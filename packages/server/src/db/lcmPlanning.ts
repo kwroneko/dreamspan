@@ -27,6 +27,7 @@ import { pathView } from "./lcmDisplay.ts"
 import { readingOnce, readSummary } from "./lcmReads.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
+import { activeViews, audienceIds, audienceKey } from "./lcmAudience.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
 import { inspectionInputs } from "./inspectorReads.ts"
@@ -35,8 +36,12 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const assembler = yield* WorkerAssembler
   return {
-    PlanSummaries: ({ userId, chatId, leafSlotId, forkId, reason }) =>
+    PlanSummaries: ({ userId, chatId, leafSlotId, forkId, reason, audience: key }) =>
       Effect.gen(function* () {
+        // A view's own summaries (db/lcmAudience.ts), or the shared ones.
+        const audience = key ?? null
+        const identities = audience === null ? undefined : audienceIds(audience)
+        const view = identities === undefined ? undefined : { identities }
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         const sources = sqlSources(sql, { userId, chatId, next: true, cut: leafSlotId })
         const events = yield* Effect.flatMap(AssemblySources, (s) => s.events(leafSlotId)).pipe(
@@ -46,8 +51,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const defaults = yield* readDefaults(sql, userId)
         const fork = yield* viewAt(sql, chatId, leafSlotId)
         const jobs = yield* sql.unsafe<SummaryJob>(
-          `SELECT ${jobColumns} FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id WHERE j.chat_id = ? AND c.owner_user_id = ? AND (j.fork_id IS NULL OR j.fork_id = ?) AND j.status IN ('pending','processing') ORDER BY j.created_at,j.id`,
-          [chatId, userId, fork]
+          `SELECT ${jobColumns} FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id WHERE j.chat_id = ? AND c.owner_user_id = ? AND (j.fork_id IS NULL OR j.fork_id = ?) AND j.status IN ('pending','processing') AND j.audience_json IS ? ORDER BY j.created_at,j.id`,
+          [chatId, userId, fork, audience]
         )
         const empty = {
           chunks: [],
@@ -84,8 +89,27 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         )
         if (usable === null)
           return { ...empty, blocked: "no_model" as const, backfill: progress && { ...progress, settled: false } }
-        const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId)
-        const readPath = yield* lcmPath(sql, userId, chatId, leafSlotId, layer.cursor ?? undefined)
+        // In a chat set to separate contexts, the views with summaries of their own: the shared
+        // plan cuts its chunks where each diverges, and names them to be planned after it.
+        const views = yield* activeViews(
+          sql,
+          chatId,
+          leafSlotId,
+          state,
+          events.map((e) => e.event)
+        )
+        const own = audience === null ? undefined : views.find((v) => v.audience === audience)
+        if (audience !== null && own === undefined) return empty
+        const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, false, view)
+        const readPath = yield* lcmPath(
+          sql,
+          userId,
+          chatId,
+          leafSlotId,
+          layer.cursor ?? undefined,
+          Number.MAX_SAFE_INTEGER,
+          identities
+        )
         const hashes = [
           ...new Set(
             readPath.flatMap((slot) => (slot.images ?? []).flatMap((image) => (image.sha256 ? [image.sha256] : [])))
@@ -127,8 +151,14 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             reason: "invalid_document",
             message: "Summary planning strategy is unavailable."
           })
+        // A view maintains its own summaries; the shared ones in its layer are the shared plan's.
+        const ownLayer =
+          audience === null
+            ? layer
+            : { summaries: layer.summaries.filter((s) => (s.audience ? audienceKey(s.audience) : null) === audience) }
         const maintenance = reason
-          ? yield* maintain(sql, userId, chatId, leafSlotId, layer, {
+          ? yield* maintain(sql, userId, chatId, leafSlotId, ownLayer, {
+              ...(audience === null ? {} : { audience }),
               planner: maintenancePlanner,
               reason,
               fanout: state.lcm.fanout,
@@ -142,7 +172,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const cost = slotCost
         const total = raw.reduce((n, s) => n + cost(s), 0)
         const partialBatch = total > windowMax
-        const available = partialBatch ? yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, true) : layer
+        const available = partialBatch ? yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, true, view) : layer
         const remaining = path.filter((s) => s.position > available.cursorDepth)
         const settled = (r: {
           chunks: ReadonlyArray<unknown>
@@ -160,12 +190,25 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           windowMax,
           partialBatch,
           over: remaining.reduce((n, s) => n + cost(s), 0) > windowMax,
-          jobs: active.filter((j) => j.firstSlotId === remaining[0]?.id)
+          jobs: active.filter((j) => j.firstSlotId === remaining[0]?.id),
+          ...(audience === null && views.length ? { views: views.map((v) => v.audience) } : {})
         }
         if (active.length) return { ...result, backfill: settled(result) }
+        // A view whose shared summaries are still being written up to where it diverged waits for
+        // them, so the stretch everyone knew is summarized once.
+        if (own !== undefined && path.length > 0 && layer.cursorDepth + 1 < own.unknownFrom) {
+          const [sharedLive] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM summarization_jobs j
+            WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id = ${fork}) AND j.audience_json IS NULL
+              AND j.status IN ('pending', 'processing') AND j.last_slot_id IN ${sql.in(path.map((s) => s.id))}`
+          if ((sharedLive?.n ?? 0) > 0) return { ...result, backfill: settled(result) }
+        }
         const shown = (yield* pathView(sql, chatId, leafSlotId)) ?? undefined
-        const held = yield* failedHold(sql, userId, chatId, path, shown)
-        const covered = yield* completedCoverage(sql, userId, chatId, path, shown)
+        const held = yield* failedHold(sql, userId, chatId, path, shown, audience)
+        const covered = yield* completedCoverage(sql, userId, chatId, path, shown, audience)
+        // The shared plan ends a chunk before each view's first message it didn't know.
+        const cuts = new Set(
+          audience === null ? path.filter((s) => views.some((v) => v.unknownFrom === s.position)).map((s) => s.id) : []
+        )
         const chunks = [
           ...leafPlanner.plan({
             raw,
@@ -174,6 +217,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             target: resolveLcm(state.lcm, defaults.lcm).leafTarget,
             covered,
             held,
+            ...(cuts.size ? { cuts } : {}),
             limit: MAX_JOBS_PER_PLAN
           })
         ].slice(0, MAX_JOBS_PER_PLAN)
@@ -188,7 +232,17 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           [jobId, userId, attempt]
         )
         if (!job) return yield* new NotFound({ entity: "summary job", id: jobId })
-        const chain = yield* lcmPath(sql, userId, job.chatId, job.lastSlotId, job.firstSlotId)
+        // A view's own job (db/lcmAudience.ts): written from what its character knew.
+        const identities = job.audience === null ? undefined : audienceIds(job.audience)
+        const chain = yield* lcmPath(
+          sql,
+          userId,
+          job.chatId,
+          job.lastSlotId,
+          job.firstSlotId,
+          Number.MAX_SAFE_INTEGER,
+          identities
+        )
         if (chain[0]?.id !== job.firstSlotId || chain.some((s) => s.generating))
           return yield* new AssemblyFailed({
             reason: "invalid_document",
@@ -297,7 +351,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
               tail: settings.tail ?? BUILTIN_SUMMARY_INSTRUCTION,
               style,
               ...(settings.withPreset === "raw" ? { withPreset: false } : {}),
-              ...(prefix ? { prefix } : {})
+              ...(prefix ? { prefix } : {}),
+              ...(identities ? { audience: identities } : {})
             }
           })
           .pipe(Effect.provide(sources.layer))

@@ -43,6 +43,7 @@ import {
   MergeRequest
 } from "@rp/shared/mergeApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
+import { AwayMark } from "@rp/shared/contextsApi.ts"
 import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
@@ -661,7 +662,8 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       leafSlotId: SlotId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
-      pins: Schema.String
+      pins: Schema.String,
+      audience: Schema.optionalKey(Schema.String)
     },
     error: Schema.Union([StorageError, NotFound])
   }),
@@ -674,7 +676,9 @@ export class WriteOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       triggerVersionId: Schema.optionalKey(VersionId),
       chunks: Schema.Array(SummaryChunk),
-      requestClass: SummaryJob.fields.requestClass
+      requestClass: SummaryJob.fields.requestClass,
+      /** A separate context's view (db/lcmAudience.ts): its audience key. Absent: the shared summaries. */
+      audience: Schema.optionalKey(Schema.String)
     },
     success: Schema.Array(SummaryJob),
     error: Schema.Union([StorageError, NotFound])
@@ -693,7 +697,9 @@ export class WriteOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       triggerVersionId: Schema.optionalKey(VersionId),
       jobs: Schema.Array(PlannedJob),
-      requestClass: SummaryJob.fields.requestClass
+      requestClass: SummaryJob.fields.requestClass,
+      /** A separate context's view (db/lcmAudience.ts): its audience key. Absent: the shared summaries. */
+      audience: Schema.optionalKey(Schema.String)
     },
     success: Schema.Array(SummaryJob),
     error: Schema.Union([StorageError, NotFound])
@@ -2908,6 +2914,24 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * Undo of an away mark the scene check set (spec/CHARACTER-CONTEXT.md §5, unit C9), in one
+   * transaction: the user's presence event replaces the decision's, and every version written
+   * since that recorded the character away for it is corrected to count it present
+   * (`db/decisions.ts`). Null when the event isn't a live away mark of the scene check.
+   */
+  Rpc.make("CorrectPresence", {
+    payload: { userId: UserId, chatId: ChatId, forkId: ForkId, eventId: Schema.String },
+    success: Schema.NullOr(
+      Schema.Struct({
+        /** The user's event that replaced the decision's. */
+        eventId: Schema.String,
+        /** The versions whose presence record was corrected. */
+        corrected: Schema.Array(VersionId)
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The account defaults, including its new-chat persona; choices must be owned and live. */
   Rpc.make("SetGenerationDefaults", {
     payload: { userId: UserId, defaults: GenerationDefaults },
@@ -3059,7 +3083,14 @@ export class ReadOps extends RpcGroup.make(
     .setPayload(Schema.Struct({ ...historyReadRpcs[3].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   historyReadRpcs[0]
-    .setPayload(Schema.Struct({ ...historyReadRpcs[0].payloadSchema.fields, userId: UserId }))
+    .setPayload(
+      Schema.Struct({
+        ...historyReadRpcs[0].payloadSchema.fields,
+        userId: UserId,
+        /** Every view's summaries, for a rename across the history; the server's own. */
+        allViews: Schema.optionalKey(Schema.Boolean)
+      })
+    )
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   historyReadRpcs[1]
     .setPayload(Schema.Struct({ ...historyReadRpcs[1].payloadSchema.fields, userId: UserId }))
@@ -3112,7 +3143,14 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The layer in use on the path to a leaf, with the failed summaries and unfinished jobs on it. */
   Rpc.make("GetLcmState", {
-    payload: { userId: UserId, chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: SlotId },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      leafSlotId: SlotId,
+      /** A character whose separate context to read: the shared summaries and its own (unit C7). */
+      viewer: Schema.optionalKey(EntityId)
+    },
     success: LcmState,
     error: Schema.Union([StorageError, NotFound])
   }),
@@ -3127,6 +3165,8 @@ export class ReadOps extends RpcGroup.make(
       toDepth: Schema.Int,
       fromPosition: Schema.optionalKey(Schema.Int),
       toPosition: Schema.optionalKey(Schema.Int),
+      /** As GetLcmState's. */
+      viewer: Schema.optionalKey(EntityId),
       includeResolved: Schema.optionalKey(Schema.Boolean)
     },
     success: LcmCoverage,
@@ -3765,7 +3805,9 @@ export class ReadOps extends RpcGroup.make(
       /** The fork it plans in (absent or null: the fork through the leaf, the current one first). */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       /** Without one, only new chunks are planned. A reply may start re-summarizing; a finished job only continues it. */
-      reason: Schema.optionalKey(Schema.Literals(["reply", "completion"]))
+      reason: Schema.optionalKey(Schema.Literals(["reply", "completion"])),
+      /** A separate context's view (db/lcmAudience.ts): its audience key. Absent: the shared summaries. */
+      audience: Schema.optionalKey(Schema.String)
     },
     success: SummaryPlan,
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
@@ -3790,6 +3832,14 @@ export class ReadOps extends RpcGroup.make(
   }),
   Rpc.make("RoleProjections", { success: Schema.Array(RoleProjectionOption) }),
   Rpc.make("MergeLayouts", { success: Schema.Array(RoleProjectionOption) }),
+  /** The away marks on a fork's display path through `slotId`, in fold order (`db/awayMarks.ts`). */
+  Rpc.make("AwayMarks", {
+    payload: { userId: UserId, chatId: ChatId, forkId: ForkId, slotId: Schema.NullOr(SlotId) },
+    success: Schema.Array(AwayMark),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The context views installed (`contextViews`), as This chat's Context setting offers them. */
+  Rpc.make("ContextViews", { success: Schema.Array(RoleProjectionOption) }),
   Rpc.make("AssembleContext", {
     payload: {
       partialBatch: Schema.optionalKey(Schema.Boolean),
@@ -3917,7 +3967,12 @@ export class ReadOps extends RpcGroup.make(
       leafSlotId: SlotId,
       tokens: Schema.Array(Schema.String),
       before: Schema.NullOr(Schema.Int),
-      limit: Schema.Int
+      limit: Schema.Int,
+      /**
+       * A separate context's viewer, as its identities through card replacements: only messages
+       * it knew (spec/CHARACTER-CONTEXT.md §3, C5).
+       */
+      viewers: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
     },
     success: Schema.NullOr(
       Schema.Array(
@@ -3931,6 +3986,27 @@ export class ReadOps extends RpcGroup.make(
       )
     ),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Who knew each of these versions of the chat (`db/knowers.ts`): card ids, or null for
+   * everyone. The agent's read tools leave out what a separate context's viewer didn't know.
+   */
+  Rpc.make("KnowersOf", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      versionIds: Schema.Array(Schema.String),
+      viewers: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+    },
+    success: Schema.Array(
+      Schema.Struct({
+        versionId: Schema.String,
+        knowers: Schema.NullOr(Schema.Array(Schema.String)),
+        content: Schema.optionalKey(Schema.String),
+        readable: Schema.optionalKey(Schema.Boolean)
+      })
+    ),
+    error: StorageError
   }),
   /**
    * The agent's `lookup_lore` (agentReads.ts, spec/AGENTIC.md §4.5): the enabled entries of the

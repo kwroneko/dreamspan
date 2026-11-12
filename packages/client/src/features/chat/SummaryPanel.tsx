@@ -18,11 +18,23 @@ import { RevisionComparison } from "../../ui/RevisionDiff.tsx"
 import { Alert, Disclosure } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { EstimateList } from "./EnableLcmDialog.tsx"
-import { boundaryText, countText, failureText, healthOf, moneyText, originText, rangeText, tokensText } from "./lcm.ts"
+import {
+  boundaryText,
+  countText,
+  failureText,
+  healthOf,
+  moneyText,
+  originText,
+  rangeText,
+  sameAudience,
+  sameWork,
+  tokensText
+} from "./lcm.ts"
 import { ClampedText, HintBadge, LevelBadge, SummaryBadges } from "./summaryParts.tsx"
 import type { ChatSession } from "./session.ts"
 import { TimelineToggle } from "./TimelineToggle.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
+import { audienceName, SummaryViewer } from "./SummaryViewer.tsx"
 import { SummaryDraft } from "./summaryDraft.ts"
 import { summaryPreviews } from "./presentation.tsx"
 
@@ -345,6 +357,8 @@ function SummaryRow({
     setError(result.ok ? null : result.error)
   }
   const range = rangeText(summary.from, summary.to)
+  const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
+  const owner = audienceName(summary, cast)
   const failed = health === "failed"
   const retryBlocked = blockedByManual && !summary.rerun
   return (
@@ -372,6 +386,13 @@ function SummaryRow({
           </Tooltip>
           {!failed && <span className="text-xs text-muted">{tokensText(summary.tokens)}</span>}
           <SummaryBadges summary={summary} />
+          {owner !== null && (
+            <HintBadge
+              hint={`Written for ${owner} alone, from what ${owner} knew: only ${owner}'s replies read it. The others read the shared summaries of these messages.`}
+            >
+              {owner}'s own
+            </HintBadge>
+          )}
         </div>
         <div className="flex shrink-0 items-center">
           {failed ? (
@@ -727,7 +748,7 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
       </div>
       {jobs > 0 && (
         <Disclosure title="Estimate for what is left">
-          <EstimateList estimate={backfill.remaining} title="What is left" />
+          <EstimateList estimate={backfill.remaining} title="What is left" cast={session.snapshot().cast} />
         </Disclosure>
       )}
       <Problem error={error} />
@@ -787,16 +808,13 @@ export function SummaryPanel({
       (parent) =>
         parent.id !== s.id &&
         parent.origin !== "generated" &&
+        sameAudience(parent, s) &&
         parent.from <= s.from &&
         parent.to >= s.to &&
         (parent.level > s.level || parent.from !== s.from || parent.to !== s.to)
     )
   const extra = wanted !== null && fetched?.id === wanted ? fetched : null
-  const unfinished = lcm.jobs.filter(
-    (job) =>
-      job.status !== "failed" ||
-      !lcm.failed.some((s) => s.level === job.level && s.from === job.from && s.to === job.to)
-  )
+  const unfinished = lcm.jobs.filter((job) => job.status !== "failed" || !lcm.failed.some((s) => sameWork(s, job)))
   const heading = (label: string, hint: string) => (
     <Tooltip label={hint}>
       <h3
@@ -849,6 +867,7 @@ export function SummaryPanel({
           </Alert>
         )}
         {viewer.error && <Problem error={viewer.error} />}
+        {lcm.enabled && <SummaryViewer session={session} />}
       </div>
       {lcm.enabled && <Backfill session={session} lcm={lcm} />}
       {unfinished.length > 0 && (

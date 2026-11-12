@@ -1,6 +1,6 @@
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { displayEndOf } from "./displayPath.ts"
-import { castAt } from "./participation.ts"
+import { presenceBefore } from "./participation.ts"
 import { canonicalJson } from "@rp/shared/editing.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { ForkNotesChanged } from "@rp/shared/chatApi.ts"
@@ -47,6 +47,7 @@ const copiedFresh = new Set([
   "origin",
   "source_version_id",
   "fork_id",
+  "authoring_fork_id",
   "created_at",
   "updated_at",
   "rollout_id",
@@ -318,11 +319,8 @@ export const makeWriteHandlers = (bin: Bin) =>
           const [next] = yield* sql<{
             n: number
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
-          const [position] = yield* sql<{
-            parent_slot_id: string | null
-          }>`SELECT parent_slot_id FROM slots WHERE id = ${slotId}`
-          const cast = yield* castAt(sql, slot.chat_id, position!.parent_slot_id, fork.id)
-          const row = yield* insertVersion(slotId, next!.n, version, at, undefined, cast)
+          const cast = yield* presenceBefore(sql, slot.chat_id, slotId, fork.id)
+          const row = yield* insertVersion(slotId, next!.n, version, at, fork.id, undefined, cast)
           if (select) {
             yield* recordHistoryReduction(sql, slotId, row.content, null, fork.id)
             yield* writeSelect(sql, { id: fork.id, chatId: slot.chat_id }, slotId, row.id)
@@ -425,11 +423,8 @@ export const makeWriteHandlers = (bin: Bin) =>
           const [next] = yield* sql<{
             n: number
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
-          const [position] = yield* sql<{
-            parent_slot_id: string | null
-          }>`SELECT parent_slot_id FROM slots WHERE id = ${slotId}`
-          const cast = yield* castAt(sql, slot.chat_id, position!.parent_slot_id, fork.id)
-          const inserted = yield* insertVersion(slotId, next!.n, version, Date.now(), undefined, cast)
+          const cast = yield* presenceBefore(sql, slot.chat_id, slotId, fork.id)
+          const inserted = yield* insertVersion(slotId, next!.n, version, Date.now(), fork.id, undefined, cast)
           // The model chosen for it shows from the start; its rollout records the same one.
           if (model)
             yield* sql`UPDATE versions SET connection_id = ${model.connection}, model_id = ${model.model}
@@ -538,12 +533,12 @@ export const makeWriteHandlers = (bin: Bin) =>
             .map((c) => c.name)
             .filter((name) => !copiedFresh.has(name))
           yield* sql.unsafe(
-            `INSERT INTO version_records (id, ordinal, content, origin, source_version_id, fork_id, created_at, updated_at,
+            `INSERT INTO version_records (id, ordinal, content, origin, source_version_id, fork_id, authoring_fork_id, created_at, updated_at,
                ${columns.join(", ")})
-             SELECT ?, (SELECT max(ordinal) + 1 FROM versions WHERE slot_id = v.slot_id), ?, 'edited', ?, ?, ?, ?,
+             SELECT ?, (SELECT max(ordinal) + 1 FROM versions WHERE slot_id = v.slot_id), ?, 'edited', ?, ?, ?, ?, ?,
                ${columns.map((c) => `v.${c}`).join(", ")}
              FROM version_records v WHERE v.id = ?`,
-            [copy, content, original, fork.id, at, at, versionId]
+            [copy, content, original, fork.id, fork.id, at, at, versionId]
           )
           const rewritten = rewriteColumns(rewrite)
           yield* sql`UPDATE version_records SET raw_content = ${rewritten.raw_content}, raw_reasoning = ${rewritten.raw_reasoning},

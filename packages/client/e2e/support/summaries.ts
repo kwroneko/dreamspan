@@ -28,6 +28,10 @@ export const level1 = async (
     readonly status?: "complete" | "failed"
     /** A failed one's error, as the summarizer stores it. */
     readonly error?: string
+    /** A separate context's own summary: its character's card ids. Absent: shared. */
+    readonly audience?: ReadonlyArray<string>
+    /** Messages of `entries` it wasn't written from (no version recorded): what a character's own missed. */
+    readonly missed?: ReadonlyArray<PathEntry>
   } = {}
 ): Promise<FixtureSummary> => {
   const id = uuidv7()
@@ -38,7 +42,7 @@ export const level1 = async (
       params: [revisionId, id, content, Math.ceil(content.length / 4), Date.now()]
     },
     {
-      sql: "INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,status,error_json,created_at) VALUES(?,?,1,?,?,?,?,?,?,?)",
+      sql: "INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,status,error_json,created_at,audience_json) VALUES(?,?,1,?,?,?,?,?,?,?,?)",
       params: [
         id,
         chatId,
@@ -50,12 +54,18 @@ export const level1 = async (
         options.status === "failed"
           ? (options.error ?? JSON.stringify({ class: "refusal", message: "refused" }))
           : null,
-        Date.now()
+        Date.now(),
+        options.audience ? JSON.stringify([...new Set(options.audience)].sort()) : null
       ]
     },
     ...entries.map((entry, ordinal) => ({
       sql: "INSERT INTO summary_inputs(summary_id,ordinal,slot_id,version_id,amend_count) VALUES(?,?,?,?,0)",
-      params: [id, ordinal, entry.slotId, entry.version.id]
+      params: [
+        id,
+        ordinal,
+        entry.slotId,
+        options.missed?.some((m) => m.slotId === entry.slotId) ? null : entry.version.id
+      ]
     })),
     { sql: "UPDATE summaries SET sealed=1 WHERE id=?", params: [id] }
   ])

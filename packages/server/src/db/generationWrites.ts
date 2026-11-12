@@ -164,9 +164,10 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
             CASE WHEN json_extract(${snapshot}, '$.inputs.type') = 'continue' THEN 1 ELSE 0 END`
         // Pin the cast actually assembled, including an earlier-message swipe and a cast
         // change racing the placeholder's creation. Later undo cannot rewrite this evidence.
+        // Who of it was away or narrated, as assembled (spec/CHARACTER-CONTEXT.md §9.1).
         yield* sql`UPDATE version_records SET cast_json = (
           SELECT json_group_array(value ->> '$.entity') FROM json_each(${snapshot}, '$.inputs.cards')
-        ) WHERE id = ${versionId}`
+        ), presence_json = json_extract(${snapshot}, '$.inputs.presence') WHERE id = ${versionId}`
         // The preset it's written with was last used now (the preset picker's Last used): the ref
         // the snapshot names.
         const [used] = yield* sql<{ ref: string | null }>`

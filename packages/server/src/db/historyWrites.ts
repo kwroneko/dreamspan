@@ -6,6 +6,7 @@ import { NotFound } from "@rp/shared/errors.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { effectiveOverride, nextSeq, writeOverride, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
+import { undoPresenceCorrection } from "./presenceCorrection.ts"
 import { historyCurrent, historyFork } from "./historyShared.ts"
 import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
 import { transaction } from "./tx.ts"
@@ -123,6 +124,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                   "origin",
                   "source_version_id",
                   "fork_id",
+                  "authoring_fork_id",
                   "fork_seq",
                   "changeset_id",
                   "created_at",
@@ -132,10 +134,10 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                   .map((c) => c.name)
                   .filter((c) => !excluded.has(c))
                 yield* sql.unsafe(
-                  `INSERT INTO version_records (id, ordinal, content, origin, source_version_id, fork_id, changeset_id, created_at, updated_at, ${columns.join(",")})
-                SELECT ?, (SELECT max(ordinal)+1 FROM versions WHERE slot_id=v.slot_id), ?, 'changeset', ?, ?, ?, ?, ?, ${columns.map((c) => `v.${c}`).join(",")}
+                  `INSERT INTO version_records (id, ordinal, content, origin, source_version_id, fork_id, authoring_fork_id, changeset_id, created_at, updated_at, ${columns.join(",")})
+                SELECT ?, (SELECT max(ordinal)+1 FROM versions WHERE slot_id=v.slot_id), ?, 'changeset', ?, ?, ?, ?, ?, ?, ${columns.map((c) => `v.${c}`).join(",")}
                 FROM version_records v WHERE id=?`,
-                  [afterId, edit.after, edit.targetId, forkId, record.id, Date.now(), Date.now(), current.id]
+                  [afterId, edit.after, edit.targetId, forkId, forkId, record.id, Date.now(), Date.now(), current.id]
                 )
                 yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text)
                 SELECT ${afterId}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id=${current.id}`
@@ -200,7 +202,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                 : edit.after
             // Preserve only inputs connected by edits that also covered summaries. A
             // later rename must not bless an earlier amend or messages-only rewrite.
-            let preservedInputs: Array<{ id: string; amends: number }> = []
+            let preservedInputs: Array<{ id: string; amends: number; summaryIds?: ReadonlyArray<string> }> = []
             if (edit.kind === "version_replace" && application.summariesIncluded) {
               const [amends] = yield* sql<{
                 n: number
@@ -215,7 +217,33 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                 ? ((JSON.parse(previousProof.after_json) as { preservedInputs?: typeof preservedInputs })
                     .preservedInputs ?? [])
                 : []
-              preservedInputs = [...inherited.filter((p) => p.id !== current.id), { id: current.id, amends: amends!.n }]
+              // Keep only searched summaries that actually depend on this message. A long
+              // replace therefore stores a few ids per message, not the entire search per edit.
+              const scope =
+                application.summaryIds === undefined
+                  ? undefined
+                  : (yield* sql<{ id: string }>`
+                WITH RECURSIVE covering(id) AS (
+                  SELECT summary_id FROM summary_inputs WHERE slot_id=${current.slot_id}
+                  UNION SELECT p.summary_id FROM summary_parents p JOIN covering c ON p.parent_id=c.id
+                ) SELECT id FROM covering WHERE id IN (SELECT value FROM json_each(${JSON.stringify(application.summaryIds)}))`).map(
+                      (s) => s.id
+                    )
+              const restrict = (previous: ReadonlyArray<string> | undefined) =>
+                scope === undefined
+                  ? previous
+                  : previous === undefined
+                    ? scope
+                    : scope.filter((id) => previous.includes(id))
+              preservedInputs = [
+                ...inherited
+                  .filter((p) => p.id !== current.id)
+                  .map((p) => {
+                    const summaryIds = restrict(p.summaryIds)
+                    return { ...p, ...(summaryIds === undefined ? {} : { summaryIds }) }
+                  }),
+                { id: current.id, amends: amends!.n, ...(scope === undefined ? {} : { summaryIds: scope }) }
+              ]
             }
             const after = JSON.stringify({ id: afterId, content: afterContent, preservedInputs, applicationId })
             if (previous) yield* sql`UPDATE changeset_items SET after_json=${after} WHERE id=${previous.id}`
@@ -262,7 +290,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
             summariesDone?: number
             changesetId?: string | null
           }
-          const after = JSON.parse(item.after_json) as { id: string; content: string }
+          const after = JSON.parse(item.after_json) as { id: string; content: string; presenceCorrectionGroup?: string }
           if (itemIds && !itemIds.includes(item.id)) continue
           if (slotId && before.slotId !== slotId) {
             if (item.target_kind !== "summary_revision") continue
@@ -277,6 +305,12 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
           // Comparing text as well as identity detects a later in-place amend.
           if (current?.id !== after.id || current.content !== after.content) {
             conflicts.push(item.id)
+            continue
+          }
+          const presence = yield* undoPresenceCorrection(sql, chatId, item.target_id, after.presenceCorrectionGroup)
+          if (presence !== null) {
+            if (presence) undone++
+            else conflicts.push(item.id)
             continue
           }
           if (edit.kind === "version_replace") yield* recordReduction(sql, before.slotId, forkId)

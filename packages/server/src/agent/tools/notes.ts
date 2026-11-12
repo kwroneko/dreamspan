@@ -5,7 +5,7 @@
 // (`agent.permission`), never one the chat forbids.
 import { Type } from "@earendil-works/pi-ai"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
+import { NOTE_SCHEMA_VERSION, readNoteCondition } from "@rp/shared/docs/note.ts"
 import type { Doc, RevisionId } from "@rp/shared/library.ts"
 import { type ChatState, foldState, noteSwitches, permissionKey } from "@rp/shared/state.ts"
 import { Effect } from "effect"
@@ -39,6 +39,7 @@ const noteEditable = (state: ChatState, entity: string, doc: Doc) =>
 export type NotesPosition = Pick<ToolContext, "userId" | "chatId" | "forkId" | "reader"> & {
   readonly slotId: ToolContext["slotId"] | null
   readonly displayEnd?: boolean
+  readonly viewers?: ToolContext["viewers"]
 }
 
 /**
@@ -107,7 +108,17 @@ export const notesAt = (context: NotesPosition) =>
         } satisfies NoteView
       })
     )
-    return { notes, state }
+    const viewers = context.viewers
+    return {
+      notes:
+        viewers == null
+          ? notes
+          : notes.filter((n) => {
+              const condition = readNoteCondition(n.doc["condition"])
+              return condition.when !== "turn" || condition.cards.some((card) => viewers.includes(card))
+            }),
+      state
+    }
   })
 
 /** The one note called `title` (case and spaces aside), or the error the model sees. */

@@ -16,7 +16,7 @@ import { makeDraftCarry } from "./carryDrafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
 import { forkThrough, onForkPath } from "./forks.ts"
 import { displayEndOf, hiddenAtFork, pathPieces, slotPlace } from "./displayPath.ts"
-import { castAt } from "./participation.ts"
+import { type PositionalCast, presenceAt, presenceJson } from "./participation.ts"
 import {
   forkAt,
   nextSeq,
@@ -108,8 +108,9 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     ordinal: number,
     version: NewVersion,
     at: number,
+    authoringForkId: string,
     owner?: string,
-    cast: ReadonlyArray<string> = []
+    { cast, presence }: PositionalCast = { cast: [], presence: null }
   ) =>
     Effect.gen(function* () {
       yield* checkSource(slotId, version.sourceVersionId)
@@ -117,11 +118,13 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       yield* sql`INSERT INTO version_records ${sql.insert({
         id,
         slot_id: slotId,
+        authoring_fork_id: authoringForkId,
         ordinal,
         status: version.status,
         speaker_entity_id: version.speakerEntityId,
         speaker_pick_json: version.speakerPick ? JSON.stringify(version.speakerPick) : null,
         cast_json: JSON.stringify(cast),
+        presence_json: presenceJson(presence),
         writer: version.writer,
         content: version.content,
         macro_mode: version.macroMode,
@@ -192,9 +195,10 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         !inserted && view?.tip_slot_id === (parent?.id ?? null)
           ? yield* displayEndOf(sql, chatId, view)
           : (parent?.id ?? null)
-      const cast = yield* castAt(sql, chatId, leaf, fork)
-      const rows = [yield* insertVersion(slotId, 0, version, at, owner!.id, cast)]
-      for (const [i, next] of more.entries()) rows.push(yield* insertVersion(slotId, i + 1, next, at, owner!.id, cast))
+      const cast = yield* presenceAt(sql, chatId, leaf, fork)
+      const rows = [yield* insertVersion(slotId, 0, version, at, fork!, owner!.id, cast)]
+      for (const [i, next] of more.entries())
+        rows.push(yield* insertVersion(slotId, i + 1, next, at, fork!, owner!.id, cast))
       yield* sql`INSERT INTO slots ${sql.insert({
         id: slotId,
         chat_id: chatId,
@@ -261,6 +265,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
           "participant.join",
           "participant.leave",
           "presence.set",
+          "away.set",
+          "cast.role",
           "played_by_me.set",
           "lorebook.binding",
           "lorebook.embedded"
@@ -293,6 +299,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
           case "participant.join":
           case "participant.leave":
           case "presence.set":
+          case "away.set":
+          case "cast.role":
           case "lorebook.binding":
           case "lorebook.embedded":
             data = rekey(data)

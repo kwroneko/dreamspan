@@ -107,7 +107,14 @@ const UtilityPrompts = Schema.Struct({
    * `{{cast}}` are the merge's. Absent means the defaults (`MERGE_SECTION_DEFAULT`, `MERGE_JOIN_DEFAULT`).
    */
   merge_section_prompt: Schema.optionalKey(Schema.String),
-  merge_join_prompt: Schema.optionalKey(Schema.String)
+  merge_join_prompt: Schema.optionalKey(Schema.String),
+  /**
+   * In separate contexts (spec/CHARACTER-CONTEXT.md §2.2): the line standing for a stretch the
+   * speaker wasn't present for, and the line at a merge point whose storyline is new to it.
+   * Absent means the defaults (`ABSENT_GAP_DEFAULT`, `ABSENT_JOIN_DEFAULT`, which is empty).
+   */
+  absent_gap_prompt: Schema.optionalKey(Schema.String),
+  absent_join_prompt: Schema.optionalKey(Schema.String)
 })
 export type UtilityPrompts = typeof UtilityPrompts.Type
 

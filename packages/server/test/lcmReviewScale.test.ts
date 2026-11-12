@@ -13,7 +13,7 @@ lcmTest(
         const seq = `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i < ${count - 1})`
         yield* fixtureSql(h.dataDir, [
           {
-            sql: `${seq} INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) SELECT 'v-${count}-'||i,'s-${count}-'||i,0,'complete','human','synthetic','verbatim','user_written',1,1 FROM n`
+            sql: `${seq} INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id) SELECT 'v-${count}-'||i,'s-${count}-'||i,0,'complete','human','synthetic','verbatim','user_written',1,1 , '${h.chat.currentForkId!}' FROM n`
           },
           {
             sql: `${seq} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at) SELECT 's-${count}-'||i,?,CASE WHEN i=0 THEN NULL ELSE 's-${count}-'||(i-1) END,i,'v-${count}-'||i,1 FROM n`,
@@ -54,7 +54,7 @@ for (const absent of ["hidden", "deleted", "empty"] as const)
         const seq = `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i < ${count - 1})`
         yield* fixtureSql(h.dataDir, [
           {
-            sql: `${seq} INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) SELECT 'hidden-v-'||i,'hidden-s-'||i,0,'complete','human',?,'verbatim','user_written',1,1 FROM n`,
+            sql: `${seq} INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id) SELECT 'hidden-v-'||i,'hidden-s-'||i,0,'complete','human',?,'verbatim','user_written',1,1 , '${h.chat.currentForkId!}' FROM n`,
             params: ["story ".repeat(70)]
           },
           {

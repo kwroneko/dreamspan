@@ -25,8 +25,8 @@ it.live("history reads stay on the selected path with 5,000 messages, 300 forks 
     yield* fixtureSql(config.dataDir, [
       {
         sql: `WITH RECURSIVE ns(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM ns WHERE n<4999)
-          INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at)
-          SELECT 'scale-v-'||n,'scale-s-'||n,0,'complete','model','Lighthouse original '||n,'verbatim','generated',1,1 FROM ns`
+          INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
+          SELECT 'scale-v-'||n,'scale-s-'||n,0,'complete','model','Lighthouse original '||n,'verbatim','generated',1,1 , '${chat.currentForkId!}' FROM ns`
       },
       {
         sql: `WITH RECURSIVE ns(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM ns WHERE n<4999)
@@ -38,8 +38,8 @@ it.live("history reads stay on the selected path with 5,000 messages, 300 forks 
       { sql: "UPDATE chats SET active_leaf_slot_id='scale-s-4999' WHERE id=?", params: [chat.id] },
       {
         sql: `WITH RECURSIVE ns(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ns WHERE n<50)
-          INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at)
-          SELECT 'scale-alt-'||n,'scale-s-4999',n,'complete','model','Lighthouse alternate '||n,'verbatim','generated',1,1 FROM ns`
+          INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
+          SELECT 'scale-alt-'||n,'scale-s-4999',n,'complete','model','Lighthouse alternate '||n,'verbatim','generated',1,1 , '${chat.currentForkId!}' FROM ns`
       },
       {
         sql: `WITH RECURSIVE ns(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM ns WHERE n<299)
@@ -61,6 +61,7 @@ it.live("history reads stay on the selected path with 5,000 messages, 300 forks 
       slotId: "scale-s-4999" as SlotId,
       versionId: "scale-v-4999" as VersionId,
       leafSlotId: "scale-s-4999" as SlotId,
+      viewers: null,
       rolloutId: "test",
       toolCallId: "test",
       cache: new Map(),

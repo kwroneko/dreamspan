@@ -2,7 +2,8 @@
 // §2.11): an imported chat chooses between keeping ST's summary as the first level over the
 // messages it covers and summarizing from scratch, and either way sees what it will cost before
 // anything is spent. Enabling generates nothing; the next reply or "Summarize now" begins.
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
+import type { Cast } from "@rp/shared/chatSetupApi.ts"
 import type { BackfillEstimate, EnableChoice, LcmEnableOffer } from "@rp/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -12,12 +13,31 @@ import { Loading } from "../../ui/Spinner.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { countText, durationText, moneyText, rangeText, tokensText } from "./lcm.ts"
 import type { ChatSession } from "./session.ts"
+import { audienceName } from "./SummaryViewer.tsx"
 
 /** Where spending stops, as a share of the estimate (spec/LCM.md §2.11). */
 const CAP_PERCENT = 150
 
-/** What the work comes to, in the terms of spec/LCM.md §2.11, with the limit that holds it. */
-export function EstimateList({ estimate, title }: { estimate: BackfillEstimate; title: string }) {
+/** "3 summaries, 1 condensing them": the requests a pass comes to. */
+const requestsText = (l1Jobs: number, condensations: number) =>
+  `${l1Jobs} ${l1Jobs === 1 ? "summary" : "summaries"}${condensations > 0 ? `, ${condensations} condensing them` : ""}`
+
+/**
+ * What the work comes to, in the terms of spec/LCM.md §2.11, with the limit that holds it. With
+ * separate contexts the requests name each character's own pass (`BackfillCounts.views`), so what
+ * separate summaries cost is seen before anything runs.
+ */
+export function EstimateList({
+  estimate,
+  title,
+  cast = null
+}: {
+  estimate: BackfillEstimate
+  title: string
+  /** Names the characters with passes of their own. */
+  cast?: Cast | null
+}) {
+  const views = (estimate.views ?? []).filter((v) => v.l1Jobs + v.condensations > 0)
   const jobs = estimate.l1Jobs + estimate.condensations
   if (estimate.blocked === "no_model")
     return (
@@ -48,8 +68,20 @@ export function EstimateList({ estimate, title }: { estimate: BackfillEstimate; 
         </dd>
         <dt className="text-muted">Requests</dt>
         <dd>
-          {estimate.l1Jobs + estimate.condensations}: {estimate.l1Jobs} summaries
-          {estimate.condensations > 0 ? `, ${estimate.condensations} condensing them` : ""}
+          {estimate.l1Jobs + estimate.condensations}: {requestsText(estimate.l1Jobs, estimate.condensations)}
+          {views.length > 0 && (
+            <ul aria-label="Each character's own summaries" className="text-muted">
+              {views.map((v) => {
+                const name = audienceName({ audience: [v.entity] }, cast) ?? "One character"
+                return (
+                  <li key={v.entity}>
+                    Of these, for {name} alone: {requestsText(v.l1Jobs, v.condensations)}, over {v.messages}{" "}
+                    {v.messages === 1 ? "message" : "messages"}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
         </dd>
         <dt className="text-muted">Tokens sent</dt>
         <dd>
@@ -101,6 +133,7 @@ export function EnableLcmDialog({
   const [choice, setChoice] = useState<EnableChoice>("adopt")
   const [pending, setPending] = useState(false)
   // The branch shown when the dialog opened: what is asked and enabled is about its path.
+  const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
   const [forkId] = useState(() => session.snapshot().forkId)
   const [leafSlotId] = useState(() => session.snapshot().leafSlotId)
   useEffect(() => {
@@ -195,7 +228,7 @@ export function EnableLcmDialog({
               Its note is switched off, so it isn't sent twice. You can switch it back on in the Notes tab.
             </p>
           )}
-          {estimate && <EstimateList estimate={estimate} title="Estimate" />}
+          {estimate && <EstimateList estimate={estimate} title="Estimate" cast={cast} />}
           {error && <Alert tone="danger">{error.message}</Alert>}
           <DialogActions>
             <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>

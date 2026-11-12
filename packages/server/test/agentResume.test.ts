@@ -17,6 +17,7 @@ import type { RolloutTool } from "../src/agent/tools.ts"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader } from "../src/db/Database.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
@@ -299,6 +300,18 @@ describe("resuming agent replies", () => {
       const slot = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
       const entry = yield* api.ResumeVersion({ versionId: version.id, expectedRowVersion: slot.entry.rowVersion })
       yield* eventually(() => finished(events, entry.version.id) !== undefined)
+      const [provenance] = yield* fixtureSql(
+        config.dataDir,
+        [
+          {
+            sql: "SELECT v.authoring_fork_id, r.fork_id FROM versions v JOIN rollouts r ON r.id=v.rollout_id WHERE v.id=?",
+            params: [entry.version.id]
+          }
+        ],
+        { readOnly: true }
+      )
+      assert.lengthOf(provenance!, 1)
+      assert.strictEqual(provenance![0]!.authoring_fork_id, provenance![0]!.fork_id)
       assert.strictEqual(finished(events, entry.version.id)!.content, version.content)
       assert.strictEqual(bodies(mock.requests()).length, 1, "the terminal send is already durable")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -709,7 +722,7 @@ describe("resuming agent replies", () => {
       const reader = yield* Reader
       const absent = Effect.map(
         reader.StateEventsAt({ userId: me.id, chatId: chat.id, slotId: version.slotId }),
-        (e) => foldState(e).absent
+        (e) => foldState(e).away
       )
       assert.deepStrictEqual(yield* absent, [mira.entityId])
       // The version says it's an agent reply; the inspector names each step as ResumeFromStep does.
@@ -806,7 +819,7 @@ describe("resuming agent replies", () => {
       })
       const db = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
       const presence = db
-        .prepare("SELECT value_json FROM state_events WHERE version_id = ? AND key = 'presence.set'")
+        .prepare("SELECT value_json FROM state_events WHERE version_id = ? AND key = 'away.set'")
         .all(rerun.id)
       db.close()
       assert.strictEqual(presence.length, 1, "only the re-run call's effect")

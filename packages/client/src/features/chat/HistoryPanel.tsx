@@ -10,6 +10,7 @@ import { Segmented } from "../../ui/Segmented.tsx"
 import { revealAdded, revealIfHidden } from "../../ui/reveal.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
+import { SummaryViewer, summaryViewers } from "./SummaryViewer.tsx"
 
 type Record = typeof HistoryRecord.Type
 const keyOf = (hit: HistoryHit) => `${hit.kind}:${hit.targetId}`
@@ -115,6 +116,10 @@ export function HistoryPanel({
           }}
         />
       </div>
+      <SummaryViewer
+        session={session}
+        about="Whose summaries the searches look in and replace in. Shared: the summaries every character reads up to where it missed something. A character: the shared ones it read and its own, so its own can be found and changed. Example: pick Wren to replace a name in the summaries written for her alone."
+      />
       {pairs.map((id, index) => (
         <section
           key={id}
@@ -258,6 +263,7 @@ function HistorySearchPair({
   const id = useId()
   const [search, setSearch] = useState(initial)
   const [hits, setHits] = useState<ReadonlyArray<HistoryHit>>([])
+  const [summaryIds, setSummaryIds] = useState<ReadonlyArray<string>>([])
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set())
   const [cost, setCost] = useState<{ messages: number; summaries: number; tokens: number } | null>(null)
   const [error, setError] = useState("")
@@ -268,7 +274,12 @@ function HistorySearchPair({
   const searched = useRef<typeof search | null>(null)
   const forkId = view.forkId ?? view.chat?.currentForkId
   const target = forkId ? { chatId: session.id, forkId } : null
-  const searchKey = JSON.stringify([search, refresh])
+  // With separate contexts, whose summaries are searched (the Summaries of choice above the searches).
+  const viewer = view.lcmViewer
+  const searchKey = JSON.stringify([search, refresh, viewer])
+  // A replacement that covered the summaries keeps them in use, but with separate contexts one search
+  // reaches one reader's summaries: the others over the same messages must be written again.
+  const separate = summaryViewers(view.cast).length > 0
   const idle = search.pairs.some((p) => !p.find)
   useEffect(() => {
     const request = ++revision.current
@@ -287,9 +298,17 @@ function HistorySearchPair({
       searched.current = search
       let cursor: typeof HistoryCursor.Type | undefined
       const all: HistoryHit[] = []
+      const searchedSummaries = new Set<string>()
       do {
         const result = await session.call((c) =>
-          c("PreviewHistory", { chatId: session.id, forkId, search, ...(cursor ? { cursor } : {}) })
+          c("PreviewHistory", {
+            chatId: session.id,
+            forkId,
+            search,
+            ...(cursor ? { cursor } : {}),
+            ...(viewer ? { viewer } : {}),
+            ...(separate ? { trackSummaries: true } : {})
+          })
         )
         if (revision.current !== request) return
         if (!result.ok) {
@@ -299,6 +318,7 @@ function HistorySearchPair({
           return
         }
         all.push(...result.value.hits)
+        for (const id of result.value.summaryIds ?? []) searchedSummaries.add(id)
         cursor = result.value.next ?? undefined
         if (all.length > 10000) {
           setError("Too many results. Narrow the search.")
@@ -307,6 +327,7 @@ function HistorySearchPair({
         }
       } while (cursor)
       setHits(all)
+      setSummaryIds([...searchedSummaries])
       const raw = all.filter((h) => h.kind === "version_replace" && h.selected)
       const summaries = view.lcm?.layer ?? []
       const firstSummary = summaries.findIndex((s) =>
@@ -333,7 +354,7 @@ function HistorySearchPair({
       clearTimeout(timer)
       if (revision.current === request) revision.current = request + 1
     }
-  }, [search, session, forkId, view.lcm, view.history, refresh, searchKey])
+  }, [search, session, forkId, viewer, view.lcm, view.history, refresh, searchKey, separate])
   const included = useMemo(
     () =>
       hits
@@ -373,6 +394,7 @@ function HistorySearchPair({
           {
             ...target,
             summariesIncluded: !one && search.summaries && skipped.size === 0,
+            ...(separate ? { summaryIds } : {}),
             edits: edits.map(({ kind, targetId, beforeId, before, after }) => ({
               kind,
               targetId,

@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 59
+export const ASSEMBLER_VERSION = 63
 
 export type Role = "system" | "user" | "assistant"
 
@@ -200,6 +200,12 @@ export interface SnapshotInputs {
   readonly mode: "st" | "layouts"
   readonly preset: { readonly ref: string | null; readonly revision: string | null; readonly scope: PresetScope }
   readonly cards: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
+  /** Who of `cards` was away or a narrator (spec/CHARACTER-CONTEXT.md §9.1); absent when neither. */
+  readonly presence?: import("@rp/shared/knowledge.ts").VersionPresence
+  /** A separate context's viewer (`knowledge` stage), whose knowledge the agent's read tools keep to; absent: none. */
+  readonly viewer?: string
+  /** The viewer's identities through card replacements (`Knowledge.aliases`); absent: only `viewer`. */
+  readonly viewerAliases?: ReadonlyArray<string>
   readonly model: ModelInput | null
 }
 
@@ -237,6 +243,8 @@ export interface HistoryStart {
     readonly revision: number
     /** Digest at the last assembled history marker, for exact-position cache reads. */
     readonly cacheHistory?: string
+    /** The same for each separate context's character, by card (unit C7); absent in a shared context. */
+    readonly cacheHistoryByView?: Readonly<Record<string, string>>
     /**
      * Lore entries placed above the history, kept activated until its start next moves
      * (DESIGN §1.3); absent when lore goes only below the history.
@@ -361,6 +369,11 @@ export interface ContextSnapshot {
     /** False: sent without the preset, the instruction and messages only (DESIGN §8); absent is with it. */
     readonly withPreset?: boolean
     readonly prefix?: SummaryPrefix
+    /**
+     * A separate context's own summary (spec/CHARACTER-CONTEXT.md §2.3): the identities whose
+     * knowledge its material is filtered by. Absent: the whole path.
+     */
+    readonly audience?: ReadonlyArray<string>
   }
   readonly lcm?: {
     readonly cursor: string | null
@@ -496,6 +509,13 @@ export interface SourcePins {
   }>
   readonly messageCount?: ReadonlyArray<{ readonly key: string; readonly count: number }>
   readonly userMessages?: ReadonlyArray<{ readonly key: string; readonly count: number }>
+  /** Who knew the messages a separate context read (`knowers`); absent when none was read. */
+  readonly knowers?: ReadonlyArray<{
+    readonly key: string
+    readonly found: ReadonlyArray<{ readonly versionId: string; readonly knowers: ReadonlyArray<string> | null }>
+  }>
+  /** Whether the viewer knew everything a summary layer covers (`knewThrough`); absent when not asked. */
+  readonly knewThrough?: ReadonlyArray<{ readonly key: string; readonly knew: boolean }>
 }
 
 /** Raw metadata from the assembly transaction, scrubbed only at final capture on the main thread. */
@@ -519,6 +539,8 @@ export interface Generation {
   /** Labels and source decisions read in the same transaction as assembly; scrubbed on the main thread. */
   readonly inspection?: InspectionInputs
   readonly leafSlotId: string | null
+  /** A separate context's viewer, as its identities: the agent's read tools leave out what it didn't know (C5). */
+  readonly viewers: ReadonlyArray<string> | null
   readonly request: AssembledRequest
   readonly model: ModelInput | null
   /** How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md); absent: not at all. */
@@ -543,6 +565,7 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
   const written = new Map((snapshot.templateWrites ?? []).map((t) => [t.version, t.writes]))
   return {
     leafSlotId: snapshot.inputs.leafSlotId,
+    viewers: snapshot.inputs.viewer ? (snapshot.inputs.viewerAliases ?? [snapshot.inputs.viewer]) : null,
     request: snapshot.request,
     ...(snapshot.replySections ? { replySections: snapshot.replySections } : {}),
     model: snapshot.inputs.model,
@@ -612,6 +635,23 @@ export interface HistoryMerge {
   readonly cast: ReadonlyArray<string>
 }
 
+/**
+ * One merged source message or summary of a join (`chat_merge_messages`), as a separate context
+ * reads it. Frozen at the merge, so a rebuild reads it again rather than pinning it.
+ */
+export interface MergeRow {
+  readonly ordinal: number
+  readonly kind: "message" | "summary"
+  readonly name: string
+  readonly side: "user" | "assistant"
+  readonly speaker: string | null
+  /** Its text; empty for a row the join left out. */
+  readonly content: string
+  readonly included: "verbatim" | "left_out"
+  /** The cards that knew it in the source: its own record, or the source's cast where none was kept. */
+  readonly knowers: ReadonlyArray<string>
+}
+
 /** One message of the path, as assembly reads it. */
 export interface HistoryEntry {
   /** A merge's join message (spec/CHAT-MERGE.md); absent on any other message. */
@@ -643,6 +683,18 @@ export interface HistoryEntry {
   readonly written: boolean
   /** False for hidden messages and for selections that failed or are still empty (invariant 2). */
   readonly inContext: boolean
+  /**
+   * Left out of a separate context: the speaker wasn't present for it (spec/CHARACTER-CONTEXT.md
+   * §2.1; `assembler/knowledge.ts`), with who did know it (gap lines name them). Set by the history
+   * stage, never by a source, so never pinned.
+   */
+  readonly unknown?: { readonly knowers: ReadonlyArray<string> }
+  /**
+   * A merge's join in a separate context: the merged rows its viewer knew, in order, and whether
+   * that's fewer than were sent (its text is then written again from them). Set by the history
+   * stage (`assembler/knowledge.ts`), never pinned; `merge-layout` lays the rows out.
+   */
+  readonly known?: { readonly rows: ReadonlyArray<MergeRow>; readonly partial: boolean; readonly ambiguous?: boolean }
   readonly sentAt: number
   readonly versions: number
   readonly selectedOrdinal: number

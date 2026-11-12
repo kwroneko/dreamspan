@@ -25,13 +25,57 @@ const cached = <A, E>(context: ToolContext, key: string, make: Effect.Effect<A, 
       : make.pipe(Effect.tap((value) => Effect.sync(() => context.cache.set(key, value))))
   )
 
-/** The messages before the one being generated, oldest first; hidden ones left out. */
-const pathMessages = (context: ToolContext) =>
+/** The path as a separate context's viewer reads it: what it knew, and the numbers it missed. */
+interface PathRead {
+  readonly messages: ReadonlyArray<PathMessage>
+  /** Numbers of messages on the path the viewer wasn't present for (hidden ones too). */
+  readonly missed: ReadonlySet<number>
+}
+
+/** Versions asked about per `KnowersOf` read, to keep each query's parameters few. */
+const KNOWERS_BATCH = 500
+
+/**
+ * Of `entries`, the numbers of those the viewer didn't know (`KnowersOf`, the rule assembly's
+ * `knowledge` stage applies, spec/CHARACTER-CONTEXT.md §9.2 C5); none without a viewer.
+ */
+const missedBy = (context: ToolContext, entries: ReadonlyArray<PathEntry>) =>
+  Effect.gen(function* () {
+    const missed = new Set<number>()
+    const viewers = context.viewers
+    const projected = new Map<number, { content: string; readable: boolean }>()
+    if (viewers === null) return { missed, projected }
+    const numberOf = new Map(entries.map((e) => [e.version.id as string, (e.position ?? e.depth) + 1]))
+    const ids = [...numberOf.keys()]
+    for (let at = 0; at < ids.length; at += KNOWERS_BATCH) {
+      const known = yield* context.reader.KnowersOf({
+        userId: context.userId,
+        chatId: context.chatId,
+        versionIds: ids.slice(at, at + KNOWERS_BATCH),
+        viewers
+      })
+      for (const { versionId, knowers, content, readable } of known) {
+        const n = numberOf.get(versionId)!
+        if (content !== undefined) projected.set(n, { content, readable: readable === true })
+        if (knowers !== null && !viewers.some((id) => knowers.includes(id))) missed.add(n)
+      }
+    }
+    return { missed, projected }
+  })
+
+/**
+ * The messages before the one being generated, oldest first; hidden ones left out, and, for a
+ * separate context's viewer, those it wasn't present for (their numbers kept, so a passage
+ * reads with a gap where they were).
+ */
+const pathMessages = (context: ToolContext) => Effect.map(pathRead(context), (read) => read.messages)
+
+const pathRead = (context: ToolContext) =>
   cached(
     context,
     "path",
     Effect.gen(function* () {
-      if (context.leafSlotId === null) return [] as ReadonlyArray<PathMessage>
+      if (context.leafSlotId === null) return { messages: [], missed: new Set<number>() } as PathRead
       const entries: Array<PathEntry> = []
       let older: SlotId | null = null
       let first = true
@@ -53,17 +97,22 @@ const pathMessages = (context: ToolContext) =>
         context,
         entries.flatMap((e) => (e.version.speakerEntityId ? [e.version.speakerEntityId] : []))
       )
-      return entries.flatMap((entry): Array<PathMessage> => {
+      const { missed, projected } = yield* missedBy(context, entries)
+      const messages = entries.flatMap((entry): Array<PathMessage> => {
         const { version } = entry
+        const n = (entry.position ?? entry.depth) + 1
         if (
           entry.contextExcluded ||
           version.status === "generating" ||
           version.status === "failed" ||
-          !version.content.trim()
+          !version.content.trim() ||
+          projected.get(n)?.readable === false ||
+          (missed.has(n) && !projected.get(n)?.readable)
         )
           return []
-        return [name({ ...version, n: (entry.position ?? entry.depth) + 1 })]
+        return [name({ ...version, content: projected.get(n)?.content ?? version.content, n })]
       })
+      return { messages, missed } satisfies PathRead
     })
   )
 
@@ -119,7 +168,8 @@ const searched = (context: ToolContext, words: ReadonlyArray<string>, before: nu
       leafSlotId: context.leafSlotId,
       tokens: words.flatMap((w) => w.match(/[\p{L}\p{N}]+/gu) ?? []),
       before: before === undefined ? null : before - 1,
-      limit: 200
+      limit: 200,
+      viewers: context.viewers
     })
     if (rows === null) return null
     const name = yield* namer(
@@ -251,7 +301,9 @@ const summaryTree = (context: ToolContext) =>
         userId: context.userId,
         chatId: context.chatId,
         forkId: context.forkId,
-        leafSlotId: context.leafSlotId
+        leafSlotId: context.leafSlotId,
+        // A separate context's character reads its own view's layer (unit C7).
+        ...(context.viewers === null ? {} : { viewer: context.viewers[0]! as EntityId })
       })
       if (!state.enabled) return []
       const nodes: Array<SummaryNode> = []
@@ -266,14 +318,26 @@ const summaryTree = (context: ToolContext) =>
           from: summary.from,
           to: summary.to,
           content: summary.content ?? "",
-          children
+          children,
+          fresh: summary.fresh,
+          audience: summary.audience
         })
         for (const id of children)
           queue.push(
             yield* context.reader.GetSummary({ userId: context.userId, forkId: context.forkId, summaryId: id })
           )
       }
-      return nodes
+      if (context.viewers === null) return nodes
+      // The view's layer (unit C7): its own summaries, written from what it knew, and shared ones
+      // before where it diverged. Kept as a second guard: a shared summary opens only when it
+      // is fresh and covers nothing the viewer missed; an own one only when it is this viewer's.
+      const viewers = context.viewers
+      const missed = [...(yield* pathRead(context)).missed]
+      return nodes.filter((s) =>
+        s.audience === undefined
+          ? s.fresh && !missed.some((n) => n >= s.from && n <= s.to)
+          : s.audience.every((id) => viewers.includes(id))
+      )
     })
   )
 
@@ -284,6 +348,10 @@ interface SummaryNode {
   readonly to: number
   readonly content: string
   readonly children: ReadonlyArray<string>
+  /** Its inputs are still what the path shows. */
+  readonly fresh: boolean
+  /** A separate context's own summary: its character's identities (unit C7). */
+  readonly audience: ReadonlyArray<string> | undefined
 }
 
 const range = (text: string) => {

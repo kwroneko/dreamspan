@@ -99,7 +99,7 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   await Effect.runPromise(
     fixtureSql(server().dataDir, [
       {
-        sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,mark,fork_id) SELECT ?,slot_id,ordinal+1,'complete','model',content,'verbatim','generated',created_at,updated_at,'refused',fork_id FROM version_records WHERE id=?",
+        sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,mark,fork_id,authoring_fork_id) SELECT ?,slot_id,ordinal+1,'complete','model',content,'verbatim','generated',created_at,updated_at,'refused',fork_id,authoring_fork_id FROM version_records WHERE id=?",
         params: [modelVersion, fixture.entry.version.id]
       }
     ])

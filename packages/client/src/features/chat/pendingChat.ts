@@ -231,6 +231,7 @@ export class PendingChat {
       history: null,
       lcm: null,
       lcmVersion: 0,
+      lcmViewer: null,
       highlight: null
     }
     this.cached = { state, view }

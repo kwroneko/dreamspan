@@ -13,6 +13,8 @@ interface LeafPlanningInput {
   readonly target: number
   readonly covered: ReadonlySet<string>
   readonly held: ReadonlySet<string>
+  /** Slots a chunk ends before: where a separate context's view diverges (unit C7). */
+  readonly cuts?: ReadonlySet<string>
   readonly limit: number
 }
 interface LeafChunk {
@@ -32,7 +34,7 @@ export const slotCost = (s: LcmSlot) => tokensOf(s)
 
 export const defaultLeafPlanner: LeafPlanner = {
   id: "leaf",
-  plan: ({ raw, recent, leafInput, target, covered, held, limit }) => {
+  plan: ({ raw, recent, leafInput, target, covered, held, cuts, limit }) => {
     if (raw.reduce((n, s) => n + slotCost(s), 0) <= (recent.target + recent.maximum) / 2) return []
     let keep = 0,
       end = raw.length
@@ -53,6 +55,8 @@ export const defaultLeafPlanner: LeafPlanner = {
         continue
       }
       if (s.generating) break
+      if (cuts?.has(s.id)) flush()
+      if (chunks.length >= limit) break
       chunk.push(s)
       tokens += slotCost(s)
       if (chunk.length >= MAX_CHUNK_SLOTS || tokens >= leafInput || (s.children >= 2 && tokens >= leafInput / 4))

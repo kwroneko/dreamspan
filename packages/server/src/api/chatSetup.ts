@@ -10,6 +10,7 @@ import type { CastCard, ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { Cast, type CastChange, ChatNote, ShellCards, ShellForks, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { awayAt } from "@rp/shared/knowledge.ts"
 import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
 import { Effect, Option, Queue, Semaphore, Stream } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
@@ -35,6 +36,10 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "participant.leave", value: { entity: change.entityId } }
     case "Presence":
       return { key: "presence.set", value: { entity: change.entityId, present: change.present } }
+    case "Away":
+      return { key: "away.set", value: { entity: change.entityId, away: change.away } }
+    case "Role":
+      return { key: "cast.role", value: { entity: change.entityId, role: change.role } }
     case "PlayedByMe":
       return { key: "played_by_me.set", value: { entities: change.entityIds } }
     case "Model":
@@ -53,6 +58,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "roles.projection", value: change.projection }
     case "MergeLayout":
       return { key: "merge.layout", value: change.layout }
+    case "ContextPerSpeaker":
+      return { key: "context.per_speaker", value: change.view }
     case "Lorebook":
       return { key: change.active ? "lorebook.attach" : "lorebook.detach", value: { ref: change.ref } }
     case "Note":
@@ -202,11 +209,12 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         )
       const roleProjections = yield* reader.RoleProjections()
       const mergeLayouts = yield* reader.MergeLayouts()
+      const contextViews = yield* reader.ContextViews()
       return positions.map((position) => {
         const ids = idsOf(position)
         const all = read.get(JSON.stringify(bindingsOf(position.state)))!
         const cards = all.filter((card) => ids.includes(card.entityId))
-        return castOf(position.slotId, position.state, cards, roleProjections, mergeLayouts)
+        return castOf(position.slotId, position.state, cards, roleProjections, mergeLayouts, contextViews)
       })
     })
 
@@ -235,13 +243,16 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     state: ChatState,
     cards: ReadonlyArray<CastCard>,
     roleProjections: Cast["roleProjections"],
-    mergeLayouts: Cast["roleProjections"] = []
+    mergeLayouts: Cast["roleProjections"] = [],
+    contextViews: Cast["roleProjections"] = []
   ) => {
     const persona = cards.find((card) => card.entityId === state.playedByMe.at(-1))
     return new Cast({
       slotId,
       participants: state.participants as Cast["participants"],
       absent: state.absent as Cast["absent"],
+      ...(awayAt(state).length ? { away: awayAt(state) as Cast["absent"] } : {}),
+      ...(Object.keys(state.roles).length ? { roles: state.roles } : {}),
       playedByMe: state.playedByMe as Cast["playedByMe"],
       model: (state.modelBindings[""] ?? null) as Cast["model"],
       preset: (state.presetBindings[""]?.ref ?? null) as Cast["preset"],
@@ -276,6 +287,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       roleProjections,
       ...(state.mergeLayout === null ? {} : { mergeLayout: state.mergeLayout }),
       ...(mergeLayouts.length ? { mergeLayouts } : {}),
+      ...(state.contextPerSpeaker === null ? {} : { contextPerSpeaker: state.contextPerSpeaker }),
+      ...(contextViews.length ? { contextViews } : {}),
       cards
     })
   }

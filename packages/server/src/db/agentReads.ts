@@ -29,6 +29,7 @@ import { pathSegments } from "./pathSegments.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { query } from "./tx.ts"
+import { knowsSql, readKnowers } from "./knowers.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
 const FEW = 2000
@@ -277,7 +278,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0, versionId)
       }).pipe(query("RolloutSteps")),
 
-    SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit }) =>
+    SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit, viewers }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ readonly current_fork_id: string | null }>`
           SELECT current_fork_id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -285,6 +286,12 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const fork = forkId ?? (yield* forkThrough(sql, chatId, leafSlotId, chat.current_fork_id))?.id ?? null
         if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
         if ((yield* placedInsertions(sql, chatId, fork)).length > 0) return null
+        // FTS indexes the whole join. Match only after projecting its rows, before limits,
+        // so hidden text cannot starve visible matches or change excerpts.
+        if (viewers != null) {
+          const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`
+          if (merged!.n > 0) return null
+        }
         // Each token as the start of a word, quoted so FTS syntax in it is only text.
         const match = tokens.length ? tokens.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" AND ") : null
         type Row = {
@@ -296,7 +303,8 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }
         const shown = sql`(${before} IS NULL OR s.depth < ${before})
             AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
-            AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}`
+            AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
+            AND ${viewers == null ? sql`1` : knowsSql(sql, viewers)}`
         const onPath = sql`EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)`
         // Few matches in the whole chat (a rare word): start from them, each checked against the
         // path, with the path's template messages (matched once their names are filled in). Many
@@ -338,6 +346,15 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           content: r.content
         }))
       }).pipe(query("SearchChat")),
+
+    KnowersOf: ({ userId, chatId, versionIds, viewers }) =>
+      readKnowers(
+        sql,
+        chatId,
+        sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`,
+        versionIds,
+        viewers
+      ).pipe(query("KnowersOf")),
 
     LookupLore: ({ userId, rolloutId, query: text, entry, limit }) =>
       Effect.gen(function* () {

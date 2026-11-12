@@ -138,8 +138,8 @@ describe("chains", () => {
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`
       const slot = (id: string, parent: string | null, depth: number, chain: string | null = null) =>
         Effect.gen(function* () {
-          yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-            VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`
+          yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+            VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1, 'chat' )`
           yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, chain_id)
             VALUES (${id}, 'chat', ${parent}, ${depth}, ${`v-${id}`}, 1, ${chain})`
         }).pipe(sql.withTransaction)
@@ -194,8 +194,8 @@ describe("chains", () => {
         yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`
         const slot = (id: string, parent: string | null, depth: number, inserted = 0) =>
           Effect.gen(function* () {
-            yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-            VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`
+            yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+            VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1, 'chat' )`
             yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
             VALUES (${id}, 'chat', ${parent}, ${depth}, ${`v-${id}`}, 1, ${inserted})`
           }).pipe(sql.withTransaction)

@@ -46,11 +46,18 @@ export const HistoryCursor = Schema.Struct({
   kind: Schema.Literals(["version_replace", "summary_revision"]),
   seq: Schema.Int
 })
-const HistoryPreview = Schema.Struct({ hits: Schema.Array(HistoryHit), next: Schema.NullOr(HistoryCursor) })
+const HistoryPreview = Schema.Struct({
+  hits: Schema.Array(HistoryHit),
+  next: Schema.NullOr(HistoryCursor),
+  /** All summaries searched on this page, including ones without a matching passage. */
+  summaryIds: Schema.optionalKey(Schema.Array(Schema.String))
+})
 const HistoryApplication = Schema.Struct({
   chatId: ChatId,
   forkId: ForkId,
   summariesIncluded: Schema.optionalKey(Schema.Boolean),
+  /** When present, preserve inputs only for these searched summaries. Omitted by all-view renames. */
+  summaryIds: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(10000))),
   edits: Schema.Array(HistoryEdit).check(Schema.isMaxLength(10000))
 })
 const HistoryItem = Schema.Struct({
@@ -73,7 +80,18 @@ export const HistoryRecord = Schema.Struct({
 const HistoryTarget = Schema.Struct({ chatId: ChatId, forkId: ForkId })
 export const historyReadRpcs = [
   Rpc.make("PreviewHistory", {
-    payload: { chatId: ChatId, forkId: ForkId, search: HistorySearch, cursor: Schema.optionalKey(HistoryCursor) },
+    payload: {
+      chatId: ChatId,
+      forkId: ForkId,
+      search: HistorySearch,
+      cursor: Schema.optionalKey(HistoryCursor),
+      /**
+       * In a chat set to separate contexts, a character whose own summaries to search too
+       * (spec/CHARACTER-CONTEXT.md §2.3, unit C7). Absent: the shared summaries only.
+       */
+      viewer: Schema.optionalKey(EntityId),
+      trackSummaries: Schema.optionalKey(Schema.Boolean)
+    },
     success: HistoryPreview,
     error: Schema.Union([NotFound, HistoryRejected, ServerError])
   }),

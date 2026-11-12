@@ -94,6 +94,25 @@ const setup = Effect.gen(function* () {
 })
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("fork-scoped state", (it) => {
+  it.effect("away and narrator changes address the original identity through card replacements", () =>
+    Effect.gen(function* () {
+      const t = yield* setup
+      yield* t.add(t.main, t.a.slotId, { key: "away.set", value: { entity: t.parent.entityId, away: true } })
+      yield* t.add(t.main, t.a.slotId, { key: "cast.role", value: { entity: t.parent.entityId, role: "narrator" } })
+      yield* t.swap(t.main)
+      yield* t.add(t.main, t.b.slotId, { key: "away.set", value: { entity: t.card.entityId, away: false } })
+      yield* t.add(t.main, t.b.slotId, { key: "cast.role", value: { entity: t.card.entityId, role: null } })
+      const state = yield* t.state(t.main)
+      assert.notInclude(state.away, t.card.entityId)
+      assert.notProperty(state.roles, t.card.entityId)
+      yield* t.add(t.main, t.b.slotId, {
+        key: "card.swap",
+        value: { entity: t.parent.entityId, replaces: t.card.entityId }
+      })
+      assert.notInclude((yield* t.state(t.main)).away, t.parent.entityId)
+    })
+  )
+
   it.effect(
     "events at a shared tip and initial position are local; later forks inherit only their bounded history",
     () =>
@@ -495,6 +514,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         characterVersion: "3"
       })
       yield* add(main, b.slotId, { key: "presence.set", value: { entity: parent.entityId, present: false } })
+      // Away follows the cast position through swaps and purges as Mute does (unit C8).
+      yield* add(main, b.slotId, { key: "away.set", value: { entity: parent.entityId, away: true } })
       yield* swap(main)
       yield* add(main, b.slotId, { key: "card.swap", value: { entity: next.entityId, replaces: card.entityId } })
       const later = yield* fork(main, b.slotId)
@@ -509,6 +530,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       yield* add(later, b.slotId, { key: "presence.set", value: { entity: next.entityId, present: true } })
       assert.notInclude((yield* state(later)).absent, next.entityId)
       assert.include((yield* state(main)).absent, next.entityId)
+      yield* add(later, b.slotId, { key: "away.set", value: { entity: next.entityId, away: false } })
+      assert.notInclude((yield* state(later)).away, next.entityId)
+      assert.include((yield* state(main)).away, next.entityId)
     })
   )
 

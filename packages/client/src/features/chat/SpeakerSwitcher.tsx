@@ -95,6 +95,8 @@ function CardOptions({
 }) {
   "use no memo"
   const list = useRef<HTMLDivElement>(null)
+  // Away from the scene (spec/CHARACTER-CONTEXT.md §2.1), shown wherever the cast is.
+  const away = useCast().cast?.away ?? []
   // eslint-disable-next-line react-hooks/incompatible-library -- mutable instance; memoization is disabled above
   const virtualizer = useVirtualizer({
     count: cards.length,
@@ -151,6 +153,7 @@ function CardOptions({
               {members !== null && !members.has(card.entityId) && !card.persona && (
                 <span className="shrink-0 text-xs text-muted">adds to this chat</span>
               )}
+              {away.includes(card.entityId) && <span className="shrink-0 text-xs text-muted">away</span>}
               {card.entityId === current && card.entityId !== played && <Badge>{currentLabel}</Badge>}
               {(card.entityId === played || (card.persona && !personaOnly)) && (
                 <PersonaBadge played={card.entityId === played} />
@@ -189,6 +192,7 @@ function SectionRow({
   onActive: (index: number) => void
   onPick: (card: CastCard) => void
 }) {
+  const away = (useCast().cast?.away ?? []).includes(card.entityId)
   return (
     <div
       id={`${id}-${index}`}
@@ -205,6 +209,7 @@ function SectionRow({
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="[overflow-wrap:anywhere]">{card.name}</span>
       </span>
+      {away && <span className="shrink-0 text-xs text-muted">away</span>}
       {(played || card.persona) && <PersonaBadge played={played} />}
       <CardSurface placement="persona-badge" entityId={card.entityId} />
       {card.persona && (

@@ -9,6 +9,7 @@ import { tokensOf } from "../assembler/st.ts"
 import type { Bin } from "./bin.ts"
 import { readSummary } from "./lcmReads.ts"
 import { requestImages, shownImages } from "./lcmImages.ts"
+import { audienceIds } from "./lcmAudience.ts"
 import { lcmPath } from "./lcmPath.ts"
 import { followsInDisplay, lcmView, placesOf, positionIn } from "./lcmDisplay.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
@@ -58,6 +59,7 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
             last_slot_id: string
             batch_id: string | null
             input_child_ids: string | null
+            audience_json: string | null
             absorbed_parent_id: string | null
             source_summary_id: string | null
             source_revision_id: string | null
@@ -222,7 +224,15 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
                 : yield* shownImages(
                     sql,
                     versions,
-                    lcmPath(sql, userId, job.chat_id, job.last_slot_id, job.first_slot_id).pipe(
+                    lcmPath(
+                      sql,
+                      userId,
+                      job.chat_id,
+                      job.last_slot_id,
+                      job.first_slot_id,
+                      Number.MAX_SAFE_INTEGER,
+                      job.audience_json === null ? undefined : audienceIds(job.audience_json)
+                    ).pipe(
                       Effect.map((path) =>
                         path.flatMap((s) =>
                           inputs.some((i) => i.slotId === s.id) ? s.images.map((image) => image.mediaId) : []
@@ -246,7 +256,8 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
             rollout_id: rolloutId,
             batch_id: job.batch_id,
             created_at: now,
-            images_json: images
+            images_json: images,
+            audience_json: job.audience_json
           })}`
           for (const [ordinal, input] of inputs.entries())
             yield* sql`INSERT INTO summary_inputs ${sql.insert({ summary_id: id, ordinal, slot_id: input.slotId, version_id: input.versionId, amend_count: input.amendCount })}`

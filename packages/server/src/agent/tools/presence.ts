@@ -1,6 +1,7 @@
-// set_presence (spec/AGENTIC.md §4.5): a character's presence from the next message on, as Mute
-// writes it (DESIGN §3.5: muting and presence are one thing), attached to the reply being
-// written, so a swipe takes it back.
+// set_presence (spec/AGENTIC.md §4.5; spec/CHARACTER-CONTEXT.md §5): a character away from the
+// scene or back, from the next message on, as the user's away mark writes it (`away.set`, apart
+// from Mute), attached to the reply being written, so a swipe takes it back. A narrator is never
+// in or out of the scene (§6), so it's refused.
 import { Type } from "@earendil-works/pi-ai"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { foldState } from "@rp/shared/state.ts"
@@ -24,7 +25,7 @@ export const setPresence: RolloutTool<{ readonly character: string; readonly pre
     safely(
       "set_presence",
       Effect.gen(function* () {
-        const { participants } = foldState(
+        const { participants, roles } = foldState(
           yield* context.reader.StateEventsAt({
             userId: context.userId,
             chatId: context.chatId,
@@ -43,11 +44,13 @@ export const setPresence: RolloutTool<{ readonly character: string; readonly pre
             isError: true
           }
         const name = card.modelName ?? card.name
+        if (roles[card.entityId] === "narrator")
+          return { text: `${name} is the narrator, who is never in or out of the scene.`, isError: true }
         const { result } = yield* context.writer.ApplyRolloutEffect({
           userId: context.userId,
           rolloutId: context.rolloutId,
           toolCallId: context.toolCallId,
-          events: [{ key: "presence.set", value: { entity: card.entityId, present } }],
+          events: [{ key: "away.set", value: { entity: card.entityId, away: !present } }],
           result: `${name} is ${present ? "present" : "away"} from the next message on.`
         })
         return { text: result }

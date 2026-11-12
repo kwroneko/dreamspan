@@ -4,6 +4,7 @@ import type { Summary } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { readSummary, SummaryReads } from "./lcmReads.ts"
+import { audienceScope, firstUnknownPosition, inputsKnown } from "./lcmAudience.ts"
 import {
   followsInDisplay,
   insertedOnPath,
@@ -191,12 +192,22 @@ export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId, view?
   return valid
 }
 
+/**
+ * A separate context's view of the summaries (spec/CHARACTER-CONTEXT.md §2.3): its character's
+ * identities. Its layer is the shared summaries ending before its first message it didn't know,
+ * then summaries whose audience is among its identities. Absent: the shared summaries only.
+ */
+export interface LayerView {
+  readonly identities: ReadonlyArray<string>
+}
+
 export const selectSummaryLayer = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chatId: string,
   leaf: string | null,
-  partialBatch = false
+  partialBatch = false,
+  view?: LayerView
 ) =>
   Effect.gen(function* () {
     const [any] = yield* sql<{
@@ -212,12 +223,37 @@ export const selectSummaryLayer = (
       JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
       WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status IN ('complete', 'truncated')
         AND (${partialBatch ? 1 : 0} OR s.batch_id IS NULL OR NOT EXISTS (SELECT 1 FROM summarization_jobs j INDEXED BY summarization_jobs_batch
-          WHERE j.chat_id = s.chat_id AND j.batch_id = s.batch_id AND j.status IN ('pending', 'processing')))`
+          WHERE j.chat_id = s.chat_id AND j.batch_id = s.batch_id AND j.status IN ('pending', 'processing')))
+        AND ${audienceScope(sql, "s", view?.identities)}`
 
     const valid = lineageValidator(sql, userId, shown ?? undefined)
     const memo = new Map<string, Summary>()
     const found: Array<Summary> = []
+    // A view (db/lcmAudience.ts): the shared summaries end before its first message it didn't know.
+    const unknownFrom =
+      view === undefined || leaf === null ? null : yield* firstUnknownPosition(sql, chatId, leaf, view.identities)
+    const sharedEnds =
+      unknownFrom === null
+        ? null
+        : new Map(
+            (yield* sql<{
+              id: string
+              depth: number
+              chain_id: string
+              slot: string
+            }>`SELECT s.id, b.depth, b.chain_id, b.id AS slot FROM json_each(${JSON.stringify(candidates.map((c) => c.id))}) c
+              JOIN summaries s ON s.id = c.value JOIN slots b ON b.id = s.last_slot_id WHERE s.audience_json IS NULL`).map(
+              (row) =>
+                [
+                  row.id,
+                  shown
+                    ? (positionIn(shown.pieces, { id: row.slot, chainId: row.chain_id, depth: row.depth }) ?? -1)
+                    : row.depth
+                ] as const
+            )
+          )
     for (const candidate of candidates) {
+      if (sharedEnds !== null && (sharedEnds.get(candidate.id) ?? -1) >= unknownFrom!) continue
       if (!(yield* valid(candidate.id))) continue
       const summary = yield* readSummary(sql, userId, candidate.id, undefined, memo, shown ?? undefined)
       if (
@@ -228,6 +264,8 @@ export const selectSummaryLayer = (
         (summary.content === "" && !summary.fresh)
       )
         continue
+      // A stale one only when the view knew every message it was written from.
+      if (view !== undefined && !summary.fresh && !(yield* inputsKnown(sql, summary.id, view.identities))) continue
       found.push(summary)
     }
     const ending = new Map<number, Array<Summary>>()
@@ -307,7 +345,8 @@ export const selectFailedRanges = (
   userId: UserId,
   chatId: string,
   leaf: string | null,
-  cursorDepth: number
+  cursorDepth: number,
+  audience: string | null = null
 ) =>
   Effect.gen(function* () {
     const [any] = yield* sql<{ present: number }>`SELECT EXISTS(SELECT 1 FROM summaries s JOIN chats c ON c.id=s.chat_id
@@ -320,7 +359,7 @@ export const selectFailedRanges = (
       UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id=p.id WHERE s.parent_slot_id IS NOT NULL
     ) SELECT s.id FROM ${shown ? sql`(SELECT id FROM path UNION SELECT value FROM json_each(${insertedOnPath(shown)})) path` : sql`path`}
       JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id=path.id
-      WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.level=1 AND s.status='failed'`
+      WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.level=1 AND s.status='failed' AND s.audience_json IS ${audience}`
     const valid = lineageValidator(sql, userId, shown ?? undefined),
       failures: Array<{ id: string; revision: string; from: number; to: number }> = []
     for (const row of rows) {

@@ -83,6 +83,46 @@ describe("foldState", () => {
     expect(foldState([e({ key: "card.swap", value: { entity: mira, replaces: mira } })], before)).toBe(before)
   })
 
+  it("keeps away apart from Mute, cleared by a join and carried by a swap with the role", () => {
+    const wren = "wren" as EntityId
+    const progressed = "progressed" as EntityId
+    const state = foldState([
+      e({ key: "participant.join", value: { entity: mira } }),
+      e({ key: "participant.join", value: { entity: wren } }),
+      e({ key: "presence.set", value: { entity: mira, present: false } }),
+      e({ key: "away.set", value: { entity: wren, away: true, source: "decision" } }),
+      e({ key: "cast.role", value: { entity: mira, role: "narrator" } }),
+      e({ key: "context.per_speaker", value: "separate" })
+    ])
+    expect(state.absent).toEqual([mira])
+    expect(state.away).toEqual([wren])
+    expect(state.roles).toEqual({ [mira]: "narrator" })
+    expect(state.contextPerSpeaker).toBe("separate")
+    expect(foldState([]).contextPerSpeaker).toBeNull()
+    // Unmuting doesn't bring Wren back, and her return doesn't unmute Mira.
+    const back = foldState(
+      [
+        e({ key: "presence.set", value: { entity: wren, present: true } }),
+        e({ key: "away.set", value: { entity: mira, away: false } })
+      ],
+      state
+    )
+    expect(back.away).toEqual([wren])
+    expect(back.absent).toEqual([mira])
+    expect(foldState([e({ key: "away.set", value: { entity: wren, away: false } })], state).away).toEqual([])
+    expect(foldState([e({ key: "participant.join", value: { entity: wren } })], state).away).toEqual([])
+    expect(foldState([e({ key: "cast.role", value: { entity: mira, role: null } })], state).roles).toEqual({})
+    const swapped = foldState(
+      [
+        e({ key: "card.swap", value: { entity: progressed, replaces: wren } }),
+        e({ key: "card.swap", value: { entity: wren, replaces: mira } })
+      ],
+      state
+    )
+    expect(swapped.away).toEqual([progressed])
+    expect(swapped.roles).toEqual({ [wren]: "narrator" })
+  })
+
   it("keeps scoped bindings apart, with later events replacing earlier ones", () => {
     const state = foldState([
       e({ key: "preset.binding", value: { ref: ref("chat-default") } }),

@@ -51,8 +51,8 @@ const chat = (ownerId: string, status = "active") => {
   return { chatId }
 }
 
-const versionSql = `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?)`
+const versionSql = `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+  VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?, (SELECT current_fork_id FROM chats WHERE id = ?))`
 
 /** Appends a slot with one version: the version first, then the slot (deferred keys). */
 const slot = (
@@ -75,7 +75,8 @@ const slot = (
       version.content ?? "",
       writer === "model" ? "generated" : "user_written",
       now(),
-      now()
+      now(),
+      c.chatId
     )
     run(
       `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -206,6 +207,29 @@ describe("0023 lineage and retention triggers", () => {
         )
       }
     })
+  it("lets two separate contexts summarize one range at once, each view only once", () => {
+    const { c, s } = setup()
+    // A chat's first fork has the chat's id.
+    const insert = `INSERT INTO summarization_jobs(id,chat_id,fork_id,level,first_slot_id,last_slot_id,leaf_slot_id,target_token_count,created_at,updated_at,audience_json) VALUES(?1,?2,?2,1,?3,?4,?5,600,1,1,?6)`
+    run(insert, "whole", c.chatId, s.slotId, s.slotId, s.slotId, null)
+    run(insert, "wren", c.chatId, s.slotId, s.slotId, s.slotId, '["wren"]')
+    run(insert, "others", c.chatId, s.slotId, s.slotId, s.slotId, '["mira","tobin"]')
+    expect(() => run(insert, "again", c.chatId, s.slotId, s.slotId, s.slotId, '["wren"]')).toThrow(/UNIQUE/)
+    expect(() => run(insert, "twice", c.chatId, s.slotId, s.slotId, s.slotId, null)).toThrow(/UNIQUE/)
+    expect(() => run(insert, "object", c.chatId, s.slotId, s.slotId, s.slotId, '{"wren":1}')).toThrow(/CHECK/)
+    // One canonical form, so the same view can't hold the range twice under another spelling.
+    for (const [id, audience] of [
+      ["reordered", '["tobin","mira"]'],
+      ["spaced", '["mira", "tobin"]'],
+      ["repeated", '["wren","wren"]'],
+      ["empty", "[]"],
+      ["number", "[1]"]
+    ] as const)
+      expect(() => run(insert, id, c.chatId, s.slotId, s.slotId, s.slotId, audience)).toThrow(/sorted, distinct/)
+    expect(() => run(`UPDATE summarization_jobs SET audience_json='["wren","mira"]' WHERE id='others'`)).toThrow(
+      /sorted, distinct/
+    )
+  })
   for (const table of ["summaries", "summary_revisions", "summary_inputs", "summary_parents"])
     it(`${table} refuses INSERT OR REPLACE with recursive triggers off`, () => {
       const { a, b, s } = setup()

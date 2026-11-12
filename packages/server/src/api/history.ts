@@ -42,6 +42,7 @@ export const makeHistoryHandlers = Effect.gen(function* () {
           const page = yield* reader.PreviewHistory({
             userId: user.id,
             ...target,
+            allViews: true,
             search: {
               pairs: [{ find: params.oldName, replace: params.newName }],
               matchCase: true,

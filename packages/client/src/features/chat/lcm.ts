@@ -149,15 +149,40 @@ export interface BoundaryCounts {
  * stays in use, so nothing the model reads is missing (owner, 2026-11-02). It's listed in the
  * Summaries tab under Failed, with Retry, and isn't counted on the divider.
  */
-export const userTextKept = (lcm: LcmState, range: { level: number; from: number; to: number }) =>
-  lcm.layer.some((s) => s.origin === "user" && s.level === range.level && s.from === range.from && s.to === range.to)
+export const userTextKept = (lcm: LcmState, range: Work) =>
+  lcm.layer.some(
+    (s) =>
+      s.origin === "user" &&
+      s.level === range.level &&
+      s.from === range.from &&
+      s.to === range.to &&
+      sameAudience(s, range)
+  )
+
+type Work = Pick<LcmSummary, "level" | "from" | "to" | "audience">
+
+/** Whose a summary or a job is, as one key: "" for the shared ones, else its character's identities. */
+const audienceKey = (work: Pick<LcmSummary, "audience">) => [...(work.audience ?? [])].sort().join(",")
+
+/**
+ * Two pieces of work for the same reader. With separate contexts a shared summary and a
+ * character's own can cover the same messages at the same level, so a range alone never says two
+ * are the same: rows match by id, and work without a common id (a failed job and the failed
+ * summary it left) by its range and whose it is.
+ */
+export const sameAudience = (a: Pick<LcmSummary, "audience">, b: Pick<LcmSummary, "audience">) =>
+  audienceKey(a) === audienceKey(b)
+
+/** The same work: level, range and whose it is. */
+export const sameWork = (a: Work, b: Work) =>
+  a.level === b.level && a.from === b.from && a.to === b.to && sameAudience(a, b)
 
 export const countsOf = (lcm: LcmState): BoundaryCounts => ({
   stale: lcm.layer.filter((s) => healthOf(s) === "stale").length,
   failed: new Set(
     [...lcm.failed, ...lcm.jobs.filter((j) => j.status === "failed")]
       .filter((range) => !userTextKept(lcm, range))
-      .map((range) => `${range.level}:${range.from}:${range.to}`)
+      .map((range) => `${range.level}:${range.from}:${range.to}:${audienceKey(range)}`)
   ).size,
   running: lcm.jobs.filter((j) => j.status === "processing"),
   queued: lcm.jobs.filter((j) => j.status === "pending").length,

@@ -16,6 +16,7 @@ import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { ownedModel } from "./generationSettings.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
+import { correctPresence } from "./presenceCorrection.ts"
 import { selectionIn } from "./forkState.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { withoutPurged } from "./stateRefs.ts"
@@ -250,6 +251,8 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
               ref: rolloutId
             })
           return events.length > 0
-        }).pipe(transaction(sql, "ApplyDecisionEffect"))
+        }).pipe(transaction(sql, "ApplyDecisionEffect")),
+
+      CorrectPresence: (payload) => correctPresence(sql, graph)(payload).pipe(transaction(sql, "CorrectPresence"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   })

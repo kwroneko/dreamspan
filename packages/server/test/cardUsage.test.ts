@@ -283,10 +283,10 @@ describe("card usage", () => {
           params: [now]
         },
         {
-          sql: `INSERT INTO version_records (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
+          sql: `INSERT INTO version_records (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at, authoring_fork_id)
             SELECT 'version-' || c.id, 'slot-' || c.id, 0, 'complete', 'human', 'verbatim', 'imported',
               (SELECT json_group_array(DISTINCT json_extract(e.value_json, '$.entity')) FROM state_events e
-                WHERE e.chat_id = c.id AND e.key = 'participant.join'), ?, ? FROM chats c`,
+                WHERE e.chat_id = c.id AND e.key = 'participant.join'), ?, ? , c.current_fork_id FROM chats c`,
           params: [now, now]
         },
         {

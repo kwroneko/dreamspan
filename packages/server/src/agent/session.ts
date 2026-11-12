@@ -386,6 +386,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         rolloutId,
         toolCallId,
         leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
+        viewers: generation.viewers,
         reader: run.reader,
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)

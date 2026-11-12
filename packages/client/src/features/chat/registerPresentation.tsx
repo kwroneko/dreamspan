@@ -1,11 +1,14 @@
 import { ChatExternalMedia } from "./externalMedia.tsx"
 import { SplitChatDivider } from "./SplitChatDivider.tsx"
-import { messageStream } from "./presentation.tsx"
+import { AwayRows } from "./AwayRows.tsx"
+import { ContextViewSection } from "./ContextViewSection.tsx"
+import { messageStream, runInspectorSections } from "./presentation.tsx"
 import { MacroBindings } from "./MacroBindings.tsx"
 import { registerImages } from "./images.tsx"
 import { registerTimelineTransforms } from "./timelineContributions.tsx"
 import { NextImagesNote } from "./imageTokens.tsx"
-import { ReplyChoicesSetting, SharedContextSetting } from "./ReplyChoicesSetting.tsx"
+import { ReplyChoicesSetting } from "./ReplyChoicesSetting.tsx"
+import { ContextSetting } from "./ContextSetting.tsx"
 import { lazy, Suspense, type ComponentType } from "react"
 import {
   accountSettingSections,
@@ -110,6 +113,10 @@ const RolesSetting = deferred<Parameters<typeof import("./ThisChatTab.tsx").Role
 
 export const registerPresentation = () => [
   messageStream.register({ id: "chat.split-divider", order: 30, component: SplitChatDivider }),
+  // Where a character left the scene or came back, with Undo for the scene check's (CU3).
+  messageStream.register({ id: "chat.away-rows", order: 20, component: AwayRows }),
+  // In the request inspector: whose view a separate context was written from, and what it left out (CU5).
+  runInspectorSections.register({ id: "inspector.context-view", order: 5, component: ContextViewSection }),
   ...registerTimelineTransforms(),
   chatBranchControls.register({ id: "chat.branches", order: 10, component: BranchControl }),
   messagePreviews.register({ id: "history.message-preview", order: 10, component: HistoryMessagePreview }),
@@ -147,7 +154,7 @@ export const registerPresentation = () => [
   // This chat leads with what a person touches; what few need comes after, collapsed.
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
-  chatSettingSections.register({ id: "settings.context", order: 15, component: SharedContextSetting }),
+  chatSettingSections.register({ id: "settings.context", order: 15, component: ContextSetting }),
   chatSettingSections.register({ id: "settings.external-media", order: 17, component: ChatExternalMedia }),
   chatSettingSections.register({ id: "settings.html-depth", order: 16, component: HtmlDepthSetting }),
   chatSettingSections.register({ id: "settings.card-layout", order: 30, component: CardLayoutSetting }),

@@ -13,12 +13,12 @@ import { makeRegistry } from "../../registry.ts"
 
 /**
  * Who can reply to the composer's next send: the participants present that the user doesn't
- * play, in the cast's order, less the composer's own speaker (one writing as a character
- * isn't answered by that character), unless no one else is there.
+ * play, neither muted nor away, in the cast's order, less the composer's own speaker (one
+ * writing as a character isn't answered by that character), unless no one else is there.
  */
 const replyCandidates = (cast: Cast | null, speaker: EntityId | null): Array<EntityId> => {
   const present = (cast?.participants ?? []).filter(
-    (id) => !cast!.playedByMe.includes(id) && !cast!.absent.includes(id)
+    (id) => !cast!.playedByMe.includes(id) && !cast!.absent.includes(id) && !(cast!.away ?? []).includes(id)
   )
   const others = present.filter((id) => id !== speaker)
   return others.length > 0 ? others : present

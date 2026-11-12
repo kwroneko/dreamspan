@@ -42,6 +42,7 @@ import { makeSourcePrefsReadHandlers } from "./sourcePrefs.ts"
 import { makeCardOriginReadHandlers } from "./cardOrigins.ts"
 import { makeTokenCountingReadHandlers } from "./tokenCounting.ts"
 import { makeDecisionReadHandlers } from "./decisions.ts"
+import { makeAwayMarkReadHandlers } from "./awayMarks.ts"
 import type { ReadOps } from "./ops.ts"
 import { usedEntries } from "./usedEntries.ts"
 import { query } from "./tx.ts"
@@ -63,8 +64,10 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
     ...(yield* makeCardOriginReadHandlers),
     ...(yield* makeTokenCountingReadHandlers),
     ...(yield* makeDecisionReadHandlers),
+    ...(yield* makeAwayMarkReadHandlers),
     RoleProjections: () => assembler.projectionOptions,
     MergeLayouts: () => assembler.mergeLayoutOptions,
+    ContextViews: () => assembler.contextViewOptions,
     AssembleContext: ({
       userId,
       chatId,
@@ -199,6 +202,9 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           SELECT q.started_at, q.cache_read, q.cache_write, q.model_id,
             p.context_snapshot_json AS snapshot, p.sent_context_json
           FROM llm_requests q JOIN rollout_payloads p ON p.rollout_id = q.rollout_id
+            -- A decision model's request (the scene check, say) is no chat request: its snapshot has
+            -- no request messages or breakpoints, and it warms no cache the next reply reads.
+            JOIN rollouts r ON r.id = q.rollout_id AND r.kind <> 'decision'
           WHERE q.chat_id = ${chatId} AND q.owner_user_id = ${userId}
             AND (q.status IN ('running', 'complete') OR q.first_token_at IS NOT NULL)
           ORDER BY q.started_at DESC, q.id DESC LIMIT 1`

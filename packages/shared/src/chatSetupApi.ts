@@ -312,6 +312,10 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   participants: Schema.Array(EntityId),
   /** Participants marked absent (DESIGN §3.5). */
   absent: Schema.Array(EntityId),
+  /** Away from the scene (`away.set`, spec/CHARACTER-CONTEXT.md §5), narrators left out: not picked to reply; absent: none. */
+  away: Schema.optionalKey(Schema.Array(EntityId)),
+  /** Cast members' roles (`cast.role`, §6): a narrator sees everything and is never away; absent: none. */
+  roles: Schema.optionalKey(Schema.Record(Schema.String, Schema.Literal("narrator"))),
   /** The "played by me" set: the composer's default speaker and `{{user}}` (DESIGN §2.2). */
   playedByMe: Schema.Array(EntityId),
   /** The chat-wide model and preset; the context assembler reads these. */
@@ -337,6 +341,10 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   mergeLayout: Schema.optionalKey(Schema.String),
   /** The merge layouts installed, as the chat's settings offer them (spec/CHAT-MERGE.md §4). */
   mergeLayouts: Schema.optionalKey(Schema.Array(RoleProjectionOption)),
+  /** How each reply's history is chosen (`context.per_speaker`, an open id); absent: one shared context. */
+  contextPerSpeaker: Schema.optionalKey(Schema.String),
+  /** The context views installed, as the chat's Context setting offers them (spec/CHARACTER-CONTEXT.md §9.2 CU1). */
+  contextViews: Schema.optionalKey(Schema.Array(RoleProjectionOption)),
   /** Who replies when nobody is picked (`reply.order`, a reply policy's id); absent is the default, natural order. */
   replyOrder: Schema.optionalKey(Schema.String),
   /** True: one reply per user action instead of the reply order's round (`reply.single`); absent is off, as in ST. */
@@ -370,6 +378,10 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("Join", { entityId: EntityId }),
   Schema.TaggedStruct("Leave", { entityId: EntityId }),
   Schema.TaggedStruct("Presence", { entityId: EntityId, present: Schema.Boolean }),
+  /** Away from the scene or back (`away.set`, apart from Mute; spec/CHARACTER-CONTEXT.md §2.1). */
+  Schema.TaggedStruct("Away", { entityId: EntityId, away: Schema.Boolean }),
+  /** A cast member's role (`cast.role`): a narrator sees everything; null clears it (§6). */
+  Schema.TaggedStruct("Role", { entityId: EntityId, role: Schema.NullOr(Schema.Literal("narrator")) }),
   Schema.TaggedStruct("PlayedByMe", { entityIds: Schema.Array(EntityId) }),
   /**
    * The one persona from here on (DESIGN §2.2, who `{{user}}` is), in one write: the card joins
@@ -387,6 +399,8 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("Roles", { projection: RolesProjection }),
   /** How merged chats are laid out (`merge.layout`): a merge layout's id. */
   Schema.TaggedStruct("MergeLayout", { layout: Schema.String }),
+  /** How each reply's history is chosen from here on (`context.per_speaker`): a context view's id. */
+  Schema.TaggedStruct("ContextPerSpeaker", { view: Schema.String.check(Schema.isMaxLength(200)) }),
   /** A note on or off (`note.activate`, `note.deactivate`): the chat's own, or a participant card's. */
   Schema.TaggedStruct("Lorebook", { ref: RefId, active: Schema.Boolean }),
   /** A card's own lorebook on or off (`lorebook.embedded`). */

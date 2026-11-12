@@ -5,7 +5,7 @@ const { file, chat } = workerData as { file: string; chat: string }
 const db = new DatabaseSync(file)
 db.exec("PRAGMA foreign_keys=ON; BEGIN; INSERT INTO fork_label_pause VALUES (1)")
 const v = db.prepare(
-  "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) VALUES(?,?,?,'complete',?,?,'verbatim','user_written',?,?)"
+  "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,authoring_fork_id) VALUES(?,?,?,'complete',?,?,'verbatim','user_written',?,?,?)"
 )
 const s = db.prepare(
   "INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,fork_id,created_at) VALUES(?,?,?,?,?,?,?)"
@@ -23,7 +23,8 @@ for (let i = 0; i < 3000; i++) {
       `Message ${i + 1}, version ${j + 1}. The travelers followed the river through the quiet valley.\n\n` +
         "Lanterns glowed along the path as they discussed the next stage of their journey. ".repeat(i % 2 ? 8 : 2),
       start + i * 60000,
-      start + i * 60000
+      start + i * 60000,
+      chat
     )
   s.run(id, chat, parent, i, `${id}-v0`, chat, start + i * 60000)
   parent = id
@@ -44,7 +45,8 @@ for (let b = 1; b < 500; b++) {
       "model",
       `Branch ${b}, version ${j + 1}. ` + "The river wound through the valley beneath the stars. ".repeat(12),
       start + 3000 * 60000 + b,
-      start + 3000 * 60000 + b
+      start + 3000 * 60000 + b,
+      f
     )
   s.run(id, chat, `${chat}-s2998`, 2999, `${id}-v0`, f, start + 3000 * 60000 + b)
   db.prepare("UPDATE forks SET tip_slot_id=? WHERE id=?").run(id, f)

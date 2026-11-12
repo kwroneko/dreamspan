@@ -11,7 +11,7 @@ import type { Bin } from "./bin.ts"
 import { onDisplayPath, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import { selectionIn, shownIn, slotDeletedIn, versionAsShown, writeInsert } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
-import { castAt } from "./participation.ts"
+import { presenceAt, presenceJson } from "./participation.ts"
 import { InsertRefused } from "@rp/shared/messagesApi.ts"
 import { InsertResult, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toVersion } from "./rows.ts"
@@ -135,8 +135,8 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
               })
             slotId = uuidv7()
             versionId = uuidv7()
-            yield* sql`INSERT INTO version_records (id, slot_id, ordinal, origin, created_at, updated_at, ${sql.literal(copied)})
-              SELECT ${versionId}, ${slotId}, 0, 'duplicate', ${at}, ${at}, ${sql.literal(copied)}
+            yield* sql`INSERT INTO version_records (id, slot_id, ordinal, origin, authoring_fork_id, created_at, updated_at, ${sql.literal(copied)})
+              SELECT ${versionId}, ${slotId}, 0, 'duplicate', ${fork.id}, ${at}, ${at}, ${sql.literal(copied)}
               FROM version_records WHERE id = ${source.id}`
             yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
               SELECT ${versionId}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${source.id}`
@@ -150,8 +150,9 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
               created_at: at,
               inserted: 1
             })}`
-            yield* sql`UPDATE version_records SET cast_json = ${JSON.stringify(yield* castAt(sql, chatId, anchor!.id, fork.id))}
-              WHERE id = ${versionId}`
+            const there = yield* presenceAt(sql, chatId, anchor!.id, fork.id)
+            yield* sql`UPDATE version_records SET cast_json = ${JSON.stringify(there.cast)},
+              presence_json = ${presenceJson(there.presence)} WHERE id = ${versionId}`
           }
 
           yield* writeInsert(sql, { id: fork.id, chatId }, slotId, 1)

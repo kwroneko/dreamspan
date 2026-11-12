@@ -18,7 +18,11 @@ import { backfillSeconds, estimateBackfill, layerTokens } from "../lcm/backfill.
 import { sqlSources } from "./assemblySources.ts"
 import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
 import { importedSummary, importedSummaryNotes } from "./lcmImported.ts"
+import { displaySlots } from "./displayPath.ts"
+import { pathView } from "./lcmDisplay.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
+import { activeViews } from "./lcmAudience.ts"
+import { knowsSql } from "./knowers.ts"
 import { lcmPath } from "./lcmPath.ts"
 import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { query } from "./tx.ts"
@@ -44,20 +48,35 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const assembler = yield* WorkerAssembler
 
-  /** The messages after depth `after` that the planner would count, and their tokens. */
-  const tail = (chatId: string, leafSlotId: string, after: number, shownThrough: number) =>
-    Effect.flatMap(
-      viewAt(sql, chatId, leafSlotId),
-      (fork) => sql<{ n: number; tokens: number }>`WITH RECURSIVE path(id, parent, depth) AS (
+  /**
+   * The messages after depth `after` that the planner would count, and their tokens; with
+   * identities, only those a separate context's character knew (db/lcmAudience.ts).
+   */
+  const tail = (
+    chatId: string,
+    leafSlotId: string,
+    after: number,
+    shownThrough: number,
+    identities?: ReadonlyArray<string>
+  ) =>
+    Effect.gen(function* () {
+      const fork = yield* viewAt(sql, chatId, leafSlotId)
+      const shown = yield* pathView(sql, chatId, leafSlotId)
+      const path = shown
+        ? sql`${displaySlots(sql, shown.pieces, Math.max(0, after + 1), shown.end)}, path(id, depth) AS (SELECT id,position FROM display_slots)`
+        : sql`WITH RECURSIVE path(id, parent, depth) AS (
         SELECT id, parent_slot_id, depth FROM slots WHERE id = ${leafSlotId} AND depth > ${after}
         UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN path p ON s.id = p.parent
           WHERE s.depth > ${after}
-      ) SELECT count(*) AS n, coalesce(sum((v.content_length + 3) / 4 + 3), 0) AS tokens
-        FROM path p JOIN slots s ON s.id = p.id JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
-        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND (${contextExcludedIn(sql, fork)} = 0 OR s.depth <= ${shownThrough})
-          AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
-          AND v.content_length > 0`
-    ).pipe(Effect.map(([row]) => row ?? { n: 0, tokens: 0 }))
+      )`
+      const [row] = yield* sql<{ n: number; tokens: number }>`${path}
+      SELECT count(*) AS n, coalesce(sum((v.content_length + 3) / 4 + 3), 0) AS tokens
+      FROM path p JOIN slots s ON s.id = p.id JOIN ${sql.literal(identities ? "version_records" : "versions")} v ON v.id = ${shownIn(sql, fork, "s")}
+      WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND (${contextExcludedIn(sql, fork)} = 0 OR p.depth <= ${shownThrough})
+        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
+        AND v.content_length > 0 AND ${identities ? knowsSql(sql, identities) : sql`1`}`
+      return row ?? { n: 0, tokens: 0 }
+    })
 
   return {
     // The settings panel (DESIGN §8): what the chat stores, what applies, and the fit, measured on
@@ -260,9 +279,9 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         const [priced] = yield* sql<{ write: number | null }>`
           SELECT json_extract(upstream_json, '$.price.cacheWrite') AS write FROM models WHERE id = ${model.modelId}`
         const sizes = summaries.summaries.map((s) => s.tokens)
-        const work = (after: number, shownThrough: number, layerBefore: number) =>
+        const work = (after: number, shownThrough: number, layerBefore: number, identities?: ReadonlyArray<string>) =>
           Effect.gen(function* () {
-            const rest = yield* tail(chatId, leafSlotId, after, shownThrough)
+            const rest = yield* tail(chatId, leafSlotId, after, shownThrough, identities)
             const totals = estimateBackfill({
               tokens: rest.tokens,
               messages: rest.n,
@@ -295,13 +314,63 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
               seconds: backfillSeconds(totals, speed)
             } satisfies BackfillCounts
           })
+        // In a chat set to separate contexts, each character that missed something gets its own
+        // summaries from where it diverged, of the messages it knew (spec/CHARACTER-CONTEXT.md §2.3):
+        // the work is the shared pass and one more per such character, each counted here.
+        const views = yield* Effect.forEach(
+          yield* activeViews(
+            sql,
+            chatId,
+            leafSlotId,
+            state,
+            events.map((e) => e.event)
+          ),
+          (view) =>
+            Effect.gen(function* () {
+              const own = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, false, view)
+              const counts = yield* work(
+                Math.max(own.cursorDepth, view.unknownFrom - 1),
+                -1,
+                layerTokens(own.summaries.map((s) => s.tokens)),
+                view.identities
+              )
+              return { entity: view.entity as EntityId, counts }
+            })
+        )
+        const withViews = (shared: BackfillCounts): BackfillCounts => {
+          if (views.length === 0) return shared
+          const all = [shared, ...views.map((v) => v.counts)]
+          const sum = (pick: (c: BackfillCounts) => number) => all.reduce((n, c) => n + pick(c), 0)
+          const seconds = all.map((c) => c.seconds)
+          return {
+            ...shared,
+            plannedRequests: all.flatMap((c) => c.plannedRequests ?? []),
+            l1Jobs: sum((c) => c.l1Jobs),
+            condensations: sum((c) => c.condensations),
+            uncachedInput: sum((c) => c.uncachedInput),
+            cachedInput: sum((c) => c.cachedInput),
+            cacheWrite: sum((c) => c.cacheWrite),
+            output: sum((c) => c.output),
+            seconds: seconds.every((n) => n !== null) ? seconds.reduce((n, s) => n + s, 0) : null,
+            views: views.map((v) => ({
+              entity: v.entity,
+              messages: v.counts.messages,
+              l1Jobs: v.counts.l1Jobs,
+              condensations: v.counts.condensations
+            }))
+          }
+        }
         // Without the imported summary, the run is shown and summarized with the rest.
-        const fromScratch = yield* work(summaries.cursorDepth, adoptable ? lastRow.depth : -1, layerTokens(sizes))
+        const fromScratch = withViews(
+          yield* work(summaries.cursorDepth, adoptable ? lastRow.depth : -1, layerTokens(sizes))
+        )
         const adopted = adoptable
-          ? yield* work(
-              Math.max(summaries.cursorDepth, lastRow.depth),
-              -1,
-              layerTokens([...sizes, estimateTokens(imported.content)])
+          ? withViews(
+              yield* work(
+                Math.max(summaries.cursorDepth, lastRow.depth),
+                -1,
+                layerTokens([...sizes, estimateTokens(imported.content)])
+              )
             )
           : null
         return { enabled, imported: offer, fromScratch, adopted, ...noted }

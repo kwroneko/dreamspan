@@ -1,5 +1,6 @@
 import { prepareTextTokens } from "./textTokens.ts"
 import { mergeLayoutStage } from "./merges.ts"
+import { gapLinesStage } from "./gapLines.ts"
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
@@ -19,6 +20,7 @@ import {
 } from "@rp/shared/endOfRequest.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { lcmStage, summaryBlock } from "./lcm.ts"
+import { knowledgeStage, withoutUnknown } from "./knowledge.ts"
 import { imageTokensStage, limitImageEstimates } from "./imageTokens.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
@@ -36,6 +38,7 @@ import {
 } from "@rp/shared/state.ts"
 import { htmlDepthForm } from "./htmlDepth.ts"
 import { anyOf, noteCondition } from "@rp/shared/docs/note.ts"
+import { AWAY_ACTS_AS_MUTED, awayAt } from "@rp/shared/knowledge.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
@@ -195,10 +198,15 @@ const castOf = (state: ChatState, speakerId: string | null, ordinal: number) =>
     const cards = new Map((yield* sources.cards(wanted, state.cardBindings)).map((c) => [c.entity, c]))
     const characters = wanted.filter((e) => !played.has(e)).flatMap((e) => cards.get(e) ?? [])
     const personas = selected.flatMap((e) => cards.get(e) ?? [])
-    const absent = new Set(state.absent)
-    // A muted character is never picked to speak (DESIGN §3.5); it speaks only when named.
+    const away = awayAt(state)
+    // Muted, and away where it counts as muted (spec/CHARACTER-CONTEXT.md §9.3, `AWAY_ACTS_AS_MUTED`).
+    const absent = new Set([...state.absent, ...(AWAY_ACTS_AS_MUTED ? away : [])])
+    // A muted or away character is never picked to speak (DESIGN §3.5; spec/CHARACTER-CONTEXT.md
+    // §5); it speaks only when named.
     const speaker =
-      (speakerId ? cards.get(speakerId) : undefined) ?? characters.find((c) => !absent.has(c.entity)) ?? null
+      (speakerId ? cards.get(speakerId) : undefined) ??
+      characters.find((c) => !absent.has(c.entity) && !away.includes(c.entity)) ??
+      null
     const type: GenerationType =
       speaker && played.has(speaker.entity) ? "impersonate" : ordinal > 0 ? "swipe" : "normal"
     const cast: Cast = { characters, personas, absent, speaker, type }
@@ -530,7 +538,9 @@ const historyStage: AssemblerStage = {
         leaf !== assembly.lcm?.cursor &&
         (tokens < budget || depth < (assembly.loreScanDepth ?? 0))
       ) {
-        const window = yield* sources.history(leaf, HISTORY_WINDOW, assembly.lcm?.cursor ?? undefined)
+        const read = yield* sources.history(leaf, HISTORY_WINDOW, assembly.lcm?.cursor ?? undefined)
+        // In a separate context, what the speaker missed is left out before the budget counts it.
+        const window = { ...read, entries: yield* withoutUnknown(assembly, read.entries) }
         entries = [...window.entries, ...entries]
         // A template's stored text isn't what it expands to, which may be nothing: it counts as
         // nothing here, so it never ends the read early.
@@ -644,6 +654,7 @@ const positionKey = (state: ChatState, events: ReadonlyArray<PositionedEvent>) =
     state.participants,
     state.playedByMe,
     state.absent,
+    awayAt(state),
     state.cardBindings,
     state.macroBindings,
     state.layoutCards,
@@ -2717,7 +2728,13 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
     })
   const exact = assembly.model?.cacheBreakpoints === "explicit" && assembly.model.cacheLayout?.lookback === false
   const digests = exact ? cachePrefixDigests(messages) : []
-  const previousHistory = previous?.state?.cacheHistory
+  // In a separate context, each character's request repeats the position of its own last one
+  // (spec/CHARACTER-CONTEXT.md §2.3, unit C7): another character's history differs after the
+  // first message one of them missed. The whole path's (a shared context, a narrator) stays
+  // `cacheHistory`; both are carried forward through every request.
+  const viewer = assembly.knowledge?.viewer ?? null
+  const byView = previous?.state?.cacheHistoryByView
+  const previousHistory = viewer === null ? previous?.state?.cacheHistory : byView?.[viewer]
   assembly.breakpoints = placeBreakpoints(
     messages.map((m) => ({
       ...m,
@@ -2735,8 +2752,19 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
   )
   const history = assembly.breakpoints.find((b) => b.reason === "history")
   const start = assembly.historyStart
-  if (exact && start?.state && history)
-    assembly.historyStart = { ...start, state: { ...start.state, cacheHistory: digests[history.message]! } }
+  if (exact && start?.state && history) {
+    const digest = digests[history.message]!
+    const shared = viewer === null ? digest : previous?.state?.cacheHistory
+    const views = viewer === null ? byView : { ...byView, [viewer]: digest }
+    assembly.historyStart = {
+      ...start,
+      state: {
+        ...start.state,
+        ...(shared === undefined ? {} : { cacheHistory: shared }),
+        ...(views === undefined ? {} : { cacheHistoryByView: views })
+      }
+    }
+  }
   // A provider that can't mark every boundary keeps the first ones; say which it can't keep.
   const dropped = assembly.breakpoints.slice(EXPLICIT_MARKERS)
   if (assembly.model?.cacheBreakpoints === "explicit" && dropped.length)
@@ -2789,6 +2817,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   notesStage,
   modeStage,
   lorebooksStage,
+  knowledgeStage,
   lcmStage,
   macrosStage,
   scriptsStage,
@@ -2834,6 +2863,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   imageTokensStage,
   rolesStage,
   mergeLayoutStage,
+  gapLinesStage,
   noteGateStage,
   replacementsStage,
   loreScanStage,

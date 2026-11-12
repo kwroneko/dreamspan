@@ -3,6 +3,7 @@
 import { DatabaseSync } from "node:sqlite"
 import { beforeEach, describe, expect, it } from "vitest"
 import { baseline } from "../src/db/baseline.ts"
+import { presenceCandidatesFrom } from "../src/db/presenceCorrection.ts"
 
 let db: DatabaseSync
 let n = 0
@@ -51,8 +52,8 @@ const chat = (ownerId: string, status = "active") => {
   return { chatId }
 }
 
-const versionSql = `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?)`
+const versionSql = `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+  VALUES (?, ?, ?, ?, ?, ?, 'verbatim', ?, ?, ?, (SELECT current_fork_id FROM chats WHERE id = ?))`
 
 /** Appends a slot with one version: the version first, then the slot (deferred keys). */
 const slot = (
@@ -75,7 +76,8 @@ const slot = (
       version.content ?? "",
       writer === "model" ? "generated" : "user_written",
       now(),
-      now()
+      now(),
+      c.chatId
     )
     run(
       `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -90,7 +92,101 @@ const slot = (
   return { slotId, versionId, depth }
 }
 
+describe("version authoring provenance", () => {
+  it("requires a real authoring fork and keeps it immutable, including through the view", () => {
+    const c = chat(user()),
+      s = slot(c, null)
+    expect(get<{ f: string }>("SELECT authoring_fork_id AS f FROM versions WHERE id=?", s.versionId).f).toBe(c.chatId)
+    expect(() =>
+      run("UPDATE version_records SET content='changed', authoring_fork_id='missing' WHERE id=?", s.versionId)
+    ).toThrow(/keeps its authoring/)
+    expect(get<{ content: string }>("SELECT content FROM version_records WHERE id=?", s.versionId).content).toBe("")
+    expect(() =>
+      run(
+        "INSERT INTO version_records(id,slot_id,ordinal,status,writer,macro_mode,origin,created_at,updated_at) VALUES('missing-author',?,1,'complete','human','verbatim','user_written',1,1)",
+        s.slotId
+      )
+    ).toThrow(/NOT NULL/)
+    expect(() =>
+      tx(() =>
+        run(
+          "INSERT INTO version_records(id,slot_id,ordinal,status,writer,macro_mode,origin,created_at,updated_at,authoring_fork_id) VALUES('bad-author',?,1,'complete','human','verbatim','user_written',1,1,'missing')",
+          s.slotId
+        )
+      )
+    ).toThrow(/FOREIGN KEY/)
+    const other = chat(user())
+    expect(() =>
+      run(
+        "INSERT INTO version_records(id,slot_id,ordinal,status,writer,macro_mode,origin,created_at,updated_at,authoring_fork_id) VALUES('wrong-chat',?,1,'complete','human','verbatim','user_written',1,1,?)",
+        s.slotId,
+        other.chatId
+      )
+    ).toThrow(/fork of its chat/)
+    const target = id("s"),
+      v = id("v")
+    expect(() =>
+      tx(() => {
+        run(
+          "INSERT INTO version_records(id,slot_id,ordinal,status,writer,macro_mode,origin,created_at,updated_at,authoring_fork_id) VALUES(?,?,0,'complete','human','verbatim','user_written',1,1,?)",
+          v,
+          target,
+          other.chatId
+        )
+        run("INSERT INTO slots(id,chat_id,depth,selected_version_id,created_at) VALUES(?,?,0,?,1)", target, c.chatId, v)
+      })
+    ).toThrow(/fork of its chat/)
+  })
+  it("retains provenance at fork tombstones, prevents a dangling reference, and permits whole-chat deletion", () => {
+    const c = chat(user()),
+      s = slot(c, null)
+    run("UPDATE forks SET deleted_at=1,purged_at=2 WHERE id=?", c.chatId)
+    expect(get<{ f: string }>("SELECT authoring_fork_id AS f FROM versions WHERE id=?", s.versionId).f).toBe(c.chatId)
+    run("UPDATE chats SET current_fork_id=NULL WHERE id=?", c.chatId)
+    expect(() => tx(() => run("DELETE FROM forks WHERE id=?", c.chatId))).toThrow(/FOREIGN KEY/)
+    run("DELETE FROM chats WHERE id=?", c.chatId)
+    expect(get<{ n: number }>("SELECT count(*) AS n FROM versions").n).toBe(0)
+    expect(get<{ n: number }>("SELECT count(*) AS n FROM forks").n).toBe(0)
+  })
+})
+
 describe("version payload separation", () => {
+  it("presence corrections use chat-bounded covering presence probes, independent of swipe prose", () => {
+    const plan = all<{
+      detail: string
+    }>(`EXPLAIN QUERY PLAN SELECT v.id,t.presence_json FROM ${presenceCandidatesFrom}
+      WHERE t.presence_json IS NOT NULL AND s.chat_id='chat' AND v.purged_at IS NULL`)
+    expect(plan.some((p) => p.detail.includes("COVERING INDEX version_texts_presence"))).toBe(true)
+    expect(plan.filter((p) => /SCAN/.test(p.detail))).toHaveLength(0)
+  })
+  it("projects presence corrections and speaker changes into historical membership on a bare connection", () => {
+    const owner = user()
+    for (const card of ["mira", "wren"])
+      run("INSERT INTO entities(id, owner_user_id, kind, created_at) VALUES (?, ?, 'card', 1)", card, owner)
+    const c = chat(owner),
+      row = slot(c, null)
+    run(
+      "UPDATE version_records SET cast_json = ?, presence_json = ? WHERE id = ?",
+      JSON.stringify(["mira", "wren"]),
+      JSON.stringify({ away: ["wren"] }),
+      row.versionId
+    )
+    const members = () =>
+      all<{ entity_id: string }>(
+        "SELECT entity_id FROM version_participants WHERE version_id = ? ORDER BY entity_id",
+        row.versionId
+      ).map((r) => r.entity_id)
+    expect(members()).toEqual(["mira"])
+    run("UPDATE version_records SET presence_json = NULL WHERE id = ?", row.versionId)
+    expect(members()).toEqual(["mira", "wren"])
+    run("UPDATE version_records SET presence_json = ? WHERE id = ?", JSON.stringify({ away: ["wren"] }), row.versionId)
+    expect(members()).toEqual(["mira"])
+    run("UPDATE version_records SET speaker_entity_id = 'wren' WHERE id = ?", row.versionId)
+    expect(members()).toEqual(["mira", "wren"])
+    run("UPDATE version_records SET speaker_entity_id = 'mira' WHERE id = ?", row.versionId)
+    expect(members()).toEqual(["mira"])
+  })
+
   it("keeps every unbounded text/JSON field outside metadata and flag query plans", () => {
     const columns = all<{ name: string }>("PRAGMA table_info(versions)").map((c) => c.name)
     for (const column of [
@@ -103,6 +199,7 @@ describe("version payload separation", () => {
       "rewrite_json",
       "frozen_macros",
       "cast_json",
+      "presence_json",
       "direction",
       "error_json",
       "usage_json",
@@ -127,6 +224,52 @@ describe("version payload separation", () => {
     )
   })
 
+  it("keeps who was present apart from the cast, through the view, its updates and its copies", () => {
+    const c = chat(user())
+    const s = slot(c, null, { writer: "model", content: "Synthetic reply." })
+    expect(
+      get<{ p: string | null }>("SELECT presence_json AS p FROM version_records WHERE id = ?", s.versionId).p
+    ).toBe(null)
+    // Not frozen with the content: a correction may count someone present again (spec/CHARACTER-CONTEXT.md C9).
+    run(`UPDATE version_records SET presence_json = '{"away":["wren"]}' WHERE id = ?`, s.versionId)
+    expect(
+      get<{ p: string }>(
+        "SELECT presence_json AS p FROM version_texts WHERE version_seq = (SELECT seq FROM versions WHERE id = ?)",
+        s.versionId
+      ).p
+    ).toBe('{"away":["wren"]}')
+    expect(() => run(`UPDATE version_records SET presence_json = '["wren"]' WHERE id = ?`, s.versionId)).toThrow()
+    // A copy made the way amends and history edits make them (every column of the view) carries it.
+    const copy = id("v")
+    const columns = all<{ name: string }>("SELECT name FROM pragma_table_info('version_records')")
+      .map((col) => col.name)
+      .filter(
+        (name) =>
+          ![
+            "seq",
+            "id",
+            "ordinal",
+            "origin",
+            "source_version_id",
+            "rollout_id",
+            "changeset_id",
+            "bin_item_id",
+            "fork_id"
+          ].includes(name)
+      )
+    tx(() =>
+      run(
+        `INSERT INTO version_records (id, ordinal, origin, source_version_id, ${columns.join(", ")})
+         SELECT ?, 1, 'edited', id, ${columns.join(", ")} FROM version_records WHERE id = ?`,
+        copy,
+        s.versionId
+      )
+    )
+    expect(get<{ p: string }>("SELECT presence_json AS p FROM version_records WHERE id = ?", copy).p).toBe(
+      '{"away":["wren"]}'
+    )
+  })
+
   it("guards payload ownership, retains empty payloads and cascades them with their version", () => {
     const c = chat(user())
     const s = slot(c, null)
@@ -146,9 +289,10 @@ describe("version payload separation", () => {
     expect(() =>
       tx(() =>
         run(
-          `INSERT INTO versions(id, slot_id, ordinal, status, writer, macro_mode, origin, created_at, updated_at)
-      VALUES ('no-payload', ?, 1, 'complete', 'human', 'verbatim', 'user_written', 1, 1)`,
-          s.slotId
+          `INSERT INTO versions(id, slot_id, ordinal, status, writer, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+      VALUES ('no-payload', ?, 1, 'complete', 'human', 'verbatim', 'user_written', 1, 1, ?)`,
+          s.slotId,
+          c.chatId
         )
       )
     ).toThrow(/FOREIGN KEY/)
@@ -208,7 +352,8 @@ const addVersion = (
     version.content,
     version.writer === "model" ? "generated" : "user_written",
     now(),
-    now()
+    now(),
+    get<{ chat_id: string }>("SELECT chat_id FROM slots WHERE id = ?", slotId).chat_id
   )
   return versionId
 }
@@ -342,8 +487,8 @@ describe("graph shape", () => {
     const s = slot(chat(owner), null, { writer: "model", content: "generated" })
     const edit = (source: string) =>
       run(
-        `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, created_at, updated_at)
-         VALUES (?, ?, 1, 'complete', 'human', 'edited', 'verbatim', 'edited', ?, 1, 1)`,
+        `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, created_at, updated_at, authoring_fork_id)
+         VALUES (?, ?, 1, 'complete', 'human', 'edited', 'verbatim', 'edited', ?, 1, 1, (SELECT c.current_fork_id FROM slots s JOIN chats c ON c.id=s.chat_id WHERE s.id=?2))`,
         id("v"),
         s.slotId,
         source
@@ -356,8 +501,8 @@ describe("graph shape", () => {
     // Deleting the source clears the reference instead of failing on it.
     const third = addVersion(s.slotId, 2, { writer: "model", content: "a swipe" })
     run(
-      `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, created_at, updated_at)
-       VALUES (?, ?, 3, 'complete', 'human', 'edited swipe', 'verbatim', 'edited', ?, 1, 1)`,
+      `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, created_at, updated_at, authoring_fork_id)
+       VALUES (?, ?, 3, 'complete', 'human', 'edited swipe', 'verbatim', 'edited', ?, 1, 1, (SELECT c.current_fork_id FROM slots s JOIN chats c ON c.id=s.chat_id WHERE s.id=?2))`,
       id("v"),
       s.slotId,
       third
@@ -1157,12 +1302,13 @@ describe("inserted messages (spec/MESSAGE-INSERT.md §2.2)", () => {
     const versionId = id("v")
     tx(() => {
       run(
-        `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-         VALUES (?, ?, 0, 'complete', 'model', 'copy', 'verbatim', 'duplicate', ?, ?)`,
+        `INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+         VALUES (?, ?, 0, 'complete', 'model', 'copy', 'verbatim', 'duplicate', ?, ?, ?)`,
         versionId,
         slotId,
         now(),
-        now()
+        now(),
+        c.chatId
       )
       run(
         `INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, inserted)

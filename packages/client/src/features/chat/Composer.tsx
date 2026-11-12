@@ -334,8 +334,13 @@ export function Composer({
   const decides =
     nextDecisionOn &&
     replyPlan.auto &&
-    (cast?.participants.filter((id) => !cast.playedByMe.includes(id) && !cast.absent.includes(id) && id !== lastSpeaker)
-      .length ?? 0) >= 2
+    (cast?.participants.filter(
+      (id) =>
+        !cast.playedByMe.includes(id) &&
+        !cast.absent.includes(id) &&
+        !(cast.away ?? []).includes(id) &&
+        id !== lastSpeaker
+    ).length ?? 0) >= 2
   const leafPick = leaf?.version.speakerPick
   const lastPick = leafPick?.by === "decision" ? { name: leafPick.name, confidence: leafPick.confidence } : undefined
   const recent = useMemo(
@@ -625,6 +630,7 @@ export function Composer({
     reply: {
       candidates: faces,
       muted: cast?.absent ?? [],
+      away: cast?.away ?? [],
       next,
       round: replyPlan.round,
       picked: pickedReply,

@@ -133,6 +133,8 @@ export interface VersionRow {
   readonly source_version_id: string | null
   /** The fork whose copy it is, standing in for its source (schema/forkVersions.ts); absent where not selected. */
   readonly fork_id?: string | null
+  /** Creation provenance; omitted by hot read projections and public version DTOs. */
+  readonly authoring_fork_id?: string
   readonly direction: string | null
   readonly hidden: number
   readonly starred: number

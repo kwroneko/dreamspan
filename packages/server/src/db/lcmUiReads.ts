@@ -14,6 +14,14 @@ import { toLlmRequest, type LlmRequestRow } from "./providers.ts"
 import { readingOnce, readSummary } from "./lcmReads.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
+import {
+  audienceIds,
+  audienceScope,
+  firstUnknownPosition,
+  inputsKnown,
+  knownVersions,
+  viewerAudience
+} from "./lcmAudience.ts"
 
 /** Most summaries one coverage read returns: far more than a window of 500 messages needs. */
 const MAX_COVERAGE = 600
@@ -28,6 +36,24 @@ const owned = (sql: SqlClient.SqlClient, userId: UserId, chatId: string, leafSlo
 
 export const makeLcmUiReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+
+  /** Every view read observes the same boundary as its selected layer, including ids and errors. */
+  const forViewer = Effect.fnUntraced(function* (
+    summaries: ReadonlyArray<Summary>,
+    chatId: string,
+    leaf: string,
+    identities?: ReadonlyArray<string>
+  ) {
+    if (identities === undefined) return summaries
+    const firstMissed = yield* firstUnknownPosition(sql, chatId, leaf, identities)
+    const kept: Array<Summary> = []
+    for (const summary of summaries) {
+      if (!summary.audience && firstMissed !== null && summary.to - 1 >= firstMissed) continue
+      if (!summary.fresh && !(yield* inputsKnown(sql, summary.id, identities))) continue
+      kept.push(summary)
+    }
+    return kept
+  })
 
   /** Revision counts and rerun requests for some summaries, in one query each. */
   const extras = (ids: ReadonlyArray<string>, chatId: string) =>
@@ -82,18 +108,19 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         rerun: reruns.has(s.id),
         replacementAvailable: replacements.has(s.id),
         content: withContent ? s.content : null,
+        ...(s.audience ? { audience: s.audience } : {}),
         children: s.children.map((c) => c.summaryId)
       }))
     })
 
-  const freshRanges = (userId: UserId, chatId: string, leaf: string) =>
+  const freshRanges = (userId: UserId, chatId: string, leaf: string, identities?: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const shown = yield* pathView(sql, chatId, leaf)
       const rows = yield* sql<{ id: string; created_at: number }>`WITH RECURSIVE path(id) AS (
       SELECT ${leaf} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id=s.id WHERE s.parent_slot_id IS NOT NULL
     ) SELECT s.id,s.created_at FROM ${shown ? sql`(SELECT id FROM path UNION SELECT value FROM json_each(${insertedOnPath(shown)})) path` : sql`path`}
       JOIN summaries s ON s.last_slot_id=path.id
-      WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status IN ('complete','truncated')`
+      WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status IN ('complete','truncated') AND ${audienceScope(sql, "s", identities)}`
       const memo = new Map<string, Summary>(),
         valid = lineageValidator(sql, userId, shown ?? undefined)
       const ranges: Array<Summary & { createdAt: number }> = []
@@ -102,7 +129,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           const s = yield* readSummary(sql, userId, row.id, undefined, memo, shown ?? undefined)
           if (s.fresh) ranges.push({ ...s, createdAt: row.created_at })
         }
-      return ranges
+      const visible = new Set((yield* forViewer(ranges, chatId, leaf, identities)).map((s) => s.id))
+      return ranges.filter((s) => visible.has(s.id))
     })
   const resolved = (
     from: number,
@@ -132,7 +160,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
     leaf: string,
     shown: { readonly pieces: ReadonlyArray<PathPiece>; readonly end: number; readonly fork: string | null },
     from: number,
-    to: number
+    to: number,
+    identities?: ReadonlyArray<string>
   ) =>
     Effect.gen(function* () {
       const inserted = JSON.parse(insertedOnPath(shown)) as Array<string>
@@ -157,7 +186,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           last.chain_id AS last_chain, last.depth AS last_depth
         FROM shown JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = shown.id
           JOIN slots first ON first.id = s.first_slot_id JOIN slots last ON last.id = s.last_slot_id
-        WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded'
+        WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded' AND ${audienceScope(sql, "s", identities)}
           AND ${effectiveOverride(sql, "summary_superseded", shown.fork, "s.id")} IS NULL`
       return rows
         .map((r) => ({
@@ -224,9 +253,12 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         }))
       }).pipe(inSummaryFork(sql, userId, summaryId, forkId), query("ListSummaryRevisions")),
 
-    GetLcmState: ({ userId, chatId, leafSlotId, forkId }) =>
+    GetLcmState: ({ userId, chatId, leafSlotId, forkId, viewer }) =>
       Effect.gen(function* () {
         yield* owned(sql, userId, chatId, leafSlotId)
+        // A character's separate context (unit C7): the shared rows and its own.
+        const identities =
+          viewer === undefined ? undefined : (yield* viewerAudience(sql, chatId, leafSlotId, viewer)).identities
         const [settings] = yield* sql<{
           enabled: number | null
         }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
@@ -234,7 +266,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         const enabled = settings?.enabled === 1
         if (!enabled)
           return new LcmState({ chatId, leafSlotId, enabled, layer: [], failed: [], jobs: [], cursorDepth: -1 })
-        const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId)
+        const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, false, identities && { identities })
         // In a fork that shows inserted slots, numbers are positions on its display path (spec/MESSAGE-INSERT.md §3.4).
         const shown = yield* pathView(sql, chatId, leafSlotId)
 
@@ -243,8 +275,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           id: string
           last_slot_id: string
           created_at: number
-        }>`SELECT id, last_slot_id, created_at FROM summaries
-          WHERE chat_id = ${chatId} AND status = 'failed' AND sealed = 1`
+        }>`SELECT s.id, s.last_slot_id, s.created_at FROM summaries s
+          WHERE s.chat_id = ${chatId} AND s.status = 'failed' AND s.sealed = 1 AND ${audienceScope(sql, "s", identities)}`
         const fork = yield* viewAt(sql, chatId, leafSlotId)
         const rawJobs = yield* sql<{
           id: string
@@ -258,10 +290,14 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           first_chain: string
           last_chain: string
           updated_at: number
-        }>`SELECT j.updated_at,j.id, j.level, j.first_slot_id, j.last_slot_id, j.status, j.error, a.depth AS first_depth, b.depth AS last_depth,
+          audience_json: string | null
+          rollout_id: string | null
+          result_summary_id: string | null
+        }>`SELECT j.rollout_id,j.result_summary_id,j.updated_at,j.audience_json,j.id, j.level, j.first_slot_id, j.last_slot_id, j.status, j.error, a.depth AS first_depth, b.depth AS last_depth,
             a.chain_id AS first_chain, b.chain_id AS last_chain
           FROM summarization_jobs j JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
           WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id=${fork}) AND j.status IN ('pending', 'processing', 'failed')
+            AND ${audienceScope(sql, "j", identities)}
           ORDER BY a.depth, j.level, j.id`
         // A job's range as positions (zero-based, as depths are): its ends' depths without insertions.
         const jobRows = shown
@@ -293,7 +329,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           if (shown) for (const id of JSON.parse(insertedOnPath(shown)) as Array<string>) onPath.add(id)
         }
         const memo = new Map<string, Summary>()
-        const allFailed = yield* onViewedPath(
+        const pathFailed = yield* onViewedPath(
           userId,
           yield* Effect.forEach(
             failedRows.filter((r) => onPath.has(r.last_slot_id)),
@@ -301,14 +337,41 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           ),
           shown
         )
+        const allFailed = yield* forViewer(pathFailed, chatId, leafSlotId, identities)
+        const firstMissed =
+          identities === undefined ? null : yield* firstUnknownPosition(sql, chatId, leafSlotId, identities)
+        const visibleJobs: Array<(typeof jobRows)[number]> = []
+        for (const job of jobRows) {
+          if (job.audience_json === null && firstMissed !== null && job.last_depth >= firstMissed) continue
+          if (identities !== undefined) {
+            if (job.result_summary_id && !(yield* inputsKnown(sql, job.result_summary_id, identities))) continue
+            if (job.rollout_id) {
+              const [payload] = yield* sql<{
+                context_snapshot_json: string | null
+              }>`SELECT context_snapshot_json FROM rollout_payloads WHERE rollout_id=${job.rollout_id}`
+              const snapshot = payload?.context_snapshot_json
+                ? (JSON.parse(payload.context_snapshot_json) as import("../assembler/types.ts").ContextSnapshot)
+                : undefined
+              const ids =
+                snapshot?.summaryJob?.inputs.flatMap((input) => (input.versionId ? [input.versionId] : [])) ?? []
+              const known = yield* knownVersions(sql, ids, identities)
+              if (ids.some((id) => !known.has(id))) continue
+              let childrenKnown = true
+              for (const child of snapshot?.summaryJob?.children ?? [])
+                if (!(yield* inputsKnown(sql, child.summaryId, identities))) childrenKnown = false
+              if (!childrenKnown) continue
+            }
+          }
+          visibleJobs.push(job)
+        }
         const fresh =
-          allFailed.length || jobRows.some((j) => j.status === "failed")
-            ? yield* freshRanges(userId, chatId, leafSlotId)
+          allFailed.length || visibleJobs.some((j) => j.status === "failed")
+            ? yield* freshRanges(userId, chatId, leafSlotId, identities)
             : []
         const failed = allFailed.filter(
           (s) => !resolved(s.from, s.to, fresh, { time: failedRows.find((r) => r.id === s.id)!.created_at, id: s.id })
         )
-        const jobIds = jobRows.filter(
+        const jobIds = visibleJobs.filter(
           (r) =>
             onPath.has(r.last_slot_id) &&
             (r.status !== "failed" ||
@@ -329,7 +392,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
             firstSlotId: j.first_slot_id as never,
             status: j.status,
             error: j.error,
-            rerun: reruns.has(j.id)
+            rerun: reruns.has(j.id),
+            ...(j.audience_json === null ? {} : { audience: audienceIds(j.audience_json) })
           })),
           cursorDepth:
             shown && layer.cursor !== null
@@ -349,10 +413,13 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
       toDepth,
       fromPosition,
       toPosition,
-      includeResolved
+      includeResolved,
+      viewer
     }) =>
       Effect.gen(function* () {
         yield* owned(sql, userId, chatId, leafSlotId)
+        const identities =
+          viewer === undefined ? undefined : (yield* viewerAudience(sql, chatId, leafSlotId, viewer)).identities
         const shown = yield* pathView(sql, chatId, leafSlotId)
         const ids = shown
           ? yield* coverageInDisplay(
@@ -361,7 +428,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
               leafSlotId,
               shown,
               fromPosition ?? fromDepth,
-              toPosition ?? toDepth
+              toPosition ?? toDepth,
+              identities
             )
           : yield* sql<{ id: string; created_at: number }>`WITH RECURSIVE path(id, depth) AS (
             SELECT id, depth FROM slots WHERE id = ${leafSlotId}
@@ -369,17 +437,20 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
               WHERE s.depth >= ${fromDepth}
           ) SELECT s.id,s.created_at FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
             JOIN slots first ON first.id = s.first_slot_id
-            WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded'
+            WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded' AND ${audienceScope(sql, "s", identities)}
               AND ${effectiveOverride(sql, "summary_superseded", yield* viewAt(sql, chatId, leafSlotId), "s.id")} IS NULL
               AND path.depth >= ${fromDepth} AND first.depth <= ${toDepth}
             ORDER BY s.level, first.depth LIMIT ${MAX_COVERAGE}`
         const memo = new Map<string, Summary>()
-        const summaries = yield* onViewedPath(
+        const pathSummaries = yield* onViewedPath(
           userId,
           yield* Effect.forEach(ids, ({ id }) => readSummary(sql, userId, id, undefined, memo, shown ?? undefined)),
           shown
         )
-        const fresh = summaries.some((s) => s.status === "failed") ? yield* freshRanges(userId, chatId, leafSlotId) : []
+        const summaries = yield* forViewer(pathSummaries, chatId, leafSlotId, identities)
+        const fresh = summaries.some((s) => s.status === "failed")
+          ? yield* freshRanges(userId, chatId, leafSlotId, identities)
+          : []
         const rows = yield* toRows(
           summaries.filter((s) => s.status !== "superseded"),
           false

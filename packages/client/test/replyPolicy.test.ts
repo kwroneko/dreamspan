@@ -145,6 +145,11 @@ it("Auto picks by ST's natural order: named first, then by talkativeness, never 
   const muted = castOf([mira, tobin, wren, ana], cards, { playedByMe: [ana], absent: [mira] })
   assert.notStrictEqual(planReply(muted, user, ana, null, "Mira?").replier, mira)
   assert.notStrictEqual(planReply(cast, user, mira, null, null).replier, mira)
+  // Nor are away cards (spec/CHARACTER-CONTEXT.md §5), named or not.
+  const away = castOf([mira, tobin, wren, ana], cards, { playedByMe: [ana], away: [mira] })
+  assert.notStrictEqual(planReply(away, user, ana, null, "Mira?").replier, mira)
+  for (let i = 0; i < 20; i++)
+    assert.notStrictEqual(planReply(away, [...user, turn(`a${i}`, tobin)], ana, null, null).replier, mira)
   // Alone, the last speaker answers themselves.
   const solo = castOf([mira, ana], cards, { playedByMe: [ana] })
   assert.strictEqual(planReply(solo, afterMira, ana, null, null).replier, mira)

@@ -3,6 +3,7 @@ import type { Summary } from "@rp/shared/lcm.ts"
 import { resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { AssemblySources, need, type AssemblerStage } from "./pipeline.ts"
 import { historyLeafOf } from "./types.ts"
+import { layerKnown } from "./knowledge.ts"
 
 /** One summary as its own message's text (DESIGN §8: separate blocks placed like the history). */
 export const summaryBlock = (s: Pick<Summary, "level" | "from" | "to" | "content">) =>
@@ -19,7 +20,27 @@ export const lcmStage: AssemblerStage = {
         need(assembly, "state").lcm,
         sources.lcmDefaults ? yield* sources.lcmDefaults() : null
       )
-      assembly.lcm = yield* sources.summaryLayer(historyLeafOf(need(assembly, "target")))
+      const leaf = historyLeafOf(need(assembly, "target"))
+      // A separate context reads its own view's layer (spec/CHARACTER-CONTEXT.md §2.3, unit C7).
+      const viewer = assembly.knowledge?.viewer ?? null
+      const identities = viewer === null ? undefined : (assembly.knowledge?.aliases ?? [viewer])
+      const layer = yield* sources.summaryLayer(leaf, identities)
+      // A source without views (a fixture) gives the shared layer: withheld where it covers what
+      // the speaker missed.
+      if (
+        !sources.viewLayers &&
+        layer.cursor !== null &&
+        ((assembly.knowledge?.viewer != null && layer.summaries.some((s) => !s.fresh)) ||
+          !(yield* layerKnown(assembly, leaf, layer.cursorDepth)))
+      ) {
+        assembly.issues.push({
+          kind: "summaries_withheld",
+          message:
+            "Summaries aren't used for this reply: they cover messages its speaker wasn't present for, or their earlier inputs can no longer be verified. The messages it was present for are sent instead, as far as they fit."
+        })
+        return assembly
+      }
+      assembly.lcm = layer
       assembly.lcmPieces = assembly.lcm.summaries.map((summary) => {
         assembly.pieces.push({
           id: `summary:${summary.firstSlotId}:${summary.lastSlotId}`,

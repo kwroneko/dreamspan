@@ -1,3 +1,5 @@
+import { gapLineDescriptors } from "./gapLines.ts"
+import { builtinContextViews, makeContextViewRegistry, type ContextViewRegistry } from "./knowledge.ts"
 import {
   builtinMergeLayouts,
   makeMergeLayoutRegistry,
@@ -63,6 +65,8 @@ export interface Assembler {
   readonly projections: ProjectionRegistry
   /** How merged chats reach the model (`merge-layout` stage, spec/CHAT-MERGE.md §4). */
   readonly mergeLayouts: MergeLayoutRegistry
+  /** How each reply's history is chosen: one shared context or separate ones (`knowledge` stage). */
+  readonly contextViews: ContextViewRegistry
   /** Local model tokenizers for display and prepared budget counts (ARCHITECTURE §15). */
   readonly textCounters: Registry<TextTokenCounter>
   /** What an image costs per provider and model (ARCHITECTURE §15, image tokens). */
@@ -75,6 +79,10 @@ export interface Assembler {
     ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
   >
   readonly mergeLayoutOptions: Effect.Effect<
+    ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
+  >
+  /** The context views installed, as the chat's Context setting offers them (CU1). */
+  readonly contextViewOptions: Effect.Effect<
     ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
   >
   readonly assemble: (
@@ -117,7 +125,7 @@ export class WorkerAssembler extends Context.Service<WorkerAssembler, Assembler>
 /** An assembler whose built-in stages and macros stay registered for the scope. */
 export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effect.gen(function* () {
   const sourceDescriptors = makeRegistry<SourceDescriptor>()
-  for (const entry of builtinSourceDescriptors) yield* sourceDescriptors.register(entry)
+  for (const entry of [...builtinSourceDescriptors, ...gapLineDescriptors]) yield* sourceDescriptors.register(entry)
   const stages = makeStageRegistry()
   const macros = makeMacroRegistry()
   const transforms = makeRegistry<AssemblyTransform>()
@@ -135,6 +143,8 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   yield* transforms.register(mergeSectionsTransform)
   const mergeLayouts = makeMergeLayoutRegistry()
   for (const layout of builtinMergeLayouts) yield* mergeLayouts.register(layout)
+  const contextViews = makeContextViewRegistry()
+  for (const view of builtinContextViews) yield* contextViews.register(view)
   const projections = makeProjectionRegistry()
   const textCounters = makeRegistry<TextTokenCounter>()
   for (const counter of builtinTextCounters.filter((c) => !c.remote)) yield* textCounters.register(counter)
@@ -158,6 +168,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
     macros,
     projections,
     mergeLayouts,
+    contextViews,
     imageTokens,
     textCounters,
     scriptSources,
@@ -178,12 +189,18 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
         Effect.sync(() => mergeLayouts.list().map(({ id, label, description }) => ({ id, label, description })))
       )
     ),
+    contextViewOptions: Effect.suspend(() =>
+      withAssemblyModules(
+        assembler,
+        Effect.sync(() => contextViews.list().map(({ id, label, description }) => ({ id, label, description })))
+      )
+    ),
     assemble: (request) =>
       withAssemblyModules(
         assembler,
         assemble(
           stages,
-          { ...request, macros, projections, mergeLayouts, imageTokens, textCounters, scriptSources },
+          { ...request, macros, projections, mergeLayouts, contextViews, imageTokens, textCounters, scriptSources },
           transforms
         )
       ),
@@ -200,6 +217,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
               macros,
               projections,
               mergeLayouts,
+              contextViews,
               imageTokens,
               textCounters,
               scriptSources,

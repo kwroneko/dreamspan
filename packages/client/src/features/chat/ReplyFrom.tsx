@@ -19,6 +19,8 @@ export interface ReplyChoice {
   readonly candidates: ReadonlyArray<EntityId>
   /** Muted characters: offered for an explicit pick, never Auto's pick (DESIGN §3.5). */
   readonly muted: ReadonlyArray<EntityId>
+  /** Away from the scene (spec/CHARACTER-CONTEXT.md §2.1): never Auto's pick either, still pickable. */
+  readonly away?: ReadonlyArray<EntityId>
   readonly next: NextInTurn | null
   /** Who replies after the next, in turn, in the round the next send starts (DESIGN §2.3). */
   readonly round?: ReadonlyArray<EntityId>
@@ -35,12 +37,23 @@ export interface ReplyChoice {
   readonly lastPick?: { readonly name: string; readonly confidence: number }
 }
 
+/** A character's line under Next: away or muted ones reply only when picked (DESIGN §3.5). */
+export const replyDetail = (id: EntityId, muted: ReadonlyArray<EntityId>, away: ReadonlyArray<EntityId>) =>
+  away.includes(id)
+    ? muted.includes(id)
+      ? "Away and muted: replies only when picked"
+      : "Away: replies only when picked"
+    : muted.includes(id)
+      ? "Muted: replies only when picked"
+      : "Replies next, for one reply"
+
 /** Whether there's anyone to choose between, for ▶. */
 export const hasReplyChoice = (reply: ReplyChoice) => reply.candidates.length >= 2
 
 export function NextReplyChip({
   candidates,
   muted,
+  away = [],
   next,
   round = [],
   picked,
@@ -116,7 +129,7 @@ export function NextReplyChip({
           ...candidates.map((id) => ({
             value: id,
             label: name(id),
-            detail: muted.includes(id) ? "Muted: replies only when picked" : "Replies next, for one reply"
+            detail: replyDetail(id, muted, away)
           }))
         ]}
         value={picked ?? (noReplies ? NO_ONE : AUTO)}

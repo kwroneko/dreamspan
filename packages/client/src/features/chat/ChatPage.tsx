@@ -1,4 +1,5 @@
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
+import { useSummariesOfUrl } from "./SummaryViewer.tsx"
 import { messageRows, useTimelineTransforms } from "./timelineContributions.tsx"
 import { lcmCursor, positionOf } from "./position.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -770,6 +771,7 @@ function ChatSurface({
   const [enabling, setEnabling] = useState(false)
   /** The summary the panel opens at: one clicked on the rail, or none. */
   const [summaryFocus, setSummaryFocus] = usePlaceParam("summary", "")
+  useSummariesOfUrl(session)
   const focus = summaryFocus || null
   const setFocus = useCallback((next: string | null) => setSummaryFocus(next ?? "", true), [setSummaryFocus])
   const { prefs } = useViewPrefs()

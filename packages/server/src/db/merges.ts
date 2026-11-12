@@ -8,6 +8,7 @@ import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { NewVersion } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import { knowersOf, parsePresence } from "@rp/shared/knowledge.ts"
 import {
   fillMergeTemplate,
   MERGE_JOIN_DEFAULT,
@@ -21,6 +22,7 @@ import {
 } from "@rp/shared/mergeApi.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { leftOutNote, mergedRowText, summaryRowName } from "../assembler/merges.ts"
 import { estimateTokens } from "../assembler/st.ts"
 import type { Bin } from "./bin.ts"
 import { loadCards } from "./cards.ts"
@@ -66,6 +68,8 @@ interface SourceRow {
   readonly first_writer: string
   readonly first_origin: string
   readonly origin: string
+  readonly cast_json: string | null
+  readonly presence_json: string | null
 }
 
 /** One merged source message or summary, as `chat_merge_messages` keeps it. */
@@ -73,6 +77,8 @@ interface MergedRow {
   readonly kind: "message" | "summary"
   readonly sourceSlotId: string | null
   readonly speaker: string | null
+  /** Who knew it in the source (spec/CHARACTER-CONTEXT.md §9.1); null: the whole source cast. */
+  readonly knowers: ReadonlyArray<string> | null
   readonly name: string
   readonly side: "user" | "assistant"
   readonly content: string
@@ -172,7 +178,7 @@ const readStretch = (
         ${displaySlots(sql, pieces, first, last)}
         SELECT s.id, path.position, ${slotDeletedIn(sql, fork.id, "s")} AS deleted,
           ${contextExcludedIn(sql, fork.id)} AS excluded, v.status, v.speaker_entity_id, v.content,
-          v.created_at, f.writer AS first_writer, f.origin AS first_origin, v.origin
+          v.created_at, f.writer AS first_writer, f.origin AS first_origin, v.origin, v.cast_json, v.presence_json
         FROM display_slots path JOIN slots s ON s.id = path.id
         JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "s")}
         JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)
@@ -189,8 +195,15 @@ const usable = (row: SourceRow) =>
 const sideOf = (row: SourceRow): "user" | "assistant" =>
   row.first_writer === "human" && row.first_origin !== "greeting" ? "user" : "assistant"
 
-const summaryText = (from: number, to: number, content: string) =>
-  `<summary from="${from}" to="${to}">\n${content}\n</summary>`
+/** The cards that knew a source message there, in its cast's order; null when no cast was recorded. */
+const knownBy = (row: SourceRow): ReadonlyArray<string> | null => {
+  const knowers = knowersOf({
+    cast: row.cast_json === null ? null : (JSON.parse(row.cast_json) as Array<string>),
+    speaker: row.speaker_entity_id,
+    presence: parsePresence(row.presence_json)
+  })
+  return knowers === null ? null : [...knowers]
+}
 
 /** What a merge of `request.source` into `request.forkId` below `request.at` brings (spec §3). */
 const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeRequest) =>
@@ -299,7 +312,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       const card = row.speaker_entity_id ? cards.get(row.speaker_entity_id) : undefined
       return card?.modelName || card?.name || (sideOf(row) === "user" ? "User" : "Narrator")
     }
-    const line = (row: SourceRow) => `${nameOf(row)}: ${row.content.trim()}`
+    const line = (row: SourceRow) => mergedRowText({ kind: "message", name: nameOf(row), content: row.content })
     let used = 0
     let verbatimFrom = messages.length
     while (verbatimFrom > 0) {
@@ -330,12 +343,24 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     for (const [i, row] of messages.entries()) {
       while (nextSummary < summaries.length && summaries[nextSummary]!.from <= row.position) {
         const s = summaries[nextSummary++]!
-        blocks.push(summaryText(s.from + 1, s.to + 1, s.content.trim()))
+        const name = summaryRowName(s.from + 1, s.to + 1)
+        blocks.push(mergedRowText({ kind: "summary", name, content: s.content }))
         rows.push({
           kind: "summary",
           sourceSlotId: s.lastSlotId,
           speaker: null,
-          name: `Summary of #${s.from + 1}–${s.to + 1}`,
+          // A frozen summary must retain who knew all its inputs, even after its source is gone.
+          // Stale inputs cannot be verified against the current source path.
+          knowers:
+            s.fresh && !read.some((m) => m.first_origin === "merge" && s.from <= m.position && m.position <= s.to)
+              ? messages
+                  .filter((m) => s.from <= m.position && m.position <= s.to)
+                  .reduce<ReadonlyArray<string> | null>((all, m) => {
+                    const known = knownBy(m)
+                    return known === null ? all : all === null ? known : all.filter((id) => known.includes(id))
+                  }, null)
+              : [],
+          name,
           side: "assistant",
           content: s.content.trim(),
           sentAt: 0,
@@ -355,6 +380,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
         kind: "message",
         sourceSlotId: row.id,
         speaker: row.speaker_entity_id,
+        knowers: knownBy(row),
         name: nameOf(row),
         side: sideOf(row),
         content: row.content,
@@ -363,9 +389,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       })
     }
     const notes = [
-      ...(leftOut && !request.includeLeftOut
-        ? [`[${leftOut} earlier ${leftOut === 1 ? "message" : "messages"} of “${title}” not included.]`]
-        : []),
+      ...(leftOut && !request.includeLeftOut ? [leftOutNote(leftOut, title)] : []),
       ...(nested ? [`[${nested} ${nested === 1 ? "chat" : "chats"} merged into “${title}” not included.]`] : [])
     ]
     const transcript = [...notes, ...blocks].join("\n\n")
@@ -607,6 +631,7 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
                 kind: r.kind,
                 source_slot_id: r.sourceSlotId,
                 speaker_entity_id: r.speaker,
+                knowers_json: r.knowers === null ? null : JSON.stringify(r.knowers),
                 speaker_name: r.name,
                 side: r.side,
                 content: r.content,

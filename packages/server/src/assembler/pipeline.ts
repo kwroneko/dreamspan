@@ -2,6 +2,7 @@ import type { LoreReceipt, LoreTimingState } from "./loreTiming.ts"
 // The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §15).
 import type { SourceActivation } from "@rp/shared/inspectorApi.ts"
 import type { FoldableEvent, ChatState, HtmlDepth } from "@rp/shared/state.ts"
+import { presenceOf } from "@rp/shared/knowledge.ts"
 import type { FrozenValues, MacroLookup } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
@@ -12,6 +13,7 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import type { MacroEnvironment } from "./macros.ts"
 import type { ScriptRunner } from "./regex.ts"
 import type { RewriteOptions, ScriptSource } from "./scriptSources.ts"
+import type { Knowledge } from "./knowledge.ts"
 import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import type { ScriptRef } from "@rp/shared/regexScripts.ts"
 import type { Composition, Stability, StMessage } from "./st.ts"
@@ -25,6 +27,7 @@ import type {
   HistoryEntry,
   HistoryWindow,
   Issue,
+  MergeRow,
   ModelInput,
   LorebookInput,
   NoteInput,
@@ -76,7 +79,17 @@ export interface PresetChain {
 export class AssemblySources extends Context.Service<
   AssemblySources,
   {
-    readonly summaryLayer: (leaf: string | null) => Effect.Effect<SummaryLayer, SourceError>
+    /**
+     * The summary layer through `leaf`. With a separate context's identities, that view's layer
+     * (spec/CHARACTER-CONTEXT.md §2.3): the shared summaries before its first missed message, then
+     * its own. Only a source that sets `viewLayers` reads them; others give the shared layer.
+     */
+    readonly summaryLayer: (
+      leaf: string | null,
+      identities?: ReadonlyArray<string>
+    ) => Effect.Effect<SummaryLayer, SourceError>
+    /** The source reads each view's own summaries (`summaryLayer` with identities). */
+    readonly viewLayers?: true
     readonly target: Effect.Effect<Target, SourceError>
     readonly historyRevision: (leaf: string | null, before: number) => Effect.Effect<number, SourceError>
     readonly historyStart: (leaf: string | null) => Effect.Effect<HistoryStart | null, SourceError>
@@ -130,6 +143,31 @@ export class AssemblySources extends Context.Service<
       model: { readonly connectionId: string; readonly kind: string; readonly modelKey: string },
       sha256s: ReadonlyArray<string>
     ) => Effect.Effect<ImageTokenFacts, SourceError>
+    /**
+     * Who knew each of these versions (spec/CHARACTER-CONTEXT.md §9.1): card ids, or null for
+     * everyone (nothing recorded). A merge's join is known to its source's cast. Fixtures
+     * without it: everyone knew everything.
+     */
+    readonly knowers?: (
+      versionIds: ReadonlyArray<string>
+    ) => Effect.Effect<
+      ReadonlyArray<{ readonly versionId: string; readonly knowers: ReadonlyArray<string> | null }>,
+      SourceError
+    >
+    /**
+     * The rows of these merges' joins, each merge's in order, for a separate context to lay out
+     * per viewer (unit C6); summarized rows are left out. Fixtures without it: joins as written.
+     */
+    readonly mergeRows?: (
+      mergeIds: ReadonlyArray<string>
+    ) => Effect.Effect<ReadonlyArray<{ readonly mergeId: string; readonly rows: ReadonlyArray<MergeRow> }>, SourceError>
+    /** Whether `viewer` knew every message on the path to `leaf` up to position `through`. */
+    readonly knewThrough?: (
+      leaf: string,
+      viewer: string,
+      through: number,
+      aliases?: ReadonlyArray<string>
+    ) => Effect.Effect<boolean, SourceError>
   }
 >()("rp/assembler/AssemblySources") {}
 
@@ -158,6 +196,8 @@ export interface AssemblyRequest {
   readonly projections: ProjectionRegistry
   /** The merge layouts in effect (`merge-layout` stage); absent: the built-ins. */
   readonly mergeLayouts?: import("./merges.ts").MergeLayoutRegistry
+  /** The context views in effect (`knowledge` stage); absent: the built-ins. */
+  readonly contextViews?: import("./knowledge.ts").ContextViewRegistry
   /** The image token rules in effect (`image-tokens` stage); none: every image is unknown. */
   readonly imageTokens?: Registry<ImageTokenRule>
   readonly textCounters?: Registry<import("../providers/textCounters.ts").TextTokenCounter>
@@ -231,6 +271,8 @@ export interface ProjectedEntry {
  */
 export interface Assembly {
   contextBudget?: ContextSnapshot["contextBudget"]
+  /** The chat's context view and whose knowledge filters the history (`knowledge` stage). */
+  knowledge?: Knowledge
   lcm?: SummaryLayer
   lcmPieces?: ReadonlyArray<number>
   lcmFailurePieces?: ReadonlyArray<{ readonly from: number; readonly to: number; readonly piece: number }>
@@ -409,6 +451,14 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
     const historyStart = need(assembly, "historyStart")
     const sources = yield* AssemblySources
     const revision = yield* sources.historyRevision(historyLeafOf(target), historyStart.depth)
+    const cards = [...cast.characters, ...cast.personas].map(({ entity, ref, revision }) => ({ entity, ref, revision }))
+    // Who of the cast was away or narrated, recorded with the version (spec/CHARACTER-CONTEXT.md §9.1).
+    const presence = assembly.state
+      ? presenceOf(
+          assembly.state,
+          cards.map((c) => c.entity)
+        )
+      : null
     let snapshot: ContextSnapshot = {
       schema: 1,
       ...(assembly.contextBudget ? { contextBudget: assembly.contextBudget } : {}),
@@ -437,7 +487,15 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
         speaker: cast.speaker?.entity ?? null,
         mode: "layouts",
         preset: { ref: preset.ref, revision: preset.revision, scope: preset.scope },
-        cards: [...cast.characters, ...cast.personas].map(({ entity, ref, revision }) => ({ entity, ref, revision })),
+        cards,
+        ...(presence ? { presence } : {}),
+        // A separate context's viewer, for the tools to read as the history did (C5).
+        ...(assembly.knowledge?.viewer
+          ? {
+              viewer: assembly.knowledge.viewer,
+              ...(assembly.knowledge.aliases ? { viewerAliases: assembly.knowledge.aliases } : {})
+            }
+          : {}),
         model: assembly.model ?? null
       },
       ...(request.summaryJob

@@ -25,8 +25,8 @@ db.exec(
 )
 try {
   const version =
-    db.prepare(`INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at)
-    VALUES(?,?,?,'complete',?,?,'verbatim',?,1,1)`)
+    db.prepare(`INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
+    VALUES(?,?,?,'complete',?,?,'verbatim',?,1,1, ? )`)
   const slot =
     db.prepare(`INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,fork_id,inserted,created_at)
     VALUES(?,?,?,?,?,?,?,1)`)
@@ -72,7 +72,8 @@ try {
           i,
           row.is_user ? "human" : "model",
           text,
-          row.is_user ? "user_written" : "generated"
+          row.is_user ? "user_written" : "generated",
+          f
         )
         versions++
       }
@@ -103,7 +104,7 @@ try {
     for (let i = 0; i < 8; i++) {
       const depth = Math.floor(((i + 1) * messages) / 10)
       const id = `${f}-insert${i}`
-      version.run(`${id}-v0`, id, 0, "human", "An inserted synthetic message.", "user_written")
+      version.run(`${id}-v0`, id, 0, "human", "An inserted synthetic message.", "user_written", f)
       slot.run(id, chatId, path[depth]!.id, depth + 1, `${id}-v0`, f, 1)
       put(f, "insert", id, path[depth]!.id, depth, null, 1)
       if (b === 0) mainInsertions.set(depth, id)
