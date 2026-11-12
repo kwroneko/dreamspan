@@ -3,6 +3,7 @@
 // ownership, so another user's ids are NotFound.
 import { type AppApi, ConnectionTest, CurrentUser, ModelRefresh, NetworkSettings } from "@rp/shared/api.ts"
 import { Forbidden, ServerError } from "@rp/shared/errors.ts"
+import type { ModelId } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
@@ -24,7 +25,11 @@ const admin = Effect.gen(function* () {
 /** The providers a new connection starts from (providerApi.ts), the same for every user. */
 export const makeProviderListHandlers = Effect.gen(function* () {
   const providers = yield* Providers
-  return { ListProviders: () => Effect.sync(() => providers.providers()) }
+  return {
+    ListProviders: () => Effect.sync(() => providers.providers()),
+    RefreshModelEndpoints: ({ modelId }: { modelId: ModelId }) =>
+      Effect.flatMap(CurrentUser, (user) => providers.refreshEndpoints(user.id, modelId))
+  }
 })
 
 export const makeProviderHandlers = Effect.gen(function* () {
@@ -142,9 +147,11 @@ export const makeProviderHandlers = Effect.gen(function* () {
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SaveLearnedContext"))),
     EditModel: ({ modelId, overrides, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
-        writer
-          .EditModel({ userId: id, modelId, overrides, expectedRowVersion })
-          .pipe(Effect.tap(() => warmth.refreshUser(id)))
+        writer.EditModel({ userId: id, modelId, overrides, expectedRowVersion }).pipe(
+          Effect.tap(() => warmth.refreshUser(id)),
+          // A pin saved: its provider's prices are fetched now, off the save's path.
+          Effect.tap((model) => Effect.forkDetach(providers.ensureEndpoints(id, model)))
+        )
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("EditModel"))),
     SetModelHidden: ({ modelId, hidden }) =>
       Effect.flatMap(userId, (id) => writer.SetModelHidden({ userId: id, modelId, hidden })).pipe(

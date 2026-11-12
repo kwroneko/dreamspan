@@ -19,7 +19,7 @@ const SLOW_SERVER_FILES = [
 /**
  * The live provider suite (`npm run test:live`): real requests to the providers' own APIs,
  * paid or quota-limited, so never part of `npm test` or `npm run check`. Skipped unless
- * RP_LIVE_KEY_FILE names a key file (packages/server/test/live/support/live.ts).
+ * RP_LIVE_KEY_DIR names a directory of key files (packages/server/test/live/support/live.ts).
  */
 const LIVE_SERVER_FILES = ["test/live/**/*.test.ts"]
 

@@ -50,9 +50,7 @@ const newerGPT = (model: string) => {
 }
 // API-compatible local models and legacy GPT-3/4 do not inherit a cache contract.
 const knownOpenAI = (model: string) =>
-  newerGPT(model) || /(?:^|[/.])(gpt-(?:4o|4\.[15]|5)(?:[.-]|$)|o[134](?:-|$)|chatgpt-4o(?:-|$))/i.test(model)
-
-const gpt55 = (model: string) => /(?:^|[/.])gpt-5\.5(?:-|$)/.test(model)
+  newerGPT(model) || /^(gpt-(?:4o|4\.[15]|5)(?:[.-]|$)|o[134](?:-|$)|chatgpt-4o(?:-|$))/i.test(model)
 
 /** OpenAI's models on Bedrock's OpenAI-compatible APIs (`us.openai.gpt-5.6-sol`, `openai.gpt-oss-120b`). */
 const bedrockOpenAI = (model: string, api: string) =>
@@ -69,12 +67,12 @@ export const documentedCachePolicy = (target: Target, payload: Record<string, un
   if (provider === "anthropic") return policy(hour ? 3600 : 300, claudeSource)
   if (provider === "openai" && knownOpenAI(model))
     return policy(
-      newerGPT(model) || gpt55(model) || payload.prompt_cache_retention === "24h" ? 1800 : 300,
+      newerGPT(model) || /^gpt-5\.5(?:-|$)/.test(model) || payload.prompt_cache_retention === "24h" ? 1800 : 300,
       openaiSource
     )
   if (provider === "azure" && knownOpenAI(model)) {
     if (newerGPT(model)) return policy(1800, azureSource)
-    return payload.prompt_cache_retention === "24h" || gpt55(model) ? null : policy(300, azureSource)
+    return payload.prompt_cache_retention === "24h" || /^gpt-5\.5(?:-|$)/.test(model) ? null : policy(300, azureSource)
   }
   if (provider === "openrouter") {
     const pinned = object(payload.provider).only

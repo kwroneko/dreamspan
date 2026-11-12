@@ -10,7 +10,7 @@ import type { Reader, Writer } from "../../../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "../../support/config.ts"
 import {
   LIVE_TIMEOUT,
-  liveKey,
+  liveKeys,
   startRecorder,
   type Exchange,
   type Findings,
@@ -137,7 +137,7 @@ export const totalInput = (c: Counts | LlmRequest["counts"] | null | undefined) 
   return (c.inputUncached ?? 0) + (c.cacheRead ?? 0) + (c.cacheWrite ?? 0)
 }
 
-/** A turn's request id at the provider (or gateway), for the report. */
+/** A turn's request id at the provider, for the report. */
 const ref = (t: Turn | undefined) => (t?.exchange ? Object.values(t.exchange.ids)[0] : undefined)
 
 /**
@@ -602,7 +602,7 @@ export const liveTest = <E>(
       const before = f.failures().length
       return Effect.gen(function* () {
         const recorder = yield* Effect.acquireRelease(
-          Effect.promise(() => startRecorder(liveKey())),
+          Effect.promise(() => startRecorder(liveKeys())),
           (r) => Effect.promise(() => r.close())
         )
         const api = yield* client()
