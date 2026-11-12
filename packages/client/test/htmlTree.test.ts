@@ -86,7 +86,11 @@ describe("the DOM is built from the tree", () => {
       for (const text of HOSTILE) {
         await act(async () => {
           root.render(
-            createElement(HtmlMessageContext, { value: { key: "slot" } }, createElement(StMarkdown, { text, streaming: false }))
+            createElement(
+              HtmlMessageContext,
+              { value: { key: "slot" } },
+              createElement(StMarkdown, { text, streaming: false })
+            )
           )
         })
         expect(

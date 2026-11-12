@@ -57,11 +57,7 @@ function address(value: string, consent: boolean, fragmentsOnly: boolean): strin
 }
 
 /** Loading constructs anywhere in these values. */
-export function loadingViolations(
-  values: ReadonlyArray<ComponentValue>,
-  consent: boolean,
-  fragmentsOnly = false
-): string[] {
+function loadingViolations(values: ReadonlyArray<ComponentValue>, consent: boolean, fragmentsOnly = false): string[] {
   const found: string[] = []
   for (const value of values) {
     const token = tokenOf(value)

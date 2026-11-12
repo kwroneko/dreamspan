@@ -64,7 +64,7 @@ export const renameId = (name: string) => `user-content-${name}`
  * specificity). `scope` where the browser supports it.
  */
 export type ScopeMode = "scope" | "prefix"
-export const defaultScopeMode = (): ScopeMode => ("CSSScopeRule" in globalThis ? "scope" : "prefix")
+const defaultScopeMode = (): ScopeMode => ("CSSScopeRule" in globalThis ? "scope" : "prefix")
 
 // ---------------------------------------------------------------------------------------------
 // Parsing
@@ -261,7 +261,7 @@ const isNameChar = (char: string) => NAME.test(char) || char.codePointAt(0)! >= 
 const hex = (char: string) => `\\${char.codePointAt(0)!.toString(16)} `
 
 /** CSSOM's "serialize an identifier". */
-export function serializeIdent(value: string): string {
+function serializeIdent(value: string): string {
   let out = ""
   const chars = [...value]
   chars.forEach((char, index) => {
