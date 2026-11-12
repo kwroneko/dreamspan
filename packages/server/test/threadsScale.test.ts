@@ -165,6 +165,37 @@ it.live(
       const sets = yield* time("ThreadsOf", h.api.ThreadsOf({ chatId, forkId: main }))
       assert.strictEqual(sets[0]!.splitId, started.splitId)
 
+      // TH3 shell additions: the open chat and a bounded page across many chats.
+      for (let i = 0; i < 30; i++) yield* h.api.CreateChat({ title: `Synthetic neighbor ${i}` })
+      yield* settle
+      const shell = yield* time(
+        "ShellForks: ten splits, 300 branches, 31 chats",
+        h.api.GetShellForks({
+          entity: null,
+          chat: chatId,
+          search: "",
+          sort: "recent",
+          sections: [
+            { id: "threads", limit: 100 },
+            { id: "other", limit: 500 }
+          ]
+        })
+      )
+      assert.strictEqual(shell.sections[0]!.rows.length, 20)
+      assert.isTrue(shell.sections[0]!.rows.every((row) => row.thread !== undefined))
+      const page = yield* time(
+        "ShellForks: bounded global page",
+        h.api.GetShellForks({
+          entity: null,
+          chat: null,
+          search: "",
+          sort: "recent",
+          sections: [{ id: "all", limit: 100 }]
+        })
+      )
+      assert.strictEqual(page.sections[0]!.rows.length, 100)
+      assert.isBelow(new TextEncoder().encode(JSON.stringify(page)).length, 600_000)
+
       const wide = yield* h.api.AddUserModel({
         connectionId: h.connection.id,
         key: "wide-model",

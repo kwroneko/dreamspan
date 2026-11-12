@@ -1,6 +1,7 @@
+import { isDeepStrictEqual } from "node:util"
 import { assert, it } from "@effect/vitest"
 import type { ShellCards, ShellCardsUpdate, ShellForks, ShellForksUpdate } from "@rp/shared/chatSetupApi.ts"
-import { applyShellCards, applyShellForks, shellCardsUpdate } from "@rp/shared/shellUpdates.ts"
+import { applyShellCards, applyShellForks, shellCardsUpdate, shellForksUpdate } from "@rp/shared/shellUpdates.ts"
 import { Effect, Stream } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually } from "./support/generation.ts"
@@ -125,5 +126,78 @@ it.live("shell streams push changed rows, page movement and deletion without a c
     assert.lengthOf(current.cards, 2)
     assert.strictEqual(current.cards.find((row) => row.card.entityId === archived.entityId)!.persona, false)
     assert.strictEqual(current.personas[0]!.card.entityId, persona.entityId)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)
+
+it.live("thread labels survive shell deltas when the same fork appears in several sections", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const card = yield* api.CreateCard({ label: "Mira", name: "Mira" })
+    const made = yield* api.StartChat({
+      cards: [card.entityId],
+      persona: null,
+      greeting: null,
+      first: { _tag: "Send", content: "At the quay", speakerEntityId: null }
+    })
+    const chatId = made.chat.id
+    const forkId = made.chat.currentForkId!
+    const entry = (yield* api.ReadPath({ chatId, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 }))
+      .entries[0]!
+    const started = yield* api.StartThreads({
+      chatId,
+      forkId,
+      slotId: entry.slotId,
+      expectedRowVersion: entry.rowVersion,
+      threads: [
+        { name: "Quay", cast: [card.entityId], writesAs: null },
+        { name: "Docks", cast: [card.entityId], writesAs: null }
+      ]
+    })
+    const view = {
+      entity: null,
+      chat: chatId,
+      search: "",
+      sort: "recent" as const,
+      sections: [
+        { id: "threads" as const, limit: 100 },
+        { id: "current" as const, limit: 100 }
+      ]
+    }
+    let watched: ShellForks | undefined
+    yield* api.WatchShellForks(view).pipe(
+      Stream.runForEach((update) =>
+        Effect.sync(() => {
+          watched = applyShellForks(watched, update)
+        })
+      ),
+      Effect.forkScoped
+    )
+    const first = yield* api.GetShellForks(view)
+    yield* waitFor("thread snapshot", () => isDeepStrictEqual(watched, { ...first }))
+    let applied = applyShellForks(undefined, shellForksUpdate(undefined, first))
+    assert.deepStrictEqual(applied, { ...first })
+    const set = (yield* api.ThreadsOf({ chatId, forkId }))[0]!
+    yield* api.RenameThread({
+      chatId,
+      splitId: started.splitId,
+      ordinal: 1,
+      name: "Harbor",
+      rowVersion: set.threads[1]!.rowVersion
+    })
+    const next = yield* api.GetShellForks(view)
+    applied = applyShellForks(applied, shellForksUpdate(first, next))
+    assert.deepStrictEqual(applied, { ...next })
+    yield* waitFor("renamed thread labels", () => isDeepStrictEqual(watched, { ...next }))
+    const item = yield* api.UndoThreads({ chatId, splitId: started.splitId })
+    const undone = yield* api.GetShellForks(view)
+    yield* waitFor("undone thread rows", () => isDeepStrictEqual(watched, { ...undone }))
+    assert.lengthOf(undone.sections[0]!.rows, 0)
+    yield* api.RestoreBinItem({ itemId: item.id })
+    const restored = yield* api.GetShellForks(view)
+    yield* waitFor("restored thread rows", () => isDeepStrictEqual(watched, { ...restored }))
+    const again = yield* api.UndoThreads({ chatId, splitId: started.splitId })
+    yield* api.PurgeBinItem({ itemId: again.id })
+    const purged = yield* api.GetShellForks(view)
+    yield* waitFor("purged thread rows", () => isDeepStrictEqual(watched, { ...purged }))
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
 )

@@ -25,6 +25,7 @@ import { Icon } from "../../ui/Icon.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { RemoteSourceBadges } from "../cardSources/RemoteBadge.tsx"
 import { Tooltip, TooltipProvider } from "../../ui/Tooltip.tsx"
+import { useBranchTabTitle } from "./branchParts.ts"
 import { openAppMenu, sidebarToggle, useTitle } from "../shell.tsx"
 import { ChatBadges } from "./ChatsPage.tsx"
 import { castCharacters, chatName, formatDay } from "./chatTitle.ts"
@@ -281,7 +282,9 @@ export function ChatHeader({
   const baseName = view.chat ? chatName(importState(view.chat.title).title, characters, view.chat.createdAt) : null
   const name =
     baseName && split && split.group.id !== split.group.chatId ? { ...baseName, name: split.group.title } : baseName
-  useTitle(kindTitle(name?.name ?? "Chat", view.chat?.kind))
+  const line = useBranchTabTitle(view)
+  const title = kindTitle(name?.name ?? "Chat", view.chat?.kind)
+  useTitle(line ? `${line} · ${title}` : title)
   const loading = view.chat === null
   return (
     <ChatHeaderFrame

@@ -7,6 +7,7 @@ import { BinItem } from "./bin.ts"
 import { Chat, ChatId, ForkId, SlotId } from "./chat.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { HistoryRejected } from "./historyApi.ts"
+import { EditRefused } from "./editorApi.ts"
 import { RefId } from "./library.ts"
 import { StartedThreads, ThreadName, ThreadSet, ThreadStarts, ThreadsRefused } from "./threads.ts"
 
@@ -66,6 +67,6 @@ export class ChatThreadsApi extends RpcGroup.make(
   Rpc.make("CopyNoteToBranch", {
     payload: { chatId: ChatId, noteRefId: RefId, fromForkId: ForkId, toForkId: ForkId },
     success: Schema.Boolean,
-    error: Schema.Union([NotFound, ServerError])
+    error: Schema.Union([NotFound, ServerError, EditRefused])
   })
 ) {}

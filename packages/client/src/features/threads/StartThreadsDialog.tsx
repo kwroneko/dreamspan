@@ -30,6 +30,7 @@ import {
   startProblem,
   startRequest
 } from "./model.ts"
+import { UNDO_HINT } from "./ThreadsSection.tsx"
 import { shownForkOf } from "./threadSets.ts"
 
 /** The hover on the action and the command: what threads are. */
@@ -189,7 +190,7 @@ function StartThreadsDialog({
   const problem = cast && threads ? startProblem(threads, cast) : null
   const moved =
     cast && threads
-      ? cast.characters.filter((id) => !threads[0]!.cast.includes(id)).map((id) => cards.get(id)?.name ?? "A card")
+      ? cast.members.filter((id) => !threads[0]!.cast.includes(id)).map((id) => cards.get(id)?.name ?? "A card")
       : []
   const earlier = last === null || last > at
   const start = async () => {
@@ -227,7 +228,7 @@ function StartThreadsDialog({
         },
         {
           label: "Undo",
-          hint: "Moves the new threads to the bin; this branch is as it was.",
+          hint: UNDO_HINT,
           onClick: () =>
             void undo(session, {
               splitId: started.splitId,
@@ -304,7 +305,7 @@ function StartThreadsDialog({
         </p>
       )}
       <DialogActions>
-        <Button variant="ghost" onClick={onClose}>
+        <Button variant="ghost" hint="Closes without starting threads." onClick={onClose}>
           Cancel
         </Button>
         <Button

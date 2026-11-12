@@ -5,10 +5,12 @@
 // of its last message and when that was, and renames it; each set has its Undo.
 import type { EntityId, Fork, ForkId } from "@rp/shared/chat.ts"
 import type { ThreadInfo, ThreadSet } from "@rp/shared/threads.ts"
-import { Link } from "@tanstack/react-router"
+import { Link, useRouter } from "@tanstack/react-router"
 import { useState } from "react"
 import { Avatar, PortraitOverflow } from "../../ui/Avatar.tsx"
 import { Badge } from "../../ui/Surface.tsx"
+import { ContextMenu, MenuItem } from "../../ui/Menu.tsx"
+import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
@@ -23,7 +25,7 @@ import { useThreadSets, useThreadSetsOf, useThreadsVersion } from "./threadSets.
 
 /** Undo's explanation, wherever threads are shown. */
 export const UNDO_HINT =
-  "Moves the threads started here to the bin, except the branch they were started in, which is as it was before. You can restore them from the bin."
+  "Moves the new threads and their messages to the bin. This branch keeps its messages; who was marked away or back at the start is undone. Branches made from the new threads stay. You can restore the threads from the bin."
 
 function ThreadRow({
   session,
@@ -40,6 +42,9 @@ function ThreadRow({
   shown: boolean
   onDone: () => void
 }) {
+  const [menu, setMenu] = useState(false)
+  const router = useRouter()
+  const canBeside = useCanOpenBeside()
   const view = session.snapshot()
   const cast = useCast()
   const panel = usePanel()
@@ -67,6 +72,14 @@ function ThreadRow({
     onDone()
     if (!shown && thread.openForkId !== null) openFork(session, thread.openForkId)
   }
+  const href =
+    thread.openForkId === null
+      ? ""
+      : router.buildLocation({
+          to: "/chats/$chatId",
+          params: { chatId: session.id },
+          search: forkSearch(view.chat, thread.openForkId, panel)
+        }).href
   return (
     <div
       data-thread-row={thread.ordinal}
@@ -99,35 +112,72 @@ function ThreadRow({
             </span>
           )}
         </div>
-        <Tooltip
-          label={
-            thread.openForkId === null
-              ? "This thread has no branch left."
-              : `Opens this thread${shown ? ", shown now" : ""}.`
+        <ContextMenu
+          label={`Actions for thread ${name}`}
+          open={menu}
+          onOpenChange={setMenu}
+          trigger={
+            <Tooltip
+              label={
+                thread.openForkId === null
+                  ? "This thread has no branch left."
+                  : `Opens this thread${shown ? ", shown now" : ""}.`
+              }
+            >
+              {thread.openForkId === null ? (
+                <span className="block text-xs text-muted">No branch left</span>
+              ) : (
+                <Link
+                  to="/chats/$chatId"
+                  params={{ chatId: session.id }}
+                  search={forkSearch(view.chat, thread.openForkId, panel)}
+                  aria-current={shown || undefined}
+                  aria-label={`Thread ${name}${shown ? ", shown" : ""}: ${opens?.tipExcerpt.slice(0, 80) || "no messages since the threads started"}`}
+                  onClick={openOnPlainClick(open)}
+                  className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
+                    {opens?.tipExcerpt || "No messages yet"}
+                  </span>
+                  <span data-row-when className="block text-xs text-muted tabular-nums">
+                    since {splitNumber(set)}
+                    {opens ? ` · Last message ${formatMoment(branchLastAt(opens))}` : ""}
+                  </span>
+                </Link>
+              )}
+            </Tooltip>
           }
         >
-          {thread.openForkId === null ? (
-            <span className="block text-xs text-muted">No branch left</span>
-          ) : (
-            <Link
-              to="/chats/$chatId"
-              params={{ chatId: session.id }}
-              search={forkSearch(view.chat, thread.openForkId, panel)}
-              aria-current={shown || undefined}
-              aria-label={`Thread ${name}${shown ? ", shown" : ""}: ${opens?.tipExcerpt.slice(0, 80) || "no messages since the threads started"}`}
-              onClick={openOnPlainClick(open)}
-              className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          <MenuItem
+            icon="threads"
+            description="Opens this thread here."
+            disabled={thread.openForkId === null}
+            onClick={open}
+          >
+            Open
+          </MenuItem>
+          {canBeside && (
+            <MenuItem
+              icon="split-right"
+              description={OPEN_BESIDE_HINT}
+              disabled={thread.openForkId === null}
+              onClick={() => {
+                onDone()
+                openBeside(href)
+              }}
             >
-              <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
-                {opens?.tipExcerpt || "No messages yet"}
-              </span>
-              <span data-row-when className="block text-xs text-muted tabular-nums">
-                since {splitNumber(set)}
-                {opens ? ` · Last message ${formatMoment(branchLastAt(opens))}` : ""}
-              </span>
-            </Link>
+              Open beside
+            </MenuItem>
           )}
-        </Tooltip>
+          <MenuItem
+            icon="external"
+            description="Opens this thread in a new browser tab."
+            disabled={thread.openForkId === null}
+            onClick={() => window.open(href, "_blank", "noopener")}
+          >
+            Open in a new browser tab
+          </MenuItem>
+        </ContextMenu>
         {failure !== null && (
           <p role="alert" className="text-xs text-danger">
             {failure}
@@ -180,7 +230,7 @@ function SetRows({
     <section
       data-thread-set={set.splitId}
       aria-label={`Threads from ${splitNumber(set)}`}
-      className="flex flex-col gap-1"
+      className="flex shrink-0 flex-col gap-1"
     >
       <div className="flex min-w-0 items-center gap-1 ps-1 pe-2">
         <h3 className="min-w-0 flex-1 truncate text-xs font-semibold text-muted">Threads from {splitNumber(set)}</h3>
@@ -230,7 +280,10 @@ export function ThreadsSection({ session, view, forks, shown, onDone }: BranchSe
   const sets = [...own, ...foreign]
   if (sets.length === 0) return null
   return (
-    <div data-threads-section className="-mx-3 mb-2 flex shrink-0 flex-col gap-2 border-b border-border px-3 pt-2 pb-2">
+    <div
+      data-threads-section
+      className="-mx-3 mb-2 flex max-h-[50dvh] min-h-0 shrink flex-col gap-2 overflow-y-auto border-b border-border px-3 pt-2 pb-2"
+    >
       {sets.map((set) => (
         <SetRows key={set.splitId} session={session} set={set} forks={forks} shownFork={shown} onDone={onDone} />
       ))}

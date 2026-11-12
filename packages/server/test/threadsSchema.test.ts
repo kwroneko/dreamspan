@@ -1,3 +1,4 @@
+import { threadLabels } from "../src/db/threadReads.ts"
 // Parallel threads' stored shape (spec/THREADS.md §4, TH1): the tables' triggers on a bare
 // migrated database, and which thread each fork is in (db/threads.ts) against a lineage oracle
 // over random fork trees with nested splits, before and after `rebuildForkLabels` recomputes
@@ -105,6 +106,30 @@ describe("thread tables", () => {
         FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE v.id = 'v-s2'`
       assert.strictEqual(known!.knows, 0)
     }).pipe(Effect.provide(writerConnection(join(tempDir("threads-unknown-cast"), "db.sqlite"))))
+  )
+
+  it.effect("thread labels add reads per member, never per fork", () =>
+    Effect.gen(function* () {
+      const sql = yield* setup
+      const made = yield* split(sql, CHAT, "s1", 2)
+      let queries = 0
+      const measured = new Proxy(sql, {
+        apply(target, receiver, args) {
+          queries++
+          return Reflect.apply(target, receiver, args)
+        }
+      })
+      const row = { forkId: made.members[0]!, chatId: CHAT, place: { splitId: made.id, ordinal: 1 } }
+      yield* threadLabels(measured, [row])
+      const one = queries
+      queries = 0
+      const labels = yield* threadLabels(
+        measured,
+        Array.from({ length: 300 }, (_, i) => ({ ...row, forkId: `shown-${i}` }))
+      )
+      assert.strictEqual(labels.size, 300)
+      assert.strictEqual(queries, one)
+    }).pipe(Effect.provide(writerConnection(join(tempDir("threads-label-queries"), "db.sqlite"))))
   )
 
   it.effect("knowledge windows in chats without threads use one query", () =>

@@ -11,11 +11,17 @@ import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"
 import { openPanel } from "./support/panel.ts"
 import { saveRevision } from "./support/saveRevision.ts"
-import { asUser } from "./support/rpc.ts"
+import { asUser, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let login: { readonly url: string; readonly cookie: string } | null = null
+const admin = async <A>(use: Parameters<typeof asUser<A>>[3]) => {
+  const target = server()
+  if (login?.url !== target.url)
+    login = { url: target.url, cookie: await loginCookie(target, ADMIN.handle, ADMIN.password) }
+  return withCookie(target, login.cookie, use)
+}
 
 /** Ash (the user's) at the market with Mira, Tobin and Wren; a side branch at #4; six messages on the main one. */
 const seed = (suffix: string) =>
@@ -122,6 +128,16 @@ const recordRequests = (page: Page) => {
   return sent
 }
 
+/** A lifecycle write may refresh each view, then its reads must stop. */
+const expectSettled = async (page: Page, sent: ReadonlyArray<string>, label: string, from = 0) => {
+  await page.waitForTimeout(1000)
+  const settled = sent.length
+  for (const tag of ["ReadPath", "GetChat", "ListForks", "ThreadsOf"])
+    expect(sent.slice(from).filter((request) => request === tag).length, `${label}: ${tag}`).toBeLessThanOrEqual(8)
+  await page.waitForTimeout(1000)
+  expect(sent.length - settled, `${label}: more requests: ${sent.slice(settled).join(", ")}`).toBeLessThanOrEqual(2)
+}
+
 for (const [width, theme] of [
   [1440, "light"],
   [1440, "dark"],
@@ -138,6 +154,14 @@ for (const [width, theme] of [
     const chat = await seed(suffix)
     const sent = recordRequests(page)
     await open(page, `/chats/${chat.chatId}`, width, theme)
+
+    // A sibling view is already open while this tab starts threads.
+    const sibling = await context.newPage()
+    const siblingSent = recordRequests(sibling)
+    await open(sibling, `/chats/${chat.chatId}?fork=${chat.side}`, width, theme)
+    await expectSettled(sibling, siblingSent, "initial sibling")
+    const startBefore = sent.length
+    const siblingStart = siblingSent.length
 
     // ⋯ → Start parallel threads…, at the newest message: nothing said about later messages.
     await page.getByRole("button", { name: "Chat actions", exact: true }).click()
@@ -164,6 +188,10 @@ for (const [width, theme] of [
     await expectLayout(page, info, `threads-header-${suffix}`, { scope: "header" })
     await expectLayout(page, info, `threads-timeline-row-${suffix}`, { scope: "[data-threads-row]" })
 
+    await expectSettled(page, sent, "Start", startBefore)
+    await expectSettled(sibling, siblingSent, "Start in sibling", siblingStart)
+    await sibling.close()
+
     // The branch control: Threads first, then the branches, never the other thread among them.
     await trigger(page, "Thread", "Mira and Tobin").click()
     const menu = branchMenu(page)
@@ -179,6 +207,10 @@ for (const [width, theme] of [
 
     // Rename the docks there: every place that names it follows.
     const docksRow = threads.locator('[data-thread-row="1"]')
+    await docksRow.getByRole("link").click({ button: "right" })
+    await expect(page.getByRole("menuitem", { name: "Open in a new browser tab", exact: true })).toBeVisible()
+    await expectLayout(page, info, `threads-context-menu-${suffix}`, { scope: '[role="menu"]' })
+    await page.keyboard.press("Escape")
     await docksRow.hover()
     await docksRow.getByRole("button", { name: "Rename At the docks", exact: true }).click()
     await docksRow.getByRole("textbox", { name: "Name of thread At the docks" }).fill("Docks")
@@ -229,20 +261,32 @@ for (const [width, theme] of [
     const heading = foot.getByRole("button", { name: /^Threads and branches of / })
     if ((await heading.getAttribute("aria-expanded")) === "false") await heading.click()
     await expect(foot).toContainText("Threads")
-    await expect(foot.getByRole("button", { name: "Open thread Docks", exact: true })).toBeVisible()
-    await expect(foot.getByRole("button", { name: "Open thread Mira and Tobin", exact: true })).toBeVisible()
+    await expect(foot.getByRole("link", { name: "Open thread Docks", exact: true })).toBeVisible()
+    await expect(foot.getByRole("link", { name: "Open thread Mira and Tobin", exact: true })).toBeVisible()
     await expect(foot.getByRole("button", { name: /^Open branch Side path/ })).toBeVisible()
+    const docksLink = foot.getByRole("link", { name: "Open thread Docks", exact: true })
+    const [linked] = await Promise.all([context.waitForEvent("page"), docksLink.click({ button: "middle" })])
+    await expect(trigger(linked, "Thread", "Docks")).toBeVisible()
+    await linked.close()
+    await docksLink.click({ button: "right" })
+    await expect(page.getByRole("menuitem", { name: "Open in a new browser tab", exact: true })).toBeVisible()
+    await page.keyboard.press("Escape")
     await expectLayout(page, info, `threads-left-panel-${suffix}`, {
       scope: '[aria-label="Branches of the open chat"]'
     })
     if (phone) await page.getByRole("button", { name: "Close", exact: true }).first().click()
 
+    const storedSplit = (await admin((api) => api.ThreadsOf({ chatId: chat.chatId, forkId: chat.forkId })))[0]!.splitId
     // A second tab on the docks.
     const second = await context.newPage()
+    const secondSent = recordRequests(second)
     await second.setViewportSize({ width, height: phone ? 844 : 1000 })
     await second.goto(`${server().url}/chats/${chat.chatId}?fork=${docks}`)
     await expect(trigger(second, "Thread", "Docks")).toBeVisible()
 
+    await expectSettled(second, secondSent, "initial second tab")
+    const undoBefore = sent.length
+    const secondUndo = secondSent.length
     // Undo, from the timeline's row: the docks go to the bin; this tab shows the branch they started in.
     await timelineRow(page).getByRole("button", { name: "Undo starting the threads from #6" }).click()
     await expect(trigger(page, "Branch", "Original")).toBeVisible()
@@ -252,12 +296,23 @@ for (const [width, theme] of [
     await expect(second.getByText("This branch is no longer available. Showing the current branch.")).toBeVisible()
     await expect(timelineRow(second)).toHaveCount(0)
 
+    await expectSettled(page, sent, "Undo", undoBefore)
+    await expectSettled(second, secondSent, "Undo in sibling", secondUndo)
+
     // Restored from the toast: they're threads again, in both tabs.
     const binned = page.locator("[data-toast]").filter({ hasText: "moved to the bin." })
     await binned.getByRole("button", { name: "Undo", exact: true }).click()
     await expect(timelineRow(page)).toContainText("Docks")
     await expect(trigger(page, "Thread", "Mira and Tobin")).toBeVisible()
     await expect(timelineRow(second)).toContainText("Docks")
+    await second.reload()
+    await expect(trigger(second, "Thread", "Mira and Tobin")).toBeVisible()
+    const undone = await admin((api) => api.UndoThreads({ chatId: chat.chatId, splitId: storedSplit }))
+    await admin((api) => api.PurgeBinItem({ itemId: undone.id }))
+    await second.goto(`${server().url}/chats/${chat.chatId}?fork=${docks}`)
+    await expect(second.getByText("This branch is no longer available. Showing the current branch.")).toBeVisible()
+    await expect(trigger(second, "Branch", "Original")).toBeVisible()
+    await expect.poll(() => new URL(second.url()).searchParams.get("fork")).toBe(chat.forkId)
     await second.close()
   })
 
@@ -278,7 +333,7 @@ for (const [width, theme] of [
     await messageMenu(third, "Start parallel threads here…")
     const dialog = await moveWren(page, 3, "At the gate")
     await expect(dialog.locator("[data-thread-played]")).toHaveText(
-      "#4–#6 become this branch’s thread. Wren counts as not there for them, in this branch only."
+      "#4–#6 become this branch’s thread. Wren counts as not there for them, in this branch only. They still know their own messages."
     )
     await expectLayout(page, info, `threads-dialog-earlier-${width}-${theme}`, { scope: '[role="dialog"]' })
     await dialog.getByRole("button", { name: "Start", exact: true }).click()
@@ -328,3 +383,134 @@ for (const [width, theme] of [
     const there = await admin((api) => api.ListChatNotes({ chatId: chat.chatId, forkId: gate, slotId: chat.slots[2]! }))
     expect(there.map((note) => note.doc["content"])).toContain("Fog over the harbor, and bells.")
   })
+
+for (const [width, theme] of [
+  [1440, "light"],
+  [1440, "dark"],
+  [390, "light"],
+  [390, "dark"]
+] as const)
+  test(`ten thread sets stay inside the branch menu (${width} ${theme})`, async ({ page }, info) => {
+    test.setTimeout(120_000)
+    const chat = await seed(`many-${width}-${theme}`)
+    await admin((api) =>
+      Effect.gen(function* () {
+        for (let i = 0; i < 10; i++) {
+          const entry = (yield* api.ReadPath({
+            chatId: chat.chatId,
+            forkId: chat.forkId,
+            leafSlotId: null,
+            range: { _tag: "Bottom" },
+            limit: 1
+          })).entries[0]!
+          const cast = yield* api.GetCast({ chatId: chat.chatId, forkId: chat.forkId, slotId: entry.slotId })
+          yield* api.StartThreads({
+            chatId: chat.chatId,
+            forkId: chat.forkId,
+            slotId: entry.slotId,
+            expectedRowVersion: entry.rowVersion,
+            threads: [
+              { name: `Market ${i}`, cast: cast.participants, writesAs: null },
+              { name: `Harbor ${i}`, cast: [chat.wren], writesAs: null }
+            ]
+          })
+        }
+      })
+    )
+    await open(page, `/chats/${chat.chatId}?fork=${chat.forkId}`, width, theme)
+    await trigger(page, "Thread", "Market 9").click()
+    const menu = branchMenu(page)
+    await expect(menu.locator("[data-thread-set]")).toHaveCount(10)
+    await expectLayout(page, info, `threads-many-${width}-${theme}`, { scope: '[role="dialog"]' })
+    const bounds = await menu.boundingBox()
+    expect(bounds!.y).toBeGreaterThanOrEqual(0)
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height)
+    const last = menu.locator("[data-thread-set]").last().getByRole("link").last()
+    await last.scrollIntoViewIfNeeded()
+    await expect(last).toBeInViewport()
+    await expect(menu.getByRole("list", { name: "Branches" })).toBeInViewport()
+  })
+
+test("thread identity names the browser tab", async ({ page }) => {
+  const chat = await seed("tab-name")
+  await open(page, `/chats/${chat.chatId}`, 1440, "light")
+  await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Start parallel threads…", exact: true }).click()
+  const dialog = await moveWren(page, 6, "At the docks")
+  await dialog.getByRole("button", { name: "Start", exact: true }).click()
+  await timelineRow(page).getByRole("link", { name: "At the docks", exact: true }).click()
+  await expect(trigger(page, "Thread", "At the docks")).toBeVisible()
+  await expect(page).toHaveTitle(/Thread: At the docks/)
+})
+
+test("thread links have the app's chrome menu", async ({ page }) => {
+  const chat = await seed("chrome-menu")
+  await open(page, `/chats/${chat.chatId}`, 1440, "light")
+  await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Start parallel threads…", exact: true }).click()
+  const dialog = await moveWren(page, 6, "At the docks")
+  await dialog.getByRole("button", { name: "Start", exact: true }).click()
+  await trigger(page, "Thread", "Mira and Tobin").click()
+  await branchMenu(page)
+    .getByRole("link", { name: /^Thread At the docks:/ })
+    .click({ button: "right" })
+  await expect(page.getByRole("menuitem", { name: "Open in a new browser tab", exact: true })).toBeVisible()
+})
+
+test("nested Start and Undo settle while another tab stays in a sibling thread", async ({ page, context }) => {
+  test.setTimeout(120_000)
+  const chat = await seed("nested-lifecycle")
+  const outer = await admin((api) =>
+    Effect.gen(function* () {
+      const entry = (yield* api.ReadPath({
+        chatId: chat.chatId,
+        forkId: chat.forkId,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 1
+      })).entries[0]!
+      const cast = yield* api.GetCast({ chatId: chat.chatId, forkId: chat.forkId, slotId: entry.slotId })
+      return yield* api.StartThreads({
+        chatId: chat.chatId,
+        forkId: chat.forkId,
+        slotId: entry.slotId,
+        expectedRowVersion: entry.rowVersion,
+        threads: [
+          { name: "Market", cast: cast.participants.filter((id) => id !== chat.wren), writesAs: null },
+          { name: "Outer docks", cast: [chat.wren], writesAs: null }
+        ]
+      })
+    })
+  )
+  const sent = recordRequests(page)
+  await open(page, `/chats/${chat.chatId}?fork=${chat.forkId}`, 1440, "light")
+  const second = await context.newPage()
+  const siblingSent = recordRequests(second)
+  await open(second, `/chats/${chat.chatId}?fork=${outer.forkIds[1]!}`, 1440, "light")
+  await expect(trigger(second, "Thread", "Outer docks")).toBeVisible()
+  await expectSettled(page, sent, "initial nested source")
+  await expectSettled(second, siblingSent, "initial sibling thread")
+  const before = sent.length
+  const siblingBefore = siblingSent.length
+  await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Start parallel threads…", exact: true }).click()
+  const dialog = await moveWren(page, 6, "Inner docks")
+  await dialog.getByRole("button", { name: "Start", exact: true }).click()
+  await expectSettled(page, sent, "nested Start", before)
+  await expectSettled(second, siblingSent, "sibling after nested Start", siblingBefore)
+  await expect(trigger(second, "Thread", "Outer docks")).toBeVisible()
+  const nested = (await admin((api) => api.ThreadsOf({ chatId: chat.chatId, forkId: chat.forkId }))).find(
+    (set) => set.splitId !== outer.splitId
+  )!
+  const undoBefore = sent.length
+  const siblingUndo = siblingSent.length
+  await page
+    .locator(`[data-threads-row="${nested.splitId}"]`)
+    .getByRole("button", { name: "Undo starting the threads from #6" })
+    .click()
+  await expectSettled(page, sent, "nested Undo", undoBefore)
+  await expectSettled(second, siblingSent, "sibling after nested Undo", siblingUndo)
+  await expect(trigger(second, "Thread", "Outer docks")).toBeVisible()
+  expect(new URL(second.url()).searchParams.get("fork")).toBe(outer.forkIds[1])
+  await second.close()
+})

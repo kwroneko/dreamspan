@@ -184,7 +184,7 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   /** The thread sets it's in that are shown (spec/THREADS.md §4.3), innermost first; absent when none. */
   threads: Schema.optionalKey(Schema.Array(ThreadPlace)),
   /**
-   * In the `threads` section only: the thread of its innermost shown set, its name (null:
+   * The thread of its innermost shown set, in every section: its name (null:
    * unnamed) and its characters at the message the threads start from, what an unnamed one is
    * called by.
    */
