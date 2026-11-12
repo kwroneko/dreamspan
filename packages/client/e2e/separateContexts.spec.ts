@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
+import { choices, nextChip } from "./support/strip.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -165,6 +166,68 @@ for (const width of [1440, 390])
     })
   }
 
-// Used by the later units' tests.
-void castIds
+/** Closes the phone's sheet over the chat, if one is open. */
+const closeSheet = async (page: Page) => {
+  const sheet = page.getByRole("dialog").filter({ has: page.getByRole("tablist", { name: "Chat panel" }) })
+  if (await sheet.isVisible()) await sheet.getByRole("button", { name: "Close", exact: true }).click()
+}
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`the Cast tab's Away and Narrator at ${width} ${theme}`, async ({ page }, info) => {
+      await look(page, width, theme)
+      const { chatId, slotId } = await threeCharacters()
+      const ids = await castIds()
+      const read = () => admin((api) => api.GetCast({ chatId, slotId }))
+      await page.goto(`${server().url}/chats/${chatId}`)
+      let cast = await openPanel(page, "Cast")
+      const row = (name: string) => cast.getByRole("listitem", { name, exact: true })
+      const awayButton = () => row("Wren").getByRole("button", { name: "Mark Wren away", exact: true })
+      // Away sits beside Mute, with the same pattern, and explains itself on hover.
+      await awayButton().hover()
+      await expect(page.getByText("Click when Wren leaves the scene", { exact: false }).first()).toBeVisible()
+      await awayButton().click()
+      await expect.poll(async () => (await read()).away).toEqual([ids.wren])
+      await expect(row("Wren").getByText("Away", { exact: true })).toBeVisible()
+      await expect(row("Wren").getByRole("button", { name: "Mark Wren back", exact: true })).toBeVisible()
+      await expect(cast.getByRole("heading", { name: /3 characters · 1 away/ })).toBeVisible()
+      // Away isn't Mute.
+      await expect(row("Wren").getByRole("button", { name: "Mute Wren", exact: true })).toBeVisible()
+      // Mira becomes the narrator: no Away mark on her row.
+      await row("Mira").getByRole("button", { name: "More for Mira", exact: true }).click()
+      const item = page.getByRole("menuitemcheckbox", { name: /^Narrator/ })
+      await expect(item).not.toBeChecked()
+      await item.click()
+      await expect.poll(async () => (await read()).roles).toEqual({ [ids.mira]: "narrator" })
+      await expect(row("Mira").getByText("Narrator", { exact: true })).toBeVisible()
+      await expect(row("Mira").getByRole("button", { name: /^Mark Mira/ })).toHaveCount(0)
+      await page.mouse.move(0, 0)
+      await expectLayout(page, info, `contexts-cast-${width}-${theme}`, {
+        scope: '[role="tabpanel"][aria-label="Cast"]'
+      })
+      // Server state: a reload keeps both.
+      await page.reload()
+      cast = await openPanel(page, "Cast")
+      await expect(row("Wren").getByText("Away", { exact: true })).toBeVisible()
+      await expect(row("Mira").getByText("Narrator", { exact: true })).toBeVisible()
+      await closeSheet(page)
+      // Next lists Wren as away, and so does the speaker switcher.
+      await nextChip(page).click()
+      const next = choices(page, "Who replies next")
+      await expect(next.getByText("Away: replies only when picked", { exact: true })).toBeVisible()
+      await expectLayout(page, info, `contexts-next-${width}-${theme}`, { scope: '[role="dialog"]' })
+      await page.keyboard.press("Escape")
+      await page.getByRole("button", { name: /^Speaking as / }).click()
+      await expect(
+        page.getByRole("option", { name: "Wren", exact: true }).getByText("away", { exact: true })
+      ).toBeVisible()
+      await page.keyboard.press("Escape")
+      // Back again.
+      cast = await openPanel(page, "Cast")
+      await row("Wren").getByRole("button", { name: "Mark Wren back", exact: true }).click()
+      await expect.poll(async () => (await read()).away).toBeUndefined()
+      await expect(row("Wren").getByText("Away", { exact: true })).toHaveCount(0)
+    })
+  }
+
 void decisionConnection

@@ -630,6 +630,7 @@ export function Composer({
     reply: {
       candidates: faces,
       muted: cast?.absent ?? [],
+      away: cast?.away ?? [],
       next,
       round: replyPlan.round,
       picked: pickedReply,

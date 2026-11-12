@@ -5,8 +5,10 @@ import { useChatCards } from "./chatCards.ts"
 // The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who you play (the persona, who
 // `{{user}}` is), then everyone in the chat, one quiet row each: portrait, name (which opens
 // their tab, where the card is edited), Mute (never picked to reply; the card stays in the
-// context: PHASE1 "Muting and presence") and Speak now. Everything else is under each row's ⋯:
-// write as them, the card's actions (`chatCardActions`, so a plugin's join them), make them the
+// context: PHASE1 "Muting and presence"), Away (not in the scene: not picked to reply, and in
+// separate contexts not seeing what's said meanwhile; spec/CHARACTER-CONTEXT.md §2.1, unit CU2;
+// a narrator has none) and Speak now. Everything else is under each row's ⋯: write as them, the
+// card's actions (`chatCardActions`, so a plugin's join them), Narrator (§6), make them the
 // persona, remove them. Under them, Add characters (CastAdd.tsx, a `castSections` entry).
 // Changes to who's here are state events at the leaf shown, so they apply from the latest
 // message on, on this branch.
@@ -16,7 +18,7 @@ import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { Menu, MenuItem } from "../../ui/Menu.tsx"
+import { Menu, MenuCheckboxItem, MenuItem } from "../../ui/Menu.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -40,7 +42,8 @@ function MemberMore({
   info,
   onChange,
   onPersona,
-  persona = false
+  persona = false,
+  narrator = false
 }: {
   session: ChatSession
   card: CastCard
@@ -48,6 +51,8 @@ function MemberMore({
   onChange: (change: CastChange) => void
   onPersona: () => void
   persona?: boolean
+  /** Their role in this chat is the narrator (`cast.role`). */
+  narrator?: boolean
 }) {
   const showPanel = useShowPanel()
   const name = card.name
@@ -66,6 +71,17 @@ function MemberMore({
       <ChatCardActions session={session} card={card} info={info} persona={persona} />
       {!persona && (
         <>
+          <MenuCheckboxItem
+            checked={narrator}
+            description={
+              narrator
+                ? `${name} becomes a character again, in and out of the scene like the others.`
+                : `${name} sees everything and is never in or out of the scene. With separate contexts, their replies see the whole chat, whoever was there.`
+            }
+            onCheckedChange={(on) => onChange({ _tag: "Role", entityId: card.entityId, role: on ? "narrator" : null })}
+          >
+            Narrator
+          </MenuCheckboxItem>
           <MenuItem description={`You play ${name} in this chat: {{user}} is them.`} onClick={onPersona}>
             Use as my persona
           </MenuItem>
@@ -87,6 +103,8 @@ function Member({
   card,
   info,
   muted,
+  away,
+  narrator,
   writing,
   onChange,
   onPersona,
@@ -96,6 +114,9 @@ function Member({
   card: CastCard
   info: ChatCard | undefined
   muted: boolean
+  /** Not in the scene (`away.set`); never for a narrator. */
+  away: boolean
+  narrator: boolean
   /** The model is writing their turn at the end of the chat. */
   writing: boolean
   onChange: (change: CastChange) => void
@@ -114,7 +135,7 @@ function Member({
   }
   return (
     <li aria-label={name} className="flex items-center gap-3 py-2">
-      <span className={muted ? "opacity-50" : ""}>
+      <span className={muted || away ? "opacity-50" : ""}>
         <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="lg" preview />
       </span>
       <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
@@ -124,14 +145,16 @@ function Member({
             title={name}
             aria-label={`${name}: open their card`}
             onClick={() => showPanel(`card:${card.entityId}`)}
-            className={`line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus ${muted ? "text-muted" : ""}`}
+            className={`line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus ${muted || away ? "text-muted" : ""}`}
           >
             {name}
           </button>
         </Tooltip>
-        {(writing || muted || card.inBin) && (
+        {(writing || muted || away || narrator || card.inBin) && (
           <span className="flex flex-wrap items-center gap-1">
             {writing && <Badge tone="success">writing…</Badge>}
+            {narrator && <Badge tone="accent">Narrator</Badge>}
+            {away && <Badge tone="warning">Away</Badge>}
             {muted && <Badge tone="warning">Muted</Badge>}
             {card.inBin && <Badge tone="danger">in the bin</Badge>}
           </span>
@@ -149,6 +172,20 @@ function Member({
         className={muted ? "text-warning!" : ""}
         onClick={() => onChange({ _tag: "Presence", entityId: card.entityId, present: muted })}
       />
+      {/* Away (spec/CHARACTER-CONTEXT.md §2.1): not in the scene, apart from Mute. A narrator is never away. */}
+      {!narrator && (
+        <IconButton
+          icon={away ? "user-x" : "user"}
+          label={away ? `Mark ${name} back` : `Mark ${name} away`}
+          hint={
+            away
+              ? `Click when ${name} is back in the scene, from the latest message on: picked to reply again, and with separate contexts seeing what's said from here.`
+              : `Click when ${name} leaves the scene, from the latest message on: not picked to reply, and with separate contexts ${name}'s replies leave out what's said meanwhile.`
+          }
+          className={away ? "text-warning!" : ""}
+          onClick={() => onChange({ _tag: "Away", entityId: card.entityId, away: !away })}
+        />
+      )}
       <IconButton
         icon="play"
         label={`Speak now: ${name}`}
@@ -156,7 +193,14 @@ function Member({
         disabled={speaking || writing}
         onClick={() => void speak()}
       />
-      <MemberMore session={session} card={card} info={info} onChange={onChange} onPersona={onPersona} />
+      <MemberMore
+        session={session}
+        card={card}
+        info={info}
+        onChange={onChange}
+        onPersona={onPersona}
+        narrator={narrator}
+      />
     </li>
   )
 }
@@ -237,6 +281,9 @@ export function CastTab({ session }: { session: ChatSession }) {
   // The characters: everyone in the chat but who you play (PHASE1 26, 27).
   const characters = participants.filter((id) => !playedByMe.includes(id))
   const muted = cast?.absent.filter((id) => characters.includes(id)).length ?? 0
+  // Who is away (`Cast.away`: narrators are never away), as the row and the header count show it.
+  const awayIds = cast?.away ?? []
+  const away = awayIds.filter((id) => characters.includes(id)).length
   /**
    * Who `{{user}}` is from here on (DESIGN §2.2): one persona, in one write. A card not in the
    * chat joins; a persona-folder card played until now leaves, since it isn't one of the characters.
@@ -268,6 +315,7 @@ export function CastTab({ session }: { session: ChatSession }) {
           <h2 className="text-sm font-semibold">
             {plural(characters.length, "character", "characters")}
             {muted > 0 && <span className="font-normal text-muted"> · {muted} muted</span>}
+            {away > 0 && <span className="font-normal text-muted"> · {away} away</span>}
           </h2>
         </div>
         {characters.length === 0 ? (
@@ -287,6 +335,8 @@ export function CastTab({ session }: { session: ChatSession }) {
                   card={card}
                   info={info.get(id)}
                   muted={cast.absent.includes(id)}
+                  away={awayIds.includes(id)}
+                  narrator={cast.roles?.[id] === "narrator"}
                   writing={writing === id}
                   onChange={(next) => void change(next)}
                   onPersona={() => void choosePersona(card)}

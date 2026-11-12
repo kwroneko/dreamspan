@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
+import type { EntityId } from "@rp/shared/chat.ts"
 import { contextChoices } from "../src/features/chat/contextChoices.ts"
+import { replyDetail } from "../src/features/chat/ReplyFrom.tsx"
 
 const views = [
   { id: "shared", label: "One shared context", description: "Every reply sees the whole chat." },
@@ -25,5 +27,16 @@ describe("the Context setting's choices", () => {
       description: "Until it's back, each reply sees only what its speaker was there for."
     })
     expect(options).toHaveLength(3)
+  })
+})
+
+describe("Next's line for an away character", () => {
+  const wren = "wren" as EntityId
+  const mira = "mira" as EntityId
+  it("says away, muted, both or neither", () => {
+    expect(replyDetail(wren, [], [wren])).toBe("Away: replies only when picked")
+    expect(replyDetail(wren, [wren], [wren])).toBe("Away and muted: replies only when picked")
+    expect(replyDetail(mira, [mira], [wren])).toBe("Muted: replies only when picked")
+    expect(replyDetail(mira, [], [wren])).toBe("Replies next, for one reply")
   })
 })

@@ -68,4 +68,25 @@ describe("separate contexts in the client's reads", () => {
       assert.strictEqual(back.contextPerSpeaker, "shared")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
+
+  it.live("the Cast tab's Away and Narrator: away apart from Mute, and a narrator never away", () =>
+    Effect.gen(function* () {
+      const { api, started, mira, wren } = yield* threeCharacters
+      const at = { chatId: started.chat.id, slotId: started.entry.slotId }
+      const change = (c: Parameters<Api["ChangeCast"]>[0]["change"]) => api.ChangeCast({ ...at, change: c })
+      const away = yield* change({ _tag: "Away", entityId: wren, away: true })
+      assert.deepStrictEqual(away.away, [wren])
+      assert.deepStrictEqual(away.absent, [])
+      const narrator = yield* change({ _tag: "Role", entityId: mira, role: "narrator" })
+      assert.deepStrictEqual(narrator.roles, { [mira]: "narrator" })
+      // A narrator marked away isn't: it's never in or out of the scene.
+      const both = yield* change({ _tag: "Away", entityId: mira, away: true })
+      assert.deepStrictEqual(both.away, [wren])
+      const back = yield* change({ _tag: "Away", entityId: wren, away: false })
+      assert.strictEqual(back.away, undefined)
+      const cleared = yield* change({ _tag: "Role", entityId: mira, role: null })
+      assert.strictEqual(cleared.roles, undefined)
+      assert.deepStrictEqual(cleared.away, [mira])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
 })

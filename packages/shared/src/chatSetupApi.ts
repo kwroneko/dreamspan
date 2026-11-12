@@ -368,6 +368,10 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("Join", { entityId: EntityId }),
   Schema.TaggedStruct("Leave", { entityId: EntityId }),
   Schema.TaggedStruct("Presence", { entityId: EntityId, present: Schema.Boolean }),
+  /** Away from the scene or back (`away.set`, apart from Mute; spec/CHARACTER-CONTEXT.md §2.1). */
+  Schema.TaggedStruct("Away", { entityId: EntityId, away: Schema.Boolean }),
+  /** A cast member's role (`cast.role`): a narrator sees everything; null clears it (§6). */
+  Schema.TaggedStruct("Role", { entityId: EntityId, role: Schema.NullOr(Schema.Literal("narrator")) }),
   Schema.TaggedStruct("PlayedByMe", { entityIds: Schema.Array(EntityId) }),
   /**
    * The one persona from here on (DESIGN §2.2, who `{{user}}` is), in one write: the card joins

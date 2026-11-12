@@ -95,8 +95,8 @@ test("the Cast tab: mute, speak now, write as, the card, add and remove", async 
   await expect(member(page, "Mira").getByRole("button", { name: "Mute Mira", exact: true })).toBeVisible()
   await expect(member(page, "Mira")).not.toContainText(/used by/)
   await expect(page.getByRole("heading", { level: 2, name: "1 character" })).toBeVisible()
-  // One row: name, Mute, Speak now and ⋯; no wall of text buttons.
-  await expect(member(page, "Mira").getByRole("button")).toHaveCount(5)
+  // One row: portrait, name, Mute, Away, Speak now and ⋯; no wall of text buttons.
+  await expect(member(page, "Mira").getByRole("button")).toHaveCount(6)
 
   // Absent from here on, like ST's mute; and back. The button says what it does, the row what it is.
   await member(page, "Mira").getByRole("button", { name: "Mute Mira", exact: true }).click()
