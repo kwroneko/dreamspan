@@ -145,6 +145,25 @@ describe("resume policies", () => {
     assert.deepStrictEqual(plan.keptCalls, [])
   })
 
+  it("refuses edited arguments outside the frozen schema before creating a resume", () => {
+    const constrained = [
+      {
+        ...tools[0]!,
+        parameters: Type.Object({ topic: Type.String({ minLength: 2 }) }, { additionalProperties: false })
+      }
+    ]
+    for (const args of [{}, { topic: 3 }, { topic: "x" }, { topic: "pier", extra: true }]) {
+      assert.instanceOf(
+        planStepResume(json(run), constrained, 1, { kind: "arguments", arguments: args }, "new"),
+        StepNotResumable
+      )
+    }
+    assert.notInstanceOf(
+      planStepResume(json(run), constrained, 1, { kind: "arguments", arguments: { topic: "pier" } }, "new"),
+      StepNotResumable
+    )
+  })
+
   it("editing a result replaces it; the turn's later calls run again", () => {
     const plan = planStepResume(json(run), tools, 1, { kind: "result", text: "Mott." }, "new")
     if (plan instanceof StepNotResumable) return assert.fail(plan.message)
@@ -610,6 +629,23 @@ describe("resuming agent replies", () => {
           yield* eventually(() => finished(events, entry.version.id) !== undefined)
           return finished(events, entry.version.id)!
         })
+
+      // Bypassing the browser cannot create a version or send a request with invalid arguments.
+      const requestsBefore = mock.requests().length
+      const slotBefore = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      const invalid = yield* Effect.flip(
+        api.ResumeFromStep({
+          versionId: version.id,
+          step: 1,
+          edit: { kind: "arguments", arguments: {} },
+          expectedRowVersion: slotBefore.entry.rowVersion
+        })
+      )
+      assert.strictEqual(invalid._tag, "NotResumable")
+      assert.strictEqual(mock.requests().length, requestsBefore)
+      const slotAfter = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      assert.strictEqual(slotAfter.entry.rowVersion, slotBefore.entry.rowVersion)
+      assert.strictEqual(slotAfter.entry.version.id, version.id)
 
       // A new result for the lookup: Mira's going away was before it, so it holds.
       const edited = yield* resumeFrom(1, { kind: "result", text: "The keeper is called Brann." })

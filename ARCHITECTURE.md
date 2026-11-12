@@ -2919,3 +2919,5 @@ Fork cost measurements (forkcost, 2026-11-05): `test/forkCostScale.test.ts` belo
 Chatsettings cache diagnostics (2026-11-06): rotating card-field macros in preset prompts now mark a changing prefix even when definition markers are disabled. Assembler version 53; `assembler.test.ts` covers macro-only rotation and byte-identical settings plans against the former assembly paths.
 
 Shell stream errors (review-shellrefresh, 2026-11-07): card and fork streams retry transport failures, while application errors reach the existing failure view. An expired session therefore returns to login even when a new stream starts without navigation, such as through Show more. `e2e/shellRefresh.spec.ts` covers that pagination case and shell updates after a server restart.
+
+Resume UI review (2026-11-12): `planStepResume` validates edited tool arguments against the frozen tool parameters before any version is created. The provider validator covers schema constraints; edits requiring coercion are refused, so the arguments run exactly as entered. `agentResume.test.ts` checks schema constraints and direct RPC refusal without a new version or model request.
