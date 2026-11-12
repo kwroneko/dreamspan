@@ -1,4 +1,5 @@
 import { rolloutEffectClasses } from "./agent/effects.ts"
+import { workshopCapabilities } from "./agent/capabilities.ts"
 import { libraryEditCard, setupTools } from "./agent/tools/setup.ts"
 import { chatKinds, type ChatKindProfile } from "@rp/shared/chatKinds.ts"
 import { workshopMode } from "./agent/workshop.ts"
@@ -46,6 +47,7 @@ export class ExecutionRegistry extends Context.Service<
     readonly orchestrationModes: Registry<OrchestrationMode>
     /** The tools an agent turn may offer, with their effect classes (spec/AGENTIC.md §4). */
     readonly effectClasses: typeof rolloutEffectClasses
+    readonly workshopCapabilities: typeof workshopCapabilities
     readonly rolloutTools: Registry<RolloutTool<never>>
     readonly kindTools: Registry<{ readonly id: string; readonly tool: RolloutTool<never> }>
   }
@@ -98,6 +100,7 @@ export class ExecutionRegistry extends Context.Service<
         chatKinds,
         rolloutTools,
         effectClasses: rolloutEffectClasses,
+        workshopCapabilities,
         kindTools
       }
     })

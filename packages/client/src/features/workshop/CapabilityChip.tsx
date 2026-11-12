@@ -2,19 +2,19 @@
 // much the assistant may do, opening a popover of full-width rows, one per capability, each with
 // how it stands and what it allows. Choosing what it may do comes later (W4); until then the
 // popover says so.
-import { useState, useSyncExternalStore } from "react"
+import { useState } from "react"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
+import type { ComposerControlContext } from "../chat/composerControls.tsx"
 import { Popover } from "../../ui/Popover.tsx"
-import { ChipText, chipClass } from "../chat/nextReplyStrip.tsx"
-import { chipLabel, chipText, modeText, workshopCapabilities } from "./capabilities.ts"
+import { ChipText, chipClass, LoadingChip } from "../chat/nextReplyStrip.tsx"
+import { chipLabel, chipText, modeText, capabilitiesAtom } from "./capabilities.ts"
 
-export function CapabilityChip() {
+export function CapabilityChip({ session }: ComposerControlContext) {
   const [open, setOpen] = useState(false)
-  const snapshot = useSyncExternalStore(
-    workshopCapabilities.subscribe,
-    workshopCapabilities.snapshot,
-    workshopCapabilities.snapshot
-  )
-  const capabilities = [...snapshot.entries].sort((a, b) => a.order - b.order)
+  const result = useAtomValue(capabilitiesAtom(session.chatId))
+  if (!AsyncResult.isSuccess(result)) return <LoadingChip label="What the assistant may do" />
+  const capabilities = result.value
   return (
     <Popover
       open={open}

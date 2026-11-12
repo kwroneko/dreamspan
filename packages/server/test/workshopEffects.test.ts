@@ -100,6 +100,184 @@ const fixture = (dataDir: string, api: Api) =>
   })
 
 describe("workshop setup effects", () => {
+  it.live("reads registered capabilities for the owned chat kind and its offered tools", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const capabilities = yield* api.ListWorkshopCapabilities({ chatId: f.chat.id })
+      assert.deepStrictEqual(
+        capabilities.map((c) => c.id),
+        ["library.read", "library.write", "chats.setup"]
+      )
+      assert.isTrue(capabilities.every((c) => c.mode === "allow" && c.always))
+      const registry = yield* ExecutionRegistry
+      yield* registry.workshopCapabilities.register({
+        id: "library.write",
+        order: 5,
+        label: "Synthetic library changes",
+        explanation: "A registered replacement.",
+        mode: "allow",
+        always: true
+      })
+      assert.strictEqual(
+        (yield* api.ListWorkshopCapabilities({ chatId: f.chat.id }))[0]!.label,
+        "Synthetic library changes"
+      )
+      const workshop = registry.orchestrationModes.get("workshop")!
+      yield* registry.orchestrationModes.register({
+        ...workshop,
+        plan: (input) => ({ ...workshop.plan(input), tools: ["list_library"] })
+      })
+      assert.deepStrictEqual(
+        (yield* api.ListWorkshopCapabilities({ chatId: f.chat.id })).map((c) => c.id),
+        ["library.read"]
+      )
+      const story = yield* api.CreateChat({ title: "Story" })
+      assert.isEmpty(yield* api.ListWorkshopCapabilities({ chatId: story.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live(
+    "resumes stopped setup work once, retains discarded library effects after a step edit, and can undo both",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        let paused = false
+        let holdOnce = true
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const messages = request.body?.messages as Array<{ role: string; tool_call_id?: string }>
+              if (!JSON.stringify(messages).includes("Build a synthetic keeper"))
+                return sse(res, completionChunks(["Ready."], {}))
+              if (
+                String(JSON.stringify(messages.filter((m) => m.role === "tool").at(-1))).includes(
+                  "may already have happened"
+                )
+              )
+                return sse(res, completionChunks(["That call needs checking first."], {}))
+              const last = messages.filter((m) => m.role === "tool").at(-1)?.tool_call_id
+              if (last === "create" && holdOnce) {
+                holdOnce = false
+                paused = true
+                res.writeHead(200, { "content-type": "text/event-stream" })
+                return
+              }
+              sse(
+                res,
+                last === "create"
+                  ? completionChunks(["The keeper is ready."], {})
+                  : last === "lookup"
+                    ? call("create_card", { name: "Synthetic keeper" }, "create")
+                    : call("list_library", { kind: "card" }, "lookup")
+              )
+            })
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const api = yield* client()
+        yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+        const chat = yield* api.CreateWorkshop({})
+        const events = yield* watch(api, chat)
+        const sent = yield* posted(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: chat.activeLeafSlotId,
+            branch: false,
+            content: "Build a synthetic keeper"
+          })
+        )
+        const run = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+        yield* eventually(() => paused)
+        yield* api.StopGeneration({ versionId: run.entry.version.id })
+        yield* eventually(() => finished(events, run.entry.version.id) !== undefined)
+        const original = (yield* api.ListRolloutEffects({ chatId: chat.id }))[0]!
+        const user = yield* api.Whoami()
+        const reader = yield* Reader
+        const slot = yield* reader.GetSlot({ userId: user.id, slotId: run.entry.slotId })
+        const resumed = yield* api.ResumeVersion({
+          versionId: run.entry.version.id,
+          expectedRowVersion: slot.entry.rowVersion
+        })
+        yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+        assert.strictEqual(finished(events, resumed.version.id)!.status, "complete")
+        assert.lengthOf(
+          (yield* api.ListLibrary({ kind: "card" })).filter((c) => c.label === "Synthetic keeper"),
+          1
+        )
+        const material = yield* reader.RolloutMaterial({ userId: user.id, versionId: resumed.version.id })
+        assert.isNotNull(
+          yield* reader.RolloutToolReceipt({ userId: user.id, rolloutId: material.rolloutId, toolCallId: "create" })
+        )
+        assert.deepStrictEqual(
+          yield* api.ListRolloutEffects({ chatId: chat.id }),
+          [original],
+          "Kept library changes retain their canonical effect row"
+        )
+        const offered = (yield* api.GetRunTranscript({ versionId: resumed.version.id })).tools
+        assert.sameMembers(
+          offered.filter((t) => t.capability === "library.write" || t.capability === "chats.setup").map((t) => t.name),
+          ["create_card", "edit_card", "clone_card", "start_chat"]
+        )
+        const steps = yield* api.GetRolloutSteps({ versionId: resumed.version.id })
+        const createStep = steps.findIndex((s) => s.kind === "tool" && s.tool === "create_card")
+        const beforeArguments = yield* reader.GetSlot({ userId: user.id, slotId: run.entry.slotId })
+        assert.strictEqual(
+          yield* outcome(
+            api.ResumeFromStep({
+              versionId: resumed.version.id,
+              step: createStep,
+              edit: { kind: "arguments", arguments: { name: "Invalid", permission: true } },
+              expectedRowVersion: beforeArguments.entry.rowVersion
+            })
+          ),
+          "NotResumable"
+        )
+        const argumentsEdit = yield* api.ResumeFromStep({
+          versionId: resumed.version.id,
+          step: createStep,
+          edit: { kind: "arguments", arguments: { name: "Needs checking" } },
+          expectedRowVersion: beforeArguments.entry.rowVersion
+        })
+        yield* eventually(() => finished(events, argumentsEdit.version.id) !== undefined)
+        assert.isTrue(
+          (yield* api.GetRunTranscript({ versionId: argumentsEdit.version.id })).entries.some(
+            (e) => e.role === "toolResult" && e.isError && e.text.includes("may already have happened")
+          )
+        )
+        assert.deepStrictEqual(
+          yield* api.ListRolloutEffects({ chatId: chat.id }),
+          [original],
+          "Editing setup arguments never replays the old change"
+        )
+        const lookup = steps.findIndex((s) => s.kind === "tool" && s.tool === "list_library")
+        const latest = yield* reader.GetSlot({ userId: user.id, slotId: run.entry.slotId })
+        const edited = yield* api.ResumeFromStep({
+          versionId: resumed.version.id,
+          step: lookup,
+          edit: { kind: "result", text: "Edited lookup result before creating." },
+          expectedRowVersion: latest.entry.rowVersion
+        })
+        yield* eventually(() => finished(events, edited.version.id) !== undefined)
+        assert.strictEqual(finished(events, edited.version.id)!.status, "complete")
+        assert.lengthOf(
+          (yield* api.ListLibrary({ kind: "card" })).filter((c) => c.label === "Synthetic keeper"),
+          2
+        )
+        const effects = yield* api.ListRolloutEffects({ chatId: chat.id })
+        assert.lengthOf(effects, 2)
+        assert.deepStrictEqual(
+          effects.find((e) => e.rolloutId === original.rolloutId),
+          original,
+          "Discarding a call does not undo its independent library change"
+        )
+        for (const effect of effects) yield* api.UndoRolloutEffect(effect)
+        assert.isEmpty((yield* api.ListLibrary({ kind: "card" })).filter((c) => c.label === "Synthetic keeper"))
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    }
+  )
+
   it.live("preserves story snapshots and refusal rows when library reads are explicitly selected", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -515,6 +693,8 @@ describe("workshop setup effects", () => {
           if (step?.kind === "tool") {
             assert.strictEqual(step.effect, "external")
             assert.strictEqual(step.effectClass, effectClass)
+            assert.strictEqual(step.label, name === "create_card" ? "Created the card" : "Started the chat")
+            assert.strictEqual(step.title, name === "create_card" ? "Mara Quill" : "The Skerry Light")
           }
         }
         const created = effects.find((e) => e.kind === "library.create")!

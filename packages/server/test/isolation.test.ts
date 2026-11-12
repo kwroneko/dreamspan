@@ -1158,6 +1158,9 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   ListRolloutEffects: {
     probe: (actor, owner) => refused(actor.api.ListRolloutEffects({ chatId: owner.chat.chatId }), "NotFound")
   },
+  ListWorkshopCapabilities: {
+    probe: (actor, owner) => refused(actor.api.ListWorkshopCapabilities({ chatId: owner.chat.chatId }), "NotFound")
+  },
   UndoRolloutEffect: {
     probe: (actor, owner) =>
       refused(

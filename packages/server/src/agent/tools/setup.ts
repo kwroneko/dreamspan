@@ -83,7 +83,8 @@ interface CreateArgs {
 }
 const createCard: RolloutTool<CreateArgs> = {
   id: "create_card",
-  label: "Created a card",
+  label: "Created the card",
+  titleField: "name",
   explanation: "Create an ordinary card in your library.",
   effect: "library",
   capability: "library.write",
@@ -144,7 +145,8 @@ const editCard: RolloutTool<{
   }>
 }> = {
   id: "edit_card",
-  label: "Edited a card",
+  label: "Edited the card",
+  titleField: "card",
   explanation: "Edit the saved library card, leaving drafts and history intact.",
   effect: "library",
   capability: "library.write",
@@ -204,7 +206,8 @@ const cloneCard: RolloutTool<{
   readonly version?: string
 }> = {
   id: "clone_card",
-  label: "Cloned a card",
+  label: "Cloned the card",
+  titleField: "name",
   explanation: "Fork a card into an ordinary card of its own.",
   effect: "library",
   capability: "library.write",
@@ -244,7 +247,8 @@ const startChat: RolloutTool<{
   readonly model?: string
 }> = {
   id: "start_chat",
-  label: "Started a chat",
+  label: "Started the chat",
+  titleField: "title",
   explanation: "Set up a story chat with greetings, without requesting a reply.",
   effect: "setup",
   capability: "chats.setup",

@@ -1,34 +1,14 @@
-// What the workshop's assistant may do, as its capability chip lists it (spec/WORKSHOP.md §3.1).
-// A registry, so the setup tools add theirs as they arrive and a plugin can add its own. Until
-// choosing is built (W4) each says only how it stands.
-import { makeRegistry } from "../../registry.ts"
+// Presentation of the server-owned capability list; grants and choices belong to W4.
+import { Atom } from "effect/reactivity"
+import type { ChatId } from "@rp/shared/chat.ts"
+import type { WorkshopCapability } from "@rp/shared/workshopApi.ts"
+import { AppClient } from "../../rpc.ts"
 
-type CapabilityMode = "allow" | "ask" | "off"
+export type { WorkshopCapability } from "@rp/shared/workshopApi.ts"
 
-export interface WorkshopCapability {
-  readonly id: string
-  readonly order: number
-  /** Short: "Read your library". */
-  readonly label: string
-  /** One line: what it lets the assistant do. */
-  readonly explanation: string
-  readonly mode: CapabilityMode
-  /** Can't be turned off: the assistant is no use without it. */
-  readonly always?: boolean
-}
-
-export const workshopCapabilities = makeRegistry<WorkshopCapability>()
-
-export const registerCapabilities = () => [
-  workshopCapabilities.register({
-    id: "library.read",
-    order: 10,
-    label: "Read your library",
-    explanation: "Looks up your cards, presets and lorebooks.",
-    mode: "allow",
-    always: true
-  })
-]
+export const capabilitiesAtom = Atom.family((chatId: ChatId) =>
+  AppClient.query("ListWorkshopCapabilities", { chatId }, { reactivityKeys: ["workshop-capabilities", chatId] })
+)
 
 export const modeText = (capability: WorkshopCapability) =>
   capability.always ? "Always allowed" : { allow: "Allowed", ask: "Asks first", off: "Off" }[capability.mode]

@@ -10,8 +10,12 @@ export const SEND_MESSAGE = "send_message"
 const resultText = (content: ReadonlyArray<{ readonly type: string; readonly text?: string }>) =>
   content.flatMap((p) => (p.type === "text" && p.text !== undefined ? [p.text] : [])).join("")
 
-const title = (args: unknown) => {
+const title = (args: unknown, field?: string) => {
   if (args === null || typeof args !== "object") return ""
+  if (field) {
+    const text = (args as Record<string, unknown>)[field]
+    return typeof text === "string" ? (text.length > 80 ? `${text.slice(0, 79)}…` : text) : ""
+  }
   const first = Object.values(args as Record<string, unknown>).find(
     (v) => typeof v === "string" || typeof v === "number"
   )
@@ -85,7 +89,7 @@ export const placedSteps = (
           id: part.id,
           tool: part.name,
           label: tool?.label ?? part.name,
-          title: title(part.arguments),
+          title: title(part.arguments, tool?.titleField),
           args: part.arguments,
           status: result ? (result.isError ? "error" : "done") : final ? "error" : "running",
           ...(result ? { result: result.text } : {}),

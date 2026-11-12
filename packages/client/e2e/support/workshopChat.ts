@@ -108,7 +108,7 @@ export function workshopChatTests() {
           await expect(card).toBeVisible()
           await expect(page.getByText("Workshop", { exact: true }).first()).toBeVisible()
           await expect(page.getByRole("button", { name: "New workshop", exact: true })).toHaveAccessibleDescription(
-            "Opens a workshop. The assistant can read your library."
+            "Opens a workshop. The assistant can read and change your library and set up chats."
           )
           await card.scrollIntoViewIfNeeded()
           await shot("chats-page")
@@ -191,7 +191,7 @@ export function workshopChatTests() {
             await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"))
           }
           const chip = nextReply(page).getByRole("button", { name: /^What the assistant may do: / })
-          await expect(chip).toHaveText(/Can: 1/)
+          await expect(chip).toHaveText(/Can: 3/)
           await expect(
             nextReply(page).getByRole("button", { name: /replies now$|^Reply now$|^No one to reply$/ })
           ).toHaveCount(0)
@@ -200,6 +200,14 @@ export function workshopChatTests() {
           const popover = page.getByRole("dialog", { name: "What the assistant may do" })
           await expect(popover.locator('[data-capability="library.read"]')).toContainText("Read your library")
           await expect(popover.locator('[data-capability="library.read"]')).toContainText("Always allowed")
+          for (const [id, label] of [
+            ["library.write", "Create and edit library items"],
+            ["chats.setup", "Set up chats"]
+          ]) {
+            await expect(popover.locator(`[data-capability="${id}"]`)).toContainText(label!)
+            await expect(popover.locator(`[data-capability="${id}"]`)).toContainText("Always allowed")
+          }
+          await expect(popover.locator("[data-capability]")).toHaveCount(3)
           await expect(popover.getByText("You can’t change these yet.")).toBeVisible()
           await shot("capabilities")
           await expectLayout(page, info, `workshop-capabilities-${width}-${theme}`, { scope: '[role="dialog"]' })
@@ -245,13 +253,20 @@ export function workshopChatTests() {
           await page.evaluate(() => Reflect.deleteProperty(document, "visibilityState"))
           const steps = reply.locator("[data-steps-panel]")
           await expect(steps).toHaveAttribute("data-steps-panel", "done")
-          await expect(reply.locator("[data-steps-badge]")).toHaveText(/^2 steps/)
+          await expect(reply.locator("[data-steps-badge]")).toHaveText(/^3 steps/)
           await reply.locator("[data-steps-badge]").click()
           const rows = steps.locator('[data-step="tool"]')
-          await expect(rows).toHaveCount(2)
+          await expect(rows).toHaveCount(3)
           await expect(rows.nth(0)).toContainText("Looked in your library")
           await expect(rows.nth(1)).toContainText("Read a card")
           await expect(rows.nth(1)).toContainText("Assistant")
+          await expect(rows.nth(2)).toContainText("Created the card Mara Quill")
+          await expect(rows.nth(2).getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
+          const created = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            api.ListRolloutEffects({ chatId: workshopId })
+          )
+          expect(created).toHaveLength(1)
+          expect(created[0]!.title).toBe("Created the card Mara Quill")
           expect(provider.toolResults().join("\n")).toContain("Assistant")
           await shot("reply")
           await expectLayout(page, info, `workshop-reply-${width}-${theme}`, { scope: "article:last-of-type" })
@@ -271,6 +286,11 @@ export function workshopChatTests() {
           await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toBeVisible()
           expect(provider.bodies[beforeEdit]!.messages.at(-1)?.content).toBe(edited)
           expect(provider.bodies[beforeEdit]!.tools).toEqual(provider.bodies[offeredAt]!.tools)
+          const afterEdit = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            api.ListRolloutEffects({ chatId: workshopId })
+          )
+          expect(afterEdit).toHaveLength(2)
+          expect(afterEdit.find((effect) => effect.rolloutId === created[0]!.rolloutId)).toEqual(created[0])
 
           // This chat leaves out the story's settings; the URL alone brings the workshop back.
           const settings = await openPanel(page, "This chat")

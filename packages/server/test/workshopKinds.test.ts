@@ -48,6 +48,10 @@ for (const workers of ["source", "bundle"] as const) {
           tags: []
         })
         const effects = yield* api.ListRolloutEffects({ chatId: chat.id })
+        assert.sameMembers(
+          (yield* api.ListWorkshopCapabilities({ chatId: chat.id })).map((c) => c.id),
+          ["library.read", "library.write", "chats.setup"]
+        )
         assert.lengthOf(effects, 1)
         assert.isNotNull((yield* api.UndoRolloutEffect(effects[0]!)).undoneAt)
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

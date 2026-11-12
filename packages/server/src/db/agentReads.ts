@@ -469,6 +469,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             description: t.description,
             parameters: t.parameters,
             ...(t.capability ? { capability: t.capability } : {}),
+            ...(t.titleField ? { titleField: t.titleField } : {}),
             effect: t.effect
           })),
           entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true)),

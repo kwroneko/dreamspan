@@ -3,6 +3,16 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { Chat } from "./chat.ts"
 import { NotFound, ServerError } from "./errors.ts"
 
+export const WorkshopCapability = Schema.Struct({
+  id: Schema.String,
+  order: Schema.Number,
+  label: Schema.String,
+  explanation: Schema.String,
+  mode: Schema.Literals(["allow", "ask", "off"]),
+  always: Schema.optionalKey(Schema.Boolean)
+})
+export type WorkshopCapability = typeof WorkshopCapability.Type
+
 export class EffectUndoRefused extends Schema.TaggedError<EffectUndoRefused>()("EffectUndoRefused", {
   message: Schema.String
 }) {}
@@ -35,6 +45,11 @@ export const EffectList = {
 }
 
 export class WorkshopApi extends RpcGroup.make(
+  Rpc.make("ListWorkshopCapabilities", {
+    payload: { chatId: Chat.fields.id },
+    success: Schema.Array(WorkshopCapability),
+    error: Schema.Union([NotFound, ServerError])
+  }),
   Rpc.make("CreateWorkshop", {
     payload: { title: Schema.optionalKey(Schema.String) },
     success: Chat,

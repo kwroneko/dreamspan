@@ -4,14 +4,12 @@ import { chatStartSections } from "../chat/ChatsPage.tsx"
 import { composerControls } from "../chat/composerControls.tsx"
 import { chatKindLooks, kindShows } from "../chat/kindLooks.ts"
 import { CapabilityChip } from "./CapabilityChip.tsx"
-import { registerCapabilities } from "./capabilities.ts"
 import { CAPABILITY_CHIP, workshopLook } from "./kinds.ts"
 import { WorkshopStartCard } from "./StartCard.tsx"
 
 export const register = () => [
   chatKindLooks.register(workshopLook),
   chatStartSections.register({ id: "workshop.start", order: 20, component: WorkshopStartCard }),
-  ...registerCapabilities(),
   // After the cache chip, where Next stands in a story chat.
   composerControls.register({
     id: CAPABILITY_CHIP,

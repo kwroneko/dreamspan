@@ -57,6 +57,7 @@ export type StepEdit = typeof StepEdit.Type
 /** One tool the run was offered, as frozen into its snapshot: exactly what the model saw. */
 export const OfferedTool = Schema.Struct({
   capability: Schema.optionalKey(Schema.String),
+  titleField: Schema.optionalKey(Schema.String),
   name: Schema.String,
   label: Schema.String,
   description: Schema.String,

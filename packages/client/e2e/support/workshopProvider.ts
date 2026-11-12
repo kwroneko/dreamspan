@@ -5,12 +5,13 @@
 import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 
-export const WORKSHOP_ANSWER = "Your library has one card, the Assistant, and it reads as practical and brief."
+export const WORKSHOP_ANSWER = "I read the Assistant and created the card Mara Quill in your library."
 export const STORY_REPLY = "The harbor bell rings twice."
 
 const CALLS = [
   { name: "list_library", arguments: { kind: "card" } },
-  { name: "read_card", arguments: { card: "Assistant", fields: ["description"] } }
+  { name: "read_card", arguments: { card: "Assistant", fields: ["description"] } },
+  { name: "create_card", arguments: { name: "Mara Quill", description: "A synthetic lighthouse keeper." } }
 ]
 
 interface Body {

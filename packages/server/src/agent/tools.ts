@@ -50,6 +50,8 @@ export interface RolloutTool<A = never> {
   /** User-facing, the chat settings' tools list: what it lets the model do, as a checkbox label. */
   readonly explanation?: string
   readonly capability?: string
+  /** Argument used as the plain step title, frozen with setup-tool metadata. */
+  readonly titleField?: string
   readonly effect: EffectClass
   /** Model-facing, with its usage guidance: when to call it and when not to. */
   readonly description: string
@@ -65,6 +67,7 @@ export interface FrozenTool {
   readonly description: string
   readonly parameters: unknown
   readonly capability?: string
+  readonly titleField?: string
   readonly effect: EffectClass
   readonly label: string
 }
@@ -75,6 +78,7 @@ export const frozenTool = (tool: RolloutTool<never>): FrozenTool => ({
   parameters: tool.parameters,
   effect: tool.effect,
   ...(tool.capability ? { capability: tool.capability } : {}),
+  ...(tool.titleField ? { titleField: tool.titleField } : {}),
   label: tool.label
 })
 

@@ -14,7 +14,7 @@ export function WorkshopStartCard() {
         draft="workshop:new"
         label="Title of the new workshop"
         button="New workshop"
-        hint="Opens a workshop. The assistant can read your library."
+        hint="Opens a workshop. The assistant can read and change your library and set up chats."
         create={(client, title) => client("CreateWorkshop", title.trim() === "" ? {} : { title })}
       />
     </Card>
