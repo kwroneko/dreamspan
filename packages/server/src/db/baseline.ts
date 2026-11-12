@@ -625,6 +625,15 @@ export const baseline: ReadonlyArray<string> = [
     );
     SELECT RAISE(ABORT, 'library effect must target an entity') WHERE NEW.kind IN ('library.create', 'library.revise') AND NEW.target_kind <> 'entity';
     SELECT RAISE(ABORT, 'chat effect must target a chat') WHERE NEW.kind = 'chat.create' AND NEW.target_kind <> 'chat';
+    SELECT RAISE(ABORT, 'library recipe must name its target ref and row version') WHERE NEW.kind IN ('library.create', 'library.revise') AND (
+      NOT EXISTS (SELECT 1 FROM entity_refs f WHERE f.id = json_extract(NEW.undo_json, '$.refId') AND f.entity_id = NEW.target_id)
+      OR json_type(NEW.undo_json, '$.rowVersion') IS NOT 'integer' OR json_extract(NEW.undo_json, '$.rowVersion') < 0
+    );
+    SELECT RAISE(ABORT, 'revision recipe must retain its previous row version') WHERE NEW.kind = 'library.revise' AND (
+      json_type(NEW.undo_json, '$.beforeRowVersion') IS NOT 'integer' OR json_extract(NEW.undo_json, '$.beforeRowVersion') < 0
+    );
+    SELECT RAISE(ABORT, 'chat creation recipe must retain its state stamp') WHERE NEW.kind = 'chat.create'
+      AND json_type(NEW.undo_json, '$.stamp') IS NOT 'text';
     SELECT RAISE(ABORT, 'creation recipe must name target ref and revision') WHERE NEW.kind = 'library.create' AND (
       NOT EXISTS (SELECT 1 FROM entity_refs f WHERE f.id = json_extract(NEW.undo_json, '$.refId') AND f.entity_id = NEW.target_id)
       OR NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = json_extract(NEW.undo_json, '$.head') AND v.entity_id = NEW.target_id)
@@ -641,6 +650,10 @@ export const baseline: ReadonlyArray<string> = [
     SELECT RAISE(ABORT, 'effect cannot be undone twice') WHERE OLD.undone_at IS NOT NULL;
     SELECT RAISE(ABORT, 'effect updates must record undo') WHERE NEW.undone_at IS NULL;
     SELECT RAISE(ABORT, 'undo recipe is retained') WHERE NEW.undo_json IS NOT OLD.undo_json;
+    SELECT RAISE(ABORT, 'revision undo must name a restored target revision and row version') WHERE NEW.kind = 'library.revise' AND (
+      NOT EXISTS (SELECT 1 FROM entity_revisions v WHERE v.id = json_extract(NEW.undo_result_json, '$.restoredHead') AND v.entity_id = NEW.target_id)
+      OR json_type(NEW.undo_result_json, '$.restoredRowVersion') IS NOT 'integer' OR json_extract(NEW.undo_result_json, '$.restoredRowVersion') < 0
+    );
   END`,
   `CREATE TABLE rollout_branches (
     rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,

@@ -2851,6 +2851,9 @@ The instruction is always one final user-role message (DESIGN §2.2), for both p
 
 **Extensible undo results (review-workshop3).** `rollout_effects.undo_json` is immutable for every kind. A separate object, `undo_result_json` (returned as `undoResult`), records the successful undoer’s result, atomically with its one-way undo timestamp. This supports later setting revisions, changeset outcomes and plugin revert commits without adding kind-specific columns or making recipes mutable. Revision-chain undo reads its new head from that result. A database CHECK couples the result and timestamp; neither can be written a second time. A synthetic registered plugin undoer tests non-revision results and repeat undo in source and bundled workers in `workshopEffectSchema.test.ts`. **BASELINE CHANGED**.
 
+**Effect-recipe constraints (review-workshop3).** The baseline checks a revision recipe’s ref as well as both revisions against the target entity, requires integer current/previous row versions, and requires a chat-creation state stamp. Revision undo results must name a revision of that target and an integer row version. Invalid effect writes roll back their receipts. `workshopEffectSchema.test.ts` rejects wrong refs, missing row versions and missing chat recipes. **BASELINE CHANGED**.
+
+
 
 
 
