@@ -132,6 +132,7 @@ export type RemoteSummary = typeof RemoteSummary.Type
 export const SourcePage = Schema.Struct({
   /** Replace earlier pages: the source restarted after refusing a cursor. */
   reset: Schema.optionalKey(Schema.Boolean),
+  notice: Schema.optionalKey(Schema.String),
   items: Schema.Array(RemoteSummary),
   next: Schema.NullOr(Schema.String),
   total: Schema.optionalKey(Schema.Number),

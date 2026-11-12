@@ -303,6 +303,26 @@ describe("v1 as card sources", () => {
     }).pipe(Effect.scoped)
   )
 
+  it.effect("name search falls back to best matches, explains why, and keeps paging that order", () =>
+    Effect.gen(function* () {
+      const seen: Array<string> = []
+      const query = { ...emptySourceQuery, text: "synthetic", sort: "name" }
+      const first = yield* fakeCardexAdapter(archive).search(direct(seen), query, null)
+      assert.include(first.notice!, "Showing best matches")
+      assert.isAbove(first.items.length, 0)
+      const next = yield* fakeCardexAdapter(archive).search(direct(seen), query, first.next)
+      assert.isFalse(next.reset === true)
+      assert.isFalse(next.items.some((item) => first.items.some((old) => old.remoteId === item.remoteId)))
+      assert.isTrue(
+        seen
+          .filter((path) => path.startsWith("/api/v1/search?"))
+          .every((path) => new URL(`http://fake${path}`).searchParams.get("sort") === "relevance")
+      )
+      const reversed = yield* fakeCardexAdapter(archive).search(direct(), { ...query, reverse: true }, null)
+      assert.isUndefined(reversed.notice)
+    })
+  )
+
   it("a batch URL is in v1's canonical form: sorted, without duplicates, joined by %2C", () => {
     assert.strictEqual(batchUrl(["b-2", "a-1", "b-2"]).href, `${CARDEX_ORIGIN}/api/v1/cards/batch?ids=a-1%2Cb-2`)
   })

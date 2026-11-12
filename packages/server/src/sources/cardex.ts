@@ -171,7 +171,7 @@ const sortParam = (query: SourceQuery) => {
     case "popular":
       return "popular"
     case "name":
-      return query.reverse ? "name_desc" : "name"
+      return query.reverse ? "name_desc" : query.text.trim() ? "relevance" : "name"
     case "created":
       return query.reverse ? "created_asc" : "created_desc"
     case "newest":
@@ -525,6 +525,9 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         return {
           items,
           next,
+          ...(query.sort === "name" && !query.reverse && query.text.trim() && !semantic
+            ? { notice: "Name sorting with search words is unavailable on cardex. Showing best matches." }
+            : {}),
           ...(restarted ? { reset: true } : {}),
           ...(total === undefined ? {} : { total }),
           ...(raw.total_is_estimate === true ? { totalEstimated: true } : {})

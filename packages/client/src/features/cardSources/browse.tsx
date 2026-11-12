@@ -109,6 +109,7 @@ interface Results {
   readonly items: ReadonlyArray<RemoteSummary>
   readonly next: string | null
   readonly total?: number | undefined
+  readonly notice?: string | undefined
   readonly estimated?: boolean | undefined
   readonly status: Status
   readonly problem?: SourceProblem | undefined
@@ -153,6 +154,7 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
                 next: out.value.next,
                 total: out.value.total,
                 estimated: out.value.totalEstimated,
+                notice: out.value.notice,
                 status: "ready"
               }
             : { key, items: [], next: null, status: "failed", problem: out.problem }
@@ -193,6 +195,7 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
           next: out.value.next,
           total: out.value.total ?? r.total,
           estimated: out.value.totalEstimated ?? r.estimated,
+          notice: out.value.notice,
           status: "ready"
         }
       })
@@ -1147,6 +1150,7 @@ export function SourceResults({ browse, className }: { browse: SourceBrowse; cla
       className="flex min-w-0 flex-col gap-3"
     >
       <RecentRow browse={browse} />
+      {results?.notice && <Alert tone="neutral">{results.notice}</Alert>}
       {failed && problem ? (
         <ProblemAlert browse={browse} problem={problem} />
       ) : loading ? (
