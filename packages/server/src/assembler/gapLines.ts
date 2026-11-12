@@ -10,6 +10,7 @@ import { modelName } from "@rp/shared/cardNames.ts"
 import { ABSENT_GAP_DEFAULT, ABSENT_JOIN_DEFAULT } from "@rp/shared/knowledge.ts"
 import { AssemblySources, need, type AssemblerStage, type Assembly, type ProjectedEntry } from "./pipeline.ts"
 import type { SourceDescriptor } from "./sourceDescriptors.ts"
+import { ownLine } from "./merges.ts"
 import type { HistoryEntry } from "./types.ts"
 
 /** "Mira", "Mira and Tobin", "Mira, Tobin and Kai". */
@@ -30,12 +31,20 @@ interface Stretch {
 const stretchesOf = (assembly: Assembly, history: ReadonlyArray<HistoryEntry>) => {
   const stretches: Array<Stretch> = []
   const joins: Array<HistoryEntry> = []
+  // The destination's parallel span is somebody else's line when the join supplies the
+  // viewer's own history. It did not miss a stretch of that history: no gap may rewrite it.
+  const elsewhere = history
+    .filter((join) => join.merge && ownLine(assembly, history, join))
+    .map((join) => ({
+      from: history.find((e) => e.slotId === join.merge!.start)?.depth ?? Number.NEGATIVE_INFINITY,
+      to: join.depth
+    }))
   let present = assembly.lcm?.cursor != null
   let run: Array<HistoryEntry> = []
   for (const entry of history) {
     if (entry.unknown) {
       if (entry.merge) joins.push(entry)
-      else if (present) run.push(entry)
+      else if (present && !elsewhere.some((span) => entry.depth >= span.from && entry.depth < span.to)) run.push(entry)
       continue
     }
     if (!entry.inContext) continue

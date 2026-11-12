@@ -87,7 +87,7 @@ describe("card archive", () => {
               params: [`usage-s-${i}`, chat.id, `usage-v-${i}`, old]
             },
             {
-              sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,macro_mode,origin,content,cast_json,created_at,updated_at) VALUES(?,?,0,'complete',?,'verbatim',?,?,?, ?,?)",
+              sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,macro_mode,origin,content,cast_json,created_at,updated_at, authoring_fork_id) VALUES(?,?,0,'complete',?,'verbatim',?,?,?, ?,?, ? )",
               params: [
                 `usage-v-${i}`,
                 `usage-s-${i}`,
@@ -96,7 +96,8 @@ describe("card archive", () => {
                 i === 3 ? "" : "Synthetic message",
                 JSON.stringify([card.entityId]),
                 old + 1,
-                old + 1
+                old + 1,
+                chat.currentForkId!
               ]
             }
           ].reverse()
@@ -224,7 +225,7 @@ describe("card archive", () => {
               params: [`tried-s-${n}`, chat.id, `tried-v-${n}`, old]
             },
             {
-              sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,macro_mode,origin,content,cast_json,created_at,updated_at) VALUES(?,?,0,'complete',?,'verbatim',?,'Synthetic try',?,?,?)",
+              sql: "INSERT INTO version_records(id,slot_id,ordinal,status,writer,macro_mode,origin,content,cast_json,created_at,updated_at, authoring_fork_id) VALUES(?,?,0,'complete',?,'verbatim',?,'Synthetic try',?,?,?, ? )",
               params: [
                 `tried-v-${n}`,
                 `tried-s-${n}`,
@@ -232,7 +233,8 @@ describe("card archive", () => {
                 writer === "human" ? "user_written" : "generated",
                 JSON.stringify([entityId]),
                 old + 1,
-                old + 1
+                old + 1,
+                chat.currentForkId!
               ]
             }
           ].reverse() // the version first: a slot can only select a version that exists

@@ -68,8 +68,8 @@ const world = Effect.gen(function* () {
       const id = uuidv7()
       const versionId = uuidv7()
       const depth = parent === null ? 0 : (yield* place(parent)).depth + 1
-      yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-        VALUES (${versionId}, ${id}, 0, 'complete', 'human', ${id}, 'verbatim', 'user_written', 1, 1)`
+      yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+        VALUES (${versionId}, ${id}, 0, 'complete', 'human', ${id}, 'verbatim', 'user_written', 1, 1, ${forkId} )`
       yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, fork_id, inserted)
         VALUES (${id}, ${chatId}, ${parent}, ${depth}, ${versionId}, 1, ${forkId}, ${inserted ? 1 : 0})`
       return id

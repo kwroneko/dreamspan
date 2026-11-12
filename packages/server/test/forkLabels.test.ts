@@ -62,22 +62,22 @@ const setup = Effect.gen(function* () {
   yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (${CHAT}, 'u', 'rp', 'active', 1)`
   for (const [depth, id] of SLOTS.entries())
     yield* Effect.gen(function* () {
-      yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-        VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`
+      yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+        VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1, ${CHAT} )`
       yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, created_at)
         VALUES (${id}, ${CHAT}, ${depth === 0 ? null : SLOTS[depth - 1]!}, ${depth}, ${`v-${id}`}, 1)`
     }).pipe(sql.withTransaction)
   yield* sql`UPDATE forks SET tip_slot_id = 's3' WHERE id = ${CHAT}`
   for (const id of SLOTS) {
     for (let ordinal = 1; ordinal < 20; ordinal++)
-      yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-        VALUES (${`swipe-${id}-${ordinal}`}, ${id}, ${ordinal}, 'complete', 'human', 'swipe', 'verbatim', 'user_written', 1, 1)`
-    yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, fork_id, source_version_id)
-      VALUES (${`copy-${id}`}, ${id}, 20, 'complete', 'human', 'copy', 'verbatim', 'edited', 1, 1, ${CHAT}, ${`v-${id}`})`
+      yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+        VALUES (${`swipe-${id}-${ordinal}`}, ${id}, ${ordinal}, 'complete', 'human', 'swipe', 'verbatim', 'user_written', 1, 1, ${CHAT} )`
+    yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, fork_id, source_version_id, authoring_fork_id)
+      VALUES (${`copy-${id}`}, ${id}, 20, 'complete', 'human', 'copy', 'verbatim', 'edited', 1, 1, ${CHAT}, ${`v-${id}`}, ${CHAT} )`
   }
   yield* Effect.gen(function* () {
-    yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-      VALUES ('v-inserted', 'inserted', 0, 'complete', 'human', 'insert', 'verbatim', 'user_written', 1, 1)`
+    yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+      VALUES ('v-inserted', 'inserted', 0, 'complete', 'human', 'insert', 'verbatim', 'user_written', 1, 1, ${CHAT} )`
     yield* sql`INSERT INTO slots (id, chat_id, parent_slot_id, depth, selected_version_id, inserted, created_at)
       VALUES ('inserted', ${CHAT}, 'r', 1, 'v-inserted', 1, 1)`
     for (const id of SUMMARIES) {
@@ -391,7 +391,7 @@ describe("fork labels", () => {
         Effect.gen(function* () {
           yield* op.event(CHAT)
           yield* op.fork(CHAT)
-          const copy = yield* forkImportSlot(sql, "s1", "r")
+          const copy = yield* forkImportSlot(sql, "s1", "r", CHAT)
           const events = yield* sql<{ label: string }>`SELECT hex(fork_label) AS label FROM state_events
             WHERE slot_id IN ('s1', ${copy}) ORDER BY slot_id`
           assert.strictEqual(events.length, 4)

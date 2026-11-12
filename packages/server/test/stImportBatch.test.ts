@@ -89,6 +89,21 @@ layer(serverLayer(config), { excludeTestServices: true })("batched ST message in
             parent = result.slotIds.at(-1) ?? parent
           }
           const chat = target.chatId
+          const [provenance] = yield* fixtureSql(
+            config.dataDir,
+            [
+              {
+                sql: "SELECT count(*) AS n FROM versions v JOIN slots s ON s.id=v.slot_id WHERE s.chat_id=? AND v.authoring_fork_id IS NOT (SELECT payload_json ->> '$.forkId' FROM jobs WHERE id=?)",
+                params: [chat, target.recordId]
+              }
+            ],
+            { readOnly: true }
+          )
+          assert.strictEqual(
+            provenance![0]!.n,
+            0,
+            "a legacy file without branch information uses the fork assigned by its importer"
+          )
           const result = yield* fixtureSql(
             config.dataDir,
             [

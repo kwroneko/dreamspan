@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 58
+export const ASSEMBLER_VERSION = 59
 
 export type Role = "system" | "user" | "assistant"
 
@@ -690,7 +690,7 @@ export interface HistoryEntry {
    * that's fewer than were sent (its text is then written again from them). Set by the history
    * stage (`assembler/knowledge.ts`), never pinned; `merge-layout` lays the rows out.
    */
-  readonly known?: { readonly rows: ReadonlyArray<MergeRow>; readonly partial: boolean }
+  readonly known?: { readonly rows: ReadonlyArray<MergeRow>; readonly partial: boolean; readonly ambiguous?: boolean }
   readonly sentAt: number
   readonly versions: number
   readonly selectedOrdinal: number

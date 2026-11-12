@@ -69,12 +69,12 @@ it.live(
         {
           sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999)
             INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,
-              cast_json,presence_json,created_at,updated_at)
+              cast_json,presence_json,created_at,updated_at,authoring_fork_id)
             SELECT 'main-v'||x, 'main-s'||x, 0, 'complete', CASE WHEN x % 2 = 0 THEN NULL ELSE ? END,
               CASE WHEN x % 2 = 0 THEN 'human' ELSE 'model' END, 'The lantern road goes on, line '||x||'.', 'verbatim',
               CASE WHEN x % 2 = 0 THEN 'user_written' ELSE 'generated' END, ?,
-              CASE WHEN x BETWEEN 1001 AND 1500 THEN ? END, x, x FROM n`,
-          params: [mira, cast, away]
+              CASE WHEN x BETWEEN 1001 AND 1500 THEN ? END, x, x, ? FROM n`,
+          params: [mira, cast, away, main]
         },
         {
           sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999)
@@ -89,10 +89,10 @@ it.live(
           sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999),
               k(j) AS (SELECT 1 UNION ALL SELECT j+1 FROM k WHERE j < 49)
             INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,
-              cast_json,presence_json,created_at,updated_at)
+              cast_json,presence_json,created_at,updated_at,authoring_fork_id)
             SELECT 'main-v'||x||'-'||j, 'main-s'||x, j, 'complete', ?, 'model', 'Another telling of line '||x||', take '||j||'.',
-              'verbatim', 'generated', ?, CASE WHEN x BETWEEN 1001 AND 1500 THEN ? END, x, x FROM n JOIN k ON j < 20 + (x % 31)`,
-          params: [mira, cast, away]
+              'verbatim', 'generated', ?, CASE WHEN x BETWEEN 1001 AND 1500 THEN ? END, x, x, ? FROM n JOIN k ON j < 20 + (x % 31)`,
+          params: [mira, cast, away, main]
         }
       ])
       // 300 branches, each with a message of its own.

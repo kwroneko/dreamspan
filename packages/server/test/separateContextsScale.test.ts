@@ -64,11 +64,11 @@ it.live(
         {
           sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999)
             INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,
-              cast_json,presence_json,created_at,updated_at)
+              cast_json,presence_json,created_at,updated_at, authoring_fork_id)
             SELECT 'main-v'||x, 'main-s'||x, 0, 'complete', CASE WHEN x % 2 = 0 THEN NULL ELSE ? END,
               CASE WHEN x % 2 = 0 THEN 'human' ELSE 'model' END, 'The lantern road goes on, line '||x||'.', 'verbatim',
               CASE WHEN x % 2 = 0 THEN 'user_written' ELSE 'generated' END, ?,
-              CASE WHEN x BETWEEN 1001 AND 1500 THEN ? END, x, x FROM n`,
+              CASE WHEN x BETWEEN 1001 AND 1500 THEN ? END, x, x , '${main}' FROM n`,
           params: [mira, cast, away]
         },
         {
@@ -84,9 +84,9 @@ it.live(
           sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999),
               k(j) AS (SELECT 1 UNION ALL SELECT j+1 FROM k WHERE j < 49)
             INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,
-              cast_json,presence_json,created_at,updated_at)
+              cast_json,presence_json,created_at,updated_at, authoring_fork_id)
             SELECT 'main-v'||x||'-'||j, 'main-s'||x, j, 'complete', ?, 'model', 'Another telling of line '||x||', take '||j||'.',
-              'verbatim', 'generated', ?, CASE WHEN x BETWEEN 1001 AND 1500 THEN ? END, x, x FROM n JOIN k ON j < 20 + (x % 31)`,
+              'verbatim', 'generated', ?, CASE WHEN x BETWEEN 1001 AND 1500 THEN ? END, x, x , '${main}' FROM n JOIN k ON j < 20 + (x % 31)`,
           params: [mira, cast, away]
         }
       ])
@@ -219,6 +219,96 @@ it.live(
       assert.isAbove(undone!.corrected.length, 10_000)
       yield* event(slotAt(2_999), { key: "context.per_speaker", value: "separate" })
       assert.include(sentText(yield* assemble(wrenRow)), "line 1200.")
+
+      // C6: a second 3,000-message line, also with 20–50 swipes per position, frozen
+      // into the owner-shape destination. Bring the older rows too, so projection reads
+      // all 3,000 rows rather than just the small verbatim budget at the end.
+      const source = yield* h.writer.CreateChat({
+        userId: h.userId,
+        kind: "rp",
+        status: "active",
+        title: "Scale docks",
+        participants: [mira, wren],
+        greeting: null
+      })
+      const sourceFirst = yield* h.writer.AppendMessage({
+        userId: h.userId,
+        chatId: source.id,
+        forkId: source.currentForkId!,
+        parentSlotId: null,
+        branch: false,
+        commitDraft: null,
+        version: new NewVersion({
+          speakerEntityId: mira,
+          writer: "model",
+          content: "MERGE-KNOWN: first dock line.",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "generated"
+        })
+      })
+      yield* sql([
+        {
+          sql: `INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,cast_json,presence_json,created_at,updated_at, authoring_fork_id)
+          SELECT 'source-'||v.id, 'source-'||v.slot_id, v.ordinal, 'complete', ?, 'model',
+            CASE WHEN cast(substr(v.slot_id,7) AS INTEGER)%2=0 THEN 'MERGE-KNOWN: ' ELSE 'MERGE-SECRET: ' END || v.content,
+            'verbatim', 'generated', ?, CASE WHEN cast(substr(v.slot_id,7) AS INTEGER)%2=1 THEN ? END, v.created_at, v.updated_at
+          , '${source.currentForkId!}' FROM version_records v WHERE v.slot_id LIKE 'main-s%'`,
+          params: [mira, cast, away]
+        },
+        {
+          sql: `INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id,chain_id)
+          SELECT 'source-'||s.id, ?, CASE WHEN s.id='main-s1' THEN ? ELSE 'source-'||s.parent_slot_id END,
+            s.depth, 'source-'||s.selected_version_id, s.created_at, ?, ? FROM slots s WHERE s.id LIKE 'main-s%'`,
+          params: [source.id, sourceFirst.slotId, source.currentForkId!, sourceFirst.slotId]
+        },
+        { sql: "UPDATE forks SET tip_slot_id='source-main-s2999' WHERE id=?", params: [source.currentForkId!] }
+      ])
+      const request = {
+        userId: h.userId,
+        chatId,
+        forkId: main,
+        at: null,
+        source: { chatId: source.id, forkId: source.currentForkId! },
+        includeLeftOut: true
+      }
+      const preview = yield* h.reader.PreviewChatMerge(request)
+      const merged = yield* h.writer.MergeChat({
+        ...request,
+        title: preview.sourceTitle,
+        framing: null,
+        digest: preview.digest
+      })
+      const mergedReply = yield* h.writer.AppendMessage({
+        userId: h.userId,
+        chatId,
+        forkId: main,
+        parentSlotId: merged.slotId,
+        branch: true,
+        commitDraft: null,
+        version: new NewVersion({
+          speakerEntityId: wren,
+          writer: "model",
+          content: "",
+          status: "generating",
+          macroMode: "verbatim",
+          origin: "generated"
+        })
+      })
+      const separateMerged = yield* time("merged separate: 3,000 rows", assemble(mergedReply))
+      assert.include(sentText(separateMerged), "MERGE-KNOWN")
+      assert.notInclude(sentText(separateMerged), "MERGE-SECRET")
+      const rebuilt = yield* h.reader.RebuildContext({ userId: h.userId, snapshot: JSON.stringify(separateMerged) })
+      assert.strictEqual(rebuilt._tag, "Rebuilt")
+      if (rebuilt._tag === "Rebuilt")
+        assert.deepStrictEqual((JSON.parse(rebuilt.snapshot) as ContextSnapshot).request, separateMerged.request)
+      yield* event(merged.slotId, { key: "context.per_speaker", value: "shared" })
+      const sharedMerged = yield* time("merged shared: 3,000 rows", assemble(mergedReply))
+      assert.include(sentText(sharedMerged), "MERGE-SECRET")
+      assert.isBelow(
+        samples.find((s) => s.operation === "merged separate: 3,000 rows")!.ms,
+        samples.find((s) => s.operation === "merged shared: 3,000 rows")!.ms * 1.5 + 300
+      )
       process.stdout.write(`CONTEXTS_SCALE ${JSON.stringify(samples)}\n`)
       const ms = (operation: string) => samples.find((s) => s.operation === operation)!.ms
       assert.isBelow(ms("separate: Wren"), ms("shared: Wren") * 1.5 + 200, "the filter adds at most a bounded share")

@@ -77,8 +77,8 @@ const build = (length: number) => {
     try {
       db.exec("PRAGMA foreign_keys = ON; BEGIN")
       const version = db.prepare(`INSERT INTO version_records
-        (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-        VALUES (?, ?, 0, 'complete', 'model', 'Synthetic reply', 'verbatim', 'generated', 1, 1)`)
+        (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+        VALUES (?, ?, 0, 'complete', 'model', 'Synthetic reply', 'verbatim', 'generated', 1, 1, '${chat.id}' )`)
       const slotRow = db.prepare(`INSERT INTO slots
         (id, chat_id, parent_slot_id, depth, selected_version_id, created_at) VALUES (?, ?, ?, ?, ?, 1)`)
       const slot = (id: string, parent: string | null, depth: number) => {
@@ -108,12 +108,12 @@ const build = (length: number) => {
 
       // Forks and their selections, the same in every fixture relative to the root and to the tip.
       const alternate = db.prepare(`INSERT INTO version_records
-        (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-        VALUES (?, ?, 1, 'complete', 'model', 'Alternate reply', 'verbatim', 'generated', 1, 1)`)
+        (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+        VALUES (?, ?, 1, 'complete', 'model', 'Alternate reply', 'verbatim', 'generated', 1, 1, '${chat.id}' )`)
       const copy = db.prepare(`INSERT INTO version_records
         (id, slot_id, ordinal, status, writer, content, macro_mode, origin, source_version_id, fork_id, created_at,
-          updated_at)
-        VALUES (?, ?, 2, 'complete', 'human', 'Amended', 'verbatim', 'edited', ?, ?, 1, 1)`)
+          updated_at, authoring_fork_id)
+        VALUES (?, ?, 2, 'complete', 'human', 'Amended', 'verbatim', 'edited', ?, ?, 1, 1, '${chat.id}' )`)
       for (let j = 0; j < ALTERNATES; j++) {
         alternate.run(`w-p-${length - j}`, `p-${length - j}`)
         copy.run(`x-p-${length - j}`, `p-${length - j}`, `v-p-${length - j}`, chat.id)
@@ -526,8 +526,8 @@ const withInsertions = (f: Fixture) => {
           tip_slot_id) VALUES (?, ?, ?, ?, 1, ?, ?)`
       ).run(INSERT_FORK, f.chatId, f.chatId, state, `p-${f.length}`, `p-${f.length}`)
       const version = db.prepare(`INSERT INTO version_records
-        (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
-        VALUES (?, ?, 0, 'complete', 'human', 'Inserted', 'verbatim', 'user_written', 1, 1)`)
+        (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at, authoring_fork_id)
+        VALUES (?, ?, 0, 'complete', 'human', 'Inserted', 'verbatim', 'user_written', 1, 1, '${INSERT_FORK}' )`)
       const slot = db.prepare(`INSERT INTO slots
         (id, chat_id, parent_slot_id, depth, selected_version_id, created_at, inserted) VALUES (?, ?, ?, ?, ?, 1, 1)`)
       const place =

@@ -10,7 +10,7 @@
 import { Effect } from "effect"
 import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
-import { leftOutNote, mergedRowText } from "./merges.ts"
+import { viewedJoin } from "./mergeKnowledge.ts"
 import { AssemblySources, need, type Assembly, type AssemblerStage, type Cast } from "./pipeline.ts"
 import type { HistoryEntry, MergeRow } from "./types.ts"
 
@@ -143,20 +143,25 @@ export const knowledgeStage: AssemblerStage = {
  * counting only those it knew. Either way `known` holds the rows for `merge-layout`.
  */
 const joinFor = (
+  assembly: Assembly,
   entry: HistoryEntry,
   rows: ReadonlyArray<MergeRow>,
   knows: (knowers: ReadonlyArray<string>) => boolean
 ): HistoryEntry => {
-  const sent = rows.filter((row) => row.included === "verbatim")
-  const kept = sent.filter((row) => knows(row.knowers))
-  if (sent.length > 0 && kept.length === 0)
-    return { ...entry, inContext: false, unknown: { knowers: [...new Set(sent.flatMap((row) => row.knowers))] } }
-  if (kept.length === sent.length) return { ...entry, known: { rows: kept, partial: false } }
-  const leftOut = rows.filter((row) => row.included === "left_out" && knows(row.knowers)).length
-  const content = [...(leftOut ? [leftOutNote(leftOut, entry.merge!.title)] : []), ...kept.map(mergedRowText)].join(
-    "\n\n"
-  )
-  return { ...entry, content, known: { rows: kept, partial: true } }
+  const view = viewedJoin(entry.content, entry.merge!.title, rows, knows)
+  if (view.partial && view.ambiguous)
+    assembly.issues.push({
+      kind: "layout_ignored",
+      message:
+        "Some edits span several merged messages and cannot be assigned to this character's history. The affected original messages are sent instead."
+    })
+  if (view.rows.length === 0 && view.partial)
+    return { ...entry, inContext: false, unknown: { knowers: [...new Set(rows.flatMap((row) => row.knowers))] } }
+  return {
+    ...entry,
+    content: view.content,
+    known: { rows: view.rows, partial: view.partial, ...(view.ambiguous ? { ambiguous: true } : {}) }
+  }
 }
 
 /**
@@ -180,7 +185,7 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
     )
     return entries.map((entry) => {
       const rows = entry.merge && entry.inContext ? merged.get(entry.merge.id) : undefined
-      if (rows !== undefined) return joinFor(entry, rows, knows)
+      if (rows !== undefined) return joinFor(assembly, entry, rows, knows)
       const knowers = known.get(entry.versionId)
       if (!entry.inContext || knowers === undefined || knowers === null || knows(knowers)) return entry
       const hidden: HistoryEntry = { ...entry, inContext: false, unknown: { knowers } }
