@@ -112,6 +112,267 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
 
 describe("starting parallel threads", () => {
+  it.live("nested thread sets follow display positions when a split is an inserted message", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const later = yield* t.append(t.F, t.S, t.mira, "The later structural message.", true)
+        const inserted = yield* t.writer.InsertMessage({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.F,
+          anchorSlotId: t.S,
+          expectedRowVersion: yield* t.rowVersion(t.S, t.F),
+          body: { _tag: "Write", speaker: t.user, content: "The earlier inserted message." }
+        })
+        const start = (slotId: SlotId) =>
+          Effect.gen(function* () {
+            return yield* t.api.StartThreads({
+              chatId: t.chatId,
+              forkId: t.F,
+              slotId,
+              expectedRowVersion: yield* t.rowVersion(slotId, t.F),
+              threads: [
+                { name: null, cast: [t.mira], writesAs: null },
+                { name: null, cast: [t.wren], writesAs: null }
+              ]
+            })
+          })
+        const inner = yield* start(later.slotId)
+        const outer = yield* start(inserted.slotId)
+        const sets = yield* t.api.ThreadsOf({ chatId: t.chatId, forkId: t.F })
+        assert.deepStrictEqual(
+          sets.map((s) => s.splitId),
+          [inner.splitId, outer.splitId]
+        )
+        assert.isAbove(sets[0]!.position, sets[1]!.position)
+      })
+    )
+  )
+
+  it.live("CorrectPresence and its Undo cannot remove a thread's independent absence", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const mark = yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: t.S,
+          versionId: null,
+          scope: null,
+          data: { key: "away.set", value: { entity: t.wren, away: true, source: "decision" } }
+        })
+        const secret = yield* t.append(t.F, t.S, t.mira, "CORRECTED-BUT-ABSENT.", true)
+        const split = yield* t.api.StartThreads({
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: t.S,
+          expectedRowVersion: yield* t.rowVersion(t.S, t.F),
+          threads: [
+            { name: null, cast: [t.mira], writesAs: null },
+            { name: null, cast: [t.wren], writesAs: null }
+          ]
+        })
+        const corrected = yield* t.writer.CorrectPresence({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.F,
+          eventId: mark.id
+        })
+        assert.isNotNull(corrected)
+        assert.notInclude(yield* t.contextFor(t.F, secret.slotId, t.wren), "CORRECTED-BUT-ABSENT")
+        const record = (yield* t.reader.ListHistoryEdits({ userId: t.userId, chatId: t.chatId, forkId: t.F })).find(
+          (edit) => edit.title === "Correct scene check"
+        )!
+        yield* t.writer.UndoHistoryEdit({ userId: t.userId, chatId: t.chatId, forkId: t.F, changesetId: record.id })
+        assert.notInclude(yield* t.contextFor(t.F, secret.slotId, t.wren), "CORRECTED-BUT-ABSENT")
+        yield* t.api.UndoThreads({ chatId: t.chatId, splitId: split.splitId })
+        assert.notInclude(
+          yield* t.contextFor(t.F, secret.slotId, t.wren),
+          "CORRECTED-BUT-ABSENT",
+          "the original scene check still applies"
+        )
+      })
+    )
+  )
+
+  it.live("a replaced card's earlier identity receives the same branch correction", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const own = yield* t.append(t.F, t.S, t.wren, "Wren remembers her own words.", true)
+        const secret = yield* t.append(t.F, own.slotId, t.mira, "OLD-IDENTITY-SECRET.", true)
+        const next = yield* t.writer.ForkCard({
+          userId: t.userId,
+          refId: t.made.characters[0]!.ref.id,
+          name: "Wren later",
+          nickname: "Wren",
+          characterVersion: "2"
+        })
+        const wren = next.entityId as EntityId
+        yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: t.S,
+          versionId: null,
+          scope: null,
+          data: { key: "card.swap", value: { entity: wren, replaces: t.wren } }
+        })
+        yield* t.api.StartThreads({
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: t.S,
+          expectedRowVersion: yield* t.rowVersion(t.S, t.F),
+          threads: [
+            { name: null, cast: [t.mira], writesAs: null },
+            { name: null, cast: [wren], writesAs: null }
+          ]
+        })
+        const context = yield* t.contextFor(t.F, secret.slotId, wren)
+        assert.notInclude(context, "OLD-IDENTITY-SECRET")
+        assert.include(context, "Wren remembers her own words.")
+      })
+    )
+  )
+
+  it.live("overlapping splits can be undone in either order without reviving the other's absent stretch", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const secret = yield* t.append(t.F, t.S, t.mira, "OVERLAPPING-SECRET.", true)
+        const start = () =>
+          Effect.gen(function* () {
+            return yield* t.api.StartThreads({
+              chatId: t.chatId,
+              forkId: t.F,
+              slotId: t.S,
+              expectedRowVersion: yield* t.rowVersion(t.S, t.F),
+              threads: [
+                { name: null, cast: [t.mira], writesAs: null },
+                { name: null, cast: [t.wren], writesAs: null }
+              ]
+            })
+          })
+        const first = yield* start()
+        const second = yield* start()
+        const undone = yield* t.api.UndoThreads({ chatId: t.chatId, splitId: first.splitId })
+        assert.notInclude(yield* t.contextFor(t.F, secret.slotId, t.wren), "OVERLAPPING-SECRET")
+        yield* t.api.RestoreBinItem({ itemId: undone.id })
+        yield* t.api.UndoThreads({ chatId: t.chatId, splitId: second.splitId })
+        assert.notInclude(yield* t.contextFor(t.F, secret.slotId, t.wren), "OVERLAPPING-SECRET")
+        yield* t.api.UndoThreads({ chatId: t.chatId, splitId: first.splitId })
+        assert.include(yield* t.contextFor(t.F, secret.slotId, t.wren), "OVERLAPPING-SECRET")
+      })
+    )
+  )
+
+  it.live("a merge freezes the source branch's corrected knowers", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        yield* t.append(t.F, t.S, t.mira, "BRANCH-SECRET.", true)
+        const started = yield* t.api.StartThreads({
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: t.S,
+          expectedRowVersion: yield* t.rowVersion(t.S, t.F),
+          threads: [
+            { name: null, cast: [t.mira], writesAs: null },
+            { name: null, cast: [t.wren], writesAs: null }
+          ]
+        })
+        const forkId = started.forkIds[1]!
+        const request = {
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId,
+          at: null,
+          source: { chatId: t.chatId, forkId: t.F },
+          includeLeftOut: false
+        }
+        const preview = yield* t.reader.PreviewChatMerge(request)
+        const joined = yield* t.writer.MergeChat({
+          ...request,
+          title: preview.sourceTitle,
+          framing: null,
+          digest: preview.digest
+        })
+        assert.notInclude(yield* t.contextFor(forkId, joined.slotId, t.wren), "BRANCH-SECRET")
+      })
+    )
+  )
+
+  it.live("Undo and restore keep played thread messages; purging can erase model replies", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const started = yield* t.api.StartThreads({
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: t.S,
+          expectedRowVersion: yield* t.rowVersion(t.S, t.F),
+          threads: [
+            { name: null, cast: [t.mira], writesAs: null },
+            { name: null, cast: [t.wren], writesAs: null }
+          ]
+        })
+        const forkId = started.forkIds[1]!
+        const reply = yield* t.append(forkId, t.S, t.wren, "Keep this played thread.", true)
+        const child = (yield* t.api.CreateFork({ chatId: t.chatId, fromForkId: forkId, atSlotId: reply.slotId })).fork
+          .id
+        const last = yield* t.append(forkId, reply.slotId, t.wren, "This reply belongs only to the thread.", true)
+        const item = yield* t.api.UndoThreads({ chatId: t.chatId, splitId: started.splitId })
+        yield* t.api.RestoreBinItem({ itemId: item.id })
+        assert.strictEqual(
+          (yield* t.reader.GetSlot({ userId: t.userId, slotId: last.slotId, forkId })).entry.version.content,
+          "This reply belongs only to the thread."
+        )
+        const again = yield* t.api.UndoThreads({ chatId: t.chatId, splitId: started.splitId })
+        yield* t.writer.PurgeBinItem({ userId: t.userId, itemId: again.id })
+        assert.strictEqual(
+          (yield* t.reader.GetSlot({ userId: t.userId, slotId: reply.slotId, forkId: child })).entry.version.content,
+          "Keep this played thread.",
+          "purging a thread preserves a later branch's shared history"
+        )
+      })
+    )
+  )
+
+  it.live("an already-away character assigned elsewhere is absent from the whole played stretch", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const event = (slotId: SlotId, away: boolean) =>
+          t.writer.AddStateEvent({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.F,
+            slotId,
+            versionId: null,
+            scope: null,
+            data: { key: "away.set", value: { entity: t.wren, away } }
+          })
+        yield* event(t.S, true)
+        const returns = yield* t.append(t.F, t.S, t.mira, "Mira waits.", true)
+        yield* event(returns.slotId, false)
+        const secret = yield* t.append(t.F, returns.slotId, t.mira, "WRONG-SCENE.", true)
+        yield* t.api.StartThreads({
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: t.S,
+          expectedRowVersion: yield* t.rowVersion(t.S, t.F),
+          threads: [
+            { name: null, cast: [t.mira], writesAs: null },
+            { name: null, cast: [t.wren], writesAs: null }
+          ]
+        })
+        assert.notInclude(yield* t.contextFor(t.F, secret.slotId, t.wren), "WRONG-SCENE")
+      })
+    )
+  )
+
   it.live(
     "at an earlier message: the played messages stay the first thread's, the moved character not there for them here only",
     () =>

@@ -350,17 +350,13 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
     KnowersOf: ({ userId, chatId, forkId, versionIds, viewers }) =>
       Effect.gen(function* () {
         // A fork of another chat is none of this one's: its corrections don't apply.
-        const [fork] =
-          forkId == null
-            ? []
-            : yield* sql<{ id: string }>`SELECT id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
         return yield* readKnowers(
           sql,
           chatId,
           sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`,
           versionIds,
           viewers,
-          fork?.id ?? null
+          forkId == null ? null : sql`(SELECT id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId})`
         )
       }).pipe(query("KnowersOf")),
 

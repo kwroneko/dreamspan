@@ -42,16 +42,19 @@ export const ThreadSet = Schema.Struct({
 })
 export type ThreadSet = typeof ThreadSet.Type
 
+/** Input bounds keep a start transaction and list labels bounded. */
+export const ThreadName = Schema.String.check(Schema.isMaxLength(200))
+
 /** One thread of a "Start parallel threads" request: who is in it and who the user writes as there. */
-export const ThreadStart = Schema.Struct({
+const ThreadStart = Schema.Struct({
   /** A name, or null to leave it unnamed (the UI shows its characters' names). */
-  name: Schema.NullOr(Schema.String),
+  name: Schema.NullOr(ThreadName),
   /** The cast members in it; everyone else in the cast is away in it. A narrator is in every thread. */
   cast: Schema.Array(EntityId),
   /** The card the user writes as there (the composer's speaker); null: the composer's choice as it is. */
   writesAs: Schema.NullOr(EntityId)
 })
-export type ThreadStart = typeof ThreadStart.Type
+export const ThreadStarts = Schema.Array(ThreadStart).check(Schema.isMaxLength(32))
 
 /** Why threads can't start as asked, in the user's words (fewer than two, one with nobody in it). */
 export class ThreadsRefused extends Schema.TaggedError<ThreadsRefused>()("ThreadsRefused", {

@@ -272,6 +272,12 @@
     },
     {
       "type": "index",
+      "name": "fork_overrides_presence",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE INDEX fork_overrides_presence ON fork_overrides(slot_id, target_id) WHERE kind = 'presence_away'"
+    },
+    {
+      "type": "index",
       "name": "fork_overrides_target",
       "tbl_name": "fork_overrides",
       "sql": "CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind, value_id)"
@@ -1864,13 +1870,13 @@
       "type": "trigger",
       "name": "fork_overrides_presence_away",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TRIGGER fork_overrides_presence_away BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'presence_away' AND (NEW.flag IS NULL OR NEW.slot_id IS NULL OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.slot_id) OR length(NEW.target_id) <= length(NEW.slot_id) + 1 OR substr(NEW.target_id, 1, length(NEW.slot_id) + 1) IS NOT NEW.slot_id || ':') BEGIN SELECT RAISE(ABORT, 'a presence correction names a message of its chat and a card'); END"
+      "sql": "CREATE TRIGGER fork_overrides_presence_away BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'presence_away' AND (NEW.flag IS NULL OR NEW.slot_id IS NULL OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.slot_id) OR NEW.value_id IS NULL OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object' OR length(NEW.target_id) <= length(NEW.slot_id) + 1 OR substr(NEW.target_id, 1, length(NEW.slot_id) + 1) IS NOT NEW.slot_id || ':') BEGIN SELECT RAISE(ABORT, 'a presence correction names a message of its chat and a card'); END"
     },
     {
       "type": "trigger",
       "name": "fork_overrides_presence_away_update",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TRIGGER fork_overrides_presence_away_update BEFORE UPDATE OF flag ON fork_overrides WHEN NEW.kind = 'presence_away' AND NEW.flag IS NULL BEGIN SELECT RAISE(ABORT, 'a presence correction names a message of its chat and a card'); END"
+      "sql": "CREATE TRIGGER fork_overrides_presence_away_update BEFORE UPDATE OF flag, value_id ON fork_overrides WHEN NEW.kind = 'presence_away' AND (NEW.flag IS NULL OR NEW.value_id IS NULL OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object') BEGIN SELECT RAISE(ABORT, 'a presence correction names a message of its chat and a card'); END"
     },
     {
       "type": "trigger",
@@ -3172,7 +3178,7 @@
       "type": "trigger",
       "name": "versions_model_content_frozen",
       "tbl_name": "version_texts",
-      "sql": "CREATE TRIGGER versions_model_content_frozen BEFORE UPDATE OF content ON version_texts WHEN NEW.content IS NOT OLD.content AND EXISTS ( SELECT 1 FROM versions v WHERE v.seq = OLD.version_seq AND v.writer = 'model' AND v.status <> 'generating' AND NOT (v.purged_at IS NOT NULL AND NEW.content = '' AND EXISTS ( SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id JOIN bin_items b ON b.user_id = c.owner_user_id AND b.chat_id = c.id WHERE s.id = v.slot_id AND ( (b.id = v.bin_item_id AND b.kind = 'version') OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch')))))) BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END"
+      "sql": "CREATE TRIGGER versions_model_content_frozen BEFORE UPDATE OF content ON version_texts WHEN NEW.content IS NOT OLD.content AND EXISTS ( SELECT 1 FROM versions v WHERE v.seq = OLD.version_seq AND v.writer = 'model' AND v.status <> 'generating' AND NOT (v.purged_at IS NOT NULL AND NEW.content = '' AND EXISTS ( SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id JOIN bin_items b ON b.user_id = c.owner_user_id AND b.chat_id = c.id WHERE s.id = v.slot_id AND ( (b.id = v.bin_item_id AND b.kind = 'version') OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch', 'threads')))))) BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END"
     },
     {
       "type": "trigger",

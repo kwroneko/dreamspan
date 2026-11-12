@@ -188,7 +188,12 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
     )
     return entries.map((entry) => {
       const gone = away.get(entry.versionId)
-      if (entry.inContext && gone !== undefined && knows(gone))
+      if (
+        entry.inContext &&
+        gone !== undefined &&
+        knows(gone) &&
+        (entry.speaker === null || !identities.includes(entry.speaker))
+      )
         return { ...entry, inContext: false, unknown: { knowers: known.get(entry.versionId) ?? [] } }
       const rows = entry.merge && entry.inContext ? merged.get(entry.merge.id) : undefined
 

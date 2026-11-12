@@ -8,7 +8,7 @@ import { Chat, ChatId, ForkId, SlotId } from "./chat.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { HistoryRejected } from "./historyApi.ts"
 import { RefId } from "./library.ts"
-import { StartedThreads, ThreadSet, ThreadStart, ThreadsRefused } from "./threads.ts"
+import { StartedThreads, ThreadName, ThreadSet, ThreadStarts, ThreadsRefused } from "./threads.ts"
 
 /** "Start parallel threads" at message `slotId` of branch `forkId`, as the tab saw it (`expectedRowVersion`). */
 export const StartThreadsInput = Schema.Struct({
@@ -17,7 +17,7 @@ export const StartThreadsInput = Schema.Struct({
   slotId: SlotId,
   expectedRowVersion: Schema.Int,
   /** The first is the branch the user is in, continuing; at least two. */
-  threads: Schema.Array(ThreadStart)
+  threads: ThreadStarts
 })
 export type StartThreadsInput = typeof StartThreadsInput.Type
 
@@ -47,7 +47,7 @@ export class ChatThreadsApi extends RpcGroup.make(
       chatId: ChatId,
       splitId: Schema.String,
       ordinal: Schema.Int,
-      name: Schema.String,
+      name: ThreadName,
       rowVersion: Schema.Int
     },
     success: Schema.Int,

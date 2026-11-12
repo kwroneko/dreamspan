@@ -23,8 +23,8 @@ import { placesOf, threadCandidates } from "./threads.ts"
 import type { ThreadPlace } from "@rp/shared/threads.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
-// Recompute rows that predate the threads a fork is in (spec/THREADS.md §4.3).
-export const FORK_SUMMARY_FORMAT = 8
+// Thread sets are ordered by display position, including inserted split points.
+export const FORK_SUMMARY_FORMAT = 9
 
 /**
  * What the shell shows of a fork: ids only, the cast with every card, binned or not, and the
@@ -252,7 +252,7 @@ export const computeForkSummaries = (
         }
         path = shown
       }
-      const onPath = new Set(path.map((s) => s.id))
+      const onPath = new Map(path.map((s, position) => [s.id, position]))
       const applicable = (eventsByFork.get(record.id) ?? []).filter((e) => e.slot_id === null || onPath.has(e.slot_id))
       // The child's bounded lineage retains the parent's cast as of the split. Own
       // events at the base (including branch-wide swaps) must not change that baseline.
@@ -359,7 +359,7 @@ export const computeForkSummaries = (
               ? ("with" as const)
               : ("just" as const)
         })),
-        threads: placesOf(threadsSeen, record.id, (slotId) => onPath.has(slotId))
+        threads: placesOf(threadsSeen, record.id, (slotId) => onPath.has(slotId), onPath)
       })
     }
     // All history/participation above is metadata. Read only each fork's newest

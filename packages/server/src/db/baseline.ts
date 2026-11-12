@@ -185,13 +185,16 @@ const threadSchema: ReadonlyArray<string> = [
     BEGIN ${raise("a send group never changes")}; END`,
   // The per-branch correction of who was present (§3.4, §16.2 [D] 2026-11-12): a fork counts a
   // character away for one message of its path. Its key is "<slot id>:<card id>".
+  `CREATE INDEX fork_overrides_presence ON fork_overrides(slot_id, target_id) WHERE kind = 'presence_away'`,
   `CREATE TRIGGER fork_overrides_presence_away BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'presence_away'
     AND (NEW.flag IS NULL OR NEW.slot_id IS NULL OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.slot_id)
+      OR NEW.value_id IS NULL OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object'
       OR length(NEW.target_id) <= length(NEW.slot_id) + 1
       OR substr(NEW.target_id, 1, length(NEW.slot_id) + 1) IS NOT NEW.slot_id || ':')
     BEGIN ${raise("a presence correction names a message of its chat and a card")}; END`,
-  `CREATE TRIGGER fork_overrides_presence_away_update BEFORE UPDATE OF flag ON fork_overrides
-    WHEN NEW.kind = 'presence_away' AND NEW.flag IS NULL
+  `CREATE TRIGGER fork_overrides_presence_away_update BEFORE UPDATE OF flag, value_id ON fork_overrides
+    WHEN NEW.kind = 'presence_away' AND (NEW.flag IS NULL OR NEW.value_id IS NULL
+      OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object')
     BEGIN ${raise("a presence correction names a message of its chat and a card")}; END`,
   // Starting threads changes what the branch it was started in is (db/forkSummaries.ts).
   `CREATE TRIGGER shell_thread_splits_insert AFTER INSERT ON thread_splits BEGIN ${bumpChat("NEW.chat_id")} END`
@@ -1801,7 +1804,7 @@ export const baseline: ReadonlyArray<string> = [
             JOIN bin_items b ON b.user_id = c.owner_user_id AND b.chat_id = c.id
           WHERE s.id = v.slot_id AND (
             (b.id = v.bin_item_id AND b.kind = 'version')
-            OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch'))))))
+            OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch', 'threads'))))))
     BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END`,
   `CREATE TRIGGER card_names_insert AFTER INSERT ON entity_refs
       WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
