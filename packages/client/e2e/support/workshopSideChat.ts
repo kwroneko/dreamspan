@@ -2,13 +2,13 @@
 // the story's ⋯ menu, the Workshop tab showing the workshop's own messages and composer, the
 // assistant reading the story through read_story, the story left as it was, a reload and a second
 // tab showing the same workshop, an unknown one falling back, and a deleted one leaving the empty
-// state. Run by workshopSideChat.spec.ts and, with LAYOUT_AUDIT_WORKSHOP_ONLY=1, by
+// state; and two tabs on two branches, each reading its own (workfix1). Run by workshopSideChat.spec.ts and, with LAYOUT_AUDIT_WORKSHOP_ONLY=1, by
 // layoutAudit.spec.ts. Synthetic data and a scripted loopback provider only.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { expectLayout } from "./layoutAudit.ts"
 import { showActions } from "./message.ts"
 import { asUser } from "./rpc.ts"
@@ -126,6 +126,87 @@ export function workshopSideChatEffectsTests() {
           )
           expect(permissions.find((c) => c.id === "library.write")!.mode).toBe("allow")
         })
+  })
+}
+
+/**
+ * Two browser tabs on two branches of one story (workfix1): each says which branch and message it
+ * reads, and each side-chat request reads its own tab's branch, never the other.
+ */
+export function workshopSideChatBranchTests() {
+  test.describe("workshop beside a story, two branches", () => {
+    const server = serverPerFile(withAdmin)
+    const provider = useSideChatProvider(server)
+    test("each tab's side chat reads the branch that tab shows", async ({ page, context }) => {
+      test.setTimeout(120_000)
+      const story = await makeStory(server, "Two roads")
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const other = "Down the other road."
+      const { original, branch, workshop } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          // The story's reply has finished before branching beside it (else the message is queued).
+          let first: string | null = null
+          for (let tries = 0; first === null; tries++) {
+            const path = yield* api.ReadPath({
+              chatId: story.id,
+              leafSlotId: null,
+              range: { _tag: "Bottom" },
+              limit: 10
+            })
+            if (path.entries.length === 2 && path.entries.every((entry) => entry.version.status !== "generating"))
+              first = path.entries[0]!.slotId
+            else if (tries > 300) return yield* Effect.die("the story's reply didn't finish")
+            else yield* Effect.sleep("100 millis")
+          }
+          const chat = yield* api.GetChat({ chatId: story.id })
+          // Another message 2, in place of the reply: a second branch.
+          const sent = yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: first as SlotId,
+            branch: true,
+            content: other
+          })
+          if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+          const moved = yield* api.GetChat({ chatId: story.id })
+          yield* api.NameFork({ forkId: moved.currentForkId!, name: "Other road" })
+          const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+          return { original: chat.currentForkId!, branch: moved.currentForkId!, workshop }
+        })
+      )
+      expect(branch).not.toBe(original)
+      const open = async (tab: Page, forkId: string) => {
+        await tab.goto(`${server().url}/chats/${story.id}?fork=${forkId}&panel=workshop&workshop=${workshop.id}`)
+        return sidePanel(tab).locator(`[data-side-chat="${workshop.id}"]`)
+      }
+      const first = await open(page, original)
+      await expect(sidePanel(page).locator("[data-side-chat-reading]")).toHaveText("Reads “Original”, up to message 2")
+      const second = await context.newPage()
+      await second.setViewportSize({ width: 1440, height: 900 })
+      const secondSide = await open(second, branch)
+      await expect(sidePanel(second).locator("[data-side-chat-reading]")).toHaveText(
+        "Reads “Other road”, up to message 2"
+      )
+
+      const ask = async (side: typeof first, text: string, answers: number) => {
+        await side.getByLabel("Message", { exact: true }).fill(text)
+        await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+        await expect(side.getByRole("article").filter({ hasText: SIDE_ANSWER })).toHaveCount(answers, {
+          timeout: 60_000
+        })
+        // This turn's read: the last tool result (earlier turns' reads stay in the side chat's history).
+        return provider().toolResults().at(-1) ?? ""
+      }
+      const fromSecond = await ask(secondSide, "What happens on this road?", 1)
+      expect(fromSecond).toContain(other)
+      expect(fromSecond).not.toContain(STORY_REPLY)
+      expect(fromSecond).toContain('branch=\\"Other road\\" up_to_message=\\"2\\"')
+      const fromFirst = await ask(first, "And on this one?", 2)
+      expect(fromFirst).toContain(STORY_REPLY)
+      expect(fromFirst).not.toContain(other)
+      expect(fromFirst).toContain('branch=\\"Original\\" up_to_message=\\"2\\"')
+      await second.close()
+    })
   })
 }
 

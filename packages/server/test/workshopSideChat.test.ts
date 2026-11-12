@@ -2,11 +2,12 @@
 // tools at the story's position (its current branch, up to that branch's newest message), never
 // another branch, chat or user, and nothing of it reaches the story's requests or rows.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat, EntityId, VersionId } from "@rp/shared/chat.ts"
+import type { Chat, EntityId, StoryAt, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { ApprovalPrompt } from "@rp/shared/agent.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { writeFileSync } from "node:fs"
+import { foldState } from "@rp/shared/state.ts"
 import { Effect, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { storyTools } from "../src/agent/tools/history.ts"
@@ -80,13 +81,40 @@ const provider = (hold: () => boolean = () => false) =>
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
-const contextFor = (userId: UserId, workshop: Chat) =>
+/** Where a tab beside the story shows it now: its current branch and that branch's newest message. */
+const shownNow = (userId: UserId, story: Chat) =>
+  Effect.gen(function* () {
+    const reader = yield* Reader
+    const now = yield* reader.GetChat({ userId, chatId: story.id })
+    return { chatId: now.id, forkId: now.currentForkId!, leafSlotId: now.activeLeafSlotId } satisfies StoryAt
+  })
+
+/** Where a tab beside a workshop's story shows it now (the workshop's attachment, read as its owner). */
+const storyOf = (api: Api, workshop: Chat) =>
+  Effect.gen(function* () {
+    const userId = (yield* api.Whoami()).id as UserId
+    const reader = yield* Reader
+    const events = yield* reader.StateEventsAt({ userId, chatId: workshop.id, slotId: null, forkId: null })
+    const story = foldState(events).workshopAttached!
+    return yield* shownNow(userId, yield* reader.GetChat({ userId, chatId: story as Chat["id"] }))
+  })
+
+/** A story tool's quoted text, without its wrapper (and its More marker). */
+const quoted = (text: string) => {
+  const start = text.indexOf("\n\n")
+  const end = text.lastIndexOf("\n</story_excerpt>")
+  return start < 0 || end < 0 ? text : text.slice(start + 2, end)
+}
+
+const contextFor = (userId: UserId, workshop: Chat, storyAt?: StoryAt) =>
   Effect.gen(function* () {
     return {
+      ...(storyAt ? { storyAt } : {}),
       userId,
       chatId: workshop.id,
       forkId: workshop.currentForkId,
       leafSlotId: null,
+      viewers: null,
       slotId: "unused" as ToolContext["slotId"],
       versionId: "unused" as VersionId,
       rolloutId: "unused",
@@ -102,7 +130,14 @@ const storyTool = (id: string) => storyTools.find((t) => t.id === id)! as Rollou
  * One workshop turn: the user's message, then the reply, waited for to its end. With `prompts`,
  * each call waiting for the user is allowed once and its approval kept there.
  */
-const turn = (api: Api, workshop: Chat, content: string, prompts?: Array<ApprovalPrompt>) =>
+const turn = (
+  api: Api,
+  workshop: Chat,
+  content: string,
+  prompts?: Array<ApprovalPrompt>,
+  /** Where the tab it's sent from shows the story; by default its story's current branch now. */
+  at?: StoryAt | null
+) =>
   Effect.gen(function* () {
     const events: Array<ChatEvent> = []
     const answered = new Set<string>()
@@ -132,7 +167,15 @@ const turn = (api: Api, workshop: Chat, content: string, prompts?: Array<Approva
     const sent = yield* posted(
       api.SendMessage({ chatId: chat.id, parentSlotId: chat.activeLeafSlotId, branch: false, content })
     )
-    const generated = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+    const storyAt = at === null ? undefined : (at ?? (yield* storyOf(api, workshop)))
+    const generated = yield* posted(
+      api.Generate({
+        chatId: chat.id,
+        parentSlotId: sent.entry.slotId,
+        branch: false,
+        ...(storyAt ? { storyAt } : {})
+      })
+    )
     yield* eventually(() => finished(events, generated.entry.version.id as VersionId) !== undefined)
     return finished(events, generated.entry.version.id as VersionId)!
   }).pipe(Effect.scoped)
@@ -178,7 +221,7 @@ describe("side chat", () => {
       const story = yield* api.CreateChat({ title: "Lifecycle story" })
       yield* posted(api.SendMessage({ chatId: story.id, parentSlotId: null, branch: false, content: "Visible story." }))
       const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
-      const context = yield* contextFor(userId, workshop)
+      const context = yield* contextFor(userId, workshop, yield* shownNow(userId, story))
       const read = () => storyTool("read_story").execute(context, {})
       assert.include((yield* read()).text, "Visible story.")
       yield* fixtureSql(config.dataDir, [
@@ -232,7 +275,7 @@ describe("side chat", () => {
         api.SendMessage({ chatId: story.id, parentSlotId: first.slotId, branch: false, content: "Second message." })
       )).entry
       const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
-      const context = yield* contextFor(userId, workshop)
+      const context = yield* contextFor(userId, workshop, yield* shownNow(userId, story))
       const read = () => storyTool("read_story").execute(context, {})
       assert.include((yield* read()).text, "Before edit.")
       yield* api.AmendVersion({
@@ -308,6 +351,7 @@ describe("side chat", () => {
         .entry
       const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
       const context: ToolContext = {
+        storyAt: yield* shownNow(userId, story),
         userId,
         chatId: workshop.id,
         forkId: workshop.currentForkId,
@@ -328,7 +372,7 @@ describe("side chat", () => {
         const output = yield* read.execute(context, { offset, chatId: workshop.id, forkId: workshop.currentForkId })
         assert.isAtMost(output.text.length, 16_000)
         const next = /\n\[More: repeat with offset=(\d+)\.\]$/.exec(output.text)
-        joined += next ? output.text.slice(0, next.index) : output.text
+        joined += quoted(next ? output.text.slice(0, next.index) : output.text)
         if (!next) break
         offset = Number(next[1])
       }
@@ -337,14 +381,15 @@ describe("side chat", () => {
         { slotId: first.slotId, versionId: first.version.id, amendCount: 0 }
       ])
       const expanded = yield* storyTool("open_story_summary").execute(context, { messages: "1–1", max_tokens: 200 })
-      assert.isAtMost(expanded.text.length, 1000)
+      // An 800-character page, quoted: the wrapper and the More marker are outside the page.
+      assert.strictEqual(quoted(expanded.text.slice(0, expanded.text.indexOf("\n[More:"))).length, 800)
       assert.match(expanded.text, /More: repeat with offset=800/)
       const continued = yield* storyTool("open_story_summary").execute(context, {
         messages: "1–1",
         max_tokens: 200,
         offset: 800
       })
-      assert.strictEqual(continued.text.slice(0, 800), joined.slice(800, 1600))
+      assert.strictEqual(quoted(continued.text).slice(0, 800), joined.slice(800, 1600))
       yield* fixtureSql(config.dataDir, [
         { sql: "UPDATE chats SET status = 'archived' WHERE id = ?", params: [story.id] }
       ])
@@ -492,9 +537,11 @@ describe("side chat", () => {
       assert.strictEqual(yield* outcome(bob.CreateWorkshop({ attachTo: story.chat.id })), "NotFound")
 
       // The story in the bin: the side chat says so, and the story lists nothing.
+      // Sent from a tab that still shows the story as it was before the delete.
+      const lastShown = yield* storyOf(alice, workshop)
       yield* alice.DeleteChat({ chatId: story.chat.id })
       const gone = mock.requests().length
-      yield* turn(alice, workshop, "Is it still there?")
+      yield* turn(alice, workshop, "Is it still there?", undefined, lastShown)
       assert.include(results(mock.requests()[gone + 1]!.body as Body)[0], "isn't available any more")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })

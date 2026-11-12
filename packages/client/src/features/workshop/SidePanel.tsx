@@ -2,8 +2,9 @@
 // workshop chat, its messages and its composer, at the panel's width. It's a chat of its own: its
 // own session and event stream, its own branch (`side.fork`) and dialogs (`side.messageDialog`)
 // in the URL, so neither chat moves or opens anything in the other. The assistant reads the story
-// through its story tools; nothing said here is in the story's context.
-import type { Chat, ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
+// through its story tools, at the branch and newest message this tab shows (`storyAt`, sent with
+// each request from here); nothing said here is in the story's context.
+import type { Chat, ChatId, ForkId, PathEntry, StoryAt } from "@rp/shared/chat.ts"
 import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult, Atom } from "effect/reactivity"
@@ -37,6 +38,8 @@ import { kindRootProps, useChatKindLook } from "../chat/kindLooks.ts"
 import type { PanelProps } from "../chat/panels.tsx"
 import { ChatSurfaceProviders, chatComposer, chatComposerNotes, chatOverlays } from "../chat/presentation.tsx"
 import { ChatSession, type ChatView } from "../chat/session.ts"
+import { branchLabel, useChatForks } from "../chat/forks.ts"
+import { ReplyExtrasContext, type ReplyExtrasSource } from "../chat/replyExtras.ts"
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
 import { useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -50,7 +53,28 @@ const attachedTo = Atom.family((chatId: ChatId) =>
 const PAGE_PROVIDERS: ReadonlySet<string> = new Set(["chat.portraits", "chat.preset-workspace"])
 
 const ABOUT =
-  "Talk about this story with an assistant, out of character. It reads the story on the branch you last wrote in; nothing said here reaches the story."
+  "Talk about this story with an assistant, out of character. It reads the branch shown here, up to its newest message; nothing said here reaches the story."
+
+/** Where this tab shows the story, read at the moment of each request; none before it's open. */
+export const storyPosition = (story: ChatSession): StoryAt | undefined => {
+  const view = story.snapshot()
+  const forkId = view.forkId ?? view.chat?.currentForkId ?? null
+  if (view.chat === null || forkId === null) return undefined
+  return { chatId: story.id, forkId, leafSlotId: view.leafSlotId }
+}
+
+/** "Reads “Original”, up to message 12": the branch and message the next request reads to. */
+function ReadingLine({ story, view }: { story: ChatSession; view: ChatView }) {
+  const { shown } = useChatForks(story, view)
+  const leaf = view.entries.find((e) => e.slotId === view.leafSlotId)
+  const upTo = leaf ? (leaf.position ?? leaf.depth) + 1 : null
+  return (
+    <p className="shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted" data-side-chat-reading="">
+      Reads {shown ? <span className="font-medium text-text">“{branchLabel(shown)}”</span> : "this branch"}
+      {upTo !== null ? `, up to message ${upTo}` : ""}
+    </p>
+  )
+}
 
 /** Opens a chat in a tab of its own, beside this one. */
 function useOpenOwn() {
@@ -70,7 +94,7 @@ export function WorkshopSidePanel(props: PanelProps) {
   return props.active ? <ActiveWorkshopSidePanel {...props} /> : null
 }
 
-function ActiveWorkshopSidePanel({ session }: PanelProps) {
+function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
   const atom = attachedTo(session.id)
   const result = useAtomValue(atom)
   const refresh = useAtomRefresh(atom)
@@ -147,14 +171,18 @@ function ActiveWorkshopSidePanel({ session }: PanelProps) {
     <SideChat
       key={choice.shown.id}
       chat={choice.shown}
+      story={session}
       header={
-        <SideChatHeader
-          shown={choice.shown}
-          all={list ?? []}
-          starting={action.pending}
-          onPick={(id) => setWanted(id)}
-          onStart={() => void start()}
-        />
+        <>
+          <SideChatHeader
+            shown={choice.shown}
+            all={list ?? []}
+            starting={action.pending}
+            onPick={(id) => setWanted(id)}
+            onStart={() => void start()}
+          />
+          <ReadingLine story={session} view={storyView} />
+        </>
       }
       error={action.error ? `The workshop couldn’t be started: ${action.error.message}` : null}
       onGone={gone}
@@ -229,11 +257,14 @@ function SideChatHeader({
 /** One workshop beside the story: its own session, at the panel's width. */
 function SideChat({
   chat,
+  story,
   header,
   error,
   onGone
 }: {
   chat: Chat
+  /** The story beside it, as this tab shows it: each reply request reads it there. */
+  story: ChatSession
   header: ReactNode
   error: string | null
   onGone: () => void
@@ -247,8 +278,16 @@ function SideChat({
   // than starting another.
   const [opening] = useState(fork)
   const [session, setSession] = useState<ChatSession | null>(null)
+  const extras = useMemo<ReplyExtrasSource>(
+    () => () => {
+      const storyAt = storyPosition(story)
+      return storyAt ? { storyAt } : {}
+    },
+    [story]
+  )
   useLayoutEffect(() => {
     const next = new ChatSession(chat.id, opening, registry, userId, (title) => showToast({ title }))
+    next.setReplyExtras(extras)
     // Shown once its first page is read, as a chat page's is (ChatPage.tsx).
     let shown = false
     const ready = () => {
@@ -263,7 +302,7 @@ function SideChat({
       unsubscribe()
       next.dispose()
     }
-  }, [chat.id, opening, registry, userId])
+  }, [chat.id, opening, registry, userId, extras])
   if (session === null || session.id !== chat.id)
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -272,7 +311,16 @@ function SideChat({
       </div>
     )
   return (
-    <SideChatSurface session={session} fork={fork} onFork={setUrlFork} header={header} error={error} onGone={onGone} />
+    <ReplyExtrasContext value={extras}>
+      <SideChatSurface
+        session={session}
+        fork={fork}
+        onFork={setUrlFork}
+        header={header}
+        error={error}
+        onGone={onGone}
+      />
+    </ReplyExtrasContext>
   )
 }
 

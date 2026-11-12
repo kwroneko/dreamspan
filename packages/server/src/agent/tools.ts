@@ -40,6 +40,11 @@ export interface ToolContext {
   readonly cache: Map<string, unknown>
   /** A one-call approval, checked again in the change's transaction. */
   readonly approvalDigest?: string
+  /**
+   * A side chat's request: where its story tools read the story (spec/WORKSHOP.md §4), as the
+   * browser tab the request came from showed it. Absent: nothing says where, so they don't read.
+   */
+  readonly storyAt?: import("@rp/shared/chat.ts").StoryAt
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */

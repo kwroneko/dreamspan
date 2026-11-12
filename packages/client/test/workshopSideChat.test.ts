@@ -1,19 +1,20 @@
 // The workshop beside a story in the client (spec/WORKSHOP.md §4, W9): which workshop the URL
 // shows and how an unknown one falls back, where the Workshop tab and "Talk about this chat" are
-// offered, and the URL keys a chat shown inside another's panel uses. Synthetic chats only.
+// offered, the URL keys a chat shown inside another's panel uses, and the story position each
+// side-chat request sends (workfix1). Synthetic chats only.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { Chat } from "@rp/shared/chat.ts"
+import type { Chat, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { chatPlaceKey } from "../src/features/chat/chatPlace.ts"
 import { availableCommands, type ChatCommandContext } from "../src/features/chat/commands.tsx"
 import { takesSideChat } from "../src/features/chat/kindLooks.ts"
 import { panelHere, panelTabs, type PanelProps } from "../src/features/chat/panels.tsx"
 import { registerPanels } from "../src/features/chat/registerPanels.tsx"
-import type { ChatView } from "../src/features/chat/session.ts"
+import type { ChatSession, ChatView } from "../src/features/chat/session.ts"
 import { register as registerWorkshop } from "../src/features/workshop/index.tsx"
 import { chooseSideChat, sideChatSearch, SIDE_CHAT_SCOPE, SIDE_CHAT_TAB } from "../src/features/workshop/sideChat.ts"
-import { WorkshopSidePanel } from "../src/features/workshop/SidePanel.tsx"
+import { storyPosition, WorkshopSidePanel } from "../src/features/workshop/SidePanel.tsx"
 
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
@@ -121,5 +122,33 @@ describe("URL keys of a chat inside another's panel", () => {
     expect(chatPlaceKey("", "messageDialog")).toBe("messageDialog")
     expect(chatPlaceKey(SIDE_CHAT_SCOPE, "messageDialog")).toBe("side.messageDialog")
     expect(chatPlaceKey(SIDE_CHAT_SCOPE, "fork")).toBe("side.fork")
+  })
+})
+
+describe("where the side chat reads the story", () => {
+  const storyIn = (view: () => Partial<ChatView>) =>
+    ({ id: "story", snapshot: () => view() as ChatView }) as unknown as ChatSession
+
+  it("sends the branch and message this tab shows, read when asked", () => {
+    let view: Partial<ChatView> = {
+      chat: { currentForkId: "fork-last-written" } as unknown as Chat,
+      forkId: "fork-shown" as ForkId,
+      leafSlotId: "slot-7" as SlotId
+    }
+    const story = storyIn(() => view)
+    expect(storyPosition(story)).toEqual({ chatId: "story", forkId: "fork-shown", leafSlotId: "slot-7" })
+    // The tab moves to another branch: the next request names it.
+    view = { ...view, forkId: "fork-other" as ForkId, leafSlotId: "slot-3" as SlotId }
+    expect(storyPosition(story)).toEqual({ chatId: "story", forkId: "fork-other", leafSlotId: "slot-3" })
+  })
+
+  it("uses the story's branch before one is chosen, and sends none before the story opens", () => {
+    const fresh = storyIn(() => ({
+      chat: { currentForkId: "fork-root" } as unknown as Chat,
+      forkId: null,
+      leafSlotId: null
+    }))
+    expect(storyPosition(fresh)).toEqual({ chatId: "story", forkId: "fork-root", leafSlotId: null })
+    expect(storyPosition(storyIn(() => ({ chat: null, forkId: null, leafSlotId: null })))).toBeUndefined()
   })
 })

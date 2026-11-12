@@ -5,7 +5,15 @@ import { regenerateSeveral } from "./agent.ts"
 // to the chat's subscribers, from every tab of the user, after it's committed.
 import { originalReply } from "@rp/shared/replySections.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { PathEntry, type ChatId, type EntityId, type ForkId, type NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import {
+  PathEntry,
+  type ChatId,
+  type EntityId,
+  type ForkId,
+  type NewVersion,
+  type SlotId,
+  type StoryAt
+} from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import { NotFound } from "@rp/shared/errors.ts"
@@ -162,10 +170,12 @@ export const makeChatHandlers = Effect.gen(function* () {
       /** The reply's speaker and the round's are Auto's picks, which the decision model may change. */
       readonly autoPick?: boolean | undefined
       readonly composer: { readonly draftId: string; readonly session: number } | undefined
+      /** A side chat's story position, for its reply now or when the queue posts it. */
+      readonly storyAt?: StoryAt | undefined
     }
   ) =>
     Effect.gen(function* () {
-      const { composer, round, autoPick, ...send } = params
+      const { composer, round, autoPick, storyAt, ...send } = params
       // What the user sends goes through the scripts first, as ST's sendMessageAsUser.
       const written =
         params.kind === "message"
@@ -185,6 +195,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         ...(written.rewrite ? { rewrite: written.rewrite } : {}),
         ...(round === undefined || round.length === 0 ? {} : { round }),
         ...(autoPick === true ? { autoPick } : {}),
+        ...(storyAt === undefined ? {} : { storyAt }),
         // The composer draft the text was taken from (DESIGN §6.2).
         commitDraft: composer === undefined ? null : { draftId: composer.draftId, session: composer.session }
       })
@@ -224,6 +235,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           versionId: result.version.id,
           ...(proof?.model ? { model: proof.model } : {}),
           ...(operation ? { replyOnly: true } : {}),
+          ...(storyAt === undefined ? {} : { storyAt }),
           forkId: result.forkId
         })
       }
@@ -319,7 +331,8 @@ export const makeChatHandlers = Effect.gen(function* () {
       reply,
       round,
       autoPick,
-      composer
+      composer,
+      storyAt
     }) =>
       Effect.flatMap(userId, (id) =>
         sendOrQueue(id, {
@@ -337,13 +350,25 @@ export const makeChatHandlers = Effect.gen(function* () {
           direction: null,
           round,
           autoPick,
-          composer
+          composer,
+          storyAt
         })
       ).pipe(internal("SendMessage")),
 
     // Once the version is written, its generation starts even if the caller has gone:
     // otherwise it would stay `generating` with nothing behind it.
-    Generate: ({ chatId, forkId, parentSlotId, branch, speakerEntityId, direction, round, autoPick, composer }) =>
+    Generate: ({
+      chatId,
+      forkId,
+      parentSlotId,
+      branch,
+      speakerEntityId,
+      direction,
+      round,
+      autoPick,
+      composer,
+      storyAt
+    }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -359,7 +384,8 @@ export const makeChatHandlers = Effect.gen(function* () {
           direction: direction ?? null,
           round,
           autoPick,
-          composer
+          composer,
+          storyAt
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
 
@@ -377,7 +403,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         return outcome.queue
       }).pipe(Effect.uninterruptible, internal("Round")),
 
-    Regenerate: ({ slotId, forkId, expectedRowVersion, model, direction }) =>
+    Regenerate: ({ slotId, forkId, expectedRowVersion, model, direction, storyAt }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -390,7 +416,8 @@ export const makeChatHandlers = Effect.gen(function* () {
             forkId: forkId ?? null,
             expectedRowVersion,
             ...(model ? { model } : {}),
-            ...(direction !== undefined ? { direction } : {})
+            ...(direction !== undefined ? { direction } : {}),
+            ...(storyAt ? { storyAt } : {})
           })
           if (resumed) {
             yield* publishChat(id, chatId)
@@ -423,7 +450,8 @@ export const makeChatHandlers = Effect.gen(function* () {
           slotId,
           versionId: added.version.id,
           forkId: added.forkId,
-          ...(model ? { model } : {})
+          ...(model ? { model } : {}),
+          ...(storyAt ? { storyAt } : {})
         })
         const { entry } = yield* reader.GetSlot({ userId: id, slotId, forkId: added.forkId })
         hub.publish(added.chatId, { _tag: "Slot", entry })
@@ -434,7 +462,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     // streams on from its end, the old version left as it was. Whoever wrote the version
     // continued (an edit is the user's), the new one is the model's. The slot is published before
     // the generation starts, so every tab has the starting text before the first delta.
-    ContinueVersion: ({ versionId, forkId, expectedRowVersion, direction }) =>
+    ContinueVersion: ({ versionId, forkId, expectedRowVersion, direction, storyAt }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -470,6 +498,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           slotId: source.slotId,
           versionId: added.version.id,
           forkId: added.forkId,
+          ...(storyAt ? { storyAt } : {}),
           initial: {
             text: added.version.content,
             reasoning: added.version.reasoning ?? "",

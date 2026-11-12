@@ -16,6 +16,7 @@ import {
   PathEntry,
   QueuedMessage,
   SlotId,
+  StoryAtField,
   Version,
   VersionId
 } from "./chat.ts"
@@ -577,7 +578,9 @@ export class ChatApi extends RpcGroup.make(
        * model's "Who replies next", when the user turned it on, may choose another for each.
        */
       autoPick: Schema.optionalKey(Schema.Boolean),
-      composer: ComposerCommit
+      composer: ComposerCommit,
+      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
+      storyAt: StoryAtField
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, ServerError])
@@ -606,7 +609,9 @@ export class ChatApi extends RpcGroup.make(
        * next", when the user turned it on, may choose another for each (DESIGN §2.3).
        */
       autoPick: Schema.optionalKey(Schema.Boolean),
-      composer: ComposerCommit
+      composer: ComposerCommit,
+      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
+      storyAt: StoryAtField
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, GenerationUnavailable, ServerError])
@@ -639,7 +644,9 @@ export class ChatApi extends RpcGroup.make(
        * A one-turn direction for this version (the guidance editor's box); empty for none.
        * Absent, the version it replaces gives its own.
        */
-      direction: Schema.optionalKey(Schema.String)
+      direction: Schema.optionalKey(Schema.String),
+      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
+      storyAt: StoryAtField
     },
     success: PathEntry,
     error: Schema.Union([...WriteErrors, GenerationUnavailable])
@@ -657,7 +664,9 @@ export class ChatApi extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       expectedRowVersion: Schema.Int,
       /** A one-turn direction for the continued version; the continued one's isn't reused. */
-      direction: Schema.optionalKey(Schema.String)
+      direction: Schema.optionalKey(Schema.String),
+      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
+      storyAt: StoryAtField
     },
     success: PathEntry,
     error: Schema.Union([...WriteErrors, GenerationUnavailable, NotContinuable])

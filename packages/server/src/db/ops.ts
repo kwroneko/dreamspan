@@ -86,7 +86,7 @@ import {
   Version,
   VersionId
 } from "@rp/shared/chat.ts"
-import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
+import { ContextIssue, StoryAtField, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import { RecentRemote, SourcePrefs } from "@rp/shared/cardSources.ts"
 import {
   ForkNote,
@@ -398,7 +398,13 @@ export const ImportedMedia = Schema.Struct({
 const StoredFile = Schema.Struct({ path: Schema.String, mime: Schema.String, byteSize: Schema.Int })
 
 /** A reply the send queue posted, generating, for the caller to start in its fork. */
-const QueuedReply = Schema.Struct({ slotId: SlotId, versionId: VersionId, forkId: Schema.optionalKey(ForkId) })
+const QueuedReply = Schema.Struct({
+  slotId: SlotId,
+  versionId: VersionId,
+  forkId: Schema.optionalKey(ForkId),
+  /** A side chat's story position, as the queued entry was sent with it. */
+  storyAt: StoryAtField
+})
 
 /** What the send queue did behind a slot (chatSetupWrites.ts). */
 export const QueueOutcome = Schema.Struct({
@@ -2151,7 +2157,9 @@ export class WriteOps extends RpcGroup.make(
        */
       round: Schema.optionalKey(Schema.Array(EntityId)),
       /** The reply's speaker and the round's are Auto's picks: the decision model may change each (DESIGN §2.3). */
-      autoPick: Schema.optionalKey(Schema.Boolean)
+      autoPick: Schema.optionalKey(Schema.Boolean),
+      /** A side chat's story position (spec/WORKSHOP.md §4): kept with a queued entry for its reply. */
+      storyAt: StoryAtField
     },
     success: Schema.Union([
       /** `queue`: the chat's queue, when the post queued the rest of a round behind it. */

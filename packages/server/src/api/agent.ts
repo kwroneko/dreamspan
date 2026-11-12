@@ -8,7 +8,7 @@ import { foldState, permissionKey } from "@rp/shared/state.ts"
 import { ACTIVITY_PAGE, NotResumable, type StepEdit } from "@rp/shared/agent.ts"
 import { type AgentApi } from "@rp/shared/agentApi.ts"
 import { CurrentUser } from "@rp/shared/api.ts"
-import type { EntityId, ForkId, VersionId } from "@rp/shared/chat.ts"
+import type { EntityId, ForkId, StoryAt, VersionId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect, Option } from "effect"
@@ -49,7 +49,7 @@ const agentVersionResumer = Effect.gen(function* () {
       frozen: Frozen
     ) => ResumePlan | StepNotResumable,
     reason: "resume" | "edit",
-    options?: { readonly model?: RetryModel; readonly direction?: string }
+    options?: { readonly model?: RetryModel; readonly direction?: string; readonly storyAt?: StoryAt }
   ) =>
     Effect.gen(function* () {
       if (Option.isNone(generator))
@@ -138,6 +138,8 @@ const agentVersionResumer = Effect.gen(function* () {
         versionId: added.version.id,
         forkId: added.forkId,
         ...(planned.continuation === undefined ? {} : { initial: { text: planned.continuation, reasoning: "" } }),
+        // A side chat's story is read where the tab asking for this showed it (spec/WORKSHOP.md §4).
+        ...(options?.storyAt ? { storyAt: options.storyAt } : {}),
         resume: {
           rolloutId,
           snapshot,
@@ -161,7 +163,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
         internal("GetRolloutSteps")
       ),
 
-    ResumeVersion: ({ versionId, forkId, expectedRowVersion }) =>
+    ResumeVersion: ({ versionId, forkId, expectedRowVersion, storyAt }) =>
       resume(
         versionId,
         forkId ?? null,
@@ -173,10 +175,11 @@ export const makeAgentHandlers = Effect.gen(function* () {
                 prefill: frozen.inputs?.model?.prefill === "assistant",
                 historical: frozen.continuity?.historical ?? 0
               }),
-        "resume"
+        "resume",
+        storyAt ? { storyAt } : undefined
       ).pipe(internal("ResumeVersion")),
 
-    ResumeFromStep: ({ versionId, step, edit, forkId, expectedRowVersion }) =>
+    ResumeFromStep: ({ versionId, step, edit, forkId, expectedRowVersion, storyAt }) =>
       resume(
         versionId,
         forkId ?? null,
@@ -191,7 +194,8 @@ export const makeAgentHandlers = Effect.gen(function* () {
             versionId,
             frozen.continuity?.historical ?? 0
           ),
-        "edit"
+        "edit",
+        storyAt ? { storyAt } : undefined
       ).pipe(internal("ResumeFromStep")),
     GetRunTranscript: ({ versionId }) =>
       Effect.flatMap(CurrentUser, (user) => reader.RolloutTranscript({ userId: user.id, versionId })).pipe(
@@ -286,6 +290,7 @@ export const regenerateSeveral = Effect.fnUntraced(function* (input: {
   readonly expectedRowVersion: number
   readonly model?: RetryModel
   readonly direction?: string
+  readonly storyAt?: StoryAt
 }) {
   const userId = (yield* CurrentUser).id
   const reader = yield* Reader

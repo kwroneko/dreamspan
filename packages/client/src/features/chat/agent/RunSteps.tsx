@@ -18,6 +18,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { Fragment, type ReactNode, useContext, useMemo, useState } from "react"
+import { ReplyExtrasContext } from "../replyExtras.ts"
 import { ChatPlaceScope, chatPlaceKey } from "../chatPlace.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../../editor/userDraft.tsx"
 import { useAction } from "../../../actions.tsx"
@@ -102,9 +103,13 @@ interface StepEditing {
   readonly error: string | null
 }
 
+/** A side chat's story text arrives quoted (spec/WORKSHOP.md §4): the inspector says so plainly. */
+const quotesStory = (target: StepTarget) =>
+  target.kind === "result" && !target.entry.isError && target.entry.text.startsWith("<story_excerpt ")
+
 const titleOf = (target: StepTarget) =>
   target.kind === "result"
-    ? `Result of ${target.entry.tool}${target.entry.isError ? " (an error)" : ""}`
+    ? `Result of ${target.entry.tool}${target.entry.isError ? " (an error)" : quotesStory(target) ? ": story text, quoted for the assistant to discuss" : ""}`
     : target.part.type === "toolCall"
       ? `Tool call: ${target.part.name}`
       : target.part.type === "thinking"
@@ -404,6 +409,8 @@ function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): Ste
   const shownFork = search[forkKey]
   const fork = typeof shownFork === "string" && shownFork !== "" ? (shownFork as ForkId) : null
   const [missing, setMissing] = useState<string | null>(null)
+  // A side chat's steps carry on reading the story where its tab shows it (spec/WORKSHOP.md §4).
+  const replyExtras = useContext(ReplyExtrasContext)
   const resume = async (step: number, edit: StepEdit | undefined) => {
     setMissing(null)
     // A guard may hold it back (a reply that changed things outside the chat warns first).
@@ -432,7 +439,8 @@ function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): Ste
           step,
           ...(edit === undefined ? {} : { edit }),
           forkId: fork,
-          expectedRowVersion: entry.rowVersion
+          expectedRowVersion: entry.rowVersion,
+          ...replyExtras()
         })
       })
     )
