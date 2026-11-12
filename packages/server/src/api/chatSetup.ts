@@ -248,9 +248,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       cardLorebooksOff: Object.entries(state.embeddedLorebooks).flatMap(([entity, on]) =>
         on ? [] : [entity as Cast["cardLorebooksOff"][number]]
       ),
-      cardLorebookBindings: Object.fromEntries(
-        Object.entries(state.lorebookBindings).flatMap(([entity, ref]) => (ref === null ? [] : [[entity, ref]]))
-      ),
+      cardLorebookBindings: state.lorebookBindings,
       listedLorebooks: state.listedLorebooks as Cast["listedLorebooks"],
       loreBelowHistory: state.loreBelowHistory ?? true,
       macroBindings: state.macroBindings,

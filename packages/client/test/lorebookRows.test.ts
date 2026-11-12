@@ -55,11 +55,16 @@ test("a switch shows at once and is pending until the server agrees", () => {
   expect(after[0]).toMatchObject({ on: false, pending: false })
 })
 
-test("a card's own book is replaced only while its linked world file is read", () => {
-  const bindings = { aria: "w" }
-  expect(replacedBy("aria", bindings, [{ ref: "w", on: true }], [])).toBe("w")
-  expect(replacedBy("aria", bindings, [], [{ id: "w", enabled: true }])).toBe("w")
-  expect(replacedBy("aria", bindings, [{ ref: "w", on: false }], [{ id: "w", enabled: false }])).toBeNull()
-  expect(replacedBy("rook", bindings, [{ ref: "w", on: true }], [])).toBeNull()
-  expect(replacedBy("aria", undefined, [{ ref: "w", on: true }], [])).toBeNull()
+test("a card's own book is replaced by the book the assembler would pick: linked, or named as its world", () => {
+  const aria = { entity: "aria", world: "Tides" }
+  const none = () => undefined
+  const named = (id: string) => (id === "w" ? "Tides" : undefined)
+  expect(replacedBy(aria, { aria: "w" }, [{ ref: "w", on: true }], [], none)).toBe("w")
+  expect(replacedBy(aria, { aria: "w" }, [], [{ id: "w", enabled: true }], none)).toBe("w")
+  expect(replacedBy(aria, { aria: "w" }, [{ ref: "w", on: false }], [{ id: "w", enabled: false }], none)).toBeNull()
+  expect(replacedBy({ entity: "rook", world: undefined }, { aria: "w" }, [{ ref: "w", on: true }], [], none)).toBeNull()
+  // By name, only without a link of the chat's own; an explicit "none" turns the name off.
+  expect(replacedBy(aria, undefined, [{ ref: "w", on: true }], [], named)).toBe("w")
+  expect(replacedBy(aria, { aria: null }, [{ ref: "w", on: true }], [], named)).toBeNull()
+  expect(replacedBy({ entity: "aria", world: "Other" }, {}, [{ ref: "w", on: true }], [], named)).toBeNull()
 })

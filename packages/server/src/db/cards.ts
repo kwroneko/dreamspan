@@ -87,6 +87,10 @@ const parse = (row: CardRow): CardText => {
       lorebook: book !== null,
       ...(bookName === "" ? {} : { lorebookName: bookName }),
       ...(book === null ? {} : { lorebookEntries: Array.isArray(book.entries) ? book.entries.length : 0 }),
+      ...(typeof (doc.extensions as { world?: unknown } | undefined)?.world === "string" &&
+      (doc.extensions as { world: string }).world !== ""
+        ? { lorebookWorld: (doc.extensions as { world: string }).world }
+        : {}),
       avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null,
       ...avatarCropField(doc.avatar_media_id, doc.avatar_crop)
     }),

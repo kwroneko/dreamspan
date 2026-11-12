@@ -380,6 +380,8 @@ export class CastCard extends Schema.Class<CastCard>("CastCard")({
   lorebookName: Schema.optionalKey(Schema.String),
   /** How many entries that lorebook has. */
   lorebookEntries: Schema.optionalKey(Schema.Int),
+  /** The world file it names (`extensions.world`), which replaces that lorebook when a chat reads a file of that name. */
+  lorebookWorld: Schema.optionalKey(Schema.String),
   /** Its avatar, served at `/library/media?id=`; null without one. */
   avatarMediaId: Schema.NullOr(Schema.String),
   /** The avatar's chosen cutout (ARCHITECTURE.md §14.5c); absent: the default. */

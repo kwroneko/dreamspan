@@ -254,7 +254,13 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
       const card = cards.get(row.id)!
       const name = card.lorebookName ?? `${card.name}'s lorebook`
       const ref = cardRefs?.get(row.id)
-      const replacement = replacedBy(row.id, cast?.cardLorebookBindings, cast?.listedLorebooks ?? [], presetBooks)
+      const replacement = replacedBy(
+        { entity: row.id, world: card.lorebookWorld },
+        cast?.cardLorebookBindings,
+        cast?.listedLorebooks ?? [],
+        presetBooks,
+        (id) => byId.get(id)?.lorebookSource
+      )
       return {
         name,
         from: [

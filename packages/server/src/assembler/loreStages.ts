@@ -1,3 +1,4 @@
+import { replacingBook } from "@rp/shared/lorebookLink.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { canonicalJson } from "@rp/shared/editing.ts"
 import { createHash } from "node:crypto"
@@ -43,14 +44,7 @@ export const lorebooksStage: AssemblerStage = {
         card.doc.character_book &&
         // Turned off for this chat: an ST import of a card whose book ST never imported.
         state.embeddedLorebooks[card.entity] !== false &&
-        !attached.some(
-          (book) =>
-            state.lorebookBindings[card.entity] === book.id ||
-            (state.lorebookBindings[card.entity] === undefined &&
-              typeof book.sourceName === "string" &&
-              book.sourceName !== "" &&
-              card.doc.extensions.world === book.sourceName)
-        )
+        replacingBook(state.lorebookBindings[card.entity], card.doc.extensions.world, attached) === null
           ? [
               {
                 id: `card:${card.entity}`,
