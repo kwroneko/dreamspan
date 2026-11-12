@@ -107,6 +107,11 @@ export interface ChatView {
   readonly lcm: LcmState | null
   /** Bumped each time the summaries are read and differ, so a window of coverage reads again. */
   readonly lcmVersion: number
+  /**
+   * In separate contexts, the character whose summaries `lcm` and coverage show (spec/CHARACTER-
+   * CONTEXT.md §2.3): the shared ones and its own. Null: the shared summaries. Not kept on reload.
+   */
+  readonly lcmViewer: EntityId | null
   /** A message just inserted here, briefly highlighted where it went (spec/MESSAGE-INSERT.md §4.3); null: none. */
   readonly highlight: SlotId | null
 }
@@ -174,6 +179,7 @@ export class ChatSession {
     history: null,
     lcm: null,
     lcmVersion: 0,
+    lcmViewer: null,
     highlight: null
   }
   private readonly listeners = new Set<() => void>()
@@ -320,13 +326,17 @@ export class ChatSession {
     const forkId = this.view.forkId
     const leafSlotId = this.view.leafSlotId
     if (leafSlotId === null || this.disposed) return
-    const result = await this.call((client) => client("GetLcmState", { chatId: this.chatId, forkId, leafSlotId }))
+    const viewer = this.view.lcmViewer
+    const result = await this.call((client) =>
+      client("GetLcmState", { chatId: this.chatId, forkId, leafSlotId, ...(viewer ? { viewer } : {}) })
+    )
     if (
       !result.ok ||
       this.disposed ||
       read < this.lcmApplied ||
       forkId !== this.view.forkId ||
-      leafSlotId !== this.view.leafSlotId
+      leafSlotId !== this.view.leafSlotId ||
+      viewer !== this.view.lcmViewer
     )
       return
     this.lcmApplied = read
@@ -338,13 +348,22 @@ export class ChatSession {
     })
   }
 
+  /** Whose summaries to show: a character's in separate contexts, or null for the shared ones. */
+  setLcmViewer(viewer: EntityId | null) {
+    if (viewer === this.view.lcmViewer) return
+    this.update({ lcmViewer: viewer })
+    void this.refreshLcm()
+  }
+
   /** The summaries overlapping a range of message positions on the path shown, without their text. */
   async coverage(fromPosition: number, toPosition: number, includeResolved = false): Promise<LcmCoverage | null> {
     const forkId = this.view.forkId
     const leafSlotId = this.view.leafSlotId
+    const viewer = this.view.lcmViewer
     if (leafSlotId === null) return null
     const result = await this.call((client) =>
       client("GetLcmCoverage", {
+        ...(viewer ? { viewer } : {}),
         forkId,
         chatId: this.chatId,
         leafSlotId,
@@ -355,7 +374,11 @@ export class ChatSession {
         includeResolved
       })
     )
-    return result.ok && !this.disposed && forkId === this.view.forkId && leafSlotId === this.view.leafSlotId
+    return result.ok &&
+      !this.disposed &&
+      forkId === this.view.forkId &&
+      leafSlotId === this.view.leafSlotId &&
+      viewer === this.view.lcmViewer
       ? result.value
       : null
   }

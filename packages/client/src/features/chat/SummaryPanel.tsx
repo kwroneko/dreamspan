@@ -23,6 +23,7 @@ import { ClampedText, HintBadge, LevelBadge, SummaryBadges } from "./summaryPart
 import type { ChatSession } from "./session.ts"
 import { TimelineToggle } from "./TimelineToggle.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
+import { audienceName, SummaryViewer } from "./SummaryViewer.tsx"
 import { SummaryDraft } from "./summaryDraft.ts"
 import { summaryPreviews } from "./presentation.tsx"
 
@@ -345,6 +346,8 @@ function SummaryRow({
     setError(result.ok ? null : result.error)
   }
   const range = rangeText(summary.from, summary.to)
+  const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
+  const owner = audienceName(summary, cast)
   const failed = health === "failed"
   const retryBlocked = blockedByManual && !summary.rerun
   return (
@@ -372,6 +375,13 @@ function SummaryRow({
           </Tooltip>
           {!failed && <span className="text-xs text-muted">{tokensText(summary.tokens)}</span>}
           <SummaryBadges summary={summary} />
+          {owner !== null && (
+            <HintBadge
+              hint={`Written for ${owner} alone, from what ${owner} knew: only ${owner}'s replies read it. The others read the shared summaries of these messages.`}
+            >
+              {owner}'s own
+            </HintBadge>
+          )}
         </div>
         <div className="flex shrink-0 items-center">
           {failed ? (
@@ -849,6 +859,7 @@ export function SummaryPanel({
           </Alert>
         )}
         {viewer.error && <Problem error={viewer.error} />}
+        {lcm.enabled && <SummaryViewer session={session} />}
       </div>
       {lcm.enabled && <Backfill session={session} lcm={lcm} />}
       {unfinished.length > 0 && (

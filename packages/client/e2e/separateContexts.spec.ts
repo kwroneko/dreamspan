@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
+import { level1 } from "./support/summaries.ts"
 import { choices, nextChip } from "./support/strip.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
@@ -436,5 +437,57 @@ for (const width of [1440, 390])
           )
         )
         .toBe("[{{char}} missed {{absentCount}} messages.]")
+    })
+  }
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`the Summaries panel shows a character's own summaries at ${width} ${theme}`, async ({ page }, info) => {
+      await look(page, width, theme)
+      const { chatId, slotId, forkId } = await threeCharacters()
+      const ids = await castIds()
+      const cast = (at: SlotId, c: object) => admin((api) => api.ChangeCast({ chatId, slotId: at, change: c as never }))
+      await cast(slotId, { _tag: "ContextPerSpeaker", view: "separate" })
+      await cast(slotId, { _tag: "Away", entityId: ids.wren, away: true })
+      // Mira answers while Wren is away; Wren is back for Mira's next lines.
+      const missed = await reply(chatId, forkId!, ids.mira)
+      await cast(missed.slotId, { _tag: "Away", entityId: ids.wren, away: false })
+      await reply(chatId, forkId!, ids.mira)
+      // The newest message is never summarized.
+      await reply(chatId, forkId!, ids.mira)
+      await admin((api) => api.SetLcmEnabled({ chatId, enabled: true }))
+      const path = await admin((api) =>
+        api.ReadPath({ chatId, forkId: forkId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      )
+      const [first, second, third] = path.entries
+      // The shared summaries; and Wren's own of messages 2–3, written without the one she missed.
+      await level1(server().dataDir, chatId, [first!], "The inn's door opened.")
+      await level1(server().dataDir, chatId, [second!, third!], "Mira nodded, then spoke of the lantern.")
+      await level1(server().dataDir, chatId, [second!, third!], "Wren came back as Mira spoke of the lantern.", {
+        audience: [ids.wren],
+        missed: [second!]
+      })
+      await page.goto(`${server().url}/chats/${chatId}`)
+      const panel = await openPanel(page, "Summaries")
+      const inUse = panel.getByRole("list", { name: "Summaries in use" })
+      await expect(inUse.getByRole("listitem")).toHaveCount(2)
+      await expect(inUse.getByText("Wren's own", { exact: true })).toHaveCount(0)
+      const picker = panel.getByRole("combobox", { name: /^Summaries of/ })
+      await expect(picker).toHaveText(/Shared/)
+      await picker.click()
+      await page.getByRole("option", { name: /^Wren/ }).click()
+      await expect(inUse.getByRole("listitem")).toHaveCount(2)
+      const own = inUse.getByText("Wren's own", { exact: true })
+      await expect(own).toBeVisible()
+      await own.hover()
+      await expect(page.getByText("Written for Wren alone", { exact: false }).filter({ visible: true })).toBeVisible()
+      await page.mouse.move(0, 0)
+      await expectLayout(page, info, `contexts-summaries-${width}-${theme}`, {
+        scope: '[role="tabpanel"][aria-label="Summaries"]'
+      })
+      await picker.click()
+      await page.getByRole("option", { name: /^Shared/ }).click()
+      await expect(inUse.getByText("Wren's own", { exact: true })).toHaveCount(0)
+      await expect(inUse.getByRole("listitem")).toHaveCount(2)
     })
   }
