@@ -419,9 +419,9 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("CardsRotation", { on: Schema.Boolean }),
   /** Tools and agent instructions from here on (`agent.enabled`). */
   Schema.TaggedStruct("AgentEnabled", { on: Schema.Boolean }),
-  /** The tools agent replies offer from here on (`agent.tools`), by id. */
+  /** The tools agent replies offer from here on (`agent.tools`), by id; null follows the app default again. */
   Schema.TaggedStruct("AgentTools", {
-    tools: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100))
+    tools: Schema.NullOr(Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100)))
   }),
   /**
    * Whether agent replies may change a note, or a card's field, in this chat from here on

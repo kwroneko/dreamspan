@@ -18,7 +18,9 @@ import {
   EffectList,
   RolloutEffect,
   RolloutEffectRecord,
-  EffectUndoRefused
+  EffectUndoRefused,
+  ReplyEffects,
+  UndoAllReport
 } from "@rp/shared/workshopApi.ts"
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
@@ -2009,6 +2011,12 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, ...EffectKey },
     success: RolloutEffect,
     error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  /** Every change of one reply not yet undone, newest first, in one transaction (workshopEffects.ts). */
+  Rpc.make("UndoRolloutEffects", {
+    payload: { userId: UserId, ...ReplyEffects },
+    success: UndoAllReport,
+    error: Schema.Union([NotFound, StorageError])
   }),
   // --- Workshop grants and approvals (workshopGrants.ts; spec/WORKSHOP.md §3.4). Never reached
   // by a tool: the session gives tools a writer without these (agent/tools.ts).

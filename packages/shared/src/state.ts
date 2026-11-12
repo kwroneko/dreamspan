@@ -95,7 +95,8 @@ export const StateEventData = Schema.Union([
    */
   event("cards.rotation", Schema.Struct({ on: Schema.Boolean })),
   /** The tools an agent reply offers, by id, in place of the default list (spec/AGENTIC.md §6). */
-  event("agent.tools", Schema.Struct({ tools: Schema.Array(Schema.String) })),
+  /** `tools` null: this chat follows the app default list again. */
+  event("agent.tools", Schema.Struct({ tools: Schema.NullOr(Schema.Array(Schema.String)) })),
   /**
    * Whether agent replies may change a note, or a card's field (as a note replacing it), in this
    * chat (spec/AGENTIC.md §4.3): over the note's `agent_editable` or the card's

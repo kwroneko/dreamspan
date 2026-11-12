@@ -9,7 +9,14 @@ import { waitsForUser } from "../src/features/chat/agent/stepActions.ts"
 import { statusText } from "../src/features/chat/agent/steps.ts"
 import { guardReply, replyGuards, type ReplyGuardRequest } from "../src/features/chat/replyGuards.ts"
 import { chatKindLooks } from "../src/features/chat/kindLooks.ts"
-import { openTarget, outstanding, undoable, undoHint } from "../src/features/workshop/effects.ts"
+import {
+  groupByReply,
+  openTarget,
+  outstanding,
+  undoAllOffered,
+  undoable,
+  undoHint
+} from "../src/features/workshop/effects.ts"
 import { workshopLook } from "../src/features/workshop/kinds.ts"
 import {
   askBeforeReply,
@@ -77,6 +84,32 @@ describe("a workshop change", () => {
     expect(outstanding([effect({}), undone, fixed]).map((e) => e.seq)).toEqual([0, 2])
     expect(undoHint(effect({ kind: "library.create" }))).toMatch(/bin/)
     expect(undoHint(effect({}))).toMatch(/as it was before/)
+  })
+})
+
+describe("the Changes tab's replies", () => {
+  it("groups changes by the reply that made them, newest reply first, and merges a later page in", () => {
+    const first = [
+      effect({ rolloutId: "r2", toolCallId: "b", createdAt: 30 }),
+      effect({ rolloutId: "r2", toolCallId: "a", createdAt: 20 }),
+      effect({ rolloutId: "r1", toolCallId: "z", createdAt: 10 })
+    ]
+    // "Show older" read the rest of r1, and an older reply.
+    const older = [
+      effect({ rolloutId: "r1", toolCallId: "y", createdAt: 5 }),
+      effect({ rolloutId: "r0", createdAt: 1 })
+    ]
+    const groups = groupByReply([...first, ...older])
+    expect(groups.map((g) => g.rolloutId)).toEqual(["r2", "r1", "r0"])
+    expect(groups[1]!.effects.map((e) => e.toolCallId)).toEqual(["z", "y"])
+    expect(groups.map((g) => g.startedAt)).toEqual([20, 5, 1])
+  })
+
+  it("offers Undo all while any change of the reply can still be undone", () => {
+    const [group] = groupByReply([effect({ undoneAt: 2 }), effect({ toolCallId: "c2" })])
+    expect(undoAllOffered(group!)).toBe(true)
+    const [done] = groupByReply([effect({ undoneAt: 2 }), effect({ toolCallId: "c2", undo: null })])
+    expect(undoAllOffered(done!)).toBe(false)
   })
 })
 
