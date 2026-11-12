@@ -17,8 +17,9 @@
 // - Nothing loads unless it's a `data:` or in-document `#` address, or an http(s) address with
 //   media consent, which becomes a proxy address built here (media.ts). Every other loading
 //   form (image(), image-set(), cross-fade(), element(), paint(), src(), @import, a bare string
-//   where an image is expected) is outside the allowlist; var() and env() can only carry tokens
-//   that passed the same policy where they were defined.
+//   where an image is expected) is outside the allowlist. Message-defined custom properties
+//   pass the same value policy; inherited app variables are not isolated (currently colors,
+//   dimensions and font names). Accepted media is queued independently of selector matches.
 import {
   type CSSToken,
   HashType,
@@ -64,7 +65,7 @@ export const renameId = (name: string) => `user-content-${name}`
  * specificity). `scope` where the browser supports it.
  */
 export type ScopeMode = "scope" | "prefix"
-export const defaultScopeMode = (): ScopeMode => ("CSSScopeRule" in globalThis ? "scope" : "prefix")
+const defaultScopeMode = (): ScopeMode => ("CSSScopeRule" in globalThis ? "scope" : "prefix")
 
 // ---------------------------------------------------------------------------------------------
 // Parsing
@@ -184,20 +185,17 @@ function blockItems(values: ReadonlyArray<ComponentValue>): Item[] {
       continue
     }
     let end = at
-    while (end < values.length && !isToken(values[end], TokenType.Semicolon)) end++
-    const declaration = declarationOf(values.slice(at, end))
-    if (declaration) {
-      items.push(declaration)
-      at = end + 1
-      continue
+    // A curly block already makes this a nested rule under our policy (declarationOf
+    // refuses curly values). Stop there: scanning to a later semicolon for every sibling
+    // rule makes a flat list of nested rules quadratic.
+    while (end < values.length && !isToken(values[end], TokenType.Semicolon) && !isCurly(values[end])) end++
+    const block = values[end]
+    if (isCurly(block)) items.push({ kind: "rule", prelude: values.slice(at, end), body: block.value })
+    else {
+      const declaration = declarationOf(values.slice(at, end))
+      if (declaration) items.push(declaration)
     }
-    // Not a declaration: a nested rule up to its block, and what follows the block is next.
-    let block = at
-    while (block < end && !isCurly(values[block])) block++
-    if (block < end) {
-      items.push({ kind: "rule", prelude: values.slice(at, block), body: (values[block] as SimpleBlockNode).value })
-      at = block + 1
-    } else at = end + 1
+    at = end + 1
   }
   return items
 }
@@ -261,7 +259,7 @@ const isNameChar = (char: string) => NAME.test(char) || char.codePointAt(0)! >= 
 const hex = (char: string) => `\\${char.codePointAt(0)!.toString(16)} `
 
 /** CSSOM's "serialize an identifier". */
-export function serializeIdent(value: string): string {
+function serializeIdent(value: string): string {
   let out = ""
   const chars = [...value]
   chars.forEach((char, index) => {

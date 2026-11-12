@@ -1,6 +1,7 @@
 // Adversarial synthetic cards, exercised through the real message renderer and frame CSP.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
+import { cleanStyle, scopeCss } from "../src/ui/html/css.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -251,3 +252,77 @@ test("markup the HTML step can't convert shows as text, and the chat stays", asy
   await expect(message.locator("svg.x, template")).toHaveCount(0)
   expect(errors).toEqual([])
 })
+
+// Exercise each containment layer by itself. The scope-only variant deliberately removes
+// our selector prefixes; the prefix variant emits no @scope at all.
+for (const layer of ["scope", "prefix", "scope-only"] as const)
+  test(`CSS parser edge cases and painting stay contained with ${layer}`, async ({ page }) => {
+    const payloads = [
+      '.a[title="x\n]{}[data-outside]{color:red!important}/*"]{color:blue}',
+      '@media x"\r\n{}[data-outside]{color:red!important}/*"{.a{color:blue}}',
+      String.raw`.a[title="x\"]{}[data-outside]{color:red!important}/*"]{color:blue}`,
+      String.raw`.a\7d [data-outside]\7b color\3a red {color:blue}`,
+      ".a\0 {color:red} [data-outside]{color:red!important}",
+      ".a\ud800 {color:red} [data-outside]{color:red!important}",
+      String.raw`.a\0 {color:red} .a\d800 {color:red}`,
+      '.a{background:url("bad\n")} [data-outside]{color:red!important}',
+      '.a{background:url(bad"url)} [data-outside]{color:red!important}',
+      "<!-- [data-outside]{color:red!important} -->",
+      ".a/**/,[data-outside]{color:red!important}",
+      ".a{color:red; /*",
+      ".a{color:rgb(1,2,3)",
+      "@media all{.a{color:red}",
+      '@import "https://media.invalid/forbidden";',
+      "@namespace x url(https://media.invalid/forbidden);",
+      '@charset "utf-8"; [data-outside]{color:red!important}',
+      '@property --x {syntax:"<color>";inherits:true;initial-value:red}',
+      "@font-face{font-family:Inter;src:url(https://media.invalid/forbidden);unicode-range:U+0-10FFFF}",
+      "@layer attack{[data-outside]{color:red!important}}",
+      "@container (min-width:0px){[data-outside]{color:red!important}}",
+      "@supports (display:block){[data-outside]{color:red!important}}",
+      "@scope (body){[data-outside]{color:red!important}}",
+      ":root,:host,:scope,:is(body,[data-outside]),:where([data-outside]),:has(.a){color:red!important}",
+      "+ [data-outside],~ [data-outside]{color:red!important}",
+      ".a{ & + [data-outside]{color:red!important} :is(&,body) [data-outside]{color:red!important}}",
+      '.a{--x:"https://media.invalid/forbidden";background:image-set(var(--x));content:attr(data-x);background-image:env(--x,url(https://media.invalid/forbidden))}',
+      '.a{--x:url(https://media.invalid/forbidden);background:var(--x);background:image-set("https://media.invalid/forbidden");background:u\\72l(https://media.invalid/forbidden)}',
+      ".a{position:fixed;inset:-10000px;z-index:2147483647;background:red!important;transform:scale(100);box-shadow:0 0 0 10000px red}"
+    ]
+    const mode = layer === "prefix" ? "prefix" : "scope"
+    const css =
+      payloads.map((input) => scopeCss(input, null, mode).css).join("\n") +
+      scopeCss(".ok{color:rgb(4,5,6)}", null, mode).css
+    const output = layer === "scope-only" ? css.replaceAll(":scope ", "") : css
+    const style = cleanStyle(
+      'color:rgb(9,8,7)!important;--x:"https://media.invalid/forbidden";background:image-set(var(--x));background:url(https://media.invalid/forbidden)'
+    ).style
+    const requests: string[] = []
+    page.on("request", (request) => requests.push(request.url()))
+    await page.setContent(
+      '<div data-outside>Before</div><section class="message-html"><div class="custom-a"></div><div class="custom-ok">Inside</div><div id="inline">Inline</div></section><div data-outside>After</div>'
+    )
+    await page.evaluate(
+      ({ output, style }) => {
+        document.body.style.margin = "0"
+        document.body.style.color = "rgb(7, 8, 9)"
+        document.body.style.background = "rgb(10, 11, 12)"
+        document.body.dataset.outside = ""
+        for (const element of document.querySelectorAll<HTMLElement>("[data-outside]"))
+          element.style.color = "rgb(7, 8, 9)"
+        const message = document.querySelector<HTMLElement>(".message-html")!
+        Object.assign(message.style, { contain: "layout paint", isolation: "isolate", width: "200px", height: "100px" })
+        Object.assign(document.querySelector<HTMLElement>("#inline")!.style, style)
+        const sheet = new CSSStyleSheet()
+        sheet.replaceSync(output)
+        document.adoptedStyleSheets = [sheet]
+      },
+      { output, style }
+    )
+    await expect(page.locator(".custom-ok")).toHaveCSS("color", "rgb(4, 5, 6)")
+    await expect(page.locator("#inline")).toHaveCSS("color", "rgb(9, 8, 7)")
+    for (const element of await page.locator("[data-outside]").all())
+      await expect(element).toHaveCSS("color", "rgb(7, 8, 9)")
+    await expect(page.locator("body")).toHaveCSS("background-color", "rgb(10, 11, 12)")
+    expect(await page.evaluate(() => document.elementFromPoint(300, 50)?.closest(".message-html") !== null)).toBe(false)
+    expect(requests).toEqual([])
+  })

@@ -58,6 +58,7 @@ function watchSinks(): { calls: string[]; restore: () => void } {
 }
 
 const HOSTILE = [
+  '<svg><template><img src="https://example.com/never" onerror="alert(1)"></template></svg>',
   '<svg></p><style><a id="</style><img src=1 onerror=alert(1)>">',
   '<math><mtext><table><mglyph><style><!--</style><img title="--&gt;&lt;/mglyph&gt;&lt;img&Tab;src=1&Tab;onerror=alert(1)&gt;">',
   '<noscript><p title="</noscript><img src=x onerror=alert(1)>">',
@@ -86,7 +87,11 @@ describe("the DOM is built from the tree", () => {
       for (const text of HOSTILE) {
         await act(async () => {
           root.render(
-            createElement(HtmlMessageContext, { value: { key: "slot" } }, createElement(StMarkdown, { text, streaming: false }))
+            createElement(
+              HtmlMessageContext,
+              { value: { key: "slot" } },
+              createElement(StMarkdown, { text, streaming: false })
+            )
           )
         })
         expect(
@@ -118,6 +123,7 @@ describe("text scans", () => {
   const OLD_SCRIPTS = /<script\b|<[^>]*\son[a-z]+\s*=/i
   const OLD_IMAGE = /!\[.*?\]/
   const OLD_STYLE = /<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/gi
+  const OLD_FENCED = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|$)/gm
   const PIECES = [
     "<",
     ">",
@@ -135,7 +141,13 @@ describe("text scans", () => {
     "x",
     " ",
     "<script",
-    "a{b}"
+    "a{b}",
+    "```",
+    "~~~",
+    "````~",
+    "\r",
+    "\u2028",
+    "\u2029"
   ]
   const random = (seed: number) => () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31
 
@@ -148,13 +160,19 @@ describe("text scans", () => {
       ).join("")
       expect(panelHasScripts(text)).toBe(OLD_SCRIPTS.test(text))
       expect(hasImageSyntax(text)).toBe(OLD_IMAGE.test(text))
-      expect(extractStyles(text)).toEqual([...text.matchAll(OLD_STYLE)].map((match) => match[1]))
+      expect(extractStyles(text)).toEqual(
+        [...text.replace(OLD_FENCED, "").matchAll(OLD_STYLE)].map((match) => match[1])
+      )
     }
   })
 
   it("finish quickly on runs the regexes took seconds over", { tags: ["slow"] }, () => {
     const started = performance.now()
     extractStyles("<style ".repeat(40_000))
+    for (const fence of ["`", "~"]) {
+      extractStyles(fence.repeat(40_000) + "<style")
+      extractStyles("```\nx\n```\n" + fence.repeat(40_000) + "<style")
+    }
     panelHasScripts("< on".repeat(70_000))
     hasImageSyntax("![".repeat(140_000))
     expect(performance.now() - started).toBeLessThan(1000)

@@ -262,3 +262,26 @@ describe("cleanPresentation", () => {
       expect(cleanPresentation(value)).toBeNull()
   })
 })
+
+// Negative controls: a checker that merely accepts the current output proves nothing.
+describe("the independent CSS checker", () => {
+  it.each([
+    "body{color:red}",
+    ".message-html + main{color:red}",
+    "@scope (body){body{color:red}}",
+    ".message-html .a{:is(&,body) main{color:red}}",
+    ".message-html .a{main &{color:red}}",
+    ".message-html .a{background:url(https://media.invalid/x)}",
+    '@import "https://media.invalid/x";',
+    '.message-html .a{background:image-set("https://media.invalid/x")}'
+  ])("refuses unsafe output: %s", (css) => {
+    expect(stylesheetViolations(css, false).length).toBeGreaterThan(0)
+  })
+})
+
+it("scopes many sibling nested rules without rescanning their suffixes", { tags: ["slow"] }, () => {
+  const started = performance.now()
+  const result = scoped(".a{" + "b{}".repeat(15_000) + "color:red}")
+  expect(result).toBe(".message-html .custom-a{" + "b{}".repeat(15_000) + "color: red;}")
+  expect(performance.now() - started).toBeLessThan(2000)
+})

@@ -57,11 +57,7 @@ function address(value: string, consent: boolean, fragmentsOnly: boolean): strin
 }
 
 /** Loading constructs anywhere in these values. */
-export function loadingViolations(
-  values: ReadonlyArray<ComponentValue>,
-  consent: boolean,
-  fragmentsOnly = false
-): string[] {
+function loadingViolations(values: ReadonlyArray<ComponentValue>, consent: boolean, fragmentsOnly = false): string[] {
   const found: string[] = []
   for (const value of values) {
     const token = tokenOf(value)
@@ -97,14 +93,36 @@ const NESTED_AT = new Set(["media", "supports", "container", "starting-style"])
 function styleBlockViolations(values: ReadonlyArray<ComponentValue>, consent: boolean): string[] {
   const found: string[] = []
   const rest: ComponentValue[] = []
+  let prelude: ComponentValue[] = []
+  const ampersands = (nodes: ReadonlyArray<ComponentValue>): number =>
+    nodes.reduce((count, node) => {
+      const token = tokenOf(node)
+      return (
+        count +
+        (token?.[0] === TokenType.Delim && token[4].value === "&" ? 1 : 0) +
+        (isFunctionNode(node) || isSimpleBlockNode(node) ? ampersands(node.value) : 0)
+      )
+    }, 0)
   for (const value of values) {
     const token = tokenOf(value)
-    if (token?.[0] === TokenType.AtKeyword) {
-      const name = (token[4] as { value: string }).value.toLowerCase()
-      if (!NESTED_AT.has(name)) found.push(`nested at-rule @${name}`)
-    } else if (isSimpleBlockNode(value) && value.startToken[0] === TokenType.OpenCurly)
+    if (isSimpleBlockNode(value) && value.startToken[0] === TokenType.OpenCurly) {
+      const head = prelude.filter((node) => !blank(node))
+      const first = tokenOf(head[0])
+      if (first?.[0] !== TokenType.AtKeyword) {
+        const count = ampersands(head)
+        if (count > 0 && !(count === 1 && first?.[0] === TokenType.Delim && first[4].value === "&"))
+          found.push(`nested selector can escape its parent: ${text(prelude)}`)
+      }
       found.push(...styleBlockViolations(value.value, consent))
-    else rest.push(value)
+      prelude = []
+    } else {
+      if (token?.[0] === TokenType.AtKeyword) {
+        const name = (token[4] as { value: string }).value.toLowerCase()
+        if (!NESTED_AT.has(name)) found.push(`nested at-rule @${name}`)
+      } else rest.push(value)
+      if (token?.[0] === TokenType.Semicolon) prelude = []
+      else prelude.push(value)
+    }
   }
   return [...found, ...loadingViolations(rest, consent)]
 }
