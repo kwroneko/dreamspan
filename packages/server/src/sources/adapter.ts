@@ -27,8 +27,8 @@ export interface SourceHttp {
   /**
    * A GET on one of the adapter's hosts. Conditional requests may return 304 without a
    * body; other non-2xx statuses fail: 401/403 `unauthorized` (for a source with no key,
-   * `refused`), 404 `not_found`, 451 `region_unavailable`, 429 `rate_limited`
-   * (with its Retry-After), 5xx `unreachable`, any other
+   * `refused`), 404 `not_found`, 451 `region_unavailable`, 429 or 503 with Retry-After `rate_limited`
+   * (with its Retry-After and status), other 5xx `unreachable` (with status), any other
    * (a 400 among them) `bad_response`, with the error code a refusal's body named.
    */
   readonly get: (

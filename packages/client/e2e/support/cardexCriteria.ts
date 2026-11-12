@@ -193,12 +193,16 @@ export function cardexCriteriaTests() {
               await page.getByRole("menuitemcheckbox", { name: "Name", exact: true }).click()
             }
             const search = scope.getByRole("searchbox", { name: "Search cardex", exact: true })
+            await fetch(`http://127.0.0.1:${port}/__fake/fail?path=/api/v1/search&sort=name&status=500&times=1`)
             await search.fill("synthetic")
             await expect(
-              scope.getByText("Name sorting with search words is unavailable on cardex. Showing best matches.", {
+              scope.getByText("cardex couldn't use name order just now. Showing best matches.", {
                 exact: true
               })
             ).toBeVisible()
+            await expectLayout(page, info, `cardex-temporary-sort-${place}-${width}-${theme}`, {
+              scope: place === "home" ? "main" : "[data-shell-list]"
+            })
             const url = page.url()
             await page.reload()
             if (place === "sidebar" && width === 390) {
@@ -207,6 +211,10 @@ export function cardexCriteriaTests() {
             }
             await expect(page).toHaveURL(url)
             await expect(search).toHaveValue("synthetic")
+            await expect(scope.locator("[data-remote-card]").first()).toBeVisible()
+            await expect(
+              scope.getByText("cardex couldn't use name order just now. Showing best matches.", { exact: true })
+            ).toHaveCount(0)
             await expect(chips).toContainText("Kind: With a lorebook")
             await expect(scope.getByRole("button", { name: "Order: A to Z", exact: true })).toBeVisible()
             await clear()
@@ -216,7 +224,7 @@ export function cardexCriteriaTests() {
             const cards = scope.locator("[data-remote-card]")
             const expected = (await (
               await fetch(
-                `http://127.0.0.1:${port}/api/v1/search?q=synthetic&kind=character&nsfw=include&sort=relevance&limit=48`
+                `http://127.0.0.1:${port}/api/v1/search?q=synthetic&kind=character&nsfw=include&sort=name&limit=48`
               )
             ).json()) as { items: { slug: string }[] }
             const firstIds = expected.items.map((item) => item.slug)

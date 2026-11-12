@@ -200,8 +200,25 @@ export const downloadModeOf = (listed: unknown): (typeof DOWNLOAD_MODES)[number]
 export const cursorRefused = (failure: SourceFailed) =>
   failure.reason === "bad_response" && failure.code === "invalid_cursor"
 
-/** The page token handed out: `c:<cursor>` (text search) or `p:<n>` (semantic search). */
-const pageOf = (token: string | null): { readonly cursor: string } | { readonly page: number } | null => {
+/** Page tokens: `c:<cursor>`, `s:<encoded sort/cursor>` after substitution, or semantic `p:<n>`. */
+const pageOf = (
+  token: string | null
+): { readonly cursor: string; readonly sort?: string } | { readonly page: number } | null => {
+  if (token?.startsWith("s:")) {
+    try {
+      const value: unknown = JSON.parse(Buffer.from(token.slice(2), "base64url").toString("utf8"))
+      if (
+        isRecord(value) &&
+        typeof value.sort === "string" &&
+        /^[a-z_]{1,50}$/.test(value.sort) &&
+        typeof value.cursor === "string" &&
+        value.cursor.length > 0
+      )
+        return { cursor: value.cursor, sort: value.sort }
+    } catch {
+      /* Not a continuation issued by this adapter. */
+    }
+  }
   if (token?.startsWith("c:") && token.length > 2) return { cursor: token.slice(2) }
   const page = token?.startsWith("p:") ? Number(token.slice(2)) : Number.NaN
   return Number.isInteger(page) && page >= 1 ? { page } : null
@@ -210,13 +227,18 @@ const pageOf = (token: string | null): { readonly cursor: string } | { readonly 
 // The labels cardex's descriptors don't carry. A filter it no longer lists is left out.
 const RATING_LABELS: Record<string, string> = { exclude: "Safe", include: "Everything", only: "Mature only" }
 const MODE_LABELS: Record<string, string> = { fts: "Words", semantic: "Meaning" }
-const SORTS: ReadonlyArray<{ readonly id: string; readonly label: string; readonly needs: ReadonlyArray<string> }> = [
-  { id: "popular", label: "Popular", needs: ["popular"] },
-  { id: "newest", label: "Newest", needs: ["newest", "oldest"] },
-  { id: "created", label: "Created", needs: ["created_desc", "created_asc"] },
-  { id: "name", label: "Name", needs: ["name", "name_desc"] },
-  { id: "tokens", label: "Tokens", needs: ["tokens_desc", "tokens_asc"] },
-  { id: "relevance", label: "Best match", needs: ["relevance"] }
+const SORTS: ReadonlyArray<{
+  readonly id: string
+  readonly label: string
+  readonly needs: ReadonlyArray<string>
+  readonly defaultOrder: string
+}> = [
+  { id: "popular", label: "Popular", needs: ["popular"], defaultOrder: "popular cards" },
+  { id: "newest", label: "Newest", needs: ["newest", "oldest"], defaultOrder: "newest first" },
+  { id: "created", label: "Created", needs: ["created_desc", "created_asc"], defaultOrder: "newest created first" },
+  { id: "name", label: "Name", needs: ["name", "name_desc"], defaultOrder: "A to Z" },
+  { id: "tokens", label: "Tokens", needs: ["tokens_desc", "tokens_asc"], defaultOrder: "most tokens first" },
+  { id: "relevance", label: "Best match", needs: ["relevance"], defaultOrder: "best matches" }
 ]
 /** Our sort and direction as cardex's sort; null leaves it to cardex. */
 const sortParam = (query: SourceQuery) => {
@@ -224,13 +246,13 @@ const sortParam = (query: SourceQuery) => {
     case "popular":
       return "popular"
     case "name":
-      return query.reverse ? "name_desc" : query.text.trim() ? "relevance" : "name"
+      return query.reverse ? "name_desc" : "name"
     case "created":
       return query.reverse ? "created_asc" : "created_desc"
     case "newest":
       return query.reverse ? "oldest" : "newest"
     case "tokens":
-      return "tokens_desc"
+      return query.reverse ? "tokens_asc" : "tokens_desc"
     // Best match ranks by the words; with none, cardex's own order for it is popularity.
     case "relevance":
       return query.text.trim() ? "relevance" : "popular"
@@ -479,10 +501,10 @@ export const searchParams = (query: SourceQuery, token: string | null) => {
       if (value === true) params.set(id, "true")
     }
   }
-  const sort = semantic ? null : sortParam(query)
+  const page = pageOf(token)
+  const sort = semantic ? null : page && "cursor" in page && page.sort ? page.sort : sortParam(query)
   if (sort) params.set("sort", sort)
   params.set("limit", String(PAGE_SIZE))
-  const page = pageOf(token)
   if (page && "cursor" in page && !semantic) params.set("cursor", page.cursor)
   if (page && "page" in page) params.set("page", String(page.page))
   return params
@@ -556,15 +578,48 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         const semantic = query.filters.mode === "semantic"
         const page = pageOf(token)
         let restarted = false
-        const raw = yield* getJson(http, api("/search", searchParams(query, token))).pipe(
-          // A cursor cardex no longer takes (expired, or for another query) restarts the search
-          // from page 1, as its docs ask; the client drops the cards it already shows.
+        const params = searchParams(query, token)
+        const defaultSort = query.text.trim() ? "relevance" : "popular"
+        const requested = sortParam(query)
+        let substituted = page !== null && "cursor" in page && page.sort !== undefined
+        const retryable = (failure: SourceFailed) =>
+          failure.retryAfterMs !== undefined && (failure.reason === "rate_limited" || failure.status === 503)
+        // Timers may round down a millisecond; retry after the limiter's deadline.
+        const wait = (failure: SourceFailed) => Effect.sleep(Math.ceil(failure.retryAfterMs ?? 0) + 1)
+        const request = () =>
+          getJson(http, api("/search", params)).pipe(
+            Effect.catchIf(retryable, (failure) =>
+              wait(failure).pipe(Effect.andThen(getJson(http, api("/search", params))))
+            )
+          )
+        const raw = yield* request().pipe(
           Effect.catchIf(
             (failure) => page !== null && "cursor" in page && cursorRefused(failure),
             () => {
               restarted = true
-              return getJson(http, api("/search", searchParams(query, null)))
+              params.delete("cursor")
+              return request()
             }
+          ),
+          Effect.catchIf(
+            (failure) =>
+              token === null &&
+              !semantic &&
+              requested !== null &&
+              requested !== defaultSort &&
+              [500, 502, 503, 504].includes(failure.status ?? 0),
+            (failure) =>
+              Effect.gen(function* () {
+                // A reversed order can use its ordinary direction; otherwise use best match.
+                // This policy applies to every sort, without a list of broken upstream orders.
+                const descriptor = SORTS.find((sort) => sort.id === query.sort)
+                const substitute =
+                  query.reverse && descriptor && descriptor.needs.length > 1 ? descriptor.needs[0]! : defaultSort
+                params.set("sort", substitute)
+                substituted = true
+                if (failure.retryAfterMs !== undefined) yield* wait(failure)
+                return yield* getJson(http, api("/search", params))
+              })
           )
         )
         if (!isRecord(raw)) return yield* bad()
@@ -587,16 +642,17 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
             ? `p:${current + 1}`
             : null
           : typeof raw.next_cursor === "string" && raw.next_cursor
-            ? `c:${raw.next_cursor}`
+            ? substituted
+              ? `s:${Buffer.from(JSON.stringify({ sort: params.get("sort"), cursor: raw.next_cursor })).toString("base64url")}`
+              : `c:${raw.next_cursor}`
             : null
         return {
           items,
           next,
-          ...(query.sort === "name" && !query.reverse && query.text.trim() && !semantic
-            ? { notice: "Name sorting with search words is unavailable on cardex. Showing best matches." }
-            : {}),
-          ...(query.sort === "tokens" && query.reverse && !semantic
-            ? { notice: "Sorting by fewest tokens is unavailable on cardex. Showing most tokens first." }
+          ...(substituted
+            ? {
+                notice: `cardex couldn't use ${SORTS.find((sort) => sort.id === query.sort)?.label.toLowerCase() ?? "the requested"} order just now. Showing ${params.get("sort") === defaultSort ? (query.text.trim() ? "best matches" : "popular cards") : (SORTS.find((sort) => sort.needs.includes(params.get("sort") ?? ""))?.defaultOrder ?? "another order")}.`
+              }
             : {}),
           ...(restarted ? { reset: true } : {}),
           ...(total === undefined ? {} : { total }),

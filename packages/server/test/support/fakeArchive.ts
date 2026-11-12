@@ -413,6 +413,7 @@ export interface FakeArchive {
   readonly paths: () => ReadonlyArray<string>
   readonly reset: () => void
   /** The next `times` requests get this status (and `Retry-After`), as a failing archive would answer. */
+  readonly failSort: (sort: string, status: number, times?: number, retryAfterSeconds?: number) => void
   readonly failNext: (status: number, times?: number, retryAfterSeconds?: number) => void
   /** The card's author publishes a newer version: a changed description, the next `character_version`. */
   readonly publish: (slug: string) => FakeCard
@@ -471,7 +472,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     return next
   }
   const seen: Array<string> = []
-  let failure: { status: number; times: number; retryAfter?: number; path?: string } | null = null
+  let failure: { status: number; times: number; retryAfter?: number; path?: string; sort?: string } | null = null
 
   let conditionalHits = 0
   let notModified = 0
@@ -545,10 +546,6 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       return { status: 400, body: error("bad_request", "Chub must be the only included source") }
     const q = (params.get("q") ?? "").trim().toLowerCase()
     const sort = params.get("sort") ?? (q ? "relevance" : "newest")
-    if (sort === "tokens_asc" && mode !== "semantic")
-      return { status: 500, body: error("internal", "fewest tokens unavailable") }
-    if (sort === "name" && q && mode !== "semantic")
-      return { status: 500, body: error("internal", "name search unavailable") }
     if (!V1_SORTS.includes(sort)) return { status: 400, body: error("bad_request", "unknown sort") }
     const include = list(params.get("tags"))
     const exclude = list(params.get("not_tags"))
@@ -721,7 +718,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         times: Number(url.searchParams.get("times") ?? "1"),
         ...(url.searchParams.has("retryAfter") ? { retryAfter: Number(url.searchParams.get("retryAfter")) } : {}),
         // Only requests to this path fail, so a picture loading meanwhile doesn't use the failure up.
-        ...(url.searchParams.has("path") ? { path: url.searchParams.get("path")! } : {})
+        ...(url.searchParams.has("path") ? { path: url.searchParams.get("path")! } : {}),
+        ...(url.searchParams.has("sort") ? { sort: url.searchParams.get("sort")! } : {})
       }
       return json(res, 200, { ok: true })
     }
@@ -733,7 +731,12 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     }
     seen.push(`${path}${url.search}`)
     if (req.headers["if-none-match"]) conditionalHits++
-    if (failure && failure.times > 0 && (failure.path === undefined || failure.path === path)) {
+    if (
+      failure &&
+      failure.times > 0 &&
+      (failure.path === undefined || failure.path === path) &&
+      (failure.sort === undefined || failure.sort === url.searchParams.get("sort"))
+    ) {
       failure.times -= 1
       const { status, retryAfter } = failure
       if (failure.times === 0) failure = null
@@ -922,6 +925,15 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     reset: () => {
       seen.length = 0
       failure = null
+    },
+    failSort: (sort, status, times = 1, retryAfterSeconds) => {
+      failure = {
+        status,
+        times,
+        sort,
+        path: "/api/v1/search",
+        ...(retryAfterSeconds === undefined ? {} : { retryAfter: retryAfterSeconds })
+      }
     },
     failNext: (status, times = 1, retryAfterSeconds) => {
       failure = { status, times, ...(retryAfterSeconds === undefined ? {} : { retryAfter: retryAfterSeconds }) }

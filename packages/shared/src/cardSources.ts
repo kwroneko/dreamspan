@@ -186,6 +186,8 @@ export type SourceFailure = typeof SourceFailure.Type
 export class SourceFailed extends Schema.TaggedError<SourceFailed>()("SourceFailed", {
   sourceId: Schema.String,
   reason: SourceFailure,
+  /** The upstream HTTP status, absent for connection failures. */
+  status: Schema.optionalKey(Schema.Number),
   /** For `rate_limited`: when to try again. */
   retryAfterMs: Schema.optionalKey(Schema.Number),
   /** For a refused request (`bad_response` from a 400): the source's own error code, when its answer named one. */

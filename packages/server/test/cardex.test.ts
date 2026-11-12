@@ -18,6 +18,8 @@ import {
   searchParams,
   summaryOf
 } from "../src/sources/cardex.ts"
+import { makeSourceHttp } from "../src/sources/guard.ts"
+import { makeLimiter } from "../src/sources/limiter.ts"
 import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
 
 const archive = await startFakeArchive({ cards: 120 })
@@ -56,6 +58,10 @@ const direct = (seen: Array<string> = []): SourceHttp => ({
         return yield* new SourceFailed({
           sourceId: "cardex",
           reason,
+          status: response.status,
+          ...(response.headers.has("retry-after")
+            ? { retryAfterMs: Number(response.headers.get("retry-after")) * 1000 }
+            : {}),
           message: String(response.status),
           ...(typeof code === "string" ? { code } : {})
         })
@@ -305,24 +311,152 @@ describe("v1 as card sources", () => {
     }).pipe(Effect.scoped)
   )
 
-  it.effect("name search falls back to best matches, explains why, and keeps paging that order", () =>
+  it.effect("healthy name-with-text and fewest-token searches use the requested order without a notice", () =>
     Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      for (const query of [
+        { ...emptySourceQuery, text: "synthetic", sort: "name" },
+        { ...emptySourceQuery, text: "synthetic", sort: "tokens", reverse: true },
+        { ...emptySourceQuery, sort: "tokens", reverse: true }
+      ]) {
+        const seen: Array<string> = []
+        const page = yield* adapter.search(direct(seen), query, null)
+        assert.isUndefined(page.notice)
+        assert.strictEqual(
+          new URL(`http://fake${seen[0]}`).searchParams.get("sort"),
+          query.sort === "name" ? "name" : "tokens_asc"
+        )
+        assert.isTrue(
+          page.items.every(
+            (item, index) =>
+              index === 0 ||
+              (query.sort === "name"
+                ? item.name.localeCompare(page.items[index - 1]!.name) >= 0
+                : item.tokens! >= page.items[index - 1]!.tokens!)
+          )
+        )
+      }
+    })
+  )
+
+  it.effect("any failed nondefault first-page order can substitute once, and all later pages retain that order", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      for (const [sort, reverse, requested, substitute, status] of [
+        ["name", false, "name", "relevance", 500],
+        ["tokens", true, "tokens_asc", "tokens_desc", 502],
+        ["newest", false, "newest", "relevance", 503],
+        ["created", true, "created_asc", "created_desc", 504]
+      ] as const) {
+        archive.failSort(requested, status)
+        const seen: Array<string> = []
+        const http = direct(seen)
+        const query = { ...emptySourceQuery, text: "synthetic", sort, reverse }
+        const first = yield* adapter.search(http, query, null)
+        assert.include(first.notice!, "just now")
+        assert.match(first.next!, /^s:/)
+        const second = yield* adapter.search(http, query, first.next)
+        assert.strictEqual(second.notice, first.notice)
+        assert.isFalse(second.reset === true)
+        assert.isFalse(second.items.some((item) => first.items.some((old) => old.remoteId === item.remoteId)))
+        const used = seen
+          .filter((path) => path.startsWith("/api/v1/search?"))
+          .map((path) => new URL(`http://fake${path}`).searchParams.get("sort"))
+        assert.deepStrictEqual(used, [requested, substitute, substitute])
+        const reloaded = yield* adapter.search(http, query, null)
+        assert.isUndefined(reloaded.notice)
+        assert.match(reloaded.next!, /^c:/)
+        // An expired substitute cursor restarts the same order, never the requested one.
+        yield* Effect.promise(() => fetch(`${archive.origin}/__fake/expire-cursors`))
+        const restarted = yield* adapter.search(http, query, first.next)
+        assert.isTrue(restarted.reset)
+        assert.deepStrictEqual(restarted.items, first.items)
+      }
+    })
+  )
+
+  it.effect(
+    "later pages, default-order failures, nonserver errors and failed substitutes do not enter a fallback loop",
+    () =>
+      Effect.gen(function* () {
+        const adapter = fakeCardexAdapter(archive)
+        const query = { ...emptySourceQuery, text: "synthetic", sort: "name" }
+        const first = yield* adapter.search(direct(), query, null)
+        for (const [sort, token, status] of [
+          ["name", first.next, 500],
+          ["relevance", null, 500],
+          ["name", null, 501],
+          ["name", null, 400]
+        ] as const) {
+          const seen: Array<string> = []
+          archive.failSort(sort, status)
+          const error = yield* Effect.flip(adapter.search(direct(seen), { ...query, sort }, token))
+          assert.strictEqual(error.status, status)
+          assert.lengthOf(seen, 1)
+        }
+        const seen: Array<string> = []
+        archive.failNext(500, 2)
+        const failed = yield* Effect.flip(adapter.search(direct(seen), query, null))
+        assert.strictEqual(failed.status, 500)
+        assert.lengthOf(seen, 2)
+        const disconnected: SourceHttp = {
+          apiKey: null,
+          get: () => Effect.fail(new SourceFailed({ sourceId: "cardex", reason: "unreachable", message: "offline" }))
+        }
+        const offline = yield* Effect.flip(adapter.search(disconnected, query, null))
+        assert.isUndefined(offline.status)
+      })
+  )
+
+  it.live("503 and 429 Retry-After retry the requested order before considering a substitute", () =>
+    Effect.gen(function* () {
+      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120 }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
+      const adapter = fakeCardexAdapter(fake)
       const seen: Array<string> = []
+      const http = makeSourceHttp(adapter, null, {
+        network: { fetchFor: () => fetch },
+        limiter: makeLimiter(),
+        bypassEntries: () => [],
+        onRequest: (_id, url) => seen.push(url.pathname + url.search)
+      })
       const query = { ...emptySourceQuery, text: "synthetic", sort: "name" }
-      const first = yield* fakeCardexAdapter(archive).search(direct(seen), query, null)
-      assert.include(first.notice!, "Showing best matches")
-      assert.isAbove(first.items.length, 0)
-      const next = yield* fakeCardexAdapter(archive).search(direct(seen), query, first.next)
-      assert.isFalse(next.reset === true)
-      assert.isFalse(next.items.some((item) => first.items.some((old) => old.remoteId === item.remoteId)))
-      assert.isTrue(
+      for (const status of [503, 429]) {
+        seen.length = 0
+        fake.failSort("name", status, 1, 0.01)
+        const started = Date.now()
+        const page = yield* adapter.search(http, query, null)
+        assert.isAtLeast(Date.now() - started, 900)
+        assert.isUndefined(page.notice)
+        assert.deepStrictEqual(
+          seen
+            .filter((path) => path.startsWith("/api/v1/search?"))
+            .map((path) => new URL(`http://fake${path}`).searchParams.get("sort")),
+          ["name", "name"]
+        )
+      }
+      seen.length = 0
+      fake.failSort("name", 503, 2, 0.01)
+      const substituted = yield* adapter.search(http, query, null)
+      assert.include(substituted.notice!, "just now")
+      assert.deepStrictEqual(
         seen
           .filter((path) => path.startsWith("/api/v1/search?"))
-          .every((path) => new URL(`http://fake${path}`).searchParams.get("sort") === "relevance")
+          .map((path) => new URL(`http://fake${path}`).searchParams.get("sort")),
+        ["name", "name", "relevance"]
       )
-      const reversed = yield* fakeCardexAdapter(archive).search(direct(), { ...query, reverse: true }, null)
-      assert.isUndefined(reversed.notice)
-    })
+      seen.length = 0
+      fake.failSort("name", 429, 2, 0.01)
+      const limited = yield* Effect.flip(adapter.search(http, query, null))
+      assert.strictEqual(limited.reason, "rate_limited")
+      assert.strictEqual(limited.status, 429)
+      assert.deepStrictEqual(
+        seen
+          .filter((path) => path.startsWith("/api/v1/search?"))
+          .map((path) => new URL(`http://fake${path}`).searchParams.get("sort")),
+        ["name", "name"]
+      )
+    }).pipe(Effect.scoped)
   )
 
   it.effect("counts share the search filters and distinguish a capped lower bound", () =>
@@ -426,23 +560,6 @@ describe("v1 as card sources", () => {
         }),
         {}
       )
-    })
-  )
-
-  it.effect("fewest-token searches stay usable when the archive's ascending order fails", () =>
-    Effect.gen(function* () {
-      for (const text of ["", "synthetic"]) {
-        const seen: Array<string> = []
-        const page = yield* fakeCardexAdapter(archive).search(
-          direct(seen),
-          { ...emptySourceQuery, text, sort: "tokens", reverse: true },
-          null
-        )
-        assert.isAbove(page.items.length, 0)
-        assert.include(page.notice!, "Showing most tokens first")
-        assert.strictEqual(new URL(`http://fake${seen[0]}`).searchParams.get("sort"), "tokens_desc")
-        assert.isTrue(page.items.every((item, index) => index === 0 || item.tokens! <= page.items[index - 1]!.tokens!))
-      }
     })
   )
 

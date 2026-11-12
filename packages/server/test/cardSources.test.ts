@@ -173,6 +173,25 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("a reload retries the requested sort instead of reusing a cached substitute", () =>
+    Effect.gen(function* () {
+      const api = yield* client({ "Remote-User": "reactive-sort-reader" })
+      const query = { ...emptySourceQuery, text: "synthetic", sort: "name" }
+      archive.failSort("name", 500)
+      const first = yield* api.SourceSearch({ sourceId: "cardex", query, page: null })
+      assert.include(first.notice!, "just now")
+      const next = yield* api.SourceSearch({ sourceId: "cardex", query, page: first.next })
+      assert.strictEqual(next.notice, first.notice)
+      const reloaded = yield* api.SourceSearch({ sourceId: "cardex", query, page: null })
+      assert.isUndefined(reloaded.notice)
+      assert.isTrue(
+        reloaded.items.every(
+          (item, index) => index === 0 || item.name.localeCompare(reloaded.items[index - 1]!.name) >= 0
+        )
+      )
+    })
+  )
+
   it.effect("suggestion cursors stay behind consent, guards, the per-user cache and retry", () =>
     Effect.gen(function* () {
       const api = yield* client({ "Remote-User": "suggestion-reader" })

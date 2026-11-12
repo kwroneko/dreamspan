@@ -391,15 +391,16 @@ const make = (options: CardSourcesOptions = {}) =>
       sourceId: string,
       kind: "page" | "caps" | "tags",
       id: string,
-      run: (http: SourceHttp) => Effect.Effect<A, SourceFailed>
+      run: (http: SourceHttp) => Effect.Effect<A, SourceFailed>,
+      keep: (value: A) => boolean = () => true
     ) =>
       Effect.gen(function* () {
         yield* usable(user, sourceId)
         const key = cacheKey(user, sourceId, kind, id)
         const hit = yield* cache.get(key)
-        if (hit) return hit.value as A
+        if (hit && keep(hit.value as A)) return hit.value as A
         const value = yield* ask(user, sourceId, `${kind}:${id}`, run)
-        yield* cache.put(key, { value })
+        if (keep(value)) yield* cache.put(key, { value })
         return value
       })
 
@@ -633,8 +634,14 @@ const make = (options: CardSourcesOptions = {}) =>
         Effect.gen(function* () {
           const adapter = yield* known(sourceId)
           let reported = false
-          const result = yield* cached(user, sourceId, "page", queryKey(query, page), (http) =>
-            adapter.search(http, query, page).pipe(Effect.tap(() => Effect.sync(() => void (reported = true))))
+          const result = yield* cached(
+            user,
+            sourceId,
+            "page",
+            queryKey(query, page),
+            (http) =>
+              adapter.search(http, query, page).pipe(Effect.tap(() => Effect.sync(() => void (reported = true)))),
+            (result) => result.notice === undefined
           )
           return {
             ...result,

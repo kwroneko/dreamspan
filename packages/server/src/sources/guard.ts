@@ -184,9 +184,15 @@ export const makeSourceHttp = (
               : fail(adapter.id, "unreachable", `can't reach ${adapter.id}`)
       })
       const status = response.status
-      if (status === 429) {
+      if (status === 429 || (status === 503 && response.headers.has("retry-after"))) {
         const delay = options.limiter.limited(adapter.id, retryAfter(response.headers.get("retry-after")))
-        return yield* fail(adapter.id, "rate_limited", `${adapter.id} is limiting requests`, delay)
+        return yield* new SourceFailed({
+          sourceId: adapter.id,
+          reason: "rate_limited",
+          status,
+          retryAfterMs: delay,
+          message: `${adapter.id} is limiting requests`
+        })
       }
       if (status === 401 || status === 403)
         return yield* (adapter.key ?? "none") === "none"
@@ -194,7 +200,13 @@ export const makeSourceHttp = (
           : fail(adapter.id, "unauthorized", `${adapter.id} refused the key`)
       if (status === 451) return yield* fail(adapter.id, "region_unavailable", "not available in your region")
       if (status === 404) return yield* fail(adapter.id, "not_found", "not on the source")
-      if (status >= 500) return yield* fail(adapter.id, "unreachable", `${adapter.id} answered ${status}`)
+      if (status >= 500)
+        return yield* new SourceFailed({
+          sourceId: adapter.id,
+          reason: "unreachable",
+          status,
+          message: `${adapter.id} answered ${status}`
+        })
       if ((status < 200 || status > 299) && !(status === 304 && new Headers(headers).has("if-none-match"))) {
         const code = refusalCode(response.bytes)
         return yield* new SourceFailed({
