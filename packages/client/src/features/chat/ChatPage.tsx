@@ -262,6 +262,15 @@ function MessageList({
       offsetChanged.current?.(list.scrollTop, false)
   }, [virtualizer])
   useLayoutEffect(syncOffset)
+  // Native scrolling (revealing a tapped message's footer) precedes its scroll event.
+  // Row refs measure earlier than our layout effect: anchor them at that actual offset.
+  const measureRow = useCallback(
+    (element: Element | null) => {
+      syncOffset()
+      virtualizer.measureElement(element)
+    },
+    [syncOffset, virtualizer]
+  )
 
   // A new window opens at the asked-for message, or at the bottom.
   // With summaries in the chat, a link waits for the layer: placed among the originals first,
@@ -581,7 +590,7 @@ function MessageList({
               <div
                 key={item.key}
                 data-index={item.index}
-                ref={virtualizer.measureElement}
+                ref={measureRow}
                 className="chat-row absolute left-0 w-full"
                 // Placed by `top`, not a transform: a transformed row would keep a reply's sticky
                 // Stop (Message.tsx) from holding to the bottom of the view.

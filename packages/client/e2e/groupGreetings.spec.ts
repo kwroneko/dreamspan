@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { openCastAdd } from "./support/cast.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 /** Does something in the pending chat's Cast tab (who's in it, who you play, who replies), then closes the panel. */
@@ -29,7 +30,7 @@ const remove = (page: Page, name: string) =>
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "10000", FAKE_GENERATOR_TOKENS: "10" })
 for (const width of [1440, 390]) {
   for (const theme of ["light", "dark"] as const)
-    test(`group greetings follow pending cast at ${width} (${theme})`, async ({ page }) => {
+    test(`group greetings follow pending cast at ${width} (${theme})`, async ({ page }, info) => {
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: 900 })
       await page.emulateMedia({ colorScheme: theme })
@@ -111,8 +112,15 @@ for (const width of [1440, 390]) {
         await page.getByRole("option", { name: second, exact: true }).click()
         await tab.getByRole("button", { name: /^Playing as / }).click()
         await page.getByRole("tab", { name: "All cards", exact: true }).click()
+        const picker = page.getByRole("dialog", { name: "Your persona", exact: true })
+        await expect(picker.getByRole("option", { name, exact: true })).toBeVisible()
+        await expect(picker.getByRole("option", { name: second, exact: true })).toBeVisible()
         await page.getByRole("combobox", { name: "Find a card to play as" }).fill(second)
-        await page.getByRole("option", { name: second, exact: true }).click()
+        await expect(picker.getByRole("option", { name, exact: true })).toHaveCount(0)
+        await expectLayout(page, info, "pending-persona-all-cards", {
+          scope: '[role="listbox"][aria-label="Cards"]'
+        })
+        await picker.getByRole("option", { name: second, exact: true }).click()
         await expect(tab.getByLabel("Reply from", { exact: true })).toHaveCount(0)
       })
       await expect(greeting).toContainText("Mira opens the door.")

@@ -30,6 +30,8 @@ import { portraitPng } from "./support/portrait.ts"
 import { writeScaleFolder } from "./support/stScaleFolder.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { modelCatalog } from "./support/modelCatalog.ts"
+import { messageMenu } from "./support/message.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
@@ -817,6 +819,47 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.locator("main")).toBeVisible()
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
+        }
+        if (process.env.LAYOUT_AUDIT_SUITEFIX2_ONLY === "1") {
+          await go("suitefix2-pending", `/cards/${cardId}/chat`)
+          const cast = await openPanel(page, "Cast")
+          await cast.getByRole("button", { name: /^Playing as / }).click()
+          await page.getByRole("tab", { name: "All cards", exact: true }).click()
+          await page.getByRole("combobox", { name: "Find a card to play as" }).fill(cardName)
+          const picker = page.getByRole("dialog", { name: "Your persona", exact: true })
+          await expect(picker.getByRole("option", { name: cardName, exact: true })).toBeVisible()
+          await audit("suitefix2-persona-picker", '[role="dialog"]:has([aria-label="Find a card to play as"])')
+          await picker.getByRole("option", { name: cardName, exact: true }).click()
+          await audit("suitefix2-pending-cast", '[role="tabpanel"][aria-label="Cast"]')
+          await closePanel(page)
+
+          const long = Array.from(
+            { length: 40 },
+            (_, i) => `Paragraph ${i}. ${"A long synthetic turn. ".repeat(8)}`
+          ).join("\n\n")
+          const sent = await admin((api) =>
+            Effect.gen(function* () {
+              const chat = yield* api.CreateChat({ title: "Long editor footer audit" })
+              const sent = yield* api.SendMessage({
+                chatId: chat.id,
+                parentSlotId: null,
+                branch: false,
+                content: long,
+                reply: false
+              })
+              if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+              return { chat, entry: sent.entry }
+            })
+          )
+          await page.goto(`${server.url}/chats/${sent.chat.id}?slot=${sent.entry.slotId}`)
+          const row = page.locator(`article[data-slot="${sent.entry.slotId}"]`)
+          await messageMenu(row, "Edit")
+          await expectTextBox(row.getByRole("textbox", { name: "Message text", exact: true }), long)
+          const cancel = row.getByRole("button", { name: "Cancel", exact: true })
+          await expect(cancel).toBeInViewport()
+          await audit("suitefix2-message-footer", '[data-testid="messages"]')
+          await expect(cancel).toBeInViewport()
+          return
         }
         if (process.env.LAYOUT_AUDIT_NOSTARTCHAT_ONLY === "1") {
           await go("nostartchat-home", "/?side=characters")
