@@ -438,11 +438,10 @@ export const layer = Layer.effect(
                   generation = JSON.parse(assembled.generation) as Generation
                 }
               } else {
+                const priorWire = providerRequest(prior.snapshot.request, snapshot.inputs.model!)
                 const lastRequest = prior.transcript.findLastIndex((m) => m.role === "assistant")
                 const lastTail =
-                  providerRequest(prior.snapshot.request, snapshot.inputs.model!).context.messages.length +
-                  liveSuffix(prior.transcript.slice(0, lastRequest)).length -
-                  1
+                  priorWire.context.messages.length + liveSuffix(prior.transcript.slice(0, lastRequest)).length - 1
                 continuity = {
                   path: baseline,
                   parent: { rolloutId: prior.material.rolloutId, versionId: prior.versionId },
@@ -457,8 +456,8 @@ export const layer = Layer.effect(
                     ? { inspection: prior.snapshot.continuity.inspection }
                     : {}),
                   breakpoints: [
-                    ...(prior.snapshot.continuity?.breakpoints ?? []),
-                    ...(snapshot.inputs.model?.cacheBreakpoints === "explicit" ? [lastTail] : [])
+                    ...(prior.snapshot.continuity?.breakpoints ?? (priorWire.stable ? [priorWire.stable.message] : [])),
+                    ...(snapshot.inputs.model?.cacheBreakpoints !== "none" ? [lastTail] : [])
                   ]
                 }
                 snapshot = { ...snapshot, request: prior.snapshot.request }

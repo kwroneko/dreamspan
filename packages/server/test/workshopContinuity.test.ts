@@ -223,8 +223,12 @@ describe("workshop messages and continuity", () => {
   })
 })
 
-for (const kind of ["openai-chat", "anthropic"] as const) {
-  it.live(`${kind}: carries the exact previous request and transcript prefix into the next turn`, () => {
+for (const [kind, cacheMode] of [
+  ["openai-chat", "explicit"],
+  ["anthropic", "explicit"],
+  ["anthropic", "auto"]
+] as const) {
+  it.live(`${kind} ${cacheMode}: carries the exact previous request and transcript prefix into the next turn`, () => {
     const config = testConfig()
     return Effect.gen(function* () {
       let number = 0
@@ -315,7 +319,7 @@ for (const kind of ["openai-chat", "anthropic"] as const) {
           baseUrl: kind === "anthropic" ? mock.url : `${mock.url}/v1`,
           ...(kind === "anthropic" ? { apiKey: "synthetic-key" } : {})
         },
-        model: { cacheBreakpoints: "explicit" }
+        model: { cacheBreakpoints: cacheMode }
       })
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
