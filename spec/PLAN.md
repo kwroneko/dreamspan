@@ -83,6 +83,7 @@ Session notes are not kept in the repository.
 - Composition scratchpad.
 
 ## Phase 6: Workshop and meta tools
+**Status (2026-11-12): designed** in [WORKSHOP.md](WORKSHOP.md) (workshop chats, setup tools, the side chat, the plugin loader and the agent writing plugins, as deltas from the build and reference-harness `latest`; fourteen build units in its §9, open questions in its §10).
 - Workshop chat kind, with its template, permissions and capability strip.
 - Meta tools: create, edit and clone cards; settings; chat setup. Agentic chat editing through changesets.
 - The out-of-character side channel docked in RP chats.
