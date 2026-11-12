@@ -72,8 +72,8 @@ const shellSummaries: ReadonlyArray<string> = [
     BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = NEW.slot_id)")} END`,
   `CREATE TRIGGER shell_versions_delete AFTER DELETE ON versions
     BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = OLD.slot_id)")} END`,
-  `CREATE TRIGGER shell_version_texts_update AFTER UPDATE OF content, cast_json ON version_texts
-    WHEN NEW.content IS NOT OLD.content OR NEW.cast_json IS NOT OLD.cast_json
+  `CREATE TRIGGER shell_version_texts_update AFTER UPDATE OF content, cast_json, presence_json ON version_texts
+    WHEN NEW.content IS NOT OLD.content OR NEW.cast_json IS NOT OLD.cast_json OR NEW.presence_json IS NOT OLD.presence_json
     BEGIN ${bumpChat("(SELECT s.chat_id FROM versions v JOIN slots s ON s.id = v.slot_id WHERE v.seq = NEW.version_seq)")} END`,
   // The kinds the walk reads; the others (stars, summaries, hides) leave it alone.
   ...(["insert", "update", "delete"] as const).map((op) => {
@@ -480,7 +480,8 @@ export const baseline: ReadonlyArray<string> = [
     WHEN NEW.speaker_entity_id IS NOT OLD.speaker_entity_id BEGIN
     DELETE FROM version_participants WHERE version_id = NEW.id;
     INSERT OR IGNORE INTO version_participants(version_id, entity_id)
-      SELECT NEW.id, value FROM version_texts t, json_each(t.cast_json) WHERE t.version_seq = NEW.seq
+      SELECT NEW.id, c.value FROM version_texts t, json_each(t.cast_json) c WHERE t.version_seq = NEW.seq
+        AND NOT EXISTS (SELECT 1 FROM json_each(t.presence_json, '$.away') a WHERE a.value = c.value)
       UNION SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL;
   END`,
   `CREATE TRIGGER version_participants_cast_insert AFTER INSERT ON version_texts
@@ -488,13 +489,15 @@ export const baseline: ReadonlyArray<string> = [
     DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq);
     INSERT OR IGNORE INTO version_participants(version_id, entity_id)
       SELECT v.id, j.value FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq
+        AND NOT EXISTS (SELECT 1 FROM json_each(NEW.presence_json, '$.away') a WHERE a.value = j.value)
       UNION SELECT id, speaker_entity_id FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL;
   END`,
-  `CREATE TRIGGER version_participants_cast AFTER UPDATE OF cast_json ON version_texts
-    WHEN NEW.cast_json IS NOT OLD.cast_json BEGIN
+  `CREATE TRIGGER version_participants_cast AFTER UPDATE OF cast_json, presence_json ON version_texts
+    WHEN NEW.cast_json IS NOT OLD.cast_json OR NEW.presence_json IS NOT OLD.presence_json BEGIN
     DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq);
     INSERT OR IGNORE INTO version_participants(version_id, entity_id)
       SELECT v.id, j.value FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq
+        AND NOT EXISTS (SELECT 1 FROM json_each(NEW.presence_json, '$.away') a WHERE a.value = j.value)
       UNION SELECT id, speaker_entity_id FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL;
   END`,
   `CREATE VIEW card_chat_membership AS

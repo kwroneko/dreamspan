@@ -91,6 +91,34 @@ const slot = (
 }
 
 describe("version payload separation", () => {
+  it("projects presence corrections and speaker changes into historical membership on a bare connection", () => {
+    const owner = user()
+    for (const card of ["mira", "wren"])
+      run("INSERT INTO entities(id, owner_user_id, kind, created_at) VALUES (?, ?, 'card', 1)", card, owner)
+    const c = chat(owner),
+      row = slot(c, null)
+    run(
+      "UPDATE version_records SET cast_json = ?, presence_json = ? WHERE id = ?",
+      JSON.stringify(["mira", "wren"]),
+      JSON.stringify({ away: ["wren"] }),
+      row.versionId
+    )
+    const members = () =>
+      all<{ entity_id: string }>(
+        "SELECT entity_id FROM version_participants WHERE version_id = ? ORDER BY entity_id",
+        row.versionId
+      ).map((r) => r.entity_id)
+    expect(members()).toEqual(["mira"])
+    run("UPDATE version_records SET presence_json = NULL WHERE id = ?", row.versionId)
+    expect(members()).toEqual(["mira", "wren"])
+    run("UPDATE version_records SET presence_json = ? WHERE id = ?", JSON.stringify({ away: ["wren"] }), row.versionId)
+    expect(members()).toEqual(["mira"])
+    run("UPDATE version_records SET speaker_entity_id = 'wren' WHERE id = ?", row.versionId)
+    expect(members()).toEqual(["mira", "wren"])
+    run("UPDATE version_records SET speaker_entity_id = 'mira' WHERE id = ?", row.versionId)
+    expect(members()).toEqual(["mira"])
+  })
+
   it("keeps every unbounded text/JSON field outside metadata and flag query plans", () => {
     const columns = all<{ name: string }>("PRAGMA table_info(versions)").map((c) => c.name)
     for (const column of [

@@ -106,6 +106,40 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 
 describe("cast participation", () => {
+  it.live("being away establishes no participation until a retained swipe has the character present", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* setup
+        yield* t.cast("participant.join")
+        yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.forkId,
+          slotId: t.tip.slotId,
+          versionId: null,
+          scope: null,
+          data: { key: "away.set", value: { entity: t.guest.entityId, away: true } }
+        })
+        const next = yield* t.append(t.tip.slotId, t.forkId)
+        yield* t.cast("participant.leave", next.slotId)
+        assert.strictEqual((yield* t.usage()).chats, 0)
+        assert.notInclude((yield* t.shell()).forks.find((f) => f.forkId === t.forkId)!.joined, t.guest.entityId)
+        // A later positional correction affects new swipes, preserving the old away record.
+        yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.forkId,
+          slotId: t.tip.slotId,
+          versionId: null,
+          scope: null,
+          data: { key: "away.set", value: { entity: t.guest.entityId, away: false } }
+        })
+        yield* t.swipe(next.slotId)
+        assert.strictEqual((yield* t.usage()).chats, 1)
+      })
+    )
+  )
+
   it.live("writing as the selected persona establishes presence and dates its usage without generation", () =>
     run(
       Effect.gen(function* () {

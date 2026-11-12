@@ -89,8 +89,8 @@ const statements: ReadonlyArray<string> = [
         SELECT '${TEXT}', s.chat_id, v.id FROM versions v JOIN slots s ON s.id = v.slot_id
         WHERE v.seq = NEW.version_seq;
     END`,
-  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_cast AFTER UPDATE OF cast_json ON main.version_texts
-    WHEN NEW.cast_json IS NOT OLD.cast_json BEGIN
+  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_cast AFTER UPDATE OF cast_json, presence_json ON main.version_texts
+    WHEN NEW.cast_json IS NOT OLD.cast_json OR NEW.presence_json IS NOT OLD.presence_json BEGIN
       INSERT INTO shell_touches(kind, chat_id, ref)
         SELECT CASE WHEN OLD.cast_json IS NULL AND (SELECT count(*) FROM (
           SELECT 1 FROM forks WHERE chat_id = s.chat_id LIMIT 2)) < 2
