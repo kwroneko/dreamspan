@@ -94,6 +94,25 @@ const setup = Effect.gen(function* () {
 })
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("fork-scoped state", (it) => {
+  it.effect("away and narrator changes address the original identity through card replacements", () =>
+    Effect.gen(function* () {
+      const t = yield* setup
+      yield* t.add(t.main, t.a.slotId, { key: "away.set", value: { entity: t.parent.entityId, away: true } })
+      yield* t.add(t.main, t.a.slotId, { key: "cast.role", value: { entity: t.parent.entityId, role: "narrator" } })
+      yield* t.swap(t.main)
+      yield* t.add(t.main, t.b.slotId, { key: "away.set", value: { entity: t.card.entityId, away: false } })
+      yield* t.add(t.main, t.b.slotId, { key: "cast.role", value: { entity: t.card.entityId, role: null } })
+      const state = yield* t.state(t.main)
+      assert.notInclude(state.away, t.card.entityId)
+      assert.notProperty(state.roles, t.card.entityId)
+      yield* t.add(t.main, t.b.slotId, {
+        key: "card.swap",
+        value: { entity: t.parent.entityId, replaces: t.card.entityId }
+      })
+      assert.notInclude((yield* t.state(t.main)).away, t.parent.entityId)
+    })
+  )
+
   it.effect(
     "events at a shared tip and initial position are local; later forks inherit only their bounded history",
     () =>

@@ -144,7 +144,12 @@ export class AssemblySources extends Context.Service<
       SourceError
     >
     /** Whether `viewer` knew every message on the path to `leaf` up to position `through`. */
-    readonly knewThrough?: (leaf: string, viewer: string, through: number) => Effect.Effect<boolean, SourceError>
+    readonly knewThrough?: (
+      leaf: string,
+      viewer: string,
+      through: number,
+      aliases?: ReadonlyArray<string>
+    ) => Effect.Effect<boolean, SourceError>
   }
 >()("rp/assembler/AssemblySources") {}
 

@@ -924,22 +924,23 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return found
       }),
 
-    knewThrough: (leaf, viewer, through) =>
+    knewThrough: (leaf, viewer, through, aliases) =>
       Effect.gen(function* () {
         const selected = yield* shown(leaf, "s")
         const fork = yield* viewAt(sql, chatId, leaf)
         const onDisplay = yield* display(leaf)
+        const viewers = JSON.stringify(aliases ?? [viewer])
         // A message the viewer doesn't know: its version's cast less those away, and its speaker;
         // a merge's join, its source's cast; nothing recorded, everyone.
         const unknown = sql`EXISTS (SELECT 1 FROM path JOIN slots s ON s.id = path.id
           JOIN version_records v ON v.id = ${selected}
           WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
             AND NOT CASE WHEN v.origin = 'merge' AND EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
-              THEN EXISTS (SELECT 1 FROM json_each(${sql.literal(mergeKnowersSql("s.id"))}) k WHERE k.value = ${viewer})
-              ELSE v.cast_json IS NULL OR v.speaker_entity_id IS ${viewer}
-                OR (EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value = ${viewer})
+              THEN EXISTS (SELECT 1 FROM json_each(${sql.literal(mergeKnowersSql("s.id"))}) k WHERE k.value IN (SELECT value FROM json_each(${viewers})))
+              ELSE v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(${viewers}) viewer WHERE viewer.value = v.speaker_entity_id)
+                OR EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${viewers}))
                   AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
-                    WHERE a.value = ${viewer})) END) AS unknown`
+                    WHERE a.value = c.value)) END) AS unknown`
         const [row] =
           onDisplay === null
             ? yield* sql<{ unknown: number }>`
@@ -954,7 +955,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         , path AS (SELECT id FROM display_slots)
         SELECT ${unknown} WHERE ${owned}`
         const knew = (row?.unknown ?? 0) === 0
-        knewPins.push({ key: keyOf(leaf, viewer, through), knew })
+        knewPins.push({ key: keyOf(leaf, viewer, through, ...(aliases ? [aliases] : [])), knew })
         return knew
       }),
 
@@ -1274,9 +1275,13 @@ const replaySources = (
       Effect.map(pinned(pins.messageCount ?? [], keyOf(leaf), "the path message count"), ({ count }) => count),
     knowers: (versionIds) =>
       Effect.map(pinned(pins.knowers ?? [], keyOf(versionIds), "who knew the messages"), ({ found }) => found),
-    knewThrough: (leaf, viewer, through) =>
+    knewThrough: (leaf, viewer, through, aliases) =>
       Effect.map(
-        pinned(pins.knewThrough ?? [], keyOf(leaf, viewer, through), "who knew the summarized messages"),
+        pinned(
+          pins.knewThrough ?? [],
+          keyOf(leaf, viewer, through, ...(aliases ? [aliases] : [])),
+          "who knew the summarized messages"
+        ),
         ({ knew }) => knew
       ),
 

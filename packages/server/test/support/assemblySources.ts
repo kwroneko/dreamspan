@@ -21,6 +21,8 @@ import {
 } from "../../src/assembler/types.ts"
 
 export interface FixtureMessage {
+  /** Synthetic version knowledge, null or absent when everyone knows it. */
+  readonly knowers?: ReadonlyArray<string> | null
   readonly side: "user" | "assistant"
   readonly content: string
   readonly speaker?: string
@@ -106,6 +108,13 @@ const fixtureSources = (fixture: AssemblyFixture) => {
       direction: fixture.target?.direction ?? null,
       ...(fixture.target?.continues ? { continues: fixture.target.continues } : {})
     }),
+    knowers: (ids) =>
+      Effect.succeed(
+        ids.map((versionId) => ({
+          versionId,
+          knowers: fixture.messages[Number(versionId.replace("version-", ""))]?.knowers ?? null
+        }))
+      ),
     historyStart: () => Effect.succeed(fixture.historyStart ?? null),
     historyRevision: (_leaf, before) =>
       Effect.succeed(entries.slice(0, before).reduce((n, e) => n - (e.inContext ? e.content.length : 0), 0)),
