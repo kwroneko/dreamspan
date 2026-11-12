@@ -1,3 +1,5 @@
+import { mediaQueue, mapCssMedia, PENDING_MEDIA } from "./mediaQueue.ts"
+import type { MediaPermit } from "./media.ts"
 // What message HTML needs from around it (spec/HTML-MESSAGES.md §3.2, §3.3): the viewer's choices,
 // the message a body belongs to, and the chat view's card styles in one constructed stylesheet.
 import { createContext } from "react"
@@ -28,6 +30,7 @@ export const HtmlSettingsContext = createContext<HtmlSettings>({ html: true, pan
 export interface HtmlMessage {
   /** Its slot: the row, whichever version shows. */
   readonly key: string
+  readonly media?: MediaPermit
   /** Its reply is being written: its panels wait ("Panel loading"). */
   readonly streaming?: boolean
   /** How far it is from the viewed fork's tip (0 is the last message), when known. */
@@ -72,6 +75,8 @@ export function extractStyles(text: string): ReadonlyArray<string> {
  * that hasn't rendered yet contributes its stored text's.
  */
 export class MessageStyles {
+  private readonly mediaReleases = new Map<string, () => void>()
+  private readonly reportedMedia = new Map<string, ReadonlyArray<string>>()
   private readonly reported = new Map<string, string>()
   private loaded: ReadonlyArray<{ readonly key: string; readonly text: string }> = []
   private readonly stored = new Map<string, { readonly text: string; readonly css: string }>()
@@ -90,15 +95,29 @@ export class MessageStyles {
     this.flush()
     return () => {
       sheets.delete(this)
+      for (const release of this.mediaReleases.values()) release()
+      this.mediaReleases.clear()
       document.adoptedStyleSheets = document.adoptedStyleSheets.filter((adopted) => adopted !== sheet)
       if (this.sheet === sheet) this.sheet = null
     }
   }
 
   /** A rendered body's scoped CSS (display text). It stays after the row unmounts. */
-  report(key: string, css: string) {
+  report(key: string, css: string, media: ReadonlyArray<string> = []) {
+    this.reportedMedia.set(key, media)
     if (this.reported.get(key) === css) return
     this.reported.set(key, css)
+    this.schedule()
+  }
+
+  /** Consent revisions invalidate offscreen reports too. Visible rows report again. */
+  clearReports() {
+    for (const [key, css] of this.reported)
+      this.reported.set(
+        key,
+        mapCssMedia(css, () => PENDING_MEDIA)
+      )
+    this.reportedMedia.clear()
     this.schedule()
   }
 
@@ -106,7 +125,11 @@ export class MessageStyles {
   setLoaded(entries: ReadonlyArray<{ readonly key: string; readonly text: string }>) {
     this.loaded = entries
     const keys = new Set(entries.map((entry) => entry.key))
-    for (const key of [...this.reported.keys()]) if (!keys.has(key)) this.reported.delete(key)
+    for (const key of [...this.reported.keys()])
+      if (!keys.has(key)) {
+        this.reported.delete(key)
+        this.reportedMedia.delete(key)
+      }
     for (const key of [...this.stored.keys()]) if (!keys.has(key)) this.stored.delete(key)
     this.schedule()
   }
@@ -143,7 +166,22 @@ export class MessageStyles {
   }
   private flush() {
     if (!this.sheet) return
-    const text = this.text()
+    const source = this.text()
+    const addresses = new Set(this.loaded.flatMap((entry) => this.reportedMedia.get(entry.key) ?? []))
+    for (const [url, release] of this.mediaReleases)
+      if (!addresses.has(url)) {
+        release()
+        this.mediaReleases.delete(url)
+      }
+    for (const url of addresses)
+      if (!this.mediaReleases.has(url))
+        this.mediaReleases.set(
+          url,
+          mediaQueue.retain(url, () => this.schedule())
+        )
+    const text = mapCssMedia(source, (url) =>
+      addresses.has(url) ? (mediaQueue.read(url) ?? PENDING_MEDIA) : PENDING_MEDIA
+    )
     if (text === this.applied) return
     this.applied = text
     this.sheet.replaceSync(text)

@@ -1,7 +1,8 @@
+import { proxyMediaUrl } from "./media.ts"
 // A message's `<style>` as CSS for the chat's constructed stylesheet (spec/HTML-MESSAGES.md §3.2,
 // as ST's decodeStyleTags): every selector under the message-body scope, classes and ids renamed
 // as the markup's are, `@import` and other global at-rules dropped, and declarations that would
-// load something from elsewhere dropped while external media is blocked (always, for now).
+// load something from elsewhere dropped while external media is blocked; approved simple url() values use the authenticated media proxy.
 import postcss, { type AtRule, type ChildNode, type Container, type Declaration, type Rule } from "postcss"
 
 /** The class every message body carries, which the card's styles are scoped to. */
@@ -57,8 +58,20 @@ function closingQuote(text: string, start: number) {
 
 /** CSS escapes decoded and comments gone, so an escape or a comment can't hide a function name. */
 function plain(value: string) {
-  return value
-    .replace(/\/\*[\s\S]*?\*\//g, "")
+  let uncommented = ""
+  let at = 0
+  for (;;) {
+    const start = value.indexOf("/*", at)
+    if (start < 0) {
+      uncommented += value.slice(at)
+      break
+    }
+    uncommented += value.slice(at, start)
+    const end = value.indexOf("*/", start + 2)
+    if (end < 0) break
+    at = end + 2
+  }
+  return uncommented
     .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) => {
       const point = Number.parseInt(hex, 16)
       return String.fromCodePoint(
@@ -96,34 +109,112 @@ export const renameReferences = (value: string) =>
   )
 
 /**
- * A `style` attribute without the declarations that would load something, its `url(#id)`
- * references renamed. Split as the browser reads it: at semicolons outside strings and brackets.
+ * Rewrite only simple url() values, in the value as written. Other loading constructs, an
+ * escaped or commented url(), keep the blocking policy. The rest of the value is never decoded:
+ * a decoded `\7d` would be a real `}` and end the scoped rule. Strings and comments are passed
+ * over whole, so a url() written inside a string stays text.
  */
-export function cleanStyle(style: string): { readonly style: string; readonly blocked: boolean } {
-  const declarations: string[] = []
+const SAFE_FUNCTIONS = new Set(
+  (
+    "rgb rgba hsl hsla hwb lab lch oklab oklch color color-mix light-dark " +
+    "calc min max clamp round mod rem abs sign sqrt pow hypot log exp sin cos tan asin acos atan atan2 " +
+    "var env linear-gradient radial-gradient conic-gradient repeating-linear-gradient repeating-radial-gradient repeating-conic-gradient " +
+    "translate translatex translatey translatez translate3d scale scalex scaley scalez scale3d rotate rotatex rotatey rotatez rotate3d skew skewx skewy matrix matrix3d perspective " +
+    "blur brightness contrast drop-shadow grayscale hue-rotate invert opacity saturate sepia " +
+    "cubic-bezier steps linear local counter counters rect inset circle ellipse polygon path"
+  ).split(" ")
+)
+function mediaValue(value: string, scope?: string | null) {
+  const remote = loads(value).remote
+  const media: string[] = []
+  const refuse = () => ({ value: "", loads: true, remote, media: [] as string[] })
+  let out = ""
   let depth = 0
-  let quote: string | null = null
-  let start = 0
-  for (let i = 0; i <= style.length; i++) {
-    const char = style[i]
-    if (char === "\\") i++
-    else if (quote) quote = char === quote ? null : quote
-    else if (char === '"' || char === "'") quote = char
-    else if (char === "(") depth++
-    else if (char === ")") depth = Math.max(0, depth - 1)
-    else if ((char === ";" && depth === 0) || char === undefined) {
-      declarations.push(style.slice(start, i))
-      start = i + 1
+  for (let i = 0; i < value.length;) {
+    const char = value[i]!
+    if (value.startsWith("/*", i)) {
+      const end = value.indexOf("*/", i + 2)
+      if (end < 0) return refuse()
+      // Keep comments as token boundaries; never join identifiers across them.
+      out += value.slice(i, end + 2)
+      i = end + 2
+    } else if (char === '"' || char === "'") {
+      const end = closingQuote(value, i)
+      if (end > value.length || /[\n\r\f]/.test(value.slice(i, end))) return refuse()
+      out += value.slice(i, end)
+      i = end
+    } else if (/[a-z_\\-]/i.test(char)) {
+      const start = i
+      while (i < value.length && /[a-z0-9_\\-]/i.test(value[i]!)) {
+        if (value[i] === "\\") {
+          // Escaped function names are deliberately unsupported. Preserve other escapes.
+          const escape = /^\\(?:[0-9a-f]{1,6}\s?|[^\n\r\f])/i.exec(value.slice(i))
+          if (!escape) return refuse()
+          i += escape[0].length
+        } else i++
+      }
+      const name = value.slice(start, i)
+      if (value[i] !== "(") {
+        out += name
+        continue
+      }
+      if (name.toLowerCase() === "url") {
+        const match = /^url\(\s*(?:"([^"\\\n\r\f]*)"|'([^'\\\n\r\f]*)'|([^()"'\\\s]*))\s*\)/i.exec(value.slice(start))
+        if (!match) return refuse()
+        const address = (match[1] ?? match[2] ?? match[3] ?? "").trim()
+        const proxy = proxyMediaUrl(address, scope)
+        if (proxy) {
+          media.push(proxy)
+          out += `url("${proxy}")`
+        } else if (/^(?:data:|#)/i.test(address)) out += match[0]
+        else return refuse()
+        i = start + match[0].length
+      } else {
+        if (!SAFE_FUNCTIONS.has(name.toLowerCase()) || ++depth > 64) return refuse()
+        out += name + "("
+        i++
+      }
+    } else {
+      if (char === "(") {
+        if (++depth > 64) return refuse()
+      }
+      if (char === ")" && --depth < 0) return refuse()
+      if (/[{};]/.test(char)) return refuse()
+      out += char
+      i++
     }
   }
-  let blocked = false
-  const kept = declarations.flatMap((declaration) => {
-    if (!declaration.trim()) return []
-    const result = loads(declaration)
-    blocked ||= result.remote
-    return result.loads ? [] : [renameReferences(declaration.trim())]
-  })
-  return { style: kept.join("; "), blocked }
+  return depth === 0 ? { value: out, loads: false, remote, media } : refuse()
+}
+
+/** A style attribute uses the same parser and value policy as the stylesheet path. */
+export function cleanStyle(
+  style: string,
+  mediaScope?: string | null
+): { readonly style: string; readonly blocked: boolean } {
+  if (style.length > MAX_MESSAGE_CSS) return { style: "", blocked: true }
+  try {
+    const root = postcss.parse(`a{${style}}`)
+    const rule = root.first
+    if (
+      root.nodes.length !== 1 ||
+      rule?.type !== "rule" ||
+      rule.nodes.some((node) => node.type !== "decl" && node.type !== "comment")
+    )
+      return { style: "", blocked: loads(style).remote }
+    let blocked = false
+    const kept: string[] = []
+    for (const node of rule.nodes) {
+      if (node.type !== "decl") continue
+      const result = mediaValue(node.value, mediaScope)
+      blocked ||= result.remote
+      if (!result.loads)
+        kept.push(`${node.prop}: ${renameReferences(result.value)}${node.important ? " !important" : ""}`)
+    }
+    return { style: kept.join("; "), blocked }
+  } catch {
+    return { style: "", blocked: loads(style).remote }
+  }
 }
 
 /** Names the stylesheet defines globally (keyframes, fonts) get the class prefix too. */
@@ -138,32 +229,43 @@ const renameNames = (value: string, names: ReadonlySet<string>) =>
 const GROUPING = new Set(["media", "supports", "container", "starting-style", "document", "-moz-document"])
 
 export interface ScopedCss {
+  readonly media?: ReadonlyArray<string>
   readonly css: string
   /** Something from another site was left out: the message says so. */
   readonly blocked: boolean
 }
 
 /** Each of a message's `<style>`s scoped on its own, so one that doesn't parse leaves the others. */
-export function scopeStyles(styles: ReadonlyArray<string>): ScopedCss {
-  const scoped = styles.map((css) => scopeCss(css))
+export function scopeStyles(styles: ReadonlyArray<string>, mediaScope?: string | null): ScopedCss {
+  const scoped = styles.map((css) => scopeCss(css, undefined, mediaScope))
   return {
     css: scoped
       .map((one) => one.css)
       .filter((css) => css.trim() !== "")
       .join("\n"),
+    media: scoped.flatMap((one) => one.media ?? []),
     blocked: scoped.some((one) => one.blocked)
   }
 }
 
 /** A message's CSS under `.message-html`; unparsable CSS is left out whole, as nothing applies. */
-export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`): ScopedCss {
+export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`, mediaScope?: string | null): ScopedCss {
   let root
   try {
-    root = postcss.parse(css.slice(0, MAX_MESSAGE_CSS))
+    if (css.length > MAX_MESSAGE_CSS) return { css: "", blocked: true }
+    root = postcss.parse(css)
   } catch {
     return { css: "", blocked: false }
   }
+  const pending: Array<{ node: Container; depth: number }> = [{ node: root, depth: 0 }]
+  while (pending.length) {
+    const { node, depth } = pending.pop()!
+    if (depth > 64) return { css: "", blocked: true }
+    for (const child of node.nodes ?? [])
+      if ("nodes" in child && child.nodes) pending.push({ node: child as Container, depth: depth + 1 })
+  }
   let blocked = false
+  const media: string[] = []
   const keyframes = new Set<string>()
   const fonts = new Set<string>()
   root.walkAtRules((rule) => {
@@ -175,13 +277,14 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`): ScopedCss {
       })
   })
   const declaration = (decl: Declaration) => {
-    const { loads: loading, remote } = loads(decl.value)
+    const { loads: loading, remote, value, media: urls } = mediaValue(decl.value, mediaScope)
     if (loading) {
       blocked ||= remote
       decl.remove()
       return
     }
-    decl.value = renameReferences(decl.value)
+    media.push(...urls)
+    decl.value = renameReferences(value)
     const property = decl.prop.toLowerCase()
     if (property === "animation" || property === "animation-name") decl.value = renameNames(decl.value, keyframes)
     if (property === "font" || property === "font-family") decl.value = renameNames(decl.value, fonts)
@@ -246,5 +349,5 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`): ScopedCss {
     else rule.remove()
   }
   visit(root, false)
-  return { css: root.toString(), blocked }
+  return { css: root.toString(), blocked, media }
 }

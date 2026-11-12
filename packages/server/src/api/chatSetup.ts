@@ -63,6 +63,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "lorebook.remove", value: { ref: change.ref } }
     case "LoreBelowHistory":
       return { key: "lorebook.below_history", value: { on: change.on } }
+    case "HtmlDepth":
+      return { key: "context.html_depth", value: change.depth }
     case "ReplyOrder":
       return { key: "reply.order", value: change.order }
     case "ReplySingle":
@@ -269,6 +271,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       ...(state.replySingle === true ? { replySingle: true } : {}),
       ...(state.agentEnabled === null ? {} : { agentEnabled: state.agentEnabled }),
       ...(state.cardsRotation === true ? { cardsRotation: true } : {}),
+      ...(state.htmlDepth === null ? {} : { htmlDepth: state.htmlDepth }),
       ...(state.agentTools ? { agentTools: state.agentTools } : {}),
       roleProjections,
       ...(state.mergeLayout === null ? {} : { mergeLayout: state.mergeLayout }),

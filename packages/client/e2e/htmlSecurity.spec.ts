@@ -7,6 +7,10 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 const server = serverPerFile(withAdmin)
 
 test("card selectors cannot style the app or remove message containment", async ({ page }) => {
+  const probes: string[] = []
+  page.on("request", (request) => {
+    if (request.url().includes("css-variable-probe")) probes.push(request.url())
+  })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
@@ -19,6 +23,8 @@ test("card selectors cannot style the app or remove message containment", async 
         reply: false,
         content: [
           "<style>",
+          '.box { --address: "/css-variable-probe"; background-image: image-set(var(--address)) }',
+          String.raw`.box { font-family: x\7d html\7b background\3a blue }`,
           String.raw`@font-face { font-family: "\49 nter"; src: local("FreeMono") }`,
           ".box { color: rgb(1, 2, 3); & > span { color: rgb(4, 5, 6) }",
           ":is(&, body) [data-security-probe] { color: rgb(11, 22, 33) !important }",
@@ -45,6 +51,8 @@ test("card selectors cannot style the app or remove message containment", async 
   await expect(page.locator("[data-security-probe]")).toHaveCSS("color", "rgb(7, 8, 9)")
   await expect(page.locator(".message-html")).toHaveCSS("contain", "layout paint")
   expect(await page.evaluate(() => Array.from(document.fonts, (font) => font.family))).not.toContain("Inter")
+  expect(probes).toEqual([])
+  await expect(box).toHaveCSS("background-image", "none")
 })
 
 test("SVG panel links cannot navigate into an attacker document", async ({ page }) => {

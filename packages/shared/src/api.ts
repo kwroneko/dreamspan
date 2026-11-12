@@ -1,3 +1,4 @@
+import { ExternalMediaApi } from "./externalMedia.ts"
 import { SplitChatApi } from "./splitChat.ts"
 import { ChatMergeApi } from "./mergeApi.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
@@ -411,6 +412,7 @@ export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authenticat
 export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authentication)
 
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
+export const AuthenticatedExternalMediaApi = ExternalMediaApi.middleware(Authentication)
 export const AuthenticatedPanelApprovalApi = PanelApprovalApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
@@ -444,6 +446,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedCardSourcesApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedPanelApprovalApi)
+  .merge(AuthenticatedExternalMediaApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi)
