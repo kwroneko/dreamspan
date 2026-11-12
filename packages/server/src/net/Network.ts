@@ -8,6 +8,7 @@ import { InvalidNetworkSettings } from "@rp/shared/api.ts"
 import { ServerError } from "@rp/shared/errors.ts"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { Agent, type Dispatcher, ProxyAgent, Socks5ProxyAgent, fetch as undiciFetch } from "undici"
+import { makeDispatcherPool } from "./dispatcherPool.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Secrets } from "../secrets.ts"
 import {
@@ -188,21 +189,14 @@ export const layer = Layer.effect(
     const current = yield* Ref.make(yield* Effect.orDie(load))
 
     // One dispatcher per route, reused so connections pool; closed with the layer.
-    const dispatchers = new Map<string, Dispatcher>()
+    const dispatchers = makeDispatcherPool()
     const dispatcherFor = (route: Route, settings: Current, pinnedTarget?: URL, servername?: string, host?: string) => {
       const routeKey =
         route.via === "direct" ? `direct:${route.pinned ? JSON.stringify(settings.bypassEntries) : "any"}` : route.proxy
       const key = JSON.stringify([routeKey, pinnedTarget?.origin, servername, host])
-      let dispatcher = dispatchers.get(key)
-      if (!dispatcher) {
-        dispatcher = makeDispatcher(route, () => settings.bypass, servername, host)
-        dispatchers.set(key, dispatcher)
-      }
-      return dispatcher
+      return dispatchers.get(key, () => makeDispatcher(route, () => settings.bypass, servername, host))
     }
-    yield* Effect.addFinalizer(() =>
-      Effect.promise(() => Promise.allSettled([...dispatchers.values()].map((d) => d.close())))
-    )
+    yield* Effect.addFinalizer(() => Effect.promise(() => dispatchers.close()))
 
     const routeNow = (
       target: URL,
