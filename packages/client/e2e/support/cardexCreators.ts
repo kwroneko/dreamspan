@@ -22,13 +22,28 @@ const creatorsOf = (scope: Locator) =>
     .locator("[data-remote-card] [data-remote-creator]")
     .evaluateAll((nodes) => nodes.map((node) => (node.textContent ?? "").replace(/^by /, "").trim()))
 
+/**
+ * The app's navigation, once the page has drawn its menu button: on a phone the side panel is in
+ * the menu sheet, which `showAppNavigation` opens only if the button is already there.
+ */
+const navigation = async (page: Page) => {
+  if ((page.viewportSize()?.width ?? 1440) < 768)
+    await expect(
+      page
+        .getByRole("button", { name: /^(Chats and menu|Close the menu)$/ })
+        .filter({ visible: true })
+        .first()
+    ).toBeVisible()
+  await showAppNavigation(page)
+}
+
 const openCardex = async (page: Page, place: "home" | "sidebar") => {
   const home = page.getByRole("main")
   if (place === "home") {
     await home.getByRole("button", { name: "cardex", exact: true }).click()
     return home
   }
-  await showAppNavigation(page)
+  await navigation(page)
   await page
     .getByRole("group", { name: "Left panel", exact: true })
     .filter({ visible: true })
@@ -88,12 +103,12 @@ export function cardexCreatorTests() {
             // The URL is the view: a reload, and a second tab, show the same creator.
             const url = page.url()
             await page.reload()
-            if (place === "sidebar" && width === 390) await showAppNavigation(page)
+            if (place === "sidebar") await navigation(page)
             await expect(header.getByRole("heading", { name: `Cards by ${creator} (synthetic)` })).toBeVisible()
             const second = await context.newPage()
             await second.setViewportSize({ width, height: 900 })
             await second.goto(url)
-            if (place === "sidebar" && width === 390) await showAppNavigation(second)
+            if (place === "sidebar") await navigation(second)
             await expect(
               second
                 .locator("[data-source-creator]")
