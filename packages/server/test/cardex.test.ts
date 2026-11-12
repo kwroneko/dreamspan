@@ -429,6 +429,23 @@ describe("v1 as card sources", () => {
     })
   )
 
+  it.effect("fewest-token searches stay usable when the archive's ascending order fails", () =>
+    Effect.gen(function* () {
+      for (const text of ["", "synthetic"]) {
+        const seen: Array<string> = []
+        const page = yield* fakeCardexAdapter(archive).search(
+          direct(seen),
+          { ...emptySourceQuery, text, sort: "tokens", reverse: true },
+          null
+        )
+        assert.isAbove(page.items.length, 0)
+        assert.include(page.notice!, "Showing most tokens first")
+        assert.strictEqual(new URL(`http://fake${seen[0]}`).searchParams.get("sort"), "tokens_desc")
+        assert.isTrue(page.items.every((item, index) => index === 0 || item.tokens! <= page.items[index - 1]!.tokens!))
+      }
+    })
+  )
+
   it("a batch URL is in v1's canonical form: sorted, without duplicates, joined by %2C", () => {
     assert.strictEqual(batchUrl(["b-2", "a-1", "b-2"]).href, `${CARDEX_ORIGIN}/api/v1/cards/batch?ids=a-1%2Cb-2`)
   })

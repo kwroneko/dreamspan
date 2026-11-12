@@ -545,6 +545,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       return { status: 400, body: error("bad_request", "Chub must be the only included source") }
     const q = (params.get("q") ?? "").trim().toLowerCase()
     const sort = params.get("sort") ?? (q ? "relevance" : "newest")
+    if (sort === "tokens_asc" && mode !== "semantic")
+      return { status: 500, body: error("internal", "fewest tokens unavailable") }
     if (sort === "name" && q && mode !== "semantic")
       return { status: 500, body: error("internal", "name search unavailable") }
     if (!V1_SORTS.includes(sort)) return { status: 400, body: error("bad_request", "unknown sort") }

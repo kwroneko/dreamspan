@@ -230,7 +230,7 @@ const sortParam = (query: SourceQuery) => {
     case "newest":
       return query.reverse ? "oldest" : "newest"
     case "tokens":
-      return query.reverse ? "tokens_asc" : "tokens_desc"
+      return "tokens_desc"
     // Best match ranks by the words; with none, cardex's own order for it is popularity.
     case "relevance":
       return query.text.trim() ? "relevance" : "popular"
@@ -594,6 +594,9 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
           next,
           ...(query.sort === "name" && !query.reverse && query.text.trim() && !semantic
             ? { notice: "Name sorting with search words is unavailable on cardex. Showing best matches." }
+            : {}),
+          ...(query.sort === "tokens" && query.reverse && !semantic
+            ? { notice: "Sorting by fewest tokens is unavailable on cardex. Showing most tokens first." }
             : {}),
           ...(restarted ? { reset: true } : {}),
           ...(total === undefined ? {} : { total }),
