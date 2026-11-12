@@ -3,11 +3,15 @@ import { describe, expect, it } from "vitest"
 import { isPublicMediaAddress, makeExternalFetcher } from "../src/net/externalMedia.ts"
 import type { NetworkShape, TargetAddresses } from "../src/net/Network.ts"
 
+const pixel = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=",
+  "base64"
+)
 const PUBLIC = "93.184.216.34"
 const controller = () => new AbortController().signal
 const fakeNetwork = (
   answer: (url: URL, init: RequestInit) => Promise<Response> = async () =>
-    new Response("image", { headers: { "content-type": "image/png" } })
+    new Response(pixel, { headers: { "content-type": "image/png" } })
 ) => {
   const requests: Array<{ url: URL; init: RequestInit; addresses: ReadonlyArray<string> | undefined }> = []
   const network: Pick<NetworkShape, "fetchFor"> = {
@@ -33,6 +37,8 @@ const refused = [
   "0.0.0.0",
   "10.0.0.1",
   "100.100.100.200",
+  "100.64.0.1",
+  "100.127.255.254",
   "127.0.0.1",
   "169.254.169.254",
   "172.31.0.1",
@@ -50,6 +56,9 @@ const refused = [
   "fd00:ec2::254",
   "ff02::1",
   "64:ff9b::7f00:1",
+  "64:ff9b:1::a00:1",
+  "::ffff:169.254.169.254",
+  "::ffff:100.100.100.200",
   "2002:7f00:1::",
   "2001::1",
   "2001:db8::1",
@@ -81,6 +90,12 @@ describe("external media address policy", () => {
     "data:image/png,a",
     "https://user:pass@media.invalid/a",
     "http://2130706433/a",
+    "http://0177.0.0.1/a",
+    "http://127.1/a",
+    "http://127.0.1/a",
+    "http://0/a",
+    "http://0xA9FEA9FE/latest",
+    "http://[64:ff9b::a9fe:a9fe]/latest",
     "http://0x7f000001/a",
     "http://[::ffff:7f00:1]/a"
   ])
@@ -168,16 +183,67 @@ describe("external media response limits", () => {
   })
   it("returns images/audio with only fixed outbound headers and no credentials", async () => {
     const fake = fakeNetwork(
-      async () =>
-        new Response("sound", { headers: { "content-type": "audio/ogg; codecs=opus", "set-cookie": "secret=1" } })
+      async () => new Response(pixel, { headers: { "content-type": "image/png", "set-cookie": "secret=1" } })
     )
     const result = await makeExternalFetcher(fake.network, { resolve: async () => [PUBLIC] })(
       "https://media.invalid/a",
       controller()
     )
-    expect(result.mime).toBe("audio/ogg")
-    expect(Buffer.from(result.bytes).toString()).toBe("sound")
+    expect(result.mime).toBe("image/png")
+    expect(Buffer.from(result.bytes)).toEqual(pixel)
     expect(fake.requests[0]?.init.credentials).toBe("omit")
     expect(Object.keys(fake.requests[0]!.init.headers!)).toEqual(["accept", "accept-encoding"])
   })
 })
+
+describe("untrusted response bytes", () => {
+  for (const body of [
+    "<!doctype html><script>alert(1)</script>",
+    '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+  ])
+    it("refuses active content mislabeled as an image", async () => {
+      const fake = fakeNetwork(async () => new Response(body, { headers: { "content-type": "image/png" } }))
+      await expect(
+        makeExternalFetcher(fake.network, { resolve: async () => [PUBLIC] })("https://media.invalid/a", controller())
+      ).rejects.toThrow()
+    })
+})
+
+it("requires the declared image type to match the sniffed bytes", async () => {
+  const fake = fakeNetwork(async () => new Response(pixel, { headers: { "content-type": "image/jpeg" } }))
+  await expect(
+    makeExternalFetcher(fake.network, { resolve: async () => [PUBLIC] })("https://media.invalid/a", controller())
+  ).rejects.toThrow()
+})
+
+it.each([false, true])(
+  "does not let a mislabeled archive allocate beyond the media limit (ID3 wrapper: %s)",
+  async (wrapped) => {
+    const bytes = Buffer.alloc(38)
+    bytes.writeUInt32LE(0x04034b50, 0)
+    bytes.writeUInt32LE(32 * 1024 * 1024, 18)
+    bytes.writeUInt16LE(8, 26)
+    bytes.write("mimetype", 30)
+    const Native = globalThis.Uint8Array
+    let oversized = false
+    try {
+      globalThis.Uint8Array = new Proxy(Native, {
+        construct(target, args) {
+          if (typeof args[0] === "number" && args[0] > 16 * 1024 * 1024) {
+            oversized = true
+            throw new Error("Prevented synthetic oversized allocation")
+          }
+          return Reflect.construct(target, args)
+        }
+      })
+      const body = wrapped ? Buffer.concat([Buffer.from([73, 68, 51, 4, 0, 0, 0, 0, 0, 0]), bytes]) : bytes
+      const fake = fakeNetwork(async () => new Response(body, { headers: { "content-type": "image/png" } }))
+      await expect(
+        makeExternalFetcher(fake.network, { resolve: async () => [PUBLIC] })("https://media.invalid/a", controller())
+      ).rejects.toThrow()
+    } finally {
+      globalThis.Uint8Array = Native
+    }
+    expect(oversized).toBe(false)
+  }
+)

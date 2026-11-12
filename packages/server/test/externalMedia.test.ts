@@ -1,4 +1,6 @@
 import { createServer } from "node:http"
+import { gzipSync } from "node:zlib"
+import { vi } from "vitest"
 import type { Socket } from "node:net"
 import * as NetworkModule from "../src/net/Network.ts"
 import * as Database from "../src/db/Database.ts"
@@ -74,12 +76,19 @@ it.live("checks ownership and consent before fetching, never caches, and stops o
     assert.strictEqual((yield* get(undefined, "bob")).status, 404)
     assert.strictEqual(requests, 0)
     yield* alice.SetExternalMedia({ target: { _tag: "Card", id: entityId }, allow: true })
+    assert.strictEqual(requests, 0)
     const first = yield* get()
     assert.strictEqual(first.status, 200)
     assert.deepStrictEqual(new Uint8Array(yield* Effect.promise(() => first.arrayBuffer())), bytes)
     assert.strictEqual(first.headers.get("cache-control"), "no-store")
     assert.strictEqual(first.headers.get("x-content-type-options"), "nosniff")
     assert.isNull(first.headers.get("set-cookie"))
+    assert.strictEqual(first.headers.get("content-disposition"), "attachment")
+    assert.strictEqual(
+      first.headers.get("content-security-policy"),
+      "sandbox; default-src 'none'; frame-ancestors 'none'"
+    )
+    assert.strictEqual(first.headers.get("cross-origin-resource-policy"), "same-origin")
     assert.strictEqual(
       (yield* get(undefined, "alice", { "if-none-match": "anything", range: "bytes=0-1" })).status,
       200
@@ -106,6 +115,10 @@ it.live("checks ownership and consent before fetching, never caches, and stops o
 
 it.live("pins public DNS answers through the real Network transport and rechecks same-origin redirects", () =>
   Effect.gen(function* () {
+    const pixel = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=",
+      "base64"
+    )
     const network = yield* Network
     const authorities: string[] = []
     const hosts: Array<string | undefined> = []
@@ -115,7 +128,12 @@ it.live("pins public DNS answers through the real Network transport and rechecks
       authorities.push(url.host.includes(":") ? url.host : `${url.host}:80`)
       hosts.push(request.headers.host)
       if (url.pathname === "/redirect") response.writeHead(302, { location: "/private" }).end()
-      else response.writeHead(200, { "content-type": "image/png" }).end("image")
+      else if (url.pathname === "/loop") response.writeHead(302, { location: "/loop" }).end()
+      else if (url.pathname === "/gzip")
+        response
+          .writeHead(200, { "content-type": "image/png", "content-encoding": "gzip" })
+          .end(gzipSync(Buffer.alloc(4096)))
+      else response.writeHead(200, { "content-type": "image/png" }).end(pixel)
     })
     proxy.on("connection", (socket) => {
       sockets.add(socket)
@@ -130,11 +148,23 @@ it.live("pins public DNS answers through the real Network transport and rechecks
         if (!buffer.includes("\r\n\r\n")) return
         socket.off("data", receive)
         hosts.push(/^host: (.*)$/im.exec(buffer)?.[1]?.trim())
-        socket.end(
-          buffer.startsWith("GET /redirect ")
-            ? "HTTP/1.1 302 Found\r\nLocation: /private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            : "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 5\r\nConnection: close\r\n\r\nimage"
-        )
+        const path = buffer.split(" ")[1]
+        if (path === "/redirect" || path === "/loop") {
+          socket.end(
+            `HTTP/1.1 302 Found\r\nLocation: ${path === "/loop" ? "/loop" : "/private"}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`
+          )
+        } else {
+          const compressed = path === "/gzip"
+          const bytes = compressed ? gzipSync(Buffer.alloc(4096)) : pixel
+          socket.end(
+            Buffer.concat([
+              Buffer.from(
+                `HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n${compressed ? "Content-Encoding: gzip\r\n" : ""}Content-Length: ${bytes.length}\r\nConnection: close\r\n\r\n`
+              ),
+              bytes
+            ])
+          )
+        }
       }
       socket.on("data", receive)
       if (head.length) receive(head)
@@ -160,8 +190,14 @@ it.live("pins public DNS answers through the real Network transport and rechecks
         return ["93.184.216.34"]
       }
     })
+    // Explicit dispatchers must ignore ambient proxy variables, even if a process enables them.
+    vi.stubEnv("HTTP_PROXY", "http://127.0.0.1:1")
+    vi.stubEnv("HTTPS_PROXY", "http://127.0.0.1:1")
+    vi.stubEnv("ALL_PROXY", "http://127.0.0.1:1")
+    vi.stubEnv("NODE_USE_ENV_PROXY", "1")
+    yield* Effect.addFinalizer(() => Effect.sync(() => vi.unstubAllEnvs()))
     const file = yield* Effect.promise(() => get("http://media.invalid/a.png", new AbortController().signal))
-    assert.strictEqual(Buffer.from(file.bytes).toString(), "image")
+    assert.deepStrictEqual(Buffer.from(file.bytes), pixel)
     assert.strictEqual(lookups, 1)
     assert.deepStrictEqual(authorities, ["93.184.216.34:80"])
     assert.deepStrictEqual(hosts, ["media.invalid"])
@@ -175,6 +211,17 @@ it.live("pins public DNS answers through the real Network transport and rechecks
     assert.strictEqual(refused._tag, "Failure")
     assert.strictEqual(hops, 2)
     assert.deepStrictEqual(hosts, ["media.invalid", "media.invalid"])
+    const beforeLoop = authorities.length
+    const loop = yield* Effect.exit(
+      Effect.tryPromise(() => get("http://media.invalid/loop", new AbortController().signal))
+    )
+    assert.strictEqual(loop._tag, "Failure")
+    assert.strictEqual(authorities.length - beforeLoop, 6, "at most five redirects")
+    const compressed = makeExternalFetcher(network, { resolve: async () => ["93.184.216.34"], maxBytes: 1024 })
+    const tooLarge = yield* Effect.exit(
+      Effect.tryPromise(() => compressed("http://media.invalid/gzip", new AbortController().signal))
+    )
+    assert.strictEqual(tooLarge._tag, "Failure", "decompressed bytes exceed the cap despite a small Content-Length")
   }).pipe(
     Effect.scoped,
     Effect.provide(

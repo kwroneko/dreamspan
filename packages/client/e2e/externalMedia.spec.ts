@@ -58,7 +58,13 @@ for (const width of [1440, 390])
           status: 200,
           body: pixel,
           contentType: "image/png",
-          headers: { "cache-control": "no-store" }
+          headers: {
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+            "cross-origin-resource-policy": "same-origin",
+            "content-disposition": "attachment",
+            "content-security-policy": "sandbox; default-src 'none'; frame-ancestors 'none'"
+          }
         })
       })
       await page.goto(`${server().url}/chats/${started.chat.id}`)

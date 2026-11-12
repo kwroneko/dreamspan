@@ -2,6 +2,7 @@
 // hop with this policy and pins its checked literals on the wire (also through proxies).
 import { lookup } from "node:dns/promises"
 import { BlockList, isIP } from "node:net"
+import { fileTypeFromBuffer } from "file-type"
 import type { NetworkShape } from "./Network.ts"
 
 const denied = new BlockList()
@@ -59,6 +60,35 @@ interface ExternalMediaFile {
   readonly mime: string
 }
 class ExternalMediaRefused extends Error {}
+/** Sniff a bounded media prefix only. General file detectors also unpack archives;
+ * untrusted archive sizes must never reach those parsers, even with an image header.
+ * Skip bounded ID3 metadata ourselves so it cannot recurse into a disguised archive. */
+const mediaSample = (bytes: Buffer) => {
+  let sample = bytes
+  for (let tags = 0; sample.subarray(0, 3).toString("ascii") === "ID3"; tags++) {
+    if (tags >= 8 || sample.length < 10 || sample.subarray(6, 10).some((byte) => byte > 127))
+      throw new ExternalMediaRefused("Invalid audio metadata")
+    const size = sample[6]! * 128 ** 3 + sample[7]! * 128 ** 2 + sample[8]! * 128 + sample[9]!
+    const footer = sample[3] === 4 && (sample[5]! & 0x10) !== 0 ? 10 : 0
+    sample = sample.subarray(10 + size + footer)
+  }
+  const ascii = (at: number, value: string) => sample.subarray(at, at + value.length).toString("latin1") === value
+  const media =
+    sample.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+    (sample[0] === 255 && sample[1] === 216 && sample[2] === 255) ||
+    ascii(0, "GIF87a") ||
+    ascii(0, "GIF89a") ||
+    (ascii(0, "RIFF") && (ascii(8, "WAVE") || ascii(8, "WEBP"))) ||
+    (ascii(4, "ftyp") &&
+      sample.length >= 16 &&
+      sample.readUInt32BE(0) >= 16 &&
+      sample.readUInt32BE(0) <= sample.length) ||
+    ascii(0, "OggS") ||
+    ascii(0, "fLaC") ||
+    (sample[0] === 255 && sample[1] !== undefined && (sample[1] & 0xe0) === 0xe0)
+  if (!media) throw new ExternalMediaRefused("Not a supported media signature")
+  return sample.subarray(0, 4100)
+}
 interface Limits {
   readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>
   readonly maxBytes?: number
@@ -120,7 +150,22 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
             if (size > maxBytes) throw new ExternalMediaRefused("The media file is too large")
             chunks.push(chunk.value)
           }
-        return { bytes: Buffer.concat(chunks), mime }
+        const bytes = Buffer.concat(chunks)
+        const detected = await fileTypeFromBuffer(mediaSample(bytes))
+        const normalize = (type: string) => {
+          const base = type.split(";")[0]!.trim()
+          return base === "image/apng"
+            ? "image/png"
+            : base === "audio/x-wav"
+              ? "audio/wav"
+              : base === "audio/x-m4a"
+                ? "audio/mp4"
+                : base
+        }
+        const sniffed = detected ? normalize(detected.mime) : ""
+        if (!TYPES.has(sniffed) || sniffed !== normalize(mime))
+          throw new ExternalMediaRefused("The media bytes do not match a supported image or audio type")
+        return { bytes, mime: sniffed }
       } finally {
         await reader?.cancel()
       }

@@ -24,7 +24,9 @@ export class ExternalMedia extends Context.Service<
     ExternalMedia,
     Effect.gen(function* () {
       const network = yield* Network
-      return { fetchers: makeRegistry([{ id: "media.external", fetch: makeExternalFetcher(network) }]) }
+      return {
+        fetchers: makeRegistry([{ id: "media.external", fetch: makeExternalFetcher(network) }])
+      }
     })
   )
 }
@@ -101,7 +103,9 @@ export const externalMediaRoute = Layer.unwrap(
           headers: {
             "cache-control": "no-store",
             "x-content-type-options": "nosniff",
-            "cross-origin-resource-policy": "same-origin"
+            "cross-origin-resource-policy": "same-origin",
+            "content-disposition": "attachment",
+            "content-security-policy": "sandbox; default-src 'none'; frame-ancestors 'none'"
           }
         })
       }).pipe(

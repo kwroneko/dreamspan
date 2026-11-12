@@ -410,7 +410,8 @@ const RequestGuard = HttpRouter.middleware(
               })
           : (response: HttpServerResponse.HttpServerResponse) =>
               // The frame page sets its own, with its nonce.
-              path === FRAME_PANEL && response.headers["content-security-policy"] !== undefined
+              (path === FRAME_PANEL || path === "/media/external") &&
+              response.headers["content-security-policy"] !== undefined
                 ? response
                 : HttpServerResponse.setHeader(response, "content-security-policy", policy)
         const headers = { host: request.headers.host, origin: library ? undefined : request.headers.origin }
