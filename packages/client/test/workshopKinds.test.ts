@@ -96,6 +96,8 @@ describe("chat kind looks", () => {
               "composer.preset",
               "workshop.capabilities",
               "composer.next",
+    // Cast stays editable, and card rotation still affects assembly in a workshop.
+    expect(kindHides("workshop", "settings.card-layout")).toBe(false)
               "composer.reply-now"
             ])
             expect(kindHides("synthetic/assistant", "composer.cache")).toBe(true)

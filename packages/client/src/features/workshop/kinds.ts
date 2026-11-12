@@ -13,11 +13,10 @@ export const workshopLook: ChatKindLook = {
     // Who replies next: the assistant always does (§2.5).
     "composer.next",
     "composer.reply-now",
-    // This chat's story settings: the workshop's tools are what the assistant may do (the chip),
-    // and it has one character.
+    // Workshop capabilities replace story tools and their write permissions.
+    // Who replies only links to the hidden Next picker.
     "settings.tools",
     "settings.agent-permissions",
-    "settings.card-layout",
     "settings.who-replies"
   ],
   shows: [CAPABILITY_CHIP]

@@ -197,3 +197,4 @@ export function workshopChatTests() {
         })
   })
 }
+          await expect(settings.getByRole("switch", { name: "Card swap", exact: true })).toBeVisible()
