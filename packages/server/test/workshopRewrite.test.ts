@@ -767,7 +767,7 @@ it.effect("review: rewrite and whole-chat readers are absent from story catalogs
   }).pipe(Effect.provide(ExecutionRegistry.layer))
 )
 
-it.live("review: a rewrite is bounded to 32 texts in preparation and in the writer", () => {
+it.live("rewrites more than 32 named texts atomically while keeping byte limits", () => {
   const config = testConfig()
   return Effect.gen(function* () {
     const f = yield* fixture(config.dataDir)
@@ -779,37 +779,20 @@ it.live("review: a rewrite is bounded to 32 texts in preparation and in the writ
         select: false,
         commitDraft: null
       })
+    const ctx = { ...f.context, toolCallId: "whole-branch" }
     const args = {
       chat: f.chat.id,
-      title: "Too many texts",
+      title: "Whole branch",
       pairs: [{ find: "Aria", replace: "Ari", in: ["messages", "swipes"] }]
     }
-    const prepared = yield* f.run("rewrite_chat", args)
-    assert.isTrue(prepared.isError, prepared.text)
-    assert.include(prepared.text, "32")
-    const proof = yield* f.reader.AgentHistorySnapshot({ userId: f.userId, chatId: f.chat.id, forkId: f.forkId })
-    const direct = yield* f.writer
-      .ApplyAgentChangeset({
-        userId: f.userId,
-        rolloutId: f.rolloutId,
-        toolCallId: "too-many-direct",
-        chatId: f.chat.id,
-        forkId: f.forkId,
-        expected: proof.stamp,
-        title: "Too many",
-        summariesIncluded: false,
-        includeSwipes: false,
-        edits: Array.from({ length: 33 }, () => ({
-          kind: "version_replace" as const,
-          targetId: f.entries[0]!.version.id,
-          beforeId: f.entries[0]!.version.id,
-          before: "Aria meets the gardener 0.",
-          after: "Ari"
-        }))
-      })
-      .pipe(Effect.match({ onFailure: (e) => e.message, onSuccess: () => "succeeded" }))
-    assert.include(direct, "32")
-    assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: f.chat.id, forkId: f.forkId }))
+    const prompt = yield* f.tool("rewrite_chat").describe!(ctx, args as never)
+    assert.lengthOf(prompt.changes!, 33)
+    const result = yield* f.tool("rewrite_chat").execute(ctx, args as never)
+    assert.isUndefined(result.isError, result.text)
+    assert.strictEqual(JSON.parse(result.text).messages, 33)
+    assert.lengthOf(yield* f.api.ListHistoryEdits({ chatId: f.chat.id, forkId: f.forkId }), 1)
+    yield* f.api.UndoRolloutEffect((yield* f.api.ListRolloutEffects({ chatId: f.workshop.id }))[0]!)
+    assert.isTrue((yield* f.path()).entries.every((e) => e.version.content.startsWith("Aria ")))
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })
 
@@ -950,5 +933,44 @@ it.live("keeps merged source lines frozen while rewriting and undoing the shown 
       (yield* f.reader.GetSlot({ userId: f.userId, slotId: merged.slotId, forkId: f.forkId })).entry.version.content,
       before.content
     )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("a later manual edit makes whole-effect bulk Undo refuse without partially restoring other messages", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    let parent = f.entries.at(-1)!.slotId
+    for (let n = 10; n < 40; n++) {
+      const posted = yield* f.writer.AppendMessage({
+        userId: f.userId,
+        chatId: f.chat.id,
+        forkId: f.forkId,
+        parentSlotId: parent,
+        branch: false,
+        version: said(`Aria ${n}`),
+        commitDraft: null
+      })
+      parent = posted.slotId
+    }
+    const result = yield* f.run("rewrite_chat", {
+      chat: f.chat.id,
+      title: "Bulk edit",
+      pairs: [{ find: "Aria", replace: "Ari", in: ["messages"] }]
+    })
+    assert.isUndefined(result.isError, result.text)
+    const first = (yield* f.path()).entries[0]!
+    yield* f.writer.AmendVersion({
+      userId: f.userId,
+      forkId: f.forkId,
+      versionId: first.version.id,
+      expectedRowVersion: first.version.rowVersion,
+      content: "Owner after bulk"
+    })
+    const effect = (yield* f.api.ListRolloutEffects({ chatId: f.workshop.id }))[0]!
+    assert.strictEqual(yield* f.api.UndoRolloutEffect(effect).pipe(outcome), "EffectUndoRefused")
+    const after = (yield* f.path()).entries
+    assert.strictEqual(after[0]!.version.content, "Owner after bulk")
+    assert.isTrue(after.slice(1).every((e) => e.version.content.startsWith("Ari ")))
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })

@@ -93,6 +93,14 @@ export const readSummary = (
           JOIN slots a ON a.id = s.first_slot_id JOIN slots b ON b.id = s.last_slot_id
           WHERE s.id = ${summaryId} AND s.sealed = 1 AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
       if (!row) return yield* new NotFound({ entity: "summary", id: summaryId })
+      const [summaryEdit] =
+        row.origin === "changeset"
+          ? yield* sql<{ changeset_id: string; application: string }>`
+        SELECT si.changeset_id,si.after_json ->> '$.applicationId' AS application FROM changesets ac
+        JOIN changeset_items si ON si.changeset_id=ac.id AND si.target_kind='summary_revision'
+        WHERE ac.chat_id=${row.chat_id} AND ac.origin='agent' AND si.target_id=${row.id}
+          AND si.after_json ->> '$.id'=${row.revision_id} LIMIT 1`
+          : []
       // Fresh in the fork in view: its inputs are what that fork shows (spec/FORK-INDEPENDENCE-DELTA.md §3).
       const inputs = yield* sql<{
         slot_id: string
@@ -104,17 +112,15 @@ export const readSummary = (
       }>`
         SELECT i.*, EXISTS(SELECT 1 FROM fork_overrides o WHERE o.id=${effectiveOverride(sql, "replace", fork, "CASE WHEN iv.fork_id IS NULL THEN i.version_id ELSE iv.source_version_id END")}
           AND o.value_id=v.id AND o.summaries_done=1 AND EXISTS (
-            SELECT 1 FROM changeset_items ci, json_each(ci.after_json, '$.preservedInputs') p
+            SELECT 1 FROM changeset_items ci INDEXED BY changeset_items_after_version, json_each(ci.after_json, '$.preservedInputs') p
             WHERE ci.changeset_id=o.changeset_id AND ci.target_kind='version_replace'
               AND ci.target_id=o.target_id AND ci.after_json ->> '$.id'=v.id
               AND p.value ->> '$.id'=i.version_id AND p.value ->> '$.amends'=i.amend_count
               -- Agent edits preserve only the summaries actually rewritten with this input.
               -- Naming an unrelated summary cannot certify every dependent summary.
               AND (NOT EXISTS (SELECT 1 FROM changesets ac WHERE ac.id=ci.changeset_id AND ac.origin='agent')
-                OR EXISTS (SELECT 1 FROM changeset_items si WHERE si.changeset_id=ci.changeset_id
-                  AND si.target_kind='summary_revision' AND si.target_id=${row.id}
-                  AND si.after_json ->> '$.id'=${row.revision_id}
-                  AND si.after_json ->> '$.applicationId'=ci.after_json ->> '$.applicationId')))) AS replaced_with_summaries, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
+                OR (ci.changeset_id=${summaryEdit?.changeset_id ?? null}
+                  AND ci.after_json ->> '$.applicationId'=${summaryEdit?.application ?? null})))) AS replaced_with_summaries, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
           AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed') AND v.content_length > 0
           THEN v.id ELSE NULL END AS effective, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS current_amends
         FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions iv ON iv.id=i.version_id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}

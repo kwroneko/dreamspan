@@ -1,3 +1,4 @@
+import { prepareHistory } from "../../historyPreparation.ts"
 import { foldState } from "@rp/shared/state.ts"
 // Workshop history tools. Target text is prepared on the server, never returned by a rewrite.
 import { Type, validateToolArguments } from "@earendil-works/pi-ai"
@@ -151,7 +152,7 @@ const replacing = (ctx: ToolContext, args: ReplaceArgs) =>
             return yield* fail("This rewrite exceeds its text budget. Rewrite fewer messages.")
         }
         if (found.size > workshopLimits.rewriteItems)
-          return yield* fail("One rewrite can change at most 32 texts or bindings. Narrow this rewrite.")
+          return yield* fail("One rewrite can change at most 10,000 texts or bindings. Narrow this rewrite.")
         cursor = page.next ?? undefined
       } while (cursor)
     }
@@ -182,8 +183,9 @@ const writing = (ctx: ToolContext, args: MessagesArgs) =>
     })
     const edits: HistoryEdit[] = []
     const labels: string[] = []
+    const byMessage = new Map(targets.map((e) => [e.message, e]))
     for (const message of args.messages) {
-      const target = targets.find((e) => e.message === message.message)
+      const target = byMessage.get(message.message)
       if (!target) return yield* fail(`Message ${message.message} is unavailable on this branch.`)
       edits.push({
         kind: "version_replace",
@@ -331,7 +333,7 @@ const rewrite = <A extends Base>(
             p.edits.reduce((n, e) => n + Buffer.byteLength(e.after, "utf8"), 0) +
             (p.notes ?? []).reduce((n, e) => n + Buffer.byteLength(e.text, "utf8"), 0)
           if (p.edits.length + (p.notes?.length ?? 0) > workshopLimits.rewriteItems)
-            return yield* fail("One rewrite can change at most 32 texts or bindings. Narrow this rewrite.")
+            return yield* fail("One rewrite can change at most 10,000 texts or bindings. Narrow this rewrite.")
           if (size > 262144)
             return yield* fail("One rewrite is limited to 262,144 bytes of new text. Rewrite fewer messages.")
           const proof = yield* ctx.reader.AgentHistorySnapshot({
@@ -368,7 +370,7 @@ const rewrite = <A extends Base>(
             },
             {
               label: "Limit",
-              value: "At most 32 texts or bindings in one atomic rewrite; 262,144 bytes per call and 1 MiB per run."
+              value: "At most 10,000 texts or bindings in one atomic rewrite; 262,144 bytes per call and 1 MiB per run."
             },
             {
               label: "Dependent summaries",
@@ -401,7 +403,19 @@ const rewrite = <A extends Base>(
           const p =
             (ctx.cache.get(`rewrite:${ctx.toolCallId}`) as Prepared | undefined) ?? (yield* prepareChecked(ctx, valid))
           if (!p.edits.length && !p.notes?.length) return { text: "No matching text changed." }
+          const staged = yield* prepareHistory(ctx.writer, {
+            userId: ctx.userId,
+            applications: [
+              {
+                chatId: p.chat.id,
+                forkId: p.chat.currentForkId!,
+                edits: p.edits,
+                summariesIncluded: p.summariesIncluded
+              }
+            ]
+          })
           const result = yield* ctx.writer.ApplyAgentChangeset({
+            ...("prepared" in staged && typeof staged.prepared === "string" ? { prepared: staged.prepared } : {}),
             ...key(ctx),
             chatId: p.chat.id,
             forkId: p.chat.currentForkId!,
@@ -434,7 +448,7 @@ const rewriteChat = rewrite<ReplaceArgs>(
     label: "Rewrote chat text",
     explanation: "Replace text in a chat, with one Undo.",
     description:
-      "Replace text on the current branch only, at most 32 texts or bindings per atomic call. Each pair names its scopes explicitly: messages, unshown swipes, summaries. Never sends a request to that chat’s provider. Returns counts without disclosing chat text. Pairs match the original text, in the given order; overlapping matches use the first pair. Read chat text only with read_chat after reading permission.",
+      "Replace text on the current branch only, at most 10,000 texts or bindings per atomic call. Each pair names its scopes explicitly: messages, unshown swipes, summaries. Never sends a request to that chat’s provider. Returns counts without disclosing chat text. Pairs match the original text, in the given order; overlapping matches use the first pair. Read chat text only with read_chat after reading permission.",
     parameters: Type.Object(
       {
         chat: name,
@@ -469,16 +483,18 @@ const rewriteMessages = rewrite<MessagesArgs>(
     label: "Rewrote messages",
     explanation: "Write new message text, with one Undo.",
     description:
-      "Replace the shown text of named message numbers on the current branch. Optional summaries must be rewritten explicitly by id. A single Undo restores messages and rewritten summaries. Other branches and unshown swipes remain unchanged. At most 32 texts or bindings total and 262,144 bytes per call, 1 MiB per run. Never calls another provider.",
+      "Replace the shown text of named message numbers on the current branch. Optional summaries must be rewritten explicitly by id. A single Undo restores messages and rewritten summaries. Other branches and unshown swipes remain unchanged. At most 10,000 texts or bindings total and 262,144 bytes per call, 1 MiB per run. Never calls another provider.",
     parameters: Type.Object(
       {
         chat: name,
         title: name,
         messages: Type.Array(Type.Object({ message: Type.Integer({ minimum: 1 }), text }, strict), {
           minItems: 1,
-          maxItems: 32
+          maxItems: workshopLimits.rewriteItems
         }),
-        summaries: Type.Optional(Type.Array(Type.Object({ summary: name, text }, strict), { maxItems: 32 }))
+        summaries: Type.Optional(
+          Type.Array(Type.Object({ summary: name, text }, strict), { maxItems: workshopLimits.rewriteItems })
+        )
       },
       strict
     )

@@ -586,8 +586,28 @@ export class WriteOps extends RpcGroup.make(
     success: Snippet,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
+  Rpc.make("PrepareHistoryEdits", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      groupId: Schema.optionalKey(Schema.String),
+      token: Schema.optionalKey(Schema.String),
+      total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(10000)),
+      summariesIncluded: Schema.Boolean,
+      edits: Schema.Array(HistoryEdit).check(Schema.isMaxLength(500))
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, HistoryRejected, StorageError])
+  }),
   historyWriteRpcs[0]
-    .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
+    .setPayload(
+      Schema.Struct({
+        ...historyWriteRpcs[0].payloadSchema.fields,
+        userId: UserId,
+        prepared: Schema.optionalKey(Schema.String)
+      })
+    )
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   historyWriteRpcs[1]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[1].payloadSchema.fields, userId: UserId }))
@@ -1837,6 +1857,7 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       forkId: ForkId,
       expected: Schema.String,
+      prepared: Schema.optionalKey(Schema.String),
       title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
       edits: Schema.Array(HistoryEdit).check(Schema.isMaxLength(10000)),
       expectedRefs: Schema.optionalKey(
@@ -3278,8 +3299,8 @@ export class ReadOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       forkId: ForkId,
-      versions: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(32))),
-      summaries: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(32)))
+      versions: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(10000))),
+      summaries: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(10000)))
     },
     success: Schema.Struct({
       stamp: Schema.String,
@@ -3294,7 +3315,7 @@ export class ReadOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       forkId: ForkId,
-      messages: Schema.Array(Schema.Int).check(Schema.isMaxLength(32))
+      messages: Schema.Array(Schema.Int).check(Schema.isMaxLength(10000))
     },
     success: Schema.Array(
       Schema.Struct({ message: Schema.Int, targetId: Schema.String, beforeId: Schema.String, before: Schema.String })

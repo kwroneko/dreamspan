@@ -87,6 +87,13 @@ export const makeAgentHistoryWriteHandlers = (
             return yield* reject("An instruction's library item changed while waiting. Read it again and ask again.")
         }
         const edits: HistoryEdit[] = [...input.edits]
+        if (!input.includeSwipes) {
+          const [unshown] =
+            yield* sql`SELECT 1 FROM json_each(${JSON.stringify(edits.filter((e) => e.kind === "version_replace").map((e) => e.targetId))}) wanted
+            LEFT JOIN versions o ON o.id=wanted.value LEFT JOIN slots s ON s.id=o.slot_id
+            WHERE o.id IS NULL OR o.id IS NOT ${selectedIn(sql, input.forkId, "s")} LIMIT 1`
+          if (unshown) return yield* reject("An unshown swipe was not included in this rewrite.")
+        }
         for (const edit of edits) {
           if (edit.kind === "state_event") {
             const event = yield* Schema.decodeUnknownEffect(FoldableEvent)(
@@ -101,10 +108,6 @@ export const makeAgentHistoryWriteHandlers = (
             }
             if (!instructionKeys.has(event.data.key))
               return yield* reject("This instruction change is not exposed to tools.")
-          } else if (edit.kind === "version_replace" && !input.includeSwipes) {
-            const [selected] = yield* sql`SELECT 1 FROM versions o JOIN slots s ON s.id=o.slot_id
-            WHERE o.id=${edit.targetId} AND o.id=${selectedIn(sql, input.forkId, "s")}`
-            if (!selected) return yield* reject("An unshown swipe was not included in this rewrite.")
           }
         }
         for (const note of input.notes ?? []) {
@@ -145,6 +148,7 @@ export const makeAgentHistoryWriteHandlers = (
         const applied = yield* history.ApplyHistoryEdits({
           userId: input.userId,
           title: input.title,
+          ...(input.prepared ? { prepared: input.prepared } : {}),
           applications: [
             { chatId: input.chatId, forkId: input.forkId, edits, summariesIncluded: input.summariesIncluded }
           ]

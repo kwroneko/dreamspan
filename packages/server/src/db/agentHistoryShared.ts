@@ -98,8 +98,8 @@ export const agentHistorySnapshot = Effect.fnUntraced(function* (
       ${displaySlots(sql, pieces, 0, displayLength(pieces) - 1)},
       affected(id) AS (
         SELECT i.summary_id FROM json_each(${JSON.stringify(changed.versions ?? [])}) changed
-          JOIN versions v ON v.id=changed.value JOIN slots s ON s.id=v.slot_id
-          JOIN summary_inputs i ON i.slot_id=s.id
+          CROSS JOIN versions v ON v.id=changed.value CROSS JOIN slots s ON s.id=v.slot_id
+          CROSS JOIN summary_inputs i ON i.slot_id=s.id
           WHERE s.chat_id=${chatId} AND v.id=${shownIn(sql, forkId, "s")}
         UNION SELECT value FROM json_each(${JSON.stringify(changed.summaries ?? [])})
         UNION SELECT p.summary_id FROM summary_parents p JOIN affected a ON p.parent_id=a.id
@@ -109,11 +109,11 @@ export const agentHistorySnapshot = Effect.fnUntraced(function* (
         AND EXISTS(SELECT 1 FROM display_slots d WHERE d.id=s.first_slot_id)
         AND EXISTS(SELECT 1 FROM display_slots d WHERE d.id=s.last_slot_id)
         AND s.id NOT IN (SELECT value FROM json_each(${JSON.stringify(changed.summaries ?? [])}))
-      ORDER BY s.id LIMIT 33`
+      ORDER BY s.id LIMIT 10001`
       : []
-  if (dependents.length > 32)
+  if (dependents.length > 10000)
     return yield* new HistoryRejected({
-      message: "This rewrite affects more than 32 dependent summaries. Narrow the rewrite."
+      message: "This rewrite affects more than 10,000 dependent summaries. Narrow the rewrite."
     })
   return {
     dependents,

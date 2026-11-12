@@ -8,7 +8,7 @@ import { useState } from "react"
 import { ErrorAlert, useAction } from "../../../actions.tsx"
 import { Button } from "../../../ui/Button.tsx"
 import { Field, Textarea } from "../../../ui/Field.tsx"
-import { RevisionDiff } from "../../../ui/RevisionDiff.tsx"
+import { RevisionComparison, RevisionDiff } from "../../../ui/RevisionDiff.tsx"
 import { Alert } from "../../../ui/Surface.tsx"
 import { Tooltip } from "../../../ui/Tooltip.tsx"
 import type { StepActionProps } from "./stepActions.ts"
@@ -80,7 +80,11 @@ export function ApprovalPanel({ step }: StepActionProps) {
       {approval.changes?.map((change) => (
         <div key={change.field} className="flex flex-col gap-1" data-approval-change={change.field}>
           <p className="text-xs font-medium">{change.field}</p>
-          <RevisionDiff before={change.before} after={change.after} unifiedLabel={`Changes to ${change.field}`} />
+          {approval.changes && approval.changes.length > 32 ? (
+            <RevisionComparison label={`Full changes to ${change.field}`} before={change.before} after={change.after} />
+          ) : (
+            <RevisionDiff before={change.before} after={change.after} unifiedLabel={`Changes to ${change.field}`} />
+          )}
         </div>
       ))}
       {noting && (

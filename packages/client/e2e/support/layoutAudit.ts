@@ -382,9 +382,16 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           for (const row of rows) {
             row.sort((a, b) => rect(a).left - rect(b).left)
             const autoMargin = row.some((c) => /(?:^|\s|:)(?:m[lrsexy]?|m[lrse])-auto(?:\s|$)/.test(c.className))
-            const spacer = [...el.children].some(
-              (c) => num(css(c as HTMLElement).flexGrow) > 0 && !c.textContent?.trim() && !c.children.length
-            )
+            // A transparent hover toolbar still reserves its flex space and both gaps.
+            // Its controls aren't painted children; don't compare across that space.
+            const spacer = [...el.children].some((c) => {
+              const childStyle = css(c as HTMLElement)
+              return (
+                childStyle.display !== "none" &&
+                num(childStyle.flexGrow) > 0 &&
+                (num(childStyle.opacity) === 0 || (!c.textContent?.trim() && !c.children.length))
+              )
+            })
             const gaps = row.slice(1).map((c, i) => rect(c).left - rect(row[i]!).right)
             if (
               gaps.length > 1 &&
