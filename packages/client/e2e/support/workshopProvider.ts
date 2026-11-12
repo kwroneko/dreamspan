@@ -6,7 +6,7 @@ import { createServer, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 
 export const WORKSHOP_ANSWER = "Your library has one card, the Assistant, and it reads as practical and brief."
-const STORY_REPLY = "The harbor bell rings twice."
+export const STORY_REPLY = "The harbor bell rings twice."
 
 const CALLS = [
   { name: "list_library", arguments: { kind: "card" } },

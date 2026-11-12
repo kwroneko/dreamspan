@@ -7,12 +7,13 @@ import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
+import type { ChatId } from "@rp/shared/chat.ts"
 import { expectLayout } from "./layoutAudit.ts"
-import { openPanel } from "./panel.ts"
+import { closePanel, openPanel } from "./panel.ts"
 import { asUser } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { nextReply } from "./strip.ts"
-import { startWorkshopProvider, WORKSHOP_ANSWER } from "./workshopProvider.ts"
+import { startWorkshopProvider, STORY_REPLY, WORKSHOP_ANSWER } from "./workshopProvider.ts"
 
 const shots = process.env.SCREENSHOT_DIR
 
@@ -74,6 +75,21 @@ export function workshopChatTests() {
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
           await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await page.addInitScript(() => {
+            localStorage.setItem("rp.notifications.system", "on")
+            const notices: Array<{ title: string; body: string | undefined }> = []
+            Object.assign(window, { workshopNotices: notices })
+            Object.defineProperty(window, "Notification", {
+              value: class {
+                static permission = "granted"
+                onclick: (() => void) | null = null
+                constructor(title: string, options: NotificationOptions) {
+                  notices.push({ title, body: options.body })
+                }
+                close() {}
+              }
+            })
+          })
           await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
           const shot = async (name: string) => {
             if (shots) {
@@ -90,29 +106,89 @@ export function workshopChatTests() {
           await expect(page.getByLabel("Title of the new chat", { exact: true })).toBeVisible()
           await expect(card).toBeVisible()
           await expect(page.getByText("Workshop", { exact: true }).first()).toBeVisible()
+          await expect(page.getByRole("button", { name: "New workshop", exact: true })).toHaveAccessibleDescription(
+            "Opens a workshop. The assistant can read your library."
+          )
           await card.scrollIntoViewIfNeeded()
           await shot("chats-page")
           await expectLayout(page, info, `workshop-chats-page-${width}-${theme}`)
+          // Keep the existing cards usable when a translation takes much more room.
+          const headings = page.locator("section h2")
+          const originalHeadings = await headings.allTextContents()
+          await headings.evaluateAll((elements) => {
+            for (const heading of elements)
+              heading.textContent = `${heading.textContent} — Ein ausführlicher übersetzter Titel für diesen Arbeitsbereich`
+          })
+          await page
+            .getByLabel("Title of the new chat", { exact: true })
+            .fill("A long synthetic title for a chat without characters and a very distant harbor")
+          await page
+            .getByLabel("Title of the new workshop")
+            .fill("A long synthetic title for a workshop about cards, presets and lorebooks")
+          for (const label of ["Title of the new chat", "Title of the new workshop"]) {
+            await page
+              .locator("section")
+              .filter({ has: page.getByLabel(label, { exact: true }) })
+              .last()
+              .scrollIntoViewIfNeeded()
+            await expectLayout(page, info, `workshop-start-cards-long-${label}-${width}-${theme}`)
+          }
+          await headings.evaluateAll((elements, originals) => {
+            elements.forEach((heading, index) => {
+              heading.textContent = originals[index]!
+            })
+          }, originalHeadings)
           await page.getByLabel("Title of the new workshop").fill(title)
           await page.getByRole("button", { name: "New workshop", exact: true }).click()
           await expect(page).toHaveURL(/\/chats\/[^/?]+/)
           const url = new URL(page.url())
-          const workshopId = url.pathname.split("/")[2]!
+          const workshopId = url.pathname.split("/")[2]! as ChatId
 
           // The workshop: its badge, its accent, its greeting, the chip in place of who replies.
           const main = page.locator("[data-chat-main]")
           await expect(page.locator('[data-chat-kind="workshop"]').first()).toBeVisible()
+          await expect(page).toHaveTitle(`Workshop · ${title} · rp-harness`)
           await expect(main.locator('[data-kind-badge="workshop"]').first()).toBeVisible()
           await expect(page.getByTestId("composer")).toBeVisible()
           const workshopAccent = await accentOf(page)
           expect(workshopAccent).toBe(
-          await expect(page.getByRole("button", { name: "New workshop", exact: true })).toHaveAccessibleDescription(
-            "Opens a workshop. The assistant can read your library."
-          )
             await page.evaluate(() =>
               getComputedStyle(document.documentElement).getPropertyValue("--accent-workshop").trim()
             )
           )
+          const contrast = await main.evaluate((element) => {
+            const style = getComputedStyle(element)
+            const canvas = document.createElement("canvas")
+            const context = canvas.getContext("2d")!
+            const luminance = (token: string) => {
+              context.fillStyle = style.getPropertyValue(token).trim()
+              context.fillRect(0, 0, 1, 1)
+              const [r, g, b] = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).map((value) => {
+                const c = value / 255
+                return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+              })
+              return r! * 0.2126 + g! * 0.7152 + b! * 0.0722
+            }
+            const ratio = (a: string, b: string) => {
+              const x = luminance(a),
+                y = luminance(b)
+              return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
+            }
+            return {
+              onAccent: ratio("--accent-contrast", "--color-accent"),
+              text: ["--canvas", "--surface", "--surface-raised"].map((bg) => ratio("--color-accent", bg)),
+              focus: ["--canvas", "--surface", "--surface-raised"].map((bg) => ratio("--color-focus", bg))
+            }
+          })
+          expect(contrast.onAccent).toBeGreaterThanOrEqual(4.5)
+          for (const ratio of contrast.text) expect(ratio).toBeGreaterThanOrEqual(4.5)
+          for (const ratio of contrast.focus) expect(ratio).toBeGreaterThanOrEqual(3)
+          await info.attach("workshop-contrast", { body: JSON.stringify(contrast), contentType: "application/json" })
+          if (theme === "dark") {
+            await page.evaluate(() => document.documentElement.removeAttribute("data-theme"))
+            expect(await accentOf(page)).toBe(workshopAccent)
+            await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"))
+          }
           const chip = nextReply(page).getByRole("button", { name: /^What the assistant may do: / })
           await expect(chip).toHaveText(/Can: 1/)
           await expect(
@@ -130,10 +206,24 @@ export function workshopChatTests() {
           await expect(popover).toHaveCount(0)
 
           // A message; the assistant looks in the library and answers, its steps shown.
+          // A background tab gets a system notice whose plain text carries the kind too.
+          await page.evaluate(() =>
+            Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" })
+          )
           await page.getByLabel("Message", { exact: true }).fill("What cards do I have?")
           await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
           const reply = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })
           await expect(reply).toBeVisible({ timeout: 30_000 })
+          await expect
+            .poll(() =>
+              page.evaluate(() =>
+                (window as unknown as { workshopNotices: Array<{ body: string }> }).workshopNotices.map(
+                  (notice) => notice.body
+                )
+              )
+            )
+            .toContain(`Workshop · ${title}`)
+          await page.evaluate(() => Reflect.deleteProperty(document, "visibilityState"))
           const steps = reply.locator("[data-steps-panel]")
           await expect(steps).toHaveAttribute("data-steps-panel", "done")
           await expect(reply.locator("[data-steps-badge]")).toHaveText(/^2 steps/)
@@ -154,11 +244,17 @@ export function workshopChatTests() {
 
           // This chat leaves out the story's settings; the URL alone brings the workshop back.
           const settings = await openPanel(page, "This chat")
+          await expect(settings.locator('[data-kind-badge="workshop"]')).toBeVisible()
+          if (width === 390)
+            await expect(page.getByRole("dialog", { name: `Workshop · ${title}`, exact: true })).toBeVisible()
           await expect(settings.getByRole("switch", { name: "Tools", exact: true })).toHaveCount(0)
           await expect(settings.getByRole("region", { name: "Summaries" })).toHaveCount(0)
           await expect(settings.getByRole("region", { name: "Who replies" })).toHaveCount(0)
+          await expect(settings.getByRole("switch", { name: "Card swap", exact: true })).toBeVisible()
           await shot("this-chat")
-          await expectLayout(page, info, `workshop-this-chat-${width}-${theme}`, { scope: '[role="tabpanel"]' })
+          await expectLayout(page, info, `workshop-this-chat-${width}-${theme}`, {
+            scope: width === 390 ? '[role="dialog"]' : 'aside[aria-label="Chat panel"]'
+          })
           await page.goto(`${server().url}/chats/${workshopId}`)
           await expect(page.locator('[data-chat-kind="workshop"]').first()).toBeVisible()
           await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toBeVisible()
@@ -197,7 +293,20 @@ export function workshopChatTests() {
           const storySettings = await openPanel(page, "This chat")
           await expect(storySettings.getByRole("switch", { name: "Tools", exact: true })).toBeVisible()
           await expect(storySettings.getByRole("region", { name: "Summaries" })).toBeVisible()
+          await closePanel(page)
+          await page.getByLabel("Message", { exact: true }).fill("What happens by the harbor?")
+          await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          await expect(page.getByRole("article").filter({ hasText: STORY_REPLY })).toBeVisible()
+
+          // A deleted workshop keeps its marker in the bin and restores with its kind intact.
+          await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteChat({ chatId: workshopId }))
+          await page.goto(`${server().url}/bin`)
+          const binned = page.getByRole("listitem", { name: title, exact: true })
+          await expect(binned.locator('[data-kind-badge="workshop"]')).toBeVisible()
+          await expectLayout(page, info, `workshop-bin-${width}-${theme}`, { scope: `li[aria-label="${title}"]` })
+          await binned.getByRole("button", { name: "Restore", exact: true }).click()
+          await page.goto(`${server().url}/chats/${workshopId}`)
+          await expect(main.locator('[data-kind-badge="workshop"]').first()).toBeVisible()
         })
   })
 }
-          await expect(settings.getByRole("switch", { name: "Card swap", exact: true })).toBeVisible()

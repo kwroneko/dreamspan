@@ -20,6 +20,7 @@ import { Cause, Context, Effect, Fiber, Schedule, Stream } from "effect"
 import { AtomRegistry } from "effect/reactivity"
 import { useContext, useEffect, useState, useSyncExternalStore } from "react"
 import { routes } from "../routes.tsx"
+import { kindTitle } from "./chat/kindLooks.ts"
 import { AppClient } from "../rpc.ts"
 import { Switch } from "../ui/Choice.tsx"
 import { Alert, Card, CardHeader } from "../ui/Surface.tsx"
@@ -114,7 +115,7 @@ export const useNotices = () => {
         receiveNoticeChannels(notice)
         if (!systemWanted() || !canNotify() || Notification.permission !== "granted") return
         const chat = yield* Effect.option(client("GetChat", { chatId: notice.chatId }))
-        const name = chat._tag === "Some" ? chat.value.title || "Untitled chat" : "A chat"
+        const name = chat._tag === "Some" ? kindTitle(chat.value.title || "Untitled chat", chat.value.kind) : "A chat"
         const shown = new Notification(notice.status === "failed" ? "A reply failed" : "A reply finished", {
           body: name,
           tag: notice.chatId

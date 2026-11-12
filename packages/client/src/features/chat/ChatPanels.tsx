@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom"
-import { kindRootProps, useChatKindLook } from "./kindLooks.ts"
+import { kindRootProps, kindTitle, useChatKindLook } from "./kindLooks.ts"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The chat panel host: descriptors own its tabs and bodies; the host owns layout and retention.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
@@ -312,7 +312,7 @@ export function ChatSidePanel({
       <Sheet
         open
         onOpenChange={(open) => !open && onClose()}
-        title={title}
+        title={kindTitle(title, content.view.chat?.kind)}
         container={document.getElementById("content")}
       >
         <div {...kindRoot} className="flex min-h-0 flex-1 flex-col">

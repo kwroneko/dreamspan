@@ -4,11 +4,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { Effect } from "effect"
-import { availableComposerControls, type ComposerControlContext } from "../src/features/chat/composerControls.tsx"
+import {
+  availableComposerControls,
+  invokeComposerControl,
+  type ComposerControlContext
+} from "../src/features/chat/composerControls.tsx"
 import {
   chatKindLooks,
   kindHides,
   kindRootProps,
+  kindTitle,
   kindShows,
   mergesInto,
   summarizes
@@ -26,11 +31,17 @@ vi.hoisted(() => {
 
 const chatOf = (kind: string) => ({ kind }) as ChatView["chat"]
 const viewOf = (kind: string) => ({ cast: null, chat: chatOf(kind) }) as ChatView
-const contextOf = (kind: string) =>
+const contextOf = (kind: string, candidates = 1) =>
   ({
     compact: false,
     view: viewOf(kind),
-    reply: { candidates: ["synthetic-a"], muted: [], next: null, picked: null, onPick: () => {} },
+    reply: {
+      candidates: Array.from({ length: candidates }, (_, i) => `synthetic-${i}`),
+      muted: [],
+      next: null,
+      picked: null,
+      onPick: () => {}
+    },
     guidance: false,
     leaf: undefined,
     leafGenerating: false
@@ -57,6 +68,25 @@ describe("chat kind looks", () => {
     expect(strip("workshop")).toEqual(["composer.model", "composer.preset", "composer.cache", "workshop.capabilities"])
   })
 
+  it("enforces hidden controls on invocation and keeps story and workshop Send working", async () => {
+    for (const source of ["button", "keyboard"] as const) {
+      const replyNow = vi.fn()
+      const send = vi.fn()
+      for (const kind of ["rp", "workshop"]) {
+        const context = {
+          ...contextOf(kind, 2),
+          hasText: true,
+          send,
+          replyNow
+        }
+        await invokeComposerControl("composer.send", context, source)
+        await invokeComposerControl("composer.reply-now", context, source)
+      }
+      expect(send).toHaveBeenCalledTimes(2)
+      expect(replyNow).toHaveBeenCalledTimes(1)
+    }
+  })
+
   it("leaves the Summaries tab out of a kind whose profile has none, and keeps the rest", () => {
     const tabs = (kind: string) => panelTabs(viewOf(kind), null).map((tab) => tab.value)
     expect(tabs("rp")).toContain("summaries")
@@ -66,6 +96,8 @@ describe("chat kind looks", () => {
     expect(summarizes(null)).toBe(true)
     expect(mergesInto(chatOf("workshop"))).toBe(false)
     expect(mergesInto(chatOf("rp"))).toBe(true)
+    // Cast stays editable, and card rotation still affects assembly in a workshop.
+    expect(kindHides("workshop", "settings.card-layout")).toBe(false)
   })
 
   it("sets the accent through the kind's token, and nothing for a kind without a look", () => {
@@ -75,6 +107,8 @@ describe("chat kind looks", () => {
       style: { "--chat-accent": "var(--accent-workshop)", "--chat-accent-contrast": "var(--accent-workshop-contrast)" }
     })
     expect(kindRootProps(chatKindLooks.get("rp"))).toEqual({})
+    expect(kindTitle("Harbor", "rp")).toBe("Harbor")
+    expect(kindTitle("Harbor", "workshop")).toBe("Workshop · Harbor")
   })
 
   it("takes a plugin's kind from its registrations alone: its look, its hidden and added controls", () => {
@@ -96,11 +130,10 @@ describe("chat kind looks", () => {
               "composer.preset",
               "workshop.capabilities",
               "composer.next",
-    // Cast stays editable, and card rotation still affects assembly in a workshop.
-    expect(kindHides("workshop", "settings.card-layout")).toBe(false)
               "composer.reply-now"
             ])
             expect(kindHides("synthetic/assistant", "composer.cache")).toBe(true)
+            expect(kindTitle("Harbor", "synthetic/assistant")).toBe("Assistant · Harbor")
             expect(kindShows("synthetic/assistant", "workshop.capabilities")).toBe(true)
             expect(panelTabs(viewOf("synthetic/assistant"), null).map((tab) => tab.value)).toContain("summaries")
           } finally {

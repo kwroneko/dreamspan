@@ -29,6 +29,7 @@ import { useShowPanel } from "./panels.tsx"
 import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import type { ChatSession } from "./session.ts"
 import { summarizes, useChatKindLook } from "./kindLooks.ts"
+import { KindBadge } from "./KindBadge.tsx"
 
 const link = "text-accent hover:underline"
 
@@ -182,7 +183,7 @@ export function ChatIdentity({ session }: { session: ChatSession }) {
         title={chatDisplayName(view)}
         className="line-clamp-2 text-lg leading-snug font-semibold [overflow-wrap:anywhere]"
       >
-        {chatDisplayName(view)}
+        {chatDisplayName(view)} <KindBadge kind={view.chat?.kind} />
       </h2>
       <div
         role="group"

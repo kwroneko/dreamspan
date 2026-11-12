@@ -28,6 +28,12 @@ const NONE: ReadonlyArray<string> = []
 const lookOf = (kind: string | undefined, snapshot = chatKindLooks.snapshot()) =>
   kind === undefined ? undefined : snapshot.entries.find((look) => look.id === kind)
 
+/** Plain-text surfaces (browser tabs and notifications) carry the same kind label as badges. */
+export const kindTitle = (title: string, kind: string | undefined) => {
+  const badge = lookOf(kind)?.badge
+  return badge ? `${badge.label} · ${title}` : title
+}
+
 /** Whether a chat of this kind leaves the control out. */
 export const kindHides = (kind: string | undefined, id: string, snapshot = chatKindLooks.snapshot()) =>
   (lookOf(kind, snapshot)?.hides ?? NONE).includes(id)
