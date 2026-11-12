@@ -973,6 +973,69 @@ describe("the agent's read tools in a separate context", () => {
     )
   )
 
+  it.live("inserted messages use the same presence and causal limits in the fallback tools", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const leaf = (yield* t.contextFor(t.wren)).inputs.leafSlotId as SlotId
+        const path = yield* t.reader.ReadPath({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          leafSlotId: leaf,
+          range: { _tag: "Bottom" },
+          limit: 20
+        })
+        const anchor = path.entries.find((e) => e.version.content.includes("vault code"))!
+        const inserted = yield* t.writer.InsertMessage({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          anchorSlotId: anchor.slotId,
+          expectedRowVersion: anchor.rowVersion,
+          body: { _tag: "Write", speaker: t.mira, content: "INSERTED-SECRET: the hidden cove." }
+        })
+        const wren = tools(t, yield* t.contextFor(t.wren))
+        const mira = tools(t, yield* t.contextFor(t.mira))
+        assert.include(yield* mira("search_chat", { query: "hidden cove" }), "INSERTED-SECRET")
+        assert.notInclude(yield* wren("search_chat", { query: "hidden cove" }), "INSERTED-SECRET")
+        assert.notInclude(yield* wren("read_messages", { from: 1, count: 20 }), "INSERTED-SECRET")
+        const beforeInsert = yield* t.contextFor(t.mira)
+        const early = { ...beforeInsert, inputs: { ...beforeInsert.inputs, leafSlotId: anchor.slotId } }
+        assert.notInclude(
+          yield* tools(t, early)("search_chat", { query: "hidden cove" }),
+          "INSERTED-SECRET",
+          "an inserted successor cannot be read before its position"
+        )
+        yield* t.writer
+          .AddStateEvent({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.fork(),
+            slotId: inserted.slotId,
+            versionId: null,
+            scope: null,
+            data: { key: "away.set", value: { entity: t.wren, away: true, source: "decision" } }
+          })
+          .pipe(
+            Effect.flatMap((mark) =>
+              t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: mark.id })
+            )
+          )
+        assert.include(
+          sentText(yield* t.contextFor(t.wren)),
+          "hides the key",
+          "correction follows display order after an inserted mark"
+        )
+        assert.notInclude(
+          sentText(yield* t.contextFor(t.wren)),
+          "vault code",
+          "messages before the inserted mark remain unknown"
+        )
+      })
+    )
+  )
+
   it.live("a card that replaced the viewer reads with the viewer's knowledge", () =>
     run(
       Effect.gen(function* () {
@@ -1051,6 +1114,137 @@ describe("the agent's read tools in a separate context", () => {
 })
 
 describe("Undo of a scene check's away mark (unit C9)", () => {
+  it.live("a correction covers inherited messages at its configured branch scope and can be reversed", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const mark = yield* t.event({ key: "away.set", value: { entity: t.wren, away: true, source: "decision" } })
+        const last = yield* t.say(t.mira, "INHERITED-SECRET")
+        const { fork: peer } = yield* t.api.CreateFork({
+          chatId: t.chatId,
+          fromForkId: t.fork(),
+          atSlotId: last.slotId
+        })
+        const corrected = yield* t.writer.CorrectPresence({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: peer.id,
+          eventId: mark.id
+        })
+        assert.isNotNull(corrected)
+        const peerContext = Effect.gen(function* () {
+          const row = yield* t.writer.AppendMessage({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: peer.id,
+            parentSlotId: last.slotId,
+            branch: true,
+            commitDraft: null,
+            version: new NewVersion({
+              speakerEntityId: t.wren,
+              writer: "model",
+              content: "",
+              status: "generating",
+              macroMode: "verbatim",
+              origin: "generated"
+            })
+          })
+          const built = yield* t.reader.AssembleContext({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: row.forkId,
+            slotId: row.slotId,
+            versionId: row.version.id,
+            now: 1,
+            timeZone: "UTC",
+            frozen: null
+          })
+          return sentText(JSON.parse(built.snapshot) as ContextSnapshot)
+        })
+        assert.include(yield* peerContext, "INHERITED-SECRET")
+        const original = sentText(yield* t.contextFor(t.wren))
+        if (process.env.CONTEXTS_TEST_BRANCH_SCOPE === "branch") assert.notInclude(original, "INHERITED-SECRET")
+        else assert.include(original, "INHERITED-SECRET")
+        const history = yield* t.reader.ListHistoryEdits({ userId: t.userId, chatId: t.chatId, forkId: peer.id })
+        const record = history.find((edit) => edit.title === "Correct scene check")!
+        assert.strictEqual(
+          (yield* t.writer.UndoHistoryEdit({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: peer.id,
+            changesetId: record.id
+          })).undone,
+          1
+        )
+        assert.notInclude(yield* peerContext, "INHERITED-SECRET")
+      })
+    )
+  )
+
+  it.live("a decision attached to an unselected swipe cannot be corrected", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const at = yield* t.say(t.mira, "Wren walks out.", true)
+        const mark = yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          slotId: at.slotId,
+          versionId: at.version.id,
+          scope: null,
+          data: { key: "away.set", value: { entity: t.wren, away: true, source: "decision" } }
+        })
+        yield* t.say(t.mira, "AWAY-UNDER-OLD-SWIPE")
+        yield* t.writer.AddVersion({
+          userId: t.userId,
+          slotId: at.slotId,
+          forkId: t.fork(),
+          select: true,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: t.mira,
+            writer: "human",
+            content: "Wren stays.",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          })
+        })
+        assert.isNull(
+          yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: mark.id })
+        )
+      })
+    )
+  )
+
+  it.live("another branch's later away event does not stop correction on this branch", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const mark = yield* t.event({ key: "away.set", value: { entity: t.wren, away: true, source: "decision" } })
+        const first = yield* t.say(t.mira, "FIRST-CORRECTED")
+        const { fork: peer } = yield* t.api.CreateFork({
+          chatId: t.chatId,
+          fromForkId: t.fork(),
+          atSlotId: first.slotId
+        })
+        yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: peer.id,
+          slotId: first.slotId,
+          versionId: null,
+          scope: null,
+          data: { key: "away.set", value: { entity: t.wren, away: true } }
+        })
+        yield* t.say(t.mira, "SECOND-CORRECTED")
+        yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: mark.id })
+        assert.include(sentText(yield* t.contextFor(t.wren)), "SECOND-CORRECTED")
+      })
+    )
+  )
+
   it.live("the user's word replaces the decision's, and what was written since counts her present", () =>
     run(
       Effect.gen(function* () {
@@ -1115,6 +1309,29 @@ describe("Undo of a scene check's away mark (unit C9)", () => {
           eventId: mark.id
         })
         assert.isNull(again)
+        assert.isNull(
+          yield* t.writer.CorrectPresence({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.fork(),
+            eventId: undone!.eventId
+          }),
+          "the compensating present event is not another decision"
+        )
+        const history = yield* t.reader.ListHistoryEdits({ userId: t.userId, chatId: t.chatId, forkId: t.fork() })
+        const correction = history.find((edit) => edit.title === "Correct scene check")!
+        assert.isDefined(correction)
+        assert.include(correction.items[0]!.before, '"source":"decision"', "History retains the original mark")
+        assert.include(correction.items[0]!.after, '"away":false')
+        const reverted = yield* t.writer.UndoHistoryEdit({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          changesetId: correction.id
+        })
+        assert.strictEqual(reverted.undone, 1)
+        assert.include(yield* awayIn(peer.id), t.wren, "reversing an all-branch correction retains its recorded scope")
+        assert.notInclude(sentText(yield* t.contextFor(t.wren)), "The password is heron.")
       })
     )
   )
