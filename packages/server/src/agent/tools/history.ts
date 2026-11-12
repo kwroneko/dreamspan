@@ -301,7 +301,9 @@ const summaryTree = (context: ToolContext) =>
         userId: context.userId,
         chatId: context.chatId,
         forkId: context.forkId,
-        leafSlotId: context.leafSlotId
+        leafSlotId: context.leafSlotId,
+        // A separate context's character reads its own view's layer (unit C7).
+        ...(context.viewers === null ? {} : { viewer: context.viewers[0]! as EntityId })
       })
       if (!state.enabled) return []
       const nodes: Array<SummaryNode> = []
@@ -317,7 +319,8 @@ const summaryTree = (context: ToolContext) =>
           to: summary.to,
           content: summary.content ?? "",
           children,
-          fresh: summary.fresh
+          fresh: summary.fresh,
+          audience: summary.audience
         })
         for (const id of children)
           queue.push(
@@ -325,11 +328,16 @@ const summaryTree = (context: ToolContext) =>
           )
       }
       if (context.viewers === null) return nodes
-      // Summaries are written for everyone (until they're kept per view, C7): a separate
-      // context's viewer opens only those covering nothing it missed, and, as assembly withholds
-      // a stale layer, none whose inputs have since changed (they may hold a version it missed).
+      // The view's layer (unit C7): its own summaries, written from what it knew, and shared ones
+      // before where it diverged. Kept as a second guard: a shared summary opens only when it
+      // is fresh and covers nothing the viewer missed; an own one only when it is this viewer's.
+      const viewers = context.viewers
       const missed = [...(yield* pathRead(context)).missed]
-      return nodes.filter((s) => s.fresh && !missed.some((n) => n >= s.from && n <= s.to))
+      return nodes.filter((s) =>
+        s.audience === undefined
+          ? s.fresh && !missed.some((n) => n >= s.from && n <= s.to)
+          : s.audience.every((id) => viewers.includes(id))
+      )
     })
   )
 
@@ -342,6 +350,8 @@ interface SummaryNode {
   readonly children: ReadonlyArray<string>
   /** Its inputs are still what the path shows. */
   readonly fresh: boolean
+  /** A separate context's own summary: its character's identities (unit C7). */
+  readonly audience: ReadonlyArray<string> | undefined
 }
 
 const range = (text: string) => {

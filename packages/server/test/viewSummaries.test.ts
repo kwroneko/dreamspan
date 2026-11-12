@@ -11,6 +11,9 @@ import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { cardDoc } from "./support/docs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
+import { historyTools } from "../src/agent/tools/history.ts"
+import type { ToolContext } from "../src/agent/tools.ts"
+import type { ForkId } from "@rp/shared/chat.ts"
 import type { Recorded } from "./support/mockProvider.ts"
 
 /** The stretch Wren was away for. */
@@ -333,5 +336,307 @@ describe("summaries kept per view (unit C7)", () => {
         )
       }),
     { timeout: 120_000 }
+  )
+
+  lcmTest(
+    "two characters with split presence each read nothing of the other's private stretch, anywhere",
+    (server) =>
+      Effect.gen(function* () {
+        // Wren is away for 20–39 (Mira's private stretch), Mira for 60–79 (Wren's). A summary
+        // says which private stretch its request carried, so a leak through a summary shows.
+        const markers = ["MIRAPRIVATE", "WRENPRIVATE"] as const
+        const h = yield* lcmHarness(server, {
+          messages: 200,
+          message: (n) =>
+            `Message ${n}. ` +
+            (n >= 20 && n < 40 ? "MIRAPRIVATE scene. " : n >= 60 && n < 80 ? "WRENPRIVATE scene. " : "") +
+            "The road ran on. ".repeat(10),
+          summarizer: (request) => {
+            const body = JSON.stringify(request.body)
+            return {
+              text: [...markers.filter((m) => body.includes(m)).map((m) => `SAW-${m}`), "Summary of the road."].join(
+                " "
+              )
+            }
+          }
+        })
+        const card = (name: string) =>
+          Effect.map(
+            h.writer.CreateEntity({
+              userId: h.userId,
+              kind: "card",
+              label: name,
+              subtitle: "",
+              doc: cardDoc(name),
+              schemaVersion: 1,
+              origin: "user",
+              sourcePath: null
+            }),
+            (made) => made.entityId as EntityId
+          )
+        const wren = yield* card("Wren")
+        const mira = yield* card("Mira")
+        const event = (data: StateEventData) =>
+          h.writer.AddStateEvent({
+            userId: h.userId,
+            chatId: h.chat.id,
+            slotId: null,
+            versionId: null,
+            scope: null,
+            data
+          })
+        yield* event({ key: "participant.join", value: { entity: wren } })
+        yield* event({ key: "participant.join", value: { entity: mira } })
+        yield* event({ key: "context.per_speaker", value: "separate" })
+        yield* fixtureSql(h.dataDir, [
+          {
+            sql: "UPDATE version_records SET cast_json = ? WHERE slot_id IN (SELECT id FROM slots WHERE chat_id = ?)",
+            params: [JSON.stringify([wren, mira]), h.chat.id]
+          },
+          ...h.rows.flatMap((row, n) =>
+            n >= 20 && n < 40
+              ? [
+                  {
+                    sql: "UPDATE version_records SET presence_json = ? WHERE id = ?",
+                    params: [JSON.stringify({ away: [wren] }), row.version.id]
+                  }
+                ]
+              : n >= 60 && n < 80
+                ? [
+                    {
+                      sql: "UPDATE version_records SET presence_json = ? WHERE id = ?",
+                      params: [JSON.stringify({ away: [mira] }), row.version.id]
+                    }
+                  ]
+                : []
+          )
+        ])
+        yield* h.settle
+        const leaf = h.rows.at(-1)!.slotId
+        const forkId = h.chat.currentForkId! as ForkId
+        for (const [me, own, other] of [
+          [wren, "WRENPRIVATE", "MIRAPRIVATE"],
+          [mira, "MIRAPRIVATE", "WRENPRIVATE"]
+        ] as const) {
+          // The reply's request.
+          const row = yield* h.writer.AppendMessage({
+            userId: h.userId,
+            chatId: h.chat.id,
+            parentSlotId: leaf,
+            branch: true,
+            commitDraft: null,
+            version: new NewVersion({
+              speakerEntityId: me,
+              writer: "model",
+              content: "",
+              status: "generating",
+              macroMode: "verbatim",
+              origin: "generated"
+            })
+          })
+          const built = yield* h.reader.AssembleContext({
+            userId: h.userId,
+            chatId: h.chat.id,
+            slotId: row.slotId,
+            versionId: row.version.id,
+            now: 1,
+            timeZone: "UTC",
+            frozen: null
+          })
+          const request = sentText(JSON.parse(built.snapshot) as ContextSnapshot)
+          assert.notInclude(request, other)
+          assert.include(request, "Summary of the road.")
+          // The character's read tools.
+          const context: ToolContext = {
+            userId: h.userId,
+            chatId: h.chat.id,
+            forkId,
+            slotId: row.slotId,
+            versionId: row.version.id,
+            leafSlotId: leaf,
+            viewers: [me],
+            rolloutId: "test",
+            toolCallId: "test",
+            cache: new Map(),
+            reader: h.reader,
+            writer: h.writer
+          }
+          const tool = (id: string, args: object) =>
+            Effect.map(historyTools.find((t) => t.id === id)!.execute(context, args as never), (r) =>
+              // A miss quotes the query back; what was found is the rest.
+              r.text.replaceAll(`“${"query" in args ? String(args.query) : ""}”`, "")
+            )
+          assert.notInclude(yield* tool("search_chat", { query: other }), other)
+          for (let from = 1; from <= 200; from += 20)
+            assert.notInclude(yield* tool("read_messages", { from, count: 20 }), other)
+          assert.notInclude(yield* tool("search_summaries", { query: other }), other)
+          assert.include(yield* tool("search_summaries", { query: own }), own, "its own summaries are its tools'")
+          const listed = yield* tool("search_summaries", { query: "road", limit: 20 })
+          const ranges = [...listed.matchAll(/Messages (\d+)–(\d+)/g)].map((m) => `${m[1]}–${m[2]}`)
+          assert.isAbove(ranges.length, 0)
+          for (const range of ranges)
+            assert.notInclude(yield* tool("expand_summary", { messages: range, max_tokens: 8000 }), other)
+          // The summary UI and the history search, as this character.
+          const state = yield* h.reader.GetLcmState({
+            userId: h.userId,
+            chatId: h.chat.id,
+            leafSlotId: leaf,
+            viewer: me
+          })
+          assert.isFalse(state.layer.some((s) => s.content?.includes(other)))
+          const search = (find: string) =>
+            h.reader.PreviewHistory({
+              userId: h.userId,
+              chatId: h.chat.id,
+              forkId,
+              viewer: me,
+              search: {
+                pairs: [{ find, replace: "x" }],
+                matchCase: true,
+                wholeWord: false,
+                regex: false,
+                preserveCase: false,
+                messages: false,
+                swipes: false,
+                summaries: true
+              }
+            })
+          assert.lengthOf((yield* search(other)).hits, 0, "no summary of the other's stretch is listed")
+          assert.isAbove((yield* search(own)).hits.length, 0)
+        }
+      }),
+    { timeout: 180_000 }
+  )
+
+  lcmTest(
+    "undoing a scene check's away makes stale exactly the view summaries it changes, on every branch",
+    (server) =>
+      Effect.gen(function* () {
+        const { h, wren, rows } = yield* chat(server, "separate")
+        const mira = (yield* h.writer.CreateEntity({
+          userId: h.userId,
+          kind: "card",
+          label: "Mira",
+          subtitle: "",
+          doc: cardDoc("Mira"),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })).entityId as EntityId
+        const forkId = h.chat.currentForkId! as ForkId
+        const event = (slot: number | null, data: StateEventData) =>
+          h.writer.AddStateEvent({
+            userId: h.userId,
+            chatId: h.chat.id,
+            forkId,
+            slotId: slot === null ? null : h.rows[slot]!.slotId,
+            versionId: null,
+            scope: null,
+            data
+          })
+        yield* event(null, { key: "participant.join", value: { entity: mira } })
+        // Wren's absence for 20–39 was the scene check's; Mira was away for 60–79.
+        const mark = yield* event(19, { key: "away.set", value: { entity: wren, away: true, source: "decision" } })
+        yield* event(39, { key: "away.set", value: { entity: wren, away: false } })
+        yield* fixtureSql(h.dataDir, [
+          {
+            sql: "UPDATE version_records SET cast_json = ? WHERE slot_id IN (SELECT id FROM slots WHERE chat_id = ?)",
+            params: [JSON.stringify([wren, mira]), h.chat.id]
+          },
+          ...h.rows.flatMap((row, n) =>
+            n >= 60 && n < 80
+              ? [
+                  {
+                    sql: "UPDATE version_records SET presence_json = ? WHERE id = ?",
+                    params: [JSON.stringify({ away: [mira] }), row.version.id]
+                  }
+                ]
+              : []
+          )
+        ])
+        yield* h.settle
+        // A branch from message 150 inherits the summaries.
+        const branch = yield* h.writer.CreateFork({
+          userId: h.userId,
+          chatId: h.chat.id,
+          fromForkId: forkId,
+          atSlotId: h.rows[150]!.slotId
+        })
+        const aside = yield* h.writer.AppendMessage({
+          userId: h.userId,
+          chatId: h.chat.id,
+          forkId: branch.fork.id,
+          parentSlotId: h.rows[150]!.slotId,
+          branch: false,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: "human",
+            content: "The branch turns aside.",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          })
+        })
+        /** Every summary's freshness on a path, as each view and the shared reads list them. */
+        const freshness = (fork: ForkId, leafSlotId: typeof aside.slotId) =>
+          Effect.gen(function* () {
+            const seen = new Map<string, { fresh: boolean; audience: string | null; from: number; to: number }>()
+            for (const viewer of [undefined, wren, mira]) {
+              const coverage = yield* h.reader.GetLcmCoverage({
+                userId: h.userId,
+                chatId: h.chat.id,
+                forkId: fork,
+                leafSlotId,
+                fromDepth: 0,
+                toDepth: 250,
+                ...(viewer ? { viewer } : {})
+              })
+              for (const s of coverage.summaries)
+                seen.set(s.id, {
+                  fresh: s.fresh,
+                  audience: s.audience ? JSON.stringify(s.audience) : null,
+                  from: s.from,
+                  to: s.to
+                })
+            }
+            return seen
+          })
+        const paths = [
+          [forkId, h.rows.at(-1)!.slotId],
+          [branch.fork.id, aside.slotId]
+        ] as const
+        const before = yield* Effect.forEach(paths, ([f, l]) => freshness(f, l))
+        assert.isTrue([...before[0]!.values()].every((s) => s.fresh))
+        const audiences = new Set([...before[0]!.values()].map((s) => s.audience))
+        assert.isTrue(
+          audiences.has(JSON.stringify([wren])) && audiences.has(JSON.stringify([mira])),
+          JSON.stringify([...audiences])
+        )
+
+        const corrected = yield* h.writer.CorrectPresence({
+          userId: h.userId,
+          chatId: h.chat.id,
+          forkId,
+          eventId: mark.id
+        })
+        assert.isAbove(corrected!.corrected.length, 0)
+        const after = yield* Effect.forEach(paths, ([f, l]) => freshness(f, l))
+        for (const [n, path] of after.entries()) {
+          const changed = [...path].filter(([id, s]) => before[n]!.get(id)?.fresh !== s.fresh).map(([id]) => id)
+          // Wren's own summaries over 21–40 (positions, from 1), and those built on them.
+          const expected = [...path]
+            .filter(([, s]) => s.audience === JSON.stringify([wren]) && s.from <= 40 && s.to >= 21)
+            .map(([id]) => id)
+          assert.isAbove(expected.length, 0)
+          assert.sameMembers(changed, expected, n === 0 ? "main" : "the branch")
+        }
+        const [superseded] = yield* rows(
+          "SELECT count(*) AS n FROM summaries WHERE chat_id = ? AND audience_json IS NULL AND status = 'superseded'",
+          [h.chat.id]
+        )
+        assert.strictEqual(superseded!.n, 0, "no shared summary is replaced")
+      }),
+    { timeout: 180_000 }
   )
 })

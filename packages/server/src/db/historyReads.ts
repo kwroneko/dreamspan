@@ -13,6 +13,7 @@ import { stateEventsThrough } from "./stateRead.ts"
 import { displayEndOf } from "./displayPath.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { query } from "./tx.ts"
+import { audienceScope, firstUnknownDepth, inputsKnown, viewerAudience } from "./lcmAudience.ts"
 import type { ReadOps } from "./ops.ts"
 import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 
@@ -28,9 +29,29 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
       return yield* pathPieces(sql, chatId, forkId, tipSlotId)
     })
   return {
-    PreviewHistory: ({ userId, chatId, forkId, search, cursor }) =>
+    PreviewHistory: ({ userId, chatId, forkId, search, cursor, viewer, allViews }) =>
       Effect.gen(function* () {
         const fork = yield* historyFork(sql, userId, chatId, forkId)
+        // Summaries kept per view (unit C7): the shared ones, and a named character's own.
+        const identities =
+          viewer === undefined
+            ? undefined
+            : fork.tip_slot_id === null
+              ? [viewer]
+              : (yield* viewerAudience(sql, chatId, fork.tip_slot_id, viewer)).identities
+        // A character's view lists its own summaries, the shared ones ending before its first
+        // missed message, and of those only the ones it knew every input of: never a summary
+        // that could hold a scene it wasn't present for.
+        const unknownFrom =
+          identities === undefined || fork.tip_slot_id === null
+            ? null
+            : yield* firstUnknownDepth(sql, chatId, fork.tip_slot_id, identities)
+        const audience =
+          allViews === true
+            ? sql`1`
+            : unknownFrom === null
+              ? audienceScope(sql, "s", identities)
+              : sql`${audienceScope(sql, "s", identities)} AND (s.audience_json IS NOT NULL OR b.depth < ${unknownFrom})`
         // With insertions, the windows, hits and cursor are positions on the display path.
         const pieces = yield* displayPieces(chatId, forkId, fork.tip_slot_id)
         // Validate patterns even when the scope is empty.
@@ -72,7 +93,7 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
             ${sql.literal(pieces === null ? "b.depth" : displayPositionSql("b"))} AS toDepth, 1 AS selected, s.level
           FROM summaries s JOIN slots a ON a.id=s.first_slot_id JOIN slots b ON b.id=s.last_slot_id
             JOIN summary_revisions r ON r.id=${historySummaryRevision(sql, forkId, "s")}
-          WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status <> 'superseded' AND r.seq>${afterSeq}`
+          WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status <> 'superseded' AND r.seq>${afterSeq} AND ${audience}`
           const summaryTerm = sql`(${term} IS NULL OR r.seq IN (SELECT rowid FROM summary_revisions_fts WHERE summary_revisions_fts MATCH ${term ?? '""'}) OR r.content GLOB '*[^ -~]*')`
           const rows =
             pieces !== null
@@ -114,11 +135,17 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
             page.map((r) => r.before),
             search
           )
-          page.forEach((row, index) => {
+          for (const [index, row] of page.entries()) {
             const result = results[index]!
-            if (result.matches.length)
-              hits.push({ ...row, kind, after: result.after, matches: result.matches, selected: row.selected === 1 })
-          })
+            if (!result.matches.length) continue
+            if (
+              kind === "summary_revision" &&
+              identities !== undefined &&
+              !(yield* inputsKnown(sql, row.targetId, identities))
+            )
+              continue
+            hits.push({ ...row, kind, after: result.after, matches: result.matches, selected: row.selected === 1 })
+          }
           if (rows.length > 100)
             return {
               hits,

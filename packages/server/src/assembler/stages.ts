@@ -2693,7 +2693,13 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
     })
   const exact = assembly.model?.cacheBreakpoints === "explicit" && assembly.model.cacheLayout?.lookback === false
   const digests = exact ? cachePrefixDigests(messages) : []
-  const previousHistory = previous?.state?.cacheHistory
+  // In a separate context, each character's request repeats the position of its own last one
+  // (spec/CHARACTER-CONTEXT.md §2.3, unit C7): another character's history differs after the
+  // first message one of them missed. The whole path's (a shared context, a narrator) stays
+  // `cacheHistory`; both are carried forward through every request.
+  const viewer = assembly.knowledge?.viewer ?? null
+  const byView = previous?.state?.cacheHistoryByView
+  const previousHistory = viewer === null ? previous?.state?.cacheHistory : byView?.[viewer]
   assembly.breakpoints = placeBreakpoints(
     messages.map((m) => ({
       ...m,
@@ -2711,8 +2717,19 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
   )
   const history = assembly.breakpoints.find((b) => b.reason === "history")
   const start = assembly.historyStart
-  if (exact && start?.state && history)
-    assembly.historyStart = { ...start, state: { ...start.state, cacheHistory: digests[history.message]! } }
+  if (exact && start?.state && history) {
+    const digest = digests[history.message]!
+    const shared = viewer === null ? digest : previous?.state?.cacheHistory
+    const views = viewer === null ? byView : { ...byView, [viewer]: digest }
+    assembly.historyStart = {
+      ...start,
+      state: {
+        ...start.state,
+        ...(shared === undefined ? {} : { cacheHistory: shared }),
+        ...(views === undefined ? {} : { cacheHistoryByView: views })
+      }
+    }
+  }
   // A provider that can't mark every boundary keeps the first ones; say which it can't keep.
   const dropped = assembly.breakpoints.slice(EXPLICIT_MARKERS)
   if (assembly.model?.cacheBreakpoints === "explicit" && dropped.length)
