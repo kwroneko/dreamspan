@@ -47,9 +47,9 @@ const watch = (api: Api, chat: Chat) =>
     yield* eventually(() => events.length > 0)
     return events
   })
-const edit = (api: Api, refId: RefId, content: string) =>
+const edit = (api: Api, refId: RefId, content: string, key = "description") =>
   Effect.gen(function* () {
-    const field = textField(["description"])
+    const field = textField([key])
     const before = yield* api.OpenEditor({ refId })
     const draft = yield* api.SaveEditorDraft({
       refId,
@@ -100,6 +100,46 @@ const fixture = (dataDir: string, api: Api) =>
   })
 
 describe("workshop setup effects", () => {
+  it.live("refuses to bin a created card after a user adds or changes an owned note", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const made = yield* f.run("create_card", { name: "With user work" }, "card")
+      const refId = JSON.parse(made.text).id as RefId
+      yield* api.CreateCardNote({ cardRefId: refId, title: "User's new note" })
+      const effect = (yield* api.ListRolloutEffects({ chatId: f.chat.id }))[0]!
+      assert.strictEqual(yield* outcome(api.UndoRolloutEffect(effect)), "EffectUndoRefused")
+      assert.strictEqual((yield* api.OpenEditor({ refId })).ref.label, "With user work")
+
+      const cloned = yield* f.run("clone_card", { card: refId, name: "Copy with notes" }, "clone-notes")
+      const effects = (yield* api.ListRolloutEffects({ chatId: f.chat.id })).filter(
+        (e) => e.toolCallId === "clone-notes"
+      )
+      const root = effects.find((e) => e.targetId === JSON.parse(cloned.text).entityId)!
+      const note = effects.find((e) => e !== root)!
+      yield* edit(api, note.undo!.refId as RefId, "A user's saved note.", "content")
+      assert.strictEqual(yield* outcome(api.UndoRolloutEffect(root)), "EffectUndoRefused")
+      const draftClone = yield* f.run("clone_card", { card: refId, name: "Copy with note draft" }, "clone-drafts")
+      const draftEffects = (yield* api.ListRolloutEffects({ chatId: f.chat.id })).filter(
+        (e) => e.toolCallId === "clone-drafts"
+      )
+      const draftRoot = draftEffects.find((e) => e.targetId === JSON.parse(draftClone.text).entityId)!
+      const draftNote = draftEffects.find((e) => e !== draftRoot)!
+      const saved = yield* api.OpenEditor({ refId: draftNote.undo!.refId as RefId })
+      yield* api.SaveEditorDraft({
+        refId: saved.ref.id,
+        field: textField(["content"]),
+        content: "Still typing a note.",
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: saved.ref.headRevisionId
+      })
+      assert.strictEqual(yield* outcome(api.UndoRolloutEffect(draftRoot)), "EffectUndoRefused")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("rejects unknown and oversized setup arguments before making changes", () => {
     const config = testConfig()
     return Effect.gen(function* () {

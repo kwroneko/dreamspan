@@ -103,18 +103,47 @@ const checkedRef = (ctx: UndoContext, effect: RolloutEffect) =>
     return ref
   })
 
+const checkedCreation = (ctx: UndoContext, effect: RolloutEffect) =>
+  Effect.gen(function* () {
+    const ref = yield* checkedRef(ctx, effect)
+    const undo = effect.undo!
+    const [meta] = yield* ctx.sql<{ archived_at: number | null; tags: string; lineage: string }>`SELECT e.archived_at,
+      (SELECT coalesce(json_group_array(tag), '[]') FROM (SELECT tag FROM entity_tags WHERE entity_id = e.id ORDER BY tag)) AS tags,
+      json_array(e.forked_from_entity_id, e.forked_from_revision_id, e.forked_in_chat_id, e.forked_at) AS lineage
+      FROM entities e WHERE e.id = ${effect.targetId}`
+    if (!meta || meta.archived_at !== undo.archivedAt || meta.tags !== undo.tags || meta.lineage !== undo.lineage)
+      return yield* refuse()
+    const [draftStamp] = yield* ctx.sql<{
+      stamp: string
+    }>`SELECT coalesce(json_group_array(json_array(id, row_version)), '[]') AS stamp FROM (SELECT id, row_version FROM drafts WHERE target_kind = 'entity_field' AND target_id = ${ref.id} ORDER BY id)`
+    if (draftStamp!.stamp !== undo.draftStamp)
+      return yield* refuse("Unsaved text on the new item changed since; open its editor first.")
+    return ref
+  })
+
 const createUndoer: Undoer = {
   id: "library.create",
   run: (ctx, effect) =>
     Effect.gen(function* () {
-      const ref = yield* checkedRef(ctx, effect)
+      const ref = yield* checkedCreation(ctx, effect)
       const undo = effect.undo!
-      const [meta] = yield* ctx.sql<{ archived_at: number | null; tags: string; lineage: string }>`SELECT e.archived_at,
-      (SELECT coalesce(json_group_array(tag), '[]') FROM (SELECT tag FROM entity_tags WHERE entity_id = e.id ORDER BY tag)) AS tags,
-      json_array(e.forked_from_entity_id, e.forked_from_revision_id, e.forked_in_chat_id, e.forked_at) AS lineage
-      FROM entities e WHERE e.id = ${effect.targetId}`
-      if (!meta || meta.archived_at !== undo.archivedAt || meta.tags !== undo.tags || meta.lineage !== undo.lineage)
-        return yield* refuse()
+      if (ref.kind === "card") {
+        const live = yield* ctx.sql<{ id: string }>`SELECT e.id FROM entities e
+          JOIN entity_refs r ON r.entity_id = e.id JOIN entity_revisions h ON h.id = r.head_revision_id
+          WHERE e.owner_user_id = ${ctx.userId} AND e.kind = 'note' AND e.deleted_at IS NULL
+            AND json_extract(h.doc_json, '$.owner.card') = ${effect.targetId}`
+        const siblings = yield* ctx.sql<EffectRow>`SELECT * FROM rollout_effects
+          WHERE rollout_id = ${effect.rolloutId} AND tool_call_id = ${effect.toolCallId} AND kind = 'library.create'`
+        const expected = (undo.notes ?? []) as ReadonlyArray<string>
+        const active = expected.filter((id) => !siblings.some((row) => row.target_id === id && row.undone_at !== null))
+        if (live.length !== active.length || live.some((note) => !active.includes(note.id)))
+          return yield* refuse("Notes on this card changed since; open its editor before undoing it.")
+        for (const id of active) {
+          const sibling = siblings.find((row) => row.target_id === id)
+          if (!sibling) return yield* refuse()
+          yield* checkedCreation(ctx, toRolloutEffect(sibling))
+        }
+      }
       // Drafts moved by ForkCard are restored with their history intact. Refuse if either end
       // was typed on since the tool moved it. The copied drafts stay with the binned copy.
       const carries = (undo.carries ?? []) as Array<{
@@ -146,14 +175,6 @@ const createUndoer: Undoer = {
           })
           .pipe(Effect.catchTag("DraftTooLarge", () => Effect.fail(refuse())))
       }
-      const drafts = yield* ctx.sql<{
-        n: number
-      }>`SELECT count(*) AS n FROM drafts WHERE target_kind = 'entity_field' AND target_id = ${ref.id}`
-      const [draftStamp] = yield* ctx.sql<{
-        stamp: string
-      }>`SELECT coalesce(json_group_array(json_array(id, row_version)), '[]') AS stamp FROM (SELECT id, row_version FROM drafts WHERE target_kind = 'entity_field' AND target_id = ${ref.id} ORDER BY id)`
-      if (drafts[0]!.n > 0 && draftStamp!.stamp !== undo.draftStamp)
-        return yield* refuse("Unsaved text on the new item changed since; open its editor first.")
       // Use the bin's ordinary delete, without capacity eviction: undo never purges history.
       yield* ctx.bin.deleteEntity(ctx.userId, ref.entity_id)
       return undo
@@ -269,6 +290,13 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       json_array(e.forked_from_entity_id, e.forked_from_revision_id, e.forked_in_chat_id, e.forked_at) AS lineage,
       (SELECT coalesce(json_group_array(json_array(id, row_version)), '[]') FROM (SELECT id, row_version FROM drafts WHERE target_kind = 'entity_field' AND target_id = ${refId} ORDER BY id)) AS draftStamp
       FROM entities e WHERE e.id = ${ref.entity_id}`
+        const notes =
+          ref.kind !== "card"
+            ? []
+            : yield* sql<{ id: string }>`SELECT e.id FROM entities e
+          JOIN entity_refs r ON r.entity_id = e.id JOIN entity_revisions h ON h.id = r.head_revision_id
+          WHERE e.owner_user_id = (SELECT owner_user_id FROM entities WHERE id = ${ref.entity_id})
+            AND e.kind = 'note' AND e.deleted_at IS NULL AND json_extract(h.doc_json, '$.owner.card') = ${ref.entity_id}`
         return {
           kind: "library.create",
           targetKind: "entity",
@@ -281,7 +309,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             archivedAt: meta!.archived_at,
             tags: meta!.tags,
             lineage: meta!.lineage,
-            draftStamp: meta!.draftStamp
+            draftStamp: meta!.draftStamp,
+            notes: notes.map((note) => note.id)
           }
         }
       })
