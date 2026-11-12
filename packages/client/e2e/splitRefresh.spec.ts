@@ -102,6 +102,11 @@ test("a workshop's first-message split has bounded reads, heap and DOM at 1440",
   await showActions(opening)
   stats.armed = true
   await opening.getByRole("button", { name: "Generate another version", exact: true }).click()
+  // The run made a card in a later message: the regenerate warning asks first (W4).
+  await page
+    .getByRole("dialog", { name: "This reply changed things outside the chat" })
+    .getByRole("button", { name: "Keep them and make a new version", exact: true })
+    .click()
   await expect.poll(() => stats.slotFrames).toBeGreaterThan(0)
   await steady(page, stats)
   await page.getByRole("button", { name: "Chat panel", exact: true }).first().click()
