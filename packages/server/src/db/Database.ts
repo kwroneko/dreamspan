@@ -12,20 +12,21 @@ import { Worker as Workers } from "effect/workers"
 import { type BinLimits, defaultBinLimits } from "@rp/shared/bin.ts"
 import { acquireInstanceLock, checkFilesystem, databaseFile } from "./connection.ts"
 import { prepareDataDirectory } from "../dataDirectory.ts"
-import { ReadOps, WriteOps } from "./ops.ts"
+import { ReadOps, WriteOps, type WriteOpsChat, type WriteOpsLibrary } from "./ops.ts"
+import type { OpsOf } from "./opsOf.ts"
 import * as ReaderPool from "./readerPool.ts"
 import { stampMatches } from "./workerStamp.ts"
 import { ProviderDefinitions, providerDefinitionClient } from "../providers/definitions.ts"
 
-export class Writer extends Context.Service<
-  Writer,
-  RpcClient.FromGroup<typeof WriteOps, RpcClientError.RpcClientError>
->()("rp/db/Writer") {}
+// Typed through `OpsOf`, never `RpcClient.FromGroup` (opsOf.ts). The writer's halves are only a
+// grouping in ops.ts; a new write operation goes in either.
+type OpsClient<Group> = RpcClient.RpcClient<OpsOf<Group>, RpcClientError.RpcClientError>
 
-export class Reader extends Context.Service<
-  Reader,
-  RpcClient.FromGroup<typeof ReadOps, RpcClientError.RpcClientError>
->()("rp/db/Reader") {}
+interface WriterClient extends OpsClient<typeof WriteOpsChat>, OpsClient<typeof WriteOpsLibrary> {}
+
+export class Writer extends Context.Service<Writer, WriterClient>()("rp/db/Writer") {}
+
+export class Reader extends Context.Service<Reader, OpsClient<typeof ReadOps>>()("rp/db/Reader") {}
 
 /** Tests can advance the writer's history clock without sleeping or writing SQLite on the main thread. */
 export const DraftClock = Context.Reference<SharedArrayBuffer | null>("rp/db/DraftClock", { defaultValue: () => null })

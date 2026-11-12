@@ -574,7 +574,7 @@ const LibraryReplacePlan = Schema.Struct({
   skipped: Schema.Array(LibrarySkipped)
 })
 
-export class WriteOps extends RpcGroup.make(
+export class WriteOpsChat extends RpcGroup.make(
   /**
    * Merges another chat's fork into `forkId` below `at` (spec/CHAT-MERGE.md §8): recomputes the
    * preview and refuses with the new one when its digest changed (`MergeChanged`), then writes
@@ -1611,7 +1611,10 @@ export class WriteOps extends RpcGroup.make(
     },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
-  }),
+  })
+) {}
+
+export class WriteOpsLibrary extends RpcGroup.make(
   // --- Library import (ARCHITECTURE.md §11). The file was parsed in a format worker;
   // documents cross as JSON text, which costs the main thread a copy, not a walk.
   /**
@@ -3108,6 +3111,9 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   })
 ) {}
+
+/** Every write operation. Database.ts types the writer's client from the two halves. */
+export class WriteOps extends WriteOpsChat.merge(WriteOpsLibrary) {}
 
 export class ReadOps extends RpcGroup.make(
   /** What a merge would bring (spec/CHAT-MERGE.md §3), as `MergeChat` computes it. */

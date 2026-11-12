@@ -10,7 +10,8 @@ import { foldState } from "@rp/shared/state.ts"
 import { settingsRegistry, readSetting, writeSetting } from "./settings.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
-import type { Rpc, RpcGroup } from "effect/rpc"
+import type { Rpc } from "effect/rpc"
+import type { OpsOf } from "./opsOf.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { StoredStateEventData } from "@rp/shared/state.ts"
 import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
@@ -18,7 +19,7 @@ import { makeLibraryQueries } from "./library.ts"
 
 export const refuseOperation = (message: string) => new EffectUndoRefused({ message })
 type Handlers = Parameters<typeof WriteOps.of>[0]
-type WriteRpc<K> = Extract<RpcGroup.Rpcs<typeof WriteOps>, { readonly _tag: K }>
+type WriteRpc<K> = Extract<OpsOf<typeof WriteOps>, { readonly _tag: K }>
 type Input<K extends keyof Handlers> = Rpc.Payload<WriteRpc<K>>
 export type OperationHandlers = {
   [K in keyof Handlers]: (input: Input<K>) => Effect.Effect<Rpc.Success<WriteRpc<K>>, unknown>
