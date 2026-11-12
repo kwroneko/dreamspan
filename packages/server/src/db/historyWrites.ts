@@ -6,6 +6,7 @@ import { NotFound } from "@rp/shared/errors.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { effectiveOverride, nextSeq, writeOverride, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
+import { onForkPath } from "./forks.ts"
 import { historyCurrent, historyFork } from "./historyShared.ts"
 import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
 import { transaction } from "./tx.ts"
@@ -18,22 +19,28 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
     edit: Pick<HistoryEdit, "kind" | "targetId">,
     valueId: string | null,
     slotId: string | null,
-    changesetId: string | null
+    changesetId: string | null,
+    summariesDone = false
   ) {
     if (edit.kind === "version_replace") {
       yield* writeOverride(
         sql,
         { id: fork.id, chatId: fork.chat_id },
-        { kind: "replace", targetId: edit.targetId, slotId, valueId, flag: null }
+        { kind: "replace", targetId: edit.targetId, slotId, valueId, flag: null, changesetId, summariesDone }
       )
-      yield* sql`UPDATE fork_overrides SET changeset_id=${changesetId} WHERE id=${effectiveOverride(sql, "replace", fork.id, `'${edit.targetId.replaceAll("'", "''")}'`)}`
     } else if (edit.kind === "state_event") {
       yield* writeOverride(
         sql,
         { id: fork.id, chatId: fork.chat_id },
-        { kind: "suppress_event", targetId: edit.targetId, slotId, valueId, flag: valueId === null ? 0 : 1 }
+        {
+          kind: "suppress_event",
+          targetId: edit.targetId,
+          slotId,
+          valueId,
+          flag: valueId === null ? 0 : 1,
+          changesetId
+        }
       )
-      yield* sql`UPDATE fork_overrides SET changeset_id=${changesetId} WHERE id=${effectiveOverride(sql, "suppress_event", fork.id, "'" + edit.targetId.replaceAll("'", "''") + "'")}`
     } else {
       const seq = yield* nextSeq(sql, fork.chat_id)
       yield* sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, changeset_id)
@@ -41,7 +48,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
           (SELECT depth FROM slots WHERE id=${slotId}), ${valueId}, ${changesetId})`
     }
   })
-  return {
+  const handlers = {
     ApplyHistoryEdits: ({ userId, title, groupId: existingGroup, applications }) =>
       Effect.gen(function* () {
         if (applications.reduce((n, a) => n + a.edits.length, 0) > 10000)
@@ -100,9 +107,12 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
               AND v.status <> 'generating' AND v.deleted_at IS NULL AND v.purged_at IS NULL AND s.deleted_at IS NULL AND s.purged_at IS NULL`
               if (!live) return yield* new HistoryRejected({ message: "A target is no longer editable." })
               const copyKey = `${current.id}:${edit.after}`
-              const [existingCopy] = copies.has(copyKey)
-                ? []
-                : yield* sql<{ id: string }>`SELECT v.id FROM version_records v JOIN changesets c ON c.id=v.changeset_id
+              const [existingCopy] =
+                copies.has(copyKey) || !existingGroup
+                  ? []
+                  : yield* sql<{
+                      id: string
+                    }>`SELECT v.id FROM version_records v JOIN changesets c ON c.id=v.changeset_id
                 JOIN changeset_items i ON i.changeset_id=c.id AND i.target_kind='version_replace' AND i.target_id=${edit.targetId}
                 WHERE c.group_id=${groupId} AND i.before_json ->> '$.id'=${current.id} AND v.content=${edit.after}
                   AND v.source_version_id=${edit.targetId} AND v.purged_at IS NULL LIMIT 1`
@@ -154,7 +164,9 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                 slot_id: string | null
                 version_id: string | null
               }>`SELECT slot_id,version_id FROM state_events WHERE id=${current.id}`
-              const base = storedBase ?? { slot_id: null, version_id: null }
+              if (edit.atSlotId && !(yield* onForkPath(sql, chatId, fork, edit.atSlotId)))
+                return yield* new NotFound({ entity: "message", id: edit.atSlotId })
+              const base = storedBase ?? { slot_id: edit.atSlotId ?? null, version_id: null }
               if (branchOwned.has(event.data.key) && (base!.slot_id !== null || event.scope !== null))
                 return yield* new HistoryRejected({ message: "Branch-owned state must be chat-wide." })
               if (current.id && current.id !== edit.targetId)
@@ -187,7 +199,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
             const before = JSON.stringify({
               id: current.id,
               content: current.content,
-              slotId: current.slot_id,
+              slotId: current.slot_id ?? edit.atSlotId ?? null,
               summariesDone: prior?.summaries_done ?? 0,
               changesetId: prior?.changeset_id ?? null
             })
@@ -226,13 +238,17 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
               yield* writeOverride(
                 sql,
                 { id: forkId, chatId },
-                { kind: "suppress_event", targetId: afterId, slotId: null, valueId: null, flag: 0 }
+                {
+                  kind: "suppress_event",
+                  targetId: afterId,
+                  slotId: current.slot_id ?? edit.atSlotId ?? null,
+                  valueId: null,
+                  flag: 0,
+                  changesetId: record.id
+                }
               )
-              yield* sql`UPDATE fork_overrides SET changeset_id=${record.id} WHERE id=${effectiveOverride(sql, "suppress_event", forkId, "'" + afterId + "'")}`
-            } else yield* override(fork, edit, afterId, current.slot_id, record.id)
-            if (edit.kind === "version_replace")
-              yield* sql`
-            UPDATE fork_overrides SET summaries_done=${application.summariesIncluded ? 1 : 0} WHERE id=${effectiveOverride(sql, "replace", fork.id, "'" + edit.targetId.replaceAll("'", "''") + "'")}`
+            } else
+              yield* override(fork, edit, afterId, current.slot_id, record.id, application.summariesIncluded ?? false)
           }
         }
         return { groupId, changesetIds }
@@ -301,11 +317,9 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                 ? null
                 : before.id,
               before.slotId,
-              null
+              edit.kind === "version_replace" ? (before.changesetId ?? null) : null,
+              before.summariesDone === 1
             )
-          if (edit.kind === "version_replace")
-            yield* sql`UPDATE fork_overrides SET summaries_done=${before.summariesDone ?? 0},changeset_id=${before.changesetId ?? null}
-            WHERE id=${effectiveOverride(sql, "replace", forkId, "'" + edit.targetId.replaceAll("'", "''") + "'")}`
           const seq = yield* nextSeq(sql, chatId)
           yield* sql`INSERT INTO changeset_reverts(changeset_id, fork_id, item_id, seq) VALUES (${changesetId},${forkId},${item.id},${seq})
           ON CONFLICT(fork_id,item_id) DO UPDATE SET seq=excluded.seq`
@@ -314,4 +328,5 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
         return { undone, conflicts }
       }).pipe(transaction(sql, "UndoHistoryEdit"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
+  return handlers
 })

@@ -1,3 +1,4 @@
+import { workshopRewriteTests } from "./support/workshopRewrite.ts"
 import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
 import { workshopChatTests } from "./support/workshopChat.ts"
 import { workshopApprovalTests } from "./support/workshopApprovals.ts"
@@ -45,6 +46,8 @@ if (process.env.LAYOUT_AUDIT_WORKSHOP_ONLY === "1") {
   workshopApprovalTests()
 }
 if (process.env.LAYOUT_AUDIT_RESUME_ONLY === "1") agentResumeTests()
+
+if (process.env.LAYOUT_AUDIT_WORKSHOP_REWRITE_ONLY === "1") workshopRewriteTests()
 
 test.describe("model picker catalog layout", () => {
   let server: TestServer

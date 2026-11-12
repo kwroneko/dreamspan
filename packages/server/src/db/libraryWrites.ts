@@ -1,3 +1,5 @@
+import { makeAgentHistoryWriteHandlers } from "./agentHistoryWrites.ts"
+import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeWorkshopWriteHandlers } from "./workshopWrites.ts"
 import { archiveCandidates } from "./cardArchive.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
@@ -969,6 +971,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       ...handlers,
       ...makeEditorWriteHandlers(steps, bin),
       ...makeWorkshopWriteHandlers(steps, bin),
+      ...makeAgentHistoryWriteHandlers(steps, yield* makeHistoryWriteHandlers),
       ...makeCardForkWriteHandlers(steps),
       ...makeForkMergeWriteHandlers(steps),
       ...makeRolloutEffectHandlers(steps)

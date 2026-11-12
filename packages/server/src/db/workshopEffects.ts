@@ -1,3 +1,4 @@
+import { historyCurrent, historyFork } from "./historyShared.ts"
 import { pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
 import { isDeepStrictEqual } from "node:util"
 import { operationPolicies, operationInfo, refuseOperation, type OperationHandlers } from "./operationPolicies.ts"
@@ -295,6 +296,21 @@ const operationUndo: Undoer = {
   unchanged: (sql, userId, effect) =>
     Effect.gen(function* () {
       const recipe = effect.undo!
+      if (typeof recipe.changesetId === "string") {
+        const fork = yield* historyFork(sql, userId, String(recipe.chatId), String(recipe.forkId))
+        const items = yield* sql<{
+          target_kind: "version_replace" | "summary_revision" | "state_event"
+          target_id: string
+          after_json: string
+        }>`SELECT target_kind,target_id,after_json FROM changeset_items WHERE changeset_id=${recipe.changesetId}`
+        if (!items.length) return false
+        for (const item of items) {
+          const current = yield* historyCurrent(sql, fork, { kind: item.target_kind, targetId: item.target_id })
+          const after = JSON.parse(item.after_json)
+          if (current?.id !== after.id || current?.content !== after.content) return false
+        }
+        return true
+      }
       const policy = operationPolicies.get(String(recipe.operation))
       if (!policy) return false
       const current = yield* policy.before(sql, userId, recipe.input as never)
@@ -303,6 +319,16 @@ const operationUndo: Undoer = {
   run: (ctx, effect) =>
     Effect.gen(function* () {
       const recipe = effect.undo!
+      if (typeof recipe.changesetId === "string") {
+        const result = yield* ctx.ops.UndoHistoryEdit({
+          userId: ctx.userId,
+          chatId: recipe.chatId as never,
+          forkId: recipe.forkId as never,
+          changesetId: recipe.changesetId
+        })
+        if (result.conflicts.length) return yield* refuse("Some history changed since. Open History edits to undo it.")
+        return { undone: result.undone }
+      }
       const policy = operationPolicies.get(String(recipe.operation))
       if (!policy) return yield* refuse("This operation no longer has an undo policy.")
       const current = yield* policy.before(ctx.sql, ctx.userId, recipe.input as never)

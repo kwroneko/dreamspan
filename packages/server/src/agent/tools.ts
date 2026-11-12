@@ -34,6 +34,7 @@ export interface ToolContext {
   readonly cache: Map<string, unknown>
   /** A one-call approval, checked again in the change's transaction. */
   readonly approvalDigest?: string
+  readonly onChanged?: (chatId: ChatId) => void
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */

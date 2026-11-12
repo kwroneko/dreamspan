@@ -202,8 +202,30 @@ const listActivity = (
         (SELECT r.slot_id FROM rollouts r WHERE r.id = last.rollout_id)
       ) END AS slot_id
     FROM last JOIN llm_requests q ON q.id = last.last_id LEFT JOIN connections c ON c.id = q.connection_id
-    ORDER BY last.started DESC, last.gid DESC, last.kind DESC`,
-    [chatId, userId, before.startedAt, before.id, before.kind, limit]
+    UNION ALL
+    SELECT r.id AS gid,'edit' AS kind,coalesce(r.started_at,r.created_at) AS started,r.completed_at AS ended,
+      0 AS requests,0 AS running,0 AS input,0 AS cache_read,0 AS cache_write,0 AS output,0 AS cost,
+      NULL AS currency,0 AS estimated,CASE WHEN r.status='completed' THEN 'complete' ELSE r.status END AS status,
+      NULL AS model,NULL AS connection,NULL AS summary_id,NULL AS summary_revision_id,NULL AS slot_id
+    FROM rollouts r JOIN chats c ON c.id=r.chat_id
+    WHERE r.chat_id=? AND c.owner_user_id=? AND c.deleted_at IS NULL AND r.kind='edit'
+      AND NOT EXISTS(SELECT 1 FROM llm_requests q WHERE q.rollout_id=r.id)
+      AND (coalesce(r.started_at,r.created_at),r.id,'edit') < (?,?,?)
+    ORDER BY started DESC,gid DESC,kind DESC LIMIT ?`,
+    [
+      chatId,
+      userId,
+      before.startedAt,
+      before.id,
+      before.kind,
+      limit,
+      chatId,
+      userId,
+      before.startedAt,
+      before.id,
+      before.kind,
+      limit
+    ]
   )
 
 const activityRow = (row: ActivitySqlRow): ActivityRow => ({

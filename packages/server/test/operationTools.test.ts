@@ -342,6 +342,12 @@ describe("operation tools", () => {
           swipes: true,
           summaries: true
         }
+        yield* f.writer.SetWorkshopGrant({
+          userId: f.user.id,
+          chatId: f.chat.id,
+          capability: "chats.read",
+          mode: "allow"
+        })
         const searched = yield* f.run("history_search", { chatId: target.id, forkId: target.currentForkId, search })
         assert.isUndefined(searched.isError, searched.text)
         const renamed = yield* f.run("history_rename", {

@@ -24,7 +24,7 @@ const library = (ctx: ToolContext, kind: EntityKind, value: unknown) =>
     })
     return found.ref
   })
-const resolveChat = (ctx: ToolContext, value: unknown) =>
+export const resolveChat = (ctx: ToolContext, value: unknown) =>
   Effect.gen(function* () {
     const wanted = String(value)
     let before: ReturnType<typeof chatCursor> | null = null

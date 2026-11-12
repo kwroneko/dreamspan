@@ -48,6 +48,7 @@ export interface AgentRun {
   readonly tools: ReadonlyArray<RolloutTool<never>>
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
+  readonly onChanged?: (chatId: import("@rp/shared/chat.ts").ChatId) => void
   readonly onState?: () => void
   /** The tool definitions to offer as a snapshot froze them (a resume); absent: `tools`' own. */
   readonly offered?: ReadonlyArray<FrozenTool>
@@ -378,6 +379,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       const cache = new Map<string, unknown>()
       const context = (toolCallId: string) => ({
         cache,
+        ...(run.onChanged ? { onChanged: run.onChanged } : {}),
         userId: request.userId,
         chatId: request.chatId,
         forkId: request.forkId ?? null,

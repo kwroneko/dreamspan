@@ -201,6 +201,10 @@ export const layer = Layer.effect(
               chatId: request.chatId,
               rolloutId
             }),
+            onChanged: (target) => {
+              hub.publish(target, { _tag: "Reload" })
+              hub.publish(target, { _tag: "Lcm" })
+            },
             onState: () => hub.publish(request.chatId, { _tag: "State" }),
             resume: {
               transcript: resume.transcript,
@@ -582,6 +586,10 @@ export const layer = Layer.effect(
                     reader,
                     writer,
                     permit: makePermit({ registries: execution, reader, writer, userId, chatId, rolloutId }),
+                    onChanged: (target) => {
+                      hub.publish(target, { _tag: "Reload" })
+                      hub.publish(target, { _tag: "Lcm" })
+                    },
                     onState: () => hub.publish(chatId, { _tag: "State" })
                   }
                 }
