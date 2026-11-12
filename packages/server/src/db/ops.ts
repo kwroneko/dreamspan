@@ -2675,6 +2675,24 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * Undo of an away mark the scene check set (spec/CHARACTER-CONTEXT.md §5, unit C9), in one
+   * transaction: the user's presence event replaces the decision's, and every version written
+   * since that recorded the character away for it is corrected to count it present
+   * (`db/decisions.ts`). Null when the event isn't a live away mark of the scene check.
+   */
+  Rpc.make("CorrectPresence", {
+    payload: { userId: UserId, chatId: ChatId, forkId: ForkId, eventId: Schema.String },
+    success: Schema.NullOr(
+      Schema.Struct({
+        /** The user's event that replaced the decision's. */
+        eventId: Schema.String,
+        /** The versions whose presence record was corrected. */
+        corrected: Schema.Array(VersionId)
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The account defaults, including its new-chat persona; choices must be owned and live. */
   Rpc.make("SetGenerationDefaults", {
     payload: { userId: UserId, defaults: GenerationDefaults },

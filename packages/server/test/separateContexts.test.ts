@@ -776,3 +776,73 @@ describe("the agent's read tools in a separate context", () => {
     )
   )
 })
+
+describe("Undo of a scene check's away mark (unit C9)", () => {
+  it.live("the user's word replaces the decision's, and what was written since counts her present", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        // The scene check judged that Wren left here.
+        const mark = yield* t.event({ key: "away.set", value: { entity: t.wren, away: true, source: "decision" } })
+        const said = yield* t.say(t.tobin, "The password is heron.")
+        const last = yield* t.say(t.mira, "Mira repeats it twice.", true)
+        assert.notInclude(sentText(yield* t.contextFor(t.wren)), "heron")
+        const { fork: peer } = yield* t.api.CreateFork({
+          chatId: t.chatId,
+          fromForkId: t.fork(),
+          atSlotId: last.slotId
+        })
+        const awayIn = (forkId: ForkId) =>
+          Effect.map(
+            t.reader.StateEventsAt({ userId: t.userId, chatId: t.chatId, slotId: last.slotId, forkId }),
+            (events) => foldState(events).away
+          )
+        assert.include(yield* awayIn(peer.id), t.wren)
+
+        // Only a live mark of the scene check can be undone this way.
+        const user = yield* t.event({ key: "away.set", value: { entity: t.mira, away: true } })
+        assert.isNull(
+          yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: user.id })
+        )
+        yield* t.event({ key: "away.set", value: { entity: t.mira, away: false } })
+
+        const undone = yield* t.writer.CorrectPresence({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          eventId: mark.id
+        })
+        assert.isNotNull(undone)
+        // The two messages written since, and the reply Wren was asked for after them.
+        assert.includeMembers([...undone!.corrected], [said.version.id, last.version.id])
+        assert.lengthOf(undone!.corrected, 3)
+        assert.include(sentText(yield* t.contextFor(t.wren)), "The password is heron.")
+        assert.include(sentText(yield* t.contextFor(t.wren)), "Mira repeats it twice.")
+        // What she was away for before the mark stays unknown to her.
+        assert.notInclude(sentText(yield* t.contextFor(t.wren)), "vault code")
+        // Every branch showing those messages: the mark no longer applies there either.
+        assert.notInclude(yield* awayIn(t.fork()), t.wren)
+        assert.notInclude(yield* awayIn(peer.id), t.wren)
+        const events = yield* t.reader.StateEventsAt({
+          userId: t.userId,
+          chatId: t.chatId,
+          slotId: last.slotId,
+          forkId: t.fork()
+        })
+        assert.deepInclude(
+          events.map((e) => e.data),
+          { key: "away.set", value: { entity: t.wren, away: false } },
+          "the user's own event"
+        )
+        // Undone once: the mark no longer applies there, so there is nothing to undo.
+        const again = yield* t.writer.CorrectPresence({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          eventId: mark.id
+        })
+        assert.isNull(again)
+      })
+    )
+  )
+})

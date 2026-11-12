@@ -206,10 +206,24 @@ it.live(
         }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(config.dataDir), readonly: true })))
       )
       assert.isFalse(knew)
+
+      // Undo of a scene check's away mark at 1,000 (unit C9): every version since that recorded
+      // Wren away (about 17,000, with their swipes) is corrected in one transaction.
+      const mark = yield* event(slotAt(1_000), {
+        key: "away.set",
+        value: { entity: wren, away: true, source: "decision" }
+      })
+      const undoStart = performance.now()
+      const undone = yield* h.writer.CorrectPresence({ userId: h.userId, chatId, forkId: main, eventId: mark.id })
+      samples.push({ operation: "CorrectPresence", ms: performance.now() - undoStart })
+      assert.isAbove(undone!.corrected.length, 10_000)
+      yield* event(slotAt(2_999), { key: "context.per_speaker", value: "separate" })
+      assert.include(sentText(yield* assemble(wrenRow)), "line 1200.")
       process.stdout.write(`CONTEXTS_SCALE ${JSON.stringify(samples)}\n`)
       const ms = (operation: string) => samples.find((s) => s.operation === operation)!.ms
       assert.isBelow(ms("separate: Wren"), ms("shared: Wren") * 1.5 + 200, "the filter adds at most a bounded share")
       assert.isBelow(ms("knewThrough 3,000"), 1_000)
+      assert.isBelow(ms("CorrectPresence"), 10_000)
     }).pipe(Effect.scoped, Effect.provide(server.layer))
   },
   600_000
