@@ -1014,3 +1014,22 @@ describe("conditions (DESIGN §2.2)", () => {
     expect(JSON.stringify(stored)).toBe(before)
   })
 })
+
+describe("separate-context utility prompts", () => {
+  it("restores custom and disabled gap/join prompts after an export and import", () => {
+    for (const text of ["", "[{{char}} missed {{absentCount}} with {{absentNames}}]"]) {
+      const original = load({ frequency_penalty: 0 }).doc
+      const changed = {
+        ...original,
+        utility_prompts: {
+          ...original.utility_prompts,
+          absent_gap_prompt: text,
+          absent_join_prompt: "Joining {{mergedNames}}"
+        }
+      }
+      const again = load(exportStPreset(changed)).doc
+      expect(again.utility_prompts.absent_gap_prompt).toBe(text)
+      expect(again.utility_prompts.absent_join_prompt).toBe("Joining {{mergedNames}}")
+    }
+  })
+})

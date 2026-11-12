@@ -404,7 +404,14 @@ const readPreset = (file: Json, r: ReportBuilder): PresetDoc => {
     ) as T
 
   const samplers = mapDefaults(DEFAULT_SAMPLERS)
-  const utility_prompts = mapDefaults(DEFAULT_UTILITY_PROMPTS)
+  const utility_prompts: UtilityPrompts = {
+    ...mapDefaults(DEFAULT_UTILITY_PROMPTS),
+    ...Object.fromEntries(
+      ["merge_section_prompt", "merge_join_prompt", "absent_gap_prompt", "absent_join_prompt"]
+        .filter((key) => src[key] !== undefined)
+        .map((key) => [key, str(key, "")])
+    )
+  }
 
   let names_behavior = namesBehavior(num("names_behavior", 0))
   if (names_behavior === undefined) {
