@@ -175,16 +175,72 @@ const textOnly = (text: string) => {
     .replace(/\n{3,}/g, "\n\n")
 }
 
-const FENCE = /^( {0,3})(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)(?:\n {0,3}\2[`~]*[ \t]*(?=\n|$)|$)/gm
-const INLINE_CODE = /(`+)[^`\n][\s\S]*?\1/g
+/** Pair equal-length backtick runs once. The former backreference regex tried every
+ * suffix of a long unmatched run, taking cubic time on a single adversarial message. */
+const inlineCode = (text: string) => {
+  const runs = [...text.matchAll(/`+/g)]
+  const next = new Map<number, number>()
+  const pairs: Array<number | undefined> = new Array(runs.length)
+  for (let i = runs.length - 1; i >= 0; i--) {
+    const length = runs[i]![0].length
+    pairs[i] = next.get(length)
+    next.set(length, i)
+  }
+  const spans: Array<{ readonly index: number; readonly 0: string }> = []
+  for (let i = 0; i < runs.length; i++) {
+    const closing = pairs[i]
+    if (closing === undefined) continue
+    const start = runs[i]!.index
+    const end = runs[closing]!.index + runs[closing]![0].length
+    spans.push({ index: start, 0: text.slice(start, end) })
+    i = closing
+  }
+  return spans
+}
+
+/** Scan fenced blocks by lines, without variable-length regex backreferences. */
+const fencedBlocks = (text: string) => {
+  const lines = text.split("\n")
+  const offsets: number[] = []
+  let offset = 0
+  for (const line of lines) {
+    offsets.push(offset)
+    offset += line.length + 1
+  }
+  const blocks: Array<{ readonly index: number; readonly 0: string; readonly 4: string }> = []
+  for (let i = 0; i < lines.length - 1; i++) {
+    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i]!)
+    if (!open) continue
+    let closing = i + 1
+    for (; closing < lines.length; closing++) {
+      const close = /^ {0,3}(`+|~+)[ \t]*$/.exec(lines[closing]!)
+      if (close && close[1]![0] === open[1]![0] && close[1]!.length >= open[1]!.length) break
+    }
+    const start = offsets[i]!
+    const end = closing < lines.length ? offsets[closing]! + lines[closing]!.length : text.length
+    const contentEnd = closing < lines.length ? offsets[closing]! - 1 : text.length
+    blocks.push({
+      index: start,
+      0: text.slice(start, end),
+      4: text.slice(offsets[i + 1]!, Math.max(offsets[i + 1]!, contentEnd))
+    })
+    i = closing
+  }
+  return blocks
+}
 
 /** Remove complete non-text elements and comments before Markdown spans can split their bodies.
  * Inline code is protected, so a literal example in backticks stays; prose and unknown markers
  * stay byte-for-byte. */
 const withoutNonText = (text: string) => {
   if (!/<(?:script|style|template|noscript|head)|<!/i.test(text)) return text
-  const spans = [...text.matchAll(INLINE_CODE)]
-  const protectedAt = (at: number) => spans.some((span) => span.index <= at && at < span.index + span[0].length)
+  const spans = inlineCode(text)
+  let spanIndex = 0
+  const protectedAt = (at: number) => {
+    while (spanIndex < spans.length && spans[spanIndex]!.index + spans[spanIndex]![0].length <= at) spanIndex++
+    const span = spans[spanIndex]
+    return span !== undefined && span.index <= at
+  }
   const pieces = tokenize(text)
   let out = ""
   let at = 0
@@ -202,7 +258,7 @@ const prose = (source: string) => {
   const text = withoutNonText(source)
   let out = ""
   let at = 0
-  for (const match of text.matchAll(INLINE_CODE)) {
+  for (const match of inlineCode(text)) {
     out += textOnly(text.slice(at, match.index))
     out += match[0]
     at = match.index + match[0].length
@@ -216,10 +272,12 @@ const prose = (source: string) => {
  * Text without HTML comes back unchanged, so its cache stays.
  */
 export const htmlDepthForm = (text: string, mode: Exclude<HtmlDepth["mode"], "as_written">) => {
-  if (!text.includes("<")) return text
+  // Bounded reduction work. Larger messages retain their inspectable as-written form;
+  // never truncate a message or cut a token in half.
+  if (text.length > 200_000 || !text.includes("<")) return text
   let out = ""
   let at = 0
-  for (const match of text.matchAll(FENCE)) {
+  for (const match of fencedBlocks(text)) {
     out += prose(text.slice(at, match.index))
     const code = match[4] ?? ""
     out += isDocument(code) ? (mode === "panels" ? "" : textOnly(code)) : match[0]

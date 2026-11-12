@@ -1,5 +1,6 @@
 // The context form of an older message's HTML (spec/HTML-MESSAGES.md §3.6, `context.htmlDepth`).
 import { describe, expect, it } from "vitest"
+import { slowIt } from "./support/slow.ts"
 import { htmlDepthForm } from "../src/assembler/htmlDepth.ts"
 
 describe("htmlDepthForm", () => {
@@ -113,4 +114,39 @@ describe("tokenizes HTML as the renderer does", () => {
     expect(htmlDepthForm(text, "text")).toBe(first)
     expect(Date.now() - started).toBeLessThan(2_000)
   })
+})
+
+it("bounds reduction without silently truncating oversized source", () => {
+  const source = "<div>".repeat(40001) + "Visible tail"
+  expect(htmlDepthForm(source, "text")).toBe(source)
+})
+it("is deterministic across deeply nested, foreign and malformed HTML", () => {
+  for (const source of [
+    "<div>".repeat(10000) + "Visible" + "</div>".repeat(10000),
+    "<svg><foreignObject><textarea>&lt;b&gt;x</textarea></foreignObject></svg>",
+    "<math><mtext><style-note>shown</style-note></mtext></math>",
+    '<div title="unterminated'
+  ]) {
+    const first = htmlDepthForm(source, "text")
+    expect(htmlDepthForm(source, "text")).toBe(first)
+    expect(htmlDepthForm(source, "text")).toBe(first)
+  }
+})
+
+it("handles long unmatched code delimiters without regex backtracking", () => {
+  const source = "`".repeat(40000) + "x<div>visible</div>"
+  expect(htmlDepthForm(source, "text")).toBe("`".repeat(40000) + "xvisible")
+})
+
+slowIt("reduces maximum-sized hostile HTML within two seconds without stack recursion", () => {
+  for (const source of [
+    "<div>".repeat(15000) + "visible" + "</div>".repeat(15000),
+    "`".repeat(199980) + "x<div>visible</div>",
+    "`x`<template>\n".repeat(14000)
+  ]) {
+    const start = performance.now()
+    const first = htmlDepthForm(source, "text")
+    expect(htmlDepthForm(source, "text")).toBe(first)
+    expect(performance.now() - start).toBeLessThan(2000)
+  }
 })
