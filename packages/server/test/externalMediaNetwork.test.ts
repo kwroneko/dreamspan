@@ -247,3 +247,23 @@ it.each([false, true])(
     expect(oversized).toBe(false)
   }
 )
+
+// Review 3: public numbering must not widen the proxy into a local service client.
+it.each(["http://media.invalid:25/a", "https://media.invalid:6379/a", "https://media.invalid:8080/a"])(
+  "refuses non-web port %s before I/O",
+  async (url) => {
+    const fake = fakeNetwork()
+    await expect(
+      makeExternalFetcher(fake.network, { resolve: async () => [PUBLIC] })(url, controller())
+    ).rejects.toThrow()
+    expect(fake.requests).toHaveLength(0)
+  }
+)
+it.each([
+  "http://media.invalid:80/a",
+  "https://media.invalid:443/a",
+  "https://media.invalid:80/a",
+  "http://media.invalid:443/a"
+])("permits web port %s", async (url) => {
+  await makeExternalFetcher(fakeNetwork().network, { resolve: async () => [PUBLIC] })(url, controller())
+})

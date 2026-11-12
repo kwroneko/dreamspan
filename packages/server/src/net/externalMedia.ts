@@ -130,7 +130,11 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
   return async (url: string, signal: AbortSignal): Promise<ExternalMediaFile> => {
     const controller = new AbortController()
     const fetch = network.fetchFor({ mode: "inherit" }, undefined, async (target) => {
-      const bad = !["http:", "https:"].includes(target.protocol) || target.username || target.password
+      const bad =
+        !["http:", "https:"].includes(target.protocol) ||
+        target.username ||
+        target.password ||
+        (target.port !== "" && !["80", "443"].includes(target.port))
       if (bad || target.href.length > 8192)
         throw new ExternalMediaRefused("Only public HTTP and HTTPS media addresses without credentials are allowed")
       const hostname = target.hostname.replace(/^\[(.*)\]$/, "$1")
