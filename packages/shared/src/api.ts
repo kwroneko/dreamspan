@@ -1,5 +1,6 @@
 import { SplitChatApi } from "./splitChat.ts"
 import { ChatContextsApi } from "./contextsApi.ts"
+import { ChatThreadsApi } from "./threadsApi.ts"
 import { ChatMergeApi } from "./mergeApi.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import { SnippetsApi } from "./snippetsApi.ts"
@@ -421,6 +422,8 @@ export const AuthenticatedShellUpdatesApi = ShellUpdatesApi.middleware(Authentic
 export class AuthenticatedSplitChatApi extends SplitChatApi.middleware(Authentication) {}
 /** Separate contexts' away rows and their Undo (contextsApi.ts). */
 export class AuthenticatedChatContextsApi extends ChatContextsApi.middleware(Authentication) {}
+/** Parallel threads in one chat (threadsApi.ts). */
+export class AuthenticatedChatThreadsApi extends ChatThreadsApi.middleware(Authentication) {}
 /** Merging another chat into this one (mergeApi.ts). */
 export class AuthenticatedChatMergeApi extends ChatMergeApi.middleware(Authentication) {}
 
@@ -448,6 +451,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi)
   .merge(AuthenticatedChatContextsApi)
+  .merge(AuthenticatedChatThreadsApi)
   .merge(AuthenticatedShellUpdatesApi)
   .merge(AuthenticatedProviderListApi) {}
 

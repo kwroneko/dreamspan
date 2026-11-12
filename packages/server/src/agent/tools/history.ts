@@ -51,11 +51,17 @@ const missedBy = (context: ToolContext, entries: ReadonlyArray<PathEntry>) =>
       const known = yield* context.reader.KnowersOf({
         userId: context.userId,
         chatId: context.chatId,
+        forkId: context.forkId,
         versionIds: ids.slice(at, at + KNOWERS_BATCH),
         viewers
       })
-      for (const { versionId, knowers, content, readable } of known) {
+      for (const { versionId, knowers, away, content, readable } of known) {
         const n = numberOf.get(versionId)!
+        // Counted not there in this fork (threads started earlier): missed, a join included.
+        if (away !== undefined && viewers.some((id) => away.includes(id))) {
+          missed.add(n)
+          continue
+        }
         if (content !== undefined) projected.set(n, { content, readable: readable === true })
         if (knowers !== null && !viewers.some((id) => knowers.includes(id))) missed.add(n)
       }

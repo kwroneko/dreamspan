@@ -885,7 +885,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
 
     knowers: (versionIds) =>
       Effect.gen(function* () {
-        const found = yield* readKnowers(sql, chatId, owned, versionIds)
+        // In the fork read: what it counts each card not present for (spec/THREADS.md §5.2).
+        const found = yield* readKnowers(sql, chatId, owned, versionIds, null, yield* viewAt(sql, chatId, null))
         knowerPins.push({ key: keyOf(versionIds), found })
         return found
       }),
@@ -903,7 +904,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const unknown = sql`EXISTS (SELECT 1 FROM path JOIN slots s ON s.id = path.id
           JOIN version_records v ON v.id = ${selected}
           WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
-            AND NOT ${knowsSql(sql, aliases ?? [viewer])}) AS unknown`
+            AND NOT ${knowsSql(sql, aliases ?? [viewer], fork)}) AS unknown`
         const [row] =
           onDisplay === null
             ? yield* sql<{ unknown: number }>`

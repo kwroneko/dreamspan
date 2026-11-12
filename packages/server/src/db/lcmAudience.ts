@@ -9,7 +9,7 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { contextExcludedIn } from "./lcmVisibility.ts"
-import { shownIn, slotDeletedIn, viewAt } from "./forkState.ts"
+import { type ForkRef, shownIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import { knowsSql } from "./knowers.ts"
 import type { ChatState, FoldableEvent } from "@rp/shared/state.ts"
 import { identitiesOf } from "../assembler/knowledge.ts"
@@ -51,18 +51,22 @@ export const viewerAudience = Effect.fnUntraced(function* (
   return { identities, audience: audienceKey(identities) }
 })
 
-/** Which of these versions the identities knew (`knowsSql`): point lookups by version id. */
+/**
+ * Which of these versions the identities knew (`knowsSql`, in fork `fork` when given: what it
+ * counts them not present for): point lookups by version id.
+ */
 export const knownVersions = (
   sql: SqlClient.SqlClient,
   versionIds: ReadonlyArray<string>,
-  identities: ReadonlyArray<string>
+  identities: ReadonlyArray<string>,
+  fork?: ForkRef
 ) =>
   versionIds.length === 0
     ? Effect.succeed(new Set<string>())
     : Effect.map(
         sql<{ id: string }>`SELECT v.id FROM json_each(${JSON.stringify([...new Set(versionIds)])}) r
           CROSS JOIN version_records v ON v.id = r.value CROSS JOIN slots s ON s.id = v.slot_id
-          WHERE ${knowsSql(sql, identities)}`,
+          WHERE ${knowsSql(sql, identities, fork)}`,
         (rows) => new Set(rows.map((row) => row.id))
       )
 
@@ -71,13 +75,18 @@ export const knownVersions = (
  * versions, through its children for a higher level. A stale summary is used for a view only
  * then, so a later correction of who was there can't put a missed message back in its context.
  */
-export const inputsKnown = (sql: SqlClient.SqlClient, summaryId: string, identities: ReadonlyArray<string>) =>
+export const inputsKnown = (
+  sql: SqlClient.SqlClient,
+  summaryId: string,
+  identities: ReadonlyArray<string>,
+  fork?: ForkRef
+) =>
   Effect.map(
     sql<{ unknown: number }>`WITH RECURSIVE parts(id) AS (
         SELECT ${summaryId} UNION SELECT p.parent_id FROM summary_parents p JOIN parts ON p.summary_id = parts.id
       ) SELECT EXISTS (SELECT 1 FROM parts JOIN summary_inputs i ON i.summary_id = parts.id
         JOIN version_records v ON v.id = i.version_id JOIN slots s ON s.id = v.slot_id
-        WHERE NOT ${knowsSql(sql, identities)}) AS unknown`,
+        WHERE NOT ${knowsSql(sql, identities, fork)}) AS unknown`,
     ([row]) => (row?.unknown ?? 0) === 0
   )
 
@@ -99,7 +108,8 @@ export const firstUnknownDepth = (
       ) SELECT min(s.depth) AS depth FROM path JOIN slots s ON s.id = path.id
         JOIN version_records v ON v.id = ${shownIn(sql, fork, "s")}
         WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
-          AND v.status NOT IN ('generating', 'failed') AND NOT ${knowsSql(sql, identities)}`
+          AND v.status NOT IN ('generating', 'failed') AND NOT ${knowsSql(sql, identities, fork)}`
+
     return row?.depth ?? null
   })
 

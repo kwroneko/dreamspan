@@ -5,6 +5,7 @@ import { providerDefinitionHandlers } from "../providers/definitions.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeInsertWriteHandlers } from "./insertWrites.ts"
 import { makeMergeWriteHandlers } from "./merges.ts"
+import { makeThreadWriteHandlers } from "./threadWrites.ts"
 import { makeLcmQueueHandlers } from "./lcmQueue.ts"
 import { makeLcmEnableWriteHandlers } from "./lcmEnableWrites.ts"
 import { makeLcmUiWriteHandlers } from "./lcmUiWrites.ts"
@@ -78,6 +79,8 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
                   ...(yield* makeHistoryWriteHandlers),
                   ...(yield* makeInsertWriteHandlers(bin)),
                   ...(yield* makeMergeWriteHandlers(bin)),
+                  // --- Parallel threads (spec/THREADS.md §5)
+                  ...(yield* makeThreadWriteHandlers(bin)),
                   ...graph,
                   ...library,
                   ...binOps,

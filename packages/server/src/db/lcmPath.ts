@@ -72,7 +72,7 @@ export const lcmPath = (
         // A view's path (db/lcmAudience.ts): a message its character didn't know is absent.
         const path = yield* wholePath(sql, userId, chatId, leaf, first, limit)
         const versions = path.flatMap((slot) => (slot.versionId === null ? [] : [slot.versionId]))
-        const known = yield* knownVersions(sql, versions, identities)
+        const known = yield* knownVersions(sql, versions, identities, yield* viewAt(sql, chatId, leaf))
         return path.map((slot) =>
           slot.versionId === null || known.has(slot.versionId)
             ? slot

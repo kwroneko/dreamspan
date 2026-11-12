@@ -41,6 +41,8 @@ const kindLabel = (item: BinItem) => {
       return "Message"
     case "branch":
       return typeof item.origin.forkId === "string" ? "Fork" : "Branch"
+    case "threads":
+      return "Threads"
     case "version":
       return "Version"
     case "chat":
@@ -68,6 +70,8 @@ const purgeEffect = (item: BinItem) => {
       return typeof item.origin.forkId === "string"
         ? "The branch goes for good, with the messages no other branch shows. Branches made from it keep their history."
         : "Its text goes for good. An empty placeholder keeps its place in the chat."
+    case "threads":
+      return "The threads go for good, with the messages only they had. The branch they were started in keeps its history."
     case "chat":
       return "The chat goes for good, with everything in it."
     case "entity":

@@ -239,7 +239,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const shown = sql`(${before} IS NULL OR s.depth < ${before})
             AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
             AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
-            AND ${viewers == null ? sql`1` : knowsSql(sql, viewers)}`
+            AND ${viewers == null ? sql`1` : knowsSql(sql, viewers, fork)}`
         const onPath = sql`EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)`
         // Few matches in the whole chat (a rare word): start from them, each checked against the
         // path, with the path's template messages (matched once their names are filled in). Many
@@ -282,14 +282,22 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }))
       }).pipe(query("SearchChat")),
 
-    KnowersOf: ({ userId, chatId, versionIds, viewers }) =>
-      readKnowers(
-        sql,
-        chatId,
-        sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`,
-        versionIds,
-        viewers
-      ).pipe(query("KnowersOf")),
+    KnowersOf: ({ userId, chatId, forkId, versionIds, viewers }) =>
+      Effect.gen(function* () {
+        // A fork of another chat is none of this one's: its corrections don't apply.
+        const [fork] =
+          forkId == null
+            ? []
+            : yield* sql<{ id: string }>`SELECT id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
+        return yield* readKnowers(
+          sql,
+          chatId,
+          sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`,
+          versionIds,
+          viewers,
+          fork?.id ?? null
+        )
+      }).pipe(query("KnowersOf")),
 
     LookupLore: ({ userId, rolloutId, query: text, entry, limit }) =>
       Effect.gen(function* () {

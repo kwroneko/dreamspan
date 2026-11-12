@@ -1801,6 +1801,38 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  // Parallel threads (spec/THREADS.md): another user's chat, branch or split is NotFound.
+  StartThreads: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.StartThreads({
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId,
+          slotId: owner.chat.slotId,
+          expectedRowVersion: 1,
+          threads: [
+            { name: null, cast: [], writesAs: null },
+            { name: null, cast: [], writesAs: null }
+          ]
+        }),
+        "NotFound"
+      )
+  },
+  ThreadsOf: {
+    probe: (actor, owner) =>
+      refused(actor.api.ThreadsOf({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
+  },
+  RenameThread: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RenameThread({ chatId: owner.chat.chatId, splitId: "a-split", ordinal: 0, name: "x", rowVersion: 1 }),
+        "NotFound"
+      )
+  },
+  UndoThreads: {
+    probe: (actor, owner) =>
+      refused(actor.api.UndoThreads({ chatId: owner.chat.chatId, splitId: "a-split" }), "NotFound")
+  },
   // Merging another chat in (spec/CHAT-MERGE.md): neither side may be someone else's chat.
   PreviewChatMerge: {
     probe: (actor, owner) =>

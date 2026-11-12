@@ -50,3 +50,15 @@ export const ThreadStart = Schema.Struct({
   writesAs: Schema.NullOr(EntityId)
 })
 export type ThreadStart = typeof ThreadStart.Type
+
+/** Why threads can't start as asked, in the user's words (fewer than two, one with nobody in it). */
+export class ThreadsRefused extends Schema.TaggedError<ThreadsRefused>()("ThreadsRefused", {
+  message: Schema.String
+}) {}
+
+/** Threads just started (`StartThreads`): the split, and each thread's fork, the first being the branch it was started in. */
+export const StartedThreads = Schema.Struct({
+  splitId: Schema.String,
+  forkIds: Schema.Array(ForkId)
+})
+export type StartedThreads = typeof StartedThreads.Type

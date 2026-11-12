@@ -510,7 +510,12 @@ export interface SourcePins {
   /** Who knew the messages a separate context read (`knowers`); absent when none was read. */
   readonly knowers?: ReadonlyArray<{
     readonly key: string
-    readonly found: ReadonlyArray<{ readonly versionId: string; readonly knowers: ReadonlyArray<string> | null }>
+    readonly found: ReadonlyArray<{
+      readonly versionId: string
+      readonly knowers: ReadonlyArray<string> | null
+      /** Those the fork read counts not present for it (spec/THREADS.md §5.2), its speaker apart. */
+      readonly away?: ReadonlyArray<string>
+    }>
   }>
   /** Whether the viewer knew everything a summary layer covers (`knewThrough`); absent when not asked. */
   readonly knewThrough?: ReadonlyArray<{ readonly key: string; readonly knew: boolean }>

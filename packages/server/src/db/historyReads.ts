@@ -141,7 +141,7 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
             if (
               kind === "summary_revision" &&
               identities !== undefined &&
-              !(yield* inputsKnown(sql, row.targetId, identities))
+              !(yield* inputsKnown(sql, row.targetId, identities, fork.id))
             )
               continue
             hits.push({ ...row, kind, after: result.after, matches: result.matches, selected: row.selected === 1 })
