@@ -2923,3 +2923,5 @@ Chatsettings cache diagnostics (2026-11-06): rotating card-field macros in prese
 Shell stream errors (review-shellrefresh, 2026-11-07): card and fork streams retry transport failures, while application errors reach the existing failure view. An expired session therefore returns to login even when a new stream starts without navigation, such as through Show more. `e2e/shellRefresh.spec.ts` covers that pagination case and shell updates after a server restart.
 
 Summary style review tests (review-small, 2026-11-12): `test/lcmSettings.test.ts` checks new-chat copying, account inheritance, chat overrides and reset through `AssembleSummary`; `e2e/lcmSettings.spec.ts` exercises Written as in both settings surfaces across reloads, account changes and reset at 1440 and 390 in both themes.
+
+Lorebook editor review tests (review-small, 2026-11-12): the large-editor rename/search/Revert journey in `e2e/lorebookPanel.spec.ts` reads CodeMirror content through the shared textbox assertion, retaining its text-restoration check after the editor binding change.
