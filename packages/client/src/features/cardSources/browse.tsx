@@ -24,6 +24,7 @@ import { Field, Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { InlinePanel, pressedButtonClass } from "../../ui/InlinePanel.tsx"
 import { ContextMenu, Menu, MenuCheckboxItem, MenuItem } from "../../ui/Menu.tsx"
+import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Alert, Badge, EmptyState } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
@@ -32,6 +33,7 @@ import { SortDirection, type SortOrder } from "../characters/cardBrowse.tsx"
 import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useOpenCharacter } from "../characters/shellData.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { canHideCreator, CreatorHeader, hideCreator, showCreator, shownCreator } from "./creator.tsx"
 import {
   cardSourceViews,
   recentAtom,
@@ -58,7 +60,8 @@ export function useSourceList(): ReadonlyArray<SourceInfo> | null {
 // Capabilities rarely change (the server keeps them a day): asked once per source per page load.
 const capabilities = new Map<string, SourceCapabilities>()
 
-function useCapabilities(sourceId: string | null) {
+/** A source's capabilities, asked once per page load; nothing is asked while `sourceId` is null. */
+export function useCapabilities(sourceId: string | null) {
   const call = useSourceCall()
   const [state, setState] = useState<{
     id: string | null
@@ -247,7 +250,11 @@ const requirementMet = (filter: SourceFilter, filters: SourceQuery["filters"]) =
  * Everything a place (home, the sidebar) needs while a source may be shown: the sources Show
  * offers, and for the one open, its capabilities, results and the controls' state.
  */
-export function useSourceBrowse(source: string | null, remote: RemoteBrowse, onRemote: (remote: RemoteBrowse) => void) {
+export function useSourceBrowse(
+  source: string | null,
+  remote: RemoteBrowse,
+  onRemote: (remote: RemoteBrowse, options?: { replace?: boolean }) => void
+) {
   const sources = useEnabledSources()
   const info = sources.find((s) => s.id === source) ?? null
   const sourceId = info?.id ?? null
@@ -256,14 +263,14 @@ export function useSourceBrowse(source: string | null, remote: RemoteBrowse, onR
   const { results, more, retry, waitMs } = useResults(sourceId, query)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const action = useAction()
-  const change = (next: Partial<RemoteBrowse>) => {
+  const change = (next: Partial<RemoteBrowse>, options?: { replace?: boolean }) => {
     const merged = { ...remote, ...next }
     if (next.filters) {
       const filters = { ...next.filters }
       for (const filter of caps?.filters ?? []) if (!requirementMet(filter, filters)) delete filters[filter.id]
       merged.filters = filters
     }
-    onRemote(merged)
+    onRemote(merged, options)
     // The content rating is remembered on the account (§5.3).
     const ratingId = caps?.ratings?.filterId
     if (info && ratingId && next.filters && next.filters[ratingId] !== remote.filters[ratingId]) {
@@ -583,7 +590,11 @@ function TextFilter({
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <Field label={filter.label} about={filter.about}>
-        <Input value={value} onChange={(event) => onChange(event.currentTarget.value || undefined)} />
+        <Input
+          {...(filter.format === "date" ? { type: "date", "data-date-filter": filter.id } : {})}
+          value={value}
+          onChange={(event) => onChange(event.currentTarget.value || undefined)}
+        />
       </Field>
       {filter.suggestions && <SuggestedValues suggestions={suggestions} kind="creators" onChoose={choose} />}
     </div>
@@ -626,6 +637,9 @@ function TagField({ browse }: { browse: SourceBrowse }) {
   )
 }
 
+/** More choices than this, and a several-choice filter is a picker rather than a row of buttons. */
+const LONG_CHOICES = 8
+
 /** Every criterion the source offers, generated from its capabilities (§2.3). */
 export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: string }) {
   const caps = browse.caps
@@ -647,8 +661,23 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
             case "choice":
               return (
                 <div key={filter.id} className="flex min-w-0 flex-col gap-1.5">
-                  <FilterLabel filter={filter} />
-                  {filter.multi ? (
+                  {filter.multi && filter.options.length > LONG_CHOICES ? (
+                    // A long list of choices: the existing picker, with a search past eight.
+                    <Field label={filter.label} about={filter.about}>
+                      <MultiSelect
+                        items={filter.options.map((o) => ({ value: o.value, label: o.label }))}
+                        value={Array.isArray(value) ? value : []}
+                        addLabel="Add"
+                        chosenLabel={`Chosen: ${filter.label.toLowerCase()}`}
+                        listLabel={`Choose: ${filter.label.toLowerCase()}`}
+                        explanation={filter.about}
+                        onValueChange={(chosen) => set(filter.id, chosen.length ? [...chosen] : undefined)}
+                      />
+                    </Field>
+                  ) : (
+                    <FilterLabel filter={filter} />
+                  )}
+                  {filter.multi && filter.options.length > LONG_CHOICES ? null : filter.multi ? (
                     <Segmented
                       multiple
                       wrap
@@ -940,7 +969,9 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
         </>
       }
     >
-      <span className="truncate text-xs text-muted">{card.creator ? `by ${card.creator}` : " "}</span>
+      <span data-remote-creator className="truncate text-xs text-muted">
+        {card.creator ? `by ${card.creator}` : " "}
+      </span>
       <span className="mt-auto truncate text-xs text-muted">
         {view?.tileLine?.(card) ?? defaultLine(card, browse.caps)}
       </span>
@@ -1046,24 +1077,27 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             Open on {info.name}
           </MenuItem>
         )}
-        {card.creator !== undefined && (
+        {card.creator !== undefined && shownCreator(browse) !== (card.creatorQuery ?? card.creator) && (
           <MenuItem
-            icon="search"
-            description={`Searches ${info.name} for cards by ${card.creator}.`}
-            onClick={() => byCreator(browse, card.creatorQuery ?? card.creator!)}
+            icon="person"
+            description={`Shows every card by ${card.creator} on ${info.name}, with their profile.`}
+            onClick={() => showCreator(browse, card.creatorQuery ?? card.creator!)}
           >
-            Search {info.name} for cards by {card.creator}
+            Cards by {card.creator}
+          </MenuItem>
+        )}
+        {card.creatorQuery !== undefined && canHideCreator(browse) && (
+          <MenuItem
+            icon="ban"
+            description={`Leaves ${card.creator ?? card.creatorQuery}'s cards out of these results.`}
+            onClick={() => hideCreator(browse, card.creatorQuery!)}
+          >
+            Not by {card.creator ?? card.creatorQuery}
           </MenuItem>
         )}
       </ContextMenu>
     </div>
   )
-}
-
-const byCreator = (browse: SourceBrowse, creator: string) => {
-  const creatorFilter = browse.caps?.filters.find((f) => f.kind === "text" && /author|creator/i.test(f.id))
-  if (creatorFilter) browse.change({ filters: { ...browse.remote.filters, [creatorFilter.id]: creator } })
-  else browse.change({ text: creator })
 }
 
 /** What each failure says, worded for what the user can do (§5.4). */
@@ -1254,12 +1288,14 @@ export function SourceResults({ browse, className }: { browse: SourceBrowse; cla
   const failed = results?.status === "failed" || (!browse.caps && problem)
   const loading = !failed && (results === null || (results.status === "loading" && results.items.length === 0))
   const items = results?.items ?? []
+  const creator = browse.caps ? shownCreator(browse) : null
   return (
     <div
       data-source-results={info.id}
       aria-busy={results?.status === "loading" || results?.status === "more"}
       className="flex min-w-0 flex-col gap-3"
     >
+      {creator !== null && <CreatorHeader key={creator} browse={browse} creator={creator} />}
       <RecentRow browse={browse} />
       {results?.notice && <Alert tone="neutral">{results.notice}</Alert>}
       {failed && problem ? (

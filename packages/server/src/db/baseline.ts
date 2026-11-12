@@ -304,12 +304,16 @@ export const baseline: ReadonlyArray<string> = [
     source_id TEXT NOT NULL,
     remote_id TEXT NOT NULL,
     remote_version TEXT NOT NULL,
+    current_remote_id TEXT,
+    remote_locator TEXT,
     seen_version TEXT,
+    seen_remote_id TEXT,
     remote_sha256 TEXT NOT NULL,
     recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized')),
     created_at INTEGER NOT NULL
   ) STRICT`,
   `CREATE UNIQUE INDEX card_origins_remote ON card_origins(owner_user_id, source_id, remote_id)`,
+  `CREATE INDEX card_origins_current ON card_origins(owner_user_id, source_id, current_remote_id)`,
   // The same file imported from disk (§3.7's third check; the join to entities adds the owner).
   `CREATE INDEX entity_refs_source_hash ON entity_refs(source_hash) WHERE source_hash IS NOT NULL`,
   `CREATE TRIGGER entity_refs_head_same_entity

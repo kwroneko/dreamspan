@@ -12,6 +12,8 @@ import {
   CARDEX_ORIGIN,
   cardexAdapter,
   cardSourceSetup,
+  creatorOf,
+  familyOf,
   cursorRefused,
   downloadModeOf,
   detailMetadata,
@@ -44,15 +46,17 @@ const direct = (seen: Array<string> = []): SourceHttp => ({
       const response = yield* Effect.promise(() => fetch(url, { redirect: "manual" }))
       const bytes = new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))
       const reason =
-        response.status === 404
-          ? "not_found"
-          : response.status === 429
-            ? "rate_limited"
-            : response.status >= 500
-              ? "unreachable"
-              : response.status < 200 || response.status > 299
-                ? "bad_response"
-                : null
+        response.status === 451
+          ? "region_unavailable"
+          : response.status === 404
+            ? "not_found"
+            : response.status === 429
+              ? "rate_limited"
+              : response.status >= 500
+                ? "unreachable"
+                : response.status < 200 || response.status > 299
+                  ? "bad_response"
+                  : null
       const code = reason === "bad_response" ? errorCode(bytes) : undefined
       if (reason)
         return yield* new SourceFailed({
@@ -146,8 +150,229 @@ describe("v1 as card sources", () => {
       )
       const sites = caps.filters.find((f) => f.id === "source")!
       assert.isTrue(sites.kind === "choice" && sites.multi && sites.options.some((o) => o.label === "Chub"))
+      // Dates are dates (the panel offers a date field); other text criteria are plain text.
+      const dated = caps.filters.filter((f) => f.kind === "text" && f.format === "date").map((f) => f.id)
+      assert.deepStrictEqual(dated, ["added_after", "added_before", "created_after", "created_before"])
+      // The sites cardex lists beyond our own labels keep the labels it gives.
+      assert.isTrue(sites.kind === "choice" && sites.options.length === 18)
     })
   )
+
+  it.effect("a creator's profile: v1's /authors facts, the avatar a path on the archive, the filters named", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      const caps = yield* adapter.capabilities(direct())
+      assert.deepStrictEqual(caps.creators, { filterId: "author", excludeFilterId: "not_author", profiles: true })
+      const card = archive.cards.find((c) => c.creator !== "lumen")!
+      const query = `${card.site}/${card.creator}`
+      const profile = yield* adapter.creator!(direct(), query)
+      const theirs = archive.cards.filter((c) => c.site === card.site && c.creator === card.creator)
+      assert.strictEqual(profile.query, query)
+      assert.strictEqual(profile.name, `${card.creator} (synthetic)`)
+      assert.strictEqual(profile.cards, theirs.length)
+      assert.strictEqual(profile.lorebooks, theirs.filter((c) => c.hasLorebook).length)
+      assert.strictEqual(profile.site, `Synthetic ${card.site}`)
+      assert.isString(profile.bio)
+      assert.match(profile.avatar!, /\/t\/[0-9a-f]{64}\.512\.webp$/)
+      assert.strictEqual(profile.url, `${archive.origin}/u/${card.site}/${card.creator}`)
+      assert.isAbove(profile.lastSeen!, profile.firstSeen! - 1)
+      assert.isTrue(archive.paths().some((p) => p.startsWith(`/api/v1/authors/${card.site}/`)))
+      // Not a creator the archive knows; not a site/handle at all.
+      for (const missing of [`${card.site}/nobody-here`, "no-slash", "/x"])
+        assert.strictEqual((yield* Effect.flip(adapter.creator!(direct(), missing))).reason, "not_found", missing)
+    })
+  )
+
+  it("a creator envelope keeps only what it can show: no avatar off the archive, no bad counts", () => {
+    const profile = creatorOf(
+      {
+        author: {
+          handle: "h",
+          source: "chub",
+          avatar: { url: "https://elsewhere.example/a.png" },
+          card_count: -1,
+          lorebook_count: "3",
+          first_seen_at: "not a date",
+          path: "/u/chub/h"
+        }
+      },
+      "chub/h"
+    )
+    assert.deepStrictEqual(profile, { query: "chub/h", name: "h", site: "Chub", url: `${CARDEX_ORIGIN}/u/chub/h` })
+    assert.throws(() => creatorOf({ results: [] }, "chub/h"))
+  })
+
+  it("malformed summaries are rejected without throwing", () => {
+    for (const fields of [
+      { name: 12 },
+      { creator: "wrong" },
+      { creator: { name: 12 } },
+      { version: {} },
+      { stats: { popularity: "many" } },
+      { thumbnail_url: [] },
+      { download_modes: "json" }
+    ])
+      assert.isNull(summaryOf({ slug: "synthetic", ...fields } as never))
+  })
+
+  it.effect("origin-keyed updates skip a three-version chain and keep historical files unchanged", () =>
+    Effect.gen(function* () {
+      const local = yield* Effect.promise(() => startFakeArchive({ cards: 6 }))
+      try {
+        const adapter = fakeCardexAdapter(local)
+        const root = local.cards[0]!
+        const first = local.publishSuccessor(root.slug)
+        const head = local.publishSuccessor(first.slug, "chub")
+        const seen: string[] = []
+        const transport = direct(seen)
+        const http: SourceHttp = {
+          ...transport,
+          get: (url, kind, headers) => {
+            assert.strictEqual(url.origin, local.origin)
+            return transport.get(url, kind, headers)
+          }
+        }
+        const historical = yield* adapter.card(http, root.slug)
+        assert.strictEqual(historical.summary.version.id, root.sha256)
+        assert.isString(historical.locator)
+        seen.length = 0
+        const [latest] = yield* adapter.versions!(http, [root.slug], { [root.slug]: historical.locator! })
+        assert.strictEqual(latest!.version.id, head.sha256)
+        assert.strictEqual(latest!.currentId, head.slug)
+        assert.lengthOf(seen, 1)
+        assert.match(seen[0]!, /^\/api\/v1\/origins\//)
+        assert.strictEqual((yield* adapter.card(http, root.slug)).summary.version.id, root.sha256)
+        const fork = local.publishFork(head.slug)
+        const currentFile = yield* adapter.card(http, head.slug)
+        const [again] = yield* adapter.versions!(http, [head.slug], { [head.slug]: currentFile.locator! })
+        assert.strictEqual(again!.currentId, head.slug)
+        assert.notStrictEqual(again!.currentId, fork.slug)
+        local.deleteCard(head.slug)
+        const [deleted] = yield* adapter.versions!(http, [root.slug], { [root.slug]: historical.locator! })
+        assert.isFalse(deleted!.available)
+      } finally {
+        yield* Effect.promise(() => local.close())
+      }
+    })
+  )
+
+  it.effect("successor fallback has one bounded request budget, rejects cycles, and never follows a URL", () =>
+    Effect.gen(function* () {
+      const local = yield* Effect.promise(() => startFakeArchive({ cards: 6 }))
+      try {
+        const adapter = fakeCardexAdapter(local)
+        const root = local.cards[0]!
+        const second = local.publishSuccessor(root.slug)
+        local.withoutOrigins(root.slug)
+        local.withoutOrigins(second.slug)
+        const head = local.publishSuccessor(second.slug)
+        local.withoutOrigins(head.slug)
+        let requests = 0
+        const transport = direct()
+        const http: SourceHttp = {
+          ...transport,
+          get: (url, kind, headers) => {
+            assert.strictEqual(url.origin, local.origin)
+            requests++
+            return transport.get(url, kind, headers)
+          }
+        }
+        const [latest] = yield* adapter.versions!(http, [root.slug])
+        assert.strictEqual(latest!.currentId, head.slug)
+        assert.strictEqual(latest!.version.id, head.sha256)
+        assert.isAtMost(requests, 8)
+        local.pointSuccessor(head.slug, root.slug)
+        requests = 0
+        const cycle = yield* Effect.flip(adapter.versions!(http, [root.slug]))
+        assert.strictEqual(cycle.reason, "bad_response")
+        assert.isAtMost(requests, 8)
+        local.pointSuccessor(head.slug, "https://untrusted.example/a-card")
+        requests = 0
+        const [missing] = yield* adapter.versions!(http, [root.slug])
+        assert.isFalse(missing!.available)
+        assert.isAtMost(requests, 8)
+        let last = head
+        for (let i = 0; i < 6; i++) {
+          last = local.publishSuccessor(last.slug)
+          local.withoutOrigins(last.slug)
+        }
+        requests = 0
+        const long = yield* Effect.flip(adapter.versions!(http, [root.slug]))
+        assert.strictEqual(long.reason, "bad_response")
+        assert.isAtMost(requests, 8)
+        const regional = local.cards[3]!
+        const file = yield* adapter.card(http, regional.slug)
+        const regionalHead = local.publishSuccessor(regional.slug)
+        local.blockRegion(regionalHead.slug)
+        const [unavailable] = yield* adapter.versions!(http, [regional.slug], { [regional.slug]: file.locator! })
+        assert.isFalse(unavailable!.available)
+      } finally {
+        yield* Effect.promise(() => local.close())
+      }
+    })
+  )
+  it("family duplicates enrich sparse parent rows without losing their relationship", () => {
+    const detail = {
+      card: { slug: "viewed" },
+      origins: [{ fork: { forked_from: { card_slug: "parent" } } }],
+      earlier_origins: []
+    }
+    const family = familyOf("viewed", detail, [
+      {
+        site: "chub",
+        versions: null,
+        forks: {
+          parent: {
+            card: {
+              slug: "parent",
+              name: "Synthetic parent",
+              thumb_url: "/t/parent.webp",
+              creator: { name: "Synthetic author", source: "chub", handle: "synthetic-author" }
+            }
+          },
+          children: [],
+          next: null
+        }
+      }
+    ])
+    assert.lengthOf(family.items, 1)
+    assert.deepInclude(family.items[0], {
+      relation: "parent",
+      remoteId: "parent",
+      name: "Synthetic parent",
+      creator: "Synthetic author",
+      creatorQuery: "chub/synthetic-author",
+      thumb: `${CARDEX_ORIGIN}/t/parent.webp`
+    })
+  })
+
+  it("creator and family envelopes refuse malformed or mismatched identities", () => {
+    for (const author of [{}, { source: "other", handle: "h" }, { source: "chub", handle: "different" }])
+      assert.throws(() => creatorOf({ author }, "chub/h"))
+    for (const detail of [
+      {},
+      { card: { slug: "other" }, origins: [], earlier_origins: [] },
+      { card: { slug: "synthetic" }, origins: "wrong" }
+    ])
+      assert.throws(() => familyOf("synthetic", detail, []))
+    const detail = { card: { slug: "synthetic" }, origins: [], earlier_origins: [] }
+    assert.isTrue(
+      familyOf(
+        "synthetic",
+        {
+          ...detail,
+          origins: Array.from({ length: 4 }, (_, i) => ({ source: "chub", external_id: `synthetic-${i}` }))
+        },
+        []
+      ).more
+    )
+    for (const lists of [
+      [{ site: "chub", versions: {}, forks: null }],
+      [{ site: "chub", versions: { items: [false] }, forks: null }],
+      [{ site: "chub", versions: null, forks: {} }]
+    ])
+      assert.throws(() => familyOf("synthetic", detail, lists))
+  })
 
   it("a filter or sort v1 no longer lists is left out, and a body without filters is refused", () => {
     const caps = capabilitiesOf({

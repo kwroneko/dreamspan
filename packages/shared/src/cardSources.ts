@@ -46,6 +46,8 @@ const SourceFilter = Schema.Union([
     label: Schema.String,
     kind: Schema.Literal("text"),
     suggestions: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("creators"), multiple: Schema.Boolean })),
+    /** The value is a calendar date (`YYYY-MM-DD`): the panel offers a date field. */
+    format: Schema.optionalKey(Schema.Literal("date")),
     about: Schema.optionalKey(Schema.String)
   })
 ])
@@ -60,7 +62,21 @@ export const SourceCapabilities = Schema.Struct({
   ratings: Schema.optionalKey(Schema.Struct({ filterId: Schema.String, default: Schema.NullOr(Schema.String) })),
   paging: Schema.Literals(["cursor", "page"]),
   /** Labels for the numbers in a summary's `stats`, by key; the first is the main one. */
-  stats: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String })))
+  stats: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String }))),
+  /**
+   * Which text filter is "by this creator" (a summary's `creatorQuery` is its value), which one
+   * leaves creators out (several, comma-separated), and whether the source has creator profiles
+   * (`SourceCreator`).
+   */
+  creators: Schema.optionalKey(
+    Schema.Struct({
+      filterId: Schema.String,
+      excludeFilterId: Schema.optionalKey(Schema.String),
+      profiles: Schema.Boolean
+    })
+  ),
+  /** The source lists a card's earlier listings, versions and forks (`SourceFamily`). */
+  families: Schema.optionalKey(Schema.Boolean)
 })
 export type SourceCapabilities = typeof SourceCapabilities.Type
 
@@ -153,6 +169,49 @@ export const SourcePage = Schema.Struct({
 })
 export type SourcePage = typeof SourcePage.Type
 
+/** A creator's public profile on the source, as it gives it. `avatar` is a key this server issued. */
+export const RemoteCreator = Schema.Struct({
+  /** The creator as the source's creator filter takes it (`creators.filterId`). */
+  query: Schema.String,
+  name: Schema.String,
+  /** The site the profile is on, by its name. */
+  site: Schema.optionalKey(Schema.String),
+  bio: Schema.optionalKey(Schema.String),
+  avatar: Schema.optionalKey(Schema.String),
+  cards: Schema.optionalKey(Schema.Number),
+  lorebooks: Schema.optionalKey(Schema.Number),
+  /** When the source first and last saw the creator, ms. */
+  firstSeen: Schema.optionalKey(Schema.Number),
+  lastSeen: Schema.optionalKey(Schema.Number),
+  /** The profile's page on the source. */
+  url: Schema.optionalKey(Schema.String)
+})
+export type RemoteCreator = typeof RemoteCreator.Type
+
+/** How a card in a card's family on the source is related to it. */
+const RemoteRelation = Schema.Literals(["parent", "earlier", "version", "fork"])
+
+/** A card in another card's family (§3.7, §10 item 9): what it was forked from or listed as, its versions, its forks. */
+export const RemoteRelative = Schema.Struct({
+  relation: RemoteRelation,
+  remoteId: Schema.String,
+  name: Schema.String,
+  creator: Schema.optionalKey(Schema.String),
+  creatorQuery: Schema.optionalKey(Schema.String),
+  /** The site it was listed on, by its name. */
+  site: Schema.optionalKey(Schema.String),
+  /** The version's own label, when the card names one ("1.2"). */
+  versionLabel: Schema.optionalKey(Schema.String),
+  /** When it was listed or this version began, ms. */
+  at: Schema.optionalKey(Schema.Number),
+  /** The version the source shows now. */
+  current: Schema.optionalKey(Schema.Boolean),
+  thumb: Schema.optionalKey(Schema.String),
+  /** The user's own card for it. Never sent to the source. */
+  held: Schema.optionalKey(Schema.Struct({ entityId: Schema.String, archived: Schema.Boolean }))
+})
+export type RemoteRelative = typeof RemoteRelative.Type
+
 export const SourceTag = Schema.Struct({
   tag: Schema.String,
   label: Schema.optionalKey(Schema.String),
@@ -179,7 +238,8 @@ export const SourceFailure = Schema.Literals([
   "disabled",
   /** The source won't give this card: cardex lists no download for it, or an anonymous source answered 401/403. */
   "refused",
-  "region_unavailable"
+  "region_unavailable",
+  "no_newer_file"
 ])
 export type SourceFailure = typeof SourceFailure.Type
 
@@ -284,7 +344,9 @@ export const CARDEX_SITE_LABELS: Readonly<Record<string, string>> = {
   aicc: "AI Character Cards",
   backyard: "Backyard AI",
   wyvern: "Wyvern",
-  pephop: "PepHop"
+  pephop: "PepHop",
+  caveduck: "Caveduck",
+  crushon: "Crushon"
 }
 
 /** The account's card-source choices: user `settings` key `sources`. */
@@ -320,12 +382,19 @@ export const CardOrigin = Schema.Struct({
   /** The source's version the user has: the one added, or one taken since. */
   remoteVersion: Schema.String,
   /** The newest version the source reported, when it isn't that one: an update is waiting. */
-  newerVersion: Schema.NullOr(Schema.String)
+  newerVersion: Schema.NullOr(Schema.String),
+  /**
+   * Imported as a file and confirmed by a matching archive hash (§3.7), rather than added
+   * directly from the source. Its recorded archive version supports the usual update checks.
+   */
+  recognized: Schema.optionalKey(Schema.Boolean)
 })
 export type CardOrigin = typeof CardOrigin.Type
 
 /** The header on the newer file's response (`GET /sources/held/<entityId>/file`): the version it is. */
 export const REMOTE_VERSION_HEADER = "x-remote-version"
+/** Signed identity of the exact source file reviewed, bound to its user and card. */
+export const SOURCE_VERSION_RECEIPT_HEADER = "x-source-version-receipt"
 /**
  * The header on the newer file's response: the card's link back to its page on the source, which
  * the import route adds to the new version's `source` list when it's sent as `link` (§4.5).
@@ -447,7 +516,8 @@ export class CardSourcesApi extends RpcGroup.make(
   Rpc.make("TakeRemoteVersion", {
     payload: {
       entityId: Schema.String.check(Schema.isMaxLength(100)),
-      version: Schema.String.check(Schema.isMaxLength(500))
+      version: Schema.String.check(Schema.isMaxLength(500)),
+      receipt: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(8192)))
     },
     success: CardOrigin,
     error: sourceErrors
@@ -456,6 +526,21 @@ export class CardSourcesApi extends RpcGroup.make(
   Rpc.make("AddRemoteVersionAsCard", {
     payload: { entityId: Schema.String.check(Schema.isMaxLength(100)) },
     success: Schema.Struct({ entityId: Schema.String, refId: Schema.String, name: Schema.String }),
+    error: sourceErrors
+  }),
+  /** A creator's public profile (`creators.profiles`), by the creator filter's value. */
+  Rpc.make("SourceCreator", {
+    payload: { sourceId: SourceId, creator: Schema.String.check(Schema.isMaxLength(300)) },
+    success: RemoteCreator,
+    error: sourceErrors
+  }),
+  /**
+   * A card's family on the source (`families`): the cards it was forked from or listed as
+   * before, its versions and its forks, the user's own among them marked.
+   */
+  Rpc.make("SourceFamily", {
+    payload: { sourceId: SourceId, remoteId: Schema.String.check(Schema.isMaxLength(500)) },
+    success: Schema.Struct({ items: Schema.Array(RemoteRelative), more: Schema.Boolean }),
     error: sourceErrors
   }),
   /** Never contacts a source. */

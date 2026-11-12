@@ -34,7 +34,7 @@ export function useHomeBrowse() {
     })
   }, [initialized, ready, navigate, state])
 
-  const update = (change: Partial<HomeBrowse>) => {
+  const update = (change: Partial<HomeBrowse>, options?: { replace?: boolean }) => {
     const next = changeHomeBrowse(state, change)
     if (change.sort !== undefined || change.reversed !== undefined || change.withPersonas !== undefined) remember(next)
     void navigate({
@@ -44,7 +44,7 @@ export function useHomeBrowse() {
         ...writeHomeSearch(changeHomeBrowse(readHomeSearch(prev), change))
       }),
       state: (prev) => ({ ...prev, homeBrowse: true }),
-      replace: change.filter === undefined && change.source === undefined,
+      replace: options?.replace ?? (change.filter === undefined && change.source === undefined),
       resetScroll: false
     })
   }

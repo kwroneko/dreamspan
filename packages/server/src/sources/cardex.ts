@@ -27,9 +27,15 @@
 // instance point this same adapter at the fake archive's origin instead
 // (test/support/fakeArchive.ts, `dev/fakeCardSource.ts`), so it never reaches cardex.zip there.
 import { CARDEX_SITE_LABELS, SourceFailed } from "@rp/shared/cardSources.ts"
-import type { SourceCapabilities, SourceFilter, SourceQuery } from "@rp/shared/cardSources.ts"
-import { Effect } from "effect"
-import type { AdapterSummary, CardSourceAdapter, SourceHttp, SourceResponse } from "./adapter.ts"
+import type {
+  RemoteCreator,
+  RemoteRelative,
+  SourceCapabilities,
+  SourceFilter,
+  SourceQuery
+} from "@rp/shared/cardSources.ts"
+import { Effect, Schema } from "effect"
+import type { AdapterSummary, CardSourceAdapter, SourceHttp, SourceResponse, SourceVersion } from "./adapter.ts"
 
 export const CARDEX_ORIGIN = "https://cardex.zip"
 /** Results per page: a multiple of the grid's usual 2 to 6 columns. */
@@ -38,28 +44,31 @@ const PAGE_SIZE = 48
 const BATCH_MAX = 100
 
 /** v1's `CardSummary` (frozen); unknown fields are ignored. */
-interface Summary {
-  readonly slug: string
-  readonly url?: string | null
-  readonly name?: string | null
-  readonly tagline?: string | null
-  readonly creator?: {
-    readonly name?: string | null
-    readonly source?: string | null
-    readonly handle?: string | null
-  } | null
-  readonly tags?: ReadonlyArray<string> | null
-  readonly nsfw?: boolean | null
-  readonly token_count?: number | null
-  readonly stats?: { readonly popularity?: number | null } | null
-  readonly thumbnail_url?: string | null
-  readonly image_url?: string | null
-  readonly version?: string | null
-  readonly updated_at?: string | null
-  readonly superseded_by?: string | null
-  /** The download modes that answer 200 for this card; absent from older answers. */
-  readonly download_modes?: ReadonlyArray<string> | null
-}
+const nullableText = Schema.optionalKey(Schema.NullOr(Schema.String))
+const SummaryShape = Schema.Struct({
+  slug: Schema.String.check(Schema.isMaxLength(500)),
+  url: nullableText,
+  name: nullableText,
+  tagline: nullableText,
+  creator: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ name: nullableText, source: nullableText, handle: nullableText }))
+  ),
+  // Invalid tag values are omitted in the projection below.
+  tags: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  nsfw: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+  token_count: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  stats: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ popularity: Schema.optionalKey(Schema.NullOr(Schema.Number)) }))
+  ),
+  thumbnail_url: nullableText,
+  image_url: nullableText,
+  version: nullableText,
+  updated_at: nullableText,
+  superseded_by: nullableText,
+  download_modes: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
+})
+type Summary = typeof SummaryShape.Type
+const isSummary = Schema.is(SummaryShape)
 
 /** v1's capabilities: each filter by its parameter name. */
 interface Capabilities {
@@ -97,8 +106,8 @@ const authorOf = (creator: Summary["creator"]) =>
   creator?.source && creator.handle ? `${creator.source}/${creator.handle}` : undefined
 
 /** A v1 `CardSummary` as ours, its pictures and page resolved against `origin`; null when it has no slug. */
-export const summaryOf = (item: Summary, origin = CARDEX_ORIGIN): AdapterSummary | null => {
-  if (typeof item?.slug !== "string" || item.slug === "") return null
+export const summaryOf = (item: unknown, origin = CARDEX_ORIGIN): AdapterSummary | null => {
+  if (!isSummary(item) || item.slug === "") return null
   const updated = item.updated_at ? Date.parse(item.updated_at) : Number.NaN
   const thumb = onOrigin(origin, item.thumbnail_url)
   const image = onOrigin(origin, item.image_url)
@@ -284,10 +293,10 @@ const FILTER_HELP: Record<string, string> = {
   any_author: "Separate site/name creators with commas. A backslash escapes a comma in a name. Up to 20 creators.",
   not_author: "Separate site/name creators with commas. A backslash escapes a comma in a name. Up to 20 creators.",
   picture: "The picture's SHA-256: 64 hexadecimal characters. Finds cards sharing that picture.",
-  added_after: "Date as YYYY-MM-DD, for example 2026-01-01.",
-  added_before: "Date as YYYY-MM-DD, for example 2026-01-01.",
-  created_after: "Date as YYYY-MM-DD, for example 2026-01-01.",
-  created_before: "Date as YYYY-MM-DD, for example 2026-01-01."
+  added_after: "Cards cardex added on or after this day.",
+  added_before: "Cards cardex added before this day.",
+  created_after: "Cards their creator made on or after this day, as far as cardex knows.",
+  created_before: "Cards their creator made before this day, as far as cardex knows."
 }
 const EXTRA_LISTS = new Set(["fields", "not_source"])
 const EXTRA_TEXT = new Set([
@@ -439,6 +448,8 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
             descriptor.allowed_value_labels?.find((v) => v.value === value)?.label ?? CARDEX_SITE_LABELS[value] ?? value
         }))
       })
+    } else if (type === "date") {
+      filters.push({ ...common, kind: "text", format: "date", about: FILTER_HELP[name] ?? "A calendar date." })
     } else {
       filters.push({
         ...common,
@@ -464,7 +475,60 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       ? { ratings: { filterId: "nsfw", default: typeof nsfwDefault === "string" ? nsfwDefault : null } }
       : {}),
     paging: "cursor",
-    stats: [{ id: "popularity", label: "popularity" }]
+    stats: [{ id: "popularity", label: "popularity" }],
+    families: true,
+    ...(named.has("author")
+      ? {
+          creators: {
+            filterId: "author",
+            ...(named.has("not_author") ? { excludeFilterId: "not_author" } : {}),
+            profiles: true
+          }
+        }
+      : {})
+  }
+}
+
+/** A date cardex gave, as ms; undefined when it isn't one. */
+const dateOf = (value: unknown) => {
+  const at = typeof value === "string" ? Date.parse(value) : Number.NaN
+  return Number.isNaN(at) ? undefined : at
+}
+const count = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined
+
+/** v1's `/authors/<site>/<handle>` envelope's `author` as a creator profile; the avatar stays a path. */
+export const creatorOf = (raw: unknown, query: string, origin = CARDEX_ORIGIN): RemoteCreator => {
+  const author = isRecord(raw) && isRecord(raw.author) ? raw.author : null
+  if (
+    author === null ||
+    typeof author.source !== "string" ||
+    typeof author.handle !== "string" ||
+    `${author.source}/${author.handle}` !== query
+  )
+    throw bad()
+  const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
+  const avatar = isRecord(author.avatar)
+    ? onOrigin(origin, text(author.avatar.thumb_url) ?? text(author.avatar.url))
+    : onOrigin(origin, text(author.avatar))
+  const site = text(author.source_label) ?? (text(author.source) && CARDEX_SITE_LABELS[text(author.source)!])
+  const url = onOrigin(origin, text(author.path))
+  const cards = count(author.card_count)
+  const lorebooks = count(author.lorebook_count)
+  const firstSeen = dateOf(author.first_seen_at)
+  const lastSeen = dateOf(author.last_seen_at)
+  const bio = text(author.bio)
+  return {
+    query,
+    name: (text(author.display_name) ?? text(author.handle) ?? query).slice(0, 300),
+    ...(site ? { site } : {}),
+    ...(bio ? { bio: bio.slice(0, 4000) } : {}),
+    ...(avatar ? { avatar } : {}),
+    ...(cards === undefined ? {} : { cards }),
+    ...(lorebooks === undefined ? {} : { lorebooks }),
+    ...(firstSeen === undefined ? {} : { firstSeen }),
+    ...(lastSeen === undefined ? {} : { lastSeen }),
+    ...(url ? { url } : {})
   }
 }
 
@@ -508,6 +572,269 @@ export const searchParams = (query: SourceQuery, token: string | null) => {
   if (page && "cursor" in page && !semantic) params.set("cursor", page.cursor)
   if (page && "page" in page) params.set("page", String(page.page))
   return params
+}
+
+/**
+ * The cardex cards a card names: `cardex:<slug>` entries and pages `<origin>/c/<slug>` (the
+ * adapter's origin: cardex.zip, or the fake archive's in tests), each slug once.
+ */
+const recognizeCardex = (links: ReadonlyArray<string>, origin = CARDEX_ORIGIN): ReadonlyArray<string> => {
+  const slugs = new Set<string>()
+  for (const link of links) {
+    const id = /^cardex:(.+)$/.exec(link.trim())?.[1]?.trim()
+    if (id) {
+      slugs.add(id)
+      continue
+    }
+    if (!URL.canParse(link)) continue
+    const url = new URL(link)
+    if (url.origin !== origin) continue
+    const [kind, slug] = url.pathname.split("/").filter(Boolean)
+    if (kind !== "c" || !slug) continue
+    try {
+      slugs.add(decodeURIComponent(slug))
+    } catch {
+      slugs.add(slug)
+    }
+  }
+  return [...slugs].filter((slug) => slug.length <= 500)
+}
+
+/** At most this many relatives in a family, and the origins whose versions and forks are read. */
+const FAMILY_MAX = 60
+const FAMILY_ORIGINS = 3
+
+const textOf = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
+
+/** A creator's `site/handle` from v1's creator path, `/u/<site>/<handle>`. */
+const creatorQueryOf = (creator: unknown) => {
+  if (!isRecord(creator)) return undefined
+  const handle = textOf(creator.handle)
+  const site = textOf(creator.source)
+  if (site && handle) return `${site}/${handle}`
+  const path = /^\/u\/([^/]+)\/(.+)$/.exec(textOf(creator.path) ?? "")
+  if (!path) return undefined
+  try {
+    return `${decodeURIComponent(path[1]!)}/${decodeURIComponent(path[2]!)}`
+  } catch {
+    return undefined
+  }
+}
+
+/** One relative from v1's family shapes; null without a slug. */
+const relativeOf = (
+  relation: RemoteRelative["relation"],
+  fields: {
+    readonly slug: unknown
+    readonly name: unknown
+    readonly creator?: unknown
+    readonly site?: unknown
+    readonly at?: unknown
+    readonly thumb?: unknown
+    readonly current?: unknown
+    readonly versionLabel?: unknown
+  },
+  origin: string
+): RemoteRelative | null => {
+  const slug = textOf(fields.slug)
+  if (!slug || slug.length > 500) return null
+  const creator = isRecord(fields.creator)
+    ? (textOf(fields.creator.name) ?? textOf(fields.creator.display_name))
+    : undefined
+  const creatorQuery = creatorQueryOf(fields.creator)
+  const siteName = textOf(fields.site)
+  const at = dateOf(fields.at)
+  const thumb = onOrigin(origin, textOf(fields.thumb))
+  const label = textOf(fields.versionLabel)
+  return {
+    relation,
+    remoteId: slug,
+    name: (textOf(fields.name) ?? slug).slice(0, 300),
+    ...(creator ? { creator: creator.slice(0, 200) } : {}),
+    ...(creatorQuery ? { creatorQuery } : {}),
+    ...(siteName ? { site: CARDEX_SITE_LABELS[siteName] ?? siteName } : {}),
+    ...(label ? { versionLabel: label.slice(0, 40) } : {}),
+    ...(at === undefined ? {} : { at }),
+    ...(typeof fields.current === "boolean" ? { current: fields.current } : {}),
+    ...(thumb ? { thumb } : {})
+  }
+}
+
+/**
+ * A card's family from v1: its detail envelope's origins (the card each was forked from) and
+ * earlier listings (each now another card's), then `/versions` and `/forks` of each origin (the
+ * first three). The card itself is left out, and each other card is listed once, in that order.
+ */
+export const familyOf = (
+  remoteId: string,
+  detail: unknown,
+  lists: ReadonlyArray<{ readonly versions: unknown; readonly forks: unknown; readonly site: string }>,
+  origin = CARDEX_ORIGIN
+): { readonly items: ReadonlyArray<RemoteRelative>; readonly more: boolean } => {
+  if (
+    !isRecord(detail) ||
+    !isRecord(detail.card) ||
+    detail.card.slug !== remoteId ||
+    !Array.isArray(detail.origins) ||
+    !detail.origins.every(isRecord) ||
+    !Array.isArray(detail.earlier_origins) ||
+    !detail.earlier_origins.every(isRecord)
+  )
+    throw bad()
+  for (const { versions, forks } of lists) {
+    if (
+      versions !== null &&
+      (!isRecord(versions) ||
+        !Array.isArray(versions.items) ||
+        !versions.items.every(
+          (item) => isRecord(item) && isRecord(item.version) && typeof item.version.slug === "string"
+        ))
+    )
+      throw bad()
+    if (
+      forks !== null &&
+      (!isRecord(forks) ||
+        !Array.isArray(forks.children) ||
+        !forks.children.every(isRecord) ||
+        (forks.parent !== null && !isRecord(forks.parent)))
+    )
+      throw bad()
+  }
+  const name =
+    (isRecord(detail.top) && isRecord(detail.top.name) ? textOf(detail.top.name.value) : undefined) ?? remoteId
+  const items: Array<RemoteRelative> = []
+  const seen = new Set([remoteId])
+  let more = detail.origins.length > FAMILY_ORIGINS
+  const add = (item: RemoteRelative | null) => {
+    if (item === null) return
+    if (seen.has(item.remoteId)) {
+      const at = items.findIndex((previous) => previous.remoteId === item.remoteId)
+      if (at >= 0) {
+        const previous = items[at]!
+        // Detail origins can name only a slug; forks/versions often have the missing facts.
+        items[at] = { ...item, ...previous, name: previous.name === previous.remoteId ? item.name : previous.name }
+      }
+      return
+    }
+    if (items.length >= FAMILY_MAX) {
+      more = true
+      return
+    }
+    seen.add(item.remoteId)
+    items.push(item)
+  }
+  const origins = Array.isArray(detail.origins) ? detail.origins.filter(isRecord) : []
+  for (const listed of origins) {
+    const fork = isRecord(listed.fork) ? listed.fork : null
+    const from = fork && isRecord(fork.forked_from) ? fork.forked_from : null
+    if (from)
+      add(relativeOf("parent", { slug: from.card_slug, name: from.name ?? from.card_slug, site: from.source }, origin))
+  }
+  for (const entry of Array.isArray(detail.earlier_origins) ? detail.earlier_origins.filter(isRecord) : []) {
+    const listing = isRecord(entry.listing) ? entry.listing : null
+    const was = isRecord(entry.origin) ? entry.origin : null
+    add(
+      relativeOf(
+        "earlier",
+        {
+          slug: was?.card_slug ?? listing?.card_slug,
+          name: listing?.name,
+          creator: listing?.author,
+          site: listing?.source ?? was?.source,
+          at: entry.active_from,
+          thumb: isRecord(listing?.cover) ? listing.cover.thumb_url : undefined
+        },
+        origin
+      )
+    )
+  }
+  for (const { versions, forks, site } of lists) {
+    if (isRecord(versions) && Array.isArray(versions.items)) {
+      if (typeof versions.next === "string" && versions.next) more = true
+      for (const item of versions.items.filter(isRecord)) {
+        const version = isRecord(item.version) ? item.version : null
+        add(
+          relativeOf(
+            "version",
+            {
+              slug: version?.slug,
+              name,
+              site,
+              at: version?.active_from,
+              current: version?.is_current,
+              versionLabel: isRecord(version?.meta) ? version.meta.character_version : undefined,
+              thumb: item.cover_thumb_url
+            },
+            origin
+          )
+        )
+      }
+    }
+    if (isRecord(forks)) {
+      if (typeof forks.next === "string" && forks.next) more = true
+      const entries = [
+        ...(isRecord(forks.parent) ? [["parent", forks.parent] as const] : []),
+        ...(Array.isArray(forks.children) ? forks.children.filter(isRecord).map((c) => ["fork", c] as const) : [])
+      ]
+      for (const [relation, entry] of entries) {
+        const card = isRecord(entry.card) ? entry.card : null
+        if (card === null) continue
+        const created = isRecord(card.estimated_creation) ? card.estimated_creation.at : card.earliest_known
+        add(
+          relativeOf(
+            relation,
+            { slug: card.slug, name: card.name, creator: card.creator, site, at: created, thumb: card.thumb_url },
+            origin
+          )
+        )
+      }
+    }
+  }
+  return { items, more }
+}
+
+/** Stable listing keys come from metadata, never by fetching its path or source_url. */
+const originLocator = (detail: unknown): string | undefined => {
+  if (!isRecord(detail)) return undefined
+  const origins = Array.isArray(detail.origins) ? detail.origins.filter(isRecord) : []
+  const main = isRecord(detail.main_origin) ? detail.main_origin : null
+  const earlier = Array.isArray(detail.earlier_origins)
+    ? detail.earlier_origins
+        .filter(isRecord)
+        .sort((a, b) => String(b.active_to ?? "").localeCompare(String(a.active_to ?? "")))
+    : []
+  const candidates = [
+    origins.find((o) => main && o.path === main.path),
+    ...origins,
+    ...earlier.flatMap((e) => [e.origin, e.listing])
+  ]
+  for (const entry of candidates) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.source !== "string" ||
+      !/^[a-z0-9_]{1,40}$/.test(entry.source) ||
+      typeof entry.external_id !== "string" ||
+      !entry.external_id ||
+      entry.external_id.length > 500
+    )
+      continue
+    return JSON.stringify([entry.source, entry.external_id])
+  }
+  return undefined
+}
+const locatorParts = (locator: string): readonly [string, string] => {
+  const pair: unknown = JSON.parse(locator)
+  if (
+    !Array.isArray(pair) ||
+    pair.length !== 2 ||
+    typeof pair[0] !== "string" ||
+    !/^[a-z0-9_]{1,40}$/.test(pair[0]) ||
+    typeof pair[1] !== "string" ||
+    !pair[1] ||
+    pair[1].length > 500
+  )
+    throw bad()
+  return [pair[0], pair[1]]
 }
 
 /** cardex's batch URL in its canonical form: sorted, without duplicates, joined by `%2C`. */
@@ -753,25 +1080,179 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         return {
           bytes: file.bytes,
           fileName: fileNameOf(file, remoteId),
-          summary: { ...summary, ...detailMetadata(detail, origin) }
+          summary: { ...summary, ...detailMetadata(detail, origin) },
+          ...(originLocator(detail) ? { locator: originLocator(detail)! } : {})
         }
+      }),
+    recognize: (links) => recognizeCardex(links, origin),
+    family: (http, remoteId) =>
+      Effect.gen(function* () {
+        const detail = yield* getJson(http, api(`/cards/${encodeURIComponent(remoteId)}`))
+        const origins = isRecord(detail) && Array.isArray(detail.origins) ? detail.origins.filter(isRecord) : []
+        const listed = origins
+          .flatMap((o): Array<readonly [string, string]> => {
+            const site = textOf(o.source)
+            const external = textOf(o.external_id)
+            return site && external ? [[site, external]] : []
+          })
+          .slice(0, FAMILY_ORIGINS)
+        // An origin cardex no longer has versions or forks of is simply left out.
+        const orNone = <A>(effect: Effect.Effect<A, SourceFailed>) =>
+          effect.pipe(
+            Effect.catchIf(
+              (failure) => failure.reason === "not_found",
+              () => Effect.succeed(null)
+            )
+          )
+        const lists = yield* Effect.forEach(listed, ([site, external]) =>
+          Effect.gen(function* () {
+            const path = `${encodeURIComponent(site)}/${encodeURIComponent(external)}`
+            const versions = yield* orNone(getJson(http, api(`/versions/${path}`)))
+            const forks = yield* orNone(getJson(http, api(`/forks/${path}`)))
+            return { versions, forks, site }
+          })
+        )
+        return yield* Effect.try({ try: () => familyOf(remoteId, detail, lists, origin), catch: () => bad() })
+      }),
+    creator: (http, query) =>
+      Effect.gen(function* () {
+        // `site/handle`, as the author filter takes it; a handle may itself hold a slash.
+        const at = query.indexOf("/")
+        const site = at > 0 ? query.slice(0, at) : ""
+        const handle = at > 0 ? query.slice(at + 1) : ""
+        if (!/^[a-z0-9_]{1,40}$/.test(site) || handle === "")
+          return yield* new SourceFailed({ sourceId: ID, reason: "not_found", message: "no such creator" })
+        // The envelope also lists a page of the creator's cards, which the search lists instead.
+        const raw = yield* getJson(http, api(`/authors/${encodeURIComponent(site)}/${encodeURIComponent(handle)}`))
+        return yield* Effect.try({ try: () => creatorOf(raw, query, origin), catch: () => bad() })
       }),
     image: (http, ref) =>
       Effect.suspend(() => {
         const href = onOrigin(origin, ref)
         return href ? Effect.map(http.get(new URL(href), "image"), (response) => response.bytes) : Effect.fail(bad())
       }),
-    versions: (http, ids) =>
+    versions: (http, ids, locators = {}) =>
       Effect.gen(function* () {
-        const unique = [...new Set(ids)].sort()
-        const out: Array<{ remoteId: string; version: AdapterSummary["version"] }> = []
-        for (let start = 0; start < unique.length; start += BATCH_MAX) {
-          const raw = yield* getJson(http, batchUrl(unique.slice(start, start + BATCH_MAX), origin))
-          const items = isRecord(raw) ? summaries(raw.items, origin) : null
-          if (items === null) return yield* bad()
-          for (const item of items) out.push({ remoteId: item.remoteId, version: item.version })
+        // One budget covers this entire check, including bootstrap, batches and fallback hops.
+        let requests = 0
+        const bounded: SourceHttp = {
+          ...http,
+          get: (url, kind, headers) =>
+            ++requests > 8
+              ? Effect.fail(bad("cardex's version lookup exceeded its request budget"))
+              : http.get(url, kind, headers)
         }
-        return out
+        const read = (url: URL) =>
+          getJson(bounded, url).pipe(
+            Effect.catchIf(
+              (failure) => failure.reason === "not_found" || failure.reason === "region_unavailable",
+              () => Effect.succeed(null)
+            )
+          )
+        const unique = [...new Set(ids)].sort()
+        const absent = (id: string): SourceVersion => ({
+          remoteId: id,
+          currentId: id,
+          version: { id: "" },
+          available: false
+        })
+        if (unique.length === 1) {
+          const id = unique[0]!
+          let locator = locators[id]
+          if (!locator) locator = originLocator(yield* read(api(`/cards/${encodeURIComponent(id)}`)))
+          if (locator) {
+            const [site, external] = yield* Effect.try({ try: () => locatorParts(locator!), catch: () => bad() })
+            const detail = yield* read(api(`/origins/${encodeURIComponent(site)}/${encodeURIComponent(external)}`))
+            if (detail === null) return [absent(id)]
+            if (
+              !isRecord(detail) ||
+              !isRecord(detail.card) ||
+              typeof detail.card.slug !== "string" ||
+              !detail.card.slug ||
+              detail.card.slug.length > 500 ||
+              !Array.isArray(detail.files)
+            )
+              return yield* bad()
+            const currentId = detail.card.slug
+            const files = detail.files
+              .filter(isRecord)
+              .filter(
+                (f) =>
+                  f.current !== false &&
+                  f.is_original === true &&
+                  typeof f.sha256 === "string" &&
+                  /^[0-9a-f]{64}$/.test(f.sha256)
+              )
+            if (detail.card.hidden === true || files.length === 0) return [absent(id)]
+            if (files.length === 1) {
+              const file = files[0]!
+              const mode = downloadModeOf(file.download_modes)
+              if (file.hidden === true || mode === "refused" || mode === null) return [absent(id)]
+              return [{ remoteId: id, currentId, locator, version: { id: file.sha256 as string }, available: true }]
+            }
+            // With several originals, batch lookup is the archive's canonical file choice.
+            const raw = yield* read(batchUrl([currentId], origin))
+            const items = isRecord(raw) ? summaries(raw.items, origin) : null
+            const item = items?.find((item) => item.remoteId === currentId)
+            if (!item) return [absent(id)]
+            return [
+              {
+                remoteId: id,
+                currentId,
+                locator,
+                version: item.version,
+                available:
+                  downloadModeOf(
+                    (isRecord(raw) && Array.isArray(raw.items) ? raw.items : []).find(
+                      (v) => isRecord(v) && v.slug === currentId
+                    )?.download_modes
+                  ) !== "refused"
+              }
+            ]
+          }
+        }
+        const lookup = (wanted: ReadonlyArray<string>) =>
+          Effect.gen(function* () {
+            const found = new Map<string, AdapterSummary>()
+            for (let offset = 0; offset < wanted.length; offset += BATCH_MAX) {
+              const raw = yield* read(batchUrl(wanted.slice(offset, offset + BATCH_MAX), origin))
+              if (raw === null) continue
+              const items = isRecord(raw) ? summaries(raw.items, origin) : null
+              if (items === null) return yield* bad()
+              for (const item of items) found.set(item.remoteId, item)
+            }
+            return found
+          })
+        const first = yield* lookup(unique)
+        const resolved = new Map<string, { item: AdapterSummary; seen: Set<string>; missing: boolean }>()
+        for (const id of unique) {
+          const item = first.get(id)
+          if (item) resolved.set(id, { item, seen: new Set([id]), missing: false })
+        }
+        for (let hop = 0; ; hop++) {
+          const pending = [...resolved.values()].filter((e) => !e.missing && e.item.version.supersededBy)
+          if (!pending.length) break
+          if (hop >= 4) return yield* bad("cardex listed too many successive versions")
+          for (const e of pending) {
+            const target = e.item.version.supersededBy!
+            if (target.length > 500 || e.seen.has(target)) return yield* bad("cardex listed a version cycle")
+            e.seen.add(target)
+          }
+          const next = yield* lookup([...new Set(pending.map((e) => e.item.version.supersededBy!))].sort())
+          for (const e of pending) {
+            const item = next.get(e.item.version.supersededBy!)
+            if (item) e.item = item
+            else e.missing = true
+          }
+        }
+        return unique
+          .filter((id) => resolved.has(id))
+          .map((remoteId): SourceVersion => {
+            const e = resolved.get(remoteId)
+            return !e || e.missing
+              ? absent(remoteId)
+              : { remoteId, currentId: e.item.remoteId, version: e.item.version, available: true }
+          })
       })
   }
 }

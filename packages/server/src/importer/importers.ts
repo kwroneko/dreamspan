@@ -319,7 +319,27 @@ export const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).
 const encoded = (doc: object) => {
   const docJson = JSON.stringify(doc)
   const stored = JSON.parse(docJson) as Doc
-  return { docJson, docHash: docHash(stored), searchText: searchText(stored) }
+  const links = linksOf(stored)
+  return { docJson, docHash: docHash(stored), searchText: searchText(stored), ...(links.length ? { links } : {}) }
+}
+
+/** At most this many links, each at most this long, go to the main thread for recognizing. */
+const MAX_LINKS = 50
+const MAX_LINK = 2048
+
+/** A card's `source` entries and its extensions' `url`s: what card sources recognize it by (§3.7). */
+const linksOf = (doc: unknown): ReadonlyArray<string> => {
+  if (typeof doc !== "object" || doc === null) return []
+  const { source, extensions } = doc as { source?: unknown; extensions?: unknown }
+  const found = Array.isArray(source) ? source.filter((entry): entry is string => typeof entry === "string") : []
+  if (typeof extensions === "object" && extensions !== null)
+    for (const extension of Object.values(extensions)) {
+      const url = typeof extension === "object" && extension !== null ? (extension as { url?: unknown }).url : null
+      if (typeof url === "string") found.push(url)
+    }
+  return [
+    ...new Set(found.map((entry) => entry.trim()).filter((entry) => entry !== "" && entry.length <= MAX_LINK))
+  ].slice(0, MAX_LINKS)
 }
 
 export const failed = (format: string, code: string, message: string) =>

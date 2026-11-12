@@ -25,6 +25,7 @@ import { HttpIncomingMessage, HttpRouter, HttpServerRequest, HttpServerResponse 
 import { Accounts } from "../auth/Accounts.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import { CardSources } from "../sources/CardSources.ts"
 import { defaultLimits } from "../formats/safety.ts"
 import { BodyRefused, firstBytes, readBody } from "./body.ts"
 import { Formats } from "./Formats.ts"
@@ -160,6 +161,7 @@ export const layer = Layer.unwrap(
     })
     const reader = yield* Reader
     const writer = yield* Writer
+    const sources = yield* CardSources
     const notices = yield* Notices
     // Media an import has written and not yet recorded, which the sweep leaves alone.
     const { pending, holding } = yield* MediaHolds
@@ -305,10 +307,13 @@ export const layer = Layer.unwrap(
                   yield* Effect.forEach(parsed.media, (file) => storeMedia(config.dataDir, file.sha256, file.bytes), {
                     discard: true
                   })
+                  const { links, ...library } = parsed.library!
+                  const recognized = links ? sources.recognize(links) : []
                   return yield* writer.ImportFile({
                     userId: user.id,
                     intoRefId: into,
-                    ...parsed.library!,
+                    ...library,
+                    ...(recognized.length ? { recognized } : {}),
                     sourceName: fileName,
                     sourceHash: parsed.sha256,
                     media: parsed.media.map(({ bytes: _, ...file }) => file),
