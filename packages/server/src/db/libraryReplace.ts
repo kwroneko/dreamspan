@@ -11,6 +11,9 @@
 import type { UserId } from "@rp/shared/domain.ts"
 import {
   applyDrafts,
+  canonicalJson,
+  getAt,
+  parseField,
   droppedDrafts,
   type FieldPath,
   isHeldField,
@@ -39,6 +42,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { scanHistory } from "./historyScan.ts"
 import type { LibraryReplaceEntry } from "./ops.ts"
+import { makeLibraryQueries } from "./library.ts"
 import { query } from "./tx.ts"
 
 /** Documents read per statement. */
@@ -48,6 +52,7 @@ const SCAN_CHARS = 2_000_000
 const SCAN_TIMEOUT = 2000
 
 interface Candidate {
+  readonly entity_id: string
   readonly ref_id: string
   readonly kind: LibraryReplaceKind
   readonly label: string
@@ -60,6 +65,7 @@ interface Candidate {
 interface DraftRow {
   readonly id: string
   readonly field: string
+  readonly base_revision: string | null
   readonly content: string
   readonly row_version: number
 }
@@ -123,6 +129,7 @@ const rejected = (message: string) =>
 
 export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+  const lib = makeLibraryQueries(sql)
 
   /** The entries a search goes through, in the library's order; `refIds` narrows them. */
   const candidates = (
@@ -135,8 +142,8 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
     const kinds = search.kinds.map(() => "?").join(", ")
     const only = refIds === null ? "" : `AND r.id IN (${refIds.map(() => "?").join(", ")})`
     return sql.unsafe<Candidate>(
-      `SELECT ref_id, kind, label, subtitle, head, row_version, drafted FROM (
-        SELECT r.id AS ref_id, e.kind, r.label, r.subtitle, r.head_revision_id AS head, r.row_version,
+      `SELECT entity_id, ref_id, kind, label, subtitle, head, row_version, drafted FROM (
+        SELECT r.entity_id, r.id AS ref_id, e.kind, r.label, r.subtitle, r.head_revision_id AS head, r.row_version,
           EXISTS (SELECT 1 FROM drafts d WHERE d.user_id = ? AND d.target_kind = 'entity_field'
             AND d.target_id = r.id AND d.status = 'active') AS drafted,
           ${kindOrder} AS kind_order, h.search_text
@@ -167,7 +174,7 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
       const base = editedDoc(candidate.kind, head)
       const rows =
         candidate.drafted === 1
-          ? yield* sql<DraftRow>`SELECT id, field, content, row_version FROM drafts WHERE user_id = ${userId}
+          ? yield* sql<DraftRow>`SELECT id, field, content, row_version, base_revision FROM drafts WHERE user_id = ${userId}
               AND target_kind = 'entity_field' AND target_id = ${candidate.ref_id} AND status = 'active'
               ORDER BY field, id`
           : []
@@ -184,6 +191,22 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
       })
       if (rows.length === 0) return result(base, null, null)
       if (rows.some((row) => isHeldField(row.field))) return result(base, null, UNSAVED_HELD)
+      // The same conflict rule as CommitEditorDrafts: a later saved edit must not be
+      // silently replaced by a draft started from an older value.
+      for (const row of rows) {
+        if (row.base_revision === null || row.base_revision === candidate.head) continue
+        const field = parseField(row.field)
+        if (field === null) return result(base, null, UNSAVED_INVALID)
+        const revision = yield* lib.draftBase(candidate.entity_id, row.base_revision)
+        const before = revision === null ? {} : editedDoc(candidate.kind, JSON.parse(revision.doc_json) as Doc)
+        const applied = applyDrafts(candidate.kind, base, [row])
+        const saved = canonicalJson(getAt(base, field.path))
+        if (
+          saved !== canonicalJson(getAt(before, field.path)) &&
+          saved !== canonicalJson(getAt(applied.doc, field.path))
+        )
+          return result(base, null, UNSAVED_INVALID)
+      }
       const applied = applyDrafts(candidate.kind, base, rows)
       if (applied.problems.length > 0) return result(base, null, UNSAVED_INVALID)
       const valid = validateDoc(candidate.kind, applied.doc)

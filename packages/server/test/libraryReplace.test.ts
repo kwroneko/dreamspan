@@ -8,6 +8,7 @@ import { textField, valueField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { LibraryPreview, LibrarySearch } from "@rp/shared/libraryReplace.ts"
 import { Effect } from "effect"
+import { Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 
 const search = (find: string, replace: string, options: Partial<LibrarySearch> = {}): LibrarySearch => ({
@@ -90,6 +91,67 @@ describe("library search and replace", () => {
       assert.isFalse((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
       yield* f.api.UndoLibraryEdit({ editId: result.editId! })
       assert.isFalse((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.effect("does not checkpoint a draft that conflicts with a later saved revision", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const opened = yield* f.api.OpenEditor({ refId: f.odo })
+      yield* f.api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
+        refId: f.odo,
+        field: textField(["description"]),
+        content: "Draft at dawn.",
+        expectedRowVersion: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      const writer = yield* Writer
+      yield* writer.EditRef({
+        userId: (yield* f.api.Whoami()).id,
+        refId: f.odo,
+        doc: { ...opened.doc, description: "Later saved at dawn." },
+        expectedRowVersion: opened.ref.rowVersion,
+        message: null,
+        commitDraft: null
+      })
+      const asked = search("dawn", "dusk")
+      const preview = yield* f.api.PreviewLibraryReplace({ search: asked })
+      const result = yield* f.api.ApplyLibraryReplace({
+        search: asked,
+        choices: [{ refId: f.odo, stamp: f.entry(preview, f.odo)!.stamp, fields: [textField(["description"])] }]
+      })
+      assert.strictEqual(result.entries, 0)
+      assert.match(result.skipped[0]!.reason, /unsaved|changed/i)
+      const after = yield* f.api.OpenEditor({ refId: f.odo })
+      assert.strictEqual(after.doc.description, "Later saved at dawn.")
+      assert.strictEqual(after.drafts.find((d) => d.status === "active")!.content, "Draft at dawn.")
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.effect("undo keeps an entry with later unsaved changes", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const asked = search("dawn", "dusk")
+      const result = yield* f.api.ApplyLibraryReplace({
+        search: asked,
+        choices: f.all(yield* f.api.PreviewLibraryReplace({ search: asked }))
+      })
+      const opened = yield* f.api.OpenEditor({ refId: f.odo })
+      yield* f.api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
+        refId: f.odo,
+        field: textField(["description"]),
+        content: "Later draft at dusk.",
+        expectedRowVersion: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      const undone = yield* f.api.UndoLibraryEdit({ editId: result.editId! })
+      assert.strictEqual(undone.undone, 0)
+      assert.strictEqual(undone.kept[0]!.refId, f.odo)
+      assert.strictEqual((yield* f.api.OpenEditor({ refId: f.odo })).doc.description, "{{char}} sails at dusk.")
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 

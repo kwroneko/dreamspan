@@ -151,7 +151,9 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
             kept.push({ refId: item.ref_id as LibrarySkipped["refId"], label: "", reason: "It's in the bin." })
             continue
           }
-          if (ref.head_revision_id !== item.after_revision_id) {
+          const [drafted] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM drafts
+            WHERE user_id = ${userId} AND target_kind = 'entity_field' AND target_id = ${ref.id} AND status = 'active'`
+          if (ref.head_revision_id !== item.after_revision_id || drafted!.n > 0) {
             kept.push({
               refId: ref.id as LibrarySkipped["refId"],
               label: ref.label,

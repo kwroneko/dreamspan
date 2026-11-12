@@ -2937,3 +2937,5 @@ Chatsettings cache diagnostics (2026-11-06): rotating card-field macros in prese
 Shell stream errors (review-shellrefresh, 2026-11-07): card and fork streams retry transport failures, while application errors reach the existing failure view. An expired session therefore returns to login even when a new stream starts without navigation, such as through Show more. `e2e/shellRefresh.spec.ts` covers that pagination case and shell updates after a server restart.
 
 Library replace review (2026-11-12): Undo uses the same permission rules as restoring an editor revision: it keeps current HTML permissions, never grants agent editing, and never restores regex approval when the scripts changed or approval was revoked.
+
+Library replace draft safety (2026-11-12): preview and plan block drafts whose base conflicts with the current saved field, following CommitEditorDrafts. Undo leaves entries with later active drafts alone and reports them, preserving both the saved replace and the later unsaved text.
