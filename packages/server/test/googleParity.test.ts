@@ -231,3 +231,39 @@ for (const id of ["../escape", "models/%2e%2e/escape", "https://example.invalid/
       await mock.close()
     }
   })
+
+// The pinned SDK predates Gemini 4; public generateContent docs require levels,
+// including when a saved preset asks to turn thinking off.
+for (const id of ["gemini-4-carbon", "gemini-4-argon"])
+  for (const reasoning of ["off", "low", "medium", "high"] as const)
+    it(`Google ${id} sends a thinking level for ${reasoning}`, async () => {
+      const mock = await startMockProvider((_r, res) => {
+        res.end(wire(stop))
+      })
+      try {
+        const events = streamSimple(
+          {
+            ...model,
+            id,
+            baseUrl: mock.url,
+            thinkingLevelMap: {
+              off: null,
+              minimal: null,
+              low: "low",
+              medium: "medium",
+              high: "high",
+              xhigh: null,
+              max: null
+            }
+          },
+          normalizeContext(context),
+          { apiKey: "synthetic-key", fetch, ...(reasoning === "off" ? {} : { reasoning }) }
+        )
+        assert.equal((await events.result()).stopReason, "stop")
+        const config = mock.requests()[0]!.body!.generationConfig as { thinkingConfig: Record<string, unknown> }
+        assert.equal(config.thinkingConfig.thinkingLevel, reasoning === "off" ? "LOW" : reasoning.toUpperCase())
+        assert.isUndefined(config.thinkingConfig.thinkingBudget)
+      } finally {
+        await mock.close()
+      }
+    })

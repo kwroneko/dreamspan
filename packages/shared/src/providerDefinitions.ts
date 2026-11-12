@@ -311,7 +311,10 @@ export const builtinProviders: ReadonlyArray<ProviderDefinition> = [
     settings: ["cacheTtlS"],
     cacheContract: "google",
     cacheLifetime: null,
-    accounting: ["Caching is automatic; cached input is part of the input count."],
+    accounting: [
+      "Caching is automatic; cache reads are counted apart from other input.",
+      "Cache lifetime is unknown. This app doesn’t create saved caches."
+    ],
     defaultFor: ["google"]
   },
   {
