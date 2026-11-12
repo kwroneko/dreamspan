@@ -1,6 +1,8 @@
 // A library document's text fields (libraryText.ts), as both the editors' and the library-wide
 // search and replace read them: a card's built-in fields, regex scripts and embedded lorebook;
 // a lorebook's entries; a note's title and content; labels as the editors show them.
+import { Effect } from "effect"
+import { libraryReplaceKinds } from "../src/libraryText.ts"
 import { describe, expect, it } from "vitest"
 import { newCardDoc } from "../src/editing.ts"
 import type { Doc } from "../src/library.ts"
@@ -53,4 +55,26 @@ describe("library text fields", () => {
     const note = libraryTextFields("note", { title: "Tide", content: "Ask {{char}}." } as Doc)
     expect(note.map((f) => f.label)).toEqual(["Title", "Content"])
   })
+})
+
+it("registered library kinds supply fields, labels and validation, and can be disabled", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* libraryReplaceKinds.register({
+          id: "preset_overlay",
+          one: "overlay",
+          many: "Overlays",
+          fields: (doc) => [{ path: ["extra"], label: "Plugin text", text: String(doc.extra) }],
+          validate: (doc) => ({ ok: true as const, doc: doc as Doc })
+        })
+        expect(libraryTextFields("preset_overlay", { extra: "hello" })).toEqual([
+          { path: ["extra"], label: "Plugin text", text: "hello" }
+        ])
+        expect(libraryReplaceKinds.list().map((k) => k.id)).toContain("preset_overlay")
+        yield* libraryReplaceKinds.disable("preset_overlay")
+        expect(libraryTextFields("preset_overlay", { extra: "hello" })).toEqual([])
+      })
+    )
+  )
 })

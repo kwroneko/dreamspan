@@ -3,8 +3,9 @@
 // which adds fields that features register) and Search and replace across the library
 // (server db/libraryReplace.ts) both read them, so a field one finds the other finds too.
 import type { LorebookDoc } from "./docs/lorebook.ts"
-import { type FieldPath, getAt } from "./editing.ts"
+import { type FieldPath, getAt, validateDoc } from "./editing.ts"
 import type { Doc, EntityKind } from "./library.ts"
+import { makeRegistry } from "./registry.ts"
 
 const CARD_LABELS: Record<string, string> = {
   name: "Display name",
@@ -251,9 +252,29 @@ export const standaloneLorebookFields = (doc: Doc): ReadonlyArray<Searchable> =>
  * card, its regex scripts and embedded lorebook, and for a lorebook its entries, as the
  * editors register them (features/editor/index.tsx).
  */
-export const libraryTextFields = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> =>
+const coreLibraryTextFields = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> =>
   [
     ...builtinSearchable(kind, doc),
     ...(kind === "card" ? [...regexScriptFields("card", doc), ...lorebookFields(doc)] : []),
     ...(kind === "lorebook" ? standaloneLorebookFields(doc) : [])
   ].filter((field) => typeof field.text === "string")
+
+/** A searchable library kind; shared plugin modules register it in the client and DB readers. */
+export const libraryReplaceKinds = makeRegistry<{
+  readonly id: EntityKind
+  readonly one: string
+  readonly many: string
+  readonly fields: (doc: Doc) => ReadonlyArray<Searchable>
+  readonly validate: (doc: unknown) => ReturnType<typeof validateDoc>
+}>([
+  ...(["card", "lorebook", "preset", "note"] as const).map((kind) => ({
+    id: kind,
+    one: kind,
+    many: { card: "Cards", lorebook: "Lorebooks", preset: "Presets", note: "Notes" }[kind],
+    fields: (doc: Doc) => coreLibraryTextFields(kind, doc),
+    validate: (doc: unknown) => validateDoc(kind, doc)
+  }))
+])
+
+export const libraryTextFields = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> =>
+  libraryReplaceKinds.get(kind)?.fields(doc) ?? []

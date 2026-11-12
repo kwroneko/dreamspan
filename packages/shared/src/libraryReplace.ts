@@ -4,12 +4,11 @@
 // undoable replace over the ones left ticked. What a field is, and its label, are
 // libraryText.ts's, which the editors' own Search and replace reads too.
 import { Schema } from "effect"
-import { RefId } from "./library.ts"
+import { EntityKind, RefId } from "./library.ts"
 
-/** The kinds the library-wide search goes through, in the library's order. */
-export const LIBRARY_REPLACE_KINDS = ["card", "lorebook", "preset", "note"] as const
-export const LibraryReplaceKind = Schema.Literals(LIBRARY_REPLACE_KINDS)
-export type LibraryReplaceKind = typeof LibraryReplaceKind.Type
+/** Storage kinds accepted on the wire; searchable kinds are contributed to libraryReplaceKinds. */
+export const LibraryReplaceKind = EntityKind
+export type LibraryReplaceKind = EntityKind
 
 export class LibraryReplaceRejected extends Schema.TaggedError<LibraryReplaceRejected>()("LibraryReplaceRejected", {
   message: Schema.String
@@ -23,7 +22,7 @@ export const LibrarySearch = Schema.Struct({
   wholeWord: Schema.Boolean,
   regex: Schema.Boolean,
   preserveCase: Schema.Boolean,
-  kinds: Schema.Array(LibraryReplaceKind).check(Schema.isMinLength(1), Schema.isMaxLength(4))
+  kinds: Schema.Array(LibraryReplaceKind).check(Schema.isMinLength(1), Schema.isMaxLength(32))
 })
 export type LibrarySearch = typeof LibrarySearch.Type
 

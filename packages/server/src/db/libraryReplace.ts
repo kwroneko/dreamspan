@@ -19,13 +19,11 @@ import {
   isHeldField,
   keepsRegexApproval,
   textField,
-  validateDoc,
   withValues
 } from "@rp/shared/editing.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import {
   AROUND,
-  LIBRARY_REPLACE_KINDS,
   type FieldExcerpt,
   type LibraryChoice,
   type LibraryEdit,
@@ -36,7 +34,7 @@ import {
   type LibrarySearch,
   type LibrarySkipped
 } from "@rp/shared/libraryReplace.ts"
-import { libraryTextFields, type Searchable } from "@rp/shared/libraryText.ts"
+import { libraryReplaceKinds, libraryTextFields, type Searchable } from "@rp/shared/libraryText.ts"
 import { editedDoc } from "@rp/shared/presetConditions.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -118,8 +116,6 @@ const prefilter = (search: LibrarySearch): { readonly where: string; readonly pa
   }
 }
 
-const kindOrder = `CASE e.kind ${LIBRARY_REPLACE_KINDS.map((kind, i) => `WHEN '${kind}' THEN ${i}`).join(" ")} END`
-
 const rejected = (message: string) =>
   new LibraryReplaceRejected({
     message: /timed out/i.test(message)
@@ -138,6 +134,10 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
     refIds: ReadonlyArray<string> | null,
     filtered: boolean
   ) => {
+    const definitions = libraryReplaceKinds.list()
+    if (search.kinds.some((kind) => !definitions.some((entry) => entry.id === kind)))
+      return Effect.fail(rejected("That kind of entry can't be searched now."))
+    const kindOrder = `CASE e.kind ${definitions.map((entry, i) => `WHEN '${entry.id.replaceAll("'", "''")}' THEN ${i}`).join(" ")} END`
     const filter = filtered ? prefilter(search) : { where: "", params: [] }
     const kinds = search.kinds.map(() => "?").join(", ")
     const only = refIds === null ? "" : `AND r.id IN (${refIds.map(() => "?").join(", ")})`
@@ -209,7 +209,7 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
       }
       const applied = applyDrafts(candidate.kind, base, rows)
       if (applied.problems.length > 0) return result(base, null, UNSAVED_INVALID)
-      const valid = validateDoc(candidate.kind, applied.doc)
+      const valid = libraryReplaceKinds.get(candidate.kind)!.validate(applied.doc)
       if (!valid.ok || droppedDrafts(candidate.kind, applied.doc, valid.doc, rows).length > 0)
         return result(base, null, UNSAVED_INVALID)
       const doc = editedDoc(candidate.kind, valid.doc)
@@ -353,7 +353,7 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
             entry.doc,
             picked.map((f) => ({ path: f.field.path, value: f.after }))
           )
-          const valid = replaced === null ? null : validateDoc(candidate.kind, replaced)
+          const valid = replaced === null ? null : libraryReplaceKinds.get(candidate.kind)!.validate(replaced)
           if (valid === null || !valid.ok)
             return skip(candidate.ref_id, candidate.label, "The replacement wouldn't make a valid document.")
           // Approved regex scripts the replace changed wait for approval again, as an imported change would.

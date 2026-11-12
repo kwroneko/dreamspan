@@ -7,7 +7,6 @@
 // whether the panel is open (`replace=open`) and what's found (`find`).
 import { useAtomValue } from "@effect/atom-react"
 import {
-  LIBRARY_REPLACE_KINDS,
   type FieldExcerpt,
   type LibraryChoice,
   type LibraryEdit,
@@ -17,6 +16,7 @@ import {
   type LibraryReplaceResult,
   type LibrarySearch
 } from "@rp/shared/libraryReplace.ts"
+import { libraryReplaceKinds } from "@rp/shared/libraryText.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type FormEvent, useState } from "react"
@@ -35,12 +35,7 @@ import { refreshOpenEditors } from "./openEditors.ts"
 const PANEL_ID = "library-replace"
 /** Entries listed before "Show more". */
 const LISTED = 100
-const KIND_NAMES: Record<LibraryReplaceKind, { readonly one: string; readonly many: string }> = {
-  card: { one: "card", many: "Cards" },
-  lorebook: { one: "lorebook", many: "Lorebooks" },
-  preset: { one: "preset", many: "Presets" },
-  note: { one: "note", many: "Notes" }
-}
+const kindNames = (kind: LibraryReplaceKind) => libraryReplaceKinds.get(kind) ?? { one: kind, many: kind }
 const INVALIDATES = ["library", "library-edits"]
 const editsAtom = AppClient.query("ListLibraryEdits", undefined, { reactivityKeys: INVALIDATES })
 
@@ -124,7 +119,7 @@ function EntryRow({
             {entry.label || "Untitled"}
           </Link>
         </Tooltip>
-        <Badge>{KIND_NAMES[entry.kind].one}</Badge>
+        <Badge>{kindNames(entry.kind).one}</Badge>
         <span className="text-xs text-muted tabular-nums">{plural(entry.count, "match", "matches")}</span>
         {entry.unsaved && !blocked && (
           <Tooltip label="Its unsaved changes are searched too. Replacing saves them first, as a revision of their own.">
@@ -230,7 +225,9 @@ export function LibraryReplacePanel() {
   const [preserveCase, setPreserveCase] = useState(false)
   const [regex, setRegex] = useState(false)
   const [matchCase, setMatchCase] = useState(false)
-  const [kinds, setKinds] = useState<ReadonlyArray<LibraryReplaceKind>>(LIBRARY_REPLACE_KINDS)
+  const [kinds, setKinds] = useState<ReadonlyArray<LibraryReplaceKind>>(() =>
+    libraryReplaceKinds.list().map((k) => k.id)
+  )
   const [found, setFound] = useState<{ readonly asked: string; readonly preview: LibraryPreview } | null>(null)
   const [left, setLeft] = useState<ReadonlySet<string>>(new Set())
   const [shown, setShown] = useState(LISTED)
@@ -241,6 +238,7 @@ export function LibraryReplacePanel() {
   const replacing = useAction()
   if (!open) return null
 
+  const available = libraryReplaceKinds.list().map((k) => k.id)
   const search: LibrarySearch = {
     find,
     replace,
@@ -248,7 +246,7 @@ export function LibraryReplacePanel() {
     wholeWord,
     regex,
     preserveCase,
-    kinds: LIBRARY_REPLACE_KINDS.filter((k) => kinds.includes(k))
+    kinds: available.filter((k) => kinds.includes(k))
   }
   const asked = JSON.stringify(search)
   // A preview of another question isn't shown: its matches and replacements are for that one.
@@ -365,18 +363,18 @@ export function LibraryReplacePanel() {
           scopeControl={
             <fieldset className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
               <legend className="sr-only">Look in</legend>
-              {LIBRARY_REPLACE_KINDS.map((kind) => {
+              {available.map((kind) => {
                 const count = counts.get(kind)
                 return (
                   <Checkbox
                     key={kind}
                     checked={kinds.includes(kind)}
                     onCheckedChange={(on) => setKinds(on ? [...kinds, kind] : kinds.filter((k) => k !== kind))}
-                    hint={`Click to ${kinds.includes(kind) ? "leave out" : "look through"} ${KIND_NAMES[kind].many.toLowerCase()}.`}
+                    hint={`Click to ${kinds.includes(kind) ? "leave out" : "look through"} ${kindNames(kind).many.toLowerCase()}.`}
                     hintInline={false}
                   >
                     <span data-kind-count={kind}>
-                      {KIND_NAMES[kind].many}
+                      {kindNames(kind).many}
                       {preview && count && (
                         <span className="text-muted tabular-nums">
                           {" "}
