@@ -13,6 +13,7 @@ import { type Copy, makeCopy } from "../src/features/editor/backup.ts"
 import { messageMenu, showActions } from "./support/message.ts"
 import { asUser, type Client, loginCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60", FAKE_GENERATOR_TOKENS: "600" })
 
@@ -418,7 +419,7 @@ test("on a phone, a tap on a long message out of the context shows the start of 
       const model = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "small-context",
-        overrides: { settings: { samplers: { openai_max_context: 4095, openai_max_tokens: 300 } } }
+        overrides: { settings: { samplers: { openai_max_context: 2500, openai_max_tokens: 300 } } }
       })
       yield* api.SetGenerationDefaults({
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
@@ -435,8 +436,8 @@ test("on a phone, a tap on a long message out of the context shows the start of 
     })
     expect(response.status).toBe(200)
   }
-  // daaa81f refuses a request that would drop its newest message. Leave room
-  // for the short tail, while the long turn at depth 6 still cannot fit.
+  // History fitting uses o200k now (53ff6407, DESIGN §4), so repeated x/b text
+  // is smaller than chars/4. This budget keeps the short tail, but not depth 6.
   await upload("characters/Mira.png", card("Mira", "Hello.", {}, { description: "x".repeat(11_000) }))
   const long = Array.from({ length: 40 }, (_, i) => `Paragraph ${i} of a long turn. ${"b".repeat(80)}`).join("\n\n")
   await upload(
@@ -458,6 +459,7 @@ test("on a phone, a tap on a long message out of the context shows the start of 
         limit: 100
       })
       const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+      expect(next.assemblyError).toBeNull()
       expect(next.historyStart?.depth, JSON.stringify(next.budget)).toBeGreaterThan(6)
       expect(next.historyStart?.depth).toBeLessThan(12)
       return { chatId: chat.id, slotId: entries[6]!.slotId, firstSent: next.historyStart!.depth + 1 }
@@ -471,9 +473,44 @@ test("on a phone, a tap on a long message out of the context shows the start of 
   await expect(row.getByRole("toolbar", { name: "Message actions" })).toBeVisible()
   const reason = row.getByText(new RegExp(`^Not sent to the model: the history sent starts at #${firstSent}\\b`))
   await expect(reason).toBeVisible()
-  await page.waitForTimeout(600)
-  const box = (await reason.boundingBox())!
-  const list = (await page.getByTestId("messages").boundingBox())!
-  expect(box.y).toBeGreaterThanOrEqual(list.y)
-  expect(box.y + box.height).toBeLessThanOrEqual(list.y + list.height)
+  await expect
+    .poll(async () => {
+      const box = (await reason.boundingBox())!
+      const list = (await page.getByTestId("messages").boundingBox())!
+      return box.y >= list.y && box.y + box.height <= list.y + list.height
+    })
+    .toBe(true)
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a long message's editor footer stays in view at ${width} ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      const long = Array.from({ length: 40 }, (_, i) => `Paragraph ${i}. ${"A long synthetic turn. ".repeat(8)}`).join(
+        "\n\n"
+      )
+      const { chat, entry } = await admin((api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.CreateChat({ title: "Long editor footer" })
+          const sent = yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: long,
+            reply: false
+          })
+          if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+          return { chat, entry: sent.entry }
+        })
+      )
+      await open(page, chat.id, `?slot=${entry.slotId}`)
+      const row = page.locator(`article[data-slot="${entry.slotId}"]`)
+      await messageMenu(row, "Edit")
+      await expectTextBox(row.getByRole("textbox", { name: "Message text", exact: true }), long)
+      const cancel = row.getByRole("button", { name: "Cancel", exact: true })
+      await expect(cancel).toBeInViewport()
+      await expectLayout(page, info, "long-message-editor-footer", { scope: '[data-testid="messages"]' })
+      await expect(cancel).toBeInViewport()
+    })

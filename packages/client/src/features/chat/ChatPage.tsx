@@ -557,6 +557,7 @@ function MessageList({
         session={session}
         branchFork={view.forkId}
         onBranch={onBranch}
+        onScrollIntoView={syncOffset}
       />
       <SlotOutlet slot={messageStream} props={{ entry, session, place: "below" }} />
     </>

@@ -184,6 +184,10 @@ const stripThenSplit = async (
   await drag(page, info, source(), right, "strip", audit && `${audit}-strip`)
   await expect(right.locator(STRIP_TAB)).toHaveCount(tabs + 1)
   await expectOpenedFirst(right, shows(right))
+  // The region precedes its lazy editor. Mounting that editor under a held drag can
+  // replace the native drop target after its last dragover, leaving a stale preview.
+  if (shows === cardEditor)
+    await expect(cardEditor(right).getByRole("textbox", { name: "Description", exact: true })).toBeVisible()
   await drag(page, info, source(), right, "split", audit && `${audit}-split`)
   await expect(frames(page)).toHaveCount(3)
   // The right frame's lower half: a new frame below it, which shows it alone.

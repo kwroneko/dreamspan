@@ -248,11 +248,12 @@ test("settings: section path survives reload and Back/Forward", async ({ page })
   await expect(page.getByRole("main").getByRole("heading", { name: "Chats", exact: true })).toBeVisible()
   await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "Interface", exact: true }).click()
   await reload(page)
-  await expect(page).toHaveURL(/\/settings\/interface$/)
+  // Sidebar choices remain in unrelated query keys (ARCHITECTURE §5, Restoring places).
+  await expect(page).toHaveURL((url) => url.pathname === "/settings/interface")
   await page.goBack()
-  await expect(page).toHaveURL(/\/settings\/chats$/)
+  await expect(page).toHaveURL((url) => url.pathname === "/settings/chats")
   await page.goForward()
-  await expect(page).toHaveURL(/\/settings\/interface$/)
+  await expect(page).toHaveURL((url) => url.pathname === "/settings/interface")
 })
 
 test("import: target and missing selected folder job restore with an explanation", async ({ page }) => {
@@ -263,7 +264,7 @@ test("import: target and missing selected folder job restore with an explanation
   await reload(page)
   await expect(page.getByText("That import isn't in the list", { exact: true })).toBeVisible()
   await page.goBack()
-  await expect(page).toHaveURL(new RegExp(`/import\\?into=${preset}$`))
+  await expect(page).toHaveURL((url) => url.pathname === "/import" && url.searchParams.get("into") === preset)
 })
 
 test("bin: section follows the URL after reload and Back/Forward", async ({ page }) => {
@@ -310,7 +311,9 @@ for (const width of [1440, 390]) {
   test(`Interface links preserve legacy addresses at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await page.goto(`${server().url}/settings/display?from=legacy`)
-    await expect(page).toHaveURL(/\/settings\/interface\?from=legacy$/)
+    await expect(page).toHaveURL(
+      (url) => url.pathname === "/settings/interface" && url.searchParams.get("from") === "legacy"
+    )
     if (width === 390) await expect(page.getByRole("group", { name: "Enter sends", exact: true })).toBeVisible()
     else
       await expect(page.getByRole("link", { name: "Interface", exact: true })).toHaveAttribute("aria-current", "page")

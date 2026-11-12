@@ -386,8 +386,9 @@ test("hundreds of cards stay searchable and reachable by keyboard on a phone, pi
   await page.getByRole("tab", { name: "All cards" }).click()
   const search = page.getByRole("combobox", { name: "Find a card to play as" })
   await expect(search).toBeFocused()
-  // The library, less the card the chat starts with.
-  await expect(page.getByRole("option").first()).toHaveAttribute("aria-setsize", String(cardCount - 1))
+  // Any card can be the persona, including the current cast (DESIGN §2.2).
+  await expect(page.getByRole("option").first()).toHaveAttribute("aria-setsize", String(cardCount))
+  await expect(page.getByRole("option", { name: "Mira", exact: true })).toBeVisible()
   expect(await page.getByRole("option").count()).toBeLessThan(30)
   // The file shares a library with other scenarios; isolate the rows this test created.
   await search.fill("Visitor")

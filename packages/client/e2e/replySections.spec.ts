@@ -5,6 +5,7 @@
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, test, type Locator } from "@playwright/test"
+import { originalReply, sectionsDisplay } from "@rp/shared/replySections.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
@@ -94,11 +95,30 @@ for (const width of [1440, 390])
       await expect(reply.getByRole("region", { name: "Reasoning" })).toBeHidden()
 
       // A wrong parse undone: the section back in the text, a new version, the reasoning kept.
+      const parsed = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        api
+          .ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+          .pipe(Effect.map((path) => path.entries.at(-1)!.version))
+      )
       await reply.getByRole("button", { name: "Show as reply text" }).click()
-      await expect(reply).toContainText("<thinking>")
-      await expect(reply).toContainText("</thinking>")
       await expect(notes).toBeHidden()
       await expect(reasoning).toBeVisible()
+      // HTML rendering strips unknown tags, keeping their content (ARCHITECTURE §12,
+      // HTML in messages, inline). Check rendered thinking and the complete stored source.
+      await expect(reply.locator(".markdown")).toContainText(sectionsDisplay(parsed.replySections))
+      const restored = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        api
+          .ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+          .pipe(Effect.map((path) => path.entries.at(-1)!.version))
+      )
+      expect(restored).toMatchObject({
+        content: originalReply(parsed.content, parsed.replySections),
+        origin: "edited",
+        sourceVersionId: parsed.id,
+        reasoning: parsed.reasoning
+      })
+      expect(restored.id).not.toBe(parsed.id)
+      expect(restored.replySections).toBeUndefined()
       await shot("reply-sections-as-text")
 
       // The preset's setting, beside End of request, on by default with the default pairs,

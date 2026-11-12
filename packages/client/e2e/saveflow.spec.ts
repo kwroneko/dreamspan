@@ -371,12 +371,12 @@ test("a copied entry's first field revert retains the copied text", async ({ pag
     .getByRole("group", { name: /^Lorebook entry/ })
     .filter({ has: page.getByRole("textbox", { name: "Title of Harbour (copy)", exact: true }) })
   const content = entry.getByRole("textbox", { name: "Entry content", exact: true })
-  await expect(content).toHaveValue("Boats rock at the quay.")
+  await expectTextBox(content, "Boats rock at the quay.")
   const frame = entry
     .locator("[data-field-frame]")
     .filter({ has: page.getByRole("textbox", { name: "Entry content", exact: true }) })
   await frame.getByRole("button", { name: "Revert to last revision", exact: true }).click()
-  await expect(content).toHaveValue("")
+  await expectTextBox(content, "")
   await entry
     .locator("span[data-own-click]")
     .filter({ hasText: /^harbour$/ })

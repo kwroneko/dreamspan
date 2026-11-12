@@ -69,12 +69,20 @@ for (const [width, theme, model, asCard] of [
     await pickPendingPersona(page, personaName)
     await page.getByRole("button", { name: /^Speaking as / }).click()
     const picker = page.getByRole("dialog", { name: "Speak as", exact: true })
-    await expect(picker.getByRole("option", { name, exact: true })).toBeVisible()
-    await expect(picker.getByRole("option", { name: personaName, exact: true })).toBeVisible()
-    await expect(picker.getByRole("option")).toHaveCount(2)
+    // The same persona also appears under Your persona, a different action
+    // (ARCHITECTURE §12, Speaker search). Choose only who writes the next turn.
+    const speakers = picker.getByRole("group", { name: "Speak as", exact: true })
+    await expect(speakers.getByRole("option", { name, exact: true })).toBeVisible()
+    await expect(speakers.getByRole("option", { name: personaName, exact: true })).toBeVisible()
+    await expect(speakers.getByRole("option")).toHaveCount(2)
+    await expect(
+      picker
+        .getByRole("group", { name: "Your persona", exact: true })
+        .getByRole("option", { name: personaName, exact: true })
+    ).toBeVisible()
     const selected = asCard ? name : personaName
     const speakerId = asCard ? cardId : personaId
-    await picker.getByRole("option", { name: selected, exact: true }).click()
+    await speakers.getByRole("option", { name: selected, exact: true }).click()
     await toggle(page, model)
     const box = page.getByRole("textbox", { name: model ? "Guidance" : "Message", exact: true })
     await box.fill(model ? "Describe the harbor in this character's voice." : "I watch the harbor.")

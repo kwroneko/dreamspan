@@ -174,7 +174,7 @@ export class PendingChat {
     const greeters = new Set(this.state.greeters.map((item) => item.card.entityId))
     this.availableCards = result.value.filter((card) => !greeters.has(card.entityId))
     this.change((state) => ({ ...state }))
-    return { ok: true, value: this.cards }
+    return result
   }
 
   /** The card the user plays, if any. */
