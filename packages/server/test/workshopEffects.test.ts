@@ -11,6 +11,7 @@ import { client, login, outcome, posted, serverLayer, testConfig } from "./suppo
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+import { validateToolArguments } from "@earendil-works/pi-ai"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 const call = (name: string, args: unknown, id: string) => [
@@ -99,6 +100,72 @@ const fixture = (dataDir: string, api: Api) =>
   })
 
 describe("workshop setup effects", () => {
+  it.live("rejects unknown and oversized setup arguments before making changes", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const registry = yield* ExecutionRegistry
+      const invalid = [
+        ["create_card", { name: "Keeper", permission: true }],
+        ["create_card", { name: "Keeper", description: "x".repeat(65_537) }],
+        ["create_card", { name: "Keeper", alternate_greetings: Array(33).fill("Hi") }],
+        ["clone_card", { card: "Assistant", name: "Copy", moveDrafts: false }],
+        ["start_chat", { cards: Array(17).fill("Assistant") }],
+        ["start_chat", { cards: ["Assistant"], kind: "workshop" }],
+        ["edit_card", { card: "Assistant", changes: [{ field: "description", text: "a", find: "b", replace: "c" }] }],
+        ["edit_card", { card: "Assistant", changes: Array(33).fill({ field: "description", text: "a" }) }]
+      ] as const
+      for (const [name, args] of invalid) {
+        const tool = toolForKind(registry, "workshop", name)!
+        assert.throws(() =>
+          validateToolArguments(
+            { name, description: tool.description, parameters: tool.parameters },
+            { type: "toolCall", name, id: "bad", arguments: args }
+          )
+        )
+        assert.isTrue((yield* f.run(name, args, `bad-${name}`)).isError)
+      }
+      assert.isEmpty(yield* api.ListRolloutEffects({ chatId: f.chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("bounds persisted documents and the number of setup calls in one rollout", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const huge = "x".repeat(65_536)
+      const oversized = yield* f.run(
+        "create_card",
+        { name: "Too large", description: huge, personality: huge, scenario: huge, first_message: huge },
+        "huge"
+      )
+      assert.isTrue(oversized.isError)
+      const source = yield* api.CreateCard({
+        label: "Large source",
+        name: "Large source",
+        description: "é".repeat(131_073)
+      })
+      assert.isTrue((yield* f.run("clone_card", { card: source.id, name: "Too large a copy" }, "huge-clone")).isError)
+      const greeting = yield* api.CreateCard({ label: "Many greetings", name: "Many greetings" })
+      yield* f.writer.EditRef({
+        userId: f.user.id,
+        refId: greeting.id,
+        expectedRowVersion: greeting.rowVersion,
+        doc: { ...newCardDoc("Many greetings"), first_mes: "Hi", alternate_greetings: Array(33).fill("Hi again") },
+        message: null,
+        commitDraft: null
+      })
+      assert.isTrue((yield* f.run("start_chat", { cards: [greeting.id] }, "many-greetings")).isError)
+      for (let i = 0; i < 32; i++)
+        assert.isUndefined((yield* f.run("create_card", { name: `Bounded ${i}` }, `bounded-${i}`)).isError)
+      const excess = yield* f.run("create_card", { name: "One too many" }, "excess")
+      assert.isTrue(excess.isError)
+      assert.lengthOf(yield* api.ListRolloutEffects({ chatId: f.chat.id, limit: 200 }), 32)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live(
     "makes the lighthouse keeper and starts her story through the provider, keeps changes across a resume, then undoes both",
     () => {

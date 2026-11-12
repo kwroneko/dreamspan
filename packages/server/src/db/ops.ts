@@ -1827,7 +1827,7 @@ export class WriteOps extends RpcGroup.make(
       characterVersion: Schema.String
     },
     success: Schema.String,
-    error: Schema.Union([NotFound, RefOperationRefused, EffectUndoRefused, StorageError])
+    error: Schema.Union([NotFound, InvalidDocument, RefOperationRefused, EffectUndoRefused, StorageError])
   }),
   Rpc.make("StartGreetingChat", {
     payload: {

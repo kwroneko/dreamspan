@@ -14,6 +14,7 @@ import type { Bin } from "./bin.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
+import { workshopLimits as limits } from "../workshopLimits.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type OperationName =
@@ -229,13 +230,32 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         if (receipt) return JSON.parse(receipt.result_json) as string
         if (!["running", "created"].includes(rollout.status))
           return yield* new EffectUndoRefused({ message: "This workshop run is no longer running." })
+        const [used] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM rollout_receipts
+          WHERE rollout_id = ${key.rolloutId} AND is_error = 0`
+        if (used!.n >= limits.calls)
+          return yield* new EffectUndoRefused({
+            message: `This run has reached its limit of ${limits.calls} changes. Start another turn to continue.`
+          })
         const { result, effects } = yield* body
+        const [recorded] = yield* sql<{
+          n: number
+        }>`SELECT count(*) AS n FROM rollout_effects WHERE rollout_id = ${key.rolloutId}`
+        if (recorded!.n + effects.length > limits.effects)
+          return yield* new EffectUndoRefused({
+            message: `This run can change at most ${limits.effects} items. Start another turn to continue.`
+          })
         const at = Date.now()
         yield* sql`INSERT INTO rollout_receipts ${sql.insert({ rollout_id: key.rolloutId, tool_call_id: key.toolCallId, result_json: JSON.stringify(result), created_at: at })}`
         for (const [seq, effect] of effects.entries())
           yield* sql`INSERT INTO rollout_effects ${sql.insert({ rollout_id: key.rolloutId, tool_call_id: key.toolCallId, seq, kind: effect.kind, target_kind: effect.targetKind, target_id: effect.targetId, title: effect.title, undo_json: effect.undo === null ? null : JSON.stringify(effect.undo), created_at: at })}`
         return result
       }).pipe(transaction(sql, "WorkshopEffect"))
+    const checkDocument = (doc: unknown) =>
+      Buffer.byteLength(JSON.stringify(doc), "utf8") <= limits.documentBytes
+        ? Effect.void
+        : Effect.fail(
+            new InvalidDocument({ problems: [`Workshop documents are limited to ${limits.documentBytes} bytes.`] })
+          )
     const creation = (refId: RefId) =>
       Effect.gen(function* () {
         const ref = (yield* lib.refsWhere("r.id = ?", [refId]))[0]!
@@ -270,6 +290,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         receipted(
           input,
           Effect.gen(function* () {
+            yield* checkDocument(input.doc)
             const valid = validateDoc(
               input.kind,
               withHtmlApprovals(
@@ -285,6 +306,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               )
             )
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
+            yield* checkDocument(valid.doc)
             const { ref } = yield* ops.CreateEntity({
               userId: input.userId,
               kind: input.kind,
@@ -307,6 +329,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         receipted(
           input,
           Effect.gen(function* () {
+            yield* checkDocument(input.doc)
             const before = yield* lib.ownedRef(input.userId, input.refId)
             const change = yield* ops.EditRef({
               userId: input.userId,
@@ -345,6 +368,22 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           input,
           Effect.gen(function* () {
             const source = yield* lib.ownedRef(input.userId, input.refId)
+            // Bound the whole fork before it copies any notes or moves any drafts.
+            const [size] = yield* sql<{ n: number; bytes: number; largest: number }>`SELECT count(*) AS n,
+              coalesce(sum(length(CAST(h.doc_json AS BLOB)) + (SELECT coalesce(sum(length(CAST(d.content AS BLOB))), 0)
+                FROM drafts d WHERE d.user_id = ${input.userId} AND d.target_kind = 'entity_field' AND d.target_id = r.id AND d.status = 'active')), 0) AS bytes,
+              coalesce(max(length(CAST(h.doc_json AS BLOB))), 0) AS largest
+              FROM entity_refs r JOIN entities e ON e.id = r.entity_id JOIN entity_revisions h ON h.id = r.head_revision_id
+              WHERE e.owner_user_id = ${input.userId} AND e.deleted_at IS NULL
+                AND (e.id = ${source.entity_id} OR (e.kind = 'note' AND json_extract(h.doc_json, '$.owner.card') = ${source.entity_id}))`
+            if (
+              size!.n > limits.listItems + 1 ||
+              size!.bytes > limits.cloneBytes ||
+              size!.largest > limits.documentBytes
+            )
+              return yield* new EffectUndoRefused({
+                message: `A workshop clone allows at most ${limits.listItems} notes, ${limits.documentBytes} bytes per document and ${limits.cloneBytes} bytes in total including drafts. Clone this card in the library instead.`
+              })
             const old = yield* sql<{
               id: string
               content: string
@@ -360,7 +399,10 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             }>`SELECT r.id, r.entity_id FROM entity_refs r JOIN entities e ON e.id = r.entity_id JOIN entity_revisions h ON h.id = r.head_revision_id WHERE e.owner_user_id = ${input.userId}
         AND (e.id = ${ref.entityId} OR (e.kind = 'note' AND json_extract(h.doc_json, '$.owner.card') = ${ref.entityId})) ORDER BY e.kind = 'card' DESC, e.id`
             const effects = []
-            for (const row of made) effects.push(yield* creation(row.id))
+            for (const row of made) {
+              yield* checkDocument(yield* lib.loadDoc((yield* lib.ownedRef(input.userId, row.id)).head_revision_id))
+              effects.push(yield* creation(row.id))
+            }
             const carries = []
             for (const draft of old) {
               const [now] = yield* sql<{ row_version: number }>`SELECT row_version FROM drafts WHERE id = ${draft.id}`
@@ -383,6 +425,19 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         receipted(
           input,
           Effect.gen(function* () {
+            const greetings = input.greeters.flatMap((greeter) => greeter.options)
+            if (
+              input.cards.length > limits.castCards ||
+              input.greeters.length > limits.castCards ||
+              input.greeters.some((greeter) => greeter.options.length > limits.listItems + 1) ||
+              greetings.length > limits.effects ||
+              greetings.some((greeting) => greeting.text.length > limits.textChars) ||
+              Buffer.byteLength(JSON.stringify(input.greeters), "utf8") > limits.cloneBytes
+            )
+              return yield* new EffectUndoRefused({
+                message:
+                  "The selected greetings exceed the workshop's setup limits. Start this chat from the library instead."
+              })
             const chat = yield* ops.StartGreetingChat(input)
             let binding: {
               connection: import("@rp/shared/providers.ts").ConnectionId
