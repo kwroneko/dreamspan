@@ -1,3 +1,4 @@
+import { requireSummaries } from "./chatKindPolicy.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 // What enabling LCM on a chat takes (spec/LCM.md §2.7, §2.11), measured in one read: the
 // imported summary that could stand in for its hidden run, and the work the planner would do
@@ -159,6 +160,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
     EstimateBackfill: ({ userId, chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
+        yield* requireSummaries(sql, chatId)
         const sources = sqlSources(sql, { userId, chatId, next: true, cut: leafSlotId })
         const base = yield* Effect.map(AssemblySources, (s) => s).pipe(Effect.provide(sources.layer))
         const events = yield* base.events(leafSlotId)

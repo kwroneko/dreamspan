@@ -1,3 +1,4 @@
+import { chatKinds } from "@rp/shared/chatKinds.ts"
 // "Merge another chat into this one" (spec/CHAT-MERGE.md §7; owner decisions DESIGN §3.3,
 // 2026-11-05). One dialog for both entry points, the ⋯ menu (after the newest message) and a
 // message's actions (after that message): pick the chat or branch to bring in, see what comes in
@@ -96,12 +97,14 @@ function SourcePicker({
           .then((result) => {
             if (live && result.ok)
               setChats(
-                (result.value.sections[0]?.rows ?? []).map((row) => ({
-                  chat: row.sourceChatId ?? row.chat.id,
-                  listed: row.chat.id,
-                  title: row.chatName,
-                  fork: row.forkId as ForkId
-                }))
+                (result.value.sections[0]?.rows ?? [])
+                  .filter((row) => chatKinds.get(row.chat.kind)?.allowsMerge === true)
+                  .map((row) => ({
+                    chat: row.sourceChatId ?? row.chat.id,
+                    listed: row.chat.id,
+                    title: row.chatName,
+                    fork: row.forkId as ForkId
+                  }))
               )
           }),
       query === "" ? 0 : 250

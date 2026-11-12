@@ -1,3 +1,4 @@
+import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
 import { exercisePhoneFooters } from "./support/phoneFooters.ts"
 import { newflowTests } from "./support/newflows.ts"
 import { seedSplitChats } from "./support/splitChats.ts"
@@ -32,6 +33,7 @@ import { modelCatalog } from "./support/modelCatalog.ts"
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
 if (process.env.LAYOUT_AUDIT_NEWFLOWS_ONLY === "1") newflowTests()
+if (process.env.LAYOUT_AUDIT_WORKSHOP_ONLY === "1") workshopBoundaryTests()
 
 test.describe("model picker catalog layout", () => {
   let server: TestServer

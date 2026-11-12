@@ -1,12 +1,12 @@
 import { expect, test } from "vitest"
 import type { PathEntry } from "@rp/shared/chat.ts"
-import { exportText } from "../src/features/chat/chatExportText.ts"
+import { exportFormats, exportText } from "../src/features/chat/chatExportText.ts"
 import type { ChatView } from "../src/features/chat/session.ts"
 
 // ⋯ Export: the branch shown, as ST's .jsonl (a header line, then one line per message, the
 // version shown) or as plain text, with the names the chat shows.
 const view = {
-  chat: { title: "Aria", createdAt: Date.UTC(2026, 0, 2) },
+  chat: { kind: "rp", title: "Aria", createdAt: Date.UTC(2026, 0, 2) },
   cast: {
     participants: ["aria", "sam"],
     playedByMe: ["sam"],
@@ -41,4 +41,11 @@ test("Export as SillyTavern .jsonl: a header line, then each message with its sp
 
 test("Export as plain text: who said what, a blank line between messages", () => {
   expect(exportText(view, entries, "txt")).toBe("Aria: Hello, Sam.\n\nSam: Hi.\nTwo lines.\n")
+})
+
+test("Workshop exports permit plain text and refuse SillyTavern", () => {
+  const workshop = { ...view, chat: { ...view.chat!, kind: "workshop" } }
+  expect(exportFormats(workshop)).toEqual(["txt"])
+  expect(exportText(workshop, entries, "txt")).toBe(exportText(view, entries, "txt"))
+  expect(() => exportText(workshop, entries, "jsonl")).toThrow("does not support")
 })

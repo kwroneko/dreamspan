@@ -148,7 +148,12 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   preview: Schema.String,
   messages: Schema.Int,
   /** Only what the rows show; the chat's own record is read when it opens. */
-  chat: Schema.Struct({ id: ChatId, title: Schema.String, createdAt: Schema.optionalKey(Schema.Number) }),
+  chat: Schema.Struct({
+    id: ChatId,
+    kind: Schema.String,
+    title: Schema.String,
+    createdAt: Schema.optionalKey(Schema.Number)
+  }),
   leaf: Schema.NullOr(SlotId),
   /** The fork's name, else its chat's. */
   name: Schema.String,

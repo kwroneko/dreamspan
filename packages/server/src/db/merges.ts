@@ -1,3 +1,4 @@
+import { chatAllows } from "./chatKindPolicy.ts"
 // Merging another chat into this one (spec/CHAT-MERGE.md; owner decisions DESIGN §3.3,
 // 2026-11-05). `mergePlan` computes what a merge brings, for the preview (a reader) and the
 // write (the writer, again inside its transaction), so the write merges exactly what was
@@ -198,6 +199,11 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     const fork = yield* liveFork(sql, request.chatId, request.forkId)
     const sourceChat = yield* ownedChat(sql, userId, request.source.chatId)
     const source = yield* liveFork(sql, request.source.chatId, request.source.forkId)
+    if (
+      !(yield* chatAllows(sql, request.chatId, "allowsMerge")) ||
+      !(yield* chatAllows(sql, request.source.chatId, "allowsMerge"))
+    )
+      return yield* refused("This chat kind does not support merging.")
     if (source.id === fork.id) return yield* refused("A branch can't be merged into itself.")
 
     // The destination: its display path, and the merge position on it.

@@ -1,3 +1,4 @@
+import { chatAllows } from "./chatKindPolicy.ts"
 import { inJobFork } from "./lcmFork.ts"
 import { viewAt } from "./forkState.ts"
 import { slotCost } from "../lcm/planning.ts"
@@ -53,7 +54,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           refresh: [],
           condensations: [],
           flagged: [],
-          enabled: state.lcm?.enabled === true,
+          enabled: state.lcm?.enabled === true && (yield* chatAllows(sql, chatId, "allowsSummaries")),
           over: false,
           partialBatch: false,
           windowMax: 0,
@@ -64,7 +65,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           liveJobs: 0,
           backfill: null as { armed: boolean; held: boolean; drive: boolean; settled: boolean } | null
         }
-        if (!state.lcm?.enabled) return empty
+        if (!state.lcm?.enabled || !empty.enabled) return empty
         // The chat's backfill (spec/LCM.md §2.11): begun by a reply, held at its cap.
         const row = yield* backfillOf(sql, chatId)
         const live = row?.status === "processing" ? row : null
