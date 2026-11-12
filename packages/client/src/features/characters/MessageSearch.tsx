@@ -23,7 +23,7 @@ import { forkLabel, formatMoment } from "../chat/forks.ts"
 import { useShellNavigation } from "./shellData.tsx"
 
 /** The URL key that widens the left panel's chat search to message text. */
-export const MESSAGE_SEARCH_KEY = "sideIn"
+const MESSAGE_SEARCH_KEY = "sideIn"
 
 /** Whether the left panel's chat search looks through message text, and a way to switch it. */
 export function useMessageSearch() {

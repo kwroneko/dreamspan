@@ -10,7 +10,7 @@ import { ChatId, EntityId, ForkId, ForkSplit, SlotId, VersionId } from "./chat.t
 export const MessageQuery = Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(200))
 
 /** Words at most; the rest of a long query is left out. */
-export const MAX_WORDS = 8
+const MAX_WORDS = 8
 
 /**
  * The words of a query, as the full-text index splits text (letters and digits; everything
@@ -66,7 +66,7 @@ export const markWords = (text: string, words: ReadonlyArray<string>): ReadonlyA
 }
 
 /** Characters an excerpt shows at most. */
-export const EXCERPT_LENGTH = 180
+const EXCERPT_LENGTH = 180
 
 export const Excerpt = Schema.Struct({
   text: Schema.String,

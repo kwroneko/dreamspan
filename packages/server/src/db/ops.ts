@@ -554,7 +554,7 @@ export const LibraryReplaceEntry = Schema.Struct({
 })
 export type LibraryReplaceEntry = typeof LibraryReplaceEntry.Type
 
-export const LibraryReplacePlan = Schema.Struct({
+const LibraryReplacePlan = Schema.Struct({
   entries: Schema.Array(LibraryReplaceEntry),
   skipped: Schema.Array(LibrarySkipped)
 })

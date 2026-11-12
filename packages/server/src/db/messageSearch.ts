@@ -33,7 +33,7 @@ import { query } from "./tx.ts"
 /** Full-text matches read per statement. */
 const BATCH = 500
 /** Matches a page looks at most before it answers with what it found and a cursor. */
-export const SCAN = 20_000
+const SCAN = 20_000
 
 interface Candidate {
   readonly seq: number
@@ -60,7 +60,7 @@ interface ChatForks {
   readonly splits: Map<string, HitBranch["split"]>
 }
 
-export const searchMessages = (
+const searchMessages = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   text: string,

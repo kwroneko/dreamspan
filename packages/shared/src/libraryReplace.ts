@@ -43,14 +43,13 @@ export const FieldExcerpt = Schema.Struct({
 })
 export type FieldExcerpt = typeof FieldExcerpt.Type
 
-export const LibraryFieldHit = Schema.Struct({
+const LibraryFieldHit = Schema.Struct({
   /** The field as drafts name it (`textField` of its path, editing.ts). */
   field: Schema.String,
   label: Schema.String,
   count: Schema.Int,
   excerpt: FieldExcerpt
 })
-export type LibraryFieldHit = typeof LibraryFieldHit.Type
 
 export const LibraryEntryHit = Schema.Struct({
   refId: RefId,
@@ -68,7 +67,7 @@ export const LibraryEntryHit = Schema.Struct({
 })
 export type LibraryEntryHit = typeof LibraryEntryHit.Type
 
-export const LibraryKindCount = Schema.Struct({
+const LibraryKindCount = Schema.Struct({
   kind: LibraryReplaceKind,
   entries: Schema.Int,
   matches: Schema.Int
