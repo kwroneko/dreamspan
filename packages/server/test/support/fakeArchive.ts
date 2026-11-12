@@ -407,6 +407,8 @@ export interface FakeArchive {
   readonly host: string
   readonly cards: ReadonlyArray<FakeCard>
   /** Requests received, by path, and all together. */
+  readonly conditionalHits: () => number
+  readonly notModified: () => number
   readonly hits: () => number
   readonly paths: () => ReadonlyArray<string>
   readonly reset: () => void
@@ -469,10 +471,23 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
   const seen: Array<string> = []
   let failure: { status: number; times: number; retryAfter?: number; path?: string } | null = null
 
-  const json = (res: ServerResponse, status: number, body: unknown) => {
-    res.writeHead(status, { "content-type": "application/json; charset=utf-8" })
-    res.end(JSON.stringify(body))
+  let conditionalHits = 0
+  let notModified = 0
+  const send = (res: ServerResponse, status: number, bytes: string | Uint8Array, headers: Record<string, string>) => {
+    if (status === 200 && !res.req.url?.startsWith("/__fake/")) {
+      const etag = `"${createHash("sha256").update(bytes).digest("hex")}"`
+      headers.etag = etag
+      if (res.req.headers["if-none-match"] === etag) {
+        notModified++
+        res.writeHead(304, { etag })
+        return res.end()
+      }
+    }
+    res.writeHead(status, headers)
+    res.end(bytes)
   }
+  const json = (res: ServerResponse, status: number, body: unknown) =>
+    send(res, status, JSON.stringify(body), { "content-type": "application/json; charset=utf-8" })
   // v1's CardSummary; its URLs are paths on the archive.
   const summary = (c: FakeCard) => ({
     slug: c.slug,
@@ -665,14 +680,15 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     if (refused.has(c.slug)) return json(res, 403, error("download_refused", "this card can't be downloaded"))
     if (!downloadModes(c).includes(mode)) return json(res, 404, error("no_derived_download", "not in this form"))
     if (mode === "json" || mode === "original") {
-      res.writeHead(200, {
+      return send(res, 200, c.json, {
         "content-type": "application/json; charset=utf-8",
         "content-disposition": `attachment; filename="${c.slug}.json"`
       })
-      return res.end(c.json)
     }
-    res.writeHead(200, { "content-type": "image/png", "content-disposition": `attachment; filename="${c.slug}.png"` })
-    return res.end(cardPng(c))
+    return send(res, 200, cardPng(c), {
+      "content-type": "image/png",
+      "content-disposition": `attachment; filename="${c.slug}.png"`
+    })
   }
 
   const handle = (req: IncomingMessage, res: ServerResponse) => {
@@ -701,6 +717,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       return json(res, 200, { slug, version: next.sha256 })
     }
     seen.push(`${path}${url.search}`)
+    if (req.headers["if-none-match"]) conditionalHits++
     if (failure && failure.times > 0 && (failure.path === undefined || failure.path === path)) {
       failure.times -= 1
       const { status, retryAfter } = failure
@@ -807,11 +824,10 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       const c = bySha.get((picture[1] ?? picture[3])!)
       if (!c) return json(res, 404, error("not_found", "no such picture"))
       void image(c, thumb ? (picture[2] as "512" | "64") : "full").then((bytes) => {
-        res.writeHead(200, {
+        send(res, 200, bytes, {
           "content-type": thumb ? "image/webp" : "image/png",
           "cache-control": "public, max-age=31536000, immutable"
         })
-        res.end(bytes)
       })
       return
     }
@@ -826,6 +842,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     origin,
     host: `127.0.0.1:${port}`,
     cards,
+    conditionalHits: () => conditionalHits,
+    notModified: () => notModified,
     hits: () => seen.length,
     paths: () => [...seen],
     reset: () => {

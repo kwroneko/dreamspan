@@ -195,7 +195,7 @@ export const makeSourceHttp = (
       if (status === 451) return yield* fail(adapter.id, "region_unavailable", "not available in your region")
       if (status === 404) return yield* fail(adapter.id, "not_found", "not on the source")
       if (status >= 500) return yield* fail(adapter.id, "unreachable", `${adapter.id} answered ${status}`)
-      if (status < 200 || status > 299) {
+      if ((status < 200 || status > 299) && !(status === 304 && new Headers(headers).has("if-none-match"))) {
         const code = refusalCode(response.bytes)
         return yield* new SourceFailed({
           sourceId: adapter.id,

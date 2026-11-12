@@ -52,6 +52,7 @@ import { Secrets } from "../secrets.ts"
 import type { AdapterSummary, CardSourceAdapter, SourceHttp } from "./adapter.ts"
 import { blobPath, DEFAULT_CAP_BYTES, makeSourceCache, type SourceCache } from "./cache.ts"
 import { makeSourceHttp } from "./guard.ts"
+import { withConditionalGets } from "./httpCache.ts"
 import { makeCoalescer, makeLimiter } from "./limiter.ts"
 
 const ADMIN_KEY = "sources.admin"
@@ -327,12 +328,13 @@ const make = (options: CardSourcesOptions = {}) =>
     const httpFor = (user: User, adapter: CardSourceAdapter, prefs: SourcePrefs) =>
       Effect.gen(function* () {
         yield* refreshBypass
-        return makeSourceHttp(adapter, yield* apiKey(user, adapter, prefs), {
+        const http = makeSourceHttp(adapter, yield* apiKey(user, adapter, prefs), {
           network,
           limiter,
           bypassEntries: () => bypass.entries,
           ...(options.onRequest ? { onRequest: options.onRequest } : {})
         })
+        return withConditionalGets(http, cache, user.id, adapter.id)
       })
 
     /** Asks the source once for everyone waiting on the same thing (two tabs, home and the sidebar). */
