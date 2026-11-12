@@ -53,3 +53,26 @@ it("removes standard embedded HTML, SVG and MathML elements while preserving cus
     "Map<status>HP 9</status>"
   )
 })
+
+for (const body of [
+  "<script>const x = `HIDDEN_SCRIPT`;</script><p>Kept.</p>",
+  "<template><template>hidden</template>HIDDEN_TEMPLATE</template><p>Kept.</p>",
+  "<!-- `HIDDEN_COMMENT` --><p>Kept.</p>",
+  "<style>.x { content: `HIDDEN_STYLE`; }</style><p>Kept.</p>"
+]) {
+  it(`removes complete non-text nodes from prose: ${body}`, () => {
+    expect(htmlDepthForm(body, "text")).toBe("Kept.")
+  })
+  it(`removes complete non-text nodes from document fences: ${body}`, () => {
+    expect(htmlDepthForm("```html\n<body>" + body + "</body>\n```", "text")).toBe("Kept.")
+  })
+}
+
+it("keeps literal HTML examples inside inline and fenced code", () => {
+  expect(htmlDepthForm("Use `<script>x()</script>` and <b>bold</b>.", "text")).toBe(
+    "Use `<script>x()</script>` and bold."
+  )
+  expect(htmlDepthForm("```js\nconst x = `<script>literal</script>`\n```", "text")).toBe(
+    "```js\nconst x = `<script>literal</script>`\n```"
+  )
+})

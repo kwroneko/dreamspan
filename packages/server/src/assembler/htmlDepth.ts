@@ -4,6 +4,7 @@
 // blocks whole. Code that isn't a document stays as written, and so do tags that aren't HTML's
 // (a model's own `<status>` markers, reply sections): only the elements HTML defines go.
 import { decodeHTML } from "entities"
+import { parseFragment, type DefaultTreeAdapterTypes } from "parse5"
 import type { HtmlDepth } from "@rp/shared/state.ts"
 
 /** Tavern Helper's test (`is_frontend.ts`), as the client's renderer has it (ui/html/parts.ts). */
@@ -50,7 +51,7 @@ const hasMarkup = (text: string) => {
 /** `text` without HTML's tags: their text stays, line ends where blocks ended, entities decoded. */
 const textOnly = (text: string) => {
   if (!hasMarkup(text) && !HAS_DROPPED.test(text)) return text
-  const stripped = text
+  const stripped = withoutNonText(text, false)
     .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
     .replace(/<!doctype\b[^>]*>/gi, "")
     .replace(DROPPED, "")
@@ -73,8 +74,43 @@ const textOnly = (text: string) => {
 const FENCE = /^( {0,3})(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)(?:\n {0,3}\2[`~]*[ \t]*(?=\n|$)|$)/gm
 const INLINE_CODE = /(`+)[^`\n][\s\S]*?\1/g
 
+/** Remove complete non-text elements before Markdown spans can split their bodies.
+ * Source offsets keep unknown markers and prose byte-for-byte; parse5 handles nested
+ * templates, quoted attributes and raw-text elements as the browser does. */
+const withoutNonText = (text: string, protectCode = true) => {
+  if (!/<(?:script|style|template|noscript|head)\b|<!--/i.test(text)) return text
+  const spans = protectCode ? [...text.matchAll(INLINE_CODE)] : []
+  const protectedAt = (at: number) => spans.some((span) => span.index <= at && at < span.index + span[0].length)
+  const ranges: Array<{ startOffset: number; endOffset: number }> = []
+  const visit = (node: DefaultTreeAdapterTypes.Node) => {
+    const location = node.sourceCodeLocation
+    if (
+      location &&
+      !protectedAt(location.startOffset) &&
+      (node.nodeName === "#comment" || ["script", "style", "template", "noscript", "head"].includes(node.nodeName))
+    ) {
+      ranges.push(location)
+      return
+    }
+    if ("childNodes" in node) node.childNodes.forEach(visit)
+  }
+  visit(parseFragment(text, { sourceCodeLocationInfo: true }))
+  // The fragment parser ignores head tags outside a document; their content still
+  // isn't visible prose. Match those spans before protecting inline Markdown.
+  for (const match of text.matchAll(/<head\b[^>]*>[\s\S]*?(?:<\/head\s*>|$)/gi))
+    if (!protectedAt(match.index)) ranges.push({ startOffset: match.index, endOffset: match.index + match[0].length })
+  let out = ""
+  let at = 0
+  for (const range of ranges.sort((a, b) => a.startOffset - b.startOffset)) {
+    if (range.startOffset >= at) out += text.slice(at, range.startOffset)
+    at = Math.max(at, range.endOffset)
+  }
+  return out + text.slice(at)
+}
+
 /** Prose's HTML reduced to text, leaving inline code as written. */
-const prose = (text: string) => {
+const prose = (source: string) => {
+  const text = withoutNonText(source)
   let out = ""
   let at = 0
   for (const match of text.matchAll(INLINE_CODE)) {

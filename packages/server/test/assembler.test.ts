@@ -19,7 +19,7 @@ import type { ContextSnapshot, ModelInput, NoteInput } from "../src/assembler/ty
 import { matchLorebooks } from "../src/assembler/lorebook.ts"
 import { makeAssembler } from "../src/assembler/assembler.ts"
 import { makeScriptRunner, makeRegexDeadline, REGEX_MS, REGEX_OUTPUT } from "../src/assembler/regex.ts"
-import { chatCompletionsFields, providerRequest } from "../src/assembler/wire.ts"
+import { chatCompletionsFields, providerRequest, wireContext } from "../src/assembler/wire.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { forbidCardOverrides, importStPreset } from "../src/formats/preset.ts"
 import { placeBreakpoints } from "../src/assembler/breakpoints.ts"
@@ -1293,6 +1293,30 @@ describe("the context assembler", () => {
     // Past its depths for good, or within them for good, a script changes nothing later.
     const settled = await depthBound({ maxDepth: 1 })
     expect(contents(settled)[settled.request.breakpoints[0]!.message]).toBe("user: six")
+  })
+
+  it("keeps HTML-depth request bytes deterministic, inspectable and the source history unchanged", async () => {
+    const messages: FixtureMessage[] = [
+      { side: "assistant", content: "<script>const secret = `HIDDEN_SCRIPT`;</script><p>Kept.</p>" },
+      { side: "user", content: "Next" }
+    ]
+    const original = JSON.stringify(messages)
+    const event = { scope: null, data: { key: "context.html_depth", value: { mode: "text", n: 1 } } } as const
+    const fixture = chat({ messages, events: [{ depth: null, event }] })
+    const first = await assembled(fixture)
+    const second = await assembled(fixture)
+    expect(JSON.stringify(first.request)).toBe(JSON.stringify(second.request))
+    expect(contents(first)).toContain("assistant: Kept.")
+    expect(JSON.stringify(first.request)).not.toContain("HIDDEN_SCRIPT")
+    expect(JSON.stringify(messages)).toBe(original)
+    const inspected = wireContext(first.request, model())
+    expect(inspected.messages.map(({ role, content }) => ({ role, content }))).toEqual(
+      first.request.messages.map(({ role, content }) => ({ role, content }))
+    )
+    const extended = await assembled(chat({ ...fixture, messages: [...messages, { side: "user", content: "Later" }] }))
+    expect(extended.request.messages.find((message) => message.content === "Kept.")).toEqual(
+      first.request.messages.find((message) => message.content === "Kept.")
+    )
   })
 
   it("applies HTML depth after prompt scripts and permits replacing or disabling the stage", async () => {
