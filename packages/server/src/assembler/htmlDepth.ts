@@ -3,8 +3,11 @@
 // "Text only" removes HTML tags and keeps their text; "Leave out panels" also drops document
 // blocks whole. Code that isn't a document stays as written, and so do tags that aren't HTML's
 // (a model's own `<status>` markers, reply sections): only the elements HTML defines go.
-import { decodeHTML } from "entities"
-import { parseFragment, type DefaultTreeAdapterTypes } from "parse5"
+// HTML is read by parse5's tokenizer, the one the client's renderer (rehype-raw) uses, with
+// the tree builder's raw-text switches, so tags, attributes, comments, character references and
+// textarea/script bodies split where the browser splits them. Markdown's code spans and fences
+// are found as before. Output is a pure function of the text: same history, same bytes.
+import { Tokenizer, TokenizerMode, type Token } from "parse5"
 import type { HtmlDepth } from "@rp/shared/state.ts"
 
 /** Tavern Helper's test (`is_frontend.ts`), as the client's renderer has it (ui/html/parts.ts). */
@@ -33,38 +36,139 @@ const ELEMENTS = new Set(
     "switch textpath view"
   ).split(" ")
 )
-/** Elements whose content isn't text: they go with it. */
-const DROPPED = /<(script|style|template|noscript|head)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi
-const HAS_DROPPED = new RegExp(DROPPED.source, "i")
+/** Elements whose content isn't text: they go with it, through the end when unfinished. */
+const NON_TEXT = new Set(["script", "style", "template", "noscript", "head"])
 /** Elements that end a line: their end becomes a line break. */
 const BLOCKS = new Set(
   "address article aside blockquote details dialog div dl dt dd fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr li main nav ol p pre section summary table tr ul".split(
     " "
   )
 )
-const TAG = /<\/?([A-Za-z][A-Za-z0-9-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*\/?>/g
-const hasMarkup = (text: string) => {
-  for (const match of text.matchAll(TAG)) if (ELEMENTS.has(match[1]!.toLowerCase())) return true
-  return /<!--|<!doctype\b/i.test(text)
+/** The tree builder's tokenizer switches (HTML §13.2.6.4.7), outside SVG and MathML. */
+const RAW_TEXT = new Map<string, Tokenizer["state"]>([
+  ["textarea", TokenizerMode.RCDATA],
+  ["title", TokenizerMode.RCDATA],
+  ["style", TokenizerMode.RAWTEXT],
+  ["xmp", TokenizerMode.RAWTEXT],
+  ["iframe", TokenizerMode.RAWTEXT],
+  ["noembed", TokenizerMode.RAWTEXT],
+  ["noframes", TokenizerMode.RAWTEXT],
+  // Scripting is on in the reader's browser, so its content is raw text there too.
+  ["noscript", TokenizerMode.RAWTEXT],
+  ["script", TokenizerMode.SCRIPT_DATA],
+  ["plaintext", TokenizerMode.PLAINTEXT]
+])
+
+type Piece =
+  /** `chars` as HTML decodes them there (references in text and RCDATA, none in raw text). */
+  | { readonly kind: "text"; readonly start: number; readonly end: number; readonly chars: string }
+  | { readonly kind: "start" | "end"; readonly start: number; readonly end: number; readonly name: string }
+  | { readonly kind: "other"; readonly start: number; readonly end: number }
+
+/**
+ * A `<` that Markdown shows as text (it isn't raw HTML there) but that HTML's tokenizer would
+ * open a bogus comment with (or drop, `</>`), hiding text up to the next `>`: `</` without a tag name (`</3`),
+ * `<?` with no `?>` after it, `<!` without a letter, `--` or CDATA, or with no `>` after it.
+ */
+const LITERAL_OPENING = /<(?=\/(?![A-Za-z])|\?|!(?!--|\[CDATA\[))/g
+const MARKS = ["", "", "", "", "﷐", "﷑"]
+const withLiteralOpenings = (source: string) => {
+  const mark = MARKS.find((candidate) => !source.includes(candidate))
+  if (mark === undefined) return { masked: source, unmask: (chars: string) => chars }
+  const lastInstruction = source.lastIndexOf("?>")
+  const lastClose = source.lastIndexOf(">")
+  const masked = source.replace(LITERAL_OPENING, (lt, at: number) => {
+    const next = source[at + 1]
+    if (next === "?") return lastInstruction > at ? lt : mark
+    if (next === "!") return /[A-Za-z]/.test(source[at + 2] ?? "") && lastClose > at ? lt : mark
+    return mark
+  })
+  return { masked, unmask: (chars: string) => chars.replaceAll(mark, "<") }
 }
 
-/** `text` without HTML's tags: their text stays, line ends where blocks ended, entities decoded. */
-const textOnly = (text: string) => {
-  if (!hasMarkup(text) && !HAS_DROPPED.test(text)) return text
-  const stripped = withoutNonText(text, false)
-    .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
-    .replace(/<!doctype\b[^>]*>/gi, "")
-    .replace(DROPPED, "")
-    .replace(TAG, (tag, name: string) => {
-      const element = name.toLowerCase()
-      if (!ELEMENTS.has(element)) return tag
-      if (element === "br") return "\n"
-      if (tag.startsWith("</") && BLOCKS.has(element)) return "\n"
-      if (tag.startsWith("</") && (element === "td" || element === "th")) return " "
-      return ""
-    })
+/** `source` as HTML tokenizes it. Bytes no token covers (a tag cut off by the end) are left out. */
+const tokenize = (source: string): ReadonlyArray<Piece> => {
+  const pieces: Piece[] = []
+  const { masked, unmask } = withLiteralOpenings(source)
+  let foreign = 0
+  const span = (token: { readonly location: Token.Location | null }) => ({
+    start: token.location!.startOffset,
+    end: token.location!.endOffset
+  })
+  const text = (token: Token.CharacterToken) =>
+    pieces.push({ kind: "text", ...span(token), chars: unmask(token.chars) })
+  const tokenizer: Tokenizer = new Tokenizer(
+    { sourceCodeLocationInfo: true },
+    {
+      onCharacter: text,
+      onWhitespaceCharacter: text,
+      // The tree builder drops NULs in body text.
+      onNullCharacter: (token) => pieces.push({ kind: "text", ...span(token), chars: "" }),
+      onComment: (token) => pieces.push({ kind: "other", ...span(token) }),
+      onDoctype: (token) => pieces.push({ kind: "other", ...span(token) }),
+      onStartTag: (token) => {
+        pieces.push({ kind: "start", ...span(token), name: token.tagName })
+        if (token.tagName === "svg" || token.tagName === "math") foreign += token.selfClosing ? 0 : 1
+        else if (foreign === 0) {
+          const state = RAW_TEXT.get(token.tagName)
+          if (state !== undefined) tokenizer.state = state
+        }
+        tokenizer.inForeignNode = foreign > 0
+      },
+      onEndTag: (token) => {
+        pieces.push({ kind: "end", ...span(token), name: token.tagName })
+        if ((token.tagName === "svg" || token.tagName === "math") && foreign > 0) foreign--
+        tokenizer.inForeignNode = foreign > 0
+      },
+      onEof: () => {}
+    }
+  )
+  tokenizer.write(masked, true)
+  return pieces
+}
 
-  return decodeHTML(stripped)
+const isMarkup = (piece: Piece) =>
+  piece.kind === "other" || (piece.kind !== "text" && (ELEMENTS.has(piece.name) || NON_TEXT.has(piece.name)))
+
+/** Where the non-text element starting at `pieces[i]` ends: its matching end tag, or the end. */
+const nonTextEnd = (pieces: ReadonlyArray<Piece>, i: number, sourceEnd: number) => {
+  const first = pieces[i]!
+  if (first.kind !== "start") return first.end
+  let depth = 0
+  for (let j = i; j < pieces.length; j++) {
+    const piece = pieces[j]!
+    if (piece.kind === "start" && piece.name === first.name) depth++
+    else if (piece.kind === "end" && piece.name === first.name && --depth === 0) return piece.end
+  }
+  return sourceEnd
+}
+const startsNonText = (piece: Piece) => piece.kind === "other" || (piece.kind === "start" && NON_TEXT.has(piece.name))
+
+/** `text` without HTML's tags: their text stays, line ends where blocks ended, references decoded. */
+const textOnly = (text: string) => {
+  const pieces = tokenize(text)
+  if (!pieces.some(isMarkup)) return text
+  let out = ""
+  let at = 0
+  for (let i = 0; i < pieces.length; i++) {
+    const piece = pieces[i]!
+    if (piece.start < at) continue
+    // What no token covers (a tag cut off at the end) is text to Markdown, as written.
+    out += text.slice(at, piece.start)
+    at = piece.end
+    if (startsNonText(piece)) {
+      at = nonTextEnd(pieces, i, text.length)
+      continue
+    }
+    if (piece.kind === "text") out += piece.chars
+    else if (piece.kind === "other") continue
+    else if (!ELEMENTS.has(piece.name)) out += text.slice(piece.start, piece.end)
+    else if (piece.name === "br") out += "\n"
+    else if (piece.kind === "end" && BLOCKS.has(piece.name)) out += "\n"
+    else if (piece.kind === "end" && (piece.name === "td" || piece.name === "th")) out += " "
+  }
+  out += text.slice(at)
+  return out
     .split("\n")
     .map((line) => line.replace(/[ \t]+$/, ""))
     .join("\n")
@@ -74,36 +178,21 @@ const textOnly = (text: string) => {
 const FENCE = /^( {0,3})(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)(?:\n {0,3}\2[`~]*[ \t]*(?=\n|$)|$)/gm
 const INLINE_CODE = /(`+)[^`\n][\s\S]*?\1/g
 
-/** Remove complete non-text elements before Markdown spans can split their bodies.
- * Source offsets keep unknown markers and prose byte-for-byte; parse5 handles nested
- * templates, quoted attributes and raw-text elements as the browser does. */
-const withoutNonText = (text: string, protectCode = true) => {
-  if (!/<(?:script|style|template|noscript|head)\b|<!--/i.test(text)) return text
-  const spans = protectCode ? [...text.matchAll(INLINE_CODE)] : []
+/** Remove complete non-text elements and comments before Markdown spans can split their bodies.
+ * Inline code is protected, so a literal example in backticks stays; prose and unknown markers
+ * stay byte-for-byte. */
+const withoutNonText = (text: string) => {
+  if (!/<(?:script|style|template|noscript|head)|<!/i.test(text)) return text
+  const spans = [...text.matchAll(INLINE_CODE)]
   const protectedAt = (at: number) => spans.some((span) => span.index <= at && at < span.index + span[0].length)
-  const ranges: Array<{ startOffset: number; endOffset: number }> = []
-  const visit = (node: DefaultTreeAdapterTypes.Node) => {
-    const location = node.sourceCodeLocation
-    if (
-      location &&
-      !protectedAt(location.startOffset) &&
-      (node.nodeName === "#comment" || ["script", "style", "template", "noscript", "head"].includes(node.nodeName))
-    ) {
-      ranges.push(location)
-      return
-    }
-    if ("childNodes" in node) node.childNodes.forEach(visit)
-  }
-  visit(parseFragment(text, { sourceCodeLocationInfo: true }))
-  // The fragment parser ignores head tags outside a document; their content still
-  // isn't visible prose. Match those spans before protecting inline Markdown.
-  for (const match of text.matchAll(/<head\b[^>]*>[\s\S]*?(?:<\/head\s*>|$)/gi))
-    if (!protectedAt(match.index)) ranges.push({ startOffset: match.index, endOffset: match.index + match[0].length })
+  const pieces = tokenize(text)
   let out = ""
   let at = 0
-  for (const range of ranges.sort((a, b) => a.startOffset - b.startOffset)) {
-    if (range.startOffset >= at) out += text.slice(at, range.startOffset)
-    at = Math.max(at, range.endOffset)
+  for (let i = 0; i < pieces.length; i++) {
+    const piece = pieces[i]!
+    if (piece.start < at || !startsNonText(piece) || protectedAt(piece.start)) continue
+    out += text.slice(at, piece.start)
+    at = nonTextEnd(pieces, i, text.length)
   }
   return out + text.slice(at)
 }

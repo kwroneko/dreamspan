@@ -76,3 +76,41 @@ it("keeps literal HTML examples inside inline and fenced code", () => {
     "```js\nconst x = `<script>literal</script>`\n```"
   )
 })
+
+// The client parses message HTML with parse5 (rehype-raw). The reduction must tokenize it the
+// same way, or the model is sent something other than what the user sees.
+describe("tokenizes HTML as the renderer does", () => {
+  it("keeps custom elements whose names start like a non-text element", () => {
+    expect(htmlDepthForm("<style-note>Visible</style-note> and more.", "text")).toBe(
+      "<style-note>Visible</style-note> and more."
+    )
+    expect(htmlDepthForm("<head-line>Breaking</head-line> news, <b>today</b>.", "text")).toBe(
+      "<head-line>Breaking</head-line> news, today."
+    )
+    expect(htmlDepthForm("<script-box>Shown</script-box><p>Kept.</p>", "text")).toBe(
+      "<script-box>Shown</script-box>Kept."
+    )
+  })
+  it("leaves the text of raw-text elements as the reader sees it", () => {
+    expect(htmlDepthForm("<p>Type:</p><textarea><b>bold</b> &amp; more</textarea>", "text")).toBe(
+      "Type:\n<b>bold</b> & more"
+    )
+  })
+  it("reads tags with unquoted or odd attributes and comments as HTML does", () => {
+    expect(htmlDepthForm('<div title=a>b class="x">Text</div>', "text")).toBe('b class="x">Text')
+    expect(htmlDepthForm("<p>Kept</p><!-->Shown", "text")).toBe("Kept\nShown")
+  })
+  it("keeps what Markdown shows as text though HTML's tokenizer would hide it", () => {
+    expect(htmlDepthForm("Bye </3 see <b>you</b> > soon", "text")).toBe("Bye </3 see you > soon")
+    expect(htmlDepthForm("What <? is <i>this</i>", "text")).toBe("What <? is this")
+    expect(htmlDepthForm("Wow <!! <b>ok</b> > yes </> <b>x</b>", "text")).toBe("Wow <!! ok > yes </> x")
+    expect(htmlDepthForm("<p>a</p><?php hidden ?>b", "text")).toBe("a\nb")
+  })
+  it("is deterministic and linear on adversarial markup", () => {
+    const text = "<b>x</b>" + "</3 <? <!x ".repeat(20_000)
+    const started = Date.now()
+    const first = htmlDepthForm(text, "text")
+    expect(htmlDepthForm(text, "text")).toBe(first)
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+})
