@@ -61,3 +61,31 @@ it.effect(
       assert.strictEqual(fake.conditionalHits(), cleared)
     }).pipe(Effect.scoped)
 )
+
+it.effect("an entry evicted during validation still owns the bytes for its 304", () =>
+  Effect.gen(function* () {
+    const dataDir = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "rp-source-validation-eviction-")))
+    yield* Effect.addFinalizer(() => Effect.promise(() => rm(dataDir, { recursive: true, force: true })))
+    const fake = yield* Effect.promise(() => startFakeArchive({ cards: 1 }))
+    yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
+    const adapter = fakeCardexAdapter(fake)
+    const cache = makeSourceCache({ dataDir })
+    yield* cache.scan
+    const guarded = makeSourceHttp(adapter, null, {
+      network: { fetchFor: () => fetch },
+      limiter: makeLimiter(),
+      bypassEntries: () => []
+    })
+    const url = new URL("/api/v1/capabilities", fake.origin)
+    const first = yield* withConditionalGets(guarded, cache, "alice", adapter.id).get(url, "json")
+    const evicting = {
+      ...guarded,
+      get: (...args: Parameters<typeof guarded.get>) =>
+        cache.clearUser("alice", adapter.id).pipe(Effect.andThen(guarded.get(...args)))
+    }
+    const validated = yield* withConditionalGets(evicting, cache, "alice", adapter.id).get(url, "json")
+    assert.deepStrictEqual(validated.bytes, first.bytes)
+    assert.strictEqual(fake.notModified(), 1)
+    assert.strictEqual(cache.size(), 0)
+  }).pipe(Effect.scoped)
+)

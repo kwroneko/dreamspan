@@ -2,7 +2,7 @@
 // pages/cards keep their normal lifetimes; validators outlive them so a refresh can use 304.
 import { createHash } from "node:crypto"
 import { SourceFailed } from "@rp/shared/cardSources.ts"
-import { Effect } from "effect"
+import { Effect, Exit } from "effect"
 import type { SourceHttp, SourceResponse } from "./adapter.ts"
 import type { SourceCache } from "./cache.ts"
 
@@ -26,19 +26,22 @@ export const withConditionalGets = (
         .digest("hex")
       const key = { user, source, kind: "response" as const, id }
       const hit = yield* cache.get(key)
-      const previous = hit?.value as ValidatedResponse | undefined
+      // Own the old bytes before waiting on the network: another request can clear or
+      // evict the entry while its conditional GET is in flight.
+      const stored = hit?.blob ? yield* Effect.exit(cache.readBlob(hit.blob)) : null
+      const bytes = stored && Exit.isSuccess(stored) ? stored.value : null
+      const previous = bytes !== null ? (hit!.value as ValidatedResponse) : undefined
       const response = yield* http.get(url, kind, {
         ...headers,
         ...(previous ? { "if-none-match": previous.etag } : {})
       })
       if (response.status === 304) {
-        if (!hit?.blob || !previous)
+        if (bytes === null || !previous)
           return yield* new SourceFailed({
             sourceId: source,
             reason: "bad_response",
             message: "unexpected cache validation"
           })
-        const bytes = yield* cache.readBlob(hit.blob)
         const merged = new Headers(Object.fromEntries(previous.headers))
         for (const [name, value] of response.headers) merged.set(name, value)
         return {
