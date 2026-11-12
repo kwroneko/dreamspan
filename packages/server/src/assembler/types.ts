@@ -496,6 +496,13 @@ export interface SourcePins {
   }>
   readonly messageCount?: ReadonlyArray<{ readonly key: string; readonly count: number }>
   readonly userMessages?: ReadonlyArray<{ readonly key: string; readonly count: number }>
+  /** Who knew the messages a separate context read (`knowers`); absent when none was read. */
+  readonly knowers?: ReadonlyArray<{
+    readonly key: string
+    readonly found: ReadonlyArray<{ readonly versionId: string; readonly knowers: ReadonlyArray<string> | null }>
+  }>
+  /** Whether the viewer knew everything a summary layer covers (`knewThrough`); absent when not asked. */
+  readonly knewThrough?: ReadonlyArray<{ readonly key: string; readonly knew: boolean }>
 }
 
 /** Raw metadata from the assembly transaction, scrubbed only at final capture on the main thread. */
@@ -643,6 +650,11 @@ export interface HistoryEntry {
   readonly written: boolean
   /** False for hidden messages and for selections that failed or are still empty (invariant 2). */
   readonly inContext: boolean
+  /**
+   * Left out of a separate context: the speaker wasn't present for it (spec/CHARACTER-CONTEXT.md
+   * §2.1; `assembler/knowledge.ts`). Set by the history stage, never by a source, so never pinned.
+   */
+  readonly unknown?: true
   readonly sentAt: number
   readonly versions: number
   readonly selectedOrdinal: number

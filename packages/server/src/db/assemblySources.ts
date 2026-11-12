@@ -32,6 +32,7 @@ import { withEndOfRequest } from "@rp/shared/presetConditions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
+import { knowersOf, parsePresence } from "@rp/shared/knowledge.ts"
 import { resolveModel } from "@rp/shared/providers.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Schema } from "effect"
@@ -351,6 +352,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     })
 
   let layerPins: SourcePins["lcm"]
+  // Read only by a separate context, so pinned only when read: a shared one's snapshot is unchanged.
+  const knowerPins: Array<NonNullable<SourcePins["knowers"]>[number]> = []
+  const knewPins: Array<NonNullable<SourcePins["knewThrough"]>[number]> = []
   let resolvedModel: ModelInput | null = null
   /** The model the chat's binding or the user's default chose, read or not; unset before the model is read. */
   /** A shared note's library head, which a linked slot shows; a binned or missing one has none. */
@@ -875,6 +879,74 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return count
       }),
 
+    knowers: (versionIds) =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          id: string
+          cast_json: string | null
+          presence_json: string | null
+          speaker_entity_id: string | null
+          merge_cast: string | null
+        }>`SELECT v.id, v.cast_json, v.presence_json, v.speaker_entity_id,
+            CASE WHEN v.origin = 'merge' THEN (SELECT json_group_array(c.value ->> 'entity')
+              FROM chat_merges m, json_each(m.cast_json) c
+              WHERE m.slot_id = v.slot_id AND c.value ->> 'from' <> 'destination') END AS merge_cast
+          FROM version_records v JOIN slots s ON s.id = v.slot_id
+          WHERE s.chat_id = ${chatId} AND ${owned} AND v.id IN ${sql.in(versionIds)}`
+        const byId = new Map(rows.map((row) => [row.id, row]))
+        const found = versionIds.map((versionId) => {
+          const row = byId.get(versionId)
+          const knowers =
+            row === undefined
+              ? null
+              : row.merge_cast !== null
+                ? (JSON.parse(row.merge_cast) as Array<string>)
+                : knowersOf({
+                    cast: row.cast_json === null ? null : (JSON.parse(row.cast_json) as Array<string>),
+                    speaker: row.speaker_entity_id,
+                    presence: parsePresence(row.presence_json)
+                  })
+          return { versionId, knowers: knowers === null ? null : [...knowers] }
+        })
+        knowerPins.push({ key: keyOf(versionIds), found })
+        return found
+      }),
+
+    knewThrough: (leaf, viewer, through) =>
+      Effect.gen(function* () {
+        const selected = yield* shown(leaf, "s")
+        const fork = yield* viewAt(sql, chatId, leaf)
+        const onDisplay = yield* display(leaf)
+        // A message the viewer doesn't know: its version's cast less those away, and its speaker;
+        // a merge's join, its source's cast; nothing recorded, everyone.
+        const unknown = sql`EXISTS (SELECT 1 FROM path JOIN slots s ON s.id = path.id
+          JOIN version_records v ON v.id = ${selected}
+          WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
+            AND NOT CASE WHEN v.origin = 'merge' AND EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
+              THEN EXISTS (SELECT 1 FROM chat_merges m, json_each(m.cast_json) c WHERE m.slot_id = s.id
+                AND c.value ->> 'from' <> 'destination' AND c.value ->> 'entity' = ${viewer})
+              ELSE v.cast_json IS NULL OR v.speaker_entity_id IS ${viewer}
+                OR (EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value = ${viewer})
+                  AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
+                    WHERE a.value = ${viewer})) END) AS unknown`
+        const [row] =
+          onDisplay === null
+            ? yield* sql<{ unknown: number }>`
+        WITH RECURSIVE walk(id, depth) AS (
+          SELECT id, depth FROM slots WHERE id = ${leaf} AND chat_id = ${chatId} AND ${owned}
+          UNION ALL
+          SELECT s.parent_slot_id, w.depth - 1 FROM slots s JOIN walk w ON s.id = w.id WHERE s.parent_slot_id IS NOT NULL
+        ), path AS (SELECT id FROM walk WHERE depth <= ${through})
+        SELECT ${unknown}`
+            : yield* sql<{ unknown: number }>`
+        ${displaySlots(sql, onDisplay.pieces, 0, Math.min(through, onDisplay.end))}
+        , path AS (SELECT id FROM display_slots)
+        SELECT ${unknown} WHERE ${owned}`
+        const knew = (row?.unknown ?? 0) === 0
+        knewPins.push({ key: keyOf(leaf, viewer, through), knew })
+        return knew
+      }),
+
     model: (binding) =>
       Effect.gen(function* () {
         const chosen = settings.modelOverride ?? binding ?? (yield* defaults).model
@@ -1016,7 +1088,14 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   return {
     layer: Layer.succeed(AssemblySources)(sources),
     /** What the sources read; a replay's are the pins it was given. */
-    pins: (): SourcePins => replay?.pins ?? { ...pins, target: pins.target!, ...(layerPins ? { lcm: layerPins } : {}) },
+    pins: (): SourcePins =>
+      replay?.pins ?? {
+        ...pins,
+        target: pins.target!,
+        ...(layerPins ? { lcm: layerPins } : {}),
+        ...(knowerPins.length ? { knowers: knowerPins } : {}),
+        ...(knewPins.length ? { knewThrough: knewPins } : {})
+      },
     /** Capabilities survive later assembly failures, including budget rejection. */
     resolvedModel: () => resolvedModel,
     /** The model chosen and where from, also when it's gone and the assembly failed on it. */
@@ -1182,6 +1261,13 @@ const replaySources = (
       ),
     messageCount: (leaf) =>
       Effect.map(pinned(pins.messageCount ?? [], keyOf(leaf), "the path message count"), ({ count }) => count),
+    knowers: (versionIds) =>
+      Effect.map(pinned(pins.knowers ?? [], keyOf(versionIds), "who knew the messages"), ({ found }) => found),
+    knewThrough: (leaf, viewer, through) =>
+      Effect.map(
+        pinned(pins.knewThrough ?? [], keyOf(leaf, viewer, through), "who knew the summarized messages"),
+        ({ knew }) => knew
+      ),
 
     model: () => Effect.succeed(inputs.model),
 

@@ -131,6 +131,19 @@ export class AssemblySources extends Context.Service<
       model: { readonly connectionId: string; readonly kind: string; readonly modelKey: string },
       sha256s: ReadonlyArray<string>
     ) => Effect.Effect<ImageTokenFacts, SourceError>
+    /**
+     * Who knew each of these versions (spec/CHARACTER-CONTEXT.md §9.1): card ids, or null for
+     * everyone (nothing recorded). A merge's join is known to its source's cast. Fixtures
+     * without it: everyone knew everything.
+     */
+    readonly knowers?: (
+      versionIds: ReadonlyArray<string>
+    ) => Effect.Effect<
+      ReadonlyArray<{ readonly versionId: string; readonly knowers: ReadonlyArray<string> | null }>,
+      SourceError
+    >
+    /** Whether `viewer` knew every message on the path to `leaf` up to position `through`. */
+    readonly knewThrough?: (leaf: string, viewer: string, through: number) => Effect.Effect<boolean, SourceError>
   }
 >()("rp/assembler/AssemblySources") {}
 
@@ -159,6 +172,8 @@ export interface AssemblyRequest {
   readonly projections: ProjectionRegistry
   /** The merge layouts in effect (`merge-layout` stage); absent: the built-ins. */
   readonly mergeLayouts?: import("./merges.ts").MergeLayoutRegistry
+  /** The context views in effect (`knowledge` stage); absent: the built-ins. */
+  readonly contextViews?: import("./knowledge.ts").ContextViewRegistry
   /** The image token rules in effect (`image-tokens` stage); none: every image is unknown. */
   readonly imageTokens?: Registry<ImageTokenRule>
   readonly textCounters?: Registry<import("../providers/textCounters.ts").TextTokenCounter>
@@ -230,6 +245,8 @@ export interface ProjectedEntry {
  */
 export interface Assembly {
   contextBudget?: ContextSnapshot["contextBudget"]
+  /** The chat's context view and whose knowledge filters the history (`knowledge` stage). */
+  knowledge?: import("./knowledge.ts").Knowledge
   lcm?: SummaryLayer
   lcmPieces?: ReadonlyArray<number>
   lcmFailurePieces?: ReadonlyArray<{ readonly from: number; readonly to: number; readonly piece: number }>

@@ -46,9 +46,9 @@ export const StateEventData = Schema.Union([
   /**
    * Context per speaker (spec/CHARACTER-CONTEXT.md §2): one shared context, every reply seeing
    * the whole path, or separate contexts, each reply seeing what its speaker was present for.
-   * Absent is shared.
+   * Absent is shared. An open id, a registered context view's (server `assembler/knowledge.ts`), resolved at use.
    */
-  event("context.per_speaker", Schema.Literals(["shared", "separate"])),
+  event("context.per_speaker", Schema.String),
   event("played_by_me.set", Schema.Struct({ entities: Schema.Array(EntityId) })),
   event(
     "card.binding",
@@ -396,7 +396,7 @@ export interface ChatState {
   /** Cast members' roles (`cast.role`): only `narrator` today. */
   readonly roles: Readonly<Record<string, "narrator">>
   /** `context.per_speaker`; null (no event) is shared. */
-  readonly contextPerSpeaker: "shared" | "separate" | null
+  readonly contextPerSpeaker: string | null
   /** Zero or one persona; the last selected ID wins. */
   readonly playedByMe: ReadonlyArray<string>
   readonly activeNotes: ReadonlyArray<string>

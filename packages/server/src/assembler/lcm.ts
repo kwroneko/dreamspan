@@ -3,6 +3,7 @@ import type { Summary } from "@rp/shared/lcm.ts"
 import { resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { AssemblySources, need, type AssemblerStage } from "./pipeline.ts"
 import { historyLeafOf } from "./types.ts"
+import { layerKnown } from "./knowledge.ts"
 
 /** One summary as its own message's text (DESIGN §8: separate blocks placed like the history). */
 export const summaryBlock = (s: Pick<Summary, "level" | "from" | "to" | "content">) =>
@@ -19,7 +20,19 @@ export const lcmStage: AssemblerStage = {
         need(assembly, "state").lcm,
         sources.lcmDefaults ? yield* sources.lcmDefaults() : null
       )
-      assembly.lcm = yield* sources.summaryLayer(historyLeafOf(need(assembly, "target")))
+      const leaf = historyLeafOf(need(assembly, "target"))
+      const layer = yield* sources.summaryLayer(leaf)
+      // A separate context: summaries covering what the speaker missed are withheld until
+      // summaries are kept per view (spec/CHARACTER-CONTEXT.md §9.2 C7).
+      if (layer.cursor !== null && !(yield* layerKnown(assembly, leaf, layer.cursorDepth))) {
+        assembly.issues.push({
+          kind: "summaries_withheld",
+          message:
+            "Summaries aren't used for this reply: they cover messages its speaker wasn't present for. The messages it was present for are sent instead, as far as they fit."
+        })
+        return assembly
+      }
+      assembly.lcm = layer
       assembly.lcmPieces = assembly.lcm.summaries.map((summary) => {
         assembly.pieces.push({
           id: `summary:${summary.firstSlotId}:${summary.lastSlotId}`,

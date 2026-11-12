@@ -19,6 +19,7 @@ import {
 } from "@rp/shared/endOfRequest.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { lcmStage, summaryBlock } from "./lcm.ts"
+import { knowledgeStage, withoutUnknown } from "./knowledge.ts"
 import { imageTokensStage, limitImageEstimates } from "./imageTokens.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
@@ -521,7 +522,9 @@ const historyStage: AssemblerStage = {
         leaf !== assembly.lcm?.cursor &&
         (tokens < budget || depth < (assembly.loreScanDepth ?? 0))
       ) {
-        const window = yield* sources.history(leaf, HISTORY_WINDOW, assembly.lcm?.cursor ?? undefined)
+        const read = yield* sources.history(leaf, HISTORY_WINDOW, assembly.lcm?.cursor ?? undefined)
+        // In a separate context, what the speaker missed is left out before the budget counts it.
+        const window = { ...read, entries: yield* withoutUnknown(assembly, read.entries) }
         entries = [...window.entries, ...entries]
         // A template's stored text isn't what it expands to, which may be nothing: it counts as
         // nothing here, so it never ends the read early.
@@ -2720,6 +2723,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   notesStage,
   modeStage,
   lorebooksStage,
+  knowledgeStage,
   lcmStage,
   macrosStage,
   scriptsStage,

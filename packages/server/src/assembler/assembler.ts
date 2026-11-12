@@ -1,3 +1,4 @@
+import { builtinContextViews, makeContextViewRegistry, type ContextViewRegistry } from "./knowledge.ts"
 import {
   builtinMergeLayouts,
   makeMergeLayoutRegistry,
@@ -63,6 +64,8 @@ export interface Assembler {
   readonly projections: ProjectionRegistry
   /** How merged chats reach the model (`merge-layout` stage, spec/CHAT-MERGE.md §4). */
   readonly mergeLayouts: MergeLayoutRegistry
+  /** How each reply's history is chosen: one shared context or separate ones (`knowledge` stage). */
+  readonly contextViews: ContextViewRegistry
   /** Local model tokenizers for display and prepared budget counts (ARCHITECTURE §15). */
   readonly textCounters: Registry<TextTokenCounter>
   /** What an image costs per provider and model (ARCHITECTURE §15, image tokens). */
@@ -135,6 +138,8 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   yield* transforms.register(mergeSectionsTransform)
   const mergeLayouts = makeMergeLayoutRegistry()
   for (const layout of builtinMergeLayouts) yield* mergeLayouts.register(layout)
+  const contextViews = makeContextViewRegistry()
+  for (const view of builtinContextViews) yield* contextViews.register(view)
   const projections = makeProjectionRegistry()
   const textCounters = makeRegistry<TextTokenCounter>()
   for (const counter of builtinTextCounters.filter((c) => !c.remote)) yield* textCounters.register(counter)
@@ -158,6 +163,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
     macros,
     projections,
     mergeLayouts,
+    contextViews,
     imageTokens,
     textCounters,
     scriptSources,
@@ -183,7 +189,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
         assembler,
         assemble(
           stages,
-          { ...request, macros, projections, mergeLayouts, imageTokens, textCounters, scriptSources },
+          { ...request, macros, projections, mergeLayouts, contextViews, imageTokens, textCounters, scriptSources },
           transforms
         )
       ),
@@ -200,6 +206,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
               macros,
               projections,
               mergeLayouts,
+              contextViews,
               imageTokens,
               textCounters,
               scriptSources,

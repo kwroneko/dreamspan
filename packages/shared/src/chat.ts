@@ -128,6 +128,9 @@ export const ContextIssue = Schema.Struct({
     "cache_breakpoints",
     "role_projection_missing",
     "merge_layout_missing",
+    // Separate contexts (spec/CHARACTER-CONTEXT.md §9.2 C3).
+    "context_view_missing",
+    "summaries_withheld",
     "note_replacement"
   ]),
   message: Schema.String
