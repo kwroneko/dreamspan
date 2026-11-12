@@ -1,5 +1,6 @@
 /** Resource bounds shared by the offered setup schemas and their worker operations. */
 export const workshopLimits = {
+  rewriteItems: 32,
   textChars: 65_536,
   nameChars: 200,
   listItems: 32,

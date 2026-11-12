@@ -7,8 +7,7 @@ import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import type { LibrarySteps } from "./editorWrites.ts"
 import type { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import type { WriteOps } from "./ops.ts"
-import { agentHistorySnapshot, checkWorkshopAccess, type WorkshopCall } from "./agentHistoryShared.ts"
-import { historyFork } from "./historyShared.ts"
+import { agentHistorySnapshot, checkWorkshopAccess, rewriteFork, type WorkshopCall } from "./agentHistoryShared.ts"
 import { selectedIn, nextSeq } from "./forkState.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits } from "../workshopLimits.ts"
@@ -30,7 +29,7 @@ export const makeAgentHistoryWriteHandlers = (
   const { sql } = steps
   const startEdit = Effect.fnUntraced(function* (input: WorkshopCall & { chatId: ChatId; forkId: ForkId }) {
     const source = yield* checkWorkshopAccess(sql, input, "chats.rewrite")
-    const fork = yield* historyFork(sql, input.userId, input.chatId, input.forkId)
+    const fork = yield* rewriteFork(sql, input.userId, input.chatId, input.forkId)
     const id = uuidv7()
     const at = Date.now()
     const [message] = yield* sql<{
@@ -56,8 +55,11 @@ export const makeAgentHistoryWriteHandlers = (
         }>`SELECT result_json FROM rollout_receipts WHERE rollout_id=${input.rolloutId} AND tool_call_id=${input.toolCallId}`
         if (receipt) return JSON.parse(receipt.result_json) as string
         yield* checkWorkshopAccess(sql, input, "chats.rewrite")
-        if (input.edits.length > 10000 || input.edits.length + (input.notes?.length ?? 0) === 0)
-          return yield* reject("Give between 1 and 10,000 edits.")
+        const items = input.edits.length + (input.notes?.length ?? 0)
+        if (items > workshopLimits.rewriteItems || items === 0)
+          return yield* reject(
+            `One rewrite can change at most ${workshopLimits.rewriteItems} texts or bindings. Narrow this rewrite.`
+          )
         const [running] =
           yield* sql`SELECT 1 FROM versions v JOIN slots s ON s.id=v.slot_id WHERE s.chat_id=${input.chatId} AND v.status='generating' LIMIT 1`
         if (running) return yield* reject("That chat is writing a reply; try again when it's done.")
@@ -72,12 +74,18 @@ export const makeAgentHistoryWriteHandlers = (
         const [used] = yield* sql<{
           n: number
           calls: number
-        }>`SELECT coalesce(sum(json_extract(undo_json,'$.bytes')),0) AS n,count(*) AS calls FROM rollout_effects
+        }>`SELECT coalesce(sum(json_extract(undo_json,'$.bytes')),0) AS n,
+          (SELECT count(*) FROM rollout_receipts WHERE rollout_id=${input.rolloutId}) AS calls FROM rollout_effects
         WHERE rollout_id=${input.rolloutId} AND kind='changeset.apply'`
         if (used!.n + bytes > 1048576 || used!.calls >= workshopLimits.calls)
           return yield* new EffectUndoRefused({
             message: "This run reached its rewrite limit. Start another turn to continue."
           })
+        for (const expected of input.expectedRefs ?? []) {
+          const ref = yield* steps.lib.ownedRef(input.userId, expected.refId)
+          if (ref.row_version !== expected.rowVersion)
+            return yield* reject("An instruction's library item changed while waiting. Read it again and ask again.")
+        }
         const edits: HistoryEdit[] = [...input.edits]
         for (const edit of edits) {
           if (edit.kind === "state_event") {
@@ -106,6 +114,7 @@ export const makeAgentHistoryWriteHandlers = (
           if (!parent) return yield* reject("That note revision is unavailable.")
           const doc = yield* steps.lib.loadDoc(note.parent)
           if (
+            typeof doc.link === "string" ||
             ref.kind !== "note" ||
             (doc.owner as { chat?: string })?.chat !== input.chatId ||
             ref.row_version !== note.expectedRowVersion

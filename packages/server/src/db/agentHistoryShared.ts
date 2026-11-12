@@ -54,18 +54,34 @@ export const checkWorkshopAccess = Effect.fnUntraced(function* (
   return run
 })
 
-/** Only the shown path's metadata is read, never its thousands of unselected swipes. */
-export const agentHistorySnapshot = Effect.fnUntraced(function* (
+/** Edit provenance never creates a nested workshop effect. Unknown profiles fail closed. */
+export const rewriteFork = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   userId: string,
   chatId: string,
   forkId: string
 ) {
   const fork = yield* historyFork(sql, userId, chatId, forkId)
+  const [chat] = yield* sql<{ kind: string }>`SELECT kind FROM chats WHERE id=${chatId}`
+  const profile = chatKinds.get(chat!.kind)
+  if (!profile || profile.allowsOutside)
+    return yield* new HistoryRejected({ message: "Choose a story chat; a rewrite cannot target a workshop." })
+  return fork
+})
+
+/** Only the shown path's metadata is read, never its thousands of unselected swipes. */
+export const agentHistorySnapshot = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  userId: string,
+  chatId: string,
+  forkId: string,
+  changed: { versions?: ReadonlyArray<string>; summaries?: ReadonlyArray<string> } = {}
+) {
+  const fork = yield* rewriteFork(sql, userId, chatId, forkId)
   const pieces = yield* pathPieces(sql, chatId, forkId, fork.tip_slot_id)
   const [row] = yield* sql<{ name: string; stamp: string }>`
     ${displaySlots(sql, pieces, 0, displayLength(pieces) - 1)}
-    SELECT c.title AS name, json_array(c.row_version,c.state_seq,c.current_fork_id,c.active_leaf_slot_id,f.row_version,f.tip_slot_id,
+    SELECT c.title AS name, json_array(c.row_version,c.shell_stamp,c.state_seq,c.current_fork_id,c.active_leaf_slot_id,f.row_version,f.tip_slot_id,
       (SELECT coalesce(json_group_array(json_array(s.id,s.row_version,${selectedIn(sql, forkId, "s")},v.id,v.updated_at,v.status,v.hidden,v.deleted_at,v.purged_at,
         (SELECT count(*) FROM version_history WHERE version_id=v.id))), '[]')
         FROM display_slots d JOIN slots s ON s.id=d.id JOIN version_records v ON v.id=${shownIn(sql, forkId, "s")}),
@@ -76,7 +92,31 @@ export const agentHistorySnapshot = Effect.fnUntraced(function* (
     FROM chats c JOIN forks f ON f.id=${forkId} WHERE c.id=${chatId}`
   if (row!.stamp.length > 2_000_000)
     return yield* new HistoryRejected({ message: "This chat is too large for one rewrite. Use a smaller branch." })
+  const dependents =
+    changed.versions?.length || changed.summaries?.length
+      ? yield* sql<{ id: string; revision: string }>`
+      ${displaySlots(sql, pieces, 0, displayLength(pieces) - 1)},
+      affected(id) AS (
+        SELECT i.summary_id FROM json_each(${JSON.stringify(changed.versions ?? [])}) changed
+          JOIN versions v ON v.id=changed.value JOIN slots s ON s.id=v.slot_id
+          JOIN summary_inputs i ON i.slot_id=s.id
+          WHERE s.chat_id=${chatId} AND v.id=${shownIn(sql, forkId, "s")}
+        UNION SELECT value FROM json_each(${JSON.stringify(changed.summaries ?? [])})
+        UNION SELECT p.summary_id FROM summary_parents p JOIN affected a ON p.parent_id=a.id
+      )
+      SELECT s.id,${historySummaryRevision(sql, forkId, "s")} AS revision FROM summaries s JOIN affected a ON a.id=s.id
+      WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status<>'superseded'
+        AND EXISTS(SELECT 1 FROM display_slots d WHERE d.id=s.first_slot_id)
+        AND EXISTS(SELECT 1 FROM display_slots d WHERE d.id=s.last_slot_id)
+        AND s.id NOT IN (SELECT value FROM json_each(${JSON.stringify(changed.summaries ?? [])}))
+      ORDER BY s.id LIMIT 33`
+      : []
+  if (dependents.length > 32)
+    return yield* new HistoryRejected({
+      message: "This rewrite affects more than 32 dependent summaries. Narrow the rewrite."
+    })
   return {
+    dependents,
     stamp: row!.stamp,
     name: row!.name,
     leaf: (yield* displayEndOf(sql, chatId, fork)) as import("@rp/shared/chat.ts").SlotId | null

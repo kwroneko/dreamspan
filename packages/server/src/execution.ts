@@ -103,6 +103,7 @@ export class ExecutionRegistry extends Context.Service<
       yield* kindTools.register({ id: "workshop:edit_card", tool: libraryEditCard })
       yield* kindTools.register({ id: "workshop:history_rename", tool: historyRenameTool as RolloutTool<never> })
       yield* kindTools.register({ id: "workshop:history_search", tool: historySearchTool as RolloutTool<never> })
+      for (const tool of rewriteTools) yield* kindTools.register({ id: `workshop:${tool.id}`, tool })
       const catalog = makeRegistry<RolloutTool<never>>()
       const rolloutTools = {
         ...catalog,
@@ -113,7 +114,6 @@ export class ExecutionRegistry extends Context.Service<
         ...historyTools,
         ...libraryTools,
         ...setupTools,
-        ...rewriteTools,
         lookupLore,
         listNotes,
         writeNote,

@@ -620,3 +620,335 @@ describe("workshop chat rewrites", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
+
+it.live("review: approval includes every changed text and exact swipe identities", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const swipe = yield* f.writer.AddVersion({
+      userId: f.userId,
+      slotId: f.entries[0]!.slotId,
+      version: said("Aria alternate"),
+      select: false,
+      commitDraft: null
+    })
+    const prompt = yield* f.tool("rewrite_chat").describe!({ ...f.context, toolCallId: "all-diffs" }, {
+      chat: f.chat.id,
+      title: "MODEL PROSE",
+      pairs: [{ find: "Aria", replace: "Ari", in: ["messages", "swipes"] }]
+    } as never)
+    assert.lengthOf(prompt.changes!, 11)
+    assert.isTrue(
+      prompt.changes!.some(
+        (c) => c.field.includes(swipe.id) && c.before === "Aria alternate" && c.after === "Ari alternate"
+      )
+    )
+    assert.include(prompt.rows.map((r) => r.value).join(" "), "1 unshown swipes")
+    assert.notInclude(JSON.stringify(prompt), "MODEL PROSE")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("review: rewriting one summary never blesses another dependent summary", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const inputs = (yield* f.path()).entries.map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: 0 }))
+    const dependent = yield* completeFixture(
+      config.dataDir,
+      f.writer,
+      f.userId,
+      f.chat.id,
+      inputs.slice(0, 5),
+      [],
+      "First half remembers Aria."
+    )
+    const independent = yield* completeFixture(
+      config.dataDir,
+      f.writer,
+      f.userId,
+      f.chat.id,
+      inputs.slice(5),
+      [],
+      "Other half remembers Aria."
+    )
+    const result = yield* f.run("rewrite_messages", {
+      chat: f.chat.id,
+      title: "Rewrite",
+      messages: [{ message: 1, text: "A different story." }],
+      summaries: [{ summary: independent.id, text: "Other half, edited." }]
+    })
+    assert.isUndefined(result.isError, result.text)
+    assert.isFalse((yield* f.reader.GetSummary({ userId: f.userId, forkId: f.forkId, summaryId: dependent.id })).fresh)
+    assert.isTrue((yield* f.reader.GetSummary({ userId: f.userId, forkId: f.forkId, summaryId: independent.id })).fresh)
+    yield* f.api.UndoRolloutEffect((yield* f.api.ListRolloutEffects({ chatId: f.workshop.id }))[0]!)
+    assert.isTrue((yield* f.reader.GetSummary({ userId: f.userId, forkId: f.forkId, summaryId: dependent.id })).fresh)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("review: an unshown target edited and restored while approval waits still refuses", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const swipe = yield* f.writer.AddVersion({
+      userId: f.userId,
+      slotId: f.entries[0]!.slotId,
+      version: said("Aria alternate"),
+      select: false,
+      commitDraft: null
+    })
+    const ctx = { ...f.context, toolCallId: "pin-swipe" }
+    const args = { chat: f.chat.id, title: "Rewrite", pairs: [{ find: "Aria", replace: "Ari", in: ["swipes"] }] }
+    yield* f.tool("rewrite_chat").describe!(ctx, args as never)
+    yield* fixtureSql(config.dataDir, [
+      { sql: "UPDATE version_records SET content='Changed' WHERE id=?", params: [swipe.id] },
+      { sql: "UPDATE version_records SET content='Aria alternate' WHERE id=?", params: [swipe.id] }
+    ])
+    const result = yield* f.tool("rewrite_chat").execute(ctx, args as never)
+    assert.isTrue(result.isError, result.text)
+    assert.include(result.text, "changed")
+    assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: f.chat.id, forkId: f.forkId }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("review: edits and their provenance cannot target another workshop", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const target = yield* f.api.CreateWorkshop({ title: "Other workshop" })
+    assert.strictEqual(
+      yield* f.writer
+        .StartEditRollout({
+          userId: f.userId,
+          rolloutId: f.rolloutId,
+          toolCallId: "recursive",
+          chatId: target.id,
+          forkId: target.currentForkId!
+        })
+        .pipe(outcome),
+      "HistoryRejected"
+    )
+    const result = yield* f.run("rewrite_messages", {
+      chat: target.id,
+      title: "Rewrite",
+      messages: [{ message: 1, text: "Changed greeting" }]
+    })
+    assert.isTrue(result.isError, result.text)
+    assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: target.id, forkId: target.currentForkId! }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("review: rewrites share the run's change quota with library operations", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    yield* fixtureSql(
+      config.dataDir,
+      Array.from({ length: 32 }, (_, n) => ({
+        sql: "INSERT INTO rollout_receipts(rollout_id,tool_call_id,result_json,created_at) VALUES (?,?,?,1)",
+        params: [f.rolloutId, `library-${n}`, '"done"']
+      }))
+    )
+    const result = yield* f.run("rewrite_messages", {
+      chat: f.chat.id,
+      title: "Rewrite",
+      messages: [{ message: 1, text: "Changed" }]
+    })
+    assert.isTrue(result.isError, result.text)
+    assert.include(result.text, "limit")
+    assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: f.chat.id, forkId: f.forkId }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.effect("review: rewrite and whole-chat readers are absent from story catalogs", () =>
+  Effect.gen(function* () {
+    const registry = yield* ExecutionRegistry
+    for (const id of ["rewrite_chat", "rewrite_messages", "rewrite_instructions", "read_chat", "search_chats"])
+      for (const kind of ["rp", "unknown"]) assert.isUndefined(toolForKind(registry, kind, id), `${kind}: ${id}`)
+  }).pipe(Effect.provide(ExecutionRegistry.layer))
+)
+
+it.live("review: a rewrite is bounded to 32 texts in preparation and in the writer", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    for (let n = 0; n < 23; n++)
+      yield* f.writer.AddVersion({
+        userId: f.userId,
+        slotId: f.entries[0]!.slotId,
+        version: said(`Aria alternate ${n}`),
+        select: false,
+        commitDraft: null
+      })
+    const args = {
+      chat: f.chat.id,
+      title: "Too many texts",
+      pairs: [{ find: "Aria", replace: "Ari", in: ["messages", "swipes"] }]
+    }
+    const prepared = yield* f.run("rewrite_chat", args)
+    assert.isTrue(prepared.isError, prepared.text)
+    assert.include(prepared.text, "32")
+    const proof = yield* f.reader.AgentHistorySnapshot({ userId: f.userId, chatId: f.chat.id, forkId: f.forkId })
+    const direct = yield* f.writer
+      .ApplyAgentChangeset({
+        userId: f.userId,
+        rolloutId: f.rolloutId,
+        toolCallId: "too-many-direct",
+        chatId: f.chat.id,
+        forkId: f.forkId,
+        expected: proof.stamp,
+        title: "Too many",
+        summariesIncluded: false,
+        includeSwipes: false,
+        edits: Array.from({ length: 33 }, () => ({
+          kind: "version_replace" as const,
+          targetId: f.entries[0]!.version.id,
+          beforeId: f.entries[0]!.version.id,
+          before: "Aria meets the gardener 0.",
+          after: "Ari"
+        }))
+      })
+      .pipe(Effect.match({ onFailure: (e) => e.message, onSuccess: () => "succeeded" }))
+    assert.include(direct, "32")
+    assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: f.chat.id, forkId: f.forkId }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("review: instruction approvals pin library revisions behind their saved names", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const preset = yield* f.api.CreatePreset({ label: "Approved preset" })
+    const ctx = { ...f.context, toolCallId: "pin-preset" }
+    const args = { chat: f.chat.id, title: "Bind preset", changes: [{ preset: preset.id }] }
+    yield* f.tool("rewrite_instructions").describe!(ctx, args as never)
+    yield* fixtureSql(config.dataDir, [
+      { sql: "UPDATE entity_refs SET row_version=row_version+1 WHERE id=?", params: [preset.id] }
+    ])
+    const result = yield* f.tool("rewrite_instructions").execute(ctx, args as never)
+    assert.isTrue(result.isError, result.text)
+    assert.include(result.text, "changed while waiting")
+    assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: f.chat.id, forkId: f.forkId }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("review: shared-note slots refuse a rewrite that cannot change their shown text", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const shared = yield* f.api.CreateSharedNote({ title: "Weather", content: "Rain." })
+    const slot = yield* f.api.CreateChatNote({ chatId: f.chat.id, title: "", link: shared.entityId })
+    const result = yield* f.run("rewrite_instructions", {
+      chat: f.chat.id,
+      title: "Weather",
+      changes: [{ note: slot.id, text: "Sun." }]
+    })
+    assert.isTrue(result.isError, result.text)
+    assert.include(result.text, "shared note")
+    assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: f.chat.id, forkId: f.forkId }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("review: approval lists the exact dependent summaries that become stale", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const inputs = (yield* f.path()).entries.map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: 0 }))
+    const dependent = yield* completeFixture(
+      config.dataDir,
+      f.writer,
+      f.userId,
+      f.chat.id,
+      inputs.slice(0, 5),
+      [],
+      "First half."
+    )
+    const independent = yield* completeFixture(
+      config.dataDir,
+      f.writer,
+      f.userId,
+      f.chat.id,
+      inputs.slice(5),
+      [],
+      "Other half."
+    )
+    const prompt = yield* f.tool("rewrite_messages").describe!({ ...f.context, toolCallId: "summary-impact" }, {
+      chat: f.chat.id,
+      title: "Rewrite",
+      messages: [{ message: 1, text: "Changed." }]
+    } as never)
+    const impact = prompt.rows.find((r) => r.label === "Dependent summaries")!
+    assert.isDefined(impact)
+    assert.include(impact.value, dependent.id)
+    assert.notInclude(impact.value, independent.id)
+    assert.include(impact.value, "1 summaries")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("keeps merged source lines frozen while rewriting and undoing the shown join", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const source = yield* f.writer.CreateChat({
+      userId: f.userId,
+      kind: "rp",
+      status: "active",
+      title: "Source",
+      participants: [],
+      greeting: null
+    })
+    yield* f.writer.AppendMessage({
+      userId: f.userId,
+      chatId: source.id,
+      forkId: source.currentForkId!,
+      parentSlotId: null,
+      branch: false,
+      version: said("Aria sees {{literal_macro}}."),
+      commitDraft: null
+    })
+    const request = {
+      userId: f.userId,
+      chatId: f.chat.id,
+      forkId: f.forkId,
+      at: null,
+      source: { chatId: source.id, forkId: source.currentForkId! },
+      includeLeftOut: true
+    }
+    const preview = yield* f.reader.PreviewChatMerge(request)
+    const merged = yield* f.writer.MergeChat({ ...request, title: "Source", framing: null, digest: preview.digest })
+    const before = (yield* f.reader.GetSlot({ userId: f.userId, slotId: merged.slotId, forkId: f.forkId })).entry
+      .version
+    const result = yield* f.run("rewrite_messages", {
+      chat: f.chat.id,
+      title: "Join edit",
+      messages: [{ message: 11, text: before.content.replace("Aria", "Ari") }]
+    })
+    assert.isUndefined(result.isError, result.text)
+    const shown = (yield* f.reader.GetSlot({ userId: f.userId, slotId: merged.slotId, forkId: f.forkId })).entry.version
+    assert.strictEqual(shown.macroMode, "verbatim")
+    assert.include(shown.content, "Ari sees {{literal_macro}}.")
+    const info = yield* f.reader.GetMerge({ userId: f.userId, chatId: f.chat.id, slotId: merged.slotId })
+    const lines = yield* f.reader.MergeMessages({
+      userId: f.userId,
+      chatId: f.chat.id,
+      mergeId: info.id,
+      offset: 0,
+      limit: 10
+    })
+    assert.include(lines[0]!.content, "Aria")
+    assert.include(
+      (yield* f.reader.GetPath({
+        userId: f.userId,
+        chatId: source.id,
+        forkId: source.currentForkId,
+        leafSlotId: null,
+        limit: 10
+      })).entries[0]!.version.content,
+      "Aria"
+    )
+    yield* f.api.UndoRolloutEffect((yield* f.api.ListRolloutEffects({ chatId: f.workshop.id }))[0]!)
+    assert.strictEqual(
+      (yield* f.reader.GetSlot({ userId: f.userId, slotId: merged.slotId, forkId: f.forkId })).entry.version.content,
+      before.content
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})

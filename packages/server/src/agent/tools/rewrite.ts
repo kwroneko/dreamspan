@@ -6,6 +6,7 @@ import type { Chat } from "@rp/shared/chat.ts"
 import type { HistoryCursor, HistoryEdit, HistoryHit } from "@rp/shared/historyApi.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 import { ToolInputRefused } from "../tools.ts"
+import { workshopLimits } from "../../workshopLimits.ts"
 import { resolveChat } from "../exposures/builtins.ts"
 import { resolveLibrary } from "./library.ts"
 
@@ -65,9 +66,11 @@ interface InstructionsArgs extends Base {
 }
 interface Prepared {
   readonly chat: Chat
+  readonly dependents?: ReadonlyArray<{ id: string; revision: string }>
   readonly expected: string
   readonly edits: ReadonlyArray<HistoryEdit>
   readonly labels: ReadonlyArray<string>
+  readonly refs?: ReadonlyArray<{ refId: import("@rp/shared/library.ts").RefId; rowVersion: number }>
   readonly previews?: ReadonlyArray<{ field: string; before: string; after: string }>
   readonly includeSwipes: boolean
   readonly summariesIncluded: boolean
@@ -147,7 +150,8 @@ const replacing = (ctx: ToolContext, args: ReplaceArgs) =>
           if (writtenBytes > 262144 || retainedBytes > 8388608)
             return yield* fail("This rewrite exceeds its text budget. Rewrite fewer messages.")
         }
-        if (found.size > 10000) return yield* fail("Too many targets. Narrow this rewrite.")
+        if (found.size > workshopLimits.rewriteItems)
+          return yield* fail("One rewrite can change at most 32 texts or bindings. Narrow this rewrite.")
         cursor = page.next ?? undefined
       } while (cursor)
     }
@@ -230,6 +234,7 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
       })
     )
     const notes: NonNullable<Prepared["notes"]>[number][] = []
+    const refs: NonNullable<Prepared["refs"]>[number][] = []
     for (const change of args.changes) {
       if (change.note) {
         const entries = yield* ctx.reader.ChatNoteEntries({
@@ -247,6 +252,8 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
         )
         if (matches.length !== 1) return yield* fail("Choose one saved chat note by name or id.")
         const saved = matches[0]!
+        if (saved.linked)
+          return yield* fail("This note follows a shared note. Edit the shared note in the library instead.")
         notes.push({
           refId: saved.ref.id,
           expectedRowVersion: saved.ref.rowVersion,
@@ -261,6 +268,7 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
           const found = change.preset === null ? null : yield* resolveLibrary(ctx, "preset", change.preset)
           if (found && "error" in found) return yield* fail(found.error)
           data = found ? { key: "preset.binding", value: { ref: found.ref.id } } : { key: "preset.unbind", value: {} }
+          if (found) refs.push({ refId: found.ref.id, rowVersion: found.ref.rowVersion })
           const old = state.presetBindings[""]
           const previous = old?.ref
             ? (yield* ctx.reader.OpenEditor({
@@ -272,6 +280,7 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
         } else if (change.lorebook) {
           const found = yield* resolveLibrary(ctx, "lorebook", change.lorebook)
           if ("error" in found) return yield* fail(found.error)
+          refs.push({ refId: found.ref.id, rowVersion: found.ref.rowVersion })
           data = { key: change.on === false ? "lorebook.detach" : "lorebook.attach", value: { ref: found.ref.id } }
           previews.push({
             field: `Lorebook ${found.ref.label}`,
@@ -296,6 +305,7 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
       includeSwipes: false,
       summariesIncluded: false,
       notes,
+      refs,
       previews
     } satisfies Prepared
   })
@@ -315,14 +325,27 @@ const rewrite = <A extends Base>(
   const prepareChecked = (ctx: ToolContext, args: A) =>
     validate(ctx, args).pipe(
       Effect.flatMap((valid) => prepare(ctx, valid)),
-      Effect.flatMap((p) => {
-        const size =
-          p.edits.reduce((n, e) => n + Buffer.byteLength(e.after, "utf8"), 0) +
-          (p.notes ?? []).reduce((n, e) => n + Buffer.byteLength(e.text, "utf8"), 0)
-        return size > 262144
-          ? fail("One rewrite is limited to 262,144 bytes of new text. Rewrite fewer messages.")
-          : Effect.succeed(p)
-      })
+      Effect.flatMap((p) =>
+        Effect.gen(function* () {
+          const size =
+            p.edits.reduce((n, e) => n + Buffer.byteLength(e.after, "utf8"), 0) +
+            (p.notes ?? []).reduce((n, e) => n + Buffer.byteLength(e.text, "utf8"), 0)
+          if (p.edits.length + (p.notes?.length ?? 0) > workshopLimits.rewriteItems)
+            return yield* fail("One rewrite can change at most 32 texts or bindings. Narrow this rewrite.")
+          if (size > 262144)
+            return yield* fail("One rewrite is limited to 262,144 bytes of new text. Rewrite fewer messages.")
+          const proof = yield* ctx.reader.AgentHistorySnapshot({
+            userId: ctx.userId,
+            chatId: p.chat.id,
+            forkId: p.chat.currentForkId!,
+            versions: p.edits.filter((e) => e.kind === "version_replace").map((e) => e.beforeId),
+            summaries: p.edits.filter((e) => e.kind === "summary_revision").map((e) => e.targetId)
+          })
+          if (proof.stamp !== p.expected)
+            return yield* fail("That chat changed while preparing the rewrite. Read it again.")
+          return { ...p, dependents: proof.dependents }
+        })
+      )
     )
   return {
     ...definition,
@@ -337,23 +360,35 @@ const rewrite = <A extends Base>(
           rows: [
             {
               label: "Changes",
-              value: `${p.edits.filter((e) => e.kind === "version_replace").length} messages, ${p.edits.filter((e) => e.kind === "summary_revision").length} summaries, ${p.edits.filter((e) => e.kind === "state_event").length + (p.notes?.length ?? 0)} instructions`
+              value: `${p.edits.filter((e) => e.kind === "version_replace").length - p.labels.filter((label) => label.includes("unshown swipe")).length} messages, ${p.edits.filter((e) => e.kind === "summary_revision").length} summaries, ${p.edits.filter((e) => e.kind === "state_event").length + (p.notes?.length ?? 0)} instructions`
             },
             {
               label: "Scope",
-              value: `Only this chat's current branch. ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
+              value: `Only this chat's current branch (${p.chat.currentForkId}). ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
+            },
+            {
+              label: "Limit",
+              value: "At most 32 texts or bindings in one atomic rewrite; 262,144 bytes per call and 1 MiB per run."
+            },
+            {
+              label: "Dependent summaries",
+              value: p.dependents?.length
+                ? `${p.dependents.length} summaries will need updating: ${p.dependents.map((s) => `${s.id} (revision ${s.revision})`).join(", ")}`
+                : "No unchanged summaries depend on these texts."
+            },
+            {
+              label: "Unshown swipes",
+              value: `${p.labels.filter((label) => label.includes("unshown swipe")).length} unshown swipes`
             }
           ],
           changes: [
-            ...(
-              p.previews ??
-              p.edits.slice(0, 3).map((edit, i) => ({
-                field: p.labels[i] ?? "Instruction",
+            ...(p.previews ??
+              p.edits.map((edit, i) => ({
+                field: `${p.labels[i] ?? "Instruction"}${edit.targetId ? ` (${edit.targetId}; revision ${edit.beforeId})` : ""}`,
                 before: edit.before,
                 after: edit.after
-              }))
-            ).slice(0, 3),
-            ...(p.notes ?? []).slice(0, 3).map((n) => ({ field: n.name, before: n.before, after: n.text }))
+              }))),
+            ...(p.notes ?? []).map((n) => ({ field: n.name, before: n.before, after: n.text }))
           ]
         }
       }),
@@ -375,6 +410,7 @@ const rewrite = <A extends Base>(
             edits: p.edits,
             includeSwipes: p.includeSwipes,
             summariesIncluded: p.summariesIncluded,
+            ...(p.refs ? { expectedRefs: p.refs } : {}),
             ...(p.notes
               ? {
                   notes: p.notes.map(({ refId, expectedRowVersion, parent, text }) => ({
@@ -398,7 +434,7 @@ const rewriteChat = rewrite<ReplaceArgs>(
     label: "Rewrote chat text",
     explanation: "Replace text in a chat, with one Undo.",
     description:
-      "Replace text on the current branch only. Each pair names its scopes explicitly: messages, unshown swipes, summaries. Never sends a request to that chat’s provider. Returns counts without disclosing chat text. Pairs match the original text, in the given order; overlapping matches use the first pair. Read chat text only with read_chat after reading permission.",
+      "Replace text on the current branch only, at most 32 texts or bindings per atomic call. Each pair names its scopes explicitly: messages, unshown swipes, summaries. Never sends a request to that chat’s provider. Returns counts without disclosing chat text. Pairs match the original text, in the given order; overlapping matches use the first pair. Read chat text only with read_chat after reading permission.",
     parameters: Type.Object(
       {
         chat: name,
@@ -433,7 +469,7 @@ const rewriteMessages = rewrite<MessagesArgs>(
     label: "Rewrote messages",
     explanation: "Write new message text, with one Undo.",
     description:
-      "Replace the shown text of named message numbers on the current branch. Optional summaries must be rewritten explicitly by id. A single Undo restores messages and rewritten summaries. Other branches and unshown swipes remain unchanged. At most 32 texts and 262,144 bytes per call, 1 MiB per run. Never calls another provider.",
+      "Replace the shown text of named message numbers on the current branch. Optional summaries must be rewritten explicitly by id. A single Undo restores messages and rewritten summaries. Other branches and unshown swipes remain unchanged. At most 32 texts or bindings total and 262,144 bytes per call, 1 MiB per run. Never calls another provider.",
     parameters: Type.Object(
       {
         chat: name,
@@ -455,7 +491,7 @@ const rewriteInstructions = rewrite<InstructionsArgs>(
     label: "Rewrote chat instructions",
     explanation: "Change chat notes and bindings, with one Undo.",
     description:
-      "Rewrite existing chat notes or change the chat’s preset and lorebook bindings in one changeset. Uses saved chat notes only; library documents and drafts stay intact. A note is bound from the current position. Does not change permissions.",
+      "Rewrite at most 32 existing chat notes or bindings, or change the chat’s preset and lorebook bindings in one changeset. Uses saved chat notes only; library documents and drafts stay intact. A note is bound from the current position. Does not change permissions.",
     parameters: Type.Object(
       {
         chat: name,

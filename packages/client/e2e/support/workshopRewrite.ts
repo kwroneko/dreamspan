@@ -25,6 +25,17 @@ export function workshopRewriteTests() {
                 content: "Aria meets the gardener."
               })
               if (posted._tag !== "Posted") throw new Error("queued")
+              let parent = posted.entry.slotId
+              for (let n = 2; n <= 4; n++) {
+                const next = yield* api.SendMessage({
+                  chatId: chat.id,
+                  parentSlotId: parent,
+                  branch: false,
+                  content: `Aria meets gardener ${n}.`
+                })
+                if (next._tag !== "Posted") throw new Error("queued")
+                parent = next.entry.slotId
+              }
               return { chat, entry: posted.entry }
             })
           )
@@ -79,8 +90,11 @@ export function workshopRewriteTests() {
             await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
             const approval = page.locator("[data-approval]")
             await expect(approval).toContainText(`Rewrite “${fixture.chat.title}”`)
-            await expect(approval).toContainText("1 messages, 1 summaries")
+            await expect(approval).toContainText("4 messages, 1 summaries")
+            await expect(approval).toContainText("At most 32 texts or bindings")
+            await expect(approval.locator("[data-approval-change]")).toHaveCount(5)
             await expect(approval.locator("[data-approval-change]").first()).toContainText("Aria")
+            await expect(approval.locator("[data-approval-change]").nth(3)).toContainText("gardener 4")
             await expectLayout(page, info, `rewrite-approval-${width}-${theme}`)
             await approval.getByRole("button", { name: "Allow", exact: true }).click()
             await expect(approval).toHaveCount(0)

@@ -11,8 +11,8 @@ import type { ReadOps } from "./ops.ts"
 export const makeAgentHistoryReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    AgentHistorySnapshot: ({ userId, chatId, forkId }) =>
-      agentHistorySnapshot(sql, userId, chatId, forkId).pipe(query("AgentHistorySnapshot")),
+    AgentHistorySnapshot: ({ userId, chatId, forkId, ...changed }) =>
+      agentHistorySnapshot(sql, userId, chatId, forkId, changed).pipe(query("AgentHistorySnapshot")),
     AgentRewriteTargets: ({ userId, chatId, forkId, messages }) =>
       Effect.gen(function* () {
         const fork = yield* historyFork(sql, userId, chatId, forkId)

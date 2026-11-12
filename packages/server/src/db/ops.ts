@@ -1839,6 +1839,9 @@ export class WriteOps extends RpcGroup.make(
       expected: Schema.String,
       title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
       edits: Schema.Array(HistoryEdit).check(Schema.isMaxLength(10000)),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int })).check(Schema.isMaxLength(32))
+      ),
       summariesIncluded: Schema.Boolean,
       includeSwipes: Schema.Boolean,
       notes: Schema.optionalKey(
@@ -3271,8 +3274,19 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** A chat's composer draft's restorable states, by the draft's id. */
   Rpc.make("AgentHistorySnapshot", {
-    payload: { userId: UserId, chatId: ChatId, forkId: ForkId },
-    success: Schema.Struct({ stamp: Schema.String, name: Schema.String, leaf: Schema.NullOr(SlotId) }),
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      versions: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(32))),
+      summaries: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(32)))
+    },
+    success: Schema.Struct({
+      stamp: Schema.String,
+      name: Schema.String,
+      leaf: Schema.NullOr(SlotId),
+      dependents: Schema.Array(Schema.Struct({ id: Schema.String, revision: Schema.String }))
+    }),
     error: Schema.Union([NotFound, HistoryRejected, StorageError])
   }),
   Rpc.make("AgentRewriteTargets", {

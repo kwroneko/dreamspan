@@ -107,7 +107,14 @@ export const readSummary = (
             SELECT 1 FROM changeset_items ci, json_each(ci.after_json, '$.preservedInputs') p
             WHERE ci.changeset_id=o.changeset_id AND ci.target_kind='version_replace'
               AND ci.target_id=o.target_id AND ci.after_json ->> '$.id'=v.id
-              AND p.value ->> '$.id'=i.version_id AND p.value ->> '$.amends'=i.amend_count)) AS replaced_with_summaries, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
+              AND p.value ->> '$.id'=i.version_id AND p.value ->> '$.amends'=i.amend_count
+              -- Agent edits preserve only the summaries actually rewritten with this input.
+              -- Naming an unrelated summary cannot certify every dependent summary.
+              AND (NOT EXISTS (SELECT 1 FROM changesets ac WHERE ac.id=ci.changeset_id AND ac.origin='agent')
+                OR EXISTS (SELECT 1 FROM changeset_items si WHERE si.changeset_id=ci.changeset_id
+                  AND si.target_kind='summary_revision' AND si.target_id=${row.id}
+                  AND si.after_json ->> '$.id'=${row.revision_id}
+                  AND si.after_json ->> '$.applicationId'=ci.after_json ->> '$.applicationId')))) AS replaced_with_summaries, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
           AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed') AND v.content_length > 0
           THEN v.id ELSE NULL END AS effective, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS current_amends
         FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions iv ON iv.id=i.version_id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
