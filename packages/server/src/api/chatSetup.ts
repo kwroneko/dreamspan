@@ -36,6 +36,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "participant.leave", value: { entity: change.entityId } }
     case "Presence":
       return { key: "presence.set", value: { entity: change.entityId, present: change.present } }
+    case "Away":
+      return { key: "away.set", value: { entity: change.entityId, away: change.away } }
     case "PlayedByMe":
       return { key: "played_by_me.set", value: { entities: change.entityIds } }
     case "Model":
