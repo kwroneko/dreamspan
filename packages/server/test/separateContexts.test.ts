@@ -11,7 +11,7 @@ import { Effect } from "effect"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
 import { historyTools } from "../src/agent/tools/history.ts"
-import { listNotes } from "../src/agent/tools/notes.ts"
+import { editNote, listNotes, switchNote } from "../src/agent/tools/notes.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -675,7 +675,9 @@ const tools = (t: Effect.Success<ReturnType<typeof story>>, snapshot: ContextSna
   }
   return (id: string, args: object) =>
     Effect.map(
-      [...historyTools, listNotes].find((tool) => tool.id === id)!.execute(context, args as never),
+      [...historyTools, listNotes, editNote, switchNote]
+        .find((tool) => tool.id === id)!
+        .execute(context, args as never),
       (out) => out.text
     )
 }
@@ -1035,6 +1037,13 @@ describe("the agent's read tools in a separate context", () => {
         assert.include(forWren, "While Mira is here")
         assert.include(forWren, "Weather")
         assert.notInclude(forWren, "Mira's secret")
+        const restricted = tools(t, yield* t.contextFor(t.wren))
+        assert.include(
+          yield* restricted("edit_note", { note: "Mira's secret", find: "unknown passage", replace: "x" }),
+          "No note is called"
+        )
+        assert.include(yield* restricted("switch_note", { note: "Mira's secret", on: false }), "No note is called")
+
         assert.include(yield* tools(t, yield* t.contextFor(t.mira))("list_notes", {}), "Mira's secret")
       })
     )

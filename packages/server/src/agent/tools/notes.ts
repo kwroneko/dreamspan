@@ -39,6 +39,7 @@ const noteEditable = (state: ChatState, entity: string, doc: Doc) =>
 export type NotesPosition = Pick<ToolContext, "userId" | "chatId" | "forkId" | "reader"> & {
   readonly slotId: ToolContext["slotId"] | null
   readonly displayEnd?: boolean
+  readonly viewers?: ToolContext["viewers"]
 }
 
 /**
@@ -107,7 +108,17 @@ export const notesAt = (context: NotesPosition) =>
         } satisfies NoteView
       })
     )
-    return { notes, state }
+    const viewers = context.viewers
+    return {
+      notes:
+        viewers == null
+          ? notes
+          : notes.filter((n) => {
+              const condition = readNoteCondition(n.doc["condition"])
+              return condition.when !== "turn" || condition.cards.some((card) => viewers.includes(card))
+            }),
+      state
+    }
   })
 
 /** The one note called `title` (case and spaces aside), or the error the model sees. */
@@ -141,17 +152,7 @@ export const listNotes: RolloutTool<Record<string, never>> = {
     safely(
       "list_notes",
       Effect.gen(function* () {
-        const { notes: all } = yield* notesAt(context)
-        // A separate context's viewer doesn't see the notes for other characters' own turns
-        // (spec/CHARACTER-CONTEXT.md §9.2 C5): their text was never in its context.
-        const viewers = context.viewers
-        const notes =
-          viewers === null
-            ? all
-            : all.filter((n) => {
-                const condition = readNoteCondition(n.doc["condition"])
-                return condition.when !== "turn" || condition.cards.some((card) => viewers.includes(card))
-              })
+        const { notes } = yield* notesAt(context)
         if (notes.length === 0) return { text: "The chat has no notes." }
         return {
           text: notes
