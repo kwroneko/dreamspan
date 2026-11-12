@@ -16,7 +16,7 @@ const CONTEXT_ABOUT =
 
 /** Shown while separate contexts are on: what they cost. */
 const SEPARATE_COST =
-  "Costs more: once a character misses part of the chat, its replies start differently from the others', so less of the context is reused from the cache."
+  "Costs more: once a character misses part of the chat, its replies start differently from the others', so less of the context is reused from the cache. Summaries also run once for each character that missed something, as well as once for the whole chat."
 
 export function ContextSetting({ session }: { session: ChatSession }) {
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)

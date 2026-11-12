@@ -92,6 +92,7 @@ const fixture = (dataDir: string, api: Api) =>
       leafSlotId: null,
       reader,
       writer,
+      viewers: null,
       cache: new Map()
     }
     const run = (name: string, args: unknown, id = name) =>

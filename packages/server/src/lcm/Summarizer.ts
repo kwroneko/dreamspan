@@ -328,7 +328,7 @@ export function makeSummarizer(pool: boolean) {
               Effect.andThen(changed(position.chatId))
             )
         if (p.backfill?.armed && reason === "reply") yield* backfill("begin")
-        if (p.backfill?.settled) yield* backfill("finish")
+        if (p.backfill?.settled && !p.views?.length) yield* backfill("finish")
         const held = p.backfill?.held === true
         if (p.enabled && !interactive && !held) {
           const explicitChunks = p.refresh.filter((c) => c.explicitRequested || c.rerunIds?.length)
@@ -344,9 +344,13 @@ export function makeSummarizer(pool: boolean) {
           // Then each separate context's own summaries (db/lcmAudience.ts), by the same rules: one
           // pass per character that missed something, after the shared one.
           const viewJobs: Array<(typeof made)[number]> = []
+          let viewsSettled = p.backfill?.settled === true
           for (const audience of p.views ?? []) {
             const v = yield* reader.PlanSummaries({ ...position, ...(reason ? { reason } : {}), audience })
             if (!v.enabled) continue
+            viewsSettled &&= v.backfill?.settled === true
+            if (v.maintenancePins && reason === "reply")
+              yield* writer.SaveLcmMaintenance({ ...position, pins: v.maintenancePins, audience })
             const ahead = v.spendAhead || p.backfill?.drive === true
             const viewChunks = ahead
               ? [...v.chunks, ...v.refresh]
@@ -368,6 +372,7 @@ export function makeSummarizer(pool: boolean) {
                 }))
               )
           }
+          if (p.views?.length && viewsSettled && !viewJobs.length) yield* backfill("finish")
           if (made.length || condensed.length || viewJobs.length) yield* changed(position.chatId)
           if (pool && [...made, ...condensed, ...viewJobs].some((j) => j.status === "complete"))
             schedule(position, "completion")

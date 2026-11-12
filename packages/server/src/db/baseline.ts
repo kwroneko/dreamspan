@@ -414,6 +414,8 @@ export const baseline: ReadonlyArray<string> = [
     recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json))
   ) STRICT`,
   // The deferred reverse FK requires one payload per version at commit, including empty ones.
+  // Corrections scan only versions that recorded presence, without fetching their prose.
+  `CREATE INDEX version_texts_presence ON version_texts(version_seq, presence_json) WHERE presence_json IS NOT NULL`,
   `CREATE TRIGGER version_texts_identity_fixed BEFORE UPDATE OF version_seq ON version_texts
     WHEN NEW.version_seq IS NOT OLD.version_seq
     BEGIN SELECT RAISE(ABORT, 'a version payload never changes owner'); END`,

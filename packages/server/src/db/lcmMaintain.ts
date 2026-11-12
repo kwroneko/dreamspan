@@ -148,7 +148,8 @@ export const maintain = (
       largeRequests: Record<string, Ask>
       explicit: Array<string>
     }
-    const previous: Pins | undefined = episode ? (JSON.parse(episode.pins_json) as Pins) : undefined
+    const recorded = episode ? (JSON.parse(episode.pins_json) as Pins & { views?: Record<string, Pins> }) : undefined
+    const previous = audience === null ? (recorded?.signatures ? recorded : undefined) : recorded?.views?.[audience]
     const askModels: Record<string, string | null> = {}
     if (options.reason === "reply" || previous) {
       const requests = yield* rerunRequests(sql, chatId)
@@ -163,7 +164,8 @@ export const maintain = (
         job_result: string | null
       }>`SELECT r.id, r.summary_id, r.model_json, j.level AS job_level, j.first_slot_id AS job_first,
           j.last_slot_id AS job_last, j.input_child_ids AS job_children, j.result_summary_id AS job_result
-        FROM summary_reruns r LEFT JOIN summarization_jobs j ON j.id = r.job_id WHERE r.chat_id = ${chatId} AND r.id IN ${sql.in(requests.map((r) => r.id))}`
+        FROM summary_reruns r LEFT JOIN summarization_jobs j ON j.id = r.job_id WHERE r.chat_id = ${chatId} AND r.id IN ${sql.in(requests.map((r) => r.id))}
+          AND (r.summary_id IS NOT NULL OR j.audience_json IS ${audience})`
       for (const row of asks) {
         if (
           options.reason !== "reply" &&

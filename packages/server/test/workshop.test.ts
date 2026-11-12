@@ -635,6 +635,7 @@ describe("workshop", () => {
         leafSlotId: null,
         reader,
         writer,
+        viewers: null,
         cache: new Map()
       })
       const run = (name: string, ctx: ToolContext, args: unknown) =>

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatSession } from "../src/features/chat/session.ts"
 import type { AwayMark } from "@rp/shared/contextsApi.ts"
-import { awayExplanation, awayLabel, awayTransitions } from "../src/features/chat/awayMarks.ts"
+import { awayExplanation, awayLabel, awayTransitions, awayRowsOf } from "../src/features/chat/awayMarks.ts"
 
 const wren = "wren" as EntityId
 const mira = "mira" as EntityId
@@ -48,4 +49,30 @@ describe("the timeline's away rows", () => {
     expect(awayExplanation(left!, name)).toContain("A decision model judged that Wren left")
     expect(awayExplanation(other!, name)).toContain("Wren's reply marked Mira away")
   })
+})
+
+it("reads away marks again after its last timeline listener was absent", async () => {
+  let marks: ReadonlyArray<AwayMark> = []
+  let reads = 0
+  const session = {
+    id: "chat",
+    snapshot: () => ({ forkId: "fork", leafSlotId: "s1", loading: false, cast: { roles: {} } }),
+    subscribe: () => () => {},
+    subscribePositions: () => () => {},
+    call: async () => {
+      reads++
+      return { ok: true, value: marks }
+    }
+  } as unknown as ChatSession
+  const store = awayRowsOf(session)
+  const stop = store.subscribe(() => {})
+  await Promise.resolve()
+  expect(store.at("s1" as SlotId)).toHaveLength(0)
+  stop()
+  marks = [mark("new-away", "s1", wren, true, "decision")]
+  const stopAgain = store.subscribe(() => {})
+  await Promise.resolve()
+  expect(reads).toBe(2)
+  expect(store.at("s1" as SlotId).map((row) => row.eventId)).toEqual(["new-away"])
+  stopAgain()
 })

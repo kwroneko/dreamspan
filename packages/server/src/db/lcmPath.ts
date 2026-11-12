@@ -8,6 +8,7 @@ import type { RequestImage } from "../assembler/types.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { windowPieces } from "./displayPath.ts"
 import { lcmView, placesOf, positionIn } from "./lcmDisplay.ts"
+import { readKnowers } from "./knowers.ts"
 import { knownVersions } from "./lcmAudience.ts"
 
 export interface LcmSlot {
@@ -73,9 +74,29 @@ export const lcmPath = (
         const path = yield* wholePath(sql, userId, chatId, leaf, first, limit)
         const versions = path.flatMap((slot) => (slot.versionId === null ? [] : [slot.versionId]))
         const known = yield* knownVersions(sql, versions, identities)
+        // A partial join is rendered from the same frozen rows as a reply. It remains a
+        // versioned input, so changing its known text invalidates the summary as usual.
+        const joins =
+          versions.length === 0
+            ? []
+            : yield* sql<{ id: string }>`
+          SELECT v.id FROM json_each(${JSON.stringify(versions)}) requested CROSS JOIN versions v ON v.id=requested.value
+          CROSS JOIN chat_merges m ON m.slot_id=v.slot_id WHERE m.chat_id=${chatId}`
+        const projected = new Map(
+          (yield* readKnowers(
+            sql,
+            chatId,
+            sql`1`,
+            joins.map((j) => j.id),
+            identities
+          )).map((v) => [v.versionId, v])
+        )
+        for (const version of projected.values()) if (!version.readable) known.delete(version.versionId)
         return path.map((slot) =>
           slot.versionId === null || known.has(slot.versionId)
-            ? slot
+            ? projected.has(slot.versionId ?? "")
+              ? { ...slot, content: projected.get(slot.versionId!)!.content ?? slot.content }
+              : slot
             : { ...slot, versionId: null, content: "", images: [], amendCount: 0 }
         )
       })

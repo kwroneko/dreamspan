@@ -4,7 +4,7 @@
 // stand in for them are labelled among the messages ("Gap line: …"), and summaries withheld are
 // in "Notes on this context". A `runInspectorSections` entry, so a plugin can replace it.
 import type { RunContext } from "@rp/shared/inspectorApi.ts"
-import { Link } from "@tanstack/react-router"
+import { Link, useSearch } from "@tanstack/react-router"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 
 /** "Message 4 (Mira)" or, with no card named, "Message 4". */
@@ -12,6 +12,7 @@ const messageLabel = (number: number, speaker: string | null) =>
   speaker ? `Message ${number} (${speaker})` : `Message ${number}`
 
 export function ContextViewSection({ run }: { run: RunContext }) {
+  const search = useSearch({ strict: false }) as { fork?: string }
   const view = run.separateContext
   if (!view) return null
   const who = view.viewer || "The speaker"
@@ -31,13 +32,13 @@ export function ContextViewSection({ run }: { run: RunContext }) {
         Separate contexts: written from {who}'s view.{" "}
         {view.leftOut.length === 0
           ? `${who} was present for every message it read.`
-          : `Messages ${who} wasn't present for were left out, and a gap line stands in for each stretch of them.`}
+          : `Messages ${who} wasn't present for were left out, with each missing message listed below.`}
       </p>
       {view.leftOut.length > 0 && (
         <ul aria-label={`Left out of ${who}'s context`} className="flex flex-col gap-2">
           {view.leftOut.map((message) => (
             <li
-              key={message.slotId}
+              key={`${message.slotId}:${message.merged?.ordinal ?? ""}`}
               className="flex items-start gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs"
             >
               <span className="shrink-0 rounded bg-surface-raised px-1.5 py-0.5 font-semibold tracking-wide text-muted uppercase">
@@ -48,10 +49,12 @@ export function ContextViewSection({ run }: { run: RunContext }) {
                   <Link
                     to="/chats/$chatId"
                     params={{ chatId: run.chatId }}
-                    search={{ slot: message.slotId }}
+                    search={{ slot: message.slotId, ...(search.fork ? { fork: search.fork as never } : {}) }}
                     className="font-medium break-words text-accent underline-offset-2 hover:underline"
                   >
-                    {messageLabel(message.number, message.speaker)}
+                    {message.merged
+                      ? `Merged message ${message.merged.ordinal} from ${message.merged.title}${message.speaker ? ` (${message.speaker})` : ""}`
+                      : messageLabel(message.number, message.speaker)}
                   </Link>
                 </Tooltip>
                 <span className="text-muted">{who} wasn't present</span>

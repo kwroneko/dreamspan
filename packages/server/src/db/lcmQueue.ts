@@ -87,12 +87,24 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
       })
     })
   return {
-    SaveLcmMaintenance: ({ userId, chatId, leafSlotId, forkId, pins }) =>
+    SaveLcmMaintenance: ({ userId, chatId, leafSlotId, forkId, pins, audience }) =>
       Effect.gen(function* () {
         yield* lcmPath(sql, userId, chatId, leafSlotId, leafSlotId)
         yield* requireSummaries(sql, chatId)
-        yield* sql`INSERT INTO lcm_reply_maintenance(chat_id,fork_id,leaf_slot_id,pins_json) VALUES (${chatId},${yield* viewAt(sql, chatId, leafSlotId)},${leafSlotId},${pins})
-          ON CONFLICT(chat_id,fork_id,leaf_slot_id) DO UPDATE SET pins_json=excluded.pins_json`
+        const fork = yield* viewAt(sql, chatId, leafSlotId)
+        let saved = pins
+        if (audience !== undefined) {
+          const [existing] = yield* sql<{
+            pins_json: string
+          }>`SELECT pins_json FROM lcm_reply_maintenance WHERE chat_id=${chatId} AND fork_id=${fork} AND leaf_slot_id=${leafSlotId}`
+          const record = existing ? JSON.parse(existing.pins_json) : {}
+          record.views = { ...record.views, [audience]: JSON.parse(pins) }
+          saved = JSON.stringify(record)
+        }
+        yield* sql`INSERT INTO lcm_reply_maintenance(chat_id,fork_id,leaf_slot_id,pins_json) VALUES (${chatId},${fork},${leafSlotId},${saved})
+          ON CONFLICT(chat_id,fork_id,leaf_slot_id) DO UPDATE SET pins_json=
+            CASE WHEN ${audience === undefined ? 1 : 0}=1 AND json_type(lcm_reply_maintenance.pins_json,'$.views')='object'
+              THEN json_set(excluded.pins_json,'$.views',json_extract(lcm_reply_maintenance.pins_json,'$.views')) ELSE excluded.pins_json END`
       }).pipe(inFork(sql, chatId, forkId, leafSlotId), transaction(sql, "SaveLcmMaintenance")),
     // Work here depends on the chunks and the jobs around them, never on the length of the chat: a
     // write holds the writer, and a long chat's first plan must not hold it for a noticeable time.

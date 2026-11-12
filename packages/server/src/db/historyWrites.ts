@@ -202,7 +202,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                 : edit.after
             // Preserve only inputs connected by edits that also covered summaries. A
             // later rename must not bless an earlier amend or messages-only rewrite.
-            let preservedInputs: Array<{ id: string; amends: number }> = []
+            let preservedInputs: Array<{ id: string; amends: number; summaryIds?: ReadonlyArray<string> }> = []
             if (edit.kind === "version_replace" && application.summariesIncluded) {
               const [amends] = yield* sql<{
                 n: number
@@ -217,7 +217,33 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                 ? ((JSON.parse(previousProof.after_json) as { preservedInputs?: typeof preservedInputs })
                     .preservedInputs ?? [])
                 : []
-              preservedInputs = [...inherited.filter((p) => p.id !== current.id), { id: current.id, amends: amends!.n }]
+              // Keep only searched summaries that actually depend on this message. A long
+              // replace therefore stores a few ids per message, not the entire search per edit.
+              const scope =
+                application.summaryIds === undefined
+                  ? undefined
+                  : (yield* sql<{ id: string }>`
+                WITH RECURSIVE covering(id) AS (
+                  SELECT summary_id FROM summary_inputs WHERE slot_id=${current.slot_id}
+                  UNION SELECT p.summary_id FROM summary_parents p JOIN covering c ON p.parent_id=c.id
+                ) SELECT id FROM covering WHERE id IN (SELECT value FROM json_each(${JSON.stringify(application.summaryIds)}))`).map(
+                      (s) => s.id
+                    )
+              const restrict = (previous: ReadonlyArray<string> | undefined) =>
+                scope === undefined
+                  ? previous
+                  : previous === undefined
+                    ? scope
+                    : scope.filter((id) => previous.includes(id))
+              preservedInputs = [
+                ...inherited
+                  .filter((p) => p.id !== current.id)
+                  .map((p) => {
+                    const summaryIds = restrict(p.summaryIds)
+                    return { ...p, ...(summaryIds === undefined ? {} : { summaryIds }) }
+                  }),
+                { id: current.id, amends: amends!.n, ...(scope === undefined ? {} : { summaryIds: scope }) }
+              ]
             }
             const after = JSON.stringify({ id: afterId, content: afterContent, preservedInputs, applicationId })
             if (previous) yield* sql`UPDATE changeset_items SET after_json=${after} WHERE id=${previous.id}`

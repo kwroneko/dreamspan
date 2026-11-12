@@ -207,7 +207,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const covered = yield* completedCoverage(sql, userId, chatId, path, shown, audience)
         // The shared plan ends a chunk before each view's first message it didn't know.
         const cuts = new Set(
-          audience === null ? path.filter((s) => views.some((v) => v.unknownFrom === s.depth)).map((s) => s.id) : []
+          audience === null ? path.filter((s) => views.some((v) => v.unknownFrom === s.position)).map((s) => s.id) : []
         )
         const chunks = [
           ...leafPlanner.plan({

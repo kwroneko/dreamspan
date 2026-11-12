@@ -9,7 +9,9 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { contextExcludedIn } from "./lcmVisibility.ts"
-import { shownIn, slotDeletedIn, viewAt } from "./forkState.ts"
+import { shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
+import { displaySlots } from "./displayPath.ts"
+import { pathView } from "./lcmDisplay.ts"
 import { knowsSql } from "./knowers.ts"
 import type { ChatState, FoldableEvent } from "@rp/shared/state.ts"
 import { identitiesOf } from "../assembler/knowledge.ts"
@@ -62,7 +64,7 @@ export const knownVersions = (
     : Effect.map(
         sql<{ id: string }>`SELECT v.id FROM json_each(${JSON.stringify([...new Set(versionIds)])}) r
           CROSS JOIN version_records v ON v.id = r.value CROSS JOIN slots s ON s.id = v.slot_id
-          WHERE ${knowsSql(sql, identities)}`,
+          WHERE ${knowsSql(sql, identities, true)}`,
         (rows) => new Set(rows.map((row) => row.id))
       )
 
@@ -77,15 +79,16 @@ export const inputsKnown = (sql: SqlClient.SqlClient, summaryId: string, identit
         SELECT ${summaryId} UNION SELECT p.parent_id FROM summary_parents p JOIN parts ON p.summary_id = parts.id
       ) SELECT EXISTS (SELECT 1 FROM parts JOIN summary_inputs i ON i.summary_id = parts.id
         JOIN version_records v ON v.id = i.version_id JOIN slots s ON s.id = v.slot_id
-        WHERE NOT ${knowsSql(sql, identities)}) AS unknown`,
+        WHERE NOT CASE WHEN (SELECT audience_json FROM summaries WHERE id=${summaryId}) IS NOT NULL
+          THEN ${knowsSql(sql, identities, true)} ELSE ${knowsSql(sql, identities)} END) AS unknown`,
     ([row]) => (row?.unknown ?? 0) === 0
   )
 
 /**
- * The depth of the first message on the path to `leaf` the identities didn't know, as its fork
+ * The display position of the first message on the path to `leaf` the identities didn't know, as its fork
  * shows it; null when they knew everything. Shared summaries end before it to be theirs too.
  */
-export const firstUnknownDepth = (
+export const firstUnknownPosition = (
   sql: SqlClient.SqlClient,
   chatId: string,
   leaf: string,
@@ -93,14 +96,21 @@ export const firstUnknownDepth = (
 ) =>
   Effect.gen(function* () {
     const fork = yield* viewAt(sql, chatId, leaf)
-    const [row] = yield* sql<{ depth: number | null }>`WITH RECURSIVE path(id) AS (
-        SELECT id FROM slots WHERE id = ${leaf} AND chat_id = ${chatId}
-        UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
-      ) SELECT min(s.depth) AS depth FROM path JOIN slots s ON s.id = path.id
+    const shown = yield* pathView(sql, chatId, leaf)
+    const path = shown
+      ? sql`${displaySlots(sql, shown.pieces, 0, shown.end)}, path(id, position) AS (SELECT id, position FROM display_slots)`
+      : sql`WITH RECURSIVE path(id, position) AS (
+        SELECT id, depth FROM slots WHERE id = ${leaf} AND chat_id = ${chatId}
+        UNION ALL SELECT s.id, s.depth FROM slots s JOIN path p ON s.id = (SELECT parent_slot_id FROM slots WHERE id = p.id)
+      )`
+    const [row] = yield* sql<{ position: number | null }>`${path}
+      SELECT min(path.position) AS position FROM path JOIN slots s ON s.id = path.id
         JOIN version_records v ON v.id = ${shownIn(sql, fork, "s")}
         WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
-          AND v.status NOT IN ('generating', 'failed') AND NOT ${knowsSql(sql, identities)}`
-    return row?.depth ?? null
+          AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
+          AND (v.content_length > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id=v.id))
+          AND NOT ${knowsSql(sql, identities)}`
+    return row?.position ?? null
   })
 
 /** A separate context with summaries of its own: its character, identities and audience key. */
@@ -108,7 +118,7 @@ interface SummaryView {
   readonly entity: string
   readonly identities: ReadonlyArray<string>
   readonly audience: string
-  /** The depth of its first message it didn't know: the shared summaries end before it. */
+  /** The display position of its first message it didn't know: the shared summaries end before it. */
   readonly unknownFrom: number
 }
 
@@ -132,7 +142,7 @@ export const activeViews = (
     for (const entity of state.participants) {
       if (state.playedByMe.includes(entity) || state.roles[entity] === "narrator") continue
       const identities = replaced.get(entity) ?? [entity]
-      const unknownFrom = yield* firstUnknownDepth(sql, chatId, leaf, identities)
+      const unknownFrom = yield* firstUnknownPosition(sql, chatId, leaf, identities)
       if (unknownFrom !== null) views.push({ entity, identities, audience: audienceKey(identities), unknownFrom })
     }
     return views

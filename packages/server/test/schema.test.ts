@@ -3,6 +3,7 @@
 import { DatabaseSync } from "node:sqlite"
 import { beforeEach, describe, expect, it } from "vitest"
 import { baseline } from "../src/db/baseline.ts"
+import { presenceCandidatesFrom } from "../src/db/presenceCorrection.ts"
 
 let db: DatabaseSync
 let n = 0
@@ -150,6 +151,14 @@ describe("version authoring provenance", () => {
 })
 
 describe("version payload separation", () => {
+  it("presence corrections use chat-bounded covering presence probes, independent of swipe prose", () => {
+    const plan = all<{
+      detail: string
+    }>(`EXPLAIN QUERY PLAN SELECT v.id,t.presence_json FROM ${presenceCandidatesFrom}
+      WHERE t.presence_json IS NOT NULL AND s.chat_id='chat' AND v.purged_at IS NULL`)
+    expect(plan.some((p) => p.detail.includes("COVERING INDEX version_texts_presence"))).toBe(true)
+    expect(plan.filter((p) => /SCAN/.test(p.detail))).toHaveLength(0)
+  })
   it("projects presence corrections and speaker changes into historical membership on a bare connection", () => {
     const owner = user()
     for (const card of ["mira", "wren"])

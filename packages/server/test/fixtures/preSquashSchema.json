@@ -866,6 +866,12 @@
     },
     {
       "type": "index",
+      "name": "version_texts_presence",
+      "tbl_name": "version_texts",
+      "sql": "CREATE INDEX version_texts_presence ON version_texts(version_seq, presence_json) WHERE presence_json IS NOT NULL"
+    },
+    {
+      "type": "index",
       "name": "versions_authoring_fork",
       "tbl_name": "versions",
       "sql": "CREATE INDEX versions_authoring_fork ON versions(authoring_fork_id)"

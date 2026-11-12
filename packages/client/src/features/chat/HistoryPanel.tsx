@@ -263,6 +263,7 @@ function HistorySearchPair({
   const id = useId()
   const [search, setSearch] = useState(initial)
   const [hits, setHits] = useState<ReadonlyArray<HistoryHit>>([])
+  const [summaryIds, setSummaryIds] = useState<ReadonlyArray<string>>([])
   const [skipped, setSkipped] = useState<ReadonlySet<string>>(new Set())
   const [cost, setCost] = useState<{ messages: number; summaries: number; tokens: number } | null>(null)
   const [error, setError] = useState("")
@@ -297,6 +298,7 @@ function HistorySearchPair({
       searched.current = search
       let cursor: typeof HistoryCursor.Type | undefined
       const all: HistoryHit[] = []
+      const searchedSummaries = new Set<string>()
       do {
         const result = await session.call((c) =>
           c("PreviewHistory", {
@@ -304,7 +306,8 @@ function HistorySearchPair({
             forkId,
             search,
             ...(cursor ? { cursor } : {}),
-            ...(viewer ? { viewer } : {})
+            ...(viewer ? { viewer } : {}),
+            ...(separate ? { trackSummaries: true } : {})
           })
         )
         if (revision.current !== request) return
@@ -315,6 +318,7 @@ function HistorySearchPair({
           return
         }
         all.push(...result.value.hits)
+        for (const id of result.value.summaryIds ?? []) searchedSummaries.add(id)
         cursor = result.value.next ?? undefined
         if (all.length > 10000) {
           setError("Too many results. Narrow the search.")
@@ -323,6 +327,7 @@ function HistorySearchPair({
         }
       } while (cursor)
       setHits(all)
+      setSummaryIds([...searchedSummaries])
       const raw = all.filter((h) => h.kind === "version_replace" && h.selected)
       const summaries = view.lcm?.layer ?? []
       const firstSummary = summaries.findIndex((s) =>
@@ -349,7 +354,7 @@ function HistorySearchPair({
       clearTimeout(timer)
       if (revision.current === request) revision.current = request + 1
     }
-  }, [search, session, forkId, viewer, view.lcm, view.history, refresh, searchKey])
+  }, [search, session, forkId, viewer, view.lcm, view.history, refresh, searchKey, separate])
   const included = useMemo(
     () =>
       hits
@@ -388,7 +393,8 @@ function HistorySearchPair({
         applications: [
           {
             ...target,
-            summariesIncluded: !one && search.summaries && skipped.size === 0 && !separate,
+            summariesIncluded: !one && search.summaries && skipped.size === 0,
+            ...(separate ? { summaryIds } : {}),
             edits: edits.map(({ kind, targetId, beforeId, before, after }) => ({
               kind,
               targetId,

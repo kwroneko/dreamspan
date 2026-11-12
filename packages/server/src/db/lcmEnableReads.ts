@@ -18,6 +18,8 @@ import { backfillSeconds, estimateBackfill, layerTokens } from "../lcm/backfill.
 import { sqlSources } from "./assemblySources.ts"
 import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
 import { importedSummary, importedSummaryNotes } from "./lcmImported.ts"
+import { displaySlots } from "./displayPath.ts"
+import { pathView } from "./lcmDisplay.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { activeViews } from "./lcmAudience.ts"
 import { knowsSql } from "./knowers.ts"
@@ -57,18 +59,24 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
     shownThrough: number,
     identities?: ReadonlyArray<string>
   ) =>
-    Effect.flatMap(
-      viewAt(sql, chatId, leafSlotId),
-      (fork) => sql<{ n: number; tokens: number }>`WITH RECURSIVE path(id, parent, depth) AS (
+    Effect.gen(function* () {
+      const fork = yield* viewAt(sql, chatId, leafSlotId)
+      const shown = yield* pathView(sql, chatId, leafSlotId)
+      const path = shown
+        ? sql`${displaySlots(sql, shown.pieces, Math.max(0, after + 1), shown.end)}, path(id, depth) AS (SELECT id,position FROM display_slots)`
+        : sql`WITH RECURSIVE path(id, parent, depth) AS (
         SELECT id, parent_slot_id, depth FROM slots WHERE id = ${leafSlotId} AND depth > ${after}
         UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN path p ON s.id = p.parent
           WHERE s.depth > ${after}
-      ) SELECT count(*) AS n, coalesce(sum((v.content_length + 3) / 4 + 3), 0) AS tokens
-        FROM path p JOIN slots s ON s.id = p.id JOIN ${sql.literal(identities ? "version_records" : "versions")} v ON v.id = ${shownIn(sql, fork, "s")}
-        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND (${contextExcludedIn(sql, fork)} = 0 OR s.depth <= ${shownThrough})
-          AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
-          AND v.content_length > 0 AND ${identities ? knowsSql(sql, identities) : sql`1`}`
-    ).pipe(Effect.map(([row]) => row ?? { n: 0, tokens: 0 }))
+      )`
+      const [row] = yield* sql<{ n: number; tokens: number }>`${path}
+      SELECT count(*) AS n, coalesce(sum((v.content_length + 3) / 4 + 3), 0) AS tokens
+      FROM path p JOIN slots s ON s.id = p.id JOIN ${sql.literal(identities ? "version_records" : "versions")} v ON v.id = ${shownIn(sql, fork, "s")}
+      WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND (${contextExcludedIn(sql, fork)} = 0 OR p.depth <= ${shownThrough})
+        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
+        AND v.content_length > 0 AND ${identities ? knowsSql(sql, identities) : sql`1`}`
+      return row ?? { n: 0, tokens: 0 }
+    })
 
   return {
     // The settings panel (DESIGN §8): what the chat stores, what applies, and the fit, measured on

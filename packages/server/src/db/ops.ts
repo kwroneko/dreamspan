@@ -653,7 +653,8 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       leafSlotId: SlotId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
-      pins: Schema.String
+      pins: Schema.String,
+      audience: Schema.optionalKey(Schema.String)
     },
     error: Schema.Union([StorageError, NotFound])
   }),

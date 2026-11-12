@@ -26,10 +26,22 @@ const mergeKnowersSql = (slot: string) => `(SELECT json_group_array(candidate.en
  * Whether the viewer knew the version `v` of slot `s` (SQL, both aliases in scope). `viewers` is
  * the viewer's identities: itself and the cards it replaced on this fork (`card.swap`).
  */
-export const knowsSql = (sql: SqlClient.SqlClient, viewers: ReadonlyArray<string>) => {
+export const knowsSql = (sql: SqlClient.SqlClient, viewers: ReadonlyArray<string>, partialMerges = false) => {
   const ids = JSON.stringify(viewers)
   return sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
-    THEN EXISTS (SELECT 1 FROM json_each(${sql.literal(mergeKnowersSql("s.id"))}) k WHERE k.value IN (SELECT value FROM json_each(${ids})))
+    THEN ${
+      partialMerges
+        ? sql`EXISTS (
+      SELECT 1 FROM chat_merges m JOIN chat_merge_messages mm ON mm.merge_id=m.id
+      WHERE m.slot_id=s.id AND mm.included IN ('verbatim','left_out') AND EXISTS (
+        SELECT 1 FROM json_each(coalesce(mm.knowers_json, (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c WHERE c.value ->> 'from' <> 'destination'))) k
+        WHERE k.value IN (SELECT value FROM json_each(${ids}))))`
+        : sql`NOT EXISTS (
+      SELECT 1 FROM chat_merges m JOIN chat_merge_messages mm ON mm.merge_id=m.id
+      WHERE m.slot_id=s.id AND mm.included IN ('verbatim','left_out') AND NOT EXISTS (
+        SELECT 1 FROM json_each(coalesce(mm.knowers_json, (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c WHERE c.value ->> 'from' <> 'destination'))) k
+        WHERE k.value IN (SELECT value FROM json_each(${ids}))))`
+    }
     ELSE v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(${ids}) viewer WHERE viewer.value = v.speaker_entity_id)
       OR EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${ids}))
         AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
@@ -57,7 +69,7 @@ export const readKnowers = (
       merge_id: string | null
       merge_title: string | null
       content: string
-    }>`SELECT metadata.id, payload.content,
+    }>`SELECT metadata.id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
         (SELECT m.id FROM chat_merges m WHERE m.slot_id = metadata.slot_id) AS merge_id,
         (SELECT m.title FROM chat_merges m WHERE m.slot_id = metadata.slot_id) AS merge_title, payload.cast_json, payload.presence_json, metadata.speaker_entity_id,
         CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = metadata.slot_id) THEN ${sql.literal(mergeKnowersSql("metadata.slot_id"))} END AS merge_cast
