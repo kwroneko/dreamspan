@@ -61,7 +61,7 @@ it.live("history reads stay on the selected path with 5,000 messages, 300 forks 
       slotId: "scale-s-4999" as SlotId,
       versionId: "scale-v-4999" as VersionId,
       leafSlotId: "scale-s-4999" as SlotId,
-      viewer: null,
+      viewers: null,
       rolloutId: "test",
       toolCallId: "test",
       cache: new Map(),

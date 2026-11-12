@@ -42,8 +42,8 @@ const KNOWERS_BATCH = 500
 const missedBy = (context: ToolContext, entries: ReadonlyArray<PathEntry>) =>
   Effect.gen(function* () {
     const missed = new Set<number>()
-    const viewer = context.viewer
-    if (viewer === null) return missed
+    const viewers = context.viewers
+    if (viewers === null) return missed
     const numberOf = new Map(entries.map((e) => [e.version.id as string, (e.position ?? e.depth) + 1]))
     const ids = [...numberOf.keys()]
     for (let at = 0; at < ids.length; at += KNOWERS_BATCH) {
@@ -53,7 +53,7 @@ const missedBy = (context: ToolContext, entries: ReadonlyArray<PathEntry>) =>
         versionIds: ids.slice(at, at + KNOWERS_BATCH)
       })
       for (const { versionId, knowers } of known)
-        if (knowers !== null && !knowers.includes(viewer)) missed.add(numberOf.get(versionId)!)
+        if (knowers !== null && !viewers.some((id) => knowers.includes(id))) missed.add(numberOf.get(versionId)!)
     }
     return missed
   })
@@ -163,7 +163,7 @@ const searched = (context: ToolContext, words: ReadonlyArray<string>, before: nu
       tokens: words.flatMap((w) => w.match(/[\p{L}\p{N}]+/gu) ?? []),
       before: before === undefined ? null : before - 1,
       limit: 200,
-      viewer: context.viewer
+      viewers: context.viewers
     })
     if (rows === null) return null
     const name = yield* namer(
@@ -310,18 +310,20 @@ const summaryTree = (context: ToolContext) =>
           from: summary.from,
           to: summary.to,
           content: summary.content ?? "",
-          children
+          children,
+          fresh: summary.fresh
         })
         for (const id of children)
           queue.push(
             yield* context.reader.GetSummary({ userId: context.userId, forkId: context.forkId, summaryId: id })
           )
       }
-      if (context.viewer === null) return nodes
+      if (context.viewers === null) return nodes
       // Summaries are written for everyone (until they're kept per view, C7): a separate
-      // context's viewer opens only those covering nothing it missed.
+      // context's viewer opens only those covering nothing it missed, and, as assembly withholds
+      // a stale layer, none whose inputs have since changed (they may hold a version it missed).
       const missed = [...(yield* pathRead(context)).missed]
-      return nodes.filter((s) => !missed.some((n) => n >= s.from && n <= s.to))
+      return nodes.filter((s) => s.fresh && !missed.some((n) => n >= s.from && n <= s.to))
     })
   )
 
@@ -332,6 +334,8 @@ interface SummaryNode {
   readonly to: number
   readonly content: string
   readonly children: ReadonlyArray<string>
+  /** Its inputs are still what the path shows. */
+  readonly fresh: boolean
 }
 
 const range = (text: string) => {

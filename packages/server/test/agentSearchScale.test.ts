@@ -180,7 +180,7 @@ describe("search_chat at scale", () => {
             tokens,
             before: null,
             limit: 200,
-            viewer
+            viewers: [viewer]
           })
         const wren = (yield* as(wrenId, ["lighthouse"]))!
         assert.strictEqual(wren.length, LENGTH / 100)

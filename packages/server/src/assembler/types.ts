@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 54
+export const ASSEMBLER_VERSION = 55
 
 export type Role = "system" | "user" | "assistant"
 
@@ -204,6 +204,8 @@ export interface SnapshotInputs {
   readonly presence?: import("@rp/shared/knowledge.ts").VersionPresence
   /** A separate context's viewer (`knowledge` stage), whose knowledge the agent's read tools keep to; absent: none. */
   readonly viewer?: string
+  /** The viewer's identities through card replacements (`Knowledge.aliases`); absent: only `viewer`. */
+  readonly viewerAliases?: ReadonlyArray<string>
   readonly model: ModelInput | null
 }
 
@@ -528,8 +530,8 @@ export interface Generation {
   /** Labels and source decisions read in the same transaction as assembly; scrubbed on the main thread. */
   readonly inspection?: InspectionInputs
   readonly leafSlotId: string | null
-  /** A separate context's viewer: the agent's read tools leave out what it didn't know (C5). */
-  readonly viewer: string | null
+  /** A separate context's viewer, as its identities: the agent's read tools leave out what it didn't know (C5). */
+  readonly viewers: ReadonlyArray<string> | null
   readonly request: AssembledRequest
   readonly model: ModelInput | null
   /** How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md); absent: not at all. */
@@ -554,7 +556,7 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
   const written = new Map((snapshot.templateWrites ?? []).map((t) => [t.version, t.writes]))
   return {
     leafSlotId: snapshot.inputs.leafSlotId,
-    viewer: snapshot.inputs.viewer ?? null,
+    viewers: snapshot.inputs.viewer ? (snapshot.inputs.viewerAliases ?? [snapshot.inputs.viewer]) : null,
     request: snapshot.request,
     ...(snapshot.replySections ? { replySections: snapshot.replySections } : {}),
     model: snapshot.inputs.model,

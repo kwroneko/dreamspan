@@ -3641,8 +3641,11 @@ export class ReadOps extends RpcGroup.make(
       tokens: Schema.Array(Schema.String),
       before: Schema.NullOr(Schema.Int),
       limit: Schema.Int,
-      /** A separate context's viewer: only messages this card knew (spec/CHARACTER-CONTEXT.md §3, C5). */
-      viewer: Schema.optionalKey(Schema.NullOr(Schema.String))
+      /**
+       * A separate context's viewer, as its identities through card replacements: only messages
+       * it knew (spec/CHARACTER-CONTEXT.md §3, C5).
+       */
+      viewers: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
     },
     success: Schema.NullOr(
       Schema.Array(

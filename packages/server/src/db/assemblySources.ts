@@ -886,7 +886,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return found
       }),
 
-    knewThrough: (leaf, viewer, through) =>
+    knewThrough: (leaf, viewer, through, aliases) =>
       Effect.gen(function* () {
         const selected = yield* shown(leaf, "s")
         const fork = yield* viewAt(sql, chatId, leaf)
@@ -896,7 +896,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const unknown = sql`EXISTS (SELECT 1 FROM path JOIN slots s ON s.id = path.id
           JOIN version_records v ON v.id = ${selected}
           WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
-            AND NOT ${knowsSql(sql, viewer)}) AS unknown`
+            AND NOT ${knowsSql(sql, aliases ?? [viewer])}) AS unknown`
         const [row] =
           onDisplay === null
             ? yield* sql<{ unknown: number }>`
@@ -911,7 +911,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         , path AS (SELECT id FROM display_slots)
         SELECT ${unknown} WHERE ${owned}`
         const knew = (row?.unknown ?? 0) === 0
-        knewPins.push({ key: keyOf(leaf, viewer, through), knew })
+        knewPins.push({ key: keyOf(leaf, viewer, through, ...(aliases ? [aliases] : [])), knew })
         return knew
       }),
 
@@ -1231,9 +1231,13 @@ const replaySources = (
       Effect.map(pinned(pins.messageCount ?? [], keyOf(leaf), "the path message count"), ({ count }) => count),
     knowers: (versionIds) =>
       Effect.map(pinned(pins.knowers ?? [], keyOf(versionIds), "who knew the messages"), ({ found }) => found),
-    knewThrough: (leaf, viewer, through) =>
+    knewThrough: (leaf, viewer, through, aliases) =>
       Effect.map(
-        pinned(pins.knewThrough ?? [], keyOf(leaf, viewer, through), "who knew the summarized messages"),
+        pinned(
+          pins.knewThrough ?? [],
+          keyOf(leaf, viewer, through, ...(aliases ? [aliases] : [])),
+          "who knew the summarized messages"
+        ),
         ({ knew }) => knew
       ),
 

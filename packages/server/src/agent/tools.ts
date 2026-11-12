@@ -25,8 +25,12 @@ export interface ToolContext {
   readonly toolCallId: string
   /** The message before the one being generated: nothing after it is visible. */
   readonly leafSlotId: SlotId | null
-  /** A separate context's viewer (spec/CHARACTER-CONTEXT.md §9.2 C5): the read tools leave out what it wasn't present for; null: nothing left out. */
-  readonly viewer: string | null
+  /**
+   * A separate context's viewer as its identities: the card, and those it replaced on this fork
+   * (`card.swap`; spec/CHARACTER-CONTEXT.md §9.2 C5). The read tools leave out what it wasn't
+   * present for; null: nothing left out.
+   */
+  readonly viewers: ReadonlyArray<string> | null
   readonly reader: Reader["Service"]
   readonly writer: Writer["Service"]
   /** Values a tool works out once per rollout (the path, the summaries), by key. */

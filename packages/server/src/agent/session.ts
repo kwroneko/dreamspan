@@ -328,7 +328,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         rolloutId,
         toolCallId,
         leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
-        viewer: generation.viewer,
+        viewers: generation.viewers,
         reader: run.reader,
         writer
       })

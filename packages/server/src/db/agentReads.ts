@@ -213,7 +213,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0)
       }).pipe(query("RolloutSteps")),
 
-    SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit, viewer }) =>
+    SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit, viewers }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ readonly current_fork_id: string | null }>`
           SELECT current_fork_id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -233,7 +233,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const shown = sql`(${before} IS NULL OR s.depth < ${before})
             AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
             AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
-            AND ${viewer == null ? sql`1` : knowsSql(sql, viewer)}`
+            AND ${viewers == null ? sql`1` : knowsSql(sql, viewers)}`
         const onPath = sql`EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)`
         // Few matches in the whole chat (a rare word): start from them, each checked against the
         // path, with the path's template messages (matched once their names are filled in). Many

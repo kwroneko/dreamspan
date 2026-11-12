@@ -1,5 +1,5 @@
 // Separate contexts at the owner's shape (spec/CHARACTER-CONTEXT.md §9.2 C3): a 3,000-message
-// path with 20–50 versions on every third message and 300 branches, Mira and Wren present
+// path with 20–50 versions on every message and 300 branches, Mira and Wren present
 // throughout except a 500-message stretch Wren was away for. Measures the next reply's
 // assembly for each, separate and shared, through the real reader worker, and the
 // summary-layer check over the whole path. Synthetic data only.
@@ -79,15 +79,15 @@ it.live(
           params: [chatId, first, first, main, first]
         },
         { sql: "UPDATE forks SET tip_slot_id = 'main-s2999' WHERE id = ?", params: [main] },
-        // 20–50 versions on every third message.
+        // 20–50 versions on every message.
         {
-          sql: `WITH RECURSIVE n(x) AS (SELECT 3 UNION ALL SELECT x+3 FROM n WHERE x < 2997),
+          sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999),
               k(j) AS (SELECT 1 UNION ALL SELECT j+1 FROM k WHERE j < 49)
             INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,
-              cast_json,created_at,updated_at)
+              cast_json,presence_json,created_at,updated_at)
             SELECT 'main-v'||x||'-'||j, 'main-s'||x, j, 'complete', ?, 'model', 'Another telling of line '||x||', take '||j||'.',
-              'verbatim', 'generated', ?, x, x FROM n JOIN k ON j < 20 + (x % 31)`,
-          params: [mira, cast]
+              'verbatim', 'generated', ?, CASE WHEN x BETWEEN 1001 AND 1500 THEN ? END, x, x FROM n JOIN k ON j < 20 + (x % 31)`,
+          params: [mira, cast, away]
         }
       ])
       // 300 branches, each with a message of its own.
@@ -208,7 +208,7 @@ it.live(
       assert.isFalse(knew)
       process.stdout.write(`CONTEXTS_SCALE ${JSON.stringify(samples)}\n`)
       const ms = (operation: string) => samples.find((s) => s.operation === operation)!.ms
-      assert.isBelow(ms("separate: Wren"), ms("shared: Wren") * 3 + 1_000, "the filter adds at most a bounded share")
+      assert.isBelow(ms("separate: Wren"), ms("shared: Wren") * 1.5 + 200, "the filter adds at most a bounded share")
       assert.isBelow(ms("knewThrough 3,000"), 1_000)
     }).pipe(Effect.scoped, Effect.provide(server.layer))
   },

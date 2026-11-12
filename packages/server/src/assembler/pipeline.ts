@@ -144,7 +144,12 @@ export class AssemblySources extends Context.Service<
       SourceError
     >
     /** Whether `viewer` knew every message on the path to `leaf` up to position `through`. */
-    readonly knewThrough?: (leaf: string, viewer: string, through: number) => Effect.Effect<boolean, SourceError>
+    readonly knewThrough?: (
+      leaf: string,
+      viewer: string,
+      through: number,
+      aliases?: ReadonlyArray<string>
+    ) => Effect.Effect<boolean, SourceError>
   }
 >()("rp/assembler/AssemblySources") {}
 
@@ -465,7 +470,12 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
         cards,
         ...(presence ? { presence } : {}),
         // A separate context's viewer, for the tools to read as the history did (C5).
-        ...(assembly.knowledge?.viewer ? { viewer: assembly.knowledge.viewer } : {}),
+        ...(assembly.knowledge?.viewer
+          ? {
+              viewer: assembly.knowledge.viewer,
+              ...(assembly.knowledge.aliases ? { viewerAliases: assembly.knowledge.aliases } : {})
+            }
+          : {}),
         model: assembly.model ?? null
       },
       ...(request.summaryJob

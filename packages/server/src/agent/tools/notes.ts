@@ -144,13 +144,13 @@ export const listNotes: RolloutTool<Record<string, never>> = {
         const { notes: all } = yield* notesAt(context)
         // A separate context's viewer doesn't see the notes for other characters' own turns
         // (spec/CHARACTER-CONTEXT.md §9.2 C5): their text was never in its context.
-        const viewer = context.viewer
+        const viewers = context.viewers
         const notes =
-          viewer === null
+          viewers === null
             ? all
             : all.filter((n) => {
                 const condition = readNoteCondition(n.doc["condition"])
-                return condition.when !== "turn" || condition.cards.includes(viewer as EntityId)
+                return condition.when !== "turn" || condition.cards.some((card) => viewers.includes(card))
               })
         if (notes.length === 0) return { text: "The chat has no notes." }
         return {

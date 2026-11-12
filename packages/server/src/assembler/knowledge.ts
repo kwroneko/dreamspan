@@ -8,6 +8,7 @@
 // layer where it covers something the viewer doesn't know. The stage and the views are each
 // registered and replaceable.
 import { Effect } from "effect"
+import { foldState } from "@rp/shared/state.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { AssemblySources, need, type Assembly, type AssemblerStage, type Cast } from "./pipeline.ts"
 import type { HistoryEntry } from "./types.ts"
@@ -72,6 +73,8 @@ export interface Knowledge {
   readonly view: string
   /** The card the history is filtered for; null: the whole path. */
   readonly viewer: string | null
+  /** Earlier identities of this same character on this fork (card replacements). */
+  readonly aliases?: ReadonlyArray<string>
 }
 
 /**
@@ -94,7 +97,25 @@ export const knowledgeStage: AssemblerStage = {
           message: `This chat's context setting "${chosen}" isn't installed (a plugin may be off); each reply sees only what its speaker was present for instead.`
         })
       const view = found ?? views.get("separate") ?? separateView
-      assembly.knowledge = { view: view.id, viewer: view.viewer({ assembly, cast, roles: state.roles }) }
+      const viewer = view.viewer({ assembly, cast, roles: state.roles })
+      const events = (assembly.events ?? []).map((e) => e.event)
+      const swaps = events.filter((e) => e.data.key === "card.swap")
+      const identities = new Map<string, ReadonlyArray<string>>()
+      if (viewer !== null && swaps.length) {
+        const original = foldState(events.filter((e) => e.data.key !== "card.swap"))
+        for (const entity of original.participants) identities.set(entity, [entity])
+        for (const { data } of swaps) {
+          if (data.key !== "card.swap") continue
+          const previous = identities.get(data.value.replaces)
+          if (!previous) continue
+          identities.delete(data.value.replaces)
+          identities.set(data.value.entity, [
+            ...new Set([...previous, ...(identities.get(data.value.entity) ?? []), data.value.entity])
+          ])
+        }
+      }
+      const aliases = viewer === null ? undefined : identities.get(viewer)
+      assembly.knowledge = { view: view.id, viewer, ...(aliases && aliases.length > 1 ? { aliases } : {}) }
       return assembly
     })
 }
@@ -113,7 +134,13 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
     const known = new Map((yield* sources.knowers(ids)).map((k) => [k.versionId, k.knowers]))
     return entries.map((entry) => {
       const knowers = known.get(entry.versionId)
-      if (!entry.inContext || knowers === undefined || knowers === null || knowers.includes(viewer)) return entry
+      if (
+        !entry.inContext ||
+        knowers === undefined ||
+        knowers === null ||
+        (assembly.knowledge?.aliases ?? [viewer]).some((id) => knowers.includes(id))
+      )
+        return entry
       const hidden: HistoryEntry = { ...entry, inContext: false, unknown: { knowers } }
       return hidden
     })
@@ -129,5 +156,5 @@ export const layerKnown = (assembly: Assembly, leaf: string | null, cursorDepth:
     const viewer = assembly.knowledge?.viewer ?? null
     const sources = yield* AssemblySources
     if (viewer === null || leaf === null || cursorDepth < 0 || !sources.knewThrough) return true
-    return yield* sources.knewThrough(leaf, viewer, cursorDepth)
+    return yield* sources.knewThrough(leaf, viewer, cursorDepth, assembly.knowledge?.aliases)
   })
