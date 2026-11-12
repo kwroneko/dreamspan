@@ -1,7 +1,8 @@
+import { proxyMediaUrl } from "./media.ts"
 // A message's `<style>` as CSS for the chat's constructed stylesheet (spec/HTML-MESSAGES.md §3.2,
 // as ST's decodeStyleTags): every selector under the message-body scope, classes and ids renamed
 // as the markup's are, `@import` and other global at-rules dropped, and declarations that would
-// load something from elsewhere dropped while external media is blocked (always, for now).
+// load something from elsewhere dropped while external media is blocked; approved simple url() values use the authenticated media proxy.
 import postcss, { type AtRule, type ChildNode, type Container, type Declaration, type Rule } from "postcss"
 
 /** The class every message body carries, which the card's styles are scoped to. */
@@ -56,8 +57,8 @@ function closingQuote(text: string, start: number) {
 }
 
 /** CSS escapes decoded and comments gone, so an escape or a comment can't hide a function name. */
-function plain(value: string) {
-  return value
+function plain(value: string, lowercase = true) {
+  const decoded = value
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) => {
       const point = Number.parseInt(hex, 16)
@@ -66,7 +67,7 @@ function plain(value: string) {
       )
     })
     .replace(/\\(.)/g, "$1")
-    .toLowerCase()
+  return lowercase ? decoded.toLowerCase() : decoded
 }
 /** What a value refers to: url() arguments, image-set strings and src() functions. */
 const URL_FUNCTION = /(?:url|src)\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/g
@@ -95,11 +96,37 @@ export const renameReferences = (value: string) =>
     (_, quote: string, id: string) => `url(${quote}#${renameId(id)}${quote})`
   )
 
+/** Rewrite only simple url() values. Other loading constructs retain the blocking policy. */
+function mediaValue(value: string, scope?: string | null) {
+  if (!scope) return { value, ...loads(value) }
+  const proxies: string[] = []
+  const decoded = plain(value, false)
+  const masked = decoded.replace(
+    /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi,
+    (whole, a: string, b: string, c: string) => {
+      const proxy = proxyMediaUrl((a ?? b ?? c ?? "").trim(), scope)
+      if (!proxy) return whole
+      const index = proxies.push(proxy) - 1
+      return `url("data:rp-media-${index}")`
+    }
+  )
+  const result = loads(masked)
+  return {
+    ...result,
+    value: masked.replace(/url\("data:rp-media-(\d+)"\)/g, (whole, index: string) =>
+      proxies[Number(index)] === undefined ? whole : `url("${proxies[Number(index)]}")`
+    )
+  }
+}
+
 /**
  * A `style` attribute without the declarations that would load something, its `url(#id)`
  * references renamed. Split as the browser reads it: at semicolons outside strings and brackets.
  */
-export function cleanStyle(style: string): { readonly style: string; readonly blocked: boolean } {
+export function cleanStyle(
+  style: string,
+  mediaScope?: string | null
+): { readonly style: string; readonly blocked: boolean } {
   const declarations: string[] = []
   let depth = 0
   let quote: string | null = null
@@ -119,9 +146,9 @@ export function cleanStyle(style: string): { readonly style: string; readonly bl
   let blocked = false
   const kept = declarations.flatMap((declaration) => {
     if (!declaration.trim()) return []
-    const result = loads(declaration)
+    const result = mediaValue(declaration, mediaScope)
     blocked ||= result.remote
-    return result.loads ? [] : [renameReferences(declaration.trim())]
+    return result.loads ? [] : [renameReferences(result.value.trim())]
   })
   return { style: kept.join("; "), blocked }
 }
@@ -144,8 +171,8 @@ export interface ScopedCss {
 }
 
 /** Each of a message's `<style>`s scoped on its own, so one that doesn't parse leaves the others. */
-export function scopeStyles(styles: ReadonlyArray<string>): ScopedCss {
-  const scoped = styles.map((css) => scopeCss(css))
+export function scopeStyles(styles: ReadonlyArray<string>, mediaScope?: string | null): ScopedCss {
+  const scoped = styles.map((css) => scopeCss(css, undefined, mediaScope))
   return {
     css: scoped
       .map((one) => one.css)
@@ -156,7 +183,7 @@ export function scopeStyles(styles: ReadonlyArray<string>): ScopedCss {
 }
 
 /** A message's CSS under `.message-html`; unparsable CSS is left out whole, as nothing applies. */
-export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`): ScopedCss {
+export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`, mediaScope?: string | null): ScopedCss {
   let root
   try {
     root = postcss.parse(css.slice(0, MAX_MESSAGE_CSS))
@@ -175,13 +202,13 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`): ScopedCss {
       })
   })
   const declaration = (decl: Declaration) => {
-    const { loads: loading, remote } = loads(decl.value)
+    const { loads: loading, remote, value } = mediaValue(decl.value, mediaScope)
     if (loading) {
       blocked ||= remote
       decl.remove()
       return
     }
-    decl.value = renameReferences(decl.value)
+    decl.value = renameReferences(value)
     const property = decl.prop.toLowerCase()
     if (property === "animation" || property === "animation-name") decl.value = renameNames(decl.value, keyframes)
     if (property === "font" || property === "font-family") decl.value = renameNames(decl.value, fonts)

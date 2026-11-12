@@ -1,3 +1,4 @@
+import { ChatExternalMedia } from "./externalMedia.tsx"
 import { SplitChatDivider } from "./SplitChatDivider.tsx"
 import { messageStream } from "./presentation.tsx"
 import { MacroBindings } from "./MacroBindings.tsx"
@@ -147,6 +148,7 @@ export const registerPresentation = () => [
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
   chatSettingSections.register({ id: "settings.context", order: 15, component: SharedContextSetting }),
+  chatSettingSections.register({ id: "settings.external-media", order: 17, component: ChatExternalMedia }),
   chatSettingSections.register({ id: "settings.html-depth", order: 16, component: HtmlDepthSetting }),
   chatSettingSections.register({ id: "settings.card-layout", order: 30, component: CardLayoutSetting }),
   chatSettingSections.register({ id: "settings.who-replies", order: 40, component: ReplyChoicesSetting }),

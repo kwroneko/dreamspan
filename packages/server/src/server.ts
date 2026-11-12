@@ -1,3 +1,5 @@
+import { ExternalMedia, externalMediaRoute, makeExternalMediaHandlers } from "./api/externalMedia.ts"
+import { AuthenticatedExternalMediaApi } from "@rp/shared/api.ts"
 import {
   AuthenticatedAgentApi,
   AuthenticatedChatEventsApi,
@@ -180,6 +182,7 @@ const Handlers = Layer.mergeAll(
   AuthenticatedCardSourcesApi.toLayer(makeCardSourceHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),
+  AuthenticatedExternalMediaApi.toLayer(makeExternalMediaHandlers),
   AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
 )
 
@@ -250,6 +253,7 @@ const contentSecurityPolicy = (host: string | undefined) => {
     "script-src 'self'",
     "style-src 'self'",
     "img-src 'self' blob: data:",
+    "media-src 'self' blob: data:",
     `connect-src 'self'${socket}`,
     "object-src 'none'",
     "base-uri 'none'",
@@ -653,6 +657,7 @@ export const serverWith = <E>(
       AuthRoutes,
       ImportRoutes.layer,
       SourceImageRoute,
+      externalMediaRoute,
       SourceNewerFileRoute,
       StaticRoutes,
       InterruptedRequests,
@@ -687,6 +692,7 @@ export const serverWith = <E>(
     Layer.provideMerge(Commands.layer),
     Layer.provideMerge(Notices.layer),
     Layer.provideMerge(sources),
+    Layer.provideMerge(ExternalMedia.layer),
     // One set of held files for uploads, the ST folder import and adopting a source's cards.
     Layer.provideMerge(MediaHolds.layer),
     Layer.provide(ProvidersLive),

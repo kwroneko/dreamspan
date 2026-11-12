@@ -1,3 +1,4 @@
+import { ExternalMediaDefault } from "./externalMedia.tsx"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { positionOf } from "./position.ts"
 import { AsyncResult, Atom } from "effect/reactivity"
@@ -296,6 +297,7 @@ export function DisplaySettings() {
           Use display regex scripts
         </Switch>
         <HtmlFormattingSwitch />
+        <ExternalMediaDefault />
         <PanelDepthSelect />
         {viewer.error && (
           <p role="alert" className="text-sm text-danger">

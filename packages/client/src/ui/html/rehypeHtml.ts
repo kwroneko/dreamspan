@@ -1,3 +1,4 @@
+import { proxyMediaUrl } from "./media.ts"
 // The inline-HTML pipeline around rehype-raw (spec/HTML-MESSAGES.md §3.2), as rehype plugins for
 // StMarkdown: mark Markdown's own elements, parse the raw HTML, prepare it, sanitize it with the
 // registered schema, then finish what the five fixes need on the parsed elements only. Media
@@ -172,7 +173,7 @@ const MEDIA = new Set(["audio", "video", "source", "track"])
  * calls a document becomes a frame; parsed elements get the custom- class prefix, the ids' prefix
  * and links to them, DOMPurify's value checks, and lose whatever would load from elsewhere.
  */
-export function htmlFinish(options: { parts: number; block: number }) {
+export function htmlFinish(options: { parts: number; block: number; mediaScope?: string | null }) {
   return (tree: Node) => {
     const classifier = effectiveClassifier()
     const frames = classifier && effectiveDocumentRenderer() ? classifier : undefined
@@ -207,12 +208,21 @@ export function htmlFinish(options: { parts: number; block: number }) {
           }
         } else {
           const name = child.tagName!.toLowerCase()
-          if (MEDIA.has(name)) {
+          if (MEDIA.has(name) && !((name === "audio" || name === "source") && options.mediaScope)) {
             blocked ||= ["src", "srcSet", "poster"].some((key) => REMOTE.test(String(properties[key] ?? "")))
             blocked ||= elements(child).some((inner) => REMOTE.test(String(inner.properties?.src ?? "")))
             continue
           }
-          blocked = finishParsed(child, name) || blocked
+          blocked = finishParsed(child, name, options.mediaScope) || blocked
+        }
+        // Markdown images use the same consent and route as parsed HTML images.
+        if (child.tagName === "img" && child.data?.html !== true) {
+          const src = String(properties.src ?? "")
+          if (REMOTE.test(src)) {
+            const proxy = proxyMediaUrl(src, options.mediaScope)
+            if (proxy) properties.src = proxy
+            else blocked = true
+          }
         }
         children.push(child)
         visit(child)
@@ -225,7 +235,7 @@ export function htmlFinish(options: { parts: number; block: number }) {
 }
 
 /** One parsed element's attributes; true when something from another site was taken out. */
-function finishParsed(node: Node, name: string): boolean {
+function finishParsed(node: Node, name: string, mediaScope?: string | null): boolean {
   const properties = node.properties ?? {}
   let blocked = false
   node.data = { ...node.data, html: true }
@@ -255,37 +265,74 @@ function finishParsed(node: Node, name: string): boolean {
   for (const key of REFERENCES)
     if (typeof properties[key] === "string") properties[key] = renameReferences(properties[key])
   if (typeof properties.style === "string") {
-    const cleaned = cleanStyle(properties.style)
+    const cleaned = cleanStyle(properties.style, mediaScope)
     blocked ||= cleaned.blocked
     if (cleaned.style) properties.style = cleaned.style
     else delete properties.style
   }
   // Images: `data:` loads (it makes no request); harden captions the rest as blocked.
   if (name === "img") {
-    blocked ||= REMOTE.test(String(properties.src ?? ""))
+    const original = String(properties.src ?? "")
+    const proxy = proxyMediaUrl(original, mediaScope)
+    if (proxy) properties.src = proxy
+    else blocked ||= REMOTE.test(original)
     const set = properties.srcSet
-    const entries = Array.isArray(set) ? set.map(String) : typeof set === "string" ? [set] : []
+    const entries = Array.isArray(set) ? set.map(String) : typeof set === "string" ? set.split(",") : []
     if (entries.some((entry) => !entry.trim().startsWith("data:"))) {
-      blocked ||= entries.some((entry) => REMOTE.test(entry))
-      delete properties.srcSet
+      const rewritten = entries.map((entry) => {
+        const match = /^(\S+)(\s+(?:\d+w|[\d.]+x))?$/.exec(entry.trim())
+        const proxy = match ? proxyMediaUrl(match[1]!, mediaScope) : null
+        return proxy ? `${proxy}${match?.[2] ?? ""}` : null
+      })
+      if (rewritten.length && rewritten.every((entry) => entry !== null)) {
+        properties.srcSet = rewritten.join(", ")
+        if (!properties.src) properties.src = rewritten[0]!.split(/\s/)[0]
+      } else {
+        blocked ||= entries.some((entry) => REMOTE.test(entry))
+        delete properties.srcSet
+      }
+    }
+  }
+
+  if (name === "audio" || name === "source") {
+    const proxy = proxyMediaUrl(String(properties.src ?? ""), mediaScope)
+    if (proxy) properties.src = proxy
+    else delete properties.src
+    delete properties.srcSet
+    if (name === "audio") {
+      delete properties.autoPlay
+      properties.controls = true
+      properties.preload = "none"
     }
   }
   if (name === "image" || name === "feimage") {
     for (const key of ["href", "xLinkHref"]) {
       const value = String(properties[key] ?? "")
       if (value && !value.startsWith("#") && !value.startsWith("data:")) {
-        blocked ||= REMOTE.test(value)
-        delete properties[key]
+        const proxy = proxyMediaUrl(value, mediaScope)
+        if (proxy) properties[key] = proxy
+        else {
+          blocked ||= REMOTE.test(value)
+          delete properties[key]
+        }
       }
     }
   }
   if (name === "input" && typeof properties.src === "string" && !properties.src.startsWith("data:")) {
-    blocked ||= REMOTE.test(properties.src)
-    delete properties.src
+    const proxy = proxyMediaUrl(properties.src, mediaScope)
+    if (proxy) properties.src = proxy
+    else {
+      blocked ||= REMOTE.test(properties.src)
+      delete properties.src
+    }
   }
   if (typeof properties.background === "string") {
-    blocked ||= REMOTE.test(properties.background)
-    delete properties.background
+    const proxy = proxyMediaUrl(properties.background, mediaScope)
+    if (proxy) properties.background = proxy
+    else {
+      blocked ||= REMOTE.test(properties.background)
+      delete properties.background
+    }
   }
   return blocked
 }

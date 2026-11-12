@@ -1,3 +1,5 @@
+import { HtmlMessageContext } from "./messageHtml.ts"
+import { Button } from "../Button.tsx"
 // The React side of message HTML (spec/HTML-MESSAGES.md §3.2): parsed elements render as
 // themselves, not as Streamdown's Markdown components; form controls stay the user's to change
 // (CSS-only games toggle checkboxes); a document block goes to the registered frame renderer;
@@ -74,11 +76,29 @@ function MediaMarker() {
 
 /** The note under a message whose media was left out. */
 export function BlockedMediaNote() {
+  const media = useContext(HtmlMessageContext)?.media
   return (
-    <p role="note" className="mt-2 flex items-center gap-1.5 text-xs text-muted select-none">
+    <div role="note" className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted select-none">
       <Icon name="image" className="size-3.5 shrink-0" />
-      Images from other sites are blocked.
-    </p>
+      <span>Images from other sites are blocked.</span>
+      {media?.actions.map((action) => (
+        <Button
+          key={action.label}
+
+          variant="ghost"
+          hint={action.about}
+          disabled={media.pending}
+          onClick={() => void action.allow()}
+        >
+          {action.label}
+        </Button>
+      ))}
+      {media?.error && (
+        <span role="alert" className="text-danger">
+          {media.error}
+        </span>
+      )}
+    </div>
   )
 }
 

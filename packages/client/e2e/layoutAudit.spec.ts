@@ -865,6 +865,20 @@ test.describe("synthetic library and every app surface", () => {
           }
           return
         }
+        if (process.env.LAYOUT_AUDIT_HTML_MESSAGES_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          await openPanel(page, "This chat")
+          await audit("html-chat-settings", '[role="tabpanel"][aria-label="This chat"]')
+          await openPanel(page, "Interface")
+          await audit("html-interface", '[role="tabpanel"][aria-label="Interface"]')
+          await openPanel(page, cardName)
+          await page.getByRole("tab", { name: "Extra", exact: true }).click()
+          await audit("html-card-panel", '[data-card-tabs] [role="tabpanel"]')
+          await page.goto(`${server.url}/library/${cardRef}`)
+          await page.getByRole("tab", { name: "Extra", exact: true }).click()
+          await audit("html-card-editor")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_INTERFACE_ONLY === "1") {
           await page.goto(`${server.url}/chats/${chatId}`)
           await openPanel(page, "Interface")

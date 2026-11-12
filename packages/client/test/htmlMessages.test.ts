@@ -20,6 +20,7 @@ afterAll(() => disposers.forEach((dispose) => dispose()))
 const render = (
   text: string,
   {
+    mediaScope = null as string | null,
     html = true,
     streaming = false,
     panelDepth = null as number | null,
@@ -33,7 +34,15 @@ const render = (
       { value: { html, panelDepth } },
       createElement(
         HtmlMessageContext,
-        { value: { key: "slot", streaming, fromTip, ...(permit ? { permit } : {}) } },
+        {
+          value: {
+            key: "slot",
+            streaming,
+            fromTip,
+            media: { scope: mediaScope, actions: [], pending: false, error: null },
+            ...(permit ? { permit } : {})
+          }
+        },
         createElement(StMarkdown, { text, streaming })
       )
     )
@@ -232,5 +241,36 @@ describe("document blocks", () => {
       partial.forEach((dispose) => dispose())
       disposers = registerHtmlParts()
     }
+  })
+})
+
+describe("external media consent", () => {
+  it("rewrites HTML, Markdown, srcset, audio and SVG image URLs through the scoped proxy", () => {
+    const scope = "chat=synthetic&card=card"
+    for (const source of [
+      '<img src="https://media.invalid/p.png">',
+      "![Map](https://media.invalid/p.png)",
+      '<img srcset="https://media.invalid/p.png 1x, https://media.invalid/q.png 2x">',
+      '<audio src="https://media.invalid/a.ogg" autoplay></audio>',
+      '<svg><image href="https://media.invalid/p.png" /></svg>'
+    ]) {
+      const blocked = render(source)
+      expect(blocked).not.toContain("/media/external?")
+      const allowed = render(source, { mediaScope: scope })
+      expect(allowed).toContain("/media/external?chat=synthetic&amp;card=card&amp;url=")
+      expect(allowed).not.toMatch(/(?:src|href|srcSet)="https:/)
+      expect(allowed).not.toContain("autoPlay")
+    }
+  })
+  it("rewrites CSS URLs after consent, leaving other loading constructs blocked", () => {
+    const scoped = scopeStyles(['.a { background: url("https://media.invalid/Case.PNG"); }'], "chat=synthetic")
+    expect(scoped.css).toContain("/media/external?chat=synthetic&url=https%3A%2F%2Fmedia.invalid%2FCase.PNG")
+    expect(scoped.blocked).toBe(false)
+    const blocked = scopeStyles(['.a { background: url("https://media.invalid/Case.PNG"); }'])
+    expect(blocked.css).not.toContain("/media/external")
+    expect(blocked.blocked).toBe(true)
+    expect(
+      scopeStyles(['.a { background: image-set("https://media.invalid/a.png" 1x); }'], "chat=synthetic").css
+    ).not.toContain("image-set")
   })
 })

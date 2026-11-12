@@ -1,3 +1,4 @@
+import type { MediaPermit } from "./media.ts"
 // What message HTML needs from around it (spec/HTML-MESSAGES.md §3.2, §3.3): the viewer's choices,
 // the message a body belongs to, and the chat view's card styles in one constructed stylesheet.
 import { createContext } from "react"
@@ -28,6 +29,7 @@ export const HtmlSettingsContext = createContext<HtmlSettings>({ html: true, pan
 export interface HtmlMessage {
   /** Its slot: the row, whichever version shows. */
   readonly key: string
+  readonly media?: MediaPermit
   /** Its reply is being written: its panels wait ("Panel loading"). */
   readonly streaming?: boolean
   /** How far it is from the viewed fork's tip (0 is the last message), when known. */
