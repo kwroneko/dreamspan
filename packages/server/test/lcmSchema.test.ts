@@ -206,6 +206,17 @@ describe("0023 lineage and retention triggers", () => {
         )
       }
     })
+  it("lets two separate contexts summarize one range at once, each view only once", () => {
+    const { c, s } = setup()
+    // A chat's first fork has the chat's id.
+    const insert = `INSERT INTO summarization_jobs(id,chat_id,fork_id,level,first_slot_id,last_slot_id,leaf_slot_id,target_token_count,created_at,updated_at,audience_json) VALUES(?1,?2,?2,1,?3,?4,?5,600,1,1,?6)`
+    run(insert, "whole", c.chatId, s.slotId, s.slotId, s.slotId, null)
+    run(insert, "wren", c.chatId, s.slotId, s.slotId, s.slotId, '["wren"]')
+    run(insert, "others", c.chatId, s.slotId, s.slotId, s.slotId, '["mira","tobin"]')
+    expect(() => run(insert, "again", c.chatId, s.slotId, s.slotId, s.slotId, '["wren"]')).toThrow(/UNIQUE/)
+    expect(() => run(insert, "twice", c.chatId, s.slotId, s.slotId, s.slotId, null)).toThrow(/UNIQUE/)
+    expect(() => run(insert, "object", c.chatId, s.slotId, s.slotId, s.slotId, '{"wren":1}')).toThrow(/CHECK/)
+  })
   for (const table of ["summaries", "summary_revisions", "summary_inputs", "summary_parents"])
     it(`${table} refuses INSERT OR REPLACE with recursive triggers off`, () => {
       const { a, b, s } = setup()

@@ -103,6 +103,7 @@ describe("version payload separation", () => {
       "rewrite_json",
       "frozen_macros",
       "cast_json",
+      "presence_json",
       "direction",
       "error_json",
       "usage_json",
@@ -124,6 +125,52 @@ describe("version payload separation", () => {
     expect(plan.some((r) => /version_texts/.test(r.detail))).toBe(false)
     expect(get<{ content: string }>("SELECT content FROM version_records WHERE id = ?", s.versionId).content).toBe(
       "Synthetic long reply. ".repeat(1000)
+    )
+  })
+
+  it("keeps who was present apart from the cast, through the view, its updates and its copies", () => {
+    const c = chat(user())
+    const s = slot(c, null, { writer: "model", content: "Synthetic reply." })
+    expect(
+      get<{ p: string | null }>("SELECT presence_json AS p FROM version_records WHERE id = ?", s.versionId).p
+    ).toBe(null)
+    // Not frozen with the content: a correction may count someone present again (spec/CHARACTER-CONTEXT.md C9).
+    run(`UPDATE version_records SET presence_json = '{"away":["wren"]}' WHERE id = ?`, s.versionId)
+    expect(
+      get<{ p: string }>(
+        "SELECT presence_json AS p FROM version_texts WHERE version_seq = (SELECT seq FROM versions WHERE id = ?)",
+        s.versionId
+      ).p
+    ).toBe('{"away":["wren"]}')
+    expect(() => run(`UPDATE version_records SET presence_json = '["wren"]' WHERE id = ?`, s.versionId)).toThrow()
+    // A copy made the way amends and history edits make them (every column of the view) carries it.
+    const copy = id("v")
+    const columns = all<{ name: string }>("SELECT name FROM pragma_table_info('version_records')")
+      .map((col) => col.name)
+      .filter(
+        (name) =>
+          ![
+            "seq",
+            "id",
+            "ordinal",
+            "origin",
+            "source_version_id",
+            "rollout_id",
+            "changeset_id",
+            "bin_item_id",
+            "fork_id"
+          ].includes(name)
+      )
+    tx(() =>
+      run(
+        `INSERT INTO version_records (id, ordinal, origin, source_version_id, ${columns.join(", ")})
+         SELECT ?, 1, 'edited', id, ${columns.join(", ")} FROM version_records WHERE id = ?`,
+        copy,
+        s.versionId
+      )
+    )
+    expect(get<{ p: string }>("SELECT presence_json AS p FROM version_records WHERE id = ?", copy).p).toBe(
+      '{"away":["wren"]}'
     )
   })
 

@@ -390,6 +390,9 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE version_texts (
     version_seq INTEGER PRIMARY KEY REFERENCES versions(seq) ON DELETE CASCADE,
     cast_json TEXT CHECK (cast_json IS NULL OR (json_valid(cast_json) AND json_type(cast_json) = 'array')),
+    -- Who of the cast was away and who was a narrator when it was written (@rp/shared/knowledge.ts,
+    -- spec/CHARACTER-CONTEXT.md §9.1): {"away": [ids], "narrators": [ids]}; NULL when neither.
+    presence_json TEXT CHECK (presence_json IS NULL OR (json_valid(presence_json) AND json_type(presence_json) = 'object')),
     content TEXT NOT NULL DEFAULT '',
     context_form TEXT,
     display_form TEXT,
@@ -427,20 +430,20 @@ export const baseline: ReadonlyArray<string> = [
     BEGIN SELECT RAISE(ABORT, 'a version length comes from its payload'); END`,
   // Text consumers explicitly opt into this flattened view. Metadata consumers use versions.
   // The write triggers keep bulk INSERT/SELECT and copies atomic without a main-thread shim.
-  `CREATE VIEW version_records AS SELECT v.*, t.cast_json, t.content, t.context_form, t.display_form, t.reasoning, t.raw_content, t.raw_reasoning, t.raw_sections, t.rewrite_json, t.reply_sections, t.frozen_macros, t.greeting_ref, t.direction, t.error_json, t.usage_json, t.recorded_model_json, t.recorded_generation_json
+  `CREATE VIEW version_records AS SELECT v.*, t.cast_json, t.presence_json, t.content, t.context_form, t.display_form, t.reasoning, t.raw_content, t.raw_reasoning, t.raw_sections, t.rewrite_json, t.reply_sections, t.frozen_macros, t.greeting_ref, t.direction, t.error_json, t.usage_json, t.recorded_model_json, t.recorded_generation_json
     FROM versions v JOIN version_texts t ON t.version_seq = v.seq`,
   `CREATE TRIGGER version_records_insert INSTEAD OF INSERT ON version_records BEGIN
     INSERT INTO versions (seq, id, slot_id, ordinal, status, speaker_entity_id, speaker_pick_json, writer, macro_mode, origin, source_version_id, rollout_id, connection_id, model_id, starred, hidden, changeset_id, created_at, updated_at, deleted_at, bin_item_id, purged_at, mark, fork_id) VALUES (
       NEW.seq, NEW.id, NEW.slot_id, NEW.ordinal, NEW.status, NEW.speaker_entity_id, NEW.speaker_pick_json, NEW.writer, NEW.macro_mode, NEW.origin, NEW.source_version_id, NEW.rollout_id, NEW.connection_id, NEW.model_id, coalesce(NEW.starred, 0), coalesce(NEW.hidden, 0), NEW.changeset_id, NEW.created_at, NEW.updated_at, NEW.deleted_at, NEW.bin_item_id, NEW.purged_at, NEW.mark, NEW.fork_id);
-    INSERT INTO version_texts(version_seq, cast_json, content, context_form, display_form, reasoning, raw_content, raw_reasoning, raw_sections, rewrite_json, reply_sections, frozen_macros, greeting_ref, direction, error_json, usage_json, recorded_model_json, recorded_generation_json) VALUES (
-      (SELECT seq FROM versions WHERE id = NEW.id), NEW.cast_json, coalesce(NEW.content, ''), NEW.context_form, NEW.display_form, NEW.reasoning, NEW.raw_content, NEW.raw_reasoning, NEW.raw_sections, NEW.rewrite_json, NEW.reply_sections, NEW.frozen_macros, NEW.greeting_ref, NEW.direction, NEW.error_json, NEW.usage_json, NEW.recorded_model_json, NEW.recorded_generation_json);
+    INSERT INTO version_texts(version_seq, cast_json, presence_json, content, context_form, display_form, reasoning, raw_content, raw_reasoning, raw_sections, rewrite_json, reply_sections, frozen_macros, greeting_ref, direction, error_json, usage_json, recorded_model_json, recorded_generation_json) VALUES (
+      (SELECT seq FROM versions WHERE id = NEW.id), NEW.cast_json, NEW.presence_json, coalesce(NEW.content, ''), NEW.context_form, NEW.display_form, NEW.reasoning, NEW.raw_content, NEW.raw_reasoning, NEW.raw_sections, NEW.rewrite_json, NEW.reply_sections, NEW.frozen_macros, NEW.greeting_ref, NEW.direction, NEW.error_json, NEW.usage_json, NEW.recorded_model_json, NEW.recorded_generation_json);
   END`,
   `CREATE TRIGGER version_records_update INSTEAD OF UPDATE ON version_records BEGIN
     -- History uses the amendment's timestamp; the purge guard needs its bin authorization.
     UPDATE versions SET updated_at = NEW.updated_at, purged_at = NEW.purged_at, bin_item_id = NEW.bin_item_id WHERE seq = OLD.seq
       AND (updated_at IS NOT NEW.updated_at OR purged_at IS NOT NEW.purged_at OR bin_item_id IS NOT NEW.bin_item_id);
-    UPDATE version_texts SET cast_json = NEW.cast_json, content = NEW.content, context_form = NEW.context_form, display_form = NEW.display_form, reasoning = NEW.reasoning, raw_content = NEW.raw_content, raw_reasoning = NEW.raw_reasoning, raw_sections = NEW.raw_sections, rewrite_json = NEW.rewrite_json, reply_sections = NEW.reply_sections, frozen_macros = NEW.frozen_macros, greeting_ref = NEW.greeting_ref, direction = NEW.direction, error_json = NEW.error_json, usage_json = NEW.usage_json, recorded_model_json = NEW.recorded_model_json, recorded_generation_json = NEW.recorded_generation_json
-      WHERE version_seq = OLD.seq AND (cast_json IS NOT NEW.cast_json OR content IS NOT NEW.content OR context_form IS NOT NEW.context_form OR display_form IS NOT NEW.display_form OR reasoning IS NOT NEW.reasoning OR raw_content IS NOT NEW.raw_content OR raw_reasoning IS NOT NEW.raw_reasoning OR raw_sections IS NOT NEW.raw_sections OR rewrite_json IS NOT NEW.rewrite_json OR reply_sections IS NOT NEW.reply_sections OR frozen_macros IS NOT NEW.frozen_macros OR greeting_ref IS NOT NEW.greeting_ref OR direction IS NOT NEW.direction OR error_json IS NOT NEW.error_json OR usage_json IS NOT NEW.usage_json OR recorded_model_json IS NOT NEW.recorded_model_json OR recorded_generation_json IS NOT NEW.recorded_generation_json);
+    UPDATE version_texts SET cast_json = NEW.cast_json, presence_json = NEW.presence_json, content = NEW.content, context_form = NEW.context_form, display_form = NEW.display_form, reasoning = NEW.reasoning, raw_content = NEW.raw_content, raw_reasoning = NEW.raw_reasoning, raw_sections = NEW.raw_sections, rewrite_json = NEW.rewrite_json, reply_sections = NEW.reply_sections, frozen_macros = NEW.frozen_macros, greeting_ref = NEW.greeting_ref, direction = NEW.direction, error_json = NEW.error_json, usage_json = NEW.usage_json, recorded_model_json = NEW.recorded_model_json, recorded_generation_json = NEW.recorded_generation_json
+      WHERE version_seq = OLD.seq AND (cast_json IS NOT NEW.cast_json OR presence_json IS NOT NEW.presence_json OR content IS NOT NEW.content OR context_form IS NOT NEW.context_form OR display_form IS NOT NEW.display_form OR reasoning IS NOT NEW.reasoning OR raw_content IS NOT NEW.raw_content OR raw_reasoning IS NOT NEW.raw_reasoning OR raw_sections IS NOT NEW.raw_sections OR rewrite_json IS NOT NEW.rewrite_json OR reply_sections IS NOT NEW.reply_sections OR frozen_macros IS NOT NEW.frozen_macros OR greeting_ref IS NOT NEW.greeting_ref OR direction IS NOT NEW.direction OR error_json IS NOT NEW.error_json OR usage_json IS NOT NEW.usage_json OR recorded_model_json IS NOT NEW.recorded_model_json OR recorded_generation_json IS NOT NEW.recorded_generation_json);
     -- Finalize only after saving text, while the old generating status still permits writes.
     UPDATE versions SET seq = NEW.seq, id = NEW.id, slot_id = NEW.slot_id, ordinal = NEW.ordinal, status = NEW.status, speaker_entity_id = NEW.speaker_entity_id, speaker_pick_json = NEW.speaker_pick_json, writer = NEW.writer, macro_mode = NEW.macro_mode, origin = NEW.origin, source_version_id = NEW.source_version_id, rollout_id = NEW.rollout_id, connection_id = NEW.connection_id, model_id = NEW.model_id, starred = NEW.starred, hidden = NEW.hidden, changeset_id = NEW.changeset_id, created_at = NEW.created_at, deleted_at = NEW.deleted_at, bin_item_id = NEW.bin_item_id, mark = NEW.mark, fork_id = NEW.fork_id
       WHERE seq = OLD.seq AND (seq IS NOT NEW.seq OR id IS NOT NEW.id OR slot_id IS NOT NEW.slot_id OR ordinal IS NOT NEW.ordinal OR status IS NOT NEW.status OR speaker_entity_id IS NOT NEW.speaker_entity_id OR speaker_pick_json IS NOT NEW.speaker_pick_json OR writer IS NOT NEW.writer OR macro_mode IS NOT NEW.macro_mode OR origin IS NOT NEW.origin OR source_version_id IS NOT NEW.source_version_id OR rollout_id IS NOT NEW.rollout_id OR connection_id IS NOT NEW.connection_id OR model_id IS NOT NEW.model_id OR starred IS NOT NEW.starred OR hidden IS NOT NEW.hidden OR changeset_id IS NOT NEW.changeset_id OR created_at IS NOT NEW.created_at OR deleted_at IS NOT NEW.deleted_at OR bin_item_id IS NOT NEW.bin_item_id OR mark IS NOT NEW.mark OR fork_id IS NOT NEW.fork_id);
@@ -1235,8 +1238,10 @@ export const baseline: ReadonlyArray<string> = [
     first_slot_id TEXT NOT NULL REFERENCES slots(id),
     last_slot_id TEXT NOT NULL REFERENCES slots(id),
     slot_count INTEGER NOT NULL CHECK (slot_count >= 1),
-    -- NULL = everyone; otherwise a JSON array of entity ids whose views may include it.
-    audience_json TEXT CHECK (audience_json IS NULL OR json_valid(audience_json)),
+    -- NULL: a summary of the whole path (shared context, narrators). Otherwise the sorted card ids
+    -- whose separate view it summarizes: who held exactly its inputs over its range
+    -- (spec/CHARACTER-CONTEXT.md §9.1).
+    audience_json TEXT CHECK (audience_json IS NULL OR (json_valid(audience_json) AND json_type(audience_json) = 'array')),
     status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'truncated', 'superseded', 'failed')),
     sealed INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1)), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), batch_id TEXT, rollout_id TEXT REFERENCES rollouts(id),
     row_version INTEGER NOT NULL DEFAULT 1,
@@ -1295,9 +1300,12 @@ export const baseline: ReadonlyArray<string> = [
     result_summary_id TEXT REFERENCES summaries(id),
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
-  , clip_tokens INTEGER NOT NULL DEFAULT 6000 CHECK (clip_tokens > 0), claim_epoch INTEGER NOT NULL DEFAULT 0, rollout_id TEXT REFERENCES rollouts(id), prefix_json TEXT CHECK (prefix_json IS NULL OR json_valid(prefix_json)), model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json)), fallback_used INTEGER NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1)), eager INTEGER NOT NULL DEFAULT 0 CHECK (eager IN (0, 1)), source_summary_id TEXT REFERENCES summaries(id), source_revision_id TEXT REFERENCES summary_revisions(id), rerun_ids_json TEXT CHECK (rerun_ids_json IS NULL OR json_valid(rerun_ids_json)), explicit_requested INTEGER NOT NULL DEFAULT 0 CHECK (explicit_requested IN (0, 1))) STRICT`,
+  , clip_tokens INTEGER NOT NULL DEFAULT 6000 CHECK (clip_tokens > 0), claim_epoch INTEGER NOT NULL DEFAULT 0, rollout_id TEXT REFERENCES rollouts(id), prefix_json TEXT CHECK (prefix_json IS NULL OR json_valid(prefix_json)), model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json)), fallback_used INTEGER NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1)), eager INTEGER NOT NULL DEFAULT 0 CHECK (eager IN (0, 1)), source_summary_id TEXT REFERENCES summaries(id), source_revision_id TEXT REFERENCES summary_revisions(id), rerun_ids_json TEXT CHECK (rerun_ids_json IS NULL OR json_valid(rerun_ids_json)), explicit_requested INTEGER NOT NULL DEFAULT 0 CHECK (explicit_requested IN (0, 1)),
+    -- The view the job summarizes, as summaries.audience_json: NULL for the whole path.
+    audience_json TEXT CHECK (audience_json IS NULL OR (json_valid(audience_json) AND json_type(audience_json) = 'array'))) STRICT`,
   `CREATE INDEX summarization_jobs_queue ON summarization_jobs(status, created_at) WHERE status IN ('pending', 'processing')`,
-  `CREATE UNIQUE INDEX summarization_jobs_live_segment ON summarization_jobs(chat_id, fork_id, first_slot_id, last_slot_id, level)
+  // Two separate contexts can summarize the same range at once, each its own view.
+  `CREATE UNIQUE INDEX summarization_jobs_live_segment ON summarization_jobs(chat_id, fork_id, first_slot_id, last_slot_id, level, coalesce(audience_json, ''))
     WHERE status IN ('pending', 'processing')`,
   `CREATE INDEX summary_inputs_version ON summary_inputs(version_id)`,
   `CREATE INDEX summaries_first_slot ON summaries(first_slot_id)`,
@@ -1955,6 +1963,9 @@ export const baseline: ReadonlyArray<string> = [
     content TEXT NOT NULL,
     sent_at INTEGER NOT NULL,
     included TEXT NOT NULL CHECK (included IN ('verbatim', 'summarized', 'left_out')),
+    -- The cards that knew this source message in the source (its version's knowers,
+    -- spec/CHARACTER-CONTEXT.md §9.1); NULL for summaries and messages with no cast recorded.
+    knowers_json TEXT CHECK (knowers_json IS NULL OR (json_valid(knowers_json) AND json_type(knowers_json) = 'array')),
     PRIMARY KEY (merge_id, ordinal)
   ) STRICT, WITHOUT ROWID`,
   `CREATE TRIGGER chat_merge_messages_frozen BEFORE UPDATE ON chat_merge_messages

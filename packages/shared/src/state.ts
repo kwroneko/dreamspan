@@ -32,6 +32,23 @@ export const StateEventData = Schema.Union([
       source: Schema.optionalKey(Schema.Literal("decision"))
     })
   ),
+  /**
+   * Away from the scene, apart from Mute (spec/CHARACTER-CONTEXT.md §2.1, §9.1): an away
+   * character isn't there and doesn't know what's said there; a muted one only doesn't talk.
+   * `source: "decision"` when the scene check set it; absent when the user or a tool did.
+   */
+  event(
+    "away.set",
+    Schema.Struct({ entity: EntityId, away: Schema.Boolean, source: Schema.optionalKey(Schema.Literal("decision")) })
+  ),
+  /** A cast member's role (spec/CHARACTER-CONTEXT.md §6): a narrator sees everything and is never away; null clears it. */
+  event("cast.role", Schema.Struct({ entity: EntityId, role: Schema.NullOr(Schema.Literal("narrator")) })),
+  /**
+   * Context per speaker (spec/CHARACTER-CONTEXT.md §2): one shared context, every reply seeing
+   * the whole path, or separate contexts, each reply seeing what its speaker was present for.
+   * Absent is shared.
+   */
+  event("context.per_speaker", Schema.Literals(["shared", "separate"])),
   event("played_by_me.set", Schema.Struct({ entities: Schema.Array(EntityId) })),
   event(
     "card.binding",
@@ -137,6 +154,9 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "participant.join": { ids: { entity: { table: "entity", kind: "card" } } },
   "participant.leave": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
   "presence.set": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
+  "away.set": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
+  "cast.role": { ids: { entity: { table: "entity", kind: "card" } }, removes: true },
+  "context.per_speaker": { ids: {} },
   "played_by_me.set": { ids: { entities: { table: "entity", kind: "card" } } },
   "card.swap": {
     ids: { entity: { table: "entity", kind: "card" }, replaces: { table: "entity", kind: "card", allowDeleted: true } }
@@ -369,7 +389,14 @@ export interface ChatState {
   readonly lcm: typeof LcmSettings.Type | null
   /** In join order. */
   readonly participants: ReadonlyArray<string>
+  /** Muted (`presence.set`): never picked to reply automatically; still there and knowing. */
   readonly absent: ReadonlyArray<string>
+  /** Away from the scene (`away.set`): not there, so not knowing what's said there. */
+  readonly away: ReadonlyArray<string>
+  /** Cast members' roles (`cast.role`): only `narrator` today. */
+  readonly roles: Readonly<Record<string, "narrator">>
+  /** `context.per_speaker`; null (no event) is shared. */
+  readonly contextPerSpeaker: "shared" | "separate" | null
   /** Zero or one persona; the last selected ID wins. */
   readonly playedByMe: ReadonlyArray<string>
   readonly activeNotes: ReadonlyArray<string>
@@ -416,6 +443,9 @@ const emptyChatState: ChatState = {
   lcm: null,
   participants: [],
   absent: [],
+  away: [],
+  roles: {},
+  contextPerSpeaker: null,
   playedByMe: [],
   activeNotes: [],
   noteRevisions: {},
@@ -485,7 +515,8 @@ const applyCore = (
       return {
         ...state,
         participants: add(state.participants, data.value.entity),
-        absent: remove(state.absent, data.value.entity)
+        absent: remove(state.absent, data.value.entity),
+        away: remove(state.away, data.value.entity)
       }
     case "participant.leave":
       return { ...state, participants: remove(state.participants, data.value.entity) }
@@ -494,6 +525,17 @@ const applyCore = (
         ...state,
         absent: data.value.present ? remove(state.absent, data.value.entity) : add(state.absent, data.value.entity)
       }
+    case "away.set":
+      return {
+        ...state,
+        away: data.value.away ? add(state.away, data.value.entity) : remove(state.away, data.value.entity)
+      }
+    case "cast.role": {
+      const { [data.value.entity]: _was, ...roles } = state.roles
+      return { ...state, roles: data.value.role === null ? roles : { ...roles, [data.value.entity]: data.value.role } }
+    }
+    case "context.per_speaker":
+      return { ...state, contextPerSpeaker: data.value }
     case "played_by_me.set":
       return { ...state, playedByMe: data.value.entities.slice(-1) }
     case "card.swap": {
@@ -508,6 +550,8 @@ const applyCore = (
         ...state,
         participants: swap(state.participants),
         absent: swap(state.absent),
+        away: swap(state.away),
+        roles: move(state.roles),
         playedByMe: swap(state.playedByMe),
         lorebookBindings: move(state.lorebookBindings),
         embeddedLorebooks: move(state.embeddedLorebooks)
