@@ -331,7 +331,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
             s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
             CASE WHEN s.fork_id IS NOT NULL
-              THEN '[' || s.cast_json || ',' || s.joined_json || ',' || s.departed_json || ',' || s.activity_json || ',' || s.added_json || ']' END AS lists
+              THEN '[' || s.cast_json || ',' || s.joined_json || ',' || s.departed_json || ',' || s.activity_json || ',' || s.added_json || ',' || s.threads_json || ']' END AS lists
           FROM chats c CROSS JOIN forks f ON f.chat_id = c.id LEFT JOIN fork_summaries s ON s.fork_id = f.id
           WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
       const records = joinedRows as unknown as ReadonlyArray<ForkRow>
@@ -362,12 +362,13 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             ((row.s_stamp !== row.shell_stamp || row.s_user_stamp !== userStamp) && !importing(row))
           )
             continue
-          const [cast, joined, departed, activity, added] = JSON.parse(row.lists) as [
+          const [cast, joined, departed, activity, added, threads] = JSON.parse(row.lists) as [
             Array<string>,
             Array<string>,
             Array<string>,
             ForkSummary["activity"],
-            Array<string>
+            Array<string>,
+            ForkSummary["threads"]
           ]
           stored.set(row.id, {
             forkId: row.id,
@@ -382,7 +383,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             added,
             joined,
             departed,
-            activity
+            activity,
+            threads
           })
         }
       }
@@ -400,7 +402,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             added: [],
             joined: [],
             departed: [],
-            activity: []
+            activity: [],
+            threads: []
           })
       // Each fork's summary is valid or not on its own (db/summaryValidity.ts): only the
       // stale ones are walked, and their walks need their full rows.

@@ -135,7 +135,11 @@ const statements: ReadonlyArray<string> = [
       OR OLD.purged_at IS NOT NEW.purged_at OR ((OLD.tip_slot_id IS NULL) <> (NEW.tip_slot_id IS NULL))`
     )} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_fork_delete AFTER DELETE ON main.forks
-    BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(KIN, "OLD.chat_id", "OLD.id")} END`
+    BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(KIN, "OLD.chat_id", "OLD.id")} END`,
+  // Starting threads changes which threads the branch they were started in is in. Forks made
+  // from it earlier never see the split, and its new threads' forks are new (spec/THREADS.md §4.3).
+  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_thread_split AFTER INSERT ON main.thread_splits
+    BEGIN ${touch(SELF, "NEW.chat_id", "NEW.fork_id")} END`
 ]
 
 /** Whether this thread's connection notes touches: only the writer's does. */

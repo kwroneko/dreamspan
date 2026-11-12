@@ -19,10 +19,12 @@ import { shellEventsQuery, shellPlainForksQuery, shellSlotsQuery, shellTreeQuery
 import { withoutPurged } from "./stateRefs.ts"
 import { settleSummaries } from "./summaryValidity.ts"
 import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
+import { placesOf, threadCandidates } from "./threads.ts"
+import type { ThreadPlace } from "@rp/shared/threads.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
-// Recompute rows that predate split-relative participation.
-export const FORK_SUMMARY_FORMAT = 7
+// Recompute rows that predate the threads a fork is in (spec/THREADS.md §4.3).
+export const FORK_SUMMARY_FORMAT = 8
 
 /**
  * What the shell shows of a fork: ids only, the cast with every card, binned or not, and the
@@ -51,6 +53,8 @@ export interface ForkSummary {
     readonly slot: string
     readonly category: "just" | "with" | "was"
   }>
+  /** The thread sets it's in, innermost first (db/threads.ts), whether shown or not. */
+  readonly threads: ReadonlyArray<ThreadPlace>
 }
 
 type Slot = {
@@ -208,6 +212,11 @@ export const computeForkSummaries = (
       const ids = new Set(structural(fork).map((s) => s.id))
       if (ids.size > 0) parentPaths.set(fork.id, ids)
     }
+    // Which threads each is in: the splits its labels see, kept where its path holds S.
+    const threadsSeen = yield* threadCandidates(
+      sql,
+      records.map((r) => r.id)
+    )
     const summaries: Array<ForkSummary> = []
     const previewCandidates: Array<Array<number>> = []
     for (const record of records) {
@@ -349,7 +358,8 @@ export const computeForkSummaries = (
             : present.some((id) => id !== a.entityId)
               ? ("with" as const)
               : ("just" as const)
-        }))
+        })),
+        threads: placesOf(threadsSeen, record.id, (slotId) => onPath.has(slotId))
       })
     }
     // All history/participation above is metadata. Read only each fork's newest
@@ -396,16 +406,20 @@ export const chatForkSummaries = (
       split_at: number | null
       split_after: number | null
       preview: string
-    }>`SELECT s.fork_id, s.end_at, s.split_at, s.split_after, s.preview FROM fork_summaries s JOIN chats c ON c.id = s.chat_id
+      threads_json: string
+    }>`SELECT s.fork_id, s.end_at, s.split_at, s.split_after, s.preview, s.threads_json
+      FROM fork_summaries s JOIN chats c ON c.id = s.chat_id
       WHERE s.chat_id = ${chatId} AND s.format = ${FORK_SUMMARY_FORMAT} AND s.stamp = c.shell_stamp
         AND s.user_stamp = ${userStamp}`
-    const byFork = new Map<string, Pick<ForkSummary, "endAt" | "split" | "preview">>(
+    const byFork = new Map<string, Pick<ForkSummary, "endAt" | "split" | "preview" | "threads">>(
       stored.map((row) => [
         row.fork_id,
         {
           endAt: row.end_at,
           preview: row.preview,
-          split: row.split_at === null || row.split_after === null ? null : { at: row.split_at, after: row.split_after }
+          split:
+            row.split_at === null || row.split_after === null ? null : { at: row.split_at, after: row.split_after },
+          threads: JSON.parse(row.threads_json) as ReadonlyArray<ThreadPlace>
         }
       ])
     )
@@ -413,7 +427,8 @@ export const chatForkSummaries = (
       sql,
       records.filter((record) => !byFork.has(record.id))
     ))
-      byFork.set(s.forkId, { endAt: s.endAt, split: s.split, preview: s.preview })
+      byFork.set(s.forkId, { endAt: s.endAt, split: s.split, preview: s.preview, threads: s.threads })
+
     return byFork
   })
 
@@ -448,11 +463,12 @@ export const storeSummaries = (sql: SqlClient.SqlClient, userId: string, chats: 
     if (kept.length === 0) return
     const rows = `[${kept.map((c) => `[${JSON.stringify(c.chatId)},${c.stamp},${c.userStamp},${c.forks}]`).join(",")}]`
     yield* sql`INSERT OR REPLACE INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, messages,
-        leaf, end_at, split_at, split_after, cast_json, joined_json, departed_json, activity_json, added_json)
+        leaf, end_at, split_at, split_after, cast_json, joined_json, departed_json, activity_json, added_json,
+        threads_json)
       SELECT f.id, f.chat_id, ${FORK_SUMMARY_FORMAT}, c.value ->> 1, c.value ->> 2, s.value ->> 'preview',
         s.value ->> 'messages', s.value ->> 'leaf', s.value ->> 'endAt', s.value ->> '$.split.at',
         s.value ->> '$.split.after', s.value -> 'cast', s.value -> 'joined',
-        s.value -> 'departed', s.value -> 'activity', s.value -> 'added'
+        s.value -> 'departed', s.value -> 'activity', s.value -> 'added', coalesce(s.value -> 'threads', '[]')
       FROM json_each(${rows}) c CROSS JOIN json_each(c.value, '$[3]') s
       CROSS JOIN forks f ON f.id = s.value ->> 'forkId' AND f.chat_id = c.value ->> 0`
   })

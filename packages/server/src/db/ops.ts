@@ -21,6 +21,7 @@ import {
 } from "@rp/shared/mergeApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { AwayMark } from "@rp/shared/contextsApi.ts"
+import { ThreadSet } from "@rp/shared/threads.ts"
 import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
@@ -4023,6 +4024,15 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListBranches", {
     payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Array(Branch),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The thread sets a live fork of the user's is in, innermost first, of those still shown
+   * (spec/THREADS.md §4.3, db/threadReads.ts): each set's threads with names and the fork each opens.
+   */
+  Rpc.make("ThreadsOf", {
+    payload: { userId: UserId, chatId: ChatId, forkId: ForkId },
+    success: Schema.Array(ThreadSet),
     error: Schema.Union([NotFound, StorageError])
   })
 ) {}

@@ -356,7 +356,8 @@ describe("fork labels", () => {
         CREATE INDEX forks_parent ON forks(parent_fork_id, branched_at);
         CREATE TABLE fork_overrides(id TEXT, chat_id TEXT, fork_id TEXT, kind TEXT, target_id TEXT, seq INTEGER);
         CREATE TABLE state_events(id TEXT, chat_id TEXT, fork_id TEXT, fork_seq INTEGER, fork_label BLOB);
-        CREATE TABLE history_changes(slot_id TEXT, chat_id TEXT, fork_id TEXT, seq INTEGER, label BLOB);`)
+        CREATE TABLE history_changes(slot_id TEXT, chat_id TEXT, fork_id TEXT, seq INTEGER, label BLOB);
+        CREATE TABLE thread_splits(id TEXT, chat_id TEXT, fork_id TEXT, seq INTEGER, fork_label BLOB);`)
       for (const statement of forkLabelSchema) db.exec(statement)
       db.exec(
         "BEGIN; INSERT INTO chats VALUES ('c'); INSERT INTO forks VALUES ('c', 'c', NULL, 0); INSERT INTO fork_label_pause VALUES (1)"
