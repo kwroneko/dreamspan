@@ -23,6 +23,7 @@ import { MESSAGE_SCOPE, scopeStyles } from "./html/css.ts"
 import { BlockedMediaNote, htmlComponents, MediaBlocked } from "./html/HtmlParts.tsx"
 import {
   extractStyles,
+  hasImageSyntax,
   HtmlChatContext,
   HtmlMessageContext,
   HtmlSettingsContext,
@@ -134,7 +135,7 @@ function PositionedBlock(props: BlockProps) {
   const key = useContext(SourceBlocks)[props.index] ?? "[]"
   const html = useContext(BlockHtml)
   // A block without a tag has no HTML to parse: the plain pipeline renders it the same, cheaper.
-  const parse = html !== null && (props.content.includes("<") || /!\[.*?\]/.test(props.content))
+  const parse = html !== null && (props.content.includes("<") || hasImageSyntax(props.content))
   // Streamdown caches processors by plugin name + serialized options, not function identity.
   const plugins = useMemo(
     () =>
