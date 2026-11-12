@@ -109,7 +109,7 @@ const isJoin = (p: ProjectedEntry) => p.entry.merge !== undefined && p.system !=
  * span is empty or starts before the history read, and then not when summaries come before).
  * Its rows then go out as the messages they were, so its history reads on across the join.
  */
-const ownLine = (assembly: Assembly, history: ReadonlyArray<HistoryEntry>, join: HistoryEntry) => {
+export const ownLine = (assembly: Assembly, history: ReadonlyArray<HistoryEntry>, join: HistoryEntry) => {
   if ((assembly.knowledge?.viewer ?? null) === null || !join.known?.rows.length || join.known.ambiguous) return false
   const start = join.merge!.start === null ? undefined : history.find((e) => e.slotId === join.merge!.start)
   if (start === undefined && assembly.lcm?.cursor != null) return false

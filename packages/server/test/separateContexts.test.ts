@@ -820,6 +820,88 @@ describe("merged chats per viewer (unit C6)", () => {
     )
   )
 
+  it.live("a joined own line preserves the source request's history prefix", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const base = (yield* t.contextFor(t.wren)).inputs.leafSlotId as SlotId
+        const { fork: source } = yield* t.writer.CreateFork({
+          userId: t.userId,
+          chatId: t.chatId,
+          fromForkId: t.fork(),
+          atSlotId: base
+        })
+        const append = (
+          forkId: ForkId,
+          parentSlotId: SlotId,
+          content: string,
+          status: "complete" | "generating" = "complete"
+        ) =>
+          t.writer.AppendMessage({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId,
+            parentSlotId,
+            branch: false,
+            commitDraft: null,
+            version: new NewVersion({
+              speakerEntityId: t.wren,
+              writer: "model",
+              content,
+              status,
+              macroMode: "verbatim",
+              origin: "generated"
+            })
+          })
+        const first = yield* append(source.id, base, "SOURCE-PREFIX: Wren mends the nets.")
+        const last = yield* append(source.id, first.slotId, "SOURCE-PREFIX: Wren counts the boats.")
+        const pending = yield* append(source.id, last.slotId, "", "generating")
+        const sourceBuilt = yield* t.reader.AssembleContext({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: source.id,
+          slotId: pending.slotId,
+          versionId: pending.version.id,
+          now: 1,
+          timeZone: "UTC",
+          frozen: null
+        })
+        const before = JSON.parse(sourceBuilt.snapshot) as ContextSnapshot
+        yield* t.event({ key: "away.set", value: { entity: t.wren, away: true } })
+        const destStart = yield* t.say(t.mira, "DESTINATION-SECRET: the chest is empty.")
+        yield* t.say(t.mira, "DESTINATION-SECRET: Mira waits.")
+        const request = {
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          at: null,
+          start: destStart.slotId,
+          source: { chatId: t.chatId, forkId: source.id },
+          includeLeftOut: false
+        }
+        const preview = yield* t.reader.PreviewChatMerge(request)
+        const joined = yield* t.writer.MergeChat({
+          ...request,
+          title: preview.sourceTitle,
+          framing: null,
+          digest: preview.digest
+        })
+        yield* t.follow(joined.slotId)
+        yield* t.event({ key: "away.set", value: { entity: t.wren, away: false } })
+        const after = yield* t.contextFor(t.wren)
+        const through = before.request.messages.findIndex(
+          (m) => typeof m.content === "string" && m.content.includes("Wren counts the boats.")
+        )
+        assert.isAbove(through, 0)
+        assert.deepStrictEqual(
+          after.request.messages.slice(0, through + 1),
+          before.request.messages.slice(0, through + 1)
+        )
+        assert.notInclude(sentText(after), "DESTINATION-SECRET")
+      })
+    )
+  )
+
   it.live("a character new to this chat reads its own merged line as its history, without a heading", () =>
     run(
       Effect.gen(function* () {
