@@ -523,12 +523,35 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 if (expected?.proof) {
                   const proof = expected.proof as {
                     chat?: { id: import("@rp/shared/chat.ts").ChatId }
+                    chats?: ReadonlyArray<{ id: import("@rp/shared/chat.ts").ChatId }>
+                    historyTargets?: ReadonlyArray<{ chatId: string; forkId: string }>
                     refs?: Array<{ refId: string; rowVersion: number }>
                   }
                   for (const expectedRef of proof.refs ?? []) {
                     const current = yield* lib.ownedRef(input.userId, expectedRef.refId)
                     if (current.row_version !== expectedRef.rowVersion)
                       return yield* refuseOperation("The saved library item changed while waiting. Read it again.")
+                  }
+                  for (const chat of proof.chats ?? []) {
+                    const current = yield* operationInfo(sql, { userId: input.userId, chatId: chat.id })
+                    if (JSON.stringify(current.proof) !== JSON.stringify(chat))
+                      return yield* refuseOperation(
+                        "The saved chat changed while waiting. Read it again and ask again."
+                      )
+                  }
+                  if (input.operation === "ApplyHistoryEdits" && proof.historyTargets) {
+                    const applications = value.applications as ReadonlyArray<{ chatId: string; forkId: string }>
+                    if (
+                      applications.some(
+                        (application) =>
+                          !proof.historyTargets!.some(
+                            (target) => target.chatId === application.chatId && target.forkId === application.forkId
+                          )
+                      )
+                    )
+                      return yield* refuseOperation(
+                        "The saved history targets changed while waiting. Read them again and ask again."
+                      )
                   }
                   const current = proof.chat
                     ? yield* operationInfo(sql, { userId: input.userId, chatId: proof.chat.id })
@@ -567,8 +590,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   const next = yield* lib.loadDoc(String(value.revisionId))
                   if (
                     !isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, old, next), next) ||
+                    !isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, next, old), old) ||
                     !isDeepStrictEqual(withHtmlApprovals(old, next), next) ||
-                    (next.regex_approved === true && old.regex_approved !== true)
+                    (next.regex_approved === true) !== (old.regex_approved === true)
                   )
                     return yield* refuseOperation(
                       "Restoring this revision would change permissions. Restore it yourself from History."

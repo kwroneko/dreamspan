@@ -273,7 +273,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   WriteVersion: "Not exposed in W6: no approved, complete undo adapter for this UI workflow."
 }
 
-const commandExclusions: Readonly<Record<string, string>> = {
+export const commandExclusions: Readonly<Record<string, string>> = {
   "chat.merge": "Merging chats is outside W6 and needs a complete undo adapter.",
   "message.insert": "The insertion workflow is not in W6 and needs its own undo adapter."
 }

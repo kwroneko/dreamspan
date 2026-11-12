@@ -768,13 +768,13 @@ it.live(
     return Effect.gen(function* () {
       const steps: Step[] = []
       const f = yield* workshop(scripted(steps).handler)
-      const target = yield* f.api.CreateWorkshop({ title: "Target workshop" })
+      const target = yield* f.api.CreateChat({ title: "Target story" })
       steps.push({ name: "generate_reply", args: { chat: target.id }, id: "generate-other" })
       const before = f.mock.requests().filter((r) => r.path === "/v1/chat/completions").length
       const versionId = yield* task(f.api, f.chat, "try the other chat")
       const prompt = yield* awaitApproval(f.events, versionId, "generate-other")
       assert.strictEqual(prompt.capability, "generate")
-      assert.isTrue(prompt.rows.some((r) => r.label === "chat" && r.value === "Target workshop"))
+      assert.isTrue(prompt.rows.some((r) => r.label === "chat" && r.value === "Target story"))
       assert.isTrue(prompt.rows.some((r) => r.label === "provider" && r.value.includes("Mock")))
       assert.strictEqual(f.mock.requests().filter((r) => r.path === "/v1/chat/completions").length, before + 1)
       yield* answer(f.api, prompt, "allow")
@@ -801,7 +801,7 @@ it.live("generate_reply refuses a changed chosen provider after the user approve
   return Effect.gen(function* () {
     const steps: Step[] = []
     const f = yield* workshop(scripted(steps).handler)
-    const target = yield* f.api.CreateWorkshop({ title: "Pinned target" })
+    const target = yield* f.api.CreateChat({ title: "Pinned target" })
     steps.push({ name: "generate_reply", args: { chat: target.id }, id: "changed-provider" })
     const versionId = yield* task(f.api, f.chat, "try it")
     const prompt = yield* awaitApproval(f.events, versionId, "changed-provider")
@@ -828,6 +828,122 @@ it.live("generate_reply refuses a changed chosen provider after the user approve
     yield* eventually(() => finished(f.events, versionId as VersionId) !== undefined)
     assert.include(JSON.stringify(toolMessages(f.mock.requests())), "changed while waiting")
     assert.strictEqual(f.mock.requests().filter((r) => r.path === "/v1/chat/completions").length, count + 1)
+    assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("generate_reply refuses another workshop before asking or starting a provider request", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const steps: Step[] = []
+    const f = yield* workshop(scripted(steps).handler)
+    const target = yield* f.api.CreateWorkshop({ title: "No recursion" })
+    steps.push({ name: "generate_reply", args: { chat: target.id }, id: "recursive" })
+    const versionId = yield* task(f.api, f.chat, "try recursion")
+    yield* eventually(() => finished(f.events, versionId as VersionId) !== undefined, 2000)
+    assert.include(JSON.stringify(toolMessages(f.mock.requests())), "workshop")
+    assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
+    assert.strictEqual((yield* f.api.GetChat({ chatId: target.id })).activeLeafSlotId, target.activeLeafSlotId)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("generate_reply pins connection configuration, even when its saved connection id stays the same", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const steps: Step[] = []
+    const f = yield* workshop(scripted(steps).handler)
+    const target = yield* f.api.CreateChat({ title: "Same connection" })
+    const connection = yield* f.api.CreateConnection({
+      kind: "openai-chat",
+      settings: {
+        name: "Target connection",
+        baseUrl: `${f.mock.url}/v1`,
+        compat: {},
+        cacheTtlS: null,
+        maxConcurrent: null,
+        presetOverrideRefId: null
+      }
+    })
+    const model = yield* f.api.AddUserModel({ connectionId: connection.id, key: "target-model", overrides: {} })
+    yield* f.api.ChangeCast({
+      chatId: target.id,
+      forkId: target.currentForkId,
+      slotId: null,
+      change: { _tag: "Model", connection: connection.id, model: model.id }
+    })
+    steps.push({ name: "generate_reply", args: { chat: target.id }, id: "changed-endpoint" })
+    const versionId = yield* task(f.api, f.chat, "try it")
+    const prompt = yield* awaitApproval(f.events, versionId, "changed-endpoint")
+    yield* fixtureSql(config.dataDir, [
+      {
+        sql: "UPDATE connections SET base_url = ?, row_version = row_version + 1 WHERE id = ?",
+        params: ["http://127.0.0.1:1/v1", connection.id]
+      }
+    ])
+    yield* answer(f.api, prompt, "allow")
+    yield* eventually(() => finished(f.events, versionId as VersionId) !== undefined)
+    assert.include(JSON.stringify(toolMessages(f.mock.requests())), "changed while waiting")
+    assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
+    assert.strictEqual((yield* f.api.GetChat({ chatId: target.id })).activeLeafSlotId, null)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("generate_reply sends only to the target's chosen connection, without auxiliary provider workflows", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const steps: Step[] = []
+    const f = yield* workshop(scripted(steps).handler)
+    const target = yield* f.api.CreateChat({ title: "Chosen connection only" })
+    const auxiliary = yield* Effect.acquireRelease(
+      Effect.promise(() => startMockProvider((_request, res) => sse(res, completionChunks(["OK"], {})))),
+      (m) => Effect.promise(() => m.close())
+    )
+    const connection = yield* f.api.CreateConnection({
+      kind: "openai-chat",
+      settings: {
+        name: "Auxiliary judge",
+        baseUrl: `${auxiliary.url}/v1`,
+        compat: {},
+        cacheTtlS: null,
+        maxConcurrent: null,
+        presetOverrideRefId: null
+      }
+    })
+    const model = yield* f.api.AddUserModel({ connectionId: connection.id, key: "judge-model", overrides: {} })
+    yield* f.api.ChangeGenerationDefaults({ change: { judge: { connection: connection.id, model: model.id } } })
+    steps.push({ name: "generate_reply", args: { chat: target.id }, id: "chosen-only" })
+    const versionId = yield* task(f.api, f.chat, "reply there")
+    yield* answer(f.api, yield* awaitApproval(f.events, versionId, "chosen-only"), "allow")
+    yield* eventually(() => finished(f.events, versionId as VersionId) !== undefined)
+    // The ordinary workshop still uses its configured judge; the delegated story reply cannot send to it.
+    yield* eventually(() => auxiliary.requests().some((r) => JSON.stringify(r.body).includes("Done.")))
+    assert.isFalse(
+      auxiliary.requests().some((r) => JSON.stringify(r.body).includes("Ready.")),
+      JSON.stringify(auxiliary.requests())
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("generate_reply shares the run and user-turn change quota before starting a send", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const steps: Step[] = []
+    const f = yield* workshop(scripted(steps).handler)
+    const target = yield* f.api.CreateChat({ title: "Quota target" })
+    steps.push({ name: "generate_reply", args: { chat: target.id }, id: "quota-reply" })
+    const versionId = yield* task(f.api, f.chat, "reply there")
+    const prompt = yield* awaitApproval(f.events, versionId, "quota-reply")
+    yield* fixtureSql(
+      config.dataDir,
+      Array.from({ length: 32 }, (_, i) => ({
+        sql: "INSERT INTO rollout_receipts(rollout_id,tool_call_id,result_json,created_at) VALUES (?, ?, ?, 1)",
+        params: [prompt.rolloutId, `earlier-${i}`, JSON.stringify("Earlier change")]
+      }))
+    )
+    yield* answer(f.api, prompt, "allow")
+    yield* eventually(() => finished(f.events, versionId as VersionId) !== undefined)
+    assert.include(JSON.stringify(toolMessages(f.mock.requests())), "limit of 32 changes")
+    assert.strictEqual((yield* f.api.GetChat({ chatId: target.id })).activeLeafSlotId, null)
     assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })

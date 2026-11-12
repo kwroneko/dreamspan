@@ -464,3 +464,221 @@ describe("operation tools", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
+
+it.live("generated-reply Undo refuses a later manual edit instead of binning the owner's work", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const card = yield* f.api.CreateCard({ label: "Undo speaker", name: "Undo speaker" })
+    const created = yield* f.run("start_chat", { cards: [card.id], title: "Reply undo" })
+    const story = yield* f.api.GetChat({ chatId: JSON.parse(created.text).chatId })
+    yield* f.api.SetWorkshopGrant({ chatId: f.chat.id, capability: "generate", mode: "allow" })
+    const started = (yield* f.writer.RunWorkshopOperation({
+      userId: f.user.id,
+      rolloutId: f.rolloutId,
+      toolCallId: "reply-undo",
+      capability: "generate",
+      expected: {},
+      operation: "SendOrQueue",
+      payload: {
+        userId: f.user.id,
+        chatId: story.id,
+        forkId: story.currentForkId,
+        parentSlotId: story.activeLeafSlotId,
+        branch: false,
+        kind: "generate",
+        content: "",
+        speakerEntityId: card.entityId,
+        replySpeakerEntityId: null,
+        direction: null,
+        commitDraft: null
+      }
+    })) as { _tag: string; result: { slotId: SlotId; version: { id: VersionId }; forkId: typeof story.currentForkId } }
+    assert.strictEqual(started._tag, "Posted")
+    yield* f.writer.FinishGeneration({
+      userId: f.user.id,
+      versionId: started.result.version.id,
+      content: "Generated",
+      status: "complete",
+      error: null
+    })
+    const slot = yield* f.reader.GetSlot({
+      userId: f.user.id,
+      slotId: started.result.slotId,
+      forkId: started.result.forkId
+    })
+    const edited = yield* f.api.EditVersion({
+      slotId: started.result.slotId,
+      forkId: started.result.forkId,
+      sourceVersionId: started.result.version.id,
+      expectedRowVersion: slot.entry.rowVersion,
+      content: "Owner's saved edit"
+    })
+    const effect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === "reply-undo")!
+    assert.strictEqual(yield* outcome(f.api.UndoRolloutEffect(effect)), "EffectUndoRefused")
+    assert.strictEqual(
+      (yield* f.reader.GetSlot({ userId: f.user.id, slotId: started.result.slotId, forkId: started.result.forkId }))
+        .entry.version.id,
+      edited.version.id
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("budgets operation after-results before recording and returning them to the model", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const original = f.registry.operationTools.get("rename_chat")!
+    yield* f.registry.operationTools.register({
+      ...original,
+      after: () => Effect.succeed({ text: "x".repeat(20_000) })
+    })
+    const result = yield* f.run("rename_chat", { chat: f.chat.id, name: "Budgeted" }, "after-budget")
+    assert.isUndefined(result.isError, result.text)
+    assert.include(result.text, "Result cut at 16000 characters")
+    assert.isBelow(result.text.length, 16_200)
+    assert.strictEqual(
+      (yield* f.reader.RolloutToolReceipt({ userId: f.user.id, rolloutId: f.rolloutId, toolCallId: "after-budget" }))!
+        .text,
+      result.text
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("history rename approvals pin the complete set of saved chat targets", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const cast = yield* f.api.GetCast({
+      chatId: f.chat.id,
+      slotId: f.chat.activeLeafSlotId,
+      forkId: f.chat.currentForkId
+    })
+    const tool = toolForKind(f.registry, "workshop", "history_rename")!
+    const args = {
+      entityId: cast.participants[0]!,
+      oldName: "What",
+      newName: "Which",
+      scope: "all",
+      chatId: f.chat.id,
+      forkId: f.chat.currentForkId
+    }
+    const ctx = { ...f.context, toolCallId: "history-pin" }
+    const prompt = yield* tool.describe!(ctx, args as never)
+    const target = yield* f.api.CreateWorkshop({ title: "Added while waiting" })
+    const result = yield* tool.execute({ ...ctx, approvalDigest: "approved" }, args as never)
+    assert.isTrue(result.isError, result.text)
+    assert.include(result.text, "changed while waiting")
+    assert.isTrue(prompt.rows.some((r) => r.value.includes(f.chat.title)))
+    assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: target.id, forkId: target.currentForkId! }))
+    assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("refuses delegated generation before it can discard a saved round that Undo cannot restore", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const card = yield* f.api.CreateCard({ label: "Queued speaker", name: "Queued speaker" })
+    const created = yield* f.run("start_chat", { cards: [card.id], title: "Saved round" })
+    yield* f.api.SendMessage({
+      chatId: JSON.parse(created.text).chatId,
+      parentSlotId: null,
+      branch: false,
+      content: "Queued anchor"
+    })
+    const story = yield* f.api.GetChat({ chatId: JSON.parse(created.text).chatId })
+    yield* f.api.SetWorkshopGrant({ chatId: f.chat.id, capability: "generate", mode: "allow" })
+    yield* fixtureSql(config.dataDir, [
+      {
+        sql: "INSERT INTO queued_messages(id,chat_id,reply_slot_id,fork_id,seq,kind,content,round,held,created_at,updated_at) VALUES ('saved-round',?,?,?,0,'generate','',1,1,1,1)",
+        params: [story.id, story.activeLeafSlotId, story.currentForkId]
+      }
+    ])
+    const result = yield* Effect.exit(
+      f.writer.RunWorkshopOperation({
+        userId: f.user.id,
+        rolloutId: f.rolloutId,
+        toolCallId: "queued-reply",
+        capability: "generate",
+        expected: {},
+        operation: "SendOrQueue",
+        payload: {
+          userId: f.user.id,
+          chatId: story.id,
+          forkId: story.currentForkId,
+          parentSlotId: story.activeLeafSlotId,
+          branch: false,
+          kind: "generate",
+          content: "",
+          speakerEntityId: card.entityId,
+          replySpeakerEntityId: null,
+          direction: null,
+          commitDraft: null
+        }
+      })
+    )
+    assert.strictEqual(result._tag, "Failure")
+    const [rows] = yield* fixtureSql(
+      config.dataDir,
+      [{ sql: "SELECT id FROM queued_messages WHERE id='saved-round'" }],
+      { readOnly: true }
+    )
+    assert.lengthOf(rows!, 1)
+    assert.strictEqual((yield* f.api.GetChat({ chatId: story.id })).activeLeafSlotId, story.activeLeafSlotId)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("missing names refuse with bounded owner-scoped candidates", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const card = yield* f.api.CreateCard({ label: "Candidate card", name: "Candidate card" })
+    const chat = yield* f.run("rename_chat", { chat: "Missing chat", name: "No change" })
+    assert.isTrue(chat.isError)
+    assert.include(chat.text, f.chat.id)
+    const library = yield* f.run("rename_ref", { kind: "card", item: "Missing card", label: "No change", subtitle: "" })
+    assert.isTrue(library.isError)
+    assert.include(library.text, card.id)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("revision restores cannot remove a user's regex permission either", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const ref = yield* f.api.CreatePreset({ label: "User permission" })
+    const before = yield* f.api.OpenEditor({ refId: ref.id })
+    yield* f.api.SetRegexApproval({ refId: ref.id, approved: true, expectedRowVersion: before.ref.rowVersion })
+    const result = yield* f.run("restore_revision", {
+      kind: "preset",
+      item: ref.id,
+      revision: before.ref.headRevisionId
+    })
+    assert.isTrue(result.isError, result.text)
+    assert.include(result.text, "permissions")
+    assert.strictEqual((yield* f.api.OpenEditor({ refId: ref.id })).doc.regex_approved, true)
+    assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("revision restores cannot remove a user's agent-edit field permissions", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* fixture(config.dataDir)
+    const ref = yield* f.api.CreateCard({ label: "User edit permission", name: "User edit permission" })
+    const before = yield* f.api.OpenEditor({ refId: ref.id })
+    yield* f.writer.EditRef({
+      userId: f.user.id,
+      refId: ref.id,
+      expectedRowVersion: before.ref.rowVersion,
+      doc: { ...before.doc, agent_editable_fields: ["description"] },
+      commitDraft: null,
+      message: "Owner permission"
+    })
+    const result = yield* f.run("restore_revision", { kind: "card", item: ref.id, revision: before.ref.headRevisionId })
+    assert.isTrue(result.isError, result.text)
+    assert.include(result.text, "permissions")
+    assert.deepStrictEqual((yield* f.api.OpenEditor({ refId: ref.id })).doc.agent_editable_fields, ["description"])
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
