@@ -159,3 +159,27 @@ describe("consented media keeps the CSS as written", () => {
     expect(escaped.css).not.toContain("background")
   })
 })
+
+// Review 3: unknown loading constructs and malformed lexical units fail closed.
+it.each([
+  "image-set(var(--x))",
+  "cross-fade(var(--x), red)",
+  "attr(data-x type(<url>))",
+  "url(",
+  "u\\72l(data:image/png,a)",
+  "URL(/**/data:image/png,a)"
+])("drops unsupported CSS value %s in both paths", (value) => {
+  for (const scope of [undefined, "chat=s"]) {
+    expect(scopeCss(`.a{background:${value}}`, undefined, scope).css).not.toContain("background")
+    expect(cleanStyle(`background:${value}`, scope).style).toBe("")
+  }
+})
+it("bounds deeply nested and oversized styles before recursive traversal", () => {
+  expect(scopeCss("@media all{".repeat(5000) + ".a{color:red}" + "}".repeat(5000)).css).toBe("")
+  expect(scopeCss(" ".repeat(200001)).css).toBe("")
+})
+it("does not permit string variables to become image-set addresses", () => {
+  expect(scopeCss('.a{--x:"/media/external?chat=other&url=example";background:image-set(var(--x))}').css).not.toContain(
+    "background"
+  )
+})

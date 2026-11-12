@@ -58,8 +58,20 @@ function closingQuote(text: string, start: number) {
 
 /** CSS escapes decoded and comments gone, so an escape or a comment can't hide a function name. */
 function plain(value: string) {
-  return value
-    .replace(/\/\*[\s\S]*?\*\//g, "")
+  let uncommented = ""
+  let at = 0
+  for (;;) {
+    const start = value.indexOf("/*", at)
+    if (start < 0) {
+      uncommented += value.slice(at)
+      break
+    }
+    uncommented += value.slice(at, start)
+    const end = value.indexOf("*/", start + 2)
+    if (end < 0) break
+    at = end + 2
+  }
+  return uncommented
     .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) => {
       const point = Number.parseInt(hex, 16)
       return String.fromCodePoint(
@@ -102,60 +114,104 @@ export const renameReferences = (value: string) =>
  * a decoded `\7d` would be a real `}` and end the scoped rule. Strings and comments are passed
  * over whole, so a url() written inside a string stays text.
  */
+const SAFE_FUNCTIONS = new Set(
+  (
+    "rgb rgba hsl hsla hwb lab lch oklab oklch color color-mix light-dark " +
+    "calc min max clamp round mod rem abs sign sqrt pow hypot log exp sin cos tan asin acos atan atan2 " +
+    "var env linear-gradient radial-gradient conic-gradient repeating-linear-gradient repeating-radial-gradient repeating-conic-gradient " +
+    "translate translatex translatey translatez translate3d scale scalex scaley scalez scale3d rotate rotatex rotatey rotatez rotate3d skew skewx skewy matrix matrix3d perspective " +
+    "blur brightness contrast drop-shadow grayscale hue-rotate invert opacity saturate sepia " +
+    "cubic-bezier steps linear local counter counters rect inset circle ellipse polygon path"
+  ).split(" ")
+)
 function mediaValue(value: string, scope?: string | null) {
-  if (!scope) return { value, ...loads(value) }
-  const proxies: string[] = []
-  const masked = value.replace(
-    /\/\*[\s\S]*?\*\/|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|url\(\s*(?:"([^"\\\n]*)"|'([^'\\\n]*)'|([^)"'\\\s]*))\s*\)/gi,
-    (whole, a: string | undefined, b: string | undefined, c: string | undefined) => {
-      if (a === undefined && b === undefined && c === undefined) return whole
-      const proxy = proxyMediaUrl((a ?? b ?? c ?? "").trim(), scope)
-      if (!proxy) return whole
-      const index = proxies.push(proxy) - 1
-      return `url("data:rp-media-${index}")`
+  const remote = loads(value).remote
+  const refuse = () => ({ value: "", loads: true, remote })
+  let out = ""
+  let depth = 0
+  for (let i = 0; i < value.length;) {
+    const char = value[i]!
+    if (value.startsWith("/*", i)) {
+      const end = value.indexOf("*/", i + 2)
+      if (end < 0) return refuse()
+      // Keep comments as token boundaries; never join identifiers across them.
+      out += value.slice(i, end + 2)
+      i = end + 2
+    } else if (char === '"' || char === "'") {
+      const end = closingQuote(value, i)
+      if (end > value.length || /[\n\r\f]/.test(value.slice(i, end))) return refuse()
+      out += value.slice(i, end)
+      i = end
+    } else if (/[a-z_\\-]/i.test(char)) {
+      const start = i
+      while (i < value.length && /[a-z0-9_\\-]/i.test(value[i]!)) {
+        if (value[i] === "\\") {
+          // Escaped function names are deliberately unsupported. Preserve other escapes.
+          const escape = /^\\(?:[0-9a-f]{1,6}\s?|[^\n\r\f])/i.exec(value.slice(i))
+          if (!escape) return refuse()
+          i += escape[0].length
+        } else i++
+      }
+      const name = value.slice(start, i)
+      if (value[i] !== "(") {
+        out += name
+        continue
+      }
+      if (name.toLowerCase() === "url") {
+        const match = /^url\(\s*(?:"([^"\\\n\r\f]*)"|'([^'\\\n\r\f]*)'|([^()"'\\\s]*))\s*\)/i.exec(value.slice(start))
+        if (!match) return refuse()
+        const address = (match[1] ?? match[2] ?? match[3] ?? "").trim()
+        const proxy = proxyMediaUrl(address, scope)
+        if (proxy) out += `url("${proxy}")`
+        else if (/^(?:data:|#)/i.test(address)) out += match[0]
+        else return refuse()
+        i = start + match[0].length
+      } else {
+        if (!SAFE_FUNCTIONS.has(name.toLowerCase()) || ++depth > 64) return refuse()
+        out += name + "("
+        i++
+      }
+    } else {
+      if (char === "(") {
+        if (++depth > 64) return refuse()
+      }
+      if (char === ")" && --depth < 0) return refuse()
+      if (/[{};]/.test(char)) return refuse()
+      out += char
+      i++
     }
-  )
-  const result = loads(masked)
-  return {
-    ...result,
-    value: masked.replace(/url\("data:rp-media-(\d+)"\)/g, (whole, index: string) =>
-      proxies[Number(index)] === undefined ? whole : `url("${proxies[Number(index)]}")`
-    )
   }
+  return depth === 0 ? { value: out, loads: false, remote } : refuse()
 }
 
-/**
- * A `style` attribute without the declarations that would load something, its `url(#id)`
- * references renamed. Split as the browser reads it: at semicolons outside strings and brackets.
- */
+/** A style attribute uses the same parser and value policy as the stylesheet path. */
 export function cleanStyle(
   style: string,
   mediaScope?: string | null
 ): { readonly style: string; readonly blocked: boolean } {
-  const declarations: string[] = []
-  let depth = 0
-  let quote: string | null = null
-  let start = 0
-  for (let i = 0; i <= style.length; i++) {
-    const char = style[i]
-    if (char === "\\") i++
-    else if (quote) quote = char === quote ? null : quote
-    else if (char === '"' || char === "'") quote = char
-    else if (char === "(") depth++
-    else if (char === ")") depth = Math.max(0, depth - 1)
-    else if ((char === ";" && depth === 0) || char === undefined) {
-      declarations.push(style.slice(start, i))
-      start = i + 1
+  if (style.length > MAX_MESSAGE_CSS) return { style: "", blocked: true }
+  try {
+    const root = postcss.parse(`a{${style}}`)
+    const rule = root.first
+    if (
+      root.nodes.length !== 1 ||
+      rule?.type !== "rule" ||
+      rule.nodes.some((node) => node.type !== "decl" && node.type !== "comment")
+    )
+      return { style: "", blocked: loads(style).remote }
+    let blocked = false
+    const kept: string[] = []
+    for (const node of rule.nodes) {
+      if (node.type !== "decl") continue
+      const result = mediaValue(node.value, mediaScope)
+      blocked ||= result.remote
+      if (!result.loads)
+        kept.push(`${node.prop}: ${renameReferences(result.value)}${node.important ? " !important" : ""}`)
     }
+    return { style: kept.join("; "), blocked }
+  } catch {
+    return { style: "", blocked: loads(style).remote }
   }
-  let blocked = false
-  const kept = declarations.flatMap((declaration) => {
-    if (!declaration.trim()) return []
-    const result = mediaValue(declaration, mediaScope)
-    blocked ||= result.remote
-    return result.loads ? [] : [renameReferences(result.value.trim())]
-  })
-  return { style: kept.join("; "), blocked }
 }
 
 /** Names the stylesheet defines globally (keyframes, fonts) get the class prefix too. */
@@ -191,9 +247,17 @@ export function scopeStyles(styles: ReadonlyArray<string>, mediaScope?: string |
 export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`, mediaScope?: string | null): ScopedCss {
   let root
   try {
-    root = postcss.parse(css.slice(0, MAX_MESSAGE_CSS))
+    if (css.length > MAX_MESSAGE_CSS) return { css: "", blocked: true }
+    root = postcss.parse(css)
   } catch {
     return { css: "", blocked: false }
+  }
+  const pending: Array<{ node: Container; depth: number }> = [{ node: root, depth: 0 }]
+  while (pending.length) {
+    const { node, depth } = pending.pop()!
+    if (depth > 64) return { css: "", blocked: true }
+    for (const child of node.nodes ?? [])
+      if ("nodes" in child && child.nodes) pending.push({ node: child as Container, depth: depth + 1 })
   }
   let blocked = false
   const keyframes = new Set<string>()
