@@ -39,3 +39,9 @@ describe("htmlDepthForm", () => {
     expect(htmlDepthForm("<b>&#0;&#xD800;&#x110000;&#65;</b>", "text")).toBe("���A")
   })
 })
+
+it("reduces unfinished document content and decodes HTML's full entity set", () => {
+  expect(htmlDepthForm("<p>Caf&eacute; &copy; &ndash; &#128;</p>", "text")).toBe("Café © – €")
+  expect(htmlDepthForm("<div>Kept.</div><script>unfinished()", "text")).toBe("Kept.")
+  expect(htmlDepthForm("```html\n<!doctype html><html><body><p>Board</p></body></html>\n```", "text")).toBe("Board")
+})

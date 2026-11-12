@@ -3,6 +3,7 @@
 // "Text only" removes HTML tags and keeps their text; "Leave out panels" also drops document
 // blocks whole. Code that isn't a document stays as written, and so do tags that aren't HTML's
 // (a model's own `<status>` markers, reply sections): only the elements HTML defines go.
+import { decodeHTML } from "entities"
 import type { HtmlDepth } from "@rp/shared/state.ts"
 
 /** Tavern Helper's test (`is_frontend.ts`), as the client's renderer has it (ui/html/parts.ts). */
@@ -21,7 +22,7 @@ const ELEMENTS = new Set(
   ).split(" ")
 )
 /** Elements whose content isn't text: they go with it. */
-const DROPPED = /<(script|style|template|noscript|head)\b[^>]*>[\s\S]*?<\/\1\s*>/gi
+const DROPPED = /<(script|style|template|noscript|head)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi
 const HAS_DROPPED = new RegExp(DROPPED.source, "i")
 /** Elements that end a line: their end becomes a line break. */
 const BLOCKS = new Set(
@@ -30,24 +31,17 @@ const BLOCKS = new Set(
   )
 )
 const TAG = /<\/?([A-Za-z][A-Za-z0-9-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*\/?>/g
-const ENTITIES: Record<string, string> = { lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", amp: "&" }
-
-/** A numeric reference's character: zero, a surrogate or past Unicode is U+FFFD, as HTML reads it. */
-const codePoint = (code: number) =>
-  code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) || !Number.isFinite(code)
-    ? "\uFFFD"
-    : String.fromCodePoint(code)
-
 const hasMarkup = (text: string) => {
   for (const match of text.matchAll(TAG)) if (ELEMENTS.has(match[1]!.toLowerCase())) return true
-  return /<!--/.test(text)
+  return /<!--|<!doctype\b/i.test(text)
 }
 
 /** `text` without HTML's tags: their text stays, line ends where blocks ended, entities decoded. */
 const textOnly = (text: string) => {
   if (!hasMarkup(text) && !HAS_DROPPED.test(text)) return text
   const stripped = text
-    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
+    .replace(/<!doctype\b[^>]*>/gi, "")
     .replace(DROPPED, "")
     .replace(TAG, (tag, name: string) => {
       const element = name.toLowerCase()
@@ -57,12 +51,8 @@ const textOnly = (text: string) => {
       if (tag.startsWith("</") && (element === "td" || element === "th")) return " "
       return ""
     })
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) => {
-      if (name.startsWith("#x") || name.startsWith("#X")) return codePoint(Number.parseInt(name.slice(2), 16))
-      if (name.startsWith("#")) return codePoint(Number(name.slice(1)))
-      return ENTITIES[name.toLowerCase()] ?? entity
-    })
-  return stripped
+
+  return decodeHTML(stripped)
     .split("\n")
     .map((line) => line.replace(/[ \t]+$/, ""))
     .join("\n")
