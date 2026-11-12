@@ -5,6 +5,7 @@
 // revision with the replacements, under one changeset group; `library_edit_items` records each
 // entry's revisions before and after, so the whole replace is undone at once. An entry that moved
 // since the plan (its head, row version or drafts) is left as it is.
+import { keepsRegexApproval, withHtmlApprovals, withoutGrantedAgentEdits } from "@rp/shared/editing.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -158,7 +159,13 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
             })
             continue
           }
-          const before = yield* lib.loadDoc(item.before_revision_id)
+          const head = yield* lib.loadDoc(ref.head_revision_id)
+          let before = withHtmlApprovals(
+            head,
+            withoutGrantedAgentEdits(ref.kind, head, yield* lib.loadDoc(item.before_revision_id))
+          )
+          if (before.regex_approved === true && !keepsRegexApproval(head, before))
+            before = { ...before, regex_approved: false }
           const id = yield* write(ref, before, "changeset", originRef, `Undid: ${group.title}`)
           yield* sql`UPDATE library_edit_items SET undone_by_revision_id = ${id ?? item.before_revision_id}
             WHERE id = ${item.id}`

@@ -4,7 +4,7 @@
 // that writes a revision per entry; an entry changed since its preview is left alone; undo
 // keeps an entry changed since.
 import { assert, describe, it } from "@effect/vitest"
-import { textField } from "@rp/shared/editing.ts"
+import { textField, valueField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { LibraryPreview, LibrarySearch } from "@rp/shared/libraryReplace.ts"
 import { Effect } from "effect"
@@ -44,6 +44,55 @@ const setup = Effect.gen(function* () {
 })
 
 describe("library search and replace", () => {
+  it.effect("undo never restores regex approval after the scripts changed", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const opened = yield* f.api.OpenEditor({ refId: f.mira })
+      yield* f.api.SaveEditorDraft({
+        draftId: null,
+        expectedSession: null,
+        refId: f.mira,
+        field: valueField(["regex"]),
+        content: JSON.stringify([
+          {
+            id: "script",
+            name: "lighthouse",
+            find_regex: "/x/g",
+            replace_string: "y",
+            placement: [2],
+            disabled: false,
+            markdown_only: false,
+            prompt_only: false,
+            run_on_edit: false,
+            substitute_regex: "none",
+            min_depth: null,
+            max_depth: null,
+            trim_strings: []
+          }
+        ]),
+        expectedRowVersion: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+      const drafted = yield* f.api.OpenEditor({ refId: f.mira })
+      yield* f.api.CommitEditorDrafts({
+        refId: f.mira,
+        expectedRowVersion: drafted.ref.rowVersion,
+        fields: drafted.drafts
+          .filter((d) => d.status === "active")
+          .map((d) => ({ field: d.key.field, draftId: d.id, expectedRowVersion: d.rowVersion })),
+        message: null
+      })
+      const saved = yield* f.api.OpenEditor({ refId: f.mira })
+      yield* f.api.SetRegexApproval({ refId: f.mira, approved: true, expectedRowVersion: saved.ref.rowVersion })
+      const asked = search("lighthouse", "beacon")
+      const preview = yield* f.api.PreviewLibraryReplace({ search: asked })
+      const result = yield* f.api.ApplyLibraryReplace({ search: asked, choices: f.all(preview) })
+      assert.isFalse((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
+      yield* f.api.UndoLibraryEdit({ editId: result.editId! })
+      assert.isFalse((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
   it.effect("finds text in every kind, with counts per kind and the match in its context", () =>
     Effect.gen(function* () {
       const f = yield* setup
