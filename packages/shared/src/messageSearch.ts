@@ -16,9 +16,15 @@ const MAX_WORDS = 8
  * The words of a query, as the full-text index splits text (letters and digits; everything
  * else separates), lower case, without repeats.
  */
-export const queryWords = (query: string): ReadonlyArray<string> => [
-  ...new Set((query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((word) => word.length > 0).slice(0, MAX_WORDS))
-]
+export const queryWords = (query: string): ReadonlyArray<string> =>
+  [
+    ...new Set(
+      query
+        .normalize("NFC")
+        .toLowerCase()
+        .match(/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu) ?? []
+    )
+  ].slice(0, MAX_WORDS)
 
 /** A text's letters with case and accents folded away, as the index compares them. */
 const fold = (char: string) => char.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase()

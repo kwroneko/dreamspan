@@ -2941,3 +2941,5 @@ Library replace review (2026-11-12): Undo uses the same permission rules as rest
 Library replace draft safety (2026-11-12): preview and plan block drafts whose base conflicts with the current saved field, following CommitEditorDrafts. Undo leaves entries with later active drafts alone and reports them, preserving both the saved replace and the later unsaved text.
 
 Library replace record invariants (2026-11-12): library_edit_items enforces one entry per group, a positive match count, different before/after revisions of the entry itself, owner agreement with its group, and an undo revision of that same entry. Membership is immutable; revision/ref deletion retains the existing cascade behavior. Each row stores identifiers and counts only, no document text.
+
+Message query review (2026-11-12): words are NFC-normalized Unicode letter/digit runs with their combining marks, deduplicated before the eight-word limit. Quotes, operator punctuation and prefix characters are separators; AND, OR and NEAR are literal search words. Emoji/punctuation alone find nothing. The UI clips input to 200 UTF-16 units; the RPC schema refuses longer input before SQL.

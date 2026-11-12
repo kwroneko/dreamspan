@@ -53,6 +53,31 @@ const setup = Effect.gen(function* () {
 })
 
 describe("message search", () => {
+  it.effect("treats punctuation as separators, operators as words and Unicode as text", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      yield* f.writer.AppendMessage({
+        userId: f.userId,
+        chatId: f.chatId,
+        forkId: f.main,
+        parentSlotId: f.mainOnly.slotId,
+        branch: false,
+        version: said("École 東京の灯台 café AND OR NEAR 🌊"),
+        commitDraft: null
+      })
+      for (const query of [
+        '"École"',
+        "e\u0301cole",
+        '"東京"*',
+        "AND OR NEAR",
+        "café + école - 東京",
+        "école ".repeat(28).trim()
+      ])
+        assert.lengthOf((yield* f.search(query)).hits, 1, query)
+      for (const query of ["🌊🌊", "***", '""']) assert.lengthOf((yield* f.search(query)).hits, 0, query)
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
   it.effect("finds a shared message once, with every branch that shows it", () =>
     Effect.gen(function* () {
       const f = yield* setup

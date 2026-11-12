@@ -5,6 +5,8 @@ import { excerpt, markWords, queryWords } from "../src/messageSearch.ts"
 describe("message search words", () => {
   it("splits as the index does, lower case, without repeats", () => {
     expect(queryWords("The old-lighthouse, the  KEEPER!")).toEqual(["the", "old", "lighthouse", "keeper"])
+    expect(queryWords("e\u0301cole école 東京 हिन्दी 🌊")).toEqual(["école", "東京", "हिन्दी"])
+    expect(queryWords("a a a a a a a a b")).toEqual(["a", "b"])
     expect(queryWords("¿?!")).toEqual([])
     expect(queryWords("a b c d e f g h i j")).toHaveLength(8)
   })
