@@ -116,5 +116,10 @@ export const executionRegistry = Effect.gen(function* () {
 export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string, name: string) => {
   const common = registry.rolloutTools.get(name)
   const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
-  return common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)
+  const tool = common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)
+  if (!tool || registry.chatKinds.get(kind)?.allowsOutside || !tool.capability) return tool
+  // Capability grants are workshop metadata. Preserve the frozen story definition shape.
+  const storyTool = { ...tool }
+  delete storyTool.capability
+  return storyTool
 }

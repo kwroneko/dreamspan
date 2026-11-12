@@ -100,6 +100,237 @@ const fixture = (dataDir: string, api: Api) =>
   })
 
 describe("workshop setup effects", () => {
+  it.live("preserves story snapshots and refusal rows when library reads are explicitly selected", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const messages = request.body?.messages as Array<{ role: string }>
+            const count = messages.filter((m) => m.role === "tool").length
+            sse(
+              res,
+              count === 0
+                ? call("read_card", { card: "Mira" }, "read")
+                : count === 1
+                  ? call(
+                      "edit_card",
+                      { character: "Mira", field: "description", find: "anything", replace: "changed" },
+                      "refused-edit"
+                    )
+                  : completionChunks(["The story continues."], {})
+            )
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const rp = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [
+          { key: "agent.enabled", value: { on: true } },
+          { key: "agent.tools", value: { tools: ["read_card", "edit_card"] } }
+        ]
+      })
+      const material = yield* (yield* Reader).RolloutMaterial({
+        userId: (yield* api.Whoami()).id,
+        versionId: rp.version.id
+      })
+      const snapshot = JSON.parse(material.snapshot) as {
+        agent: { tools: Array<{ name: string; capability?: string }> }
+      }
+      const [receipts] = yield* fixtureSql(
+        config.dataDir,
+        [{ sql: "SELECT tool_call_id FROM rollout_receipts WHERE rollout_id = ?", params: [material.rolloutId] }],
+        { readOnly: true }
+      )
+      assert.isEmpty(receipts, "A refused story edit did not write a receipt before W3")
+      assert.isFalse(
+        snapshot.agent.tools.some((tool) => "capability" in tool),
+        "Workshop metadata must not change stored story snapshots"
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("cannot enable setup tools in a story through state or a crafted provider call", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const messages = request.body?.messages as Array<{ role: string }>
+            sse(
+              res,
+              messages.some((m) => m.role === "tool")
+                ? completionChunks(["No setup was performed."], {})
+                : call("create_card", { name: "Must never exist" }, "forged-setup")
+            )
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const rp = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [
+          { key: "agent.enabled", value: { on: true } },
+          { key: "agent.tools", value: { tools: ["create_card", "edit_card", "clone_card", "start_chat"] } }
+        ]
+      })
+      const transcript = yield* api.GetRunTranscript({ versionId: rp.version.id })
+      assert.notInclude(
+        transcript.tools.map((t) => t.name),
+        "create_card"
+      )
+      assert.notInclude(
+        transcript.tools.map((t) => t.name),
+        "clone_card"
+      )
+      assert.notInclude(
+        transcript.tools.map((t) => t.name),
+        "start_chat"
+      )
+      assert.strictEqual(transcript.tools.find((t) => t.name === "edit_card")!.effect, "chat_state")
+      assert.isTrue(transcript.entries.some((e) => e.role === "toolResult" && e.isError))
+      assert.isEmpty((yield* api.ListLibrary({ kind: "card" })).filter((r) => r.label === "Must never exist"))
+      assert.isEmpty(yield* api.ListRolloutEffects({ chatId: rp.chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live(
+    "replays a committed create_card through Resume without creating another card, and retains effects across swipes and purge",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const messages = request.body?.messages as Array<{ role: string }>
+              sse(
+                res,
+                messages.some((m) => m.role === "tool")
+                  ? completionChunks(["Created the card."], {})
+                  : call("create_card", { name: "Resume keeper" }, "receipt-create")
+              )
+            })
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const api = yield* client()
+        yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+        const chat = yield* api.CreateWorkshop({})
+        const events = yield* watch(api, chat)
+        const sent = yield* posted(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: chat.activeLeafSlotId,
+            branch: false,
+            content: "Create a synthetic keeper."
+          })
+        )
+        const generated = yield* posted(
+          api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
+        )
+        yield* eventually(() => finished(events, generated.entry.version.id) !== undefined)
+        const user = yield* api.Whoami()
+        const reader = yield* Reader
+        const material = yield* reader.RolloutMaterial({ userId: user.id, versionId: generated.entry.version.id })
+        const transcript = JSON.parse(material.transcript!) as Array<{ role: string }>
+        const resultAt = transcript.findIndex((m) => m.role === "toolResult")
+        assert.isAbove(resultAt, 0)
+        yield* fixtureSql(config.dataDir, [
+          {
+            sql: "UPDATE rollout_payloads SET transcript_json = ? WHERE rollout_id = ?",
+            params: [JSON.stringify(transcript.slice(0, resultAt)), material.rolloutId]
+          },
+          { sql: "UPDATE rollouts SET status = 'interrupted' WHERE id = ?", params: [material.rolloutId] },
+          { sql: "UPDATE versions SET status = 'interrupted' WHERE id = ?", params: [generated.entry.version.id] }
+        ])
+        const slot = yield* reader.GetSlot({ userId: user.id, slotId: generated.entry.slotId })
+        const resumed = yield* api.ResumeVersion({
+          versionId: generated.entry.version.id,
+          expectedRowVersion: slot.entry.rowVersion
+        })
+        yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+        assert.strictEqual(finished(events, resumed.version.id)!.status, "complete")
+        assert.lengthOf(
+          (yield* api.ListLibrary({ kind: "card" })).filter((r) => r.label === "Resume keeper"),
+          1
+        )
+        assert.isTrue(
+          (yield* api.GetRunTranscript({ versionId: resumed.version.id })).entries.some(
+            (e) => e.role === "toolResult" && e.tool === "create_card" && !e.isError
+          )
+        )
+        const current = yield* reader.GetSlot({ userId: user.id, slotId: generated.entry.slotId })
+        const swipe = yield* api.Regenerate({
+          slotId: generated.entry.slotId,
+          expectedRowVersion: current.entry.rowVersion
+        })
+        yield* eventually(() => finished(events, swipe.version.id) !== undefined)
+        assert.lengthOf(yield* api.ListRolloutEffects({ chatId: chat.id }), 2)
+        const binnedVersion = yield* api.DeleteVersion({ versionId: resumed.version.id })
+        yield* api.PurgeBinItem({ itemId: binnedVersion.id })
+        assert.lengthOf(
+          yield* api.ListRolloutEffects({ chatId: chat.id }),
+          2,
+          "A swipe's purge cannot undo or discard independent library effects"
+        )
+        const binnedChat = yield* api.DeleteChat({ chatId: chat.id })
+        yield* api.PurgeBinItem({ itemId: binnedChat.id })
+        const [rows] = yield* fixtureSql(
+          config.dataDir,
+          [
+            {
+              sql: "SELECT count(*) AS n FROM rollout_effects e JOIN rollouts r ON r.id = e.rollout_id WHERE r.chat_id = ?",
+              params: [chat.id]
+            }
+          ],
+          { readOnly: true }
+        )
+        assert.strictEqual(rows![0]!.n, 0)
+        assert.lengthOf(
+          (yield* api.ListLibrary({ kind: "card" })).filter((r) => r.label === "Resume keeper"),
+          2
+        )
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    }
+  )
+
+  it.live("serializes repeated undo and concurrent user saves without losing the user's text", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const card = yield* api.CreateCard({ label: "Undo race", name: "Undo race", description: "Before" })
+      yield* f.run("edit_card", { card: card.id, changes: [{ field: "description", text: "Agent" }] }, "edit")
+      const effect = (yield* api.ListRolloutEffects({ chatId: f.chat.id }))[0]!
+      const both = yield* Effect.all([api.UndoRolloutEffect(effect), api.UndoRolloutEffect(effect)], { concurrency: 2 })
+      assert.deepStrictEqual(both[0], both[1])
+      const restored = yield* api.OpenEditor({ refId: card.id })
+      assert.strictEqual(restored.ref.rowVersion, card.rowVersion + 2)
+      yield* f.run(
+        "edit_card",
+        { card: card.id, changes: [{ field: "description", text: "Agent again" }] },
+        "edit-again"
+      )
+      const again = (yield* api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === "edit-again")!
+      const [saved] = yield* Effect.all(
+        [outcome(edit(api, card.id, "Concurrent user text")), outcome(api.UndoRolloutEffect(again))],
+        { concurrency: 2 }
+      )
+      const after = yield* api.OpenEditor({ refId: card.id })
+      if (saved === "ok") assert.strictEqual(after.doc.description, "Concurrent user text")
+      else
+        assert.isTrue(
+          after.drafts.some((d) => d.content === "Concurrent user text"),
+          "A stale save must retain its draft"
+        )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("refuses to bin a created card after a user adds or changes an owned note", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -494,6 +725,32 @@ describe("workshop setup effects", () => {
       const created = (yield* alice.ListRolloutEffects({ chatId: f.chat.id }))[0]!
       assert.strictEqual(yield* outcome(bob.ListRolloutEffects({ chatId: f.chat.id })), "NotFound")
       assert.strictEqual(yield* outcome(bob.UndoRolloutEffect(created)), "NotFound")
+      assert.isEmpty(yield* bob.ListRolloutEffects({ chatId: b.chat.id }))
+      assert.isTrue((yield* b.run("clone_card", { card: id, name: "Stolen clone" }, "foreign-clone")).isError)
+      assert.isTrue((yield* b.run("start_chat", { cards: [id] }, "foreign-chat")).isError)
+      const privatePreset = (yield* alice.ListLibrary({ kind: "preset" }))[0]!
+      assert.isTrue(
+        (yield* b.run("start_chat", { cards: ["Assistant"], preset: privatePreset.id }, "foreign-preset")).isError
+      )
+      const privateConnection = yield* alice.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Synthetic private",
+          baseUrl: "http://127.0.0.1:9/v1",
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        }
+      })
+      const privateModel = yield* alice.AddUserModel({
+        connectionId: privateConnection.id,
+        key: "private-model",
+        overrides: {}
+      })
+      assert.isTrue(
+        (yield* b.run("start_chat", { cards: ["Assistant"], model: privateModel.id }, "foreign-model")).isError
+      )
       assert.isEmpty(yield* bob.ListRolloutEffects({ chatId: b.chat.id }))
       assert.isTrue(
         (yield* b.run("edit_card", { card: id, changes: [{ field: "description", text: "Stolen" }] })).isError

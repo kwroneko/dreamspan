@@ -2853,6 +2853,9 @@ The instruction is always one final user-role message (DESIGN §2.2), for both p
 
 **Effect-recipe constraints (review-workshop3).** The baseline checks a revision recipe’s ref as well as both revisions against the target entity, requires integer current/previous row versions, and requires a chat-creation state stamp. Revision undo results must name a revision of that target and an integer row version. Invalid effect writes roll back their receipts. `workshopEffectSchema.test.ts` rejects wrong refs, missing row versions and missing chat recipes. **BASELINE CHANGED**.
 
+**Story persistence parity (review-workshop3).** The new fallback receipt recorder runs only for profiles that permit outside effects; RP chat-state tools retain their existing atomic success receipts and their former refusal rows. Kind resolution also omits workshop capability metadata from story tool definitions, preserving frozen story snapshots even when library reads are explicitly selected. `workshopEffects.test.ts` reproduces both persistence changes, checks forged setup calls and cross-owner card/preset/model IDs, and proves create-card receipt replay through Resume, effects retained across regeneration/version purge, source-chat cascades, and serialized repeated/concurrent undo. No story provider definitions or request pieces change.
+
+
 
 
 

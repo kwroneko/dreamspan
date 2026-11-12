@@ -382,7 +382,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               isError: true
             }
           const result = exit.value
-          if (tool.effect !== "read") {
+          if (tool.effect !== "read" && run.allowsOutside === true) {
             await runPromise(
               writer.RecordRolloutEffects({
                 userId: request.userId,
