@@ -344,7 +344,17 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
           kind: "summary",
           sourceSlotId: s.lastSlotId,
           speaker: null,
-          knowers: null,
+          // A frozen summary must retain who knew all its inputs, even after its source is gone.
+          // Stale inputs cannot be verified against the current source path.
+          knowers:
+            s.fresh && !read.some((m) => m.first_origin === "merge" && s.from <= m.position && m.position <= s.to)
+              ? messages
+                  .filter((m) => s.from <= m.position && m.position <= s.to)
+                  .reduce<ReadonlyArray<string> | null>((all, m) => {
+                    const known = knownBy(m)
+                    return known === null ? all : all === null ? known : all.filter((id) => known.includes(id))
+                  }, null)
+              : [],
           name: `Summary of #${s.from + 1}–${s.to + 1}`,
           side: "assistant",
           content: s.content.trim(),

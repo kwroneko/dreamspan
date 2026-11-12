@@ -81,6 +81,17 @@ import {
 import { noteHistory } from "./noteHistory.ts"
 import { withoutPurged } from "./stateRefs.ts"
 
+/** Until C6 renders individual frozen rows, send a join only to viewers who knew all its sent rows. */
+const mergeKnowersSql = (slot: string) => `(SELECT json_group_array(candidate.entity) FROM (
+  SELECT c.value ->> 'entity' AS entity FROM chat_merges m, json_each(m.cast_json) c
+    WHERE m.slot_id = ${slot} AND c.value ->> 'from' <> 'destination'
+  UNION SELECT k.value FROM chat_merges m JOIN chat_merge_messages mm ON mm.merge_id = m.id,
+    json_each(mm.knowers_json) k WHERE m.slot_id = ${slot}
+) candidate WHERE NOT EXISTS (
+  SELECT 1 FROM chat_merges m JOIN chat_merge_messages mm ON mm.merge_id = m.id
+  WHERE m.slot_id = ${slot} AND mm.included = 'verbatim' AND mm.knowers_json IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM json_each(mm.knowers_json) k WHERE k.value = candidate.entity)))`
+
 /** Stored image facts for assembly and its draft preview, always inside a reader worker. */
 export const readImageTokenFacts = (
   sql: SqlClient.SqlClient,
@@ -888,9 +899,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           speaker_entity_id: string | null
           merge_cast: string | null
         }>`SELECT v.id, v.cast_json, v.presence_json, v.speaker_entity_id,
-            CASE WHEN v.origin = 'merge' THEN (SELECT json_group_array(c.value ->> 'entity')
-              FROM chat_merges m, json_each(m.cast_json) c
-              WHERE m.slot_id = v.slot_id AND c.value ->> 'from' <> 'destination') END AS merge_cast
+            CASE WHEN v.origin = 'merge' THEN ${sql.literal(mergeKnowersSql("v.slot_id"))} END AS merge_cast
           FROM version_records v JOIN slots s ON s.id = v.slot_id
           WHERE s.chat_id = ${chatId} AND ${owned} AND v.id IN ${sql.in(versionIds)}`
         const byId = new Map(rows.map((row) => [row.id, row]))
@@ -923,8 +932,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           JOIN version_records v ON v.id = ${selected}
           WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
             AND NOT CASE WHEN v.origin = 'merge' AND EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
-              THEN EXISTS (SELECT 1 FROM chat_merges m, json_each(m.cast_json) c WHERE m.slot_id = s.id
-                AND c.value ->> 'from' <> 'destination' AND c.value ->> 'entity' = ${viewer})
+              THEN EXISTS (SELECT 1 FROM json_each(${sql.literal(mergeKnowersSql("s.id"))}) k WHERE k.value = ${viewer})
               ELSE v.cast_json IS NULL OR v.speaker_entity_id IS ${viewer}
                 OR (EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value = ${viewer})
                   AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a

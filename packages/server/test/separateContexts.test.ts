@@ -215,6 +215,86 @@ describe("separate contexts", () => {
 })
 
 describe("separate contexts and summaries", () => {
+  lcmTest("merged summary rows freeze the knowers of their inputs, not the source's later cast", (server) =>
+    Effect.gen(function* () {
+      const h = yield* lcmHarness(server, { messages: 120, summarizer: () => ({ text: "SOURCE-SUMMARY" }) })
+      yield* h.settle
+      const made = yield* h.writer.CreateEntity({
+        userId: h.userId,
+        kind: "card",
+        label: "Wren",
+        subtitle: "",
+        doc: cardDoc("Wren"),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const wren = made.entityId as EntityId
+      yield* h.writer.AddStateEvent({
+        userId: h.userId,
+        chatId: h.chat.id,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "participant.join", value: { entity: wren } }
+      })
+      yield* fixtureSql(h.dataDir, [
+        {
+          sql: "UPDATE version_records SET cast_json = ?, presence_json = ? WHERE slot_id IN (SELECT id FROM slots WHERE chat_id = ?)",
+          params: [JSON.stringify([wren]), JSON.stringify({ away: [wren] }), h.chat.id]
+        }
+      ])
+      const dest = yield* h.writer.CreateChat({
+        userId: h.userId,
+        kind: "rp",
+        status: "active",
+        title: "Destination",
+        participants: [wren],
+        greeting: null
+      })
+      yield* h.writer.AppendMessage({
+        userId: h.userId,
+        chatId: dest.id,
+        parentSlotId: null,
+        branch: false,
+        commitDraft: null,
+        version: new NewVersion({
+          speakerEntityId: wren,
+          writer: "human",
+          content: "Destination begins.",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        })
+      })
+      const request = {
+        chatId: dest.id,
+        forkId: dest.currentForkId!,
+        at: null,
+        source: { chatId: h.chat.id, forkId: h.chat.currentForkId! },
+        includeLeftOut: false
+      }
+      const seen = yield* h.reader.PreviewChatMerge({ userId: h.userId, ...request })
+      yield* h.writer.MergeChat({
+        userId: h.userId,
+        ...request,
+        title: seen.sourceTitle,
+        framing: null,
+        digest: seen.digest
+      })
+      const [rows] = yield* fixtureSql(
+        h.dataDir,
+        [{ sql: "SELECT knowers_json FROM chat_merge_messages WHERE kind = 'summary'" }],
+        { readOnly: true }
+      )
+      assert.isAbove(rows!.length, 0, "fixture includes frozen summaries")
+      assert.isTrue(
+        rows!.every((r) => r.knowers_json === "[]"),
+        JSON.stringify(rows)
+      )
+    })
+  )
+
   lcmTest("a stale summary cannot reveal the away version after selecting a present swipe", (server) =>
     Effect.gen(function* () {
       const h = yield* lcmHarness(server, { messages: 120, summarizer: () => ({ text: "SECRET-SUMMARY" }) })
@@ -300,7 +380,6 @@ describe("separate contexts and summaries", () => {
     })
   )
 
-
   lcmTest("summaries covering what the speaker missed are withheld, with an issue", (server) =>
     Effect.gen(function* () {
       const h = yield* lcmHarness(server, { messages: 120, summarizer: () => ({ text: "SUMMARY-TEXT" }) })
@@ -369,6 +448,63 @@ describe("separate contexts and summaries", () => {
 const GAP = "[Wren wasn't present for 2 messages here, in which Mira and Tobin took part.]"
 
 describe("gap lines", () => {
+  it.live("a source cast member who was away cannot read the merge's whole transcript", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const source = yield* t.writer.CreateChat({
+          userId: t.userId,
+          kind: "rp",
+          status: "active",
+          title: "Private docks",
+          participants: [t.mira, t.wren],
+          greeting: null
+        })
+        yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          chatId: source.id,
+          slotId: null,
+          versionId: null,
+          scope: null,
+          data: { key: "away.set", value: { entity: t.wren, away: true } }
+        })
+        yield* t.writer.AppendMessage({
+          userId: t.userId,
+          chatId: source.id,
+          parentSlotId: null,
+          branch: false,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: t.mira,
+            writer: "human",
+            content: "MERGED-SECRET",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          })
+        })
+        const request = {
+          chatId: t.chatId,
+          forkId: t.fork(),
+          at: null,
+          source: { chatId: source.id, forkId: source.currentForkId! },
+          includeLeftOut: false
+        }
+        const seen = yield* t.reader.PreviewChatMerge({ userId: t.userId, ...request })
+        const joined = yield* t.writer.MergeChat({
+          userId: t.userId,
+          ...request,
+          title: seen.sourceTitle,
+          framing: null,
+          digest: seen.digest
+        })
+        yield* t.follow(joined.slotId)
+        assert.notInclude(sentText(yield* t.contextFor(t.wren)), "MERGED-SECRET")
+        assert.include(sentText(yield* t.contextFor(t.mira)), "MERGED-SECRET")
+      })
+    )
+  )
+
   it.live("one line where Wren was away, between what she was there for, and none before she arrived", () =>
     run(
       Effect.gen(function* () {
