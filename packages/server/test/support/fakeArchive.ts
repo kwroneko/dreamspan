@@ -394,6 +394,7 @@ export interface FakeArchiveOptions {
   /** Report the total as an estimate, as an archive with a large index may. */
   readonly estimate?: boolean
   /** Live v1 omits the expensive count on cursor searches. */
+  readonly countCap?: number
   readonly unknownTotal?: boolean
   /** Include some characters without cover images. */
   readonly coverless?: boolean
@@ -633,6 +634,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     return {
       status: 200,
       body: {
+        exact_count: sorted.length,
         query: Object.fromEntries(params),
         author: null,
         author_error: null,
@@ -710,6 +712,20 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       return res.end(JSON.stringify(error(status === 429 ? "rate_limited" : "failed", "a failure the test asked for")))
     }
     if (path === "/api/v1/capabilities") return json(res, 200, capabilitiesBody)
+    if (path === "/api/v1/search/count") {
+      const params = new URLSearchParams(url.searchParams)
+      params.set("limit", "1")
+      const result = search(params)
+      if (result.status !== 200) return json(res, result.status, result.body)
+      const body = result.body as { exact_count: number }
+      const cap = options.countCap ?? 100_000
+      return json(res, 200, {
+        total: Math.min(body.exact_count, cap),
+        capped: body.exact_count >= cap,
+        cap,
+        timed_out: false
+      })
+    }
     if (path === "/api/v1/search") {
       const { status, body } = search(url.searchParams)
       return json(res, status, body)

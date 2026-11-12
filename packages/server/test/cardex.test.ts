@@ -275,13 +275,14 @@ describe("v1 as card sources", () => {
     })
   )
 
-  it.effect("a live cursor reply can have no total; paging still follows next_cursor", () =>
+  it.effect("a nullable search total is filled by the exact count endpoint; paging still follows next_cursor", () =>
     Effect.gen(function* () {
       const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120, unknownTotal: true }))
       yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
       const adapter = fakeCardexAdapter(fake)
       const first = yield* adapter.search(direct(), emptySourceQuery, null)
-      assert.isUndefined(first.total)
+      assert.strictEqual(first.total, 120)
+      assert.isFalse(first.totalCapped)
       assert.isString(first.next)
       const second = yield* adapter.search(direct(), emptySourceQuery, first.next)
       assert.lengthOf(second.items, 48)
@@ -321,6 +322,32 @@ describe("v1 as card sources", () => {
       const reversed = yield* fakeCardexAdapter(archive).search(direct(), { ...query, reverse: true }, null)
       assert.isUndefined(reversed.notice)
     })
+  )
+
+  it.effect("counts share the search filters and distinguish a capped lower bound", () =>
+    Effect.gen(function* () {
+      const fake = yield* Effect.promise(() => startFakeArchive({ cards: 120, unknownTotal: true, countCap: 50 }))
+      yield* Effect.addFinalizer(() => Effect.promise(() => fake.close()))
+      const adapter = fakeCardexAdapter(fake)
+      const all = yield* adapter.search(direct(), emptySourceQuery, null)
+      assert.strictEqual(all.total, 50)
+      assert.isTrue(all.totalCapped)
+      const filtered = yield* adapter.search(
+        direct(),
+        { ...emptySourceQuery, text: "Amber", filters: { nsfw: "exclude" } },
+        null
+      )
+      assert.strictEqual(filtered.total, filtered.items.length)
+      assert.isFalse(filtered.totalCapped)
+      assert.isTrue(
+        fake
+          .paths()
+          .some(
+            (path) =>
+              path.startsWith("/api/v1/search/count?") && path.includes("q=Amber") && path.includes("nsfw=exclude")
+          )
+      )
+    }).pipe(Effect.scoped)
   )
 
   it("a batch URL is in v1's canonical form: sorted, without duplicates, joined by %2C", () => {
@@ -389,7 +416,7 @@ describe("the adapter against the fake archive", () => {
       const page = yield* adapter.search(direct(seen), emptySourceQuery, "c:not-a-cursor")
       assert.lengthOf(page.items, 48)
       assert.isTrue(page.reset)
-      assert.lengthOf(seen, 2)
+      assert.lengthOf(seen, 3)
       assert.include(seen[0]!, "cursor=not-a-cursor")
       assert.notInclude(seen[1]!, "cursor=")
       assert.notInclude(seen[1]!, "page=")

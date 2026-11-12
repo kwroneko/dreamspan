@@ -136,6 +136,8 @@ export const SourcePage = Schema.Struct({
   items: Schema.Array(RemoteSummary),
   next: Schema.NullOr(Schema.String),
   total: Schema.optionalKey(Schema.Number),
+  /** A lower bound: the archive stopped counting at its cap or deadline. */
+  totalCapped: Schema.optionalKey(Schema.Boolean),
   /** The total is the source's estimate, not an exact count. */
   totalEstimated: Schema.optionalKey(Schema.Boolean)
 })

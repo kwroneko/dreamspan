@@ -108,6 +108,7 @@ interface Results {
   readonly key: string
   readonly items: ReadonlyArray<RemoteSummary>
   readonly next: string | null
+  readonly capped?: boolean | undefined
   readonly total?: number | undefined
   readonly notice?: string | undefined
   readonly estimated?: boolean | undefined
@@ -153,6 +154,7 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
                 items: out.value.items,
                 next: out.value.next,
                 total: out.value.total,
+                capped: out.value.totalCapped,
                 estimated: out.value.totalEstimated,
                 notice: out.value.notice,
                 status: "ready"
@@ -193,7 +195,8 @@ function useResults(sourceId: string | null, query: SourceQuery | null) {
           ...r,
           items: [...previous, ...out.value.items.filter((i) => !seen.has(i.remoteId))],
           next: out.value.next,
-          total: out.value.total ?? r.total,
+          total: out.value.reset ? out.value.total : (out.value.total ?? r.total),
+          capped: out.value.reset ? out.value.totalCapped : (out.value.totalCapped ?? r.capped),
           estimated: out.value.totalEstimated ?? r.estimated,
           notice: out.value.notice,
           status: "ready"
@@ -218,7 +221,9 @@ const isRange = (value: SourceFilterValue | undefined): value is { readonly min?
 
 /** What a source option shows once open: its reported total, "~" when it's an estimate. */
 const totalLabel = (results: Results | null) =>
-  results?.total === undefined ? null : `${results.estimated ? "~" : ""}${numberFormat.format(results.total)}`
+  results?.total === undefined
+    ? null
+    : `${results.estimated ? "~" : ""}${numberFormat.format(results.total)}${results.capped ? "+" : ""}`
 
 /** How many filters are set, for the Filters button: tags, and the filters away from their default. */
 const filterCount = (query: SourceQuery | null, caps: SourceCapabilities | undefined) =>

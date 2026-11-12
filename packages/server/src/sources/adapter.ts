@@ -48,6 +48,7 @@ interface AdapterPage {
   readonly notice?: string
   readonly items: ReadonlyArray<AdapterSummary>
   readonly next: string | null
+  readonly totalCapped?: boolean
   readonly total?: number
   readonly totalEstimated?: boolean
 }

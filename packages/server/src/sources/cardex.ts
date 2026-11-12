@@ -513,7 +513,17 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         if (!isRecord(raw)) return yield* bad()
         const items = summaries(raw.items, origin)
         if (items === null) return yield* bad()
-        const total = typeof raw.total === "number" ? raw.total : undefined
+        let total = typeof raw.total === "number" ? raw.total : undefined
+        let totalCapped = false
+        if (!semantic && (token === null || restarted)) {
+          const params = searchParams(query, null)
+          for (const name of ["sort", "limit", "page", "cursor"]) params.delete(name)
+          const count = yield* getJson(http, api("/search/count", params))
+          if (!isRecord(count) || typeof count.total !== "number" || !Number.isFinite(count.total) || count.total < 0)
+            return yield* bad()
+          total = count.total
+          totalCapped = count.capped === true || count.timed_out === true
+        }
         const current = page && "page" in page ? page.page : 1
         const next = semantic
           ? items.length === PAGE_SIZE && (total === undefined || current * PAGE_SIZE < total)
@@ -530,7 +540,8 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
             : {}),
           ...(restarted ? { reset: true } : {}),
           ...(total === undefined ? {} : { total }),
-          ...(raw.total_is_estimate === true ? { totalEstimated: true } : {})
+          ...(!semantic && (token === null || restarted) ? { totalCapped } : {}),
+          ...(semantic && raw.total_is_estimate === true ? { totalEstimated: true } : {})
         }
       }),
     tags: (http, prefix) =>
