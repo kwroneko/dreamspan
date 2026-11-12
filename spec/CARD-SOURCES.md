@@ -4,6 +4,8 @@
 
 **Built and verified 2026-11-12 (cardexlive):** §0's every-criterion requirement is implemented for character results using §2.3/§3.2's existing generic panel, including the live v1 additions and all sort directions. That subset is obsolete as an implementation proposal; ARCHITECTURE §11.5 records it. Standalone lorebook/all-kind results still need an owner-approved opening/layout choice. Manual live verification found the advertised docs URL unavailable and name-with-text sorting failing upstream; no real card became a fixture.
 
+**Built 2026-11-12 (cardex2):** long choice lists use the existing picker and date criteria are date fields (ARCHITECTURE §11.5, "Long choices and dates").
+
 **cardex** is a public card archive run by a third party. We use only its public API, as any client would ([D] owner, 2026-10-26). Its public API documentation wasn't found (§10), so our side is designed against an adapter interface (§2.2), and §10 lists exactly what we need from any archive's API.
 
 ## 0. The owner's decisions this builds on

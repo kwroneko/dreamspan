@@ -146,6 +146,11 @@ describe("v1 as card sources", () => {
       )
       const sites = caps.filters.find((f) => f.id === "source")!
       assert.isTrue(sites.kind === "choice" && sites.multi && sites.options.some((o) => o.label === "Chub"))
+      // Dates are dates (the panel offers a date field); other text criteria are plain text.
+      const dated = caps.filters.filter((f) => f.kind === "text" && f.format === "date").map((f) => f.id)
+      assert.deepStrictEqual(dated, ["added_after", "added_before", "created_after", "created_before"])
+      // The sites cardex lists beyond our own labels keep the labels it gives.
+      assert.isTrue(sites.kind === "choice" && sites.options.length === 18)
     })
   )
 

@@ -24,6 +24,7 @@ import { Field, Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { InlinePanel, pressedButtonClass } from "../../ui/InlinePanel.tsx"
 import { ContextMenu, Menu, MenuCheckboxItem, MenuItem } from "../../ui/Menu.tsx"
+import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Alert, Badge, EmptyState } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
@@ -583,7 +584,11 @@ function TextFilter({
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <Field label={filter.label} about={filter.about}>
-        <Input value={value} onChange={(event) => onChange(event.currentTarget.value || undefined)} />
+        <Input
+          {...(filter.format === "date" ? { type: "date", "data-date-filter": filter.id } : {})}
+          value={value}
+          onChange={(event) => onChange(event.currentTarget.value || undefined)}
+        />
       </Field>
       {filter.suggestions && <SuggestedValues suggestions={suggestions} kind="creators" onChoose={choose} />}
     </div>
@@ -626,6 +631,9 @@ function TagField({ browse }: { browse: SourceBrowse }) {
   )
 }
 
+/** More choices than this, and a several-choice filter is a picker rather than a row of buttons. */
+const LONG_CHOICES = 8
+
 /** Every criterion the source offers, generated from its capabilities (§2.3). */
 export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: string }) {
   const caps = browse.caps
@@ -647,8 +655,23 @@ export function SourceFiltersPanel({ browse, id }: { browse: SourceBrowse; id: s
             case "choice":
               return (
                 <div key={filter.id} className="flex min-w-0 flex-col gap-1.5">
-                  <FilterLabel filter={filter} />
-                  {filter.multi ? (
+                  {filter.multi && filter.options.length > LONG_CHOICES ? (
+                    // A long list of choices: the existing picker, with a search past eight.
+                    <Field label={filter.label} about={filter.about}>
+                      <MultiSelect
+                        items={filter.options.map((o) => ({ value: o.value, label: o.label }))}
+                        value={Array.isArray(value) ? value : []}
+                        addLabel="Add"
+                        chosenLabel={`Chosen: ${filter.label.toLowerCase()}`}
+                        listLabel={`Choose: ${filter.label.toLowerCase()}`}
+                        explanation={filter.about}
+                        onValueChange={(chosen) => set(filter.id, chosen.length ? [...chosen] : undefined)}
+                      />
+                    </Field>
+                  ) : (
+                    <FilterLabel filter={filter} />
+                  )}
+                  {filter.multi && filter.options.length > LONG_CHOICES ? null : filter.multi ? (
                     <Segmented
                       multiple
                       wrap

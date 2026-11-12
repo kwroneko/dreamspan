@@ -46,6 +46,8 @@ const SourceFilter = Schema.Union([
     label: Schema.String,
     kind: Schema.Literal("text"),
     suggestions: Schema.optionalKey(Schema.Struct({ kind: Schema.Literal("creators"), multiple: Schema.Boolean })),
+    /** The value is a calendar date (`YYYY-MM-DD`): the panel offers a date field. */
+    format: Schema.optionalKey(Schema.Literal("date")),
     about: Schema.optionalKey(Schema.String)
   })
 ])
@@ -284,7 +286,9 @@ export const CARDEX_SITE_LABELS: Readonly<Record<string, string>> = {
   aicc: "AI Character Cards",
   backyard: "Backyard AI",
   wyvern: "Wyvern",
-  pephop: "PepHop"
+  pephop: "PepHop",
+  caveduck: "Caveduck",
+  crushon: "Crushon"
 }
 
 /** The account's card-source choices: user `settings` key `sources`. */

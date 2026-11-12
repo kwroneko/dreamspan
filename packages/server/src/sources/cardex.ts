@@ -284,10 +284,10 @@ const FILTER_HELP: Record<string, string> = {
   any_author: "Separate site/name creators with commas. A backslash escapes a comma in a name. Up to 20 creators.",
   not_author: "Separate site/name creators with commas. A backslash escapes a comma in a name. Up to 20 creators.",
   picture: "The picture's SHA-256: 64 hexadecimal characters. Finds cards sharing that picture.",
-  added_after: "Date as YYYY-MM-DD, for example 2026-01-01.",
-  added_before: "Date as YYYY-MM-DD, for example 2026-01-01.",
-  created_after: "Date as YYYY-MM-DD, for example 2026-01-01.",
-  created_before: "Date as YYYY-MM-DD, for example 2026-01-01."
+  added_after: "Cards cardex added on or after this day.",
+  added_before: "Cards cardex added before this day.",
+  created_after: "Cards their creator made on or after this day, as far as cardex knows.",
+  created_before: "Cards their creator made before this day, as far as cardex knows."
 }
 const EXTRA_LISTS = new Set(["fields", "not_source"])
 const EXTRA_TEXT = new Set([
@@ -439,6 +439,8 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
             descriptor.allowed_value_labels?.find((v) => v.value === value)?.label ?? CARDEX_SITE_LABELS[value] ?? value
         }))
       })
+    } else if (type === "date") {
+      filters.push({ ...common, kind: "text", format: "date", about: FILTER_HELP[name] ?? "A calendar date." })
     } else {
       filters.push({
         ...common,
