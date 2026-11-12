@@ -1062,7 +1062,7 @@ Tools that “change a card” during RP create notes replacing its fields, incl
   - an output contract that allows several messages
   - **rollout continuity**: fork fresh per turn, or **resume the previous rollout** **[D]** (the timeline stays separate either way)
   - the meta toolset
-- **[P]** The chat kind (RP or Workshop) is chosen at creation and can't be toggled afterwards. Workshops have a distinct accent, a badge and a capability strip. **Unbuilt Phase 6 proposal.**
+- **[P]** The chat kind (RP or Workshop) is chosen at creation and can't be toggled afterwards. Workshops have a distinct accent, a badge and a capability strip. **Built (workshop1, workshop2; ARCHITECTURE §16, “Workshop chats”): the kind is set by the Chats page’s Workshop card and never changes; the accent, the badge and a read-only capability chip. Choosing what the assistant may do is unbuilt (WORKSHOP W4).**
 - **[P]** An out-of-character side channel attached to an RP chat: a small workshop docked in a panel that can read the story but writes to its own timeline. **Unbuilt Phase 6 proposal.**
 - **[P]** Permissions: **Unbuilt tool/plugin consent UX (Phase 6)**; imported data already cannot grant executable capabilities.
   - tools with external effects need approval

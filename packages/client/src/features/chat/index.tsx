@@ -23,7 +23,7 @@ import { loadChatPage, loadedChatPage } from "./chatPageLoader.ts"
 import { routes } from "../../routes.tsx"
 import { Loading, reloadPage } from "../../ui/Spinner.tsx"
 import { ChatDefaultsPage } from "./ChatDefaults.tsx"
-import { ChatsPage } from "./ChatsPage.tsx"
+import { chatStartSections, ChatsPage, EmptyChatCard } from "./ChatsPage.tsx"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
 import { PICTURE_PATH, PicturePage } from "./PicturePage.tsx"
 import { sidebarSearch } from "../characters/sidebarSearch.ts"
@@ -97,6 +97,8 @@ export const register = () => {
   registerHistoryCommands()
   registerChatHeader()
   registerReplyCommands()
+  // The Chats page's first start card; the workshop adds the second (features/workshop).
+  chatStartSections.register({ id: "chats.start-empty", order: 10, component: EmptyChatCard })
   // One tab per chat (features/workbench): its branches and messages are places within it.
   tabKinds.register({
     id: "chat",

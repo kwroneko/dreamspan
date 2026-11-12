@@ -23,6 +23,7 @@ import { useUnseen } from "../notices.tsx"
 import { type ShellFork, useShellForks } from "../characters/shellData.tsx"
 import { PinButton } from "../characters/ShellBrowser.tsx"
 import { chatName, formatDay, formatWhen } from "./chatTitle.ts"
+import { KindBadge } from "./KindBadge.tsx"
 
 const PAGE = 50
 
@@ -116,6 +117,7 @@ function Row({
               >
                 {name.name}
               </span>
+              <KindBadge kind={chat.kind} inLink />
               <span className="ml-auto shrink-0 text-xs text-muted">
                 {formatWhen(chat.lastMessageAt ?? chat.createdAt)}
               </span>

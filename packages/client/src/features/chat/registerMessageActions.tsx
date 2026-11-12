@@ -5,6 +5,7 @@ import { continueUnavailable, ContinueView, runContinue } from "./ContinueAction
 import { copy } from "./copy.ts"
 import { invokeMessageAction, type MessageActionProps, messageActions, viewOf } from "./messageActions.tsx"
 import type { ChatSession } from "./session.ts"
+import { mergesInto } from "./kindLooks.ts"
 
 /**
  * The fork the message is viewed in, for the inspector's links back into the chat. It isn't
@@ -102,7 +103,8 @@ export const registerMessageActions = () => [
     id: "message.merge",
     order: 75,
     group: "place",
-    available: ({ entry }) => entry.version.origin !== "merge",
+    // Not in a kind that takes no merges (a workshop): the server refuses them there.
+    available: ({ entry, session }) => entry.version.origin !== "merge" && mergesInto(session.snapshot().chat),
     describe: viewOf(({ openDialog }) => ({
       label: "Merge a chat here…",
       icon: "merge",

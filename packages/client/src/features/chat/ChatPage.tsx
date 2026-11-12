@@ -55,6 +55,7 @@ import { ChatSession, type ChatView } from "./session.ts"
 import { boundaryIndex, placeOf } from "./summaryBoundary.ts"
 import { LET_GO } from "./composition.ts"
 import { flashWhenShown } from "./jumpFlash.ts"
+import { kindRootProps, summarizes, useChatKindLook } from "./kindLooks.ts"
 
 interface ReadingPosition {
   key: string
@@ -828,13 +829,19 @@ function ChatSurface({
   const place = useSidePanelPlace(wide)
   const panelOpen = panel !== null && place.show
   useTabMeta(undefined, tabPortrait(castCharacters(view)))
+  const kindRoot = kindRootProps(useChatKindLook(view.chat?.kind))
+  // A kind without summaries (a workshop) isn't offered them when it outgrows its context.
+  const summariesAllowed = summarizes(view.chat)
   return (
     <ChatSurfaceProviders session={session} cast={cast} view={view} wide={wide} onOpenPanel={show}>
       <CastContext value={cast}>
+        {/* The chat's kind marks everything in it: a workshop's accent (spec/WORKSHOP.md §2.5). */}
         <div
+          {...kindRoot}
           className="flex min-h-0 flex-1"
           style={
             {
+              ...kindRoot.style,
               "--chat-portrait-width": `${{ small: 48, default: 60, large: 72, largest: 84 }[prefs.portraitSize]}px`
             } as CSSProperties
           }
@@ -850,6 +857,7 @@ function ChatSurface({
             />
             {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
             {view.lcm !== null &&
+              summariesAllowed &&
               !view.lcm.enabled &&
               view.lcm.leafSlotId === view.leafSlotId &&
               (view.history?.historyStart?.depth ?? 0) > 0 && (

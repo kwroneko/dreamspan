@@ -34,6 +34,9 @@
   --macro-directive: oklch(43% 0.06 305);
   --accent: oklch(55% 0.17 265);
   --accent-contrast: oklch(99% 0 0);
+  /* A workshop chat's accent (spec/WORKSHOP.md §2.5): teal, apart from the story chats' blue. */
+  --accent-workshop: oklch(52% 0.1 185);
+  --accent-workshop-contrast: oklch(99% 0 0);
   --danger: oklch(57% 0.2 25);
   --danger-contrast: oklch(99% 0 0);
   --success: oklch(52% 0.14 150);
@@ -67,6 +70,8 @@
     --macro-directive: oklch(79% 0.05 305);
     --accent: oklch(72% 0.13 265);
     --accent-contrast: oklch(18% 0.02 265);
+    --accent-workshop: oklch(76% 0.11 185);
+    --accent-workshop-contrast: oklch(18% 0.02 185);
     --danger: oklch(70% 0.16 25);
     --danger-contrast: oklch(18% 0.02 25);
     --success: oklch(72% 0.13 150);
@@ -98,6 +103,8 @@
   --macro-directive: oklch(79% 0.05 305);
   --accent: oklch(72% 0.13 265);
   --accent-contrast: oklch(18% 0.02 265);
+  --accent-workshop: oklch(76% 0.11 185);
+  --accent-workshop-contrast: oklch(18% 0.02 185);
   --danger: oklch(70% 0.16 25);
   --danger-contrast: oklch(18% 0.02 25);
   --success: oklch(72% 0.13 150);
@@ -156,6 +163,20 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+/*
+ * A chat kind's accent (features/chat/kindLooks.ts): the chat's root, and its side panel shown
+ * apart, name the kind's token in --chat-accent, and everything inside takes it as the accent.
+ * The theme's colours are resolved where they're declared, so they're declared again here.
+ */
+[data-chat-accent] {
+  --accent: var(--chat-accent);
+  --accent-contrast: var(--chat-accent-contrast);
+  --focus: var(--chat-accent);
+  --color-accent: var(--accent);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-focus: var(--focus);
 }
 
 body {

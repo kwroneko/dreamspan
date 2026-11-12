@@ -13,6 +13,7 @@ const lazyPending = (load: () => Promise<{ default: ComponentType<PendingPanelPr
   )
 }
 import { summaryPanelSections } from "./presentation.tsx"
+import { summarizes } from "./kindLooks.ts"
 import { NOTE_FOCUS, workspaceViews, type WorkspaceViewProps } from "../editor/workspaceViews.ts"
 
 /** A note in the large editor over the chat, loaded when first opened. */
@@ -153,6 +154,8 @@ export const registerPanels = () => [
   }),
   chatPanels.register({
     id: "summaries",
+    // A kind whose summaries stay off (a workshop) has no Summaries tab.
+    available: (view) => summarizes(view.chat),
     label: "Summaries",
     description: "The summaries that stand in for older messages, and how they're written.",
     order: 60,

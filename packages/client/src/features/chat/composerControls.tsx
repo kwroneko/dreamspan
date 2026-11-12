@@ -13,6 +13,7 @@ import type { AvatarCrop } from "@rp/shared/media.ts"
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
+import { kindHides } from "./kindLooks.ts"
 import type { ReplyChoice } from "./ReplyFrom.tsx"
 import type { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
@@ -79,13 +80,20 @@ export const availableComposerControls = (
     .filter(
       (entry) =>
         (typeof entry.placement === "function" ? entry.placement(context) : entry.placement) === placement &&
-        entry.available?.(context) !== false
+        controlApplies(entry, context)
     )
+
+/** A control is offered unless the chat's kind leaves it out (kindLooks.ts) or it says it isn't. */
+const controlApplies = (entry: ComposerControl, context: ComposerControlContext) =>
+  !kindHides(kindOf(context), entry.id) && entry.available?.(context) !== false
+
+/** The chat's kind; a context a control builds for itself (a plugin's test, say) may leave the view out. */
+const kindOf = (context: ComposerControlContext) => (context.view as ChatView | undefined)?.chat?.kind
 
 /** Both buttons and Enter resolve the effective registration at invocation time. */
 export const invokeComposerControl = (id: string, context: ComposerControlContext, source: Invocation) => {
   const entry = composerControls.get(id)
-  if (entry?.available?.(context) === false) return
+  if (entry === undefined || !controlApplies(entry, context)) return
   return entry?.run?.(context, source)
 }
 
