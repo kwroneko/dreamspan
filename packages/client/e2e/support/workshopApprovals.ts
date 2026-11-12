@@ -260,9 +260,9 @@ export function workshopApprovalTests() {
           const offered = provider.bodies[offAt]!.tools?.map((tool) => tool.function.name) ?? []
           expect(offered).toContain("list_library")
           expect(offered).not.toContain("create_card")
-          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toHaveCount(3, {
-            timeout: 30_000
-          })
+          // The run finishes (earlier messages may have scrolled out of the rendered list).
+          await expect(page.getByRole("article").last().getByText(WORKSHOP_ANSWER)).toBeVisible({ timeout: 30_000 })
+          await expect(page.getByRole("article").last().locator('[data-step-status="waiting"]')).toHaveCount(0)
           expect(await effects()).toHaveLength(3)
         })
   })
