@@ -45,3 +45,11 @@ it("reduces unfinished document content and decodes HTML's full entity set", () 
   expect(htmlDepthForm("<div>Kept.</div><script>unfinished()", "text")).toBe("Kept.")
   expect(htmlDepthForm("```html\n<!doctype html><html><body><p>Board</p></body></html>\n```", "text")).toBe("Board")
 })
+
+it("removes standard embedded HTML, SVG and MathML elements while preserving custom markers", () => {
+  expect(htmlDepthForm("<object><iframe>Fallback</iframe></object><slot>Slot</slot>", "text")).toBe("FallbackSlot")
+  expect(htmlDepthForm("<math><mfrac><mi>x</mi><mn>2</mn></mfrac></math>", "text")).toBe("x2")
+  expect(htmlDepthForm("<svg><textPath>Map</textPath></svg><status>HP 9</status>", "text")).toBe(
+    "Map<status>HP 9</status>"
+  )
+})

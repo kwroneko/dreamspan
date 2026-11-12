@@ -18,7 +18,18 @@ const ELEMENTS = new Set(
     "label legend li link main map mark marquee menu meta meter nav nobr ol optgroup option output p " +
     "picture pre progress q rp rt ruby s samp section select small source span strike strong sub summary " +
     "sup table tbody td tfoot th thead time tr track tt u ul var video wbr svg path circle rect line " +
-    "polyline polygon ellipse g text tspan defs use symbol title"
+    "polyline polygon ellipse g text tspan defs use symbol title " +
+    "acronym applet bgsound content embed frame frameset iframe keygen listing menuitem multicol " +
+    "nextid noembed noframes object param plaintext rb rtc search shadow slot spacer textarea xmp " +
+    "math maction maligngroup malignmark menclose merror mfenced mfrac mglyph mi mlabeledtr mlongdiv " +
+    "mmultiscripts mn mo mover mpadded mphantom mroot mrow ms mscarries mscarry msgroup msline mspace " +
+    "msqrt msrow mstack mstyle msub msubsup msup mtable mtd mtext mtr munder munderover semantics " +
+    "annotation annotation-xml animate animatemotion animatetransform clippath desc discard feblend " +
+    "fecolormatrix fecomponenttransfer fecomposite feconvolvematrix fediffuselighting fedisplacementmap " +
+    "fedistantlight fedropshadow feflood fefunca fefuncb fefuncg fefuncr fegaussianblur feimage femerge " +
+    "femergenode femorphology feoffset fepointlight fespecularlighting fespotlight fetile feturbulence " +
+    "filter foreignobject lineargradient marker mask metadata mpath pattern radialgradient set stop " +
+    "switch textpath view"
   ).split(" ")
 )
 /** Elements whose content isn't text: they go with it. */
