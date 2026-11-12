@@ -652,9 +652,10 @@ export interface HistoryEntry {
   readonly inContext: boolean
   /**
    * Left out of a separate context: the speaker wasn't present for it (spec/CHARACTER-CONTEXT.md
-   * §2.1; `assembler/knowledge.ts`). Set by the history stage, never by a source, so never pinned.
+   * §2.1; `assembler/knowledge.ts`), with who did know it (gap lines name them). Set by the history
+   * stage, never by a source, so never pinned.
    */
-  readonly unknown?: true
+  readonly unknown?: { readonly knowers: ReadonlyArray<string> }
   readonly sentAt: number
   readonly versions: number
   readonly selectedOrdinal: number

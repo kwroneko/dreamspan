@@ -1,5 +1,6 @@
 import { prepareTextTokens } from "./textTokens.ts"
 import { mergeLayoutStage } from "./merges.ts"
+import { gapLinesStage } from "./gapLines.ts"
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
@@ -2744,6 +2745,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   imageTokensStage,
   rolesStage,
   mergeLayoutStage,
+  gapLinesStage,
   noteGateStage,
   replacementsStage,
   loreScanStage,

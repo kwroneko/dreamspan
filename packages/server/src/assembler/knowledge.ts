@@ -114,7 +114,7 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
     return entries.map((entry) => {
       const knowers = known.get(entry.versionId)
       if (!entry.inContext || knowers === undefined || knowers === null || knowers.includes(viewer)) return entry
-      const hidden: HistoryEntry = { ...entry, inContext: false, unknown: true }
+      const hidden: HistoryEntry = { ...entry, inContext: false, unknown: { knowers } }
       return hidden
     })
   })

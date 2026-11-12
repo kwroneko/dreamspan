@@ -1,3 +1,4 @@
+import { gapLineDescriptors } from "./gapLines.ts"
 import { builtinContextViews, makeContextViewRegistry, type ContextViewRegistry } from "./knowledge.ts"
 import {
   builtinMergeLayouts,
@@ -120,7 +121,7 @@ export class WorkerAssembler extends Context.Service<WorkerAssembler, Assembler>
 /** An assembler whose built-in stages and macros stay registered for the scope. */
 export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effect.gen(function* () {
   const sourceDescriptors = makeRegistry<SourceDescriptor>()
-  for (const entry of builtinSourceDescriptors) yield* sourceDescriptors.register(entry)
+  for (const entry of [...builtinSourceDescriptors, ...gapLineDescriptors]) yield* sourceDescriptors.register(entry)
   const stages = makeStageRegistry()
   const macros = makeMacroRegistry()
   const transforms = makeRegistry<AssemblyTransform>()
