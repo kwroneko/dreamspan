@@ -713,7 +713,7 @@ for (const change of [
       if (change === "model-settings") assert.strictEqual(body.temperature, 0.23)
       assert.notInclude(JSON.stringify(body.messages), "tool_call_id", "a fresh request has no old tool transcript")
       if (change === "budget") {
-        assert.include(JSON.stringify(body.messages), "[Steps: Read a card")
+        assert.include(JSON.stringify(body.messages), "steps: Read a card")
         assert.notInclude(JSON.stringify(body.messages), "synthetic tool result")
         const material = yield* reader.RolloutMaterial({ userId: user.id, versionId: next.entry.version.id })
         const rebuilt = yield* reader.RebuildContext({ userId: user.id, snapshot: material.snapshot })

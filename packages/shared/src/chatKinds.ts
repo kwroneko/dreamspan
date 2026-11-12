@@ -31,7 +31,8 @@ export const chatKinds = makeRegistry<ChatKindProfile>([
     allowsOutside: true,
     rolloutKind: "workshop",
     purpose: "workshop",
-    allowsSummaries: false,
+    // Summaries cover a long workshop's messages (spec/WORKSHOP-CONTEXT.md §2.4).
+    allowsSummaries: true,
     allowsMerge: false,
     allowsStImport: false,
     exportFormats: ["txt"]

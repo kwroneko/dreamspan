@@ -16,6 +16,8 @@ export interface ModelChoice {
   readonly modelKey?: string
   readonly name?: string
   readonly hidden?: boolean
+  /** Its context window in tokens; `assumed` when nothing reports it (ASSUMED_CONTEXT). */
+  readonly window?: { readonly tokens: number; readonly assumed: boolean }
 }
 
 export const modelValue = (connection: string, model: string) => `${connection} ${model}`
@@ -100,6 +102,10 @@ export const readModelChoices = (client: AppClient["Service"]) =>
               connectionName: connection.name,
               modelKey: model.key,
               name: resolveModel(model.key, model.upstream, model.overrides).name.value,
+              window: (() => {
+                const { context } = resolveModel(model.key, model.upstream, model.overrides)
+                return { tokens: context.value, assumed: context.source === "unknown" }
+              })(),
               hidden: model.hidden
             }))
           : []

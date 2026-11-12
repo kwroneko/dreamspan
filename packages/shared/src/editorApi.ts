@@ -203,6 +203,27 @@ export class EditorApi extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, InvalidDocument, ServerError])
   }),
+  /**
+   * A new workshop preset made from this preset's saved head (spec/WORKSHOP-CONTEXT.md §4.4): the
+   * user's keep/drop/reword choice per story piece, the workshop pieces added. The original
+   * never changes.
+   */
+  Rpc.make("ConvertPresetToWorkshop", {
+    payload: {
+      refId: RefId,
+      label: LibraryLabel,
+      choices: Schema.Array(
+        Schema.Struct({
+          identifier: Schema.String,
+          keep: Schema.Boolean,
+          content: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200_000)))
+        })
+      ),
+      instructions: Schema.String.check(Schema.isMaxLength(200_000))
+    },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, InvalidDocument, ServerError])
+  }),
   /** An empty, named library lorebook. */
   Rpc.make("CreateLorebook", {
     payload: { label: LibraryLabel },

@@ -18,7 +18,8 @@ import {
   EffectList,
   RolloutEffect,
   RolloutEffectRecord,
-  EffectUndoRefused
+  EffectUndoRefused,
+  WorkshopDefaults
 } from "@rp/shared/workshopApi.ts"
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
@@ -2027,8 +2028,18 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("CreateWorkshop", {
-    payload: { userId: UserId, title: Schema.optionalKey(Schema.String) },
+    payload: {
+      userId: UserId,
+      title: Schema.optionalKey(Schema.String),
+      card: Schema.optionalKey(Schema.String),
+      persona: Schema.optionalKey(Schema.NullOr(Schema.String))
+    },
     success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SetWorkshopPersona", {
+    payload: { userId: UserId, persona: Schema.NullOr(Schema.String) },
+    success: WorkshopDefaults,
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("StartChat", {
@@ -3920,7 +3931,8 @@ export class ReadOps extends RpcGroup.make(
           instructions: Schema.String,
           speakerCardOnly: Schema.Boolean,
           workshop: Schema.optionalKey(Schema.Boolean),
-          stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
+          stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+          response: Schema.optionalKey(Schema.Literals(["model"]))
         })
       ),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
@@ -4117,6 +4129,12 @@ export class ReadOps extends RpcGroup.make(
       )
     }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** What new workshops start with (db/workshopDefaults.ts). */
+  Rpc.make("WorkshopDefaults", {
+    payload: { userId: UserId },
+    success: WorkshopDefaults,
+    error: StorageError
   }),
   /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
   Rpc.make("ListRolloutEffects", {

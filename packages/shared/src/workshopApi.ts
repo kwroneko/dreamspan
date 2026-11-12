@@ -71,15 +71,44 @@ export const EffectList = {
   limit: Schema.optionalKey(Schema.Int)
 }
 
+/** What new workshops start with; null where none is set yet or it is gone. */
+export const WorkshopDefaults = Schema.Struct({
+  card: Schema.NullOr(Schema.String),
+  preset: Schema.NullOr(Schema.String),
+  persona: Schema.NullOr(Schema.String)
+})
+export type WorkshopDefaults = typeof WorkshopDefaults.Type
+
 export class WorkshopApi extends RpcGroup.make(
   Rpc.make("ListWorkshopCapabilities", {
     payload: { chatId: Chat.fields.id },
     success: Schema.Array(WorkshopCapability),
     error: Schema.Union([NotFound, ServerError])
   }),
+  /**
+   * A new workshop. `card`: the card to talk to (any of the user's cards; default the workshop's
+   * default assistant). `persona`: who the user is there (default the workshop persona, never
+   * the story one; null for none).
+   */
   Rpc.make("CreateWorkshop", {
-    payload: { title: Schema.optionalKey(Schema.String) },
+    payload: {
+      title: Schema.optionalKey(Schema.String),
+      card: Schema.optionalKey(Schema.String),
+      persona: Schema.optionalKey(Schema.NullOr(Schema.String))
+    },
     success: Chat,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** The workshop defaults: the assistant card, the preset and the persona new workshops start with. */
+  Rpc.make("GetWorkshopDefaults", {
+    payload: {},
+    success: WorkshopDefaults,
+    error: Schema.Union([ServerError])
+  }),
+  /** Sets the workshop persona new workshops start with; the story default persona never changes. */
+  Rpc.make("SetWorkshopPersona", {
+    payload: { persona: Schema.NullOr(Schema.String) },
+    success: WorkshopDefaults,
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("ListRolloutEffects", {

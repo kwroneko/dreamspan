@@ -2,7 +2,8 @@
 // authenticated user, and storage enforces ownership, so another user's ids are NotFound.
 // Documents from the client are validated against their kind's schema here or in the writer.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { PRESET_SCHEMA_VERSION, promptPreset } from "@rp/shared/docs/preset.ts"
+import { PRESET_SCHEMA_VERSION, type PresetDoc, promptPreset } from "@rp/shared/docs/preset.ts"
+import { convertToWorkshop } from "@rp/shared/workshopPreset.ts"
 import { builtinPreset } from "../db/assemblySources.ts"
 import { CARD_SCHEMA_VERSION } from "@rp/shared/docs/card.ts"
 import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
@@ -307,6 +308,24 @@ export const makeEditorHandlers = Effect.gen(function* () {
         })
         return ref
       }).pipe(settle("CreatePreset")),
+
+    ConvertPresetToWorkshop: ({ refId, label, choices, instructions }) =>
+      Effect.gen(function* () {
+        const owner = yield* userId
+        const source = yield* reader.OpenEditor({ userId: owner, refId })
+        if (source.ref.kind !== "preset") return yield* new NotFound({ entity: "preset", id: refId })
+        const { ref } = yield* writer.CreateEntity({
+          userId: owner,
+          kind: "preset",
+          label,
+          subtitle: "",
+          doc: convertToWorkshop(source.doc as PresetDoc, choices, instructions),
+          schemaVersion: PRESET_SCHEMA_VERSION,
+          origin: "user",
+          sourcePath: null
+        })
+        return ref
+      }).pipe(settle("ConvertPresetToWorkshop")),
 
     CreateLorebook: ({ label }) =>
       Effect.gen(function* () {

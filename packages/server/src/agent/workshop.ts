@@ -1,4 +1,5 @@
 import type { OrchestrationMode } from "./modes.ts"
+import { WORKSHOP_HISTORY_TOOLS } from "./tools/runs.ts"
 
 // What a capability turned off in this workshop is (spec/WORKSHOP.md §3.4) is named in the instructions.
 const workshopInstructions = (off: ReadonlyArray<string>) =>
@@ -20,7 +21,9 @@ export const workshopMode: OrchestrationMode = {
       "create_card",
       "edit_card",
       "clone_card",
-      "start_chat"
+      "start_chat",
+      // The conversation's own history (spec/WORKSHOP-CONTEXT.md §3.3).
+      ...WORKSHOP_HISTORY_TOOLS
     ],
     contract: state.outputContract ?? "several",
     continuity: state.rolloutContinuity ?? "resume_previous",
@@ -28,7 +31,8 @@ export const workshopMode: OrchestrationMode = {
     assembly: {
       instructions: (_offered, _contract, context) => workshopInstructions(context?.off ?? []),
       speakerCardOnly: false,
-      workshop: true
+      workshop: true,
+      response: "model"
     }
   })
 }

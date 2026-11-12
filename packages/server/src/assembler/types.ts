@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 63
+export const ASSEMBLER_VERSION = 64
 
 export type Role = "system" | "user" | "assistant"
 
@@ -308,6 +308,8 @@ export interface AgentAssembly {
   readonly speakerCardOnly: boolean
   readonly workshop?: boolean
   readonly stepSummaries?: Readonly<Record<string, string>>
+  /** "model": the reply reserve is the model's max output within a quarter of the context. */
+  readonly response?: "model"
 }
 
 /** What decision models decided for this context (spec/AGENTIC.md §7): the lorebook entries admitted. */

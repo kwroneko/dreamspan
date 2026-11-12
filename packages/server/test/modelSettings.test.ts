@@ -52,6 +52,19 @@ describe("separate ST preset import surfaces", () => {
     assert.isNull(imported.connection)
     assert.notInclude(JSON.stringify(imported), "never-import-me")
   })
+  it("drops SillyTavern's default context size (4,095) and keeps any other, so the model's window applies", () => {
+    const withContext = (size: number) =>
+      importStSettings(JSON.stringify({ ...(JSON.parse(file) as object), openai_max_context: size }), "model")
+    const untouched = withContext(4095)
+    assert.isUndefined(untouched.model?.samplers?.openai_max_context)
+    assert.ok(untouched.report.issues.some((issue) => issue.code === "settings.default_context"))
+    assert.strictEqual(untouched.model?.samplers?.temperature, 0.37)
+    for (const size of [4096, 8192, 200_000]) {
+      const chosen = withContext(size)
+      assert.strictEqual(chosen.model?.samplers?.openai_max_context, size)
+      assert.notOk(chosen.report.issues.some((issue) => issue.code === "settings.default_context"))
+    }
+  })
   it("imports API type, URL and model name without keys, and reports all ignored parts", () => {
     const imported = importStSettings(file, "connection")
     assert.deepStrictEqual(imported.connection, {

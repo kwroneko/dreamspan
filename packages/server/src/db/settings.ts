@@ -41,7 +41,16 @@ const definitions: ReadonlyArray<SettingDefinition> = [
     agent: { description: "Collapse pinned chats." }
   },
   { id: "cost", scope: "user", schema: CostRules },
-  { id: "workshop.defaults", scope: "user", schema: Schema.Struct({ card: Schema.String, preset: Schema.String }) },
+  {
+    id: "workshop.defaults",
+    scope: "user",
+    // The workshop persona is its own default, never the story one (owner, 2026-11-12).
+    schema: Schema.Struct({
+      card: Schema.String,
+      preset: Schema.String,
+      persona: Schema.optionalKey(Schema.NullOr(Schema.String))
+    })
+  },
   { id: "chat.persona", scope: "user", schema: Schema.NullOr(Schema.String) },
   { id: "generation.model", scope: "user", schema: Schema.NullOr(ModelChoice) },
   { id: "generation.preset", scope: "user", schema: Schema.NullOr(Schema.String) },

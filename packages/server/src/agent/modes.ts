@@ -28,6 +28,8 @@ export interface AgentPlan {
     /** Card-swap: only the speaking character's card is sent, where the preset puts cards. */
     readonly speakerCardOnly: boolean
     readonly workshop?: boolean
+    /** How the turn's reply reserve is sized: "model" takes the model's max output (WORKSHOP-CONTEXT §1.2). */
+    readonly response?: "model"
   }
 }
 

@@ -30,6 +30,7 @@ import { pathSegments } from "./pathSegments.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { query } from "./tx.ts"
+import { workshopDefaultsOf } from "./workshopDefaults.ts"
 import { knowsSql, readKnowers } from "./knowers.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
@@ -413,6 +414,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("LookupLore")),
 
+    WorkshopDefaults: ({ userId }) => workshopDefaultsOf(sql, userId).pipe(query("WorkshopDefaults")),
     ListRolloutEffects: ({ userId, chatId, before, limit }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{
