@@ -22,6 +22,16 @@ const assistant = {
     "Practical and brief. You say what you're about to change, change it, then say what you changed. You don't describe changes you haven't made.",
   first_mes: "What would you like to work on, {{user}}?"
 }
+/**
+ * The seeded card names the skills it comes with (spec/TOOL-LOADING.md §6), as any card can: a
+ * user's own workshop card chooses its own, and one without any still reaches every tool through
+ * `tool_search`. The list is the registered `workshopCardSkills` defaults, sent by the caller.
+ */
+const withSkills = (card: typeof assistant, skills: ReadonlyArray<string>) =>
+  skills.length === 0
+    ? card
+    : { ...card, extensions: { ...card.extensions, rp_harness: { skills: skills.map((use) => ({ use })) } } }
+
 const preset: PresetDoc = {
   ...promptPreset(builtinPreset),
   prompts: [
@@ -46,7 +56,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   const { sql } = steps
   const graph = makeGraphWrites(sql, bin.drafts)
   return {
-    CreateWorkshop: ({ userId, title }) =>
+    CreateWorkshop: ({ userId, title, assistantSkills }) =>
       Effect.gen(function* () {
         const stored = (yield* readSetting(sql, "user", userId, "workshop.defaults")).value as {
           card: string
@@ -65,7 +75,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
               kind,
               label: kind === "card" ? "Assistant" : "Workshop",
               subtitle: "",
-              doc: steps.encode(kind === "card" ? assistant : preset),
+              doc: steps.encode(kind === "card" ? withSkills(assistant, assistantSkills ?? []) : preset),
               schemaVersion: 1,
               origin: "import",
               originRef: kind === "card" ? "builtin:workshop-assistant@1" : "builtin:workshop-preset@1",

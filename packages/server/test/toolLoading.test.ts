@@ -45,7 +45,7 @@ const split = (
     // As loadingPlan.ts builds them: the skill index and the uncovered tools in the descriptions.
     loaders: (deferred) => {
       const names = deferred.map((t) => t.id)
-      const skills = skillsFor(runSkills(registry.skills.list(), kind, []), names)
+      const skills = skillsFor(runSkills(registry.skills.list(), kind, [assistantCard(registry)]), names)
       return [
         { ...registry.toolLoaders.get("tool_search")!, description: toolSearchDescription(orphansOf(names, skills)) },
         { ...registry.toolLoaders.get("load_skill")!, description: loadSkillDescription(skills) }
@@ -54,6 +54,38 @@ const split = (
   })
 
 const claude = { kind: "anthropic", api: "anthropic-messages", key: "claude-sonnet-4-5" }
+
+/** The seeded Assistant card's skills, as `CreateWorkshop` writes them from the registered defaults. */
+const assistantCard = (registry: ExecutionRegistry["Service"]) =>
+  cardSkills(
+    { extensions: { rp_harness: { skills: registry.workshopCardSkills.list().map((s) => ({ use: s.id })) } } },
+    { entity: "assistant", name: "Assistant" }
+  )
+
+describe("built-in skills come with the Assistant card", () => {
+  it.effect("its skills cover every deferred workshop tool", () =>
+    Effect.gen(function* () {
+      const { registry, tools } = yield* workshopTools
+      const offer = split(registry, tools, "workshop", claude)
+      const skills = skillsFor(runSkills(registry.skills.list(), "workshop", [assistantCard(registry)]), [
+        ...offer.deferred
+      ])
+      assert.strictEqual(skills.length, registry.skills.list().length)
+      assert.deepStrictEqual(orphansOf([...offer.deferred], skills), [])
+    }).pipe(Effect.provide(ExecutionRegistry.layer))
+  )
+
+  it.effect("a card without skills lists every deferred tool for tool_search", () =>
+    Effect.gen(function* () {
+      const { registry, tools } = yield* workshopTools
+      const offer = split(registry, tools, "workshop", claude)
+      const plain = cardSkills({}, { entity: "mine", name: "My card" })
+      const skills = skillsFor(runSkills(registry.skills.list(), "workshop", [plain]), [...offer.deferred])
+      assert.deepStrictEqual(skills, [])
+      assert.deepStrictEqual(orphansOf([...offer.deferred], skills), [...offer.deferred])
+    }).pipe(Effect.provide(ExecutionRegistry.layer))
+  )
+})
 
 describe("the split", () => {
   it.effect("defers the workshop's tools for Claude 4.5 and later on Anthropic's API", () =>
@@ -92,15 +124,6 @@ describe("the split", () => {
           .deferred.size,
         0
       )
-    }).pipe(Effect.provide(ExecutionRegistry.layer))
-  )
-
-  it.effect("covers every deferred workshop tool with a built-in skill", () =>
-    Effect.gen(function* () {
-      const { registry, tools } = yield* workshopTools
-      const offer = split(registry, tools, "workshop", claude)
-      const skills = skillsFor(runSkills(registry.skills.list(), "workshop", []), [...offer.deferred])
-      assert.deepStrictEqual(orphansOf([...offer.deferred], skills), [])
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 

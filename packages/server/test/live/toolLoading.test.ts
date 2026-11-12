@@ -27,7 +27,22 @@ interface Target {
   readonly loreTokens: number
 }
 
+// Support is per model: the current Claude models, each with enough lore to pass any cache minimum.
+const claude = (version: string, model: string): Target => ({
+  id: `anthropic ${version}`,
+  kind: "anthropic",
+  route: "anthropic",
+  provider: "anthropic",
+  model,
+  dialect: "anthropic",
+  loads: true,
+  loreTokens: 6000
+})
+
 const targets: ReadonlyArray<Target> = [
+  claude("sonnet-5.5", "claude-sonnet-5-5"),
+  claude("opus-5.5", "claude-opus-5-5"),
+  claude("haiku-5.5", "claude-haiku-5-5"),
   {
     id: "anthropic haiku-4.5",
     kind: "anthropic",

@@ -64,7 +64,7 @@ A card carries skills in `extensions.rp_harness.skills` (format **[P]**), which 
 ] } } }
 ```
 
-- `{ "use": id }` names a registered skill: one registered with `always: false` is offered only when the workshop's card names it. Built-in skills are `always`, so a card can't lose them.
+- `{ "use": id }` names a registered skill: one registered with `always: false` is offered only when the workshop's card names it. The built-in skills are `always: false` **[P]**: the seeded Assistant card names them all (`ExecutionRegistry.workshopCardSkills`, passed to `CreateWorkshop` as `assistantSkills`), so a user's own workshop card chooses its skills. A card that names none still reaches every deferred tool through `tool_search`, whose description then lists them all. Assistant cards seeded before this have no references (re-import expected).
 - A card's own skill: name `^[a-z0-9][a-z0-9_-]{0,47}$`, description and instructions required; at most 16 entries; anything else is ignored.
 - Which cards: those the assistant speaks as at the revisions the request was assembled with; cards played by the user (persona) are left out. Read once per fresh run and frozen in the snapshot (`agent.cardSkills`).
 - A registered skill wins a name clash: a card can't stand in for a built-in skill.
@@ -74,7 +74,7 @@ A card carries skills in `extensions.rp_harness.skills` (format **[P]**), which 
 
 ## 7. Inspector
 
-`GetRunTranscript.tools[]` gains `deferred` and `loadedBy` (the loading call's id). Showing them in the run's Tools list is not built (§10).
+`GetRunTranscript.tools[]` gains `deferred`, `loadedBy` (the loading call's id) and `tokens` (the definition's size, counted with the run's model's tokenizer where the app has one). The run's Tools list groups them: "Sent from the start", "Loaded during the run" (each with the loader that loaded it) and "Never loaded", each heading with its tool count and tokens. A run with nothing deferred shows one group, "Available to this run". E2E: `e2e/toolLoading.spec.ts`, layout audit on the list at 1440/390, light and dark.
 
 ## 8. Live measurements (2026-11-12)
 
@@ -84,9 +84,12 @@ A card carries skills in `extensions.rp_harness.skills` (format **[P]**), which 
 | --- | --- | --- | --- | --- | --- |
 | Anthropic, claude-haiku-4-5 | yes | 0/7821 (write 7729), 7729/7980, 7975/8135 | 8130 of 8135 | same on all 6 | pass |
 | Anthropic, claude-sonnet-4-5 | yes | 0/4647, 4555/4797, 4792/4938 | 4933 of 4938 | same on all 6 | pass |
-| OpenAI Responses, gpt-5.4-mini | yes | not run: the test endpoint refused the Responses API for its key | — | — | not tested live; golden wire test only |
-| Anthropic on Bedrock | no (no wire) | not reachable from the test setup | — | — | not tested; nothing deferred |
-| Vertex | no (no wire) | not reachable | — | — | not tested; nothing deferred |
+| Anthropic, claude-sonnet-5-5 | yes | 0/10860 (write 10738), 10738/11103, 11101/11256 | 11254 of 11256 | same on all (31 tools) | pass |
+| Anthropic, claude-opus-5-5 | yes | 10738/11074, 11072/11226 | 11224 of 11226 | same on all (31 tools) | pass |
+| Anthropic, claude-haiku-5-5 | yes | not recorded | 11368 of 11370 | same on all (30 tools) | pass |
+| OpenAI Responses, gpt-5.4-mini | yes | NOT TESTED live (2026-11-12) | — | — | golden wire test only |
+| Anthropic on Bedrock | no (no wire) | NOT TESTED live (2026-11-12) | — | — | nothing deferred |
+| Vertex | no (no wire) | NOT TESTED live (2026-11-12) | — | — | nothing deferred |
 | OpenRouter → anthropic/claude-haiku-4.5 | no (all tools) | each request read the previous one (13151/13156 …) | — | same | pass (baseline) |
 | OpenRouter → openai/gpt-5.4-nano | no (all tools) | first request 400 "Provider returned error" | — | — | fails without loading too: not caused by this change |
 | DeepSeek, deepseek-flash | no (all tools) | 8960/9180, 9088/9310, 9344/9590 | — | same | pass (baseline) |
@@ -103,11 +106,24 @@ Found by measuring: Anthropic rejects a `tool_result` holding both `tool_referen
 
 ## 10. Built, and not yet
 
-Built: §2–§6 server side, §7's fields, the transforms, tests (`toolLoading.test.ts`, `toolLoadingWorkshop.test.ts`, live `live/toolLoading.test.ts`).
+Built: §2–§6 server side, the Assistant card's skill references, §7 (fields and the inspector's groups), the transforms, tests (`toolLoading.test.ts`, `toolLoadingWorkshop.test.ts`, live `live/toolLoading.test.ts`, e2e `toolLoading.spec.ts`).
 
-Not yet: the inspector's display of deferred/loaded tools; a client view of a card's skills in the card editor; seeding `{ "use": … }` references on the built-in Assistant card (built-in skills are `always`, so they'd add nothing yet); wires for Bedrock, Vertex, OpenRouter and DeepSeek.
+Not yet: a client view of a card's skills in the card editor; wires for Bedrock, Vertex, OpenRouter and DeepSeek, and either option of §11.1 for them.
 
 ## 11. Open questions
 
-1. **Hosts without a wire** (OpenRouter, DeepSeek, Bedrock, Google). Today they get every tool from the start. Alternatives: (a) grow `tools` at a load and pay one full cache write per load (shown in the inspector), or (b) one immediate `call_tool { name, arguments }` dispatcher whose loaded definitions travel as tool-result text, which never changes `tools`. Example: a DeepSeek workshop that loads `cards` mid-run would cost one ~9k-token uncached request under (a), and nothing extra under (b), at the price of the model calling tools indirectly.
-2. **Should built-in skills come only with the Assistant card?** Making them `always: false` and listing them on the seeded card would let a user's own workshop card choose its skills; a card without them would still reach every tool through `tool_search`.
+1. **Hosts without a wire** (OpenRouter, DeepSeek, Bedrock, Google). Today they get every tool from the start. Neither option is built:
+   - (a) **Grow `tools` at a load.** The loaded definitions join `tools`; the request after the load rereads nothing past the system prompt, so it pays for the whole transcript uncached (or as a cache write), once per load.
+   - (b) **Definitions as text, one dispatcher.** An immediate `call_tool { name, arguments }` is declared from the start; a load returns the loaded definitions as tool-result text, and the model calls them through `call_tool`. `tools` never changes, so the request after a load reads the whole cache. The price: the model calls tools indirectly (argument schemas aren't enforced by the provider, so the app validates them), and `call_tool` itself is one more tool from the first request.
+
+   Measured 2026-11-12 (synthetic transcript; a load of 5 definitions, ≈1.8k tokens; "control" repeats the request unchanged):
+
+   | Host, model | Transcript | Control | (a) after the load | (b) after the load |
+   | --- | --- | --- | --- | --- |
+   | DeepSeek, deepseek-flash | 3,679 tokens | read 3,456 | 5,498 in, read 1,536 | 5,481 in, read 3,712 |
+   | DeepSeek, deepseek-flash | 50,595 tokens | read 50,432 | 52,414 in, read 1,536 (≈50.9k uncached) | 52,397 in, read 50,688 |
+   | OpenRouter → anthropic/claude-haiku-4.5 | 4,434 tokens | read 4,431 | write 6,294, read 0 | read 4,545, write 1,752 |
+   | OpenRouter → anthropic/claude-haiku-4.5 | 57,928 tokens | read 57,925 | write 59,788, read 0 | read 58,039, write 1,752 |
+
+   So (a) costs the whole transcript once per load (≈50k tokens at 50k); (b) costs only the loaded definitions. Switching a running chat to (b) costs one full rewrite itself, since adding `call_tool` changes `tools` (measured: DeepSeek read 1,536, OpenRouter wrote everything). DeepSeek also needs `reasoning_content` on a replayed assistant tool call (400 otherwise).
+2. **Built-in skills only with the Assistant card** (§6) is now built as Proposed: confirm or revert.

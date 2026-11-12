@@ -523,9 +523,11 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly tools: string | null
           readonly turn_cap: number | null
           readonly rollout_id: string
+          readonly model: string | null
         }>`
           SELECT p.transcript_json AS transcript, json_extract(p.context_snapshot_json, '$.agent.tools') AS tools,
-            json_extract(p.context_snapshot_json, '$.agent.turnCap') AS turn_cap, r.id AS rollout_id
+            json_extract(p.context_snapshot_json, '$.agent.turnCap') AS turn_cap, r.id AS rollout_id,
+            json_extract(p.context_snapshot_json, '$.inputs.model') AS model
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
@@ -539,6 +541,11 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
               SELECT reason, fork_index, messages_json FROM rollout_branches
               WHERE rollout_id = ${row.rollout_id} ORDER BY branch_no`
           : []
+        // Each definition's size with the model's own tokenizer, where the app has one.
+        const count = yield* prepareTextTokens(
+          assembler.textCounters.list(),
+          row.model ? (JSON.parse(row.model) as ModelInput) : null
+        )
         const loadedBy = new Map(
           loadPoints(messages, new Set(tools.filter((t) => t.deferred).map((t) => t.name))).flatMap((p) =>
             p.names.map((name) => [name, p.toolCallId] as const)
@@ -553,6 +560,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             ...(t.capability ? { capability: t.capability } : {}),
             ...(t.titleField ? { titleField: t.titleField } : {}),
             effect: t.effect,
+            tokens: count(JSON.stringify({ name: t.name, description: t.description, parameters: t.parameters })),
             ...(t.deferred ? { deferred: true } : {}),
             ...(loadedBy.has(t.name) ? { loadedBy: loadedBy.get(t.name)! } : {})
           })),

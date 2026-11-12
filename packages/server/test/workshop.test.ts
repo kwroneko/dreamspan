@@ -501,7 +501,11 @@ describe("workshop", () => {
           "send_message"
         ]
       )
-      assert.deepStrictEqual((JSON.parse(material.snapshot) as { agent: { tools: unknown } }).agent.tools, frozen)
+      // The snapshot holds the definitions; the read adds each one's size in tokens.
+      assert.deepStrictEqual(
+        (JSON.parse(material.snapshot) as { agent: { tools: unknown } }).agent.tools,
+        frozen.map(({ tokens: _tokens, ...tool }) => tool)
+      )
 
       // Neither today's planner nor today's tool descriptions may change this run's offer.
       const planner = registry.orchestrationModes.get("workshop")!

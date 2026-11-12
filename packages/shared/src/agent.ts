@@ -90,6 +90,8 @@ export const OfferedTool = Schema.Struct({
   description: Schema.String,
   parameters: Schema.Unknown,
   effect: EffectClass,
+  /** The definition's size in tokens, counted with the run's model's tokenizer where the app has one. */
+  tokens: Schema.optionalKey(Schema.Int),
   /** Declared but not sent from the start: a loading call made it callable (spec/TOOL-LOADING.md). */
   deferred: Schema.optionalKey(Schema.Boolean),
   /** The loading call that loaded it in this run, when one did. */
