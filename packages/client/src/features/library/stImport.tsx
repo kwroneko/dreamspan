@@ -42,6 +42,7 @@ import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
 import { FolderBrowser } from "./FolderBrowser.tsx"
 import { type StImportSectionProps, stImportSections } from "./slots.ts"
+import { askMediaApproval } from "../savedMedia/approval.ts"
 import {
   percentOf,
   ST_IMPORTS,
@@ -415,7 +416,11 @@ function Result({ detail }: { detail: StImportJobDetail }) {
   const now = useNow(running)
   const issues = reportIssues(detail)
   useEffect(() => {
-    if (!running && !job.seen) void action.run((client) => client("SeenStImport", { importId: job.id }), [ST_IMPORTS])
+    if (!running && !job.seen) {
+      void action.run((client) => client("SeenStImport", { importId: job.id }), [ST_IMPORTS])
+      // The sites its media is on that the user hasn't approved, from every waiting file (spec/SAVED-MEDIA.md §3.2).
+      askMediaApproval(null)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mark each finished import once when opened
   }, [job.id, job.seen, running])
   return (

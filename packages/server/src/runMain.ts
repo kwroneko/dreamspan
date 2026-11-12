@@ -6,6 +6,7 @@ import { serverWith } from "./server.ts"
 import { serverEnvironment } from "./serverEnvironment.ts"
 import * as CardSources from "./sources/CardSources.ts"
 import { cardexAdapter, cardSourceSetup } from "./sources/cardex.ts"
+import { fakeSavedMedia, fakeSavedMediaWanted } from "./dev/fakeSavedMedia.ts"
 
 /**
  * SIGTERM or SIGINT interrupts the server, and that's how it's meant to stop: exit 0, not
@@ -39,4 +40,12 @@ const server =
         setup === "cardex" ? CardSources.layerWith({ adapters: [cardexAdapter()] }) : CardSources.layer
       )
 
-server.pipe(Layer.provide(AppConfig.layer), Layer.launch, NodeRuntime.runMain({ teardown }))
+/**
+ * Browser tests and previews set `FAKE_SAVED_MEDIA=on`: saved card media is then a synthetic
+ * file, never a download (dev/fakeSavedMedia.ts). Production's units never set it.
+ */
+const withMedia = fakeSavedMediaWanted(process.env[serverEnvironment.FAKE_SAVED_MEDIA])
+  ? fakeSavedMedia.pipe(Layer.provideMerge(server))
+  : server
+
+withMedia.pipe(Layer.provide(AppConfig.layer), Layer.launch, NodeRuntime.runMain({ teardown }))

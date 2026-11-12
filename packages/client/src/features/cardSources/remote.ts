@@ -14,6 +14,8 @@ import { makeRegistry } from "../../registry.ts"
 import { AppClient } from "../../rpc.ts"
 import type { ReactNode } from "react"
 import type { RemoteSummary } from "@rp/shared/cardSources.ts"
+import type { RefId } from "@rp/shared/library.ts"
+import { askMediaApproval } from "../savedMedia/approval.ts"
 
 /** The reactivity key of everything card sources show from the server. */
 export const SOURCES_KEY = "cardSources"
@@ -125,6 +127,8 @@ export function useAdoptRemote() {
     const added = out.value
     invalidateKeys(registry, ["library", "chats"])
     showAdopted(navigate, added)
+    // Its media on sites the user hasn't approved (spec/SAVED-MEDIA.md §3.2).
+    if (!added.existing) askMediaApproval([added.refId as RefId])
     return added
   }
 }

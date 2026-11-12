@@ -63,7 +63,19 @@ interface ExternalMediaFile {
   readonly dispose: () => Promise<void>
   readonly mime: string
 }
-class ExternalMediaRefused extends Error {}
+/** Why an address was refused, in words the user can read (saved media shows them). */
+export class ExternalMediaRefused extends Error {}
+
+/** What saved card media keeps (spec/SAVED-MEDIA.md §3.3): no SVG, no page, no script. */
+export const SAVED_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  ...TYPES,
+  "video/mp4",
+  "video/webm",
+  "font/woff",
+  "font/woff2",
+  "font/ttf",
+  "font/otf"
+])
 /** Sniff a bounded media prefix only. General file detectors also unpack archives;
  * untrusted archive sizes must never reach those parsers, even with an image header.
  * Skip bounded ID3 metadata ourselves so it cannot recurse into a disguised archive. */
@@ -98,7 +110,14 @@ const mediaSample = async (path: string, size: number) => {
         sample.readUInt32BE(0) <= sample.length) ||
       ascii(0, "OggS") ||
       ascii(0, "fLaC") ||
-      (sample[0] === 255 && sample[1] !== undefined && (sample[1] & 0xe0) === 0xe0)
+      (sample[0] === 255 && sample[1] !== undefined && (sample[1] & 0xe0) === 0xe0) ||
+      // Matroska/WebM, and the font formats saved card media accepts.
+      sample.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) ||
+      ascii(0, "wOFF") ||
+      ascii(0, "wOF2") ||
+      ascii(0, "OTTO") ||
+      ascii(0, "true") ||
+      sample.subarray(0, 4).equals(Buffer.from([0, 1, 0, 0]))
     if (!media) throw new ExternalMediaRefused("Not a supported media signature")
     return sample
   } finally {
@@ -138,6 +157,19 @@ interface Limits {
   readonly dnsServers?: ReadonlyArray<string>
   readonly maxBytes?: number
   readonly timeoutMs?: number
+  /** The types kept, as sniffed (default: images and audio). */
+  readonly types?: ReadonlySet<string>
+  /**
+   * Whether the response's own type must be the sniffed one too (the default). Saved media
+   * decides by the bytes alone: many hosts send fonts and media as `application/octet-stream`.
+   */
+  readonly declaredType?: boolean
+  /** A smaller cap for some sniffed types (fonts). */
+  readonly maxBytesFor?: (mime: string) => number
+}
+export interface FetchOptions {
+  /** Each hop's host must pass, the first included; redirects to another origin then follow too. */
+  readonly allowHost?: (host: string) => boolean
 }
 
 /** Fixed headers only: never cookies, authorization, referrers, ranges or upstream cache validators. */
@@ -145,29 +177,45 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
   const resolve = limits.resolve ?? resolveOffPool(limits.dnsServers)
   const maxBytes = limits.maxBytes ?? 16 * 1024 * 1024
   const timeoutMs = limits.timeoutMs ?? 15_000
-  return async (url: string, signal: AbortSignal): Promise<ExternalMediaFile> => {
+  const types = limits.types ?? TYPES
+  const declaredType = limits.declaredType ?? true
+  return async (url: string, signal: AbortSignal, options: FetchOptions = {}): Promise<ExternalMediaFile> => {
     const controller = new AbortController()
-    const fetch = network.fetchFor({ mode: "inherit" }, undefined, async (target) => {
-      const bad =
-        !["http:", "https:"].includes(target.protocol) ||
-        target.username ||
-        target.password ||
-        (target.port !== "" && !["80", "443"].includes(target.port))
-      if (bad || target.href.length > 8192)
-        throw new ExternalMediaRefused("Only public HTTP and HTTPS media addresses without credentials are allowed")
-      const hostname = target.hostname.replace(/^\[(.*)\]$/, "$1")
-      const addresses = isIP(hostname) ? [hostname] : await resolve(hostname, controller.signal)
-      const local = new BlockList()
-      for (const entries of Object.values((limits.interfaces ?? networkInterfaces)()))
-        for (const entry of entries ?? [])
-          local.addAddress(entry.address.split("%")[0]!, entry.family === "IPv6" ? "ipv6" : "ipv4")
-      if (
-        addresses.length === 0 ||
-        addresses.some((ip) => !isPublicMediaAddress(ip) || local.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4"))
-      )
-        throw new ExternalMediaRefused("This media address is not public")
-      return addresses
-    })
+    const allowHost = options.allowHost
+    const hostOf = (target: URL) =>
+      target.hostname
+        .replace(/^\[(.*)\]$/, "$1")
+        .replace(/\.$/, "")
+        .toLowerCase()
+    const crossOrigin = allowHost && ((next: URL) => allowHost(hostOf(next)))
+    const fetch = network.fetchFor(
+      { mode: "inherit" },
+      undefined,
+      async (target) => {
+        const bad =
+          !["http:", "https:"].includes(target.protocol) ||
+          target.username ||
+          target.password ||
+          (target.port !== "" && !["80", "443"].includes(target.port))
+        if (bad || target.href.length > 8192)
+          throw new ExternalMediaRefused("Only public HTTP and HTTPS media addresses without credentials are allowed")
+        if (allowHost && !allowHost(hostOf(target)))
+          throw new ExternalMediaRefused("It moved to a site you haven't approved.")
+        const hostname = target.hostname.replace(/^\[(.*)\]$/, "$1")
+        const addresses = isIP(hostname) ? [hostname] : await resolve(hostname, controller.signal)
+        const local = new BlockList()
+        for (const entries of Object.values((limits.interfaces ?? networkInterfaces)()))
+          for (const entry of entries ?? [])
+            local.addAddress(entry.address.split("%")[0]!, entry.family === "IPv6" ? "ipv6" : "ipv4")
+        if (
+          addresses.length === 0 ||
+          addresses.some((ip) => !isPublicMediaAddress(ip) || local.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4"))
+        )
+          throw new ExternalMediaRefused("This media address is not public")
+        return addresses
+      },
+      crossOrigin
+    )
     const abort = () => controller.abort()
     signal.addEventListener("abort", abort, { once: true })
     if (signal.aborted) abort()
@@ -184,11 +232,11 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
         credentials: "omit",
         redirect: "manual",
         signal: controller.signal,
-        headers: { accept: [...TYPES].join(", "), "accept-encoding": "identity" }
+        headers: { accept: [...types].join(", "), "accept-encoding": "identity" }
       })
       const mime = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? ""
       const length = Number(response.headers.get("content-length"))
-      if (!response.ok || !TYPES.has(mime) || length > maxBytes) {
+      if (!response.ok || (declaredType && !types.has(mime)) || length > maxBytes) {
         await response.body?.cancel()
         throw new ExternalMediaRefused(
           "The address did not return a supported image or audio file within the size limit"
@@ -246,8 +294,10 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
                 : base
         }
         const sniffed = detected ? normalize(detected.mime) : ""
-        if (!TYPES.has(sniffed) || sniffed !== normalize(mime))
+        if (!types.has(sniffed) || (declaredType && sniffed !== normalize(mime)))
           throw new ExternalMediaRefused("The media bytes do not match a supported image or audio type")
+        if (limits.maxBytesFor && size > limits.maxBytesFor(sniffed))
+          throw new ExternalMediaRefused("The media file is too large")
         controller.signal.throwIfAborted()
         complete = true
         return { path, dispose, mime: sniffed }

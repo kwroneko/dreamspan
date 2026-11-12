@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { StMarkdown } from "../src/ui/StMarkdown.tsx"
 import { scopeStyles } from "../src/ui/html/css.ts"
+import { savedMedia } from "../src/ui/html/savedMedia.ts"
 import { extractStyles, HtmlMessageContext, HtmlSettingsContext, type PanelPermit } from "../src/ui/html/messageHtml.ts"
 import { htmlClassifiers, htmlSchemas, isDocumentBlock } from "../src/ui/html/parts.ts"
 import { registerHtmlParts } from "../src/ui/html/register.ts"
@@ -273,6 +274,46 @@ describe("external media consent", () => {
       expect(allowed).toContain("/media/external?chat=synthetic&amp;card=card&amp;url=")
       expect(allowed).not.toMatch(/(?:src|href|srcSet)="https:/)
       expect(allowed).not.toContain("autoPlay")
+    }
+  })
+  it("shows saved card media from this app, waits blank until the lookup answers, then follows consent", async () => {
+    const asked: string[][] = []
+    savedMedia.install(async (urls) => {
+      asked.push([...urls])
+      return urls.includes("https://media.invalid/p.png")
+        ? [{ url: "https://media.invalid/p.png", mediaId: "m1", waiting: false }]
+        : []
+    })
+    try {
+      const sources = [
+        '<img src="https://media.invalid/p.png">',
+        "![Map](https://media.invalid/p.png)",
+        '<div style="background: url(https://media.invalid/p.png)">x</div>',
+        '<audio src="https://media.invalid/p.png"></audio>'
+      ]
+      // Before the answer: a placeholder, never the other site, never the blocked note.
+      for (const source of sources) {
+        const first = render(source)
+        expect(first).not.toContain("https://media.invalid")
+        expect(first).not.toContain("/media/external?")
+      }
+      await new Promise((done) => setTimeout(done, 50))
+      expect(asked.flat()).toContain("https://media.invalid/p.png")
+      for (const source of sources) {
+        const saved = render(source)
+        expect(saved).toContain("/media/saved/m1")
+        expect(saved).not.toContain("/media/external?")
+        expect(render(source, { mediaScope: "chat=synthetic" })).toContain("/media/saved/m1")
+      }
+      // Not saved: the consent rules, unchanged.
+      render('<img src="https://media.invalid/other.png">')
+      await new Promise((done) => setTimeout(done, 50))
+      expect(render('<img src="https://media.invalid/other.png">')).not.toContain("/media/")
+      expect(render('<img src="https://media.invalid/other.png">', { mediaScope: "chat=synthetic" })).toContain(
+        "/media/external?chat=synthetic"
+      )
+    } finally {
+      savedMedia.install(null)
     }
   })
   it("rewrites CSS URLs after consent, leaving other loading constructs blocked", () => {

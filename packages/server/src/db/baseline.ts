@@ -161,6 +161,29 @@ export const baseline: ReadonlyArray<string> = [
     PRIMARY KEY (media_id, owner_user_id)
   ) STRICT, WITHOUT ROWID`,
   `CREATE INDEX media_refs_owner ON media_refs(owner_user_id)`,
+  // Saved card media (spec/SAVED-MEDIA.md). Each account's remote media addresses, one row per
+  // address whichever entries name it, and its saved file once downloaded. `once`: approved for
+  // these files only, not by the account's list of sites.
+  `CREATE TABLE saved_media (
+    id INTEGER PRIMARY KEY,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    url TEXT NOT NULL CHECK (length(url) <= 8192),
+    host TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('image', 'audio', 'video', 'font')),
+    state TEXT NOT NULL CHECK (state IN ('approval', 'pending', 'saved', 'failed', 'declined')),
+    media_id TEXT REFERENCES media_assets(id),
+    reason TEXT,
+    once INTEGER NOT NULL DEFAULT 0 CHECK (once IN (0, 1)),
+    updated_at INTEGER NOT NULL,
+    UNIQUE (owner_user_id, url),
+    CHECK ((state = 'saved') = (media_id IS NOT NULL))
+  ) STRICT`,
+  `CREATE INDEX saved_media_state ON saved_media(state, updated_at) WHERE state = 'pending'`,
+  `CREATE INDEX saved_media_owner_host ON saved_media(owner_user_id, host, state)`,
+  `CREATE INDEX saved_media_media ON saved_media(media_id) WHERE media_id IS NOT NULL`,
+  `CREATE TRIGGER saved_media_owner_fixed BEFORE UPDATE OF owner_user_id, url ON saved_media
+    WHEN NEW.owner_user_id IS NOT OLD.owner_user_id OR NEW.url IS NOT OLD.url
+    BEGIN SELECT RAISE(ABORT, 'saved_media never changes owner or address'); END`,
   `CREATE TABLE jobs (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT REFERENCES users(id),
@@ -249,6 +272,27 @@ export const baseline: ReadonlyArray<string> = [
         THEN json_array_length(NEW.doc_json, '$.character_book.entries') ELSE 0 END); END`,
   `CREATE TRIGGER card_summaries_delete AFTER DELETE ON entity_revisions
     BEGIN DELETE FROM card_summaries WHERE revision_id = OLD.id; END`,
+  // Saved card media (spec/SAVED-MEDIA.md): which addresses each revision names (its map from
+  // address to saved file, through saved_media), and the revisions still to be read for them.
+  // Every revision insert queues itself, whatever path wrote it (import, edit, fork, merge,
+  // restore), unless its document can't name a remote address.
+  `CREATE TABLE revision_media (
+    revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    media INTEGER NOT NULL REFERENCES saved_media(id) ON DELETE CASCADE,
+    PRIMARY KEY (revision_id, media)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX revision_media_media ON revision_media(media)`,
+  `CREATE TABLE saved_media_scans (
+    revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    queued_at INTEGER NOT NULL
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX saved_media_scans_owner ON saved_media_scans(owner_user_id, queued_at)`,
+  `CREATE INDEX saved_media_scans_queued ON saved_media_scans(queued_at)`,
+  `CREATE TRIGGER saved_media_scans_queue AFTER INSERT ON entity_revisions
+    WHEN instr(NEW.doc_json, '//') > 0
+    BEGIN INSERT INTO saved_media_scans (revision_id, owner_user_id, queued_at)
+      SELECT NEW.id, owner_user_id, NEW.created_at FROM entities WHERE id = NEW.entity_id; END`,
   `CREATE INDEX entity_revisions_entity ON entity_revisions(entity_id, seq)`,
   // Archive eligibility reads these columns without following doc_json's overflow pages.
   `CREATE INDEX entity_revisions_activity ON entity_revisions(entity_id, origin, created_at, parents)`,

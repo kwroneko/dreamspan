@@ -476,7 +476,9 @@ function writeUrl(address: string, writer: Writer, policy: Policy, options: Valu
   else if (!options.fragmentsOnly && /^data:/i.test(value)) target = value
   else if (!options.fragmentsOnly) {
     target = proxyMediaUrl(value, policy.mediaScope)
-    if (target) policy.media.push(target)
+    // Only proxied addresses go through the download queue (mediaQueue.ts): a saved copy is
+    // this app's own file, and a placeholder makes no request.
+    if (target?.startsWith("/media/external?")) policy.media.push(target)
   }
   if (target === null) {
     policy.remote ||= REMOTE.test(value)

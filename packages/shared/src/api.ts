@@ -1,4 +1,5 @@
 import { ExternalMediaApi } from "./externalMedia.ts"
+import { SavedMediaApi } from "./savedMedia.ts"
 import { WorkshopApi } from "./workshopApi.ts"
 import { SplitChatApi } from "./splitChat.ts"
 import { ChatContextsApi } from "./contextsApi.ts"
@@ -416,6 +417,8 @@ export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authenticat
 
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
 export const AuthenticatedExternalMediaApi = ExternalMediaApi.middleware(Authentication)
+/** Saved card media (savedMedia.ts): approved sites, approvals and lookups. */
+export const AuthenticatedSavedMediaApi = SavedMediaApi.middleware(Authentication)
 export const AuthenticatedPanelApprovalApi = PanelApprovalApi.middleware(Authentication)
 export const AuthenticatedSummaryRequestApi = SummaryRequestApi.middleware(Authentication)
 
@@ -458,6 +461,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedGalleryApi)
   .merge(AuthenticatedPanelApprovalApi)
   .merge(AuthenticatedExternalMediaApi)
+  .merge(AuthenticatedSavedMediaApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
   .merge(AuthenticatedChatMergeApi)

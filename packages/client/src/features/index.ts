@@ -25,6 +25,7 @@ import * as network from "./network.tsx"
 import * as noteOverrides from "./noteOverrides/index.tsx"
 import * as pickers from "./pickers/index.tsx"
 import * as regex from "./regex/index.tsx"
+import * as savedMedia from "./savedMedia/index.tsx"
 import * as notices from "./notices.tsx"
 import * as completionSound from "./completionSoundFeature.tsx"
 import * as settings from "./settings/index.tsx"
@@ -64,6 +65,7 @@ export const registerFeatures = () => {
   credentials.register()
   network.register()
   regex.register()
+  savedMedia.register()
   accounts.register()
   notices.register()
   completionSound.register()

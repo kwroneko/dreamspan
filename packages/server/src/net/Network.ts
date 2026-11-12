@@ -58,7 +58,12 @@ export interface NetworkShape {
   readonly fetchFor: (
     override: ProxyOverride,
     onRoute?: (route: Route, target: URL) => void,
-    targetAddresses?: TargetAddresses
+    targetAddresses?: TargetAddresses,
+    /**
+     * A redirect to another origin is refused unless this accepts it. Only for requests that
+     * carry nothing secret (saved card media); each hop is checked by `targetAddresses` too.
+     */
+    crossOriginRedirect?: (next: URL) => boolean
   ) => typeof fetch
   readonly route: (target: URL, override: ProxyOverride) => Effect.Effect<Route>
   /** Whether non-admins must use the instance proxy. */
@@ -223,6 +228,7 @@ export const layer = Layer.effect(
       override: ProxyOverride,
       onRoute?: (route: Route, target: URL) => void,
       targetAddresses?: TargetAddresses,
+      crossOriginRedirect?: (next: URL) => boolean,
       settings?: Current
     ): typeof fetch => {
       const routed = async (input: Parameters<typeof fetch>[0], init: RequestInit = {}) => {
@@ -288,7 +294,7 @@ export const layer = Layer.effect(
             return response as unknown as Response
           await response.body?.cancel()
           const next = new URL(location, target)
-          if (next.origin !== target.origin) {
+          if (next.origin !== target.origin && !crossOriginRedirect?.(next)) {
             throw new RedirectRefused(`refused a redirect from ${target.origin} to ${next.origin}`)
           }
           if (hop >= MAX_REDIRECTS) throw new Error(`more than ${MAX_REDIRECTS} redirects`)
@@ -350,7 +356,7 @@ export const layer = Layer.effect(
         if (settings.proxyUrl !== null) registerSecret(settings.proxyUrl)
         if (override.mode === "custom") registerSecret(override.url)
         return {
-          fetchFor: (onRoute) => fetchFor(override, onRoute, undefined, settings),
+          fetchFor: (onRoute) => fetchFor(override, onRoute, undefined, undefined, settings),
           route: (target) => Effect.promise(() => routeNow(target, override, settings))
         }
       },

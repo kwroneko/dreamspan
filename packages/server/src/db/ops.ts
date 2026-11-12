@@ -1,4 +1,13 @@
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
+import {
+  MediaApprovalHost,
+  MediaChoice,
+  MediaHost,
+  MediaHosts,
+  MediaKind,
+  SavedMediaLookup,
+  SavedMediaStatus
+} from "@rp/shared/savedMedia.ts"
 import { MessageCursor, MessageQuery, MessageSearchPage } from "@rp/shared/messageSearch.ts"
 import {
   LibraryChoice,
@@ -397,6 +406,26 @@ export const ImportedMedia = Schema.Struct({
 /** A stored file, at `path` under the data directory. */
 const StoredFile = Schema.Struct({ path: Schema.String, mime: Schema.String, byteSize: Schema.Int })
 
+/** A queued revision and the media its document names (savedMedia/extract.ts). */
+export const SavedMediaScan = Schema.Struct({
+  revisionId: Schema.String,
+  ownerUserId: UserId,
+  media: Schema.Array(Schema.Struct({ url: Schema.String, kind: MediaKind }))
+})
+export type SavedMediaScan = typeof SavedMediaScan.Type
+/** One address to download, and what the fetcher checks it against. */
+export const SavedMediaDownload = Schema.Struct({
+  id: Schema.Int,
+  ownerUserId: UserId,
+  url: Schema.String,
+  host: Schema.String,
+  kind: MediaKind,
+  once: Schema.Boolean,
+  revisionId: Schema.NullOr(Schema.String),
+  hosts: MediaHosts
+})
+export type SavedMediaDownload = typeof SavedMediaDownload.Type
+
 /** A reply the send queue posted, generating, for the caller to start in its fork. */
 const QueuedReply = Schema.Struct({ slotId: SlotId, versionId: VersionId, forkId: Schema.optionalKey(ForkId) })
 
@@ -572,6 +601,59 @@ const LibraryReplacePlan = Schema.Struct({
   entries: Schema.Array(LibraryReplaceEntry),
   skipped: Schema.Array(LibrarySkipped)
 })
+
+/**
+ * Saved card media's writes (spec/SAVED-MEDIA.md; db/savedMedia.ts), a group of their own
+ * merged into WriteOps: one more operation in that group's own list exceeds TypeScript's
+ * instantiation depth. No network in any of these: the main thread downloads between them.
+ */
+const SavedMediaWriteOps = RpcGroup.make(
+  /** Records what queued revisions name: one row per address per account, linked to the revision. */
+  Rpc.make("RecordSavedMediaScans", {
+    payload: { scans: Schema.Array(SavedMediaScan), at: Schema.Int },
+    success: Schema.Int,
+    error: StorageError
+  }),
+  /** A download's result, recorded only while the address is still to be downloaded. */
+  Rpc.make("RecordSavedMediaResult", {
+    payload: {
+      id: Schema.Int,
+      at: Schema.Int,
+      saved: Schema.NullOr(Schema.Struct({ sha256: Sha256, mime: Schema.String, byteSize: Schema.Int })),
+      failure: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
+  /** The entry's failed addresses on approved sites downloaded again. */
+  Rpc.make("RetrySavedMedia", {
+    payload: { userId: UserId, refId: RefId, at: Schema.Int },
+    success: SavedMediaStatus,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("DecideMediaApproval", {
+    payload: {
+      userId: UserId,
+      refIds: Schema.NullOr(Schema.Array(RefId)),
+      decisions: Schema.Array(Schema.Struct({ host: Schema.String, choice: MediaChoice })),
+      at: Schema.Int
+    },
+    success: MediaHosts,
+    error: StorageError
+  }),
+  Rpc.make("ChangeMediaHosts", {
+    payload: {
+      userId: UserId,
+      add: Schema.optionalKey(MediaHost),
+      remove: Schema.optionalKey(Schema.String),
+      at: Schema.Int
+    },
+    success: MediaHosts,
+    error: StorageError
+  }),
+  /** Addresses no revision names any more, and files nothing else uses; the sweep removes their bytes. */
+  Rpc.make("PruneSavedMedia", { success: Schema.Int, error: StorageError })
+)
 
 export class WriteOps extends RpcGroup.make(
   /**
@@ -3096,7 +3178,7 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Struct({ slotId: SlotId, fork: Fork, chat: Chat }),
     error: Schema.Union([NotFound, StorageError])
   })
-) {}
+).merge(SavedMediaWriteOps) {}
 
 export class ReadOps extends RpcGroup.make(
   /** What a merge would bring (spec/CHAT-MERGE.md §3), as `MergeChat` computes it. */
@@ -4353,6 +4435,51 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** What the preset the user's chats use does with a card's own prompts (DESIGN §5.0). */
   Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
+  // --- Saved card media (spec/SAVED-MEDIA.md; db/savedMedia.ts).
+  /**
+   * Queued revisions with the media their documents name, read here so no main thread parses
+   * a document: those of `refIds`' heads (the user's), else the user's queue, else everyone's.
+   */
+  Rpc.make("ReadSavedMediaScans", {
+    payload: {
+      userId: Schema.NullOr(UserId),
+      refIds: Schema.NullOr(Schema.Array(RefId)),
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 2000 }))
+    },
+    success: Schema.Array(SavedMediaScan),
+    error: StorageError
+  }),
+  /** Addresses to download, oldest first, with their account's approved sites and a revision naming them. */
+  Rpc.make("NextSavedMediaDownloads", {
+    payload: {
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 })),
+      skip: Schema.Array(Schema.Int)
+    },
+    success: Schema.Array(SavedMediaDownload),
+    error: StorageError
+  }),
+  Rpc.make("LookupSavedMedia", {
+    payload: { userId: UserId, urls: Schema.Array(Schema.String) },
+    success: Schema.Array(SavedMediaLookup),
+    error: StorageError
+  }),
+  Rpc.make("GetSavedMediaStatus", {
+    payload: { userId: UserId, refId: RefId },
+    success: SavedMediaStatus,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ListMediaApproval", {
+    payload: { userId: UserId, refIds: Schema.NullOr(Schema.Array(RefId)) },
+    success: Schema.Array(MediaApprovalHost),
+    error: StorageError
+  }),
+  Rpc.make("GetMediaHosts", { payload: { userId: UserId }, success: MediaHosts, error: StorageError }),
+  /** A saved file the user's own saved addresses name. */
+  Rpc.make("GetSavedMediaFile", {
+    payload: { userId: UserId, mediaId: Schema.String },
+    success: Schema.NullOr(StoredFile),
+    error: StorageError
+  }),
   /** The user's display choices; the defaults where none are stored. */
   Rpc.make("GetExternalMediaPrefs", { payload: { userId: UserId }, success: ExternalMediaPrefs, error: StorageError }),
   Rpc.make("CheckExternalMedia", {
