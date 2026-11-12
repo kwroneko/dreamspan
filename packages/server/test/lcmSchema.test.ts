@@ -223,7 +223,7 @@ describe("0023 lineage and retention triggers", () => {
       ["repeated", '["wren","wren"]'],
       ["empty", "[]"],
       ["number", "[1]"]
-    ])
+    ] as const)
       expect(() => run(insert, id, c.chatId, s.slotId, s.slotId, s.slotId, audience)).toThrow(/sorted, distinct/)
     expect(() => run(`UPDATE summarization_jobs SET audience_json='["wren","mira"]' WHERE id='others'`)).toThrow(
       /sorted, distinct/
