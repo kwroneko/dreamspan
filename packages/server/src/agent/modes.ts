@@ -2,7 +2,7 @@
 // entry. The built-in planner combines independent chat settings; modes are not chat state.
 import type { ChatState } from "@rp/shared/state.ts"
 
-export type OutputContract = "final_text" | "send_message" | "both"
+export type OutputContract = "final_text" | "send_message" | "both" | "several"
 
 /** One agent's turn: the reply strategy it runs, its tools and how its message is taken. */
 export interface AgentPlan {
@@ -12,6 +12,7 @@ export interface AgentPlan {
   readonly tools: ReadonlyArray<string>
   readonly contract: OutputContract
   /** Most provider requests one reply makes; the last is made without tools. */
+  readonly continuity?: "fork" | "resume_previous"
   readonly turnCap: number
   /** What the mode changes in the context; absent: the plain reply's. */
   readonly assembly?: {
@@ -71,7 +72,7 @@ export const defaultMode: OrchestrationMode = {
     return {
       strategy: "agent",
       tools: state.agentTools ?? DEFAULT_TOOLS,
-      contract: state.outputContract ?? "both",
+      contract: state.outputContract === "several" ? "both" : (state.outputContract ?? "both"),
       turnCap: 12,
       assembly: { instructions: agentInstructions, speakerCardOnly: state.cardsRotation === true }
     }

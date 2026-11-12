@@ -125,12 +125,18 @@ export const applyAnthropicBreakpoints = (
   payload: Record<string, unknown>,
   transcript: ReadonlyArray<Message>,
   breakpoints: ReadonlyArray<number>,
-  capabilities: CacheLayout = {}
+  capabilities: CacheLayout = {},
+  preserve = false
 ): Array<number> => {
   const marker = firstMarker(payload)
   if (!marker || !Array.isArray(payload.messages)) return []
   const wire = payload.messages as Array<WireMessage>
   const aligned = alignTranscript(transcript, wire)
+  // A carried run prioritizes the markers already present in its previous request.
+  // pi-ai's automatic new tail would otherwise take one of their four places.
+  if (preserve)
+    for (const message of wire)
+      if (Array.isArray(message.content)) for (const block of message.content) delete block.cache_control
   let budget = Math.min(MAX_ANTHROPIC_BREAKPOINTS, capabilities.maxMarkers ?? 4) - countMarkers(payload)
   const placed: Array<number> = []
   for (const index of breakpoints) {

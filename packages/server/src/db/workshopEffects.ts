@@ -57,6 +57,13 @@ export const toRolloutEffect = (row: EffectRow): RolloutEffect => ({
 // Undo policies are replaceable worker registrations; the transaction/ownership boundary is kernel.
 interface Undoer {
   readonly id: string
+  /** Optional read-only state proof for carrying a saved tool success into a new turn. */
+  readonly unchanged?: (
+    sql: SqlClient.SqlClient,
+    userId: UserId,
+    effect: RolloutEffect,
+    effects: ReadonlyArray<RolloutEffect>
+  ) => Effect.Effect<boolean, import("effect/sql").SqlError.SqlError>
   readonly run: (
     context: UndoContext,
     effect: RolloutEffect
@@ -129,8 +136,29 @@ const checkedCreation = (ctx: UndoContext, effect: RolloutEffect) =>
     return ref
   })
 
+const libraryUnchanged: NonNullable<Undoer["unchanged"]> = Effect.fnUntraced(function* (sql, userId, effect, effects) {
+  const undo = effect.undo!
+  let head = undo.head
+  let version = undo.rowVersion
+  const remaining = effects
+    .filter((e) => e.kind === "library.revise" && e.targetId === effect.targetId)
+    .map((e) => e.undo!)
+  for (;;) {
+    const at = remaining.findIndex((r) => r.refId === undo.refId && r.before === head && r.beforeRowVersion === version)
+    if (at < 0) break
+    const edge = remaining.splice(at, 1)[0]!
+    head = edge.head
+    version = edge.rowVersion
+  }
+  const [ref] = yield* sql`SELECT 1 FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+    WHERE r.id = ${String(undo.refId)} AND e.id = ${effect.targetId} AND e.owner_user_id = ${userId}
+      AND e.deleted_at IS NULL AND r.head_revision_id = ${String(head)} AND r.row_version = ${Number(version)}`
+  return !!ref
+})
+
 const createUndoer: Undoer = {
   id: "library.create",
+  unchanged: libraryUnchanged,
   run: (ctx, effect) =>
     Effect.gen(function* () {
       const ref = yield* checkedCreation(ctx, effect)
@@ -190,6 +218,7 @@ const createUndoer: Undoer = {
 }
 const reviseUndoer: Undoer = {
   id: "library.revise",
+  unchanged: libraryUnchanged,
   run: (ctx, effect) =>
     Effect.gen(function* () {
       const ref = yield* checkedRef(ctx, effect)
@@ -220,6 +249,10 @@ const chatStamp = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
 
 const chatUndoer: Undoer = {
   id: "chat.create",
+  unchanged: Effect.fnUntraced(function* (sql, userId, effect) {
+    const [chat] = yield* chatStamp(sql, userId, effect.targetId)
+    return !!chat && chat.stamp === effect.undo!.stamp
+  }),
   run: (ctx, effect) =>
     Effect.gen(function* () {
       const [chat] = yield* chatStamp(ctx.sql, ctx.userId, effect.targetId)
@@ -229,6 +262,30 @@ const chatUndoer: Undoer = {
     })
 }
 export const rolloutUndoers = makeRegistry<Undoer>([createUndoer, reviseUndoer, chatUndoer])
+
+/** A carried transcript includes all ancestors' successful changes. Revalidate their final
+ * saved state in the reader worker; never replay a success after its undo or a user edit. */
+export const continuityEffectsReason = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  rolloutId: string
+) {
+  const rows = yield* sql<EffectRow>`WITH RECURSIVE runs(id, parent_rollout_id) AS (
+    SELECT id, parent_rollout_id FROM rollouts WHERE id = ${rolloutId}
+    UNION
+    SELECT r.id, r.parent_rollout_id FROM rollouts r JOIN runs p ON r.id = p.parent_rollout_id
+  ) SELECT e.* FROM runs JOIN rollout_effects e ON e.rollout_id = runs.id`
+  if (rows.some((e) => e.undone_at !== null))
+    return "A previous change was undone, so this request was put together again from the messages."
+  const changed =
+    "The library or a chat changed after the previous run, so this request was put together again from the messages."
+  const effects = rows.map(toRolloutEffect)
+  for (const effect of effects) {
+    const unchanged = rolloutUndoers.get(effect.kind)?.unchanged
+    if (!effect.undo || !unchanged || !(yield* unchanged(sql, userId, effect, effects))) return changed
+  }
+  return null
+})
 
 export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
   Effect.gen(function* () {
