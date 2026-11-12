@@ -52,19 +52,95 @@ export interface PanelPermit {
 }
 export const HtmlMessageContext = createContext<HtmlMessage | null>(null)
 
-/** Whether a block has scripts of its own: a script element or an event handler attribute. */
-export const panelHasScripts = (html: string) => /<script\b|<[^>]*\son[a-z]+\s*=/i.test(html)
+/**
+ * Whether a block has scripts of its own: a script element, or an event handler attribute (a
+ * space and `on…=` inside a tag, after a `<` with no `>` since). One pass over the text: the
+ * regex this replaces rescanned to the end from every `<`, quadratic on a run of them.
+ */
+export function panelHasScripts(html: string): boolean {
+  if (/<script\b/i.test(html)) return true
+  const handler = /on[a-z]+\s*=/iy
+  let inTag = false
+  for (let at = 0; at < html.length; at++) {
+    const char = html[at]!
+    if (char === "<") inTag = true
+    else if (char === ">") inTag = false
+    else if (inTag && /\s/.test(char)) {
+      handler.lastIndex = at + 1
+      if (handler.test(html)) return true
+    }
+  }
+  return false
+}
 
-const FENCED = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|$)/gm
-const STYLE = /<style\b[^>]*>([\s\S]*?)(?:<\/style\s*>|$)/gi
+/**
+ * Whether a line has `![` and a `]` after it (what `/!\[.*?\]/` tests), in one pass: the regex
+ * rescanned the rest of the line from every `![`, quadratic on a long line of them.
+ */
+export function hasImageSyntax(text: string): boolean {
+  let open = false
+  for (let at = 0; at < text.length; at++) {
+    const char = text[at]
+    if (char === "\n" || char === "\r" || char === " " || char === " ") open = false
+    else if (char === "!" && text[at + 1] === "[") {
+      open = true
+      at++
+    } else if (char === "]" && open) return true
+  }
+  return false
+}
+
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/gm
+const FENCED = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[`~]*[ \t]*(?=\n|$)|$)/my
+
+/**
+ * Keep the old fence matching exactly (including its multiline `$`). Only try the full
+ * pattern once an opener has a following newline: otherwise its two greedy runs backtrack
+ * quadratically over an unterminated line of backticks. Every successful match advances both
+ * searches past that block; when no newline remains, no later opener can match either.
+ */
+function withoutFences(text: string): string {
+  const pieces: string[] = []
+  let from = 0
+  FENCE_OPEN.lastIndex = 0
+  for (let open = FENCE_OPEN.exec(text); open; open = FENCE_OPEN.exec(text)) {
+    if (text.indexOf("\n", FENCE_OPEN.lastIndex) < 0) break
+    FENCED.lastIndex = open.index
+    const match = FENCED.exec(text)!
+    pieces.push(text.slice(from, match.index))
+    from = FENCED.lastIndex
+    FENCE_OPEN.lastIndex = from
+  }
+  pieces.push(text.slice(from))
+  return pieces.join("")
+}
+
+const STYLE_OPEN = /<style(?!\w)/gi
+const STYLE_CLOSE = /<\/style\s*>/gi
 
 /**
  * The CSS of each of a text's `<style>` elements, as ST takes it from the text before formatting
- * it (encodeStyleTags), but not from inside code blocks.
+ * it (encodeStyleTags: `<style\b[^>]*>` to `</style>` or the end), but not from inside code
+ * blocks. Found with forward searches only, so the work is linear in the text: the regex this
+ * replaces rescanned to the end from every `<style` without a `>` (quadratic: seconds on a
+ * long reply).
  */
 export function extractStyles(text: string): ReadonlyArray<string> {
   if (!/<style/i.test(text)) return []
-  return [...text.replace(FENCED, "").matchAll(STYLE)].map((match) => match[1]!)
+  const source = withoutFences(text)
+  const styles: string[] = []
+  STYLE_OPEN.lastIndex = 0
+  for (let open = STYLE_OPEN.exec(source); open; open = STYLE_OPEN.exec(source)) {
+    const start = source.indexOf(">", open.index + 6)
+    // No `>` after this `<style`, so none after any later one either.
+    if (start < 0) break
+    STYLE_CLOSE.lastIndex = start + 1
+    const close = STYLE_CLOSE.exec(source)
+    styles.push(source.slice(start + 1, close ? close.index : source.length))
+    if (!close) break
+    STYLE_OPEN.lastIndex = close.index + close[0].length
+  }
+  return styles
 }
 
 /**

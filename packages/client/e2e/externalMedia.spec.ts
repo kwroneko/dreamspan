@@ -33,6 +33,7 @@ for (const width of [1440, 390])
               first_mes:
                 'A synthetic map.\n\n<img class="map" alt="Synthetic map" src="https://media.invalid/map.png" width="80" height="80">\n\n<style>.tile{background-image:url("https://media.invalid/tile.png");width:40px;height:40px}</style><div class="tile"></div>' +
                 '<span src="/media/external?url=inert-attribute"></span><style>.literal{--address:"/media/external?url=inert-style";content:\'url("/media/external?url=inert-content")\'}</style><span class="literal"></span>' +
+                '<style>:is([data-probe="yes"] *) .tile{background-image:url("https://media.invalid/yes.png")} :is([data-probe="no"] *) .tile{background-image:url("https://media.invalid/no.png")} @media (width:0px){.absent{background:url("https://media.invalid/never.png")}}</style>' +
                 "\n\n<div>" +
                 Array.from(
                   { length: 80 },
@@ -121,6 +122,19 @@ for (const width of [1440, 390])
           requests.some((request) => new URL(request).searchParams.get("url") === "https://media.invalid/tile.png")
         )
         .toBe(true)
+      // Both state branches, and a rule that cannot match, fetch before any selector does.
+      for (const name of ["yes", "no", "never"])
+        await expect
+          .poll(() =>
+            requests.some((request) => new URL(request).searchParams.get("url") === `https://media.invalid/${name}.png`)
+          )
+          .toBe(true)
+      const addresses = [...new Set(requests)].sort()
+      await page.evaluate(async () => {
+        document.documentElement.dataset.probe = "yes"
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      })
+      expect([...new Set(requests)].sort()).toEqual(addresses)
       await expectLayout(page, info, `external-media-allowed-${width}-${theme}`, { scope: "[data-testid=messages]" })
       await page.reload()
       await expect(article.locator("img.custom-map")).toBeVisible()

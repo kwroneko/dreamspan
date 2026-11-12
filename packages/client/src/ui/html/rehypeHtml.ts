@@ -3,10 +3,11 @@ import { proxyMediaUrl } from "./media.ts"
 // StMarkdown: mark Markdown's own elements, parse the raw HTML, prepare it, sanitize it with the
 // registered schema, then finish what the five fixes need on the parsed elements only. Media
 // from elsewhere is taken out, and a marker element tells the renderer to say so.
+import rehypeRaw from "rehype-raw"
 import rehypeSanitize from "rehype-sanitize"
 import type { PositionedNode } from "../sourcePositions.ts"
 import { sliceText } from "../sourcePositions.ts"
-import { cleanStyle, renameClass, renameId, renameReferences } from "./css.ts"
+import { cleanPresentation, cleanStyle, renameClass, renameId } from "./css.ts"
 import { effectiveClassifier, effectiveDocumentRenderer, effectiveSchema, htmlPartsRevision } from "./parts.ts"
 
 interface Node extends PositionedNode {
@@ -38,6 +39,31 @@ export function htmlMark() {
       for (const child of node.children ?? []) visit(child)
     }
     visit(tree)
+  }
+}
+
+type RawParse = ReturnType<typeof rehypeRaw>
+
+/**
+ * Step 1b, rehype-raw: the raw HTML parsed into the tree. A document its conversion can't take
+ * (parse5 gives an SVG or MathML `<template>` no template contents, and the conversion reads
+ * them) keeps its markup as text, as with HTML formatting off, instead of failing the message's
+ * render and the chat view around it.
+ */
+export function htmlRaw() {
+  const parse = rehypeRaw()
+  return (tree: Parameters<RawParse>[0], file: Parameters<RawParse>[1]) => {
+    try {
+      return parse(tree, file)
+    } catch {
+      const visit = (node: Node) => {
+        for (const child of node.children ?? [])
+          if ((child.type as string) === "raw") child.type = "text"
+          else visit(child)
+      }
+      visit(tree as unknown as Node)
+      return tree
+    }
   }
 }
 
@@ -163,8 +189,18 @@ const ID_LISTS = [
   "ariaLabelledBy",
   "ariaOwns"
 ]
-/** SVG presentation attributes that can refer to a gradient, filter or marker by `url(#id)`. */
-const REFERENCES = ["fill", "stroke", "filter", "clipPath", "mask", "markerStart", "markerMid", "markerEnd"]
+/** SVG presentation attributes the browser reads as CSS values that can name a resource by url(). */
+const PRESENTATION_URLS = [
+  "fill",
+  "stroke",
+  "filter",
+  "clipPath",
+  "mask",
+  "markerStart",
+  "markerMid",
+  "markerEnd",
+  "cursor"
+]
 const REMOTE = /^\s*(?:https?:)?\/\//i
 const MEDIA = new Set(["audio", "video", "source", "track"])
 
@@ -262,12 +298,21 @@ function finishParsed(node: Node, name: string, mediaScope?: string | null): boo
     const address = typeof value === "string" ? urlAddress(value) : ""
     if (address.startsWith("#") && address.length > 1) properties[key] = `#${renameId(address.slice(1))}`
   }
-  for (const key of REFERENCES)
-    if (typeof properties[key] === "string") properties[key] = renameReferences(properties[key])
+  // The browser reads these as CSS: the stylesheet's value policy, url() only to the message's own
+  // elements. A value the policy refuses goes.
+  for (const key of PRESENTATION_URLS) {
+    const value = properties[key]
+    if (value === undefined) continue
+    const cleaned = typeof value === "string" ? cleanPresentation(value) : null
+    if (cleaned === null) delete properties[key]
+    else properties[key] = cleaned
+  }
   if (typeof properties.style === "string") {
     const cleaned = cleanStyle(properties.style, mediaScope)
     blocked ||= cleaned.blocked
-    if (cleaned.style) properties.style = cleaned.style
+    // An object, not text: the renderer hands it to React as it is, and React sets each
+    // property on its own, so nothing reads the style's text again.
+    if (cleaned.style) properties.style = cleaned.style as unknown as string
     else delete properties.style
   }
   // Images: `data:` loads (it makes no request); harden captions the rest as blocked.
