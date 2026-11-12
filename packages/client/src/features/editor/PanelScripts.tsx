@@ -1,3 +1,4 @@
+import { ExternalMediaChoice } from "../chat/externalMedia.tsx"
 // A card's or preset's panel permissions (spec/HTML-MESSAGES.md §3.4, §3.5): "Run panel scripts"
 // and, once they run, "Let panels use the internet". Only SetHtmlApproval changes them, never
 // a draft, an import or a merge (`html_scripts_approved`, `html_network_approved`).
@@ -43,6 +44,12 @@ function PanelScripts({ store, holder }: { store: EditorStore; holder: "card" | 
       <CardHeader title="Panels" />
       <div className="flex flex-col gap-3">
         <ErrorAlert error={error} />
+        {holder === "card" && snapshot && (
+          <ExternalMediaChoice
+            target={{ _tag: "Card", id: snapshot.ref.entityId }}
+            label="Images from other sites from this card"
+          />
+        )}
         <Switch
           checked={scripts}
           disabled={pending || snapshot === null}

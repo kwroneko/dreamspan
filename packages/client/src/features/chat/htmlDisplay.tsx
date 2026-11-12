@@ -1,7 +1,7 @@
 // HTML in messages, for the chat view (spec/HTML-MESSAGES.md): the viewer's "Show HTML as
 // formatting" for the message renderer, and the chat's card styles in one constructed
 // stylesheet, kept from every message in the loaded window (ui/html/messageHtml.ts).
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react"
 import { Switch } from "../../ui/Choice.tsx"
 import {
   HtmlChatContext,
@@ -10,6 +10,7 @@ import {
   MessageStyles,
   type HtmlChat
 } from "../../ui/html/messageHtml.ts"
+import { useExternalMediaRevision } from "./externalMedia.tsx"
 import { FrameSlots } from "../../ui/html/frames.ts"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -18,10 +19,11 @@ import type { ChatSurfaceProps } from "./presentation.tsx"
 
 type Entries = ReadonlyArray<{ readonly key: string; readonly text: string }>
 /** The viewer's setting and a stylesheet adopted while mounted, holding `entries`' styles. */
-function useHtml(entries: Entries) {
+function useHtml(entries: Entries, mediaRevision = "") {
   const { htmlFormatting: html, panelDepth } = useViewPrefs().prefs
   const settings = useMemo(() => ({ html, panelDepth }), [html, panelDepth])
   const [chat] = useState<HtmlChat>(() => ({ styles: new MessageStyles(), frames: new FrameSlots() }))
+  useLayoutEffect(() => chat.styles.clearReports(), [chat, mediaRevision])
   useEffect(() => chat.styles.attach(), [chat])
   useEffect(() => chat.styles.setLoaded(html ? entries : []), [chat, html, entries])
   return { settings, chat }
@@ -32,7 +34,8 @@ export function HtmlProvider({ view, children }: ChatSurfaceProps) {
     () => view.entries.map((entry) => ({ key: entry.slotId, text: entry.version.content })),
     [view.entries]
   )
-  const { settings, chat } = useHtml(entries)
+  const revision = useExternalMediaRevision()
+  const { settings, chat } = useHtml(entries, revision)
   return (
     <HtmlSettingsContext value={settings}>
       <HtmlChatContext value={chat}>{children}</HtmlChatContext>

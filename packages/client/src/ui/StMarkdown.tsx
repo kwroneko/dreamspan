@@ -9,6 +9,7 @@ import {
   type ComponentProps
 } from "react"
 import { diff } from "@codemirror/merge"
+import rehypeRaw from "rehype-raw"
 import {
   Block,
   type BlockProps,
@@ -17,19 +18,19 @@ import {
   parseMarkdownIntoBlocks,
   Streamdown
 } from "streamdown"
-import rehypeRaw from "rehype-raw"
 import { fixMarkdownMapped, stFormatting } from "./stFormatting.ts"
 import { MESSAGE_SCOPE, scopeStyles } from "./html/css.ts"
 import { BlockedMediaNote, htmlComponents, MediaBlocked } from "./html/HtmlParts.tsx"
 import {
   extractStyles,
+  hasImageSyntax,
   HtmlChatContext,
   HtmlMessageContext,
   HtmlSettingsContext,
   setStyleScoper
 } from "./html/messageHtml.ts"
 import { effectiveSchema, htmlPartsRevision, subscribeHtmlParts } from "./html/parts.ts"
-import { htmlFinish, htmlMark, htmlPrepare, htmlSanitize, urlAddress } from "./html/rehypeHtml.ts"
+import { htmlFinish, htmlMark, htmlPrepare, htmlRaw, htmlSanitize, urlAddress } from "./html/rehypeHtml.ts"
 import type { MessageTextProps } from "./Markdown.tsx"
 import { withDefinitions } from "./referenceDefinitions.ts"
 import { sourcePositions, type SourceChar, type PositionedNode } from "./sourcePositions.ts"
@@ -73,11 +74,12 @@ function hardenWithPositions(options: unknown) {
 setStyleScoper((styles) => scopeStyles(styles).css)
 
 type Plugins = NonNullable<ComponentProps<typeof Streamdown>["rehypePlugins"]>
-const hardening = (allowDataImages: boolean) => [
+const hardening = (allowDataImages: boolean, media = false) => [
   hardenWithPositions,
   {
     allowedLinkPrefixes: ["*"],
-    allowedImagePrefixes: [],
+    defaultOrigin: typeof location === "undefined" ? "https://message.invalid" : location.origin,
+    allowedImagePrefixes: media ? ["/media/external?"] : [],
     allowDataImages,
     blockedImageClass: "md-blocked",
     blockedLinkClass: "md-blocked"
@@ -90,14 +92,17 @@ const rehypePlugins = [defaultRehypePlugins.sanitize!, hardening(false)] as Plug
  * re-keys Streamdown's processor cache when a part is replaced; `block` keeps the document
  * blocks of different blocks apart. `data:` images load: they make no request.
  */
-const htmlPlugins = (parts: number, block: number) =>
+const htmlPlugins = (parts: number, block: number, mediaScope: string | null) =>
   [
     htmlMark,
-    rehypeRaw,
+    // Streamdown keeps raw HTML as HTML only when rehype-raw is in the list (it compares the
+    // plugin); off here, so unified skips it and htmlRaw parses in its place.
+    [rehypeRaw, false],
+    htmlRaw,
     [htmlPrepare, { parts }],
     [htmlSanitize, { parts }],
-    [htmlFinish, { parts, block }],
-    hardening(true)
+    [htmlFinish, { parts, block, mediaScope }],
+    hardening(true, mediaScope !== null)
   ] as Plugins
 
 function Link({ node: _node, ...props }: ComponentProps<"a"> & { node?: unknown; xlinkHref?: unknown }) {
@@ -127,18 +132,18 @@ const htmlRemarkPlugins = [
 ] as typeof remarkPlugins
 const SourceBlocks = createContext<ReadonlyArray<string>>([])
 /** How this text's blocks render HTML: null shows it as text. */
-const BlockHtml = createContext<{ readonly parts: number } | null>(null)
+const BlockHtml = createContext<{ readonly parts: number; readonly mediaScope: string | null } | null>(null)
 
 function PositionedBlock(props: BlockProps) {
   const key = useContext(SourceBlocks)[props.index] ?? "[]"
   const html = useContext(BlockHtml)
   // A block without a tag has no HTML to parse: the plain pipeline renders it the same, cheaper.
-  const parse = html !== null && props.content.includes("<")
+  const parse = html !== null && (props.content.includes("<") || hasImageSyntax(props.content))
   // Streamdown caches processors by plugin name + serialized options, not function identity.
   const plugins = useMemo(
     () =>
       [
-        ...(parse ? htmlPlugins(html.parts, props.index) : rehypePlugins),
+        ...(parse ? htmlPlugins(html.parts, props.index, html.mediaScope) : rehypePlugins),
         [sourcePositions, { offsets: JSON.parse(key) as SourceChar[] }]
       ] as Plugins,
     [key, parse, html, props.index]
@@ -191,11 +196,18 @@ export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
   const chat = useContext(HtmlChatContext)
   const parts = useSyncExternalStore(subscribeHtmlParts, htmlPartsRevision, htmlPartsRevision)
   // Disabling the registered schema (`html.inline`) shows HTML as text, as the switch does.
-  const html = useMemo(() => (settings.html && effectiveSchema() ? { parts } : null), [settings.html, parts])
+  const mediaScope = message?.media?.scope ?? null
+  const html = useMemo(
+    () => (settings.html && effectiveSchema() ? { parts, mediaScope } : null),
+    [settings.html, parts, mediaScope]
+  )
   // A message body's `<style>`s join the chat's stylesheet (ui/html/messageHtml.ts).
-  const styles = useMemo(() => (html && message ? scopeStyles(extractStyles(text)) : null), [html, message, text])
+  const styles = useMemo(
+    () => (html && message ? scopeStyles(extractStyles(text), mediaScope) : null),
+    [html, message, text, mediaScope]
+  )
   useEffect(() => {
-    if (styles && message && chat) chat.styles.report(message.key, styles.css)
+    if (styles && message && chat) chat.styles.report(message.key, styles.css, styles.media)
   }, [styles, message, chat])
   const [blockedText, setBlockedText] = useState<string | null>(null)
   const reportBlocked = useCallback(() => setBlockedText(text), [text])
@@ -223,7 +235,7 @@ export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
     return { fixed: normalized, renderedBlocks: [...withDefinitions(normalized, parsed)], sourceBlocks }
   }, [text, sourceText])
   const blocks = useCallback(() => renderedBlocks, [renderedBlocks])
-  const blocked = html !== null && (blockedText === text || styles?.blocked === true)
+  const blocked = html !== null && mediaScope === null && (blockedText === text || styles?.blocked === true)
   return (
     <SourceBlocks.Provider value={sourceBlocks}>
       <BlockHtml value={html}>
