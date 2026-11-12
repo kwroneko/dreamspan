@@ -126,6 +126,32 @@ export const summaryOf = (item: Summary, origin = CARDEX_ORIGIN): AdapterSummary
   }
 }
 
+/** Optional detail metadata; never use the envelope's character text as an import. */
+export const detailMetadata = (raw: unknown, origin = CARDEX_ORIGIN): Pick<AdapterSummary, "tokenCounts"> => {
+  if (!isRecord(raw)) return {}
+  const counts = isRecord(raw.card) && isRecord(raw.card.token_counts) ? raw.card.token_counts : null
+  const number = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0
+  const fields =
+    counts && isRecord(counts.fields)
+      ? (Object.fromEntries(Object.entries(counts.fields).filter(([, value]) => number(value))) as Record<
+          string,
+          number
+        >)
+      : {}
+  if (counts && number(counts.mes_example)) fields.mes_example = counts.mes_example
+  return {
+    ...(counts && typeof counts.model === "string"
+      ? {
+          tokenCounts: {
+            model: counts.model,
+            fields,
+            greetings: Array.isArray(counts.greetings) ? counts.greetings.filter(number) : []
+          }
+        }
+      : {})
+  }
+}
+
 const summaries = (items: unknown, origin: string) =>
   Array.isArray(items) ? items.flatMap((item) => summaryOf(item as Summary, origin) ?? []) : null
 
@@ -637,7 +663,12 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
                 () => download("json")
               )
             )
-        return { bytes: file.bytes, fileName: fileNameOf(file, remoteId), summary }
+        const detail = yield* getJson(http, api(`/cards/${encodeURIComponent(remoteId)}`))
+        return {
+          bytes: file.bytes,
+          fileName: fileNameOf(file, remoteId),
+          summary: { ...summary, ...detailMetadata(detail, origin) }
+        }
       }),
     image: (http, ref) =>
       Effect.suspend(() => {

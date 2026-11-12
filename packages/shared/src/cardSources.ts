@@ -112,6 +112,14 @@ export const RemoteSummary = Schema.Struct({
   /** Its content rating, as the source words it; only when it isn't the source's default (safe) one. */
   rating: Schema.optionalKey(Schema.String),
   tokens: Schema.optionalKey(Schema.Number),
+  /** Archive estimates, labelled by tokenizer; separate from locally computed counts. */
+  tokenCounts: Schema.optionalKey(
+    Schema.Struct({
+      model: Schema.String,
+      fields: Schema.Record(Schema.String, Schema.Number),
+      greetings: Schema.Array(Schema.Number)
+    })
+  ),
   thumb: Schema.optionalKey(Schema.String),
   image: Schema.optionalKey(Schema.String),
   version: RemoteVersion,

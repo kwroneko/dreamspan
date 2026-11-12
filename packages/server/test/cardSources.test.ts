@@ -31,7 +31,11 @@ const bob = { "Remote-User": "src-bob" }
 const config = testConfig({ authMode: "proxy" })
 // The real cardex adapter against the fake, with a key it may take: cardex itself takes none,
 // but this is where the key's write-only path is tested.
-const sources = CardSources.layerWith({ adapters: [{ ...fakeCardexAdapter(archive), key: "optional" }] })
+// Functional RPC tests use Effect's virtual clock. Keep the synthetic archive's burst
+// above this suite's request count; the real rate and waiting/backoff are tested below.
+const sources = CardSources.layerWith({
+  adapters: [{ ...fakeCardexAdapter(archive), key: "optional", rate: { perSecond: 10, burst: 1000 } }]
+})
 const testServer = serverLayer(config, undefined, undefined, sources)
 const base = Effect.map(serverPort, (port) => `http://127.0.0.1:${port}`)
 

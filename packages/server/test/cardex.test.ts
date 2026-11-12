@@ -14,6 +14,7 @@ import {
   cardSourceSetup,
   cursorRefused,
   downloadModeOf,
+  detailMetadata,
   searchParams,
   summaryOf
 } from "../src/sources/cardex.ts"
@@ -383,6 +384,33 @@ describe("v1 as card sources", () => {
     })
   )
 
+  it.effect("opened cards retain the archive's per-field counts, labelled by its tokenizer", () =>
+    Effect.gen(function* () {
+      const card = yield* fakeCardexAdapter(archive).card(direct(), archive.cards[0]!.slug)
+      assert.strictEqual(card.summary.tokenCounts?.model, "o200k_base")
+      assert.deepStrictEqual(card.summary.tokenCounts?.fields, {
+        description: 40,
+        personality: 9,
+        scenario: 12,
+        creator_notes: 7,
+        mes_example: 0
+      })
+      assert.deepStrictEqual(card.summary.tokenCounts?.greetings, [18, 15])
+      assert.deepStrictEqual(
+        detailMetadata({
+          card: {
+            token_counts: {
+              model: "o200k_base",
+              fields: { name: -1, description: "text", scenario: 12 },
+              greetings: [0, -1, "text"]
+            }
+          }
+        }).tokenCounts?.fields,
+        { scenario: 12 }
+      )
+    })
+  )
+
   it("a batch URL is in v1's canonical form: sorted, without duplicates, joined by %2C", () => {
     assert.strictEqual(batchUrl(["b-2", "a-1", "b-2"]).href, `${CARDEX_ORIGIN}/api/v1/cards/batch?ids=a-1%2Cb-2`)
   })
@@ -511,7 +539,7 @@ describe("the adapter against the fake archive", () => {
       assert.strictEqual(json.fileName, `${charx.slug}.json`)
       assert.deepStrictEqual(
         seen.map((p) => new URLSearchParams(p.split("?")[1]).get("mode")),
-        [null, "mirrored", "json"]
+        [null, "mirrored", "json", null]
       )
       const missing = yield* Effect.flip(old.card(http, "no-such-card"))
       assert.strictEqual(missing.reason, "not_found")

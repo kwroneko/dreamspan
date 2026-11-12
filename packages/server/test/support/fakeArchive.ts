@@ -824,7 +824,15 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
           nsfw: c.nsfw,
           tags: c.tags,
           path: `/c/${c.slug}`,
-          content_hash: c.sha256
+          content_hash: c.sha256,
+          token_counts: {
+            model: "o200k_base",
+            fields: { description: 40, personality: 9, scenario: 12, creator_notes: 7 },
+            mes_example: 0,
+            greetings: [18, 15],
+            permanent: 61,
+            total_budget_estimate: c.tokens
+          }
         },
         creator: summary(c).creator,
         files: [
