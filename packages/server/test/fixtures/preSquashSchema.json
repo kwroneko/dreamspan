@@ -686,6 +686,12 @@
     },
     {
       "type": "index",
+      "name": "state_events_workshop_attached",
+      "tbl_name": "state_events",
+      "sql": "CREATE INDEX state_events_workshop_attached ON state_events(json_extract(value_json, '$.chat'), chat_id) WHERE key = 'workshop.attached'"
+    },
+    {
+      "type": "index",
       "name": "summaries_chat_level",
       "tbl_name": "summaries",
       "sql": "CREATE INDEX summaries_chat_level ON summaries(chat_id, level)"

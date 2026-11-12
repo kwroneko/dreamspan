@@ -77,9 +77,16 @@ export class WorkshopApi extends RpcGroup.make(
     success: Schema.Array(WorkshopCapability),
     error: Schema.Union([NotFound, ServerError])
   }),
+  /** `attachTo`: a side chat beside that story, reading it through its tools (spec/WORKSHOP.md §4). */
   Rpc.make("CreateWorkshop", {
-    payload: { title: Schema.optionalKey(Schema.String) },
+    payload: { title: Schema.optionalKey(Schema.String), attachTo: Schema.optionalKey(Chat.fields.id) },
     success: Chat,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** The workshops beside a story, newest first. */
+  Rpc.make("ListAttachedWorkshops", {
+    payload: { chatId: Chat.fields.id },
+    success: Schema.Array(Chat),
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("ListRolloutEffects", {

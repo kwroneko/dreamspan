@@ -40,7 +40,7 @@ const ownedRollout = (sql: Sql, userId: string, rolloutId: string) =>
     return row
   })
 
-const writeGrant = (sql: Sql, userId: string, chatId: string, capability: string, mode: string | null) =>
+export const writeGrant = (sql: Sql, userId: string, chatId: string, capability: string, mode: string | null) =>
   mode === null
     ? sql`DELETE FROM workshop_grants WHERE chat_id = ${chatId} AND capability = ${capability} AND target = ''`
     : sql`INSERT INTO workshop_grants ${sql.insert({

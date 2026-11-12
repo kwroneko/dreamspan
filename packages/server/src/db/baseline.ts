@@ -1723,6 +1723,9 @@ export const baseline: ReadonlyArray<string> = [
     ) BEGIN SELECT RAISE(ABORT, 'summary endpoints must form its declared primary-parent chain'); END`,
   `CREATE INDEX state_events_participants ON state_events(json_extract(value_json, '$.entity'), chat_id)
       WHERE key IN ('participant.join', 'card.swap') AND superseded_by_changeset IS NULL`,
+  // The workshops beside a story (spec/WORKSHOP.md §4): each names it in its own chat-wide event.
+  `CREATE INDEX state_events_workshop_attached ON state_events(json_extract(value_json, '$.chat'), chat_id)
+      WHERE key = 'workshop.attached'`,
   `CREATE INDEX drafts_speaker_entity_id ON drafts(speaker_entity_id) WHERE speaker_entity_id IS NOT NULL`,
   `CREATE TRIGGER drafts_speaker_entity_id_owner BEFORE INSERT ON drafts
       WHEN NEW.speaker_entity_id IS NOT NULL
