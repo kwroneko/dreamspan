@@ -13,6 +13,7 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import type { MacroEnvironment } from "./macros.ts"
 import type { ScriptRunner } from "./regex.ts"
 import type { RewriteOptions, ScriptSource } from "./scriptSources.ts"
+import type { Knowledge } from "./knowledge.ts"
 import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import type { ScriptRef } from "@rp/shared/regexScripts.ts"
 import type { Composition, Stability, StMessage } from "./st.ts"
@@ -246,7 +247,7 @@ export interface ProjectedEntry {
 export interface Assembly {
   contextBudget?: ContextSnapshot["contextBudget"]
   /** The chat's context view and whose knowledge filters the history (`knowledge` stage). */
-  knowledge?: import("./knowledge.ts").Knowledge
+  knowledge?: Knowledge
   lcm?: SummaryLayer
   lcmPieces?: ReadonlyArray<number>
   lcmFailurePieces?: ReadonlyArray<{ readonly from: number; readonly to: number; readonly piece: number }>

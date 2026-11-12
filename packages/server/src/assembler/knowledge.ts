@@ -32,7 +32,7 @@ export type ContextViewRegistry = Registry<ContextView>
 
 export const makeContextViewRegistry = (): ContextViewRegistry => makeRegistry<ContextView>()
 
-export const CONTEXT_VIEW_DEFAULT = "shared"
+const CONTEXT_VIEW_DEFAULT = "shared"
 
 /** One shared context (the default): every reply sees the whole path. */
 const sharedView: ContextView = {
