@@ -244,7 +244,8 @@ const HOST = /^[A-Za-z0-9.-]+(?::\d{1,5})?$|^\[[0-9A-Fa-f:.]+\](?::\d{1,5})?$/
  * which make no request), so text can't report on the chat through an image URL (the
  * message renderer blocks them as well). Connections go to the app and its WebSocket,
  * on the host the browser used; `'self'` covers the WebSocket in current browsers, the
- * explicit origins cover older ones.
+ * explicit origins cover older ones. No form submits natively (every form of the app's handles
+ * its submit), so none may: a form that slipped past sanitizing can't post to the app's routes.
  */
 const contentSecurityPolicy = (host: string | undefined) => {
   const socket = host !== undefined && HOST.test(host) ? ` ws://${host} wss://${host}` : ""
@@ -257,7 +258,7 @@ const contentSecurityPolicy = (host: string | undefined) => {
     `connect-src 'self'${socket}`,
     "object-src 'none'",
     "base-uri 'none'",
-    "form-action 'self'",
+    "form-action 'none'",
     "frame-ancestors 'none'"
   ].join("; ")
 }
