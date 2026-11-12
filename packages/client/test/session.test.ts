@@ -507,7 +507,7 @@ describe("ChatSession", () => {
     s.dispose()
   })
 
-  it("reads a slot another fork now shows once per event, never again on replay", async () => {
+  it("bounds reads of another fork's slot, including overlapping events and replay", async () => {
     // A new version of a message that another fork shows (a split): its slot events say so, and
     // this fork reads the slot again as it shows it. Events that arrive while those reads are in
     // flight are replayed when each lands; a replay that read again kept a read in flight
@@ -532,9 +532,172 @@ describe("ChatSession", () => {
       answers[answered++]!(asShownHere)
       await new Promise((settle) => setTimeout(settle, 0))
     }
-    // The opening read, then one for each of the two events: no more.
-    expect(answers.length).toBe(3)
+    // Opening, two event reads, and one replay for the event during the first read.
+    expect(answers.length).toBe(4)
     expect(s.snapshot().entries[0]!.version.id).toBe(first.version.id)
+    s.dispose()
+  })
+
+  it("repairs a stale window that lands after another fork's slot refresh", async () => {
+    const { s, answers, receive } = session()
+    const own = (entries: Array<PathEntry>) => ({ ...window(entries), forkId: "root" as ForkId })
+    const opening = s.open(null)
+    answers[0]!(own([first, second]))
+    await opening
+    const older = s.open(null)
+    receive({ _tag: "Slot", entry: { ...first, shownForkId: "split" as ForkId, versionCount: 2 } })
+    const fresh = { ...first, shownForkId: "root" as ForkId, versionCount: 2, rowVersion: 2 }
+    answers[2]!(own([fresh]))
+    await new Promise((settle) => setTimeout(settle, 0))
+    expect(s.snapshot().entries[0]!.versionCount).toBe(2)
+    answers[1]!(own([first, second]))
+    await older
+    for (let i = 3; i < answers.length && i < 12; i++) {
+      answers[i]!(own([fresh]))
+      await new Promise((settle) => setTimeout(settle, 0))
+    }
+    expect(answers.length).toBeLessThanOrEqual(4)
+    expect(s.snapshot().entries[0]!.versionCount).toBe(2)
+    s.dispose()
+  })
+
+  it("bounds reloads for an unknown insertion without a position, even when outside the returned window", async () => {
+    const { s, answers, receive } = session()
+    const opening = s.open(null)
+    answers[0]!(window([first, second]))
+    await opening
+    const older = s.open(null)
+    receive({ _tag: "Slot", entry: { ...entry("insert", "s1", first.version), inserted: true } })
+    for (let i = 1; i < answers.length && i < 12; i++) {
+      answers[i]!(window([first, second]))
+      await new Promise((settle) => setTimeout(settle, 0))
+    }
+    await older
+    expect(answers.length).toBeLessThanOrEqual(4)
+    s.dispose()
+  })
+
+  for (const end of ["dispose", "switch"] as const)
+    it(`ignores a slot refresh after ${end}`, async () => {
+      const { s, answers, receive } = session()
+      const opening = s.open(null)
+      answers[0]!({ ...window([first, second]), forkId: "root" as ForkId })
+      await opening
+      receive({ _tag: "Slot", entry: { ...first, shownForkId: "split" as ForkId } })
+      if (end === "dispose") s.dispose()
+      else s.showFork("next" as ForkId, null)
+      const before = s.snapshot()
+      answers[1]!({ ...window([{ ...first, rowVersion: 100, versionCount: 100 }]), forkId: "root" as ForkId })
+      await new Promise((settle) => setTimeout(settle, 0))
+      expect(s.snapshot()).toBe(before)
+      if (end === "switch") {
+        answers[2]!({ ...window([first, second]), forkId: "next" as ForkId })
+        await new Promise((settle) => setTimeout(settle, 0))
+      }
+      s.dispose()
+    })
+
+  for (const when of ["before", "during", "after"] as const)
+    for (const failed of [false, true])
+      it(`settles several other-fork slots ${when} a ${failed ? "failed" : "successful"} read`, async () => {
+        const { s, answers, receive } = session()
+        const own = (entries: Array<PathEntry>) => ({ ...window(entries), forkId: "root" as ForkId })
+        const opening = s.open(null)
+        answers[0]!(own([first, second]))
+        await opening
+        const changed = [first, second].map((e) => ({
+          ...e,
+          shownForkId: "root" as ForkId,
+          rowVersion: 2,
+          versionCount: 3
+        }))
+        const events = () => {
+          // A reconnect may repeat the same server event: it is a new delivery, not a
+          // local replay. Neither repeated delivery nor multiple messages may spin.
+          for (const e of [first, second, first])
+            receive({ _tag: "Slot", entry: { ...e, shownForkId: "split" as ForkId, versionCount: 3 } })
+        }
+        if (when === "before") events()
+        const index = answers.length
+        const read = s.open(null)
+        if (when === "during") events()
+        // Failed reads don't update the window; their event buffers still have to end.
+        answers[index]!(failed ? (null as unknown as PathWindow) : own(when === "before" ? changed : [first, second]))
+        await read
+        if (when === "after") events()
+        let answered = 1
+        while (answered < answers.length && answered < 30) {
+          if (answered !== index) answers[answered]!(own(changed))
+          answered++
+          await new Promise((settle) => setTimeout(settle, 0))
+        }
+        expect(answers.length).toBeLessThanOrEqual(12)
+        expect(s.snapshot().entries.map((e) => [e.version.id, e.versionCount])).toEqual([
+          [first.version.id, 3],
+          [second.version.id, 3]
+        ])
+        expect((s as unknown as { readEvents: Set<unknown> }).readEvents.size).toBe(0)
+        s.dispose()
+      })
+
+  it("refreshes a slot first loaded by a window after its other-fork event arrived", async () => {
+    const { s, answers, receive } = session()
+    const own = (entries: Array<PathEntry>) => ({ ...window(entries), forkId: "root" as ForkId })
+    const opening = s.open(null)
+    answers[0]!(own([second]))
+    await opening
+    const read = s.open(first.slotId)
+    receive({ _tag: "Slot", entry: { ...first, shownForkId: "split" as ForkId, versionCount: 2 } })
+    expect(answers).toHaveLength(2)
+    answers[1]!(own([first, second]))
+    await read
+    expect(answers).toHaveLength(3)
+    answers[2]!(own([{ ...first, shownForkId: "root" as ForkId, rowVersion: 2, versionCount: 2 }]))
+    await new Promise((settle) => setTimeout(settle, 0))
+    expect(s.snapshot().entries[0]!.versionCount).toBe(2)
+    s.dispose()
+  })
+
+  it("ends a failed slot refresh, then recovers on reconnect with repeated server events", async () => {
+    const { s, answers, receive } = session()
+    const own = (entries: Array<PathEntry>) => ({ ...window(entries), forkId: "root" as ForkId })
+    const opening = s.open(null)
+    answers[0]!(own([first, second]))
+    await opening
+    const event = { _tag: "Slot", entry: { ...first, shownForkId: "split" as ForkId } } as const
+    receive(event)
+    answers[1]!(null as unknown as PathWindow)
+    await new Promise((settle) => setTimeout(settle, 0))
+    expect(answers).toHaveLength(2)
+    expect((s as unknown as { readEvents: Set<unknown> }).readEvents.size).toBe(0)
+    // The real subscription calls reload on its second Hello.
+    ;(s as unknown as { hellos: number }).hellos = 1
+    receive({ _tag: "Hello", live: [] })
+    receive(event)
+    const fresh = { ...first, rowVersion: 2, versionCount: 2, shownForkId: "root" as ForkId }
+    let answered = 2
+    while (answered < answers.length && answered < 12) {
+      answers[answered++]!(own([fresh, second]))
+      await new Promise((settle) => setTimeout(settle, 0))
+    }
+    expect(answers.length).toBeLessThanOrEqual(5)
+    expect(s.snapshot().entries[0]!.versionCount).toBe(2)
+    s.dispose()
+  })
+
+  it("does not re-read a slot snapshot returned from a fallback fork", async () => {
+    const { s, answers, receive } = session()
+    const opening = s.open(null)
+    answers[0]!({ ...window([first, second]), forkId: "root" as ForkId })
+    await opening
+    receive({ _tag: "Slot", entry: { ...first, shownForkId: "split" as ForkId } })
+    let answered = 1
+    while (answered < answers.length && answered < 12) {
+      answers[answered++]!({ ...window([{ ...first, shownForkId: "split" as ForkId }]), forkId: "split" as ForkId })
+      await new Promise((settle) => setTimeout(settle, 0))
+    }
+    expect(answers).toHaveLength(2)
+    expect(s.snapshot().forkId).toBe("root")
     s.dispose()
   })
 
