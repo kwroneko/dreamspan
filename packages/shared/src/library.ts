@@ -33,6 +33,8 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   modelName: Schema.optionalKey(Schema.String),
   /** For lorebooks, how many entries its head revision has. */
   lorebookEntries: Schema.optionalKey(Schema.Int),
+  /** For lorebooks imported from a file, the file's name (what a card's world is matched against). */
+  lorebookSource: Schema.optionalKey(Schema.String),
   filterData: Schema.optionalKey(Schema.Struct({ name: Schema.String, tags: Schema.Array(Schema.String) })),
   headRevisionId: RevisionId,
   /** What it merges from (its own imports, else a preset's or lorebook's parent) moved on since the last merge. */

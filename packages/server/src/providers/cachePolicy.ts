@@ -150,6 +150,12 @@ export const documentedCacheMinimum = (target: Target): number | null => {
   // bedrockSource: 1,024 per marker for GPT-5.6 and later, and for earlier models' automatic cache.
   if (provider === "amazon-bedrock" && bedrockOpenAI(model, target.api)) return 1024
   if (provider === "openrouter" && /^openai\//.test(model)) return 1024
+  // Google generateContent implicit caching, read 2026-11-12. No minimum is
+  // inferred for unlisted models, including Flash-Lite aliases.
+  if (provider === "google" && target.api === "google-generative-ai") {
+    if (/^gemini-2\.5-(?:flash|pro)(?:-\d+)?$/.test(model)) return 2048
+    if (/^gemini-(?:4-(?:argon|carbon)|3\.[68]-flash|3\.1-pro-preview)(?:-\d+)?$/.test(model)) return 4096
+  }
   // routerSource: Gemini Pro 4,096, Flash 1,024.
   if (provider === "openrouter" && /^google\/gemini/.test(model)) return /pro/.test(model) ? 4096 : 1024
   return null

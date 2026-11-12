@@ -4,8 +4,8 @@
 //
 // What v1 gives and how it maps:
 // - `/api/v1/capabilities` describes the filters by name, type and allowed values, with no
-//   labels; this adapter offers the ones that suit a character browser, labelled here, and
-//   only those the archive still lists.
+//   labels on older replies; this adapter uses the labels when present, and offers
+//   every card criterion the archive lists.
 // - `/api/v1/search` pages two ways: text search (`mode=fts`) with an opaque `next_cursor`,
 //   semantic search with page numbers (240 results at most, no cursor, no sort). The page token
 //   handed out is `c:<cursor>` or `p:<n>`, so the client never needs to know which. A cursor
@@ -65,6 +65,9 @@ interface Summary {
 interface Capabilities {
   readonly filters: ReadonlyArray<{
     readonly name: string
+    readonly label?: string
+    readonly description?: string
+    readonly allowed_value_labels?: ReadonlyArray<{ readonly value: string; readonly label: string }>
     readonly type: string
     readonly allowed_values?: ReadonlyArray<string> | null
     readonly default?: unknown
@@ -123,6 +126,59 @@ export const summaryOf = (item: Summary, origin = CARDEX_ORIGIN): AdapterSummary
   }
 }
 
+/** Optional detail metadata; never use the envelope's character text as an import. */
+export const detailMetadata = (
+  raw: unknown,
+  origin = CARDEX_ORIGIN
+): Pick<AdapterSummary, "tokenCounts" | "earlierOrigins"> => {
+  if (!isRecord(raw)) return {}
+  const counts = isRecord(raw.card) && isRecord(raw.card.token_counts) ? raw.card.token_counts : null
+  const number = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0
+  const fields =
+    counts && isRecord(counts.fields)
+      ? (Object.fromEntries(Object.entries(counts.fields).filter(([, value]) => number(value))) as Record<
+          string,
+          number
+        >)
+      : {}
+  if (counts && number(counts.mes_example)) fields.mes_example = counts.mes_example
+  const earlierOrigins = Array.isArray(raw.earlier_origins)
+    ? raw.earlier_origins.filter(isRecord).flatMap((entry) => {
+        const listing = isRecord(entry.listing) ? entry.listing : null
+        const ref =
+          listing &&
+          (typeof listing.url === "string"
+            ? listing.url
+            : typeof listing.path === "string"
+              ? listing.path
+              : typeof listing.slug === "string"
+                ? `/c/${encodeURIComponent(listing.slug)}`
+                : undefined)
+        const url = onOrigin(origin, ref)
+        if (!url) return []
+        const site =
+          typeof listing?.source_label === "string"
+            ? listing.source_label
+            : typeof listing?.source === "string"
+              ? (CARDEX_SITE_LABELS[listing.source] ?? listing.source)
+              : "archive"
+        return [{ label: `Earlier listing on ${site}`, url }]
+      })
+    : []
+  return {
+    ...(counts && typeof counts.model === "string"
+      ? {
+          tokenCounts: {
+            model: counts.model,
+            fields,
+            greetings: Array.isArray(counts.greetings) ? counts.greetings.filter(number) : []
+          }
+        }
+      : {}),
+    ...(earlierOrigins.length ? { earlierOrigins } : {})
+  }
+}
+
 const summaries = (items: unknown, origin: string) =>
   Array.isArray(items) ? items.flatMap((item) => summaryOf(item as Summary, origin) ?? []) : null
 
@@ -144,8 +200,25 @@ export const downloadModeOf = (listed: unknown): (typeof DOWNLOAD_MODES)[number]
 export const cursorRefused = (failure: SourceFailed) =>
   failure.reason === "bad_response" && failure.code === "invalid_cursor"
 
-/** The page token handed out: `c:<cursor>` (text search) or `p:<n>` (semantic search). */
-const pageOf = (token: string | null): { readonly cursor: string } | { readonly page: number } | null => {
+/** Page tokens: `c:<cursor>`, `s:<encoded sort/cursor>` after substitution, or semantic `p:<n>`. */
+const pageOf = (
+  token: string | null
+): { readonly cursor: string; readonly sort?: string } | { readonly page: number } | null => {
+  if (token?.startsWith("s:")) {
+    try {
+      const value: unknown = JSON.parse(Buffer.from(token.slice(2), "base64url").toString("utf8"))
+      if (
+        isRecord(value) &&
+        typeof value.sort === "string" &&
+        /^[a-z_]{1,50}$/.test(value.sort) &&
+        typeof value.cursor === "string" &&
+        value.cursor.length > 0
+      )
+        return { cursor: value.cursor, sort: value.sort }
+    } catch {
+      /* Not a continuation issued by this adapter. */
+    }
+  }
   if (token?.startsWith("c:") && token.length > 2) return { cursor: token.slice(2) }
   const page = token?.startsWith("p:") ? Number(token.slice(2)) : Number.NaN
   return Number.isInteger(page) && page >= 1 ? { page } : null
@@ -154,12 +227,18 @@ const pageOf = (token: string | null): { readonly cursor: string } | { readonly 
 // The labels cardex's descriptors don't carry. A filter it no longer lists is left out.
 const RATING_LABELS: Record<string, string> = { exclude: "Safe", include: "Everything", only: "Mature only" }
 const MODE_LABELS: Record<string, string> = { fts: "Words", semantic: "Meaning" }
-const SORTS: ReadonlyArray<{ readonly id: string; readonly label: string; readonly needs: ReadonlyArray<string> }> = [
-  { id: "popular", label: "Popular", needs: ["popular"] },
-  { id: "newest", label: "Newest", needs: ["newest", "oldest"] },
-  { id: "name", label: "Name", needs: ["name"] },
-  { id: "tokens", label: "Tokens", needs: ["tokens_desc", "tokens_asc"] },
-  { id: "relevance", label: "Best match", needs: ["relevance"] }
+const SORTS: ReadonlyArray<{
+  readonly id: string
+  readonly label: string
+  readonly needs: ReadonlyArray<string>
+  readonly defaultOrder: string
+}> = [
+  { id: "popular", label: "Popular", needs: ["popular"], defaultOrder: "popular cards" },
+  { id: "newest", label: "Newest", needs: ["newest", "oldest"], defaultOrder: "newest first" },
+  { id: "created", label: "Created", needs: ["created_desc", "created_asc"], defaultOrder: "newest created first" },
+  { id: "name", label: "Name", needs: ["name", "name_desc"], defaultOrder: "A to Z" },
+  { id: "tokens", label: "Tokens", needs: ["tokens_desc", "tokens_asc"], defaultOrder: "most tokens first" },
+  { id: "relevance", label: "Best match", needs: ["relevance"], defaultOrder: "best matches" }
 ]
 /** Our sort and direction as cardex's sort; null leaves it to cardex. */
 const sortParam = (query: SourceQuery) => {
@@ -167,7 +246,9 @@ const sortParam = (query: SourceQuery) => {
     case "popular":
       return "popular"
     case "name":
-      return "name"
+      return query.reverse ? "name_desc" : "name"
+    case "created":
+      return query.reverse ? "created_asc" : "created_desc"
     case "newest":
       return query.reverse ? "oldest" : "newest"
     case "tokens":
@@ -179,6 +260,47 @@ const sortParam = (query: SourceQuery) => {
       return null
   }
 }
+
+const FILTER_LABELS: Record<string, string> = {
+  fields: "Search in",
+  kind: "Kind",
+  not_source: "Exclude sites",
+  any_tags: "Any of these tags",
+  any_author: "Any of these creators",
+  not_author: "Exclude creators",
+  picture: "Picture",
+  added_after: "Added after",
+  added_before: "Added before",
+  created_after: "Created after",
+  created_before: "Created before",
+  deleted_from_source: "Deleted from all sites",
+  deleted_from_any_source: "Deleted from a site",
+  chub_verified: "Chub verified",
+  chub_recommended: "Chub recommended"
+}
+const FILTER_HELP: Record<string, string> = {
+  any_tags:
+    "Use | between alternatives and commas between required groups: fantasy|magic,adventure|mystery. Up to 20 groups.",
+  any_author: "Separate site/name creators with commas. A backslash escapes a comma in a name. Up to 20 creators.",
+  not_author: "Separate site/name creators with commas. A backslash escapes a comma in a name. Up to 20 creators.",
+  picture: "The picture's SHA-256: 64 hexadecimal characters. Finds cards sharing that picture.",
+  added_after: "Date as YYYY-MM-DD, for example 2026-01-01.",
+  added_before: "Date as YYYY-MM-DD, for example 2026-01-01.",
+  created_after: "Date as YYYY-MM-DD, for example 2026-01-01.",
+  created_before: "Date as YYYY-MM-DD, for example 2026-01-01."
+}
+const EXTRA_LISTS = new Set(["fields", "not_source"])
+const EXTRA_TEXT = new Set([
+  "any_tags",
+  "any_author",
+  "not_author",
+  "picture",
+  "added_after",
+  "added_before",
+  "created_after",
+  "created_before"
+])
+const EXTRA_FLAGS = new Set(["deleted_from_source", "deleted_from_any_source", "chub_verified", "chub_recommended"])
 
 export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
   if (!isRecord(raw) || !Array.isArray(raw.filters) || !Array.isArray(raw.sorts)) throw bad()
@@ -219,7 +341,7 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       unit: "tokens",
       min: 0,
       ...(typeof max === "number" ? { max } : {}),
-      about: "cardex leaves out characters under 30 tokens unless you set a minimum."
+      about: `cardex leaves out characters under ${typeof named.get("min_tokens")?.default === "number" ? named.get("min_tokens")!.default : 300} tokens unless you set a minimum.`
     })
   }
   if (named.has("exclude_forks")) filters.push({ id: "exclude_forks", label: "Leave out forks", kind: "toggle" })
@@ -230,7 +352,13 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       label: "Site",
       kind: "choice",
       multi: true,
-      options: sites.map((value) => ({ value, label: CARDEX_SITE_LABELS[value] ?? value })),
+      options: sites.map((value) => ({
+        value,
+        label:
+          CARDEX_SITE_LABELS[value] ??
+          named.get("source")?.allowed_value_labels?.find((v) => v.value === value)?.label ??
+          value
+      })),
       about: "Only cards cardex found on these sites."
     })
   }
@@ -239,8 +367,88 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       id: "author",
       label: "Creator",
       kind: "text",
+      suggestions: { kind: "creators", multiple: false },
       about: "One creator's cards, written as site/name, for example chub/someone."
     })
+  }
+  // Reuse the generic panel's choices, text fields and switches for the remaining v1
+  // criteria. Standalone lorebooks need their own browsing/opening flow; never put one
+  // in a character's draft chat.
+  const handled = new Set([
+    "q",
+    "tags",
+    "not_tags",
+    "nsfw",
+    "min_tokens",
+    "max_tokens",
+    "exclude_forks",
+    "source",
+    "author"
+  ])
+  for (const descriptor of named.values()) {
+    const { name, type, label, description } = descriptor
+    if (handled.has(name)) continue
+    const common = {
+      id: name,
+      label: FILTER_LABELS[name] ?? label ?? name,
+      ...(description ? { about: description } : {})
+    }
+    if (name === "kind") {
+      const options = allowed(name).filter((v) => v === "character" || v === "character_lorebook")
+      if (options.length > 1)
+        filters.push({
+          ...common,
+          kind: "choice",
+          multi: false,
+          options: options.map((value) => ({
+            value,
+            label: value === "character" ? "All characters" : "With a lorebook"
+          }))
+        })
+    } else if (name === "has_cover") {
+      filters.push({
+        ...common,
+        label: "Cover",
+        kind: "choice",
+        multi: false,
+        options: [
+          { value: "true", label: "With a cover" },
+          { value: "false", label: "Any" }
+        ],
+        about: "cardex hides characters without a cover by default. Any includes them too."
+      })
+    } else if (type === "boolean") {
+      filters.push({
+        ...common,
+        kind: "toggle",
+        ...(name.startsWith("chub_")
+          ? {
+              requires: { filterId: "source", values: ["chub"], about: "Choose Chub as the only included site first." },
+              about: "Available when Chub is the only site included."
+            }
+          : {})
+      })
+    } else if ((type === "list" || type === "enum") && allowed(name).length) {
+      filters.push({
+        ...common,
+        kind: "choice",
+        multi: type === "list",
+        options: allowed(name).map((value) => ({
+          value,
+          label:
+            descriptor.allowed_value_labels?.find((v) => v.value === value)?.label ?? CARDEX_SITE_LABELS[value] ?? value
+        }))
+      })
+    } else {
+      filters.push({
+        ...common,
+        kind: "text",
+        ...(["any_author", "not_author"].includes(name)
+          ? { suggestions: { kind: "creators" as const, multiple: true } }
+          : {}),
+        about: FILTER_HELP[name] ?? description ?? `Filters by ${common.label.toLowerCase()}.`
+      })
+    }
   }
   const nsfwDefault = named.get("nsfw")?.default
   return {
@@ -280,17 +488,23 @@ export const searchParams = (query: SourceQuery, token: string | null) => {
       if (value === "semantic" || value === "fts") params.set("mode", value)
     } else if (id === "nsfw" || id === "author") {
       if (typeof value === "string" && value.trim()) params.set(id, value.trim())
-    } else if (id === "source") {
+    } else if (id === "kind") {
+      if (value === "character" || value === "character_lorebook") params.set(id, value)
+    } else if (id === "has_cover") {
+      if (value === "true" || value === "false" || typeof value === "boolean") params.set(id, String(value))
+    } else if (EXTRA_TEXT.has(id)) {
+      if (typeof value === "string" && value.trim()) params.set(id, value.trim())
+    } else if (id === "source" || EXTRA_LISTS.has(id)) {
       const sites = Array.isArray(value) ? value : typeof value === "string" ? [value] : []
-      if (sites.length) params.set("source", [...new Set(sites)].sort().join(","))
-    } else if (id === "exclude_forks") {
-      if (value === true) params.set("exclude_forks", "true")
+      if (sites.length) params.set(id, [...new Set(sites)].sort().join(","))
+    } else if (id === "exclude_forks" || EXTRA_FLAGS.has(id)) {
+      if (value === true) params.set(id, "true")
     }
   }
-  const sort = semantic ? null : sortParam(query)
+  const page = pageOf(token)
+  const sort = semantic ? null : page && "cursor" in page && page.sort ? page.sort : sortParam(query)
   if (sort) params.set("sort", sort)
   params.set("limit", String(PAGE_SIZE))
-  const page = pageOf(token)
   if (page && "cursor" in page && !semantic) params.set("cursor", page.cursor)
   if (page && "page" in page) params.set("page", String(page.page))
   return params
@@ -363,31 +577,87 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
       Effect.gen(function* () {
         const semantic = query.filters.mode === "semantic"
         const page = pageOf(token)
-        const raw = yield* getJson(http, api("/search", searchParams(query, token))).pipe(
-          // A cursor cardex no longer takes (expired, or for another query) restarts the search
-          // from page 1, as its docs ask; the client drops the cards it already shows.
+        let restarted = false
+        const params = searchParams(query, token)
+        const defaultSort = query.text.trim() ? "relevance" : "popular"
+        const requested = sortParam(query)
+        let substituted = page !== null && "cursor" in page && page.sort !== undefined
+        const retryable = (failure: SourceFailed) =>
+          failure.retryAfterMs !== undefined && (failure.reason === "rate_limited" || failure.status === 503)
+        // Timers may round down a millisecond; retry after the limiter's deadline.
+        const wait = (failure: SourceFailed) => Effect.sleep(Math.ceil(failure.retryAfterMs ?? 0) + 1)
+        const request = () =>
+          getJson(http, api("/search", params)).pipe(
+            Effect.catchIf(retryable, (failure) =>
+              wait(failure).pipe(Effect.andThen(getJson(http, api("/search", params))))
+            )
+          )
+        const raw = yield* request().pipe(
           Effect.catchIf(
             (failure) => page !== null && "cursor" in page && cursorRefused(failure),
-            () => getJson(http, api("/search", searchParams(query, null)))
+            () => {
+              restarted = true
+              params.delete("cursor")
+              return request()
+            }
+          ),
+          Effect.catchIf(
+            (failure) =>
+              token === null &&
+              !semantic &&
+              requested !== null &&
+              requested !== defaultSort &&
+              [500, 502, 503, 504].includes(failure.status ?? 0),
+            (failure) =>
+              Effect.gen(function* () {
+                // A reversed order can use its ordinary direction; otherwise use best match.
+                // This policy applies to every sort, without a list of broken upstream orders.
+                const descriptor = SORTS.find((sort) => sort.id === query.sort)
+                const substitute =
+                  query.reverse && descriptor && descriptor.needs.length > 1 ? descriptor.needs[0]! : defaultSort
+                params.set("sort", substitute)
+                substituted = true
+                if (failure.retryAfterMs !== undefined) yield* wait(failure)
+                return yield* getJson(http, api("/search", params))
+              })
           )
         )
         if (!isRecord(raw)) return yield* bad()
         const items = summaries(raw.items, origin)
         if (items === null) return yield* bad()
-        const total = typeof raw.total === "number" ? raw.total : undefined
+        let total = typeof raw.total === "number" ? raw.total : undefined
+        let totalCapped = false
+        if (!semantic && (token === null || restarted)) {
+          const params = searchParams(query, null)
+          for (const name of ["sort", "limit", "page", "cursor"]) params.delete(name)
+          const count = yield* getJson(http, api("/search/count", params))
+          if (!isRecord(count) || typeof count.total !== "number" || !Number.isFinite(count.total) || count.total < 0)
+            return yield* bad()
+          total = count.total
+          totalCapped = count.capped === true || count.timed_out === true
+        }
         const current = page && "page" in page ? page.page : 1
         const next = semantic
           ? items.length === PAGE_SIZE && (total === undefined || current * PAGE_SIZE < total)
             ? `p:${current + 1}`
             : null
           : typeof raw.next_cursor === "string" && raw.next_cursor
-            ? `c:${raw.next_cursor}`
+            ? substituted
+              ? `s:${Buffer.from(JSON.stringify({ sort: params.get("sort"), cursor: raw.next_cursor })).toString("base64url")}`
+              : `c:${raw.next_cursor}`
             : null
         return {
           items,
           next,
+          ...(substituted
+            ? {
+                notice: `cardex couldn't use ${SORTS.find((sort) => sort.id === query.sort)?.label.toLowerCase() ?? "the requested"} order just now. Showing ${params.get("sort") === defaultSort ? (query.text.trim() ? "best matches" : "popular cards") : (SORTS.find((sort) => sort.needs.includes(params.get("sort") ?? ""))?.defaultOrder ?? "another order")}.`
+              }
+            : {}),
+          ...(restarted ? { reset: true } : {}),
           ...(total === undefined ? {} : { total }),
-          ...(raw.total_is_estimate === true ? { totalEstimated: true } : {})
+          ...(!semantic && (token === null || restarted) ? { totalCapped } : {}),
+          ...(semantic && raw.total_is_estimate === true ? { totalEstimated: true } : {})
         }
       }),
     tags: (http, prefix) =>
@@ -406,6 +676,48 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
             ...(typeof t.label === "string" ? { label: t.label } : {}),
             ...(typeof t.card_count === "number" ? { count: t.card_count } : {})
           }))
+      }),
+    suggestions: (http, kind, prefix, page) =>
+      Effect.gen(function* () {
+        const params = new URLSearchParams({ limit: "10" })
+        if (prefix.trim()) params.set("q", prefix.trim())
+        if (page) params.set("cursor", page)
+        let reset = false
+        const raw = yield* getJson(http, api(kind === "tags" ? "/tags" : "/search/authors", params)).pipe(
+          Effect.catchIf(
+            (failure) => page !== null && cursorRefused(failure),
+            () => {
+              reset = true
+              params.delete("cursor")
+              return getJson(http, api(kind === "tags" ? "/tags" : "/search/authors", params))
+            }
+          )
+        )
+        if (!isRecord(raw)) return yield* bad()
+        const entries = kind === "tags" ? raw.tags : raw.authors
+        if (!Array.isArray(entries)) return yield* bad()
+        const items = entries.filter(isRecord).flatMap((entry) => {
+          const value =
+            kind === "tags"
+              ? entry.slug
+              : typeof entry.source === "string" && typeof entry.handle === "string"
+                ? `${entry.source}/${entry.handle}`
+                : undefined
+          if (typeof value !== "string") return []
+          const label = kind === "tags" ? entry.label : entry.display_name
+          return [
+            {
+              value,
+              label: typeof label === "string" ? label : value,
+              ...(typeof entry.card_count === "number" ? { count: entry.card_count } : {})
+            }
+          ]
+        })
+        return {
+          items,
+          next: typeof raw.next === "string" && raw.next ? raw.next : null,
+          ...(reset ? { reset: true } : {})
+        }
       }),
     card: (http, remoteId) =>
       Effect.gen(function* () {
@@ -437,7 +749,12 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
                 () => download("json")
               )
             )
-        return { bytes: file.bytes, fileName: fileNameOf(file, remoteId), summary }
+        const detail = yield* getJson(http, api(`/cards/${encodeURIComponent(remoteId)}`))
+        return {
+          bytes: file.bytes,
+          fileName: fileNameOf(file, remoteId),
+          summary: { ...summary, ...detailMetadata(detail, origin) }
+        }
       }),
     image: (http, ref) =>
       Effect.suspend(() => {

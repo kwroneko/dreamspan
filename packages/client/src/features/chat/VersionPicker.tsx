@@ -52,7 +52,11 @@ const writerOf = (version: Version, numberOf: (id: Version["id"]) => number | un
   }
   if (version.origin === "greeting") return "Greeting"
   if (version.writer === "human") return version.origin === "imported" ? "Imported, written by you" : "Written by you"
-  return version.model ?? (version.origin === "imported" ? "Imported, by a model" : "Model not recorded")
+  const model = version.model ?? (version.origin === "imported" ? "Imported, by a model" : "Model not recorded")
+  // A resumed agent reply says which one it carried on (spec/AGENTIC.md §5.2).
+  const resumed = version.origin === "resumed" && version.sourceVersionId !== null
+  const source = resumed ? numberOf(version.sourceVersionId!) : undefined
+  return source === undefined ? model : `${model}, resumed from #${source}`
 }
 
 function StatusBadges({ version }: { version: Version }) {

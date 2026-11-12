@@ -9,6 +9,7 @@ import type { LibraryRef } from "@rp/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
 
 const lorebooksAtom = libraryListAtom("lorebook")
+const archivedLorebooksAtom = libraryListAtom("lorebook", true)
 const filterCardsAtom = AppClient.query(
   "ListLibrary",
   { kind: "card", withFilterData: true },
@@ -16,10 +17,15 @@ const filterCardsAtom = AppClient.query(
 )
 const cardsAtom = libraryListAtom("card")
 
-/** The library's lorebooks; null while they load. */
-export function useLibraryLorebooks(): ReadonlyArray<LibraryRef> | null {
+/** The library's lorebooks; chats also read attached archived books. Null while they load. */
+export function useLibraryLorebooks(includeArchived = false): ReadonlyArray<LibraryRef> | null {
   const result = useAtomRevalidated(lorebooksAtom)
-  return AsyncResult.isSuccess(result) ? result.value : null
+  const archived = useAtomRevalidated(includeArchived ? archivedLorebooksAtom : lorebooksAtom)
+  return AsyncResult.isSuccess(result) && AsyncResult.isSuccess(archived)
+    ? includeArchived
+      ? [...result.value, ...archived.value]
+      : result.value
+    : null
 }
 
 /** Cards' upstream refs by entity, where a card's own lorebook is edited; null while loading. */

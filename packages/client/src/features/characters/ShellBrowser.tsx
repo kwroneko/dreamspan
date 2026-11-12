@@ -44,6 +44,8 @@ import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { WindowedList } from "../../ui/WindowedList.tsx"
+import { KindBadge } from "../chat/KindBadge.tsx"
+import { useChatKindLook } from "../chat/kindLooks.ts"
 import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
 import {
   CharacterGrid,
@@ -398,6 +400,7 @@ export function ForkRow({
   const besideHref = useRouter().buildLocation(forkLink(fork)).href
   const canBeside = useCanOpenBeside()
   const [menu, setMenu] = useState(false)
+  const kindBadge = useChatKindLook(fork.chat.kind)?.badge
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
@@ -429,7 +432,7 @@ export function ForkRow({
               {...forkLink(fork)}
               onClick={openOnPlainClick(open)}
               onDragStart={carryChat}
-              aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}`}
+              aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}${kindBadge ? `, ${kindBadge.label}` : ""}`}
               aria-current={here ? "page" : undefined}
               data-chat-id={fork.chat.id}
               data-fork-id={fork.forkId}
@@ -465,6 +468,8 @@ export function ForkRow({
                   className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]"
                 >
                   <span className="font-medium">{title}</span>
+                  {/* A workshop says so where it's named (spec/WORKSHOP.md §2.5). */}{" "}
+                  <KindBadge kind={fork.chat.kind} inLink />
                   {opensHere && (
                     <>
                       {" "}

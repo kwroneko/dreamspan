@@ -1,4 +1,6 @@
 import { loreEffectsAt, type LoreReceipt, type LoreTimeline } from "../assembler/loreTiming.ts"
+import { refSourcePathSql } from "./library.ts"
+import { bookSourceName } from "@rp/shared/lorebookLink.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { originalReply, type ReplySections } from "@rp/shared/replySections.ts"
 import { eventApplies, eventOrder } from "./forkState.ts"
@@ -288,19 +290,22 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
    * imported from: a fork answers to its original's ST name (a card's linked lorebook).
    */
   const refHead = (refId: string, kind: string, entity?: string) =>
-    sql<{ id: string; entity_id: string; head_revision_id: string; doc_json: string; source_path: string | null }>`
-      SELECT r.id, r.entity_id, r.head_revision_id, h.doc_json,
-        coalesce(r.source_path, (
-          WITH RECURSIVE up(id, depth) AS (
-            SELECT e.forked_from_entity_id, 1 WHERE e.forked_from_entity_id IS NOT NULL
-            UNION SELECT a.forked_from_entity_id, up.depth + 1 FROM entities a JOIN up ON a.id = up.id
-              WHERE a.forked_from_entity_id IS NOT NULL)
-          SELECT u.source_path FROM up JOIN entity_refs u ON u.entity_id = up.id
-          WHERE u.source_path IS NOT NULL ORDER BY up.depth LIMIT 1)) AS source_path
+    sql
+      .unsafe<{
+        id: string
+        entity_id: string
+        head_revision_id: string
+        doc_json: string
+        source_path: string | null
+      }>(
+        `SELECT r.id, r.entity_id, r.head_revision_id, h.doc_json, ${refSourcePathSql} AS source_path
       FROM entity_refs r
       JOIN entities e ON e.id = r.entity_id JOIN entity_revisions h ON h.id = r.head_revision_id
-      WHERE r.id = ${refId} AND e.owner_user_id = ${userId} AND e.kind = ${kind} AND e.deleted_at IS NULL
-        AND (${entity ?? null} IS NULL OR e.id = ${entity ?? null})`.pipe(Effect.map(([row]) => row))
+      WHERE r.id = ? AND e.owner_user_id = ? AND e.kind = ? AND e.deleted_at IS NULL
+        AND (? IS NULL OR e.id = ?)`,
+        [refId, userId, kind, entity ?? null, entity ?? null]
+      )
+      .pipe(Effect.map(([row]) => row))
 
   /** A card's single upstream ref when no revision is pinned. */
   const defaultRef = (entity: string) =>
@@ -706,12 +711,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             const row = yield* refHead(id, "lorebook")
             if (!row) return []
             const doc = yield* decoded<LorebookDoc>(decodeLorebook(JSON.parse(row.doc_json)), "A lorebook")
-            const sourceName =
-              row.source_path
-                ?.replaceAll("\\", "/")
-                .split("/")
-                .at(-1)
-                ?.replace(/\.json$/i, "") ?? null
+            const sourceName = bookSourceName(row.source_path)
             return [
               { id, entity: row.entity_id, revision: row.head_revision_id, doc, sourceName } satisfies LorebookInput
             ]

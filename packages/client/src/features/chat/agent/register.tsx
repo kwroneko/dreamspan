@@ -1,12 +1,14 @@
 // Agent replies in the client (spec/AGENTIC.md §5, §6), as registered parts a plugin can replace:
-// the steps inside a reply and its header badge, the run inspector's tools and steps, the
-// Activity tab, and the Tools setting.
+// a stopped reply's Resume, the steps inside a reply and its header badge, the run inspector's
+// tools and steps (with their edits), the Activity tab, and the Tools setting.
 import { lazy, Suspense, type ComponentProps } from "react"
 import { Loading } from "../../../ui/Spinner.tsx"
 import { chatPanels, lazyPanel, type PanelProps } from "../panels.tsx"
 import { chatSettingSections, messageHeaderDetails, reasoningPanels, runInspectorSections } from "../presentation.tsx"
 import { Steps, StepsBadge } from "./Steps.tsx"
 import { cardDefinitionSections } from "../../editor/cardSections.ts"
+import { invokeMessageAction, messageActions, viewOf } from "../messageActions.tsx"
+import { resumeOffer } from "./resume.ts"
 
 const RunSteps = lazy(() => import("./RunSteps.tsx").then((m) => ({ default: m.RunSteps })))
 const ToolsSection = lazy(() => import("./ToolsSection.tsx").then((m) => ({ default: m.ToolsSection })))
@@ -18,6 +20,22 @@ const AgentEditableFields = lazy(() =>
 )
 
 export const registerAgent = () => [
+  // Resume (DESIGN §7.5 [D]): an agent reply that stopped or failed, carried on as a new version.
+  messageActions.register({
+    id: "message.resume",
+    order: 25,
+    group: "change",
+    pinned: true,
+    available: ({ entry }) => resumeOffer(entry.version) !== null,
+    disabled: ({ entry }) => resumeOffer(entry.version)?.disabled ?? null,
+    run: async ({ session, entry, report }) => report(await session.resumeVersion(entry)),
+    describe: viewOf((context) => ({
+      label: "Resume",
+      icon: "play",
+      hint: "Carries on this reply from where it stopped, as a new version.",
+      onSelect: () => invokeMessageAction("message.resume", context, "button")
+    }))
+  }),
   // Above the reasoning: the steps came before the final turn's reasoning and text.
   reasoningPanels.register({ id: "agent.steps", order: 5, component: Steps }),
   messageHeaderDetails.register({ id: "message.steps-badge", order: 15, component: StepsBadge }),

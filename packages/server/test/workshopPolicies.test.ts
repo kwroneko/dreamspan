@@ -4,6 +4,20 @@ import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 
 describe("workshop policies", () => {
+  it.live("keeps the kind in bin items and preserves it when restored", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      for (const chat of [yield* api.CreateWorkshop({}), yield* api.CreateChat({ title: "Synthetic story" })]) {
+        const deleted = yield* api.DeleteChat({ chatId: chat.id })
+        assert.strictEqual(deleted.origin.chatKind, chat.kind)
+        const listed = (yield* api.ListBin({ limit: 100, before: null })).find((item) => item.id === deleted.id)!
+        assert.strictEqual(listed.origin.chatKind, chat.kind)
+        yield* api.RestoreBinItem({ itemId: deleted.id })
+        assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).kind, chat.kind)
+      }
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
   it.live("refuses workshops as merge sources and destinations", () => {
     const config = testConfig()
     return Effect.gen(function* () {

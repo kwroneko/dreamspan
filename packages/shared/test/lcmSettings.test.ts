@@ -58,3 +58,13 @@ describe("summary preset choice", () => {
     expect(resolveLcm({}, defaults).preset).toBe(accountRef)
   })
 })
+
+describe("summary style", () => {
+  it("is a reply by default, follows the account, and a chat takes precedence", () => {
+    expect(resolveLcm(null, null).style).toBe("direct")
+    expect(resolveLcm({}, { style: "tool" }).style).toBe("tool")
+    expect(resolveLcm({}, { style: "tool" }).from.style).toBe("account")
+    expect(resolveLcm({ style: "direct" }, { style: "tool" }).style).toBe("direct")
+    expect(newChatLcm({ style: "tool" }).style).toBe("tool")
+  })
+})

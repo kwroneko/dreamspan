@@ -129,9 +129,13 @@ export const layer = Layer.effect(
             readonly contract: OutputContract
             readonly turnCap: number
             readonly tools: ReadonlyArray<FrozenTool>
+            readonly inspection?: Generation["inspection"]
           }
         }
-        const generation = generationOf(snapshot)
+        const generation = {
+          ...generationOf(snapshot),
+          ...(snapshot.agent?.inspection ? { inspection: snapshot.agent.inspection } : {})
+        }
         const { model } = generation
         const frozen = snapshot.agent
         if (model === null || frozen === undefined)
@@ -380,6 +384,9 @@ export const layer = Layer.effect(
                     mode: planned.mode,
                     contract: plan.contract,
                     turnCap: plan.turnCap,
+                    // Resume captures the same historical display metadata, without
+                    // rebuilding it from today's library or changing the model request.
+                    inspection: generation.inspection,
                     tools: [
                       ...tools.map(frozenTool),
                       ...(plan.contract === "final_text" ? [] : [sendMessageDefinition])

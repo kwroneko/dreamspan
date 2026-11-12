@@ -981,6 +981,16 @@ export class ChatApi extends RpcGroup.make(
   })
 ) {}
 
+/** Message reads kept separate from the core handler group to bound TypeScript inference. */
+export class MessageVersionApi extends RpcGroup.make(
+  /** A URL-selected message version, including when its row is outside the loaded path window. */
+  Rpc.make("ReadMessageVersion", {
+    payload: { chatId: ChatId, forkId: ForkId, versionId: VersionId },
+    success: PathEntry,
+    error: Schema.Union([...Errors])
+  })
+) {}
+
 /**
  * The chat's live updates, in a group (and handler layer) of their own: with the event union
  * in it, AppCoreApi's handler inference exceeds TypeScript's instantiation depth (TS2589).

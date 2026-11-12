@@ -6,7 +6,7 @@ import { Type } from "@earendil-works/pi-ai"
 import type { Chat, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { Effect, Stream } from "effect"
+import { Deferred, Effect, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { libraryTools } from "../src/agent/tools/library.ts"
@@ -176,6 +176,13 @@ describe("workshop", () => {
           model: {}
         })
         const chat = yield* api.CreateWorkshop({})
+        // Story-only settings can still arrive through RPC or imported state. Hiding their
+        // controls must not let them replace the tools the workshop's chip promises.
+        yield* api.ChangeCast({
+          chatId: chat.id,
+          slotId: chat.activeLeafSlotId,
+          change: { _tag: "AgentTools", tools: ["write_note"] }
+        })
         const events = yield* watch(api, chat)
         const before = mock.requests().length
         const version = yield* answer(api, chat, events)
@@ -381,14 +388,20 @@ describe("workshop", () => {
       )
       const user = yield* api.Whoami()
       const slot = yield* (yield* Reader).GetSlot({ userId: user.id, slotId: rp.version.slotId })
-      const resumed = yield* api.ResumeFromStep({
-        versionId: rp.version.id,
-        step: 0,
-        edit: { kind: "arguments", arguments: {} },
-        expectedRowVersion: slot.entry.rowVersion
-      })
-      yield* eventually(() => finished(rp.events, resumed.version.id) !== undefined)
-      assert.strictEqual(ran, 0, "A dangling outside call must also be refused during RP resume.")
+      const requestsBefore = mock.requests().length
+      const refused = yield* Effect.flip(
+        api.ResumeFromStep({
+          versionId: rp.version.id,
+          step: 0,
+          edit: { kind: "arguments", arguments: {} },
+          expectedRowVersion: slot.entry.rowVersion
+        })
+      )
+      assert.strictEqual(refused._tag, "NotResumable")
+      if (refused._tag === "NotResumable")
+        assert.strictEqual(refused.message, "That tool wasn't offered to this reply.")
+      assert.strictEqual(mock.requests().length, requestsBefore)
+      assert.strictEqual(ran, 0, "An unoffered outside call must be refused before a resumed version is created.")
       const chat = yield* api.CreateWorkshop({})
       const events = yield* watch(api, chat)
       const version = yield* answer(api, chat, events)
@@ -398,6 +411,199 @@ describe("workshop", () => {
         (yield* api.GetRunTranscript({ versionId: version.id })).tools.map((t) => t.name),
         outside.id
       )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("resumes a workshop stopped mid-tool and edits its step using the original frozen tools", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      const reader = yield* Reader
+      const started = yield* Deferred.make<VersionId>()
+      const original = registry.rolloutTools.get("read_card")!
+      let runs = 0
+      yield* registry.rolloutTools.register({
+        ...original,
+        execute: (context, args) =>
+          ++runs === 1
+            ? Deferred.succeed(started, context.versionId).pipe(Effect.andThen(Effect.never))
+            : original.execute(context, args)
+      })
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const body = request.body as {
+              tools?: Array<{ function: { name: string } }>
+              messages: Array<{ role: string }>
+            }
+            const hasTools = body.tools?.some((tool) => tool.function.name === "read_card")
+            sse(
+              res,
+              hasTools && body.messages.at(-1)?.role !== "tool"
+                ? call("read_card", { card: "Assistant", fields: ["description"] })
+                : completionChunks(["Read the library."], {})
+            )
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+      const user = yield* api.Whoami()
+      const chat = yield* api.CreateWorkshop({})
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId: chat.activeLeafSlotId,
+        change: { _tag: "AgentTools", tools: ["search_chat"] }
+      })
+      const events = yield* watch(api, chat)
+      yield* Deferred.await(started).pipe(
+        Effect.andThen((versionId) => api.StopGeneration({ versionId })),
+        Effect.ignore,
+        Effect.forkScoped
+      )
+      const before = mock.requests().length
+      const stopped = yield* answer(api, chat, events)
+      assert.strictEqual(stopped.status, "stopped")
+      const material = yield* reader.RolloutMaterial({ userId: user.id, versionId: stopped.id })
+      const frozen = (yield* api.GetRunTranscript({ versionId: stopped.id })).tools
+      assert.deepStrictEqual(
+        frozen.map((tool) => tool.name),
+        [
+          "list_library",
+          "read_card",
+          "read_preset",
+          "read_lorebook",
+          "create_card",
+          "edit_card",
+          "clone_card",
+          "start_chat",
+          "send_message"
+        ]
+      )
+      assert.deepStrictEqual((JSON.parse(material.snapshot) as { agent: { tools: unknown } }).agent.tools, frozen)
+
+      // Neither today's planner nor today's tool descriptions may change this run's offer.
+      const planner = registry.orchestrationModes.get("workshop")!
+      yield* registry.orchestrationModes.register({
+        ...planner,
+        plan: (input) => ({ ...planner.plan(input), tools: ["list_library"] })
+      })
+      yield* registry.rolloutTools.register({
+        ...registry.rolloutTools.get("read_card")!,
+        description: "A changed description for future runs."
+      })
+      const slot = yield* reader.GetSlot({ userId: user.id, slotId: stopped.slotId })
+      const resumed = yield* api.ResumeVersion({ versionId: stopped.id, expectedRowVersion: slot.entry.rowVersion })
+      yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+      assert.strictEqual(finished(events, resumed.version.id)!.status, "complete")
+      assert.strictEqual(runs, 2)
+      const inspected = yield* api.GetRunContext({ versionId: resumed.version.id })
+      assert.strictEqual(inspected.capture, "captured")
+      assert.isTrue(
+        inspected.messages.some((message) => message.sources.some((source) => source.label === "Workshop instructions"))
+      )
+      assert.strictEqual(
+        (yield* reader.RolloutMaterial({ userId: user.id, versionId: resumed.version.id })).snapshot,
+        material.snapshot
+      )
+      const requests = () =>
+        mock
+          .requests()
+          .slice(before)
+          .filter((request) => request.path === "/v1/chat/completions")
+          .map((request) => request.body!)
+      assert.deepStrictEqual(requests()[1]!.tools, requests()[0]!.tools)
+      assert.include(JSON.stringify(requests()[1]!.messages), "Practical and brief.")
+
+      const current = yield* reader.GetSlot({ userId: user.id, slotId: stopped.slotId })
+      const edited = yield* api.ResumeFromStep({
+        versionId: resumed.version.id,
+        step: 0,
+        edit: { kind: "arguments", arguments: { card: "Assistant", fields: ["name"] } },
+        expectedRowVersion: current.entry.rowVersion
+      })
+      yield* eventually(() => finished(events, edited.version.id) !== undefined)
+      assert.strictEqual(finished(events, edited.version.id)!.status, "complete")
+      assert.strictEqual(runs, 3)
+      assert.deepStrictEqual(requests()[2]!.tools, requests()[0]!.tools)
+      const editedCalls = (
+        requests()[2]!.messages as Array<{ tool_calls?: Array<{ function: { arguments: string } }> }>
+      ).flatMap((message) => message.tool_calls ?? [])
+      assert.deepStrictEqual(JSON.parse(editedCalls.at(-1)!.function.arguments), {
+        card: "Assistant",
+        fields: ["name"]
+      })
+      assert.strictEqual(
+        (yield* reader.RolloutMaterial({ userId: user.id, versionId: edited.version.id })).snapshot,
+        material.snapshot
+      )
+      assert.strictEqual((yield* reader.GetVersion({ userId: user.id, versionId: stopped.id })).status, "stopped")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("refuses a workshop step's unoffered tool even when its current planner offers it", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      let ran = 0
+      yield* registry.rolloutTools.register({
+        ...outside,
+        execute: () =>
+          Effect.sync(() => {
+            ran++
+            return { text: "Unexpected." }
+          })
+      })
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const body = request.body as { tools?: Array<unknown>; messages: Array<{ role: string }> }
+            sse(
+              res,
+              body.tools && body.messages.at(-1)?.role !== "tool"
+                ? call(outside.id, {})
+                : completionChunks(["Done."], {})
+            )
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+      const chat = yield* api.CreateWorkshop({})
+      const events = yield* watch(api, chat)
+      const version = yield* answer(api, chat, events)
+      assert.notInclude(
+        (yield* api.GetRunTranscript({ versionId: version.id })).tools.map((tool) => tool.name),
+        outside.id
+      )
+      const planner = registry.orchestrationModes.get("workshop")!
+      yield* registry.orchestrationModes.register({
+        ...planner,
+        plan: (input) => ({ ...planner.plan(input), tools: [outside.id] })
+      })
+      const user = yield* api.Whoami()
+      const reader = yield* Reader
+      const slot = yield* reader.GetSlot({ userId: user.id, slotId: version.slotId })
+      const before = mock.requests().length
+      const refused = yield* Effect.flip(
+        api.ResumeFromStep({
+          versionId: version.id,
+          step: 0,
+          edit: { kind: "arguments", arguments: {} },
+          expectedRowVersion: slot.entry.rowVersion
+        })
+      )
+      assert.strictEqual(refused._tag, "NotResumable")
+      if (refused._tag === "NotResumable")
+        assert.strictEqual(refused.message, "That tool wasn't offered to this reply.")
+      assert.strictEqual(
+        (yield* reader.GetSlot({ userId: user.id, slotId: version.slotId })).entry.rowVersion,
+        slot.entry.rowVersion
+      )
+      assert.strictEqual(mock.requests().length, before)
+      assert.strictEqual(ran, 0)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
