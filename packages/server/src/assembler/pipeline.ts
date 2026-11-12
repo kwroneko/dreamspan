@@ -27,6 +27,7 @@ import type {
   HistoryEntry,
   HistoryWindow,
   Issue,
+  MergeRow,
   ModelInput,
   LorebookInput,
   NoteInput,
@@ -143,6 +144,13 @@ export class AssemblySources extends Context.Service<
       ReadonlyArray<{ readonly versionId: string; readonly knowers: ReadonlyArray<string> | null }>,
       SourceError
     >
+    /**
+     * The rows of these merges' joins, each merge's in order, for a separate context to lay out
+     * per viewer (unit C6); summarized rows are left out. Fixtures without it: joins as written.
+     */
+    readonly mergeRows?: (
+      mergeIds: ReadonlyArray<string>
+    ) => Effect.Effect<ReadonlyArray<{ readonly mergeId: string; readonly rows: ReadonlyArray<MergeRow> }>, SourceError>
     /** Whether `viewer` knew every message on the path to `leaf` up to position `through`. */
     readonly knewThrough?: (
       leaf: string,

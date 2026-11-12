@@ -14,7 +14,7 @@ import {
   fillMergeTemplate
 } from "@rp/shared/mergeApi.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
-import { need, type AssemblerStage, type AssemblyTransform, type ProjectedEntry } from "./pipeline.ts"
+import { need, type Assembly, type AssemblerStage, type AssemblyTransform, type ProjectedEntry } from "./pipeline.ts"
 import type { HistoryEntry, HistoryMerge } from "./types.ts"
 
 export interface MergeLayout {
@@ -36,6 +36,29 @@ export interface MergeLayout {
     readonly merge: HistoryMerge
   }) => number | null
 }
+
+/** A merged summary row's name: its one-based range in the source. */
+export const summaryRowName = (from: number, to: number) => `Summary of #${from}–${to}`
+
+const SUMMARY_ROW_NAME = /^Summary of #(\d+)–(\d+)$/
+
+/**
+ * A merged row as the join's text holds it (`db/merges.ts` writes the join with this; a separate
+ * context writes a viewer's section again with it): "Name: text", or a summary in its tags.
+ */
+export const mergedRowText = (row: {
+  readonly kind: "message" | "summary"
+  readonly name: string
+  readonly content: string
+}) => {
+  if (row.kind === "message") return `${row.name}: ${row.content.trim()}`
+  const range = SUMMARY_ROW_NAME.exec(row.name)
+  return `<summary from="${range?.[1] ?? ""}" to="${range?.[2] ?? ""}">\n${row.content.trim()}\n</summary>`
+}
+
+/** The join's note on the source messages it left out. */
+export const leftOutNote = (count: number, title: string) =>
+  `[${count} earlier ${count === 1 ? "message" : "messages"} of “${title}” not included.]`
 
 export type MergeLayoutRegistry = Registry<MergeLayout>
 
@@ -80,9 +103,27 @@ const fallbackLayouts = (() => {
 const isJoin = (p: ProjectedEntry) => p.entry.merge !== undefined && p.system !== true
 
 /**
+ * Whether a join is the viewer's own line (spec/CHARACTER-CONTEXT.md §9.4, THREADS's request, unit
+ * C6): in a separate context, the viewer knew some of the merged rows and none of this chat's
+ * own messages beside them, from the parallel span's start (from the history's start when the
+ * span is empty or starts before the history read, and then not when summaries come before).
+ * Its rows then go out as the messages they were, so its history reads on across the join.
+ */
+const ownLine = (assembly: Assembly, history: ReadonlyArray<HistoryEntry>, join: HistoryEntry) => {
+  if ((assembly.knowledge?.viewer ?? null) === null || !join.known?.rows.length) return false
+  const start = join.merge!.start === null ? undefined : history.find((e) => e.slotId === join.merge!.start)
+  if (start === undefined && assembly.lcm?.cursor != null) return false
+  const from = start?.depth ?? Number.NEGATIVE_INFINITY
+  return !history.some(
+    (e) => e.depth >= from && e.depth < join.depth && e.merge === undefined && e.inContext && !e.unknown
+  )
+}
+
+/**
  * Each join of the history read becomes two system messages without a name (as summaries are
  * sent): the section, placed by the chat's layout, and the join marker at the join. Their text
- * runs through the prompt regex scripts at `compose`, at their new depths.
+ * runs through the prompt regex scripts at `compose`, at their new depths. In a separate context,
+ * a join that is the viewer's own line (`ownLine`) sends its rows as messages instead of the section.
  */
 export const mergeLayoutStage: AssemblerStage = {
   id: "merge-layout",
@@ -112,10 +153,13 @@ export const mergeLayoutStage: AssemblerStage = {
           merge.cast
         )
         const marker = fillMergeTemplate(utility.merge_join_prompt ?? MERGE_JOIN_DEFAULT, merge.title, merge.cast)
-        // The join's own piece holds the section: the inspector shows it as the join message.
-        const text = env.text(p.piece)
-        const sectionText = heading.trim() ? `${heading.trim()}\n\n${text}` : text
-        assembly.pieces[p.piece] = { ...assembly.pieces[p.piece]!, text: sectionText }
+        const own = ownLine(assembly, history, p.entry)
+        if (!own) {
+          // The join's own piece holds the section: the inspector shows it as the join message.
+          const text = env.text(p.piece)
+          const sectionText = heading.trim() ? `${heading.trim()}\n\n${text}` : text
+          assembly.pieces[p.piece] = { ...assembly.pieces[p.piece]!, text: sectionText }
+        }
         const markerPiece = env.verbatim(
           `layout:merge-join:${merge.id}`,
           { kind: "merge/join", data: { merge: merge.id, title: merge.title } },
@@ -125,7 +169,27 @@ export const mergeLayoutStage: AssemblerStage = {
         scripted.delete(p.entry.versionId)
         const place = layout.place({ projected, history, join, merge })
         const markerEntry: ProjectedEntry = { ...p, piece: markerPiece, system: true }
-        if (place === null || place >= join) {
+        if (own) {
+          // The viewer's own line: its rows as the messages they were, then the marker.
+          const { merge: _merge, known, ...plain } = p.entry
+          const rows = known!.rows.map((row): ProjectedEntry => {
+            const summary = row.kind === "summary"
+            const piece = env.verbatim(
+              `layout:merge-row:${merge.id}:${row.ordinal}`,
+              { kind: "merge/row", data: { merge: merge.id, ordinal: row.ordinal, title: merge.title } },
+              summary ? mergedRowText(row) : row.content.trim()
+            )
+            return {
+              entry: { ...plain, side: row.side, speaker: row.speaker },
+              role: summary ? "user" : row.side,
+              name: summary ? "" : row.name,
+              persona: row.side === "user",
+              piece,
+              ...(summary ? { system: true as const } : {})
+            }
+          })
+          projected.splice(join, 1, ...rows, markerEntry)
+        } else if (place === null || place >= join) {
           projected.splice(join, 1, { ...p, system: true }, markerEntry)
         } else {
           // Placed before another message: it takes that message's place in the history's numbering,

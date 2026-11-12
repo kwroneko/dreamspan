@@ -75,3 +75,51 @@ export const readKnowers = (
       return { versionId, knowers: knowers === null ? null : [...knowers] }
     })
   })
+
+/**
+ * The rows of these merges' joins a separate context lays out per viewer (unit C6), each
+ * merge's in order, summarized rows left out. A row with no knowers recorded was known to the
+ * source's cast. Point lookups by merge id.
+ */
+export const readMergeRows = (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  owned: Fragment,
+  mergeIds: ReadonlyArray<string>
+) =>
+  Effect.gen(function* () {
+    const rows = yield* sql<{
+      merge_id: string
+      ordinal: number
+      kind: "message" | "summary"
+      speaker_name: string
+      side: "user" | "assistant"
+      speaker_entity_id: string | null
+      content: string
+      included: "verbatim" | "left_out"
+      knowers: string
+    }>`SELECT m.id AS merge_id, mm.ordinal, mm.kind, mm.speaker_name, mm.side, mm.speaker_entity_id,
+        CASE WHEN mm.included = 'verbatim' THEN mm.content ELSE '' END AS content, mm.included,
+        coalesce(mm.knowers_json, (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c
+          WHERE c.value ->> 'from' <> 'destination')) AS knowers
+      FROM json_each(${JSON.stringify(mergeIds)}) requested
+      CROSS JOIN chat_merges m ON m.id = requested.value
+      CROSS JOIN chat_merge_messages mm ON mm.merge_id = m.id
+      WHERE m.chat_id = ${chatId} AND mm.included <> 'summarized' AND ${owned}
+      ORDER BY m.id, mm.ordinal`
+    return mergeIds.map((mergeId) => ({
+      mergeId,
+      rows: rows
+        .filter((row) => row.merge_id === mergeId)
+        .map((row) => ({
+          ordinal: row.ordinal,
+          kind: row.kind,
+          name: row.speaker_name,
+          side: row.side,
+          speaker: row.speaker_entity_id,
+          content: row.content,
+          included: row.included,
+          knowers: JSON.parse(row.knowers) as Array<string>
+        }))
+    }))
+  })

@@ -654,6 +654,159 @@ describe("gap lines", () => {
   )
 })
 
+describe("merged chats per viewer (unit C6)", () => {
+  type Story = Effect.Success<ReturnType<typeof story>>
+  const card = (t: Story, name: string) =>
+    Effect.map(
+      t.writer.CreateEntity({
+        userId: t.userId,
+        kind: "card",
+        label: name,
+        subtitle: "",
+        doc: cardDoc(name),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      }),
+      (made) => made.entityId as EntityId
+    )
+  /** A chat of `participants` with these lines, `away` marked before the line it's on, merged in at the tip. */
+  const mergeIn = (
+    t: Story,
+    title: string,
+    participants: ReadonlyArray<EntityId>,
+    lines: ReadonlyArray<{ speaker: EntityId; content: string; away?: EntityId }>
+  ) =>
+    Effect.gen(function* () {
+      const source = yield* t.writer.CreateChat({
+        userId: t.userId,
+        kind: "rp",
+        status: "active",
+        title,
+        participants: [...participants],
+        greeting: null
+      })
+      let parent: SlotId | null = null
+      for (const line of lines) {
+        if (line.away)
+          yield* t.writer.AddStateEvent({
+            userId: t.userId,
+            chatId: source.id,
+            slotId: parent,
+            versionId: null,
+            scope: null,
+            data: { key: "away.set", value: { entity: line.away, away: true } }
+          })
+        const row: { readonly slotId: SlotId } = yield* t.writer.AppendMessage({
+          userId: t.userId,
+          chatId: source.id,
+          parentSlotId: parent,
+          branch: false,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: line.speaker,
+            writer: "model",
+            content: line.content,
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "generated"
+          })
+        })
+        parent = row.slotId
+      }
+      const request = {
+        chatId: t.chatId,
+        forkId: t.fork(),
+        at: null,
+        source: { chatId: source.id, forkId: source.currentForkId! as ForkId },
+        includeLeftOut: false
+      }
+      const seen = yield* t.reader.PreviewChatMerge({ userId: t.userId, ...request })
+      const made = yield* t.writer.MergeChat({
+        userId: t.userId,
+        ...request,
+        title: seen.sourceTitle,
+        framing: null,
+        digest: seen.digest
+      })
+      yield* t.follow(made.slotId)
+    })
+
+  it.live("a character sees the merged lines it was there for, and a shared context the whole join", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        // Wren and Mira at the docks; Wren leaves before Mira's second line.
+        yield* mergeIn(
+          t,
+          "Private docks",
+          [t.mira, t.wren],
+          [
+            { speaker: t.mira, content: "DOCKS-SHARED: the tide turns." },
+            { speaker: t.mira, content: "MERGED-SECRET: the crate is hollow.", away: t.wren }
+          ]
+        )
+        const wren = yield* t.contextFor(t.wren)
+        const forWren = sentText(wren)
+        assert.include(forWren, "Mira: DOCKS-SHARED: the tide turns.")
+        assert.notInclude(forWren, "MERGED-SECRET")
+        // She knew this chat's own messages beside it: still a section, under its heading.
+        assert.include(forWren, "Meanwhile")
+        assert.include(forWren, "[Here “Private docks” joins this chat.]")
+        const forMira = sentText(yield* t.contextFor(t.mira))
+        assert.include(forMira, "DOCKS-SHARED")
+        assert.include(forMira, "MERGED-SECRET")
+        // A rebuild of Wren's context sends the same.
+        const again = yield* t.reader.RebuildContext({ userId: t.userId, snapshot: JSON.stringify(wren) })
+        assert.strictEqual(again._tag, "Rebuilt")
+        if (again._tag === "Rebuilt")
+          assert.deepStrictEqual((JSON.parse(again.snapshot) as ContextSnapshot).request, wren.request)
+        // One shared context sends the join as written.
+        yield* t.event({ key: "context.per_speaker", value: "shared" })
+        const shared = sentText(yield* t.contextFor(t.wren))
+        assert.include(shared, "DOCKS-SHARED")
+        assert.include(shared, "MERGED-SECRET")
+      })
+    )
+  )
+
+  it.live("a character new to this chat reads its own merged line as its history, without a heading", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        const kai = yield* card(t, "Kai")
+        yield* mergeIn(
+          t,
+          "Docks",
+          [kai],
+          [
+            { speaker: kai, content: "Kai mends the nets at the docks." },
+            { speaker: kai, content: "Kai counts the boats coming in." }
+          ]
+        )
+        const built = yield* t.contextFor(kai)
+        const forKai = sentText(built)
+        // Nothing of this chat before the join, nor a line for it: Kai was never in it.
+        assert.notInclude(forKai, "The vault code is 739.")
+        assert.notInclude(forKai, "wasn't present")
+        assert.notInclude(forKai, "Meanwhile")
+        const nets = built.request.messages.findIndex(
+          (m) => typeof m.content === "string" && m.content.includes("Kai mends the nets at the docks.")
+        )
+        const boats = built.request.messages.findIndex(
+          (m) => typeof m.content === "string" && m.content.includes("Kai counts the boats coming in.")
+        )
+        assert.isTrue(nets >= 0 && boats === nets + 1, JSON.stringify(built.request.messages))
+        assert.strictEqual(built.request.messages[nets]!.role, "assistant")
+        const marker = built.request.messages.findIndex((m) => m.content === "[Here “Docks” joins this chat.]")
+        assert.strictEqual(marker, boats + 1)
+        // Wren was never in it: nothing of it (unit C4's rule).
+        assert.notInclude(sentText(yield* t.contextFor(t.wren)), "mends the nets")
+      })
+    )
+  )
+})
+
 describe("the agent's read tools in a separate context", () => {
   /** A tool run as the reply whose context `snapshot` is, reading as its viewer. */
   const tools = (t: Effect.Success<ReturnType<typeof story>>, snapshot: ContextSnapshot) => {

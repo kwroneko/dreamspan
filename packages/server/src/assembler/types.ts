@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 56
+export const ASSEMBLER_VERSION = 57
 
 export type Role = "system" | "user" | "assistant"
 
@@ -626,6 +626,23 @@ export interface HistoryMerge {
   readonly cast: ReadonlyArray<string>
 }
 
+/**
+ * One merged source message or summary of a join (`chat_merge_messages`), as a separate context
+ * reads it. Frozen at the merge, so a rebuild reads it again rather than pinning it.
+ */
+export interface MergeRow {
+  readonly ordinal: number
+  readonly kind: "message" | "summary"
+  readonly name: string
+  readonly side: "user" | "assistant"
+  readonly speaker: string | null
+  /** Its text; empty for a row the join left out. */
+  readonly content: string
+  readonly included: "verbatim" | "left_out"
+  /** The cards that knew it in the source: its own record, or the source's cast where none was kept. */
+  readonly knowers: ReadonlyArray<string>
+}
+
 /** One message of the path, as assembly reads it. */
 export interface HistoryEntry {
   /** A merge's join message (spec/CHAT-MERGE.md); absent on any other message. */
@@ -663,6 +680,12 @@ export interface HistoryEntry {
    * stage, never by a source, so never pinned.
    */
   readonly unknown?: { readonly knowers: ReadonlyArray<string> }
+  /**
+   * A merge's join in a separate context: the merged rows its viewer knew, in order, and whether
+   * that's fewer than were sent (its text is then written again from them). Set by the history
+   * stage (`assembler/knowledge.ts`), never pinned; `merge-layout` lays the rows out.
+   */
+  readonly known?: { readonly rows: ReadonlyArray<MergeRow>; readonly partial: boolean }
   readonly sentAt: number
   readonly versions: number
   readonly selectedOrdinal: number

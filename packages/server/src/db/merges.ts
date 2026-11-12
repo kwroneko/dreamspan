@@ -21,6 +21,7 @@ import {
 } from "@rp/shared/mergeApi.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { leftOutNote, mergedRowText, summaryRowName } from "../assembler/merges.ts"
 import { estimateTokens } from "../assembler/st.ts"
 import type { Bin } from "./bin.ts"
 import { loadCards } from "./cards.ts"
@@ -203,9 +204,6 @@ const knownBy = (row: SourceRow): ReadonlyArray<string> | null => {
   return knowers === null ? null : [...knowers]
 }
 
-const summaryText = (from: number, to: number, content: string) =>
-  `<summary from="${from}" to="${to}">\n${content}\n</summary>`
-
 /** What a merge of `request.source` into `request.forkId` below `request.at` brings (spec §3). */
 const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeRequest) =>
   Effect.gen(function* () {
@@ -308,7 +306,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       const card = row.speaker_entity_id ? cards.get(row.speaker_entity_id) : undefined
       return card?.modelName || card?.name || (sideOf(row) === "user" ? "User" : "Narrator")
     }
-    const line = (row: SourceRow) => `${nameOf(row)}: ${row.content.trim()}`
+    const line = (row: SourceRow) => mergedRowText({ kind: "message", name: nameOf(row), content: row.content })
     let used = 0
     let verbatimFrom = messages.length
     while (verbatimFrom > 0) {
@@ -339,7 +337,8 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     for (const [i, row] of messages.entries()) {
       while (nextSummary < summaries.length && summaries[nextSummary]!.from <= row.position) {
         const s = summaries[nextSummary++]!
-        blocks.push(summaryText(s.from + 1, s.to + 1, s.content.trim()))
+        const name = summaryRowName(s.from + 1, s.to + 1)
+        blocks.push(mergedRowText({ kind: "summary", name, content: s.content }))
         rows.push({
           kind: "summary",
           sourceSlotId: s.lastSlotId,
@@ -355,7 +354,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
                     return known === null ? all : all === null ? known : all.filter((id) => known.includes(id))
                   }, null)
               : [],
-          name: `Summary of #${s.from + 1}–${s.to + 1}`,
+          name,
           side: "assistant",
           content: s.content.trim(),
           sentAt: 0,
@@ -384,9 +383,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       })
     }
     const notes = [
-      ...(leftOut && !request.includeLeftOut
-        ? [`[${leftOut} earlier ${leftOut === 1 ? "message" : "messages"} of “${title}” not included.]`]
-        : []),
+      ...(leftOut && !request.includeLeftOut ? [leftOutNote(leftOut, title)] : []),
       ...(nested ? [`[${nested} ${nested === 1 ? "chat" : "chats"} merged into “${title}” not included.]`] : [])
     ]
     const transcript = [...notes, ...blocks].join("\n\n")

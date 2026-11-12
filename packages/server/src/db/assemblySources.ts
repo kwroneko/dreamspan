@@ -32,7 +32,7 @@ import { withEndOfRequest } from "@rp/shared/presetConditions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
-import { knowsSql, readKnowers } from "./knowers.ts"
+import { knowsSql, readKnowers, readMergeRows } from "./knowers.ts"
 import { resolveModel } from "@rp/shared/providers.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Schema } from "effect"
@@ -886,6 +886,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return found
       }),
 
+    // Frozen rows (`chat_merge_messages_frozen`): a rebuild reads them again, unpinned.
+    mergeRows: (mergeIds) => readMergeRows(sql, chatId, owned, mergeIds),
+
     knewThrough: (leaf, viewer, through, aliases) =>
       Effect.gen(function* () {
         const selected = yield* shown(leaf, "s")
@@ -1231,6 +1234,7 @@ const replaySources = (
       Effect.map(pinned(pins.messageCount ?? [], keyOf(leaf), "the path message count"), ({ count }) => count),
     knowers: (versionIds) =>
       Effect.map(pinned(pins.knowers ?? [], keyOf(versionIds), "who knew the messages"), ({ found }) => found),
+    ...(live.mergeRows ? { mergeRows: live.mergeRows } : {}),
     knewThrough: (leaf, viewer, through, aliases) =>
       Effect.map(
         pinned(

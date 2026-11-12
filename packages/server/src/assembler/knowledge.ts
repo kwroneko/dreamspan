@@ -10,8 +10,9 @@
 import { Effect } from "effect"
 import { foldState } from "@rp/shared/state.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
+import { leftOutNote, mergedRowText } from "./merges.ts"
 import { AssemblySources, need, type Assembly, type AssemblerStage, type Cast } from "./pipeline.ts"
-import type { HistoryEntry } from "./types.ts"
+import type { HistoryEntry, MergeRow } from "./types.ts"
 
 export interface ContextView {
   readonly id: string
@@ -121,8 +122,33 @@ export const knowledgeStage: AssemblerStage = {
 }
 
 /**
+ * A merge's join for one viewer (spec/CHARACTER-CONTEXT.md §2.1 [P], unit C6): the merged rows
+ * it knew in the source. None of those sent: the join is left out like any message it missed
+ * (the gap-lines stage may send the join line). All of them: the join as written. Some: its
+ * text written again from those rows, in their order, with the note on the messages left out
+ * counting only those it knew. Either way `known` holds the rows for `merge-layout`.
+ */
+const joinFor = (
+  entry: HistoryEntry,
+  rows: ReadonlyArray<MergeRow>,
+  knows: (knowers: ReadonlyArray<string>) => boolean
+): HistoryEntry => {
+  const sent = rows.filter((row) => row.included === "verbatim")
+  const kept = sent.filter((row) => knows(row.knowers))
+  if (sent.length > 0 && kept.length === 0)
+    return { ...entry, inContext: false, unknown: { knowers: [...new Set(sent.flatMap((row) => row.knowers))] } }
+  if (kept.length === sent.length) return { ...entry, known: { rows: kept, partial: false } }
+  const leftOut = rows.filter((row) => row.included === "left_out" && knows(row.knowers)).length
+  const content = [...(leftOut ? [leftOutNote(leftOut, entry.merge!.title)] : []), ...kept.map(mergedRowText)].join(
+    "\n\n"
+  )
+  return { ...entry, content, known: { rows: kept, partial: true } }
+}
+
+/**
  * A window's messages with those the viewer doesn't know left out: kept in place, so the
- * numbering and the history's positions stay, but not in the context (`unknown`).
+ * numbering and the history's positions stay, but not in the context (`unknown`). A merge's
+ * join keeps what the viewer knew of it (`joinFor`).
  */
 export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<HistoryEntry>) =>
   Effect.gen(function* () {
@@ -131,16 +157,18 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
     if (viewer === null || !sources.knowers) return entries
     const ids = entries.filter((e) => e.inContext).map((e) => e.versionId)
     if (ids.length === 0) return entries
+    const identities = assembly.knowledge?.aliases ?? [viewer]
+    const knows = (knowers: ReadonlyArray<string>) => identities.some((id) => knowers.includes(id))
     const known = new Map((yield* sources.knowers(ids)).map((k) => [k.versionId, k.knowers]))
+    const joins = sources.mergeRows ? entries.flatMap((e) => (e.inContext && e.merge ? [e.merge.id] : [])) : []
+    const merged = new Map(
+      joins.length ? (yield* sources.mergeRows!(joins)).map((m) => [m.mergeId, m.rows] as const) : []
+    )
     return entries.map((entry) => {
+      const rows = entry.merge && entry.inContext ? merged.get(entry.merge.id) : undefined
+      if (rows !== undefined) return joinFor(entry, rows, knows)
       const knowers = known.get(entry.versionId)
-      if (
-        !entry.inContext ||
-        knowers === undefined ||
-        knowers === null ||
-        (assembly.knowledge?.aliases ?? [viewer]).some((id) => knowers.includes(id))
-      )
-        return entry
+      if (!entry.inContext || knowers === undefined || knowers === null || knows(knowers)) return entry
       const hidden: HistoryEntry = { ...entry, inContext: false, unknown: { knowers } }
       return hidden
     })
