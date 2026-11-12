@@ -33,6 +33,7 @@ import { SortDirection, type SortOrder } from "../characters/cardBrowse.tsx"
 import { TILE_CLASS, TILE_SURFACE_CLASS, TileFace, useOpenCharacter } from "../characters/shellData.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { canHideCreator, CreatorHeader, hideCreator, showCreator, shownCreator } from "./creator.tsx"
 import {
   cardSourceViews,
   recentAtom,
@@ -59,7 +60,8 @@ export function useSourceList(): ReadonlyArray<SourceInfo> | null {
 // Capabilities rarely change (the server keeps them a day): asked once per source per page load.
 const capabilities = new Map<string, SourceCapabilities>()
 
-function useCapabilities(sourceId: string | null) {
+/** A source's capabilities, asked once per page load; nothing is asked while `sourceId` is null. */
+export function useCapabilities(sourceId: string | null) {
   const call = useSourceCall()
   const [state, setState] = useState<{
     id: string | null
@@ -963,7 +965,9 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
         </>
       }
     >
-      <span className="truncate text-xs text-muted">{card.creator ? `by ${card.creator}` : " "}</span>
+      <span data-remote-creator className="truncate text-xs text-muted">
+        {card.creator ? `by ${card.creator}` : " "}
+      </span>
       <span className="mt-auto truncate text-xs text-muted">
         {view?.tileLine?.(card) ?? defaultLine(card, browse.caps)}
       </span>
@@ -1069,24 +1073,27 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
             Open on {info.name}
           </MenuItem>
         )}
-        {card.creator !== undefined && (
+        {card.creator !== undefined && shownCreator(browse) !== (card.creatorQuery ?? card.creator) && (
           <MenuItem
-            icon="search"
-            description={`Searches ${info.name} for cards by ${card.creator}.`}
-            onClick={() => byCreator(browse, card.creatorQuery ?? card.creator!)}
+            icon="person"
+            description={`Shows every card by ${card.creator} on ${info.name}, with their profile.`}
+            onClick={() => showCreator(browse, card.creatorQuery ?? card.creator!)}
           >
-            Search {info.name} for cards by {card.creator}
+            Cards by {card.creator}
+          </MenuItem>
+        )}
+        {card.creatorQuery !== undefined && canHideCreator(browse) && (
+          <MenuItem
+            icon="ban"
+            description={`Leaves ${card.creator ?? card.creatorQuery}'s cards out of these results.`}
+            onClick={() => hideCreator(browse, card.creatorQuery!)}
+          >
+            Not by {card.creator ?? card.creatorQuery}
           </MenuItem>
         )}
       </ContextMenu>
     </div>
   )
-}
-
-const byCreator = (browse: SourceBrowse, creator: string) => {
-  const creatorFilter = browse.caps?.filters.find((f) => f.kind === "text" && /author|creator/i.test(f.id))
-  if (creatorFilter) browse.change({ filters: { ...browse.remote.filters, [creatorFilter.id]: creator } })
-  else browse.change({ text: creator })
 }
 
 /** What each failure says, worded for what the user can do (§5.4). */
@@ -1277,12 +1284,14 @@ export function SourceResults({ browse, className }: { browse: SourceBrowse; cla
   const failed = results?.status === "failed" || (!browse.caps && problem)
   const loading = !failed && (results === null || (results.status === "loading" && results.items.length === 0))
   const items = results?.items ?? []
+  const creator = browse.caps ? shownCreator(browse) : null
   return (
     <div
       data-source-results={info.id}
       aria-busy={results?.status === "loading" || results?.status === "more"}
       className="flex min-w-0 flex-col gap-3"
     >
+      {creator !== null && <CreatorHeader key={creator} browse={browse} creator={creator} />}
       <RecentRow browse={browse} />
       {results?.notice && <Alert tone="neutral">{results.notice}</Alert>}
       {failed && problem ? (

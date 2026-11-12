@@ -12,6 +12,7 @@ import {
   CARDEX_ORIGIN,
   cardexAdapter,
   cardSourceSetup,
+  creatorOf,
   cursorRefused,
   downloadModeOf,
   detailMetadata,
@@ -153,6 +154,50 @@ describe("v1 as card sources", () => {
       assert.isTrue(sites.kind === "choice" && sites.options.length === 18)
     })
   )
+
+  it.effect("a creator's profile: v1's /authors facts, the avatar a path on the archive, the filters named", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      const caps = yield* adapter.capabilities(direct())
+      assert.deepStrictEqual(caps.creators, { filterId: "author", excludeFilterId: "not_author", profiles: true })
+      const card = archive.cards.find((c) => c.creator !== "lumen")!
+      const query = `${card.site}/${card.creator}`
+      const profile = yield* adapter.creator!(direct(), query)
+      const theirs = archive.cards.filter((c) => c.site === card.site && c.creator === card.creator)
+      assert.strictEqual(profile.query, query)
+      assert.strictEqual(profile.name, `${card.creator} (synthetic)`)
+      assert.strictEqual(profile.cards, theirs.length)
+      assert.strictEqual(profile.lorebooks, theirs.filter((c) => c.hasLorebook).length)
+      assert.strictEqual(profile.site, `Synthetic ${card.site}`)
+      assert.isString(profile.bio)
+      assert.match(profile.avatar!, /\/t\/[0-9a-f]{64}\.512\.webp$/)
+      assert.strictEqual(profile.url, `${archive.origin}/u/${card.site}/${card.creator}`)
+      assert.isAbove(profile.lastSeen!, profile.firstSeen! - 1)
+      assert.isTrue(archive.paths().some((p) => p.startsWith(`/api/v1/authors/${card.site}/`)))
+      // Not a creator the archive knows; not a site/handle at all.
+      for (const missing of [`${card.site}/nobody-here`, "no-slash", "/x"])
+        assert.strictEqual((yield* Effect.flip(adapter.creator!(direct(), missing))).reason, "not_found", missing)
+    })
+  )
+
+  it("a creator envelope keeps only what it can show: no avatar off the archive, no bad counts", () => {
+    const profile = creatorOf(
+      {
+        author: {
+          handle: "h",
+          source: "chub",
+          avatar: { url: "https://elsewhere.example/a.png" },
+          card_count: -1,
+          lorebook_count: "3",
+          first_seen_at: "not a date",
+          path: "/u/chub/h"
+        }
+      },
+      "chub/h"
+    )
+    assert.deepStrictEqual(profile, { query: "chub/h", name: "h", site: "Chub", url: `${CARDEX_ORIGIN}/u/chub/h` })
+    assert.throws(() => creatorOf({ results: [] }, "chub/h"))
+  })
 
   it("a filter or sort v1 no longer lists is left out, and a body without filters is refused", () => {
     const caps = capabilitiesOf({

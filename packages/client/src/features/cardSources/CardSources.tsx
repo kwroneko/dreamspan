@@ -1,10 +1,44 @@
 // The card's Sources list, read-only: CCv3 `source` is only appended to, never edited by the
 // user (DESIGN §4). Each link opens the site in a new tab.
-import { useMemo, useSyncExternalStore } from "react"
+import { useMemo, useState, useSyncExternalStore } from "react"
+import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { cardSources, sourceRecognizers, type CardSource, type SourceInput } from "./sources.ts"
-import { CheckForNewer } from "./updates.tsx"
+import { SourceFamily } from "./family.tsx"
+import { CheckForNewer, useOrigin } from "./updates.tsx"
+
+/** Versions and forks: the card's family on the source it came from, asked for on request. */
+function FamilyOnSource({ entityId, name }: { entityId: string; name: string }) {
+  const origin = useOrigin(entityId)
+  const [open, setOpen] = useState(false)
+  if (!origin) return null
+  return (
+    <div data-card-source-family className="flex min-w-0 flex-col gap-1 px-2 pt-2">
+      <div>
+        <Button
+          aria-expanded={open}
+          hint={
+            open
+              ? "Click to hide the versions and forks"
+              : `Lists the versions and forks of ${name || "this card"} on ${origin.sourceName}.`
+          }
+          onClick={() => setOpen(!open)}
+        >
+          Versions and forks on {origin.sourceName}
+        </Button>
+      </div>
+      {open && (
+        <SourceFamily
+          sourceId={origin.sourceId}
+          sourceName={origin.sourceName}
+          remoteId={origin.remoteId}
+          name={name || "this card"}
+        />
+      )}
+    </div>
+  )
+}
 
 function SourceRow({ source }: { source: CardSource }) {
   if (source.kind === "id") {
@@ -59,6 +93,7 @@ export function CardSources({ doc, entityId, name }: { doc: SourceInput; entityI
         </ul>
       )}
       {entityId && <CheckForNewer entityId={entityId} name={name ?? ""} />}
+      {entityId && <FamilyOnSource entityId={entityId} name={name ?? ""} />}
     </section>
   )
 }

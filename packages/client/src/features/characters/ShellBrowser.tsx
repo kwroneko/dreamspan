@@ -980,7 +980,7 @@ function Browser({ data }: { data: ShellLibrary }) {
       >
         {grid && source ? (
           // The source's cards only: never mixed with the user's (spec/CARD-SOURCES.md §3.2).
-          <div className="flex min-w-0 flex-col gap-2 pb-2">
+          <div className="flex min-w-0 flex-col gap-2 py-2">
             <SourceFiltersPanel browse={sources} id="side-source-filters" />
             <SourceChips browse={sources} />
             <SourceResults

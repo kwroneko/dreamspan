@@ -117,12 +117,16 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
     await release(entry.blob)
   }
 
+  /** Entries the last `sweepKeeping` named (cards with unsaved edits): pinned until the next. */
+  let keeping: ReadonlySet<string> = new Set()
+
   /** Expired unpinned entries go; then, past the cap, the least recently used, unpinned first. */
   const enforce = async () => {
     const t = now()
-    for (const [k, entry] of [...index]) if (!pins.has(k) && expired(entry, t)) await drop(k)
+    const pinned = (k: string) => pins.has(k) || keeping.has(k)
+    for (const [k, entry] of [...index]) if (!pinned(k) && expired(entry, t)) await drop(k)
     if (usedBytes() <= cap()) return
-    const order = [...index].sort(([ka, a], [kb, b]) => Number(pins.has(ka)) - Number(pins.has(kb)) || a.used - b.used)
+    const order = [...index].sort(([ka, a], [kb, b]) => Number(pinned(ka)) - Number(pinned(kb)) || a.used - b.used)
     for (const [k] of order) {
       if (usedBytes() <= cap()) break
       await drop(k)
@@ -227,7 +231,7 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
     })
 
   /** Rebuilds the index from the entry files, and removes blobs no entry names and stray temporary files. */
-  const scan = Effect.promise(async () => {
+  const rebuild = async () => {
     await mkdir(entriesDir, { recursive: true })
     await mkdir(blobsDir, { recursive: true })
     for (const name of await readdir(entriesDir)) {
@@ -262,8 +266,18 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
         else if (name.endsWith(".tmp")) await unlink(join(dir, name)).catch(() => undefined)
       }
     }
+  }
+  const scan = Effect.promise(async () => {
+    await rebuild()
     await enforce()
   })
+
+  /** A sweep that keeps `keys` as if pinned, and keeps them so until the next such sweep. */
+  const sweepKeeping = (keys: ReadonlyArray<CacheKey>) =>
+    Effect.promise(() => {
+      keeping = new Set(keys.map(keyString))
+      return enforce()
+    })
 
   return {
     get,
@@ -274,7 +288,10 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
     pin,
     clearUser,
     scan,
-    sweep: Effect.promise(enforce),
+    /** The index rebuilt as `scan` does, with no sweep: the caller sweeps, keeping what it must. */
+    load: Effect.promise(rebuild),
+    sweep: Effect.promise(() => enforce()),
+    sweepKeeping,
     usedBytes,
     size: () => index.size,
     has: (key: CacheKey) => index.has(keyString(key))

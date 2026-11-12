@@ -36,6 +36,8 @@ export const makeCardSourceHandlers = Effect.gen(function* () {
     CheckRemoteVersion: ({ entityId }) => withUser((user) => sources.checkVersion(user, entityId)),
     TakeRemoteVersion: ({ entityId, version }) => withUser((user) => sources.takeVersion(user, entityId, version)),
     AddRemoteVersionAsCard: ({ entityId }) => withUser((user) => sources.addVersionAsCard(user, entityId)),
+    SourceCreator: ({ sourceId, creator }) => withUser((user) => sources.creator(user, sourceId, creator)),
+    SourceFamily: ({ sourceId, remoteId }) => withUser((user) => sources.family(user, sourceId, remoteId)),
     ListRecentRemote: ({ sourceId }) => withUser((user) => sources.recent(user, sourceId)),
     ClearRecentRemote: ({ sourceId }) => withUser((user) => sources.clearRecent(user, sourceId))
   } satisfies Parameters<typeof CardSourcesApi.of>[0]

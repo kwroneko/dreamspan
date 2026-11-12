@@ -27,7 +27,13 @@
 // instance point this same adapter at the fake archive's origin instead
 // (test/support/fakeArchive.ts, `dev/fakeCardSource.ts`), so it never reaches cardex.zip there.
 import { CARDEX_SITE_LABELS, SourceFailed } from "@rp/shared/cardSources.ts"
-import type { SourceCapabilities, SourceFilter, SourceQuery } from "@rp/shared/cardSources.ts"
+import type {
+  RemoteCreator,
+  RemoteRelative,
+  SourceCapabilities,
+  SourceFilter,
+  SourceQuery
+} from "@rp/shared/cardSources.ts"
 import { Effect } from "effect"
 import type { AdapterSummary, CardSourceAdapter, SourceHttp, SourceResponse } from "./adapter.ts"
 
@@ -466,7 +472,54 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       ? { ratings: { filterId: "nsfw", default: typeof nsfwDefault === "string" ? nsfwDefault : null } }
       : {}),
     paging: "cursor",
-    stats: [{ id: "popularity", label: "popularity" }]
+    stats: [{ id: "popularity", label: "popularity" }],
+    families: true,
+    ...(named.has("author")
+      ? {
+          creators: {
+            filterId: "author",
+            ...(named.has("not_author") ? { excludeFilterId: "not_author" } : {}),
+            profiles: true
+          }
+        }
+      : {})
+  }
+}
+
+/** A date cardex gave, as ms; undefined when it isn't one. */
+const dateOf = (value: unknown) => {
+  const at = typeof value === "string" ? Date.parse(value) : Number.NaN
+  return Number.isNaN(at) ? undefined : at
+}
+const count = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined
+
+/** v1's `/authors/<site>/<handle>` envelope's `author` as a creator profile; the avatar stays a path. */
+export const creatorOf = (raw: unknown, query: string, origin = CARDEX_ORIGIN): RemoteCreator => {
+  const author = isRecord(raw) && isRecord(raw.author) ? raw.author : null
+  if (author === null) throw bad()
+  const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
+  const avatar = isRecord(author.avatar)
+    ? onOrigin(origin, text(author.avatar.thumb_url) ?? text(author.avatar.url))
+    : onOrigin(origin, text(author.avatar))
+  const site = text(author.source_label) ?? (text(author.source) && CARDEX_SITE_LABELS[text(author.source)!])
+  const url = onOrigin(origin, text(author.path))
+  const cards = count(author.card_count)
+  const lorebooks = count(author.lorebook_count)
+  const firstSeen = dateOf(author.first_seen_at)
+  const lastSeen = dateOf(author.last_seen_at)
+  const bio = text(author.bio)
+  return {
+    query,
+    name: text(author.display_name) ?? text(author.handle) ?? query,
+    ...(site ? { site } : {}),
+    ...(bio ? { bio: bio.slice(0, 4000) } : {}),
+    ...(avatar ? { avatar } : {}),
+    ...(cards === undefined ? {} : { cards }),
+    ...(lorebooks === undefined ? {} : { lorebooks }),
+    ...(firstSeen === undefined ? {} : { firstSeen }),
+    ...(lastSeen === undefined ? {} : { lastSeen }),
+    ...(url ? { url } : {})
   }
 }
 
@@ -510,6 +563,188 @@ export const searchParams = (query: SourceQuery, token: string | null) => {
   if (page && "cursor" in page && !semantic) params.set("cursor", page.cursor)
   if (page && "page" in page) params.set("page", String(page.page))
   return params
+}
+
+/**
+ * The cardex cards a card names: `cardex:<slug>` entries and pages `<origin>/c/<slug>` (the
+ * adapter's origin: cardex.zip, or the fake archive's in tests), each slug once.
+ */
+export const recognizeCardex = (links: ReadonlyArray<string>, origin = CARDEX_ORIGIN): ReadonlyArray<string> => {
+  const slugs = new Set<string>()
+  for (const link of links) {
+    const id = /^cardex:(.+)$/.exec(link.trim())?.[1]?.trim()
+    if (id) {
+      slugs.add(id)
+      continue
+    }
+    if (!URL.canParse(link)) continue
+    const url = new URL(link)
+    if (url.origin !== origin) continue
+    const [kind, slug] = url.pathname.split("/").filter(Boolean)
+    if (kind !== "c" || !slug) continue
+    try {
+      slugs.add(decodeURIComponent(slug))
+    } catch {
+      slugs.add(slug)
+    }
+  }
+  return [...slugs].filter((slug) => slug.length <= 500)
+}
+
+/** At most this many relatives in a family, and the origins whose versions and forks are read. */
+const FAMILY_MAX = 60
+const FAMILY_ORIGINS = 3
+
+const textOf = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
+
+/** A creator's `site/handle` from v1's creator path, `/u/<site>/<handle>`. */
+const creatorQueryOf = (creator: unknown) => {
+  if (!isRecord(creator)) return undefined
+  const handle = textOf(creator.handle)
+  const site = textOf(creator.source)
+  if (site && handle) return `${site}/${handle}`
+  const path = /^\/u\/([^/]+)\/(.+)$/.exec(textOf(creator.path) ?? "")
+  if (!path) return undefined
+  try {
+    return `${decodeURIComponent(path[1]!)}/${decodeURIComponent(path[2]!)}`
+  } catch {
+    return undefined
+  }
+}
+
+/** One relative from v1's family shapes; null without a slug. */
+const relativeOf = (
+  relation: RemoteRelative["relation"],
+  fields: {
+    readonly slug: unknown
+    readonly name: unknown
+    readonly creator?: unknown
+    readonly site?: unknown
+    readonly at?: unknown
+    readonly thumb?: unknown
+    readonly current?: unknown
+    readonly versionLabel?: unknown
+  },
+  origin: string
+): RemoteRelative | null => {
+  const slug = textOf(fields.slug)
+  if (!slug || slug.length > 500) return null
+  const creator = isRecord(fields.creator)
+    ? (textOf(fields.creator.name) ?? textOf(fields.creator.display_name))
+    : undefined
+  const creatorQuery = creatorQueryOf(fields.creator)
+  const siteName = textOf(fields.site)
+  const at = dateOf(fields.at)
+  const thumb = onOrigin(origin, textOf(fields.thumb))
+  const label = textOf(fields.versionLabel)
+  return {
+    relation,
+    remoteId: slug,
+    name: (textOf(fields.name) ?? slug).slice(0, 300),
+    ...(creator ? { creator: creator.slice(0, 200) } : {}),
+    ...(creatorQuery ? { creatorQuery } : {}),
+    ...(siteName ? { site: CARDEX_SITE_LABELS[siteName] ?? siteName } : {}),
+    ...(label ? { versionLabel: label.slice(0, 40) } : {}),
+    ...(at === undefined ? {} : { at }),
+    ...(typeof fields.current === "boolean" ? { current: fields.current } : {}),
+    ...(thumb ? { thumb } : {})
+  }
+}
+
+/**
+ * A card's family from v1: its detail envelope's origins (the card each was forked from) and
+ * earlier listings (each now another card's), then `/versions` and `/forks` of each origin (the
+ * first three). The card itself is left out, and each other card is listed once, in that order.
+ */
+export const familyOf = (
+  remoteId: string,
+  detail: unknown,
+  lists: ReadonlyArray<{ readonly versions: unknown; readonly forks: unknown; readonly site: string }>,
+  origin = CARDEX_ORIGIN
+): { readonly items: ReadonlyArray<RemoteRelative>; readonly more: boolean } => {
+  if (!isRecord(detail)) throw bad()
+  const name =
+    (isRecord(detail.top) && isRecord(detail.top.name) ? textOf(detail.top.name.value) : undefined) ?? remoteId
+  const items: Array<RemoteRelative> = []
+  const seen = new Set([remoteId])
+  let more = false
+  const add = (item: RemoteRelative | null) => {
+    if (item === null || seen.has(item.remoteId)) return
+    if (items.length >= FAMILY_MAX) {
+      more = true
+      return
+    }
+    seen.add(item.remoteId)
+    items.push(item)
+  }
+  const origins = Array.isArray(detail.origins) ? detail.origins.filter(isRecord) : []
+  for (const listed of origins) {
+    const fork = isRecord(listed.fork) ? listed.fork : null
+    const from = fork && isRecord(fork.forked_from) ? fork.forked_from : null
+    if (from)
+      add(relativeOf("parent", { slug: from.card_slug, name: from.name ?? from.card_slug, site: from.source }, origin))
+  }
+  for (const entry of Array.isArray(detail.earlier_origins) ? detail.earlier_origins.filter(isRecord) : []) {
+    const listing = isRecord(entry.listing) ? entry.listing : null
+    const was = isRecord(entry.origin) ? entry.origin : null
+    add(
+      relativeOf(
+        "earlier",
+        {
+          slug: was?.card_slug ?? listing?.card_slug,
+          name: listing?.name,
+          creator: listing?.author,
+          site: listing?.source ?? was?.source,
+          at: entry.active_from,
+          thumb: isRecord(listing?.cover) ? listing.cover.thumb_url : undefined
+        },
+        origin
+      )
+    )
+  }
+  for (const { versions, forks, site } of lists) {
+    if (isRecord(versions) && Array.isArray(versions.items)) {
+      if (typeof versions.next === "string" && versions.next) more = true
+      for (const item of versions.items.filter(isRecord)) {
+        const version = isRecord(item.version) ? item.version : null
+        add(
+          relativeOf(
+            "version",
+            {
+              slug: version?.slug,
+              name,
+              site,
+              at: version?.active_from,
+              current: version?.is_current,
+              versionLabel: isRecord(version?.meta) ? version.meta.character_version : undefined,
+              thumb: item.cover_thumb_url
+            },
+            origin
+          )
+        )
+      }
+    }
+    if (isRecord(forks)) {
+      if (typeof forks.next === "string" && forks.next) more = true
+      const entries = [
+        ...(isRecord(forks.parent) ? [["parent", forks.parent] as const] : []),
+        ...(Array.isArray(forks.children) ? forks.children.filter(isRecord).map((c) => ["fork", c] as const) : [])
+      ]
+      for (const [relation, entry] of entries) {
+        const card = isRecord(entry.card) ? entry.card : null
+        if (card === null) continue
+        const created = isRecord(card.estimated_creation) ? card.estimated_creation.at : card.earliest_known
+        add(
+          relativeOf(
+            relation,
+            { slug: card.slug, name: card.name, creator: card.creator, site, at: created, thumb: card.thumb_url },
+            origin
+          )
+        )
+      }
+    }
+  }
+  return { items, more }
 }
 
 /** cardex's batch URL in its canonical form: sorted, without duplicates, joined by `%2C`. */
@@ -757,6 +992,48 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
           fileName: fileNameOf(file, remoteId),
           summary: { ...summary, ...detailMetadata(detail, origin) }
         }
+      }),
+    recognize: (links) => recognizeCardex(links, origin),
+    family: (http, remoteId) =>
+      Effect.gen(function* () {
+        const detail = yield* getJson(http, api(`/cards/${encodeURIComponent(remoteId)}`))
+        const origins = isRecord(detail) && Array.isArray(detail.origins) ? detail.origins.filter(isRecord) : []
+        const listed = origins
+          .flatMap((o): Array<readonly [string, string]> => {
+            const site = textOf(o.source)
+            const external = textOf(o.external_id)
+            return site && external ? [[site, external]] : []
+          })
+          .slice(0, FAMILY_ORIGINS)
+        // An origin cardex no longer has versions or forks of is simply left out.
+        const orNone = <A>(effect: Effect.Effect<A, SourceFailed>) =>
+          effect.pipe(
+            Effect.catchIf(
+              (failure) => failure.reason === "not_found",
+              () => Effect.succeed(null)
+            )
+          )
+        const lists = yield* Effect.forEach(listed, ([site, external]) =>
+          Effect.gen(function* () {
+            const path = `${encodeURIComponent(site)}/${encodeURIComponent(external)}`
+            const versions = yield* orNone(getJson(http, api(`/versions/${path}`)))
+            const forks = yield* orNone(getJson(http, api(`/forks/${path}`)))
+            return { versions, forks, site }
+          })
+        )
+        return yield* Effect.try({ try: () => familyOf(remoteId, detail, lists, origin), catch: () => bad() })
+      }),
+    creator: (http, query) =>
+      Effect.gen(function* () {
+        // `site/handle`, as the author filter takes it; a handle may itself hold a slash.
+        const at = query.indexOf("/")
+        const site = at > 0 ? query.slice(0, at) : ""
+        const handle = at > 0 ? query.slice(at + 1) : ""
+        if (!/^[a-z0-9_]{1,40}$/.test(site) || handle === "")
+          return yield* new SourceFailed({ sourceId: ID, reason: "not_found", message: "no such creator" })
+        // The envelope also lists a page of the creator's cards, which the search lists instead.
+        const raw = yield* getJson(http, api(`/authors/${encodeURIComponent(site)}/${encodeURIComponent(handle)}`))
+        return yield* Effect.try({ try: () => creatorOf(raw, query, origin), catch: () => bad() })
       }),
     image: (http, ref) =>
       Effect.suspend(() => {

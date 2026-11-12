@@ -225,6 +225,37 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("a creator's profile stays behind consent and the cache; its avatar is an image key", () =>
+    Effect.gen(function* () {
+      const api = yield* client({ "Remote-User": "creator-reader" })
+      const card = archive.cards.find((c) => c.creator !== "lumen")!
+      const creator = `${card.site}/${card.creator}`
+      yield* api.SetCardSourceEnabled({ sourceId: "cardex", enabled: false })
+      const before = archive.hits()
+      assert.strictEqual(yield* outcome(api.SourceCreator({ sourceId: "cardex", creator })), "SourceFailed:disabled")
+      assert.strictEqual(archive.hits(), before)
+      yield* api.SetCardSourceEnabled({ sourceId: "cardex", enabled: true })
+      const profile = yield* api.SourceCreator({ sourceId: "cardex", creator })
+      assert.strictEqual(profile.query, creator)
+      // The avatar is a key this server issued, never the archive's URL.
+      assert.notInclude(profile.avatar!, "/")
+      const port = yield* base
+      const picture = yield* Effect.promise(() =>
+        fetch(`${port}/sources/cardex/image?k=${encodeURIComponent(profile.avatar!)}`, {
+          headers: { "Remote-User": "creator-reader" }
+        })
+      )
+      assert.strictEqual(picture.status, 200)
+      const hits = archive.hits()
+      yield* api.SourceCreator({ sourceId: "cardex", creator })
+      assert.strictEqual(archive.hits(), hits)
+      assert.strictEqual(
+        yield* outcome(api.SourceCreator({ sourceId: "cardex", creator: `${card.site}/nobody-here` })),
+        "SourceFailed:not_found"
+      )
+    })
+  )
+
   it.effect("a regional file restriction is a plain regional state and can be retried", () =>
     Effect.gen(function* () {
       const api = yield* client({ "Remote-User": "regional-reader" })
@@ -470,6 +501,9 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
         again.drafts.map((d) => [d.key.targetKind, d.key.field, d.content]),
         [["remote_card", field, "Edited before adding."]]
       )
+      // While the edit waits, the cache keeps the card's file (§4.1).
+      const edited = (yield* (yield* Reader).EditedRemoteCards()).filter((row) => row.userId === me.id)
+      assert.deepInclude(edited, { userId: me.id, sourceId: "cardex", remoteId: card.slug })
       assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), before.length)
       // Nobody else sees it.
       assert.lengthOf((yield* (yield* client(bob)).OpenEditor({ refId })).drafts, 0)
@@ -499,6 +533,12 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       // An editor still open on the placeholder carries on with the user's card.
       const carried = yield* api.OpenEditor({ refId })
       assert.deepStrictEqual([carried.ref.id, carried.revisionNumber], [held!.refId, 2])
+      // Saved, the edit no longer keeps the source's file.
+      assert.notDeepInclude(yield* (yield* Reader).EditedRemoteCards(), {
+        userId: me.id,
+        sourceId: "cardex",
+        remoteId: card.slug
+      })
     })
   )
 
@@ -809,6 +849,140 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       // The cached page now shows it too, from what was recorded, and doesn't undo it.
       assert.isTrue(held(yield* api.SourceSearch({ sourceId: "cardex", query, page: null }))!.update)
       assert.strictEqual((yield* api.CardOrigin({ entityId: added.entityId }))!.newerVersion, next.sha256)
+    })
+  )
+
+  // --- Families and recognition (§3.7).
+  /** A synthetic card file naming `links` in its Sources. */
+  const namingFile = (name: string, links: ReadonlyArray<string>) =>
+    new TextEncoder().encode(
+      JSON.stringify({
+        spec: "chara_card_v3",
+        spec_version: "3.0",
+        data: {
+          name,
+          description: `${name}, made up for this test.`,
+          personality: "",
+          scenario: "",
+          first_mes: `Hello from ${name}.`,
+          mes_example: "",
+          creator_notes: "",
+          system_prompt: "",
+          post_history_instructions: "",
+          alternate_greetings: [],
+          tags: [],
+          creator: "",
+          character_version: "",
+          extensions: {},
+          group_only_greetings: [],
+          source: links
+        }
+      })
+    )
+  const importedEntity = (response: Response) =>
+    Effect.promise(() => response.json() as Promise<{ library: { ref: { entityId: string } } }>).pipe(
+      Effect.map((body) => body.library.ref.entityId as EntityId)
+    )
+
+  it.effect("a card naming a source's page in its Sources is that card: results mark it, adding returns it", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const card = archive.cards[30]!
+      const response = yield* importFile(namingFile("Recognized one", [`${archive.origin}/c/${card.slug}`]), {
+        name: "recognized.json"
+      })
+      assert.strictEqual(response.status, 200, yield* Effect.promise(() => response.clone().text()))
+      const entityId = yield* importedEntity(response)
+      // Its origin is the source's card, recognized: there is no version to check against.
+      const origin = yield* api.CardOrigin({ entityId })
+      assert.deepStrictEqual([origin?.remoteId, origin?.recognized], [card.slug, true])
+      assert.strictEqual(
+        (yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held?.entityId,
+        entityId
+      )
+      const again = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.deepStrictEqual([again.existing, again.entityId], [true, entityId])
+      const me = yield* api.Whoami()
+      const [held] = yield* (yield* Reader).HeldRemoteCards({
+        userId: me.id,
+        sourceId: "cardex",
+        items: [{ remoteId: card.slug, sha256: null }]
+      })
+      assert.isFalse(held!.tracked)
+      // `cardex:<slug>` names one too; a page on another site names none.
+      const other = archive.cards[31]!
+      const elsewhere = archive.cards[32]!
+      const second = yield* importFile(
+        namingFile("Recognized two", [`cardex:${other.slug}`, `https://elsewhere.example/c/${elsewhere.slug}`]),
+        { name: "recognized-two.json" }
+      )
+      assert.strictEqual(second.status, 200)
+      assert.isDefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: other.slug })).summary.held)
+      assert.isUndefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: elsewhere.slug })).summary.held)
+      // Nobody else holds them.
+      assert.isUndefined(
+        (yield* (yield* client(bob)).SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held
+      )
+    })
+  )
+
+  it.effect("with the card in the bin, its newest live fork is the user's card from there", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const me = yield* api.Whoami()
+      const card = archive.cards[40]!
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      const fork = yield* api.ForkCard({
+        refId: added.refId as RefId,
+        name: `${card.name} (mine)`,
+        nickname: "",
+        characterVersion: ""
+      })
+      yield* (yield* Writer).DeleteEntity({ userId: me.id, entityId: added.entityId as EntityId })
+      const shown = (yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held
+      assert.strictEqual(shown?.entityId, fork.entityId)
+      const again = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.deepStrictEqual([again.existing, again.entityId], [true, fork.entityId])
+      // With the fork gone too, nothing holds it: a file naming it is recognized as it.
+      yield* (yield* Writer).DeleteEntity({ userId: me.id, entityId: fork.entityId as EntityId })
+      assert.isUndefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held)
+      const response = yield* importFile(namingFile("Back again", [`${archive.origin}/c/${card.slug}`]), {
+        name: "back.json"
+      })
+      const entityId = yield* importedEntity(response)
+      assert.strictEqual(
+        (yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held?.entityId,
+        entityId
+      )
+    })
+  )
+
+  it.effect("a card's family: the card it was forked from, an earlier listing, its versions, its forks", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      // Card 13 is a fork of card 12 and has an earlier version; card 20 holds its earlier listing.
+      const parent = archive.cards[12]!
+      const card = archive.cards[13]!
+      const next = archive.cards[20]!
+      const family = yield* api.SourceFamily({ sourceId: "cardex", remoteId: card.slug })
+      const by = new Map(family.items.map((item) => [item.remoteId, item]))
+      assert.strictEqual(by.get(parent.slug)?.relation, "parent")
+      assert.strictEqual(by.get(next.slug)?.relation, "earlier")
+      const older = by.get(`${card.slug}-v09`)!
+      assert.deepStrictEqual([older.relation, older.versionLabel, older.current], ["version", "0.9", false])
+      assert.isFalse(by.has(card.slug))
+      assert.isFalse(family.more)
+      // Thumbnails are image keys, never the source's URLs.
+      assert.notInclude(JSON.stringify(family), archive.origin)
+      // The parent lists it as a fork, by its creator; once added, it is marked as the user's.
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      const ofParent = yield* api.SourceFamily({ sourceId: "cardex", remoteId: parent.slug })
+      const child = ofParent.items.find((item) => item.remoteId === card.slug)!
+      assert.deepStrictEqual([child.relation, child.creatorQuery], ["fork", `${card.site}/${card.creator}`])
+      assert.deepStrictEqual(child.held, { entityId: added.entityId, archived: false })
+      // An older version opens like any card.
+      const opened = yield* api.SourceCard({ sourceId: "cardex", remoteId: older.remoteId })
+      assert.strictEqual(opened.summary.name, card.name)
     })
   )
 })
@@ -1206,6 +1380,36 @@ describe("the cache (§4.1)", () => {
       yield* release
       yield* cache.sweep
       assert.isFalse(cache.has(key("a", "card", "pinned")))
+    })
+  )
+
+  it.effect("a card with unsaved edits is kept from one sweep to the next, past its age and before others", () =>
+    Effect.gen(function* () {
+      let now = 0
+      const { cache } = fresh(
+        () => now,
+        () => 2_000
+      )
+      yield* cache.load
+      const bytes = (fill: number) => new Uint8Array(600).fill(fill)
+      yield* cache.put(key("a", "card", "edited"), { bytes: bytes(1) })
+      now += 1
+      yield* cache.put(key("a", "card", "other"), { bytes: bytes(2) })
+      yield* cache.sweepKeeping([key("a", "card", "edited")])
+      now += 1
+      yield* cache.put(key("a", "card", "more"), { bytes: bytes(3) })
+      now += 1
+      // Past the cap, an admission evicts the oldest of the others, not the edited card.
+      yield* cache.put(key("a", "card", "newest"), { bytes: bytes(4) })
+      assert.isTrue(cache.has(key("a", "card", "edited")))
+      assert.isFalse(cache.has(key("a", "card", "other")))
+      now += 30 * DAY
+      yield* cache.sweep
+      assert.isTrue(cache.has(key("a", "card", "edited")))
+      assert.isFalse(cache.has(key("a", "card", "more")))
+      // Saved or reverted: the next sweep names it no longer, and it goes with its age.
+      yield* cache.sweepKeeping([])
+      assert.isFalse(cache.has(key("a", "card", "edited")))
     })
   )
 

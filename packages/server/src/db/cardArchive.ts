@@ -35,6 +35,7 @@ export const archiveCandidatesSql = `SELECT e.id AS entityId, r.id AS refId, r.l
     FROM entities e JOIN entity_refs r ON r.entity_id = e.id
       LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
       LEFT JOIN card_origins o ON o.entity_id = e.id AND o.owner_user_id = e.owner_user_id
+        AND o.recognized_by = 'adopted'
     WHERE e.owner_user_id = ? AND e.kind = 'card'
       AND e.archived_at IS NULL AND e.deleted_at IS NULL AND e.purged_at IS NULL
     ORDER BY r.label COLLATE NOCASE, e.id`

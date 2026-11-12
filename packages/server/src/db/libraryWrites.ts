@@ -1,4 +1,5 @@
 import { archiveCandidates } from "./cardArchive.ts"
+import { newestLiveFork } from "./cardOrigins.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
 import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
 import { makeForkMergeWriteHandlers } from "./forkMergeWrites.ts"
@@ -906,6 +907,28 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             if (flag?.fav !== null && flag?.fav !== undefined)
               yield* importFavourite(sql, userId, upstream.entity_id, isFav(flag.fav))
           }
+          // Recognized by its Sources (§3.7): the card is the user's card from there, unless a
+          // live card already is. A card keeps one origin.
+          if (kind === "card")
+            for (const { sourceId, remoteId } of input.recognized ?? []) {
+              const [held] = yield* sql<{ entity_id: string; gone: number }>`
+                SELECT o.entity_id, (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone
+                FROM card_origins o JOIN entities e ON e.id = o.entity_id
+                WHERE o.owner_user_id = ${userId} AND o.source_id = ${sourceId} AND o.remote_id = ${remoteId}`
+              // A family whose cards are all gone holds it no longer.
+              if (held?.gone === 1 && (yield* newestLiveFork(sql, userId, held.entity_id)) === undefined)
+                yield* sql`DELETE FROM card_origins WHERE entity_id = ${held.entity_id}`
+              yield* sql`INSERT OR IGNORE INTO card_origins ${sql.insert({
+                entity_id: upstream.entity_id,
+                owner_user_id: userId,
+                source_id: sourceId,
+                remote_id: remoteId,
+                remote_version: input.sourceHash,
+                remote_sha256: input.sourceHash,
+                recognized_by: "recognized",
+                created_at: Date.now()
+              })}`
+            }
           if (input.stageMerge)
             return new LibraryImport({
               created: false,

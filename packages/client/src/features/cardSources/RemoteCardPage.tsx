@@ -11,7 +11,9 @@ import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Badge, Card, EmptyState } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useTitle } from "../shell.tsx"
-import { useSourceList } from "./browse.tsx"
+import { AboutHint } from "../../ui/AboutHint.tsx"
+import { useCapabilities, useSourceList } from "./browse.tsx"
+import { SourceFamily } from "./family.tsx"
 import {
   type Adopted,
   problemText,
@@ -121,6 +123,8 @@ export function RemoteCardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `call` is a fresh closure each render
   }, [key, attempt, info === undefined])
   const current = state?.key === key ? state : null
+  const caps = useCapabilities(info ? sourceId : null).caps
+  const creatorFilter = caps?.creators?.filterId
   useTitle(current?.card?.summary.name ?? "Card")
   if (list === null) return <p className="p-2 text-sm text-muted">Loading…</p>
   if (!info)
@@ -166,7 +170,24 @@ export function RemoteCardPage() {
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="flex min-w-0 flex-col gap-1">
             <h1 className="text-xl font-semibold break-words">{summary.name}</h1>
-            {summary.creator && <p className="text-sm text-muted">by {summary.creator}</p>}
+            {summary.creator && (
+              <p className="text-sm text-muted">
+                by{" "}
+                {creatorFilter && summary.creatorQuery ? (
+                  <Tooltip label={`Shows every card by ${summary.creator} on ${name}, with their profile.`}>
+                    <Link
+                      to="/"
+                      search={{ show: `src.${sourceId}`, sf: { [creatorFilter]: summary.creatorQuery } } as never}
+                      className="text-accent"
+                    >
+                      {summary.creator}
+                    </Link>
+                  </Tooltip>
+                ) : (
+                  summary.creator
+                )}
+              </p>
+            )}
             <p className="text-sm text-muted">
               {mine === null
                 ? `On ${name}. It isn't in your cards.`
@@ -246,6 +267,18 @@ export function RemoteCardPage() {
               />
             ) : null
           })}
+          {caps?.families && (
+            <section className="flex min-w-0 flex-col gap-1">
+              <h2 className="text-sm font-medium">
+                Versions and forks{" "}
+                <AboutHint heading="Versions and forks">
+                  Cards {name} lists as this one&apos;s versions, the card it was forked from or listed as before, and
+                  its forks. You can try or inspect each without adding it; yours are marked.
+                </AboutHint>
+              </h2>
+              <SourceFamily sourceId={sourceId} sourceName={name} remoteId={remoteId} name={summary.name} />
+            </section>
+          )}
           {(greetings > 0 || entries > 0) && (
             <p className="text-sm text-muted">
               {[

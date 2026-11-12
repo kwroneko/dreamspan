@@ -1607,7 +1607,15 @@ export class WriteOps extends RpcGroup.make(
        * card's notes and favourite stay as they are.
        */
       stageMerge: Schema.optionalKey(Schema.Boolean),
-      replace: Schema.optionalKey(Schema.Struct({ expectedHeadRevisionId: Schema.String }))
+      replace: Schema.optionalKey(Schema.Struct({ expectedHeadRevisionId: Schema.String })),
+      /**
+       * Card-source cards this card names in its Sources (spec/CARD-SOURCES.md §3.7), found on
+       * the main thread: each becomes the card's `recognized` origin, unless the user already has
+       * a live card from there (an origin left by a card in the bin or purged is let go).
+       */
+      recognized: Schema.optionalKey(
+        Schema.Array(Schema.Struct({ sourceId: Schema.String, remoteId: Schema.String })).check(Schema.isMaxLength(40))
+      )
     },
     success: LibraryImport,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
@@ -3912,6 +3920,14 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(Draft),
     error: StorageError
   }),
+  /**
+   * Every user's source cards with unsaved edits (active `remote_card` drafts): the cache keeps
+   * their files past their age while the edits wait (spec/CARD-SOURCES.md §4.1).
+   */
+  Rpc.make("EditedRemoteCards", {
+    success: Schema.Array(Schema.Struct({ userId: UserId, sourceId: Schema.String, remoteId: Schema.String })),
+    error: StorageError
+  }),
   Rpc.make("HeldRemoteCards", {
     payload: {
       userId: UserId,
@@ -3930,7 +3946,7 @@ export class ReadOps extends RpcGroup.make(
         remoteVersion: Schema.NullOr(Schema.String),
         /** The newest version the source reported, when it isn't that one. */
         seenVersion: Schema.NullOr(Schema.String),
-        /** Found by its origin row, which records versions (not by its file's hash). */
+        /** Found by an added card's origin row, which records versions (not by a file's hash or Sources). */
         tracked: Schema.Boolean
       })
     ),
@@ -3944,7 +3960,9 @@ export class ReadOps extends RpcGroup.make(
         sourceId: Schema.String,
         remoteId: Schema.String,
         remoteVersion: Schema.String,
-        seenVersion: Schema.NullOr(Schema.String)
+        seenVersion: Schema.NullOr(Schema.String),
+        /** Recognized from an imported file's Sources, not added from the source: no update tracking. */
+        recognized: Schema.Boolean
       })
     ),
     error: StorageError

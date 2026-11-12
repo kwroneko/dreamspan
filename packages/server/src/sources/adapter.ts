@@ -3,6 +3,8 @@
 // given, which keeps them on their declared hosts, under the response caps and timeouts, and
 // behind the source's rate limit (guard.ts, limiter.ts).
 import type {
+  RemoteCreator,
+  RemoteRelative,
   RemoteSummary,
   SourceCapabilities,
   SourceFailed,
@@ -99,6 +101,21 @@ export interface CardSourceAdapter {
   readonly card: (http: SourceHttp, remoteId: string) => Effect.Effect<RemoteCardFile, SourceFailed>
   /** An image a summary referenced (`thumb` or `image`), as bytes. */
   readonly image: (http: SourceHttp, ref: string) => Effect.Effect<Uint8Array, SourceFailed>
+  /** A creator's public profile, by the creator filter's value; `avatar` is the adapter's own reference. */
+  readonly creator?: (http: SourceHttp, query: string) => Effect.Effect<RemoteCreator, SourceFailed>
+  /**
+   * A card's family: what it was forked from or listed as before, its versions and its forks,
+   * a bounded number; `thumb` is the adapter's own reference, `held` unset.
+   */
+  readonly family?: (
+    http: SourceHttp,
+    remoteId: string
+  ) => Effect.Effect<{ readonly items: ReadonlyArray<RemoteRelative>; readonly more: boolean }, SourceFailed>
+  /**
+   * The source's cards a card names among its links (its `source` entries, its extensions'
+   * page URLs): their remote ids. Pure and quick: it runs on the main thread for each import.
+   */
+  readonly recognize?: (links: ReadonlyArray<string>) => ReadonlyArray<string>
   /** Current versions for many ids at once, for update checks (phase 5). */
   readonly versions?: (
     http: SourceHttp,

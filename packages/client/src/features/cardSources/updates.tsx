@@ -29,7 +29,7 @@ const ORIGIN_KEYS = ["library", "card-origin"]
 /** The card's origin, when it was added from a source that's on; read locally. */
 const originQuery = (entityId: string) => AppClient.query("CardOrigin", { entityId }, { reactivityKeys: ORIGIN_KEYS })
 
-function useOrigin(entityId: string): CardOrigin | null {
+export function useOrigin(entityId: string): CardOrigin | null {
   const result = useAtomValue(useMemo(() => originQuery(entityId), [entityId]))
   return AsyncResult.isSuccess(result) ? result.value : null
 }
@@ -211,7 +211,8 @@ export function CheckForNewer({ entityId, name }: { entityId: string; name: stri
   const registry = useContext(RegistryContext)
   const [pending, setPending] = useState(false)
   const [said, setSaid] = useState<string | null>(null)
-  if (!origin) return null
+  // A card recognized by its Sources has no version recorded to compare with.
+  if (!origin || origin.recognized) return null
   const check = async () => {
     setPending(true)
     setSaid(null)

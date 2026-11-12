@@ -18,6 +18,8 @@ import { join } from "node:path"
 import {
   type CardOrigin,
   type RecentRemote,
+  type RemoteCreator,
+  type RemoteRelative,
   remoteEntityId,
   remoteMediaId,
   type RemoteSummary,
@@ -206,8 +208,27 @@ export interface CardSourcesShape {
     user: User,
     entityId: string
   ) => Effect.Effect<{ entityId: string; refId: string; name: string }, SourceFailed | NotFound | ServerError>
+  /** A card's family on the source, the user's own among it marked; a page's lifetime in the cache. */
+  readonly family: (
+    user: User,
+    sourceId: string,
+    remoteId: string
+  ) => Effect.Effect<{ items: ReadonlyArray<RemoteRelative>; more: boolean }, SourceFailed | NotFound | ServerError>
+  /** A creator's public profile, its avatar by an image key; a page's lifetime in the cache. */
+  readonly creator: (
+    user: User,
+    sourceId: string,
+    query: string
+  ) => Effect.Effect<RemoteCreator, SourceFailed | NotFound | ServerError>
   readonly recent: (user: User, sourceId: string) => Effect.Effect<ReadonlyArray<RecentRemote>, ServerError>
   readonly clearRecent: (user: User, sourceId: string) => Effect.Effect<void, ServerError>
+  /**
+   * The registered sources' cards an imported card names among its links (§3.7), so the import
+   * records it as theirs (`recognized`). Local: nothing is sent to a source.
+   */
+  readonly recognize: (
+    links: ReadonlyArray<string>
+  ) => ReadonlyArray<{ readonly sourceId: string; readonly remoteId: string }>
   /** The cache, for tests and pinning (phase 3: drafts and open tabs pin their card). */
   readonly cache: SourceCache
 }
@@ -268,8 +289,24 @@ const make = (options: CardSourcesOptions = {}) =>
       capBytes: () => admin.value.capBytes ?? DEFAULT_CAP_BYTES,
       ...(options.now ? { now: options.now } : {})
     })
-    yield* cache.scan
-    yield* Effect.forkScoped(Effect.repeat(cache.sweep, Schedule.spaced("10 minutes")))
+    yield* cache.load
+    // A card with unsaved edits keeps its cached file while they wait (§4.1): the edits are a
+    // diff from it. If the drafts can't be read, the sweep waits for the next round.
+    const sweep = reader.EditedRemoteCards().pipe(
+      Effect.flatMap((edited) =>
+        cache.sweepKeeping(
+          edited.map(({ userId, sourceId, remoteId }) => ({
+            user: userId,
+            source: sourceId,
+            kind: "card",
+            id: remoteId
+          }))
+        )
+      ),
+      Effect.catch((error) => Effect.logWarning("card source cache sweep skipped", error))
+    )
+    yield* sweep
+    yield* Effect.forkScoped(Effect.repeat(sweep, Schedule.spaced("10 minutes")))
     const limiter = makeLimiter(options.now)
     const coalescer = makeCoalescer()
     const bypass = { entries: [] as ReadonlyArray<string> }
@@ -545,7 +582,8 @@ const make = (options: CardSourcesOptions = {}) =>
       sourceName: adapter.name,
       remoteId: row.remoteId,
       remoteVersion: row.remoteVersion,
-      newerVersion: row.seenVersion !== null && row.seenVersion !== row.remoteVersion ? row.seenVersion : null
+      newerVersion: row.seenVersion !== null && row.seenVersion !== row.remoteVersion ? row.seenVersion : null,
+      ...(row.recognized ? { recognized: true } : {})
     })
     const noOrigin = (entityId: string) => new NotFound({ entity: "card from a card source", id: entityId })
     /** The card's origin, on a source that's on for this user: else NotFound, or `disabled`. */
@@ -566,6 +604,14 @@ const make = (options: CardSourcesOptions = {}) =>
     const service: CardSourcesShape = {
       registry,
       cache,
+      recognize: (links) =>
+        links.length === 0
+          ? []
+          : registry
+              .list()
+              .flatMap((adapter) =>
+                (adapter.recognize?.(links) ?? []).slice(0, 20).map((remoteId) => ({ sourceId: adapter.id, remoteId }))
+              ),
       list: (user) =>
         Effect.gen(function* () {
           const prefs = yield* prefsOf(user.id)
@@ -589,7 +635,7 @@ const make = (options: CardSourcesOptions = {}) =>
         Effect.gen(function* () {
           yield* requireAdmin(user)
           yield* saveAdmin({ ...admin.value, capBytes: bytes })
-          yield* cache.sweep
+          yield* sweep
         }),
       setKey: (user, sourceId, key) =>
         Effect.gen(function* () {
@@ -898,6 +944,46 @@ const make = (options: CardSourcesOptions = {}) =>
             () => [true]
           )
           return { entityId: added.entityId, refId: added.refId, name: prepared.name }
+        }),
+      family: (user, sourceId, remoteId) =>
+        Effect.gen(function* () {
+          const adapter = yield* known(sourceId)
+          const list = adapter.family
+          if (!list) return yield* new NotFound({ entity: "card family", id: remoteId })
+          const found = yield* cached(user, sourceId, "page", `family:${remoteId}`, (http) => list(http, remoteId))
+          const held =
+            found.items.length === 0
+              ? []
+              : yield* reader
+                  .HeldRemoteCards({
+                    userId: user.id,
+                    sourceId,
+                    items: found.items.map((item) => ({ remoteId: item.remoteId, sha256: null }))
+                  })
+                  .pipe(Effect.catch(storage("finding your cards in the family")))
+          const byId = new Map(held.map((card) => [card.remoteId, card]))
+          return {
+            more: found.more,
+            items: found.items.map(({ thumb, held: _, ...item }): RemoteRelative => {
+              const key = issue(user, sourceId, thumb)
+              const mine = byId.get(item.remoteId)
+              return {
+                ...item,
+                ...(key ? { thumb: key } : {}),
+                ...(mine ? { held: { entityId: mine.entityId, archived: mine.archived } } : {})
+              }
+            })
+          }
+        }),
+      creator: (user, sourceId, query) =>
+        Effect.gen(function* () {
+          const adapter = yield* known(sourceId)
+          const profile = adapter.creator
+          if (!profile) return yield* new NotFound({ entity: "creator profile", id: query })
+          const found = yield* cached(user, sourceId, "page", `creator:${query}`, (http) => profile(http, query))
+          const { avatar, ...rest } = found
+          const key = issue(user, sourceId, avatar)
+          return { ...rest, ...(key ? { avatar: key } : {}) }
         }),
       recent: (user, sourceId) =>
         Effect.map(prefsOf(user.id), (prefs) => prefs.recent.filter((r) => r.sourceId === sourceId)),
