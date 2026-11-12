@@ -7,6 +7,32 @@ import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
 import { sse, startMockProvider } from "./support/mockProvider.ts"
 
+for (const parts of [[], [{ text: "" }], [{ text: " \n" }], [{ text: "Thinking only", thought: true }]])
+  it.live(`Google rejects an empty STOP reply: ${JSON.stringify(parts)}`, () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((_r, res) =>
+            sse(res, [{ candidates: [{ content: { parts }, finishReason: "STOP" }] }], { done: false })
+          )
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const reply = yield* generateReply(api, {
+        connection: { kind: "google", baseUrl: mock.url, apiKey: "synthetic-google-key" },
+        modelKey: "gemini-2.5-flash",
+        model: { prefill: "none" }
+      })
+      assert.equal(reply.version.status, "failed")
+      assert.include(reply.version.error!.message, "no text or tool calls")
+      assert.lengthOf(mock.requests(), 1, "an empty completion is not retried automatically")
+      const rows = yield* api.ListLlmRequests({ limit: 5, before: null })
+      assert.equal(rows.find((r) => r.versionId === reply.version.id)!.status, "failed")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
 it.live(
   "Google captures the sent transcript and accounts for cached and thought tokens without an invented TTL",
   () => {

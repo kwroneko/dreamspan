@@ -315,6 +315,11 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
             ? `Google stream ended with ${output.rawStopReason}`
             : "Google stream ended without a finish reason"
         )
+      if (
+        output.stopReason === "stop" &&
+        !output.content.some((block) => block.type === "toolCall" || (block.type === "text" && block.text.trim()))
+      )
+        throw new Error("Google returned no text or tool calls")
       events.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output })
     } catch (error) {
       output.stopReason = options.signal?.aborted ? "aborted" : "error"
