@@ -35,6 +35,7 @@ import { importFavourite, isFav } from "./cardFavourites.ts"
 import { docHash, searchText } from "./documents.ts"
 import { makeCardForkWriteHandlers } from "./cardForkWrites.ts"
 import { makeEditorWriteHandlers } from "./editorWrites.ts"
+import { makeLibraryReplaceWrites } from "./libraryReplaceWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaPath } from "./media.ts"
 import { sharedNote } from "./sharedNotes.ts"
@@ -86,7 +87,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly schemaVersion: number
       readonly doc: EncodedDoc
       readonly parents: ReadonlyArray<string>
-      readonly origin: "import" | "user" | "merge" | "generation"
+      readonly origin: "import" | "user" | "merge" | "generation" | "changeset"
       readonly originRef: string | null
       readonly message: string | null
       readonly modifiedAt?: number
@@ -957,6 +958,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     return {
       ...handlers,
       ...makeEditorWriteHandlers(steps, bin),
+      ...makeLibraryReplaceWrites(steps),
       ...makeCardForkWriteHandlers(steps),
       ...makeForkMergeWriteHandlers(steps),
       ...makeRolloutEffectHandlers(steps)

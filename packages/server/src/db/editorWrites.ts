@@ -59,7 +59,7 @@ export interface LibrarySteps {
     readonly schemaVersion: number
     readonly doc: EncodedDoc
     readonly parents: ReadonlyArray<string>
-    readonly origin: "import" | "user" | "merge" | "generation"
+    readonly origin: "import" | "user" | "merge" | "generation" | "changeset"
     readonly originRef: string | null
     readonly message: string | null
   }) => Sql<string>

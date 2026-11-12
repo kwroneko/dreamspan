@@ -155,6 +155,31 @@ const settings = (name: string, presetOverrideRefId: RefId | null = null): Conne
 
 const credentialKey = (handle: string) => `sk-${handle}-credential-key`
 
+/** A search for the lorebook every party has, named "Lore". */
+const LORE_SEARCH = {
+  find: "Lore",
+  replace: "",
+  matchCase: true,
+  wholeWord: true,
+  regex: false,
+  preserveCase: false,
+  kinds: ["lorebook"] as const
+}
+
+/** A replace of the owner's own, in a lorebook of its own: its id. */
+const ownerLibraryEdit = (owner: Party) =>
+  Effect.gen(function* () {
+    const book = yield* owner.api.CreateLorebook({ label: "Isolation tides" })
+    const search = { ...LORE_SEARCH, find: "Isolation tides", replace: "Isolation ebb" }
+    const preview = yield* owner.api.PreviewLibraryReplace({ search })
+    const entry = preview.entries.find((e) => e.refId === book.id)!
+    const result = yield* owner.api.ApplyLibraryReplace({
+      search,
+      choices: [{ refId: entry.refId, stamp: entry.stamp, fields: entry.fields.map((f) => f.field) }]
+    })
+    return result.editId!
+  })
+
 const refused = <A, E>(attempt: Effect.Effect<A, E>, expected: string) =>
   Effect.map(
     outcome(attempt, () => "allowed"),
@@ -2740,6 +2765,52 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         const page = yield* actor.api.SearchMessages({ text: "hi", cursor: null })
         assert.isTrue(page.hits.some((h) => h.chatId === actor.quiet.chatId))
         assert.isFalse(page.hits.some((h) => h.chatId === owner.quiet.chatId || h.chatId === owner.chat.chatId))
+      })
+  },
+  PreviewLibraryReplace: {
+    // Both have a lorebook named "Lore": each finds its own, never the other's.
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const search = { ...LORE_SEARCH, replace: "Lore" }
+        const own = yield* owner.api.PreviewLibraryReplace({ search })
+        assert.isTrue(own.entries.some((e) => e.refId === owner.loreRefId))
+        const theirs = yield* actor.api.PreviewLibraryReplace({ search })
+        assert.isTrue(theirs.entries.some((e) => e.refId === actor.loreRefId))
+        assert.isFalse(theirs.entries.some((e) => e.refId === owner.loreRefId))
+      })
+  },
+  ApplyLibraryReplace: {
+    // The owner's lorebook, with the owner's own stamp: left as it is.
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const search = { ...LORE_SEARCH, replace: "Taken" }
+        const own = yield* owner.api.PreviewLibraryReplace({ search })
+        const entry = own.entries.find((e) => e.refId === owner.loreRefId)!
+        const result = yield* actor.api.ApplyLibraryReplace({
+          search,
+          choices: [{ refId: entry.refId, stamp: entry.stamp, fields: entry.fields.map((f) => f.field) }]
+        })
+        assert.strictEqual(result.entries, 0)
+        assert.isNull(result.editId)
+        const after = yield* owner.api.PreviewLibraryReplace({ search })
+        assert.strictEqual(after.entries.find((e) => e.refId === owner.loreRefId)?.stamp, entry.stamp)
+      })
+  },
+  ListLibraryEdits: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const editId = yield* ownerLibraryEdit(owner)
+        assert.isTrue((yield* owner.api.ListLibraryEdits()).some((e) => e.id === editId))
+        assert.isFalse((yield* actor.api.ListLibraryEdits()).some((e) => e.id === editId))
+      })
+  },
+  UndoLibraryEdit: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const editId = yield* ownerLibraryEdit(owner)
+        yield* refused(actor.api.UndoLibraryEdit({ editId }), "NotFound")
+        const listed = (yield* owner.api.ListLibraryEdits()).find((e) => e.id === editId)
+        assert.strictEqual(listed?.undone, 0)
       })
   },
   ListArchiveCandidates: {

@@ -1,4 +1,14 @@
 import { MessageCursor, MessageQuery, MessageSearchPage } from "@rp/shared/messageSearch.ts"
+import {
+  LibraryChoice,
+  LibraryEdit,
+  LibraryPreview,
+  LibraryReplaceRejected,
+  LibraryReplaceResult,
+  LibrarySearch,
+  LibrarySkipped,
+  LibraryUndoResult
+} from "@rp/shared/libraryReplace.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
@@ -526,6 +536,28 @@ const StartChatFields = {
 }
 
 export const StartChatResult = Schema.Struct({ ...AppendResult.fields, composer: Draft })
+
+/**
+ * An entry a library-wide replace changes, as the reader worked it out (libraryReplace.ts): the
+ * head and drafts it was read at, its unsaved changes applied (`checkpoint`, null without any)
+ * and the document with the replacements in it.
+ */
+export const LibraryReplaceEntry = Schema.Struct({
+  refId: RefId,
+  label: Schema.String,
+  head: Schema.String,
+  rowVersion: Schema.Int,
+  drafts: Schema.Array(Schema.Struct({ id: Schema.String, field: Schema.String, rowVersion: Schema.Int })),
+  checkpoint: Schema.NullOr(Doc),
+  doc: Doc,
+  matches: Schema.Int
+})
+export type LibraryReplaceEntry = typeof LibraryReplaceEntry.Type
+
+export const LibraryReplacePlan = Schema.Struct({
+  entries: Schema.Array(LibraryReplaceEntry),
+  skipped: Schema.Array(LibrarySkipped)
+})
 
 export class WriteOps extends RpcGroup.make(
   /**
@@ -2276,6 +2308,31 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A new revision on the head with an earlier revision's content. */
+  /**
+   * A library-wide replace (libraryReplace.ts) as planned: per entry, its unsaved changes saved
+   * first as a revision of their own, then a `changeset` revision with the replacements, all
+   * under one changeset group (`editId`). An entry whose head, row version or drafts moved since
+   * the plan is left as it is, in `skipped` with the plan's own.
+   */
+  Rpc.make("ApplyLibraryReplace", {
+    payload: {
+      userId: UserId,
+      title: Schema.String,
+      entries: Schema.Array(LibraryReplaceEntry),
+      skipped: Schema.Array(LibrarySkipped)
+    },
+    success: LibraryReplaceResult,
+    error: StorageError
+  }),
+  /**
+   * Takes a library-wide replace back: each entry whose head is still the replace's revision
+   * gets a revision with the document from before it; the others are `kept`, with why.
+   */
+  Rpc.make("UndoLibraryEdit", {
+    payload: { userId: UserId, editId: Schema.String },
+    success: LibraryUndoResult,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("RestoreRevision", {
     payload: {
       userId: UserId,
@@ -3630,6 +3687,28 @@ export class ReadOps extends RpcGroup.make(
    * message"): message versions whose text has a word starting with each word of `text`, newest
    * first, each with the live branches that show it; `cursor` from the previous page.
    */
+  /**
+   * Search across the library (libraryReplace.ts, ARCHITECTURE §14.6 "Across the library"):
+   * every live, unarchived entry of the chosen kinds, as its editor shows it, with its matches by
+   * field.
+   */
+  Rpc.make("PreviewLibraryReplace", {
+    payload: { userId: UserId, search: LibrarySearch },
+    success: LibraryPreview,
+    error: Schema.Union([LibraryReplaceRejected, StorageError])
+  }),
+  /** The documents a library-wide replace writes, for the chosen entries and fields. */
+  Rpc.make("PlanLibraryReplace", {
+    payload: { userId: UserId, search: LibrarySearch, choices: Schema.Array(LibraryChoice) },
+    success: LibraryReplacePlan,
+    error: Schema.Union([LibraryReplaceRejected, StorageError])
+  }),
+  /** The user's latest library-wide replaces. */
+  Rpc.make("ListLibraryEdits", {
+    payload: { userId: UserId, limit: Schema.Int },
+    success: Schema.Array(LibraryEdit),
+    error: StorageError
+  }),
   Rpc.make("SearchMessages", {
     payload: { userId: UserId, text: MessageQuery, cursor: Schema.NullOr(MessageCursor), limit: Schema.Int },
     success: MessageSearchPage,

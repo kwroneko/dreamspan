@@ -127,7 +127,7 @@
 | F10 | "My persona list has become extremely bloated from having single-chat specific personas that are copies of their card(s)" | P 14:43 | has | Cast → I play them, on any member; no copy needed |
 | F11 | "{{user}} in greetings in ST often sticks so if you open a card and then change persona, it actually keeps the old name" | P 14:12, D §5.6 [D] | has | Greetings resolve against the state at their position until a message follows (`TemplateText`) |
 | F12 | "having control over these variables, being able to override them and keep them fixed" | P 14:43, D §5.3 [D] | has | This chat → Prompt names shows resolved `{{user}}` and `{{char}}`; pin the current value or an override, or unpin to follow the cast/personas (U09) |
-| F13 | "There isn't even a way to search (never mind search and replace) within chats or presets or cards" | P 13:23, D §6.2 [D] | partial | Editor → Search: plain or regex, replace, across all fields of one card or preset. Nothing across entries; chats are L2 |
+| F13 | "There isn't even a way to search (never mind search and replace) within chats or presets or cards" | P 13:23, D §6.2 [D] | has | Editor → Search: plain or regex, replace, across all fields of one card or preset. Library → Search and replace: every card, lorebook, preset and note at once, one undoable replace (2026-11-12, ARCHITECTURE §14.6). Message text across all chats from the left panel (§12) |
 | F14 | "UI gripe #1, it appears to be designed to confuse you in how and when edits are saved" | P 13:23, D §6.2 [D] | has | Editors keep drafts per field; Save (n) makes a revision; a status line says "Everything is saved" or "n fields have changes" |
 
 ## 7. Notes (author's notes, character notes)
@@ -253,7 +253,7 @@ The ranking assumes the owner's own use: only group chats, often directing and w
     - *Build:* a name field per fork in the header's branch menu, and "Delete this branch" there (`DeleteBranch` exists).
 20. **I3: preset override on a connection.** It hits once per connection.
     - *Build:* a preset select on the connection page.
-21. **F13: search across library entries.** It hits when a rename spans cards or several presets.
+21. **F13: search across library entries.** It hits when a rename spans cards or several presets. **Built 2026-11-12** (ARCHITECTURE §14.6 "Across the library").
     - *Build:* a library-wide search page over card, preset and note text, with replace by entry through each editor's drafts.
 22. **B13: display regex.** It hits for presets that rely on display scripts.
     - *Build:* apply `markdown_only` scripts at render, client-side in the Markdown pipeline, with an "as sent / as shown" toggle on a message.

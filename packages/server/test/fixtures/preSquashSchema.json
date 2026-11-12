@@ -368,6 +368,36 @@
     },
     {
       "type": "index",
+      "name": "library_edit_items_after",
+      "tbl_name": "library_edit_items",
+      "sql": "CREATE INDEX library_edit_items_after ON library_edit_items(after_revision_id)"
+    },
+    {
+      "type": "index",
+      "name": "library_edit_items_before",
+      "tbl_name": "library_edit_items",
+      "sql": "CREATE INDEX library_edit_items_before ON library_edit_items(before_revision_id)"
+    },
+    {
+      "type": "index",
+      "name": "library_edit_items_group",
+      "tbl_name": "library_edit_items",
+      "sql": "CREATE INDEX library_edit_items_group ON library_edit_items(group_id)"
+    },
+    {
+      "type": "index",
+      "name": "library_edit_items_ref",
+      "tbl_name": "library_edit_items",
+      "sql": "CREATE INDEX library_edit_items_ref ON library_edit_items(ref_id)"
+    },
+    {
+      "type": "index",
+      "name": "library_edit_items_undone",
+      "tbl_name": "library_edit_items",
+      "sql": "CREATE INDEX library_edit_items_undone ON library_edit_items(undone_by_revision_id) WHERE undone_by_revision_id IS NOT NULL"
+    },
+    {
+      "type": "index",
       "name": "library_merges_base",
       "tbl_name": "library_merges",
       "sql": "CREATE INDEX library_merges_base ON library_merges(base_revision_id) WHERE base_revision_id IS NOT NULL"
@@ -1097,6 +1127,12 @@
       "name": "lcm_summary_choices",
       "tbl_name": "lcm_summary_choices",
       "sql": "CREATE TABLE lcm_summary_choices ( summary_id TEXT PRIMARY KEY REFERENCES summaries(id) ON DELETE CASCADE, chosen_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "library_edit_items",
+      "tbl_name": "library_edit_items",
+      "sql": "CREATE TABLE library_edit_items ( id INTEGER PRIMARY KEY, group_id TEXT NOT NULL REFERENCES changeset_groups(id) ON DELETE CASCADE, ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE, before_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, after_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, matches INTEGER NOT NULL, undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL ) STRICT"
     },
     {
       "type": "table",

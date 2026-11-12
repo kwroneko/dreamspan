@@ -1959,6 +1959,23 @@ export const baseline: ReadonlyArray<string> = [
   ) STRICT, WITHOUT ROWID`,
   `CREATE TRIGGER chat_merge_messages_frozen BEFORE UPDATE ON chat_merge_messages
     BEGIN SELECT RAISE(ABORT, 'a merged message never changes'); END`,
+  // Search and replace across the library (db/libraryReplace.ts): one changeset group per
+  // replace, and here each entry it changed, the revision before and the one it wrote, so the
+  // whole replace is undone at once where nothing changed the entry since.
+  `CREATE TABLE library_edit_items (
+    id INTEGER PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES changeset_groups(id) ON DELETE CASCADE,
+    ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE,
+    before_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    after_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
+    matches INTEGER NOT NULL,
+    undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL
+  ) STRICT`,
+  `CREATE INDEX library_edit_items_group ON library_edit_items(group_id)`,
+  `CREATE INDEX library_edit_items_ref ON library_edit_items(ref_id)`,
+  `CREATE INDEX library_edit_items_before ON library_edit_items(before_revision_id)`,
+  `CREATE INDEX library_edit_items_after ON library_edit_items(after_revision_id)`,
+  `CREATE INDEX library_edit_items_undone ON library_edit_items(undone_by_revision_id) WHERE undone_by_revision_id IS NOT NULL`,
   ...forkLabelSchema,
   ...shellSummaries
 ]
