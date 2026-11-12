@@ -428,14 +428,14 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             SELECT v.id, v.id FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
             WHERE v.id IN ${sql.in(ids)} AND c.owner_user_id = ${userId}
               AND EXISTS (SELECT 1 FROM llm_requests q INDEXED BY llm_requests_version
-                WHERE q.version_id = v.id AND q.purpose = 'generation' AND q.owner_user_id = ${userId})
+                WHERE q.version_id = v.id AND q.purpose IN ('generation', 'workshop') AND q.owner_user_id = ${userId})
             UNION
             SELECT chain.root, v.source_version_id FROM chain JOIN versions v ON v.id = chain.id
             WHERE v.source_version_id IS NOT NULL
           )
           SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source
           FROM chain JOIN llm_requests q INDEXED BY llm_requests_version ON q.version_id = chain.id
-          WHERE q.purpose = 'generation' AND q.owner_user_id = ${userId}
+          WHERE q.purpose IN ('generation', 'workshop') AND q.owner_user_id = ${userId}
           ORDER BY chain.root, q.started_at, q.id`
         const byVersion = new Map<string, Array<RequestFigures>>()
         for (const row of rows) {

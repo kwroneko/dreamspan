@@ -19,6 +19,7 @@ export interface AgentPlan {
     readonly instructions: (offered: ReadonlyArray<string>, contract: OutputContract) => string
     /** Card-swap: only the speaking character's card is sent, where the preset puts cards. */
     readonly speakerCardOnly: boolean
+    readonly workshop?: boolean
   }
 }
 
@@ -27,7 +28,7 @@ export interface OrchestrationMode {
   readonly label: string
   readonly description: string
   /** The plan for the turn being generated, from the chat's settings there. */
-  readonly plan: (input: { readonly state: ChatState }) => AgentPlan
+  readonly plan: (input: { readonly state: ChatState; readonly kind: string }) => AgentPlan
 }
 
 /** The tools agent replies offer by default (spec/AGENTIC.md §4.5), as far as they're registered. */
@@ -80,10 +81,12 @@ export const defaultMode: OrchestrationMode = {
 /** A disabled planner fails before sending; plugins can replace or wrap the default entry. */
 export const planTurn = (
   modes: { readonly get: (id: string) => OrchestrationMode | undefined },
-  state: ChatState
+  state: ChatState,
+  kind = "rp",
+  planner = "default"
 ): { readonly mode: string; readonly plan: AgentPlan } | { readonly unavailable: string } => {
-  const id = "default"
+  const id = planner
   const mode = modes.get(id)
   if (!mode) return { unavailable: id }
-  return { mode: id, plan: mode.plan({ state }) }
+  return { mode: id, plan: mode.plan({ state, kind }) }
 }

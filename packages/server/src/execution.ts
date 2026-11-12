@@ -1,3 +1,6 @@
+import { builtinChatKinds, type ChatKindProfile } from "./agent/chatKinds.ts"
+import { workshopMode } from "./agent/workshop.ts"
+import { libraryTools } from "./agent/tools/library.ts"
 import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
 import { agentReplyStrategy } from "./agent/strategy.ts"
 import { historyTools } from "./agent/tools/history.ts"
@@ -37,6 +40,7 @@ export class ExecutionRegistry extends Context.Service<
     readonly summaries: Registry<SummaryStrategy>
     readonly summaryTools: Registry<SummaryToolFactory>
     /** Who runs on a turn, what it sees and how its output is taken (spec/AGENTIC.md §6). */
+    readonly chatKinds: Registry<ChatKindProfile>
     readonly orchestrationModes: Registry<OrchestrationMode>
     /** The tools an agent turn may offer, with their effect classes (spec/AGENTIC.md §4). */
     readonly rolloutTools: Registry<RolloutTool<never>>
@@ -50,9 +54,13 @@ export class ExecutionRegistry extends Context.Service<
       yield* replyStrategies.register(agentReplyStrategy)
       const orchestrationModes = makeRegistry<OrchestrationMode>()
       yield* orchestrationModes.register(defaultMode)
+      yield* orchestrationModes.register(workshopMode)
+      const chatKinds = makeRegistry<ChatKindProfile>()
+      for (const profile of builtinChatKinds) yield* chatKinds.register(profile)
       const rolloutTools = makeRegistry<RolloutTool<never>>()
       for (const tool of [
         ...historyTools,
+        ...libraryTools,
         lookupLore,
         listNotes,
         writeNote,
@@ -82,6 +90,7 @@ export class ExecutionRegistry extends Context.Service<
         summaries,
         summaryTools,
         orchestrationModes,
+        chatKinds,
         rolloutTools
       }
     })

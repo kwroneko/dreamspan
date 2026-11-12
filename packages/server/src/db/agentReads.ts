@@ -110,7 +110,7 @@ const listActivity = (
         max(q.cost_currency) AS currency, max(q.usage_source = 'estimated') AS estimated,
         max(q.version_id) AS version_id
       FROM llm_requests q
-      WHERE q.chat_id = ? AND q.owner_user_id = ? AND q.purpose NOT IN ('generation', 'test')
+      WHERE q.chat_id = ? AND q.owner_user_id = ? AND q.purpose NOT IN ('generation', 'workshop', 'test')
       GROUP BY gid, q.purpose
       HAVING (min(q.started_at), gid, q.purpose) < (?, ?, ?)
       ORDER BY started DESC, gid DESC, kind DESC
@@ -354,7 +354,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             p.context_snapshot_json AS snapshot, p.transcript_json AS transcript
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
-          WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind = 'generation'
+          WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind IN ('generation', 'workshop')
             AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!row || row.snapshot === null) return yield* new NotFound({ entity: "rollout", id: versionId })
         return {

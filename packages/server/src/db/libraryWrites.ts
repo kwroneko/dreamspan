@@ -1,3 +1,4 @@
+import { makeWorkshopWriteHandlers } from "./workshopWrites.ts"
 import { archiveCandidates } from "./cardArchive.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
 import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
@@ -957,6 +958,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     return {
       ...handlers,
       ...makeEditorWriteHandlers(steps, bin),
+      ...makeWorkshopWriteHandlers(steps, bin),
       ...makeCardForkWriteHandlers(steps),
       ...makeForkMergeWriteHandlers(steps),
       ...makeRolloutEffectHandlers(steps)

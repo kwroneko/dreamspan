@@ -1776,6 +1776,11 @@ export class WriteOps extends RpcGroup.make(
    * start, the persona is played by the user, every greeting of the first card becomes a
    * version of the first message (`greeting` selected), then the first turn.
    */
+  Rpc.make("CreateWorkshop", {
+    payload: { userId: UserId, title: Schema.optionalKey(Schema.String) },
+    success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("StartChat", {
     payload: StartChatFields,
     success: StartChatResult,
@@ -3567,7 +3572,13 @@ export class ReadOps extends RpcGroup.make(
       timeZone: Schema.String,
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String))),
       /** An agent reply's assembly (spec/AGENTIC.md §6). */
-      agent: Schema.optionalKey(Schema.Struct({ instructions: Schema.String, speakerCardOnly: Schema.Boolean })),
+      agent: Schema.optionalKey(
+        Schema.Struct({
+          instructions: Schema.String,
+          speakerCardOnly: Schema.Boolean,
+          workshop: Schema.optionalKey(Schema.Boolean)
+        })
+      ),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
       decisions: Schema.optionalKey(
         Schema.Struct({

@@ -186,7 +186,8 @@ export const makeAgentHandlers = Effect.gen(function* () {
         const tools = registry.rolloutTools.list().filter((tool) => tool.effect !== "external")
         const registered = new Set(tools.map((tool) => tool.id))
         const plan = registry.orchestrationModes.get("default")?.plan({
-          state: foldState([{ scope: null, data: { key: "agent.enabled", value: { on: true } } }])
+          state: foldState([{ scope: null, data: { key: "agent.enabled", value: { on: true } } }]),
+          kind: "rp"
         })
         return {
           defaultTools: (plan?.tools ?? []).filter((id) => registered.has(id)),

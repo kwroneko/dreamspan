@@ -48,7 +48,7 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
             SELECT r.id AS rollout_id, v.slot_id, v.status, r.connection_id, r.model_id
             FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
             JOIN rollouts r ON r.id = v.rollout_id
-            WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind = 'generation'
+            WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND r.kind IN ('generation', 'workshop')
               AND r.mode IS NOT NULL AND v.deleted_at IS NULL AND c.deleted_at IS NULL`
           if (!source) return yield* new NotFound({ entity: "agent reply", id: versionId })
           if (source.status === "generating")

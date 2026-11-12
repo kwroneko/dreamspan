@@ -1,5 +1,7 @@
+import { makeWorkshopHandlers } from "./api/workshop.ts"
 import {
   AuthenticatedAgentApi,
+  AuthenticatedWorkshopApi,
   AuthenticatedChatEventsApi,
   AuthenticatedChatMergeApi,
   AuthenticatedDecisionApi,
@@ -174,6 +176,7 @@ const Handlers = Layer.mergeAll(
   AuthenticatedChatMergeApi.toLayer(makeMergeHandlers),
   AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),
+  AuthenticatedWorkshopApi.toLayer(makeWorkshopHandlers),
   AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),

@@ -33,6 +33,7 @@ const definitions: ReadonlyArray<SettingDefinition> = [
   { id: "notices", scope: "user", schema: Schema.Record(Schema.String, Schema.Array(Schema.String)) },
   { id: "shell.pinsCollapsed", scope: "user", schema: Schema.Boolean },
   { id: "cost", scope: "user", schema: CostRules },
+  { id: "workshop.defaults", scope: "user", schema: Schema.Struct({ card: Schema.String, preset: Schema.String }) },
   { id: "chat.persona", scope: "user", schema: Schema.NullOr(Schema.String) },
   { id: "generation.model", scope: "user", schema: Schema.NullOr(ModelChoice) },
   { id: "generation.preset", scope: "user", schema: Schema.NullOr(Schema.String) },

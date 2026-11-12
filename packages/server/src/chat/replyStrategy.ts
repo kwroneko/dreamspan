@@ -13,6 +13,7 @@ export interface ReplyStrategy {
     readonly request: GenerationRequest
     readonly generation: Generation
     readonly rolloutId: string
+    readonly purpose?: "generation" | "workshop"
     readonly output: ReturnType<ReplyOutputStrategy["create"]>
     readonly providers: Providers["Service"]
     /** An agent turn's plan, tools and storage (spec/AGENTIC.md §3); absent for a plain reply. */
@@ -22,7 +23,7 @@ export interface ReplyStrategy {
 /** The existing single provider turn, including streaming preference and output decoding. */
 export const defaultReplyStrategy: ReplyStrategy = {
   id: "reply",
-  run: ({ request, generation, rolloutId, output, providers, resolveImages }) =>
+  run: ({ request, generation, rolloutId, output, providers, resolveImages, purpose }) =>
     Stream.unwrap(
       Effect.gen(function* () {
         const { userId, chatId, versionId } = request
@@ -48,7 +49,7 @@ export const defaultReplyStrategy: ReplyStrategy = {
               breakpoints: wire.breakpoints,
               ...(wire.stable ? { stable: wire.stable } : {})
             },
-            attribution: { purpose: "generation", chatId, rolloutId, versionId }
+            attribution: { purpose: purpose ?? "generation", chatId, rolloutId, versionId }
           })
           .pipe(
             Stream.tap((event) =>

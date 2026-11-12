@@ -1155,6 +1155,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         assert.lengthOf(yield* actor.api.ListChatSummaries({ chatIds }), 0)
       })
   },
+  CreateWorkshop: { createOnly: "creates a workshop and its private defaults for the caller" },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
   GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },
   ReadPath: {

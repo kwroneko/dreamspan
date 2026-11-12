@@ -142,11 +142,18 @@ export const layer = Layer.effect(
           return yield* new GenerationFailed({ class: "unavailable", message: "Reply strategy is unavailable." })
         const output = outputStrategy.create({ prefix: null, request, generation, rolloutId })
         // A tool no longer registered is still offered as frozen; calling it is a tool error.
+        const chat = yield* reader
+          .GetChat({ userId: request.userId, chatId: request.chatId })
+          .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetChat")))
+        const profile = execution.chatKinds.get(chat.kind)
+        if (!profile)
+          return yield* new GenerationFailed({ class: "unavailable", message: "This chat kind is unavailable." })
         const tools = frozen.tools.flatMap((t) => {
           const tool = execution.rolloutTools.get(t.name)
-          return tool && tool.effect !== "external" ? [tool] : []
+          return tool && (profile.allowsOutside || tool.effect !== "external") ? [tool] : []
         })
         const reply = strategy.run({
+          purpose: chat.kind === "workshop" ? "workshop" : "generation",
           request,
           generation,
           rolloutId,
@@ -160,6 +167,7 @@ export const layer = Layer.effect(
               turnCap: frozen.turnCap
             },
             mode: frozen.mode,
+            allowsOutside: profile.allowsOutside,
             tools,
             offered: frozen.tools,
             reader,
@@ -238,7 +246,13 @@ export const layer = Layer.effect(
               Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetSlot"))
             )
           const state = foldState(events)
-          const planned = planTurn(execution.orchestrationModes, state)
+          const chat = yield* reader
+            .GetChat({ userId, chatId })
+            .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetChat")))
+          const profile = execution.chatKinds.get(chat.kind)
+          if (!profile)
+            return yield* new GenerationFailed({ class: "unavailable", message: "This chat kind is unavailable." })
+          const planned = planTurn(execution.orchestrationModes, state, chat.kind, profile.planner)
           if ("unavailable" in planned)
             return yield* new GenerationFailed({
               class: "unavailable",
@@ -256,7 +270,7 @@ export const layer = Layer.effect(
           const tools = plan.tools.flatMap((id) => {
             const tool = execution.rolloutTools.get(id)
             // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
-            return tool && tool.effect !== "external" ? [tool] : []
+            return tool && (profile.allowsOutside || tool.effect !== "external") ? [tool] : []
           })
           const assemblyNow = Date.now()
           const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>
@@ -281,7 +295,8 @@ export const layer = Layer.effect(
                             tools.map((t) => t.id),
                             plan.contract
                           ) ?? "",
-                        speakerCardOnly: plan.assembly?.speakerCardOnly ?? false
+                        speakerCardOnly: plan.assembly?.speakerCardOnly ?? false,
+                        ...(plan.assembly?.workshop ? { workshop: true } : {})
                       }
                     }
                   : {})
@@ -397,6 +412,7 @@ export const layer = Layer.effect(
           if (!strategy)
             return yield* new GenerationFailed({ class: "unavailable", message: "Reply strategy is unavailable." })
           const reply = strategy.run({
+            purpose: chat.kind === "workshop" ? "workshop" : "generation",
             request,
             generation,
             rolloutId,
@@ -407,6 +423,7 @@ export const layer = Layer.effect(
                   agent: {
                     plan,
                     mode: planned.mode,
+                    allowsOutside: profile.allowsOutside,
                     tools,
                     reader,
                     writer,

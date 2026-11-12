@@ -953,7 +953,12 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
   for (const entry of presetOrder(doc.prompts, doc.order)) {
     const prompt = prompts.get(entry.identifier)
     // The end-of-request texts are sent by their own stage, never from the order (DESIGN §2.2).
-    if (!prompt || endOfRequestText(prompt.identifier)) continue
+    if (
+      !prompt ||
+      endOfRequestText(prompt.identifier) ||
+      (assembly.request.agent?.workshop && prompt.identifier === "workshopTurn")
+    )
+      continue
     const condition = conditionOf(prompt)
     const allowed = entry.enabled && triggersFor(prompt, type) && conditionHolds(assembly, condition)
     if (entry.identifier === "chatHistory") afterHistory = true
@@ -2508,7 +2513,7 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
       return text.text.trim() === "" ? [] : [text]
     })
     // An agent reply's instructions come last, so the prefix is the plain reply's (spec/AGENTIC.md §6).
-    const instructions = assembly.request.agent?.instructions.trim()
+    const instructions = assembly.request.agent?.workshop ? "" : assembly.request.agent?.instructions.trim()
     if (instructions)
       parts.push({
         text: instructions,
@@ -2523,6 +2528,27 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
       role: "user",
       content: parts.map((t) => t.text).join("\n"),
       pieces: parts.map((t) => t.piece),
+      kind: "volatile"
+    }
+  }
+})
+
+/** Workshop text has its own registered stage and inspector piece, after end-of-request. */
+const workshopInstructionsStage = sync("workshop-instructions", (assembly) => {
+  if (!assembly.request.agent?.workshop || assembly.request.summarizing) return
+  const previous = assembly.renderEndOfRequest
+  assembly.renderEndOfRequest = () => {
+    const end = previous?.()
+    const override = need(assembly, "preset").doc.prompts.find((p) => p.identifier === "workshopTurn")
+    const raw = override?.content ?? assembly.request.agent!.instructions
+    const env = need(assembly, "macros")
+    const piece = env.piece("workshop:instructions", { kind: "assembler", what: "Workshop instructions" }, raw)
+    const text = env.text(piece)
+    if (!text.trim()) return end
+    return {
+      role: "user",
+      content: [end?.content, text].filter(Boolean).join("\n"),
+      pieces: [...(end?.pieces ?? []), piece],
       kind: "volatile"
     }
   }
@@ -2745,6 +2771,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   loreScanStage,
   loreActivationStage,
   endOfRequestStage,
+  workshopInstructionsStage,
   composeStage,
   messagesStage,
   breakpointsStage,

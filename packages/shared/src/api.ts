@@ -1,3 +1,4 @@
+import { WorkshopApi } from "./workshopApi.ts"
 import { SplitChatApi } from "./splitChat.ts"
 import { ChatMergeApi } from "./mergeApi.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
@@ -425,6 +426,8 @@ export class AuthenticatedChatMergeApi extends ChatMergeApi.middleware(Authentic
 export class AuthenticatedChatEventsApi extends ChatEventsApi.middleware(Authentication) {}
 
 /** The agent RPCs (agentApi.ts). */
+export class AuthenticatedWorkshopApi extends WorkshopApi.middleware(Authentication) {}
+
 export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {}
 
 /** The decision-model settings RPCs (decisionApi.ts). */
@@ -436,6 +439,7 @@ export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Aut
 export class AppApi extends AppCoreApi.merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedChatEventsApi)
   .merge(AuthenticatedAgentApi)
+  .merge(AuthenticatedWorkshopApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedCardArchiveApi)
   .merge(AuthenticatedCardSourcesApi)

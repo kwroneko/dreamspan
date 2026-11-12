@@ -122,7 +122,8 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         // leaf, as a send's does.
         const [chat] = yield* sql<{
           current_fork_id: string | null
-        }>`SELECT current_fork_id FROM chats WHERE id = ${chatId}`
+          kind: string
+        }>`SELECT kind, current_fork_id FROM chats WHERE id = ${chatId}`
         const [named] =
           forkId == null
             ? []
@@ -135,7 +136,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           id: rolloutId,
           chat_id: chatId,
           fork_id: fork?.id ?? chat?.current_fork_id ?? null,
-          kind: "generation",
+          kind: chat?.kind === "workshop" ? "workshop" : "generation",
           status: "running",
           slot_id: slotId,
           leaf_slot_id: leafSlotId,
@@ -247,7 +248,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
 
     InterruptRollouts: () =>
       sql`UPDATE rollouts SET status = 'interrupted', updated_at = ${Date.now()}
-          WHERE status IN ('created', 'running') AND kind IN ('generation', 'decision') RETURNING id`.pipe(
+          WHERE status IN ('created', 'running') AND kind IN ('generation', 'workshop', 'decision') RETURNING id`.pipe(
         Effect.map((rows) => ({ interrupted: rows.length })),
         transaction(sql, "InterruptRollouts")
       ),

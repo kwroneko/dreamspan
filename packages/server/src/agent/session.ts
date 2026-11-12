@@ -45,6 +45,7 @@ declare module "@earendil-works/pi-agent-core" {
 
 /** What an agent turn needs beyond a plain reply's. */
 export interface AgentRun {
+  readonly allowsOutside?: boolean
   readonly plan: AgentPlan
   readonly mode: string
   readonly tools: ReadonlyArray<RolloutTool<never>>
@@ -58,6 +59,7 @@ export interface AgentRun {
 }
 
 export interface AgentStrategyInput {
+  readonly purpose?: "generation" | "workshop"
   readonly resolveImages: (input: AssembledRequest) => Effect.Effect<AssembledRequest, GenerationFailed>
   readonly request: GenerationRequest
   readonly generation: Generation
@@ -222,7 +224,12 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 breakpoints: wire.breakpoints,
                 ...(wire.stable ? { stable: wire.stable } : {})
               },
-              attribution: { purpose: "generation", chatId: request.chatId, rolloutId, versionId: request.versionId }
+              attribution: {
+                purpose: input.purpose ?? "generation",
+                chatId: request.chatId,
+                rolloutId,
+                versionId: request.versionId
+              }
             })
             .pipe(
               Stream.runForEach((event) =>
@@ -403,7 +410,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         convertToLlm: (messages) => liveSuffix(messages),
         streamFn,
         toolExecution: "sequential",
-        beforeToolCall: async () => {
+        beforeToolCall: async ({ toolCall }) => {
+          const tool = tools.find((entry) => entry.id === toolCall.name)
+          if (tool?.effect === "external" && run.allowsOutside !== true)
+            return { block: true, reason: "This chat does not allow tools with outside effects." }
           if (requests >= plan.turnCap) return { block: true, reason: "The final turn cannot use tools." }
           if (sent !== undefined) return { block: true, reason: "The reply has already been sent." }
           // A process kill after an effect commits must leave its call ID durable,
