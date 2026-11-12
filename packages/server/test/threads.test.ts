@@ -249,6 +249,24 @@ describe("starting parallel threads", () => {
           const miraHere = yield* t.contextFor(F, tip, t.mira)
           assert.include(miraHere, "vault code")
           assert.include(miraHere, "in the well")
+          // The agent's reads agree: in F, Wren is away for the message and the join; not in the sibling.
+          const join = yield* t.reader.GetSlot({ userId: t.userId, slotId: tip, forkId: F })
+          const knowers = (forkId: ForkId) =>
+            t.reader.KnowersOf({
+              userId: t.userId,
+              chatId: t.chatId,
+              forkId,
+              versionIds: [code.version.id, join.entry.version.id],
+              viewers: [t.wren]
+            })
+          assert.deepStrictEqual(
+            (yield* knowers(F)).map((k) => k.away),
+            [[t.wren], [t.wren]]
+          )
+          assert.deepStrictEqual(
+            (yield* knowers(peer.id)).map((k) => k.away),
+            [undefined, undefined]
+          )
 
           // Rename: in all the thread's branches; a stale tab is refused.
           const renamed = yield* api.RenameThread({

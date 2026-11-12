@@ -7,7 +7,7 @@ import { EntityId, ForkId, SlotId } from "./chat.ts"
 export { ThreadPlace } from "./chat.ts"
 
 /** One thread of a set, as `ThreadsOf` lists it. */
-export const ThreadInfo = Schema.Struct({
+const ThreadInfo = Schema.Struct({
   ordinal: Schema.Int,
   /** The fork that starts it: the branch it was started in for the first, a new fork for the others. */
   forkId: ForkId,
@@ -23,7 +23,6 @@ export const ThreadInfo = Schema.Struct({
   forks: Schema.Int,
   rowVersion: Schema.Int
 })
-export type ThreadInfo = typeof ThreadInfo.Type
 
 /** A set of threads started together at a message, as one fork sees it (`ThreadsOf`). */
 export const ThreadSet = Schema.Struct({

@@ -14,7 +14,7 @@ import { effectiveOverride, type ForkRef } from "./forkState.ts"
  * (a `presence_away` override with flag 1: the played stretch of threads started at an earlier
  * message, spec/THREADS.md §5.2 step 5, [D] 2026-11-12). One probe of the fork's steps.
  */
-export const correctedAwaySql = (sql: SqlClient.SqlClient, fork: ForkRef, slot: string, card: string) =>
+const correctedAwaySql = (sql: SqlClient.SqlClient, fork: ForkRef, slot: string, card: string) =>
   sql`coalesce((SELECT flag FROM fork_overrides
     WHERE id = ${effectiveOverride(sql, "presence_away", fork, `${slot} || ':' || ${card}`)}), 0) = 1`
 
