@@ -55,6 +55,61 @@ test("card selectors cannot style the app or remove message containment", async 
   await expect(box).toHaveCSS("background-image", "none")
 })
 
+// Each style reads differently to a lenient CSS parser and to the browser (bad strings, escaped
+// braces, unclosed blocks): before the CSS Syntax tokenizer, the first three became global rules.
+test("CSS that parsers read differently stays inside the message", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const hostile = [
+    '.a[title="x\n]{}[data-security-probe]{color:rgb(11, 22, 33)!important}body{background:rgb(1, 1, 1)!important}/*"]{color:blue}',
+    '@media x"\n{}[data-security-probe]{color:rgb(11, 22, 33)!important}/*"{.a{color:blue}}',
+    '.a{color:red}\n.b"\n{}body{background:rgb(1, 1, 1)!important}/*"{color:blue}',
+    String.raw`.a { color: red\7d [data-security-probe]\7b color\3a rgb(11, 22, 33) }`,
+    ".a{color:red;}<!--}[data-security-probe]{color:rgb(11, 22, 33)!important}-->",
+    "@media all{.a{color:red}}}[data-security-probe]{color:rgb(11, 22, 33)!important}"
+  ]
+  const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "CSS differentials" })
+      yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        reply: false,
+        content: [
+          ...hostile.map((css) => `<style>${css}</style>`),
+          "<style>.legit { color: rgb(4, 5, 6) }</style>",
+          '<div class="legit">Card</div>'
+        ].join("\n")
+      })
+      return chat
+    })
+  )
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  // The message's own legitimate style applies, so the sheet is in place.
+  await expect(page.locator(".custom-legit")).toHaveCSS("color", "rgb(4, 5, 6)")
+  await page.evaluate(() => {
+    const app = document.createElement("div")
+    app.dataset.securityProbe = ""
+    app.style.color = "rgb(7, 8, 9)"
+    app.textContent = "App outside the message"
+    document.querySelector(".message-html")!.after(app)
+  })
+  await expect(page.locator("[data-security-probe]")).toHaveCSS("color", "rgb(7, 8, 9)")
+  expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).not.toBe("rgb(1, 1, 1)")
+  // Every top-level rule the browser read from message styles is scoped, or a renamed global.
+  const topLevel = await page.evaluate(() =>
+    document.adoptedStyleSheets.flatMap((sheet) =>
+      Array.from(sheet.cssRules, (rule) => (rule instanceof CSSStyleRule ? rule.selectorText : rule.constructor.name))
+    )
+  )
+  expect(topLevel.length).toBeGreaterThan(0)
+  for (const rule of topLevel)
+    expect(
+      ["CSSScopeRule", "CSSKeyframesRule", "CSSFontFaceRule"].includes(rule) || rule.startsWith(".message-html ")
+    ).toBe(true)
+})
+
 test("SVG panel links cannot navigate into an attacker document", async ({ page }) => {
   const requests: string[] = []
   await page.route("http://attacker.invalid/**", async (route) => {

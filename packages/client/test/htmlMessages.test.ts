@@ -103,7 +103,7 @@ describe("inline HTML", () => {
       '<svg viewBox="0 0 10 10"><defs><linearGradient id="g"></linearGradient></defs><rect fill="url(#g)"/></svg>'
     )
     expect(out).toContain('id="user-content-g"')
-    expect(out).toContain('fill="url(#user-content-g)"')
+    expect(out).toContain('fill="url(&quot;#user-content-g&quot;)"')
   })
 
   it("reads SVG links as the browser does: padded fragments renamed, xlink-only links in a new tab", () => {
@@ -183,7 +183,7 @@ describe("styles", () => {
 
   it("scopes each style on its own, so a broken one leaves the rest", () => {
     expect(scopeStyles(extractStyles('<style>.a { color: red }</style><style><a id="</style>')).css).toBe(
-      ".message-html .custom-a { color: red }"
+      ".message-html .custom-a{color: red;}"
     )
   })
 })

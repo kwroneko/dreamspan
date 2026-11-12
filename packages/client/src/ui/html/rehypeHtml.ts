@@ -6,7 +6,7 @@ import { proxyMediaUrl } from "./media.ts"
 import rehypeSanitize from "rehype-sanitize"
 import type { PositionedNode } from "../sourcePositions.ts"
 import { sliceText } from "../sourcePositions.ts"
-import { cleanStyle, renameClass, renameId, renameReferences } from "./css.ts"
+import { cleanPresentation, cleanStyle, renameClass, renameId } from "./css.ts"
 import { effectiveClassifier, effectiveDocumentRenderer, effectiveSchema, htmlPartsRevision } from "./parts.ts"
 
 interface Node extends PositionedNode {
@@ -163,8 +163,18 @@ const ID_LISTS = [
   "ariaLabelledBy",
   "ariaOwns"
 ]
-/** SVG presentation attributes that can refer to a gradient, filter or marker by `url(#id)`. */
-const REFERENCES = ["fill", "stroke", "filter", "clipPath", "mask", "markerStart", "markerMid", "markerEnd"]
+/** SVG presentation attributes the browser reads as CSS values that can name a resource by url(). */
+const PRESENTATION_URLS = [
+  "fill",
+  "stroke",
+  "filter",
+  "clipPath",
+  "mask",
+  "markerStart",
+  "markerMid",
+  "markerEnd",
+  "cursor"
+]
 const REMOTE = /^\s*(?:https?:)?\/\//i
 const MEDIA = new Set(["audio", "video", "source", "track"])
 
@@ -262,12 +272,21 @@ function finishParsed(node: Node, name: string, mediaScope?: string | null): boo
     const address = typeof value === "string" ? urlAddress(value) : ""
     if (address.startsWith("#") && address.length > 1) properties[key] = `#${renameId(address.slice(1))}`
   }
-  for (const key of REFERENCES)
-    if (typeof properties[key] === "string") properties[key] = renameReferences(properties[key])
+  // The browser reads these as CSS: the stylesheet's value policy, url() only to the message's own
+  // elements. A value the policy refuses goes.
+  for (const key of PRESENTATION_URLS) {
+    const value = properties[key]
+    if (value === undefined) continue
+    const cleaned = typeof value === "string" ? cleanPresentation(value) : null
+    if (cleaned === null) delete properties[key]
+    else properties[key] = cleaned
+  }
   if (typeof properties.style === "string") {
     const cleaned = cleanStyle(properties.style, mediaScope)
     blocked ||= cleaned.blocked
-    if (cleaned.style) properties.style = cleaned.style
+    // An object, not text: the renderer hands it to React as it is, and React sets each
+    // property on its own, so nothing reads the style's text again.
+    if (cleaned.style) properties.style = cleaned.style as unknown as string
     else delete properties.style
   }
   // Images: `data:` loads (it makes no request); harden captions the rest as blocked.
