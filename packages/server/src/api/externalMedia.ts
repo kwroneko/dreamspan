@@ -10,11 +10,13 @@ import { Accounts } from "../auth/Accounts.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
 import { Network } from "../net/Network.ts"
+import { makeMediaLimits } from "../net/mediaLimits.ts"
 import { makeExternalFetcher } from "../net/externalMedia.ts"
 
 export class ExternalMedia extends Context.Service<
   ExternalMedia,
   {
+    readonly limits: ReturnType<typeof makeMediaLimits>
     readonly fetchers: ReturnType<
       typeof makeRegistry<{ readonly id: string; readonly fetch: ReturnType<typeof makeExternalFetcher> }>
     >
@@ -25,6 +27,7 @@ export class ExternalMedia extends Context.Service<
     Effect.gen(function* () {
       const network = yield* Network
       return {
+        limits: makeMediaLimits(),
         fetchers: makeRegistry([{ id: "media.external", fetch: makeExternalFetcher(network) }])
       }
     })
@@ -89,10 +92,12 @@ export const externalMediaRoute = Layer.unwrap(
         if (!allowed) return error(403, "Images from other sites are blocked")
         const fetcher = media.fetchers.get("media.external")
         if (!fetcher) return error(403, "External media is disabled")
+        const release = media.limits.acquire(session.value.user.id)
+        if (!release) return HttpServerResponse.setHeader(error(429, "Too many media requests"), "retry-after", "1")
         const result = yield* Effect.tryPromise({
           try: (signal) => fetcher.fetch(url, signal),
           catch: () => new Error("Media refused")
-        }).pipe(Effect.option)
+        }).pipe(Effect.option, Effect.ensuring(Effect.sync(release)))
         if (Option.isNone(result)) return error(502, "This media could not be loaded safely")
         // Check again after I/O: revoking consent while a slow download runs takes effect too.
         if (

@@ -252,3 +252,67 @@ it.live("pins public DNS answers through the real Network transport and rechecks
     )
   )
 )
+
+it.live("bounds simultaneous external downloads per user before opening another connection", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const user = yield* alice.Whoami()
+    const writer = yield* Writer
+    const { entityId } = yield* writer.CreateEntity({
+      userId: user.id,
+      kind: "card",
+      label: "Synthetic",
+      subtitle: "",
+      doc: cardDoc("Synthetic"),
+      schemaVersion: 1,
+      origin: "user",
+      sourcePath: null
+    })
+    const chat = yield* alice.StartChat({
+      cards: [entityId],
+      persona: null,
+      greeting: null,
+      first: { _tag: "Send", content: "Synthetic media", speakerEntityId: null }
+    })
+    yield* alice.SetExternalMedia({ target: { _tag: "Chat", id: chat.chat.id }, allow: true })
+    const media = yield* ExternalMedia
+    const port = yield* serverPort
+    let release!: () => void
+    const gate = new Promise<void>((done) => {
+      release = done
+    })
+    let ready!: () => void
+    const started = new Promise<void>((done) => {
+      ready = done
+    })
+    let calls = 0
+    yield* media.fetchers.register({
+      id: "media.external",
+      fetch: async () => {
+        calls++
+        if (calls === 8) ready()
+        if (calls <= 8) await gate
+        return { bytes: new Uint8Array([1]), mime: "image/png" }
+      }
+    })
+    yield* Effect.promise(async () => {
+      const get = () =>
+        fetch(
+          `http://127.0.0.1:${port}/media/external?${new URLSearchParams({ chat: chat.chat.id, url: "https://media.invalid/a" })}`,
+          { headers: { "Remote-User": "alice", "sec-fetch-site": "same-origin" } }
+        )
+      const pending = Array.from({ length: 8 }, get)
+      try {
+        await started
+        const excess = await get()
+        assert.strictEqual(excess.status, 429)
+        assert.strictEqual(calls, 8)
+        assert.isNotNull(excess.headers.get("retry-after"))
+      } finally {
+        release()
+        await Promise.all(pending)
+      }
+      assert.strictEqual((await get()).status, 200)
+    })
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ authMode: "proxy" }))))
+)
