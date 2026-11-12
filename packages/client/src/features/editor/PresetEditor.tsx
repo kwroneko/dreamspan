@@ -4,6 +4,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // and the regex scripts, which run only once the user allows them (ARCHITECTURE.md §9).
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX } from "@rp/shared/docs/preset.ts"
 import { MERGE_JOIN_DEFAULT, MERGE_SECTION_DEFAULT } from "@rp/shared/mergeApi.ts"
+import { ABSENT_GAP_DEFAULT, ABSENT_JOIN_DEFAULT } from "@rp/shared/knowledge.ts"
 import { type ReactNode, useState } from "react"
 import type { SearchMatch } from "./searchNavigation.ts"
 import { PromptDocument } from "./PromptDocument.tsx"
@@ -60,6 +61,33 @@ function MergeTemplate({ store, which }: { store: EditorStore; which: "merge_sec
       rows={2}
       about="{{title}} is the merged chat's title; {{cast}} names its characters. Empty adds nothing."
       description={stored === undefined ? `Default: ${JSON.stringify(fallback)}` : undefined}
+    />
+  )
+}
+
+/**
+ * In separate contexts (spec/CHARACTER-CONTEXT.md §2.2, unit CU4): the line that stands for the
+ * messages a character wasn't present for, and the line where a merged chat's storyline is new
+ * to it. Absent, the default applies (the join line's is empty: nothing is sent).
+ */
+function AbsentTemplate({ store, which }: { store: EditorStore; which: "absent_gap_prompt" | "absent_join_prompt" }) {
+  const stored = useValue<string | undefined>(store, ["utility_prompts", which])
+  const gap = which === "absent_gap_prompt"
+  const fallback = gap ? ABSENT_GAP_DEFAULT : ABSENT_JOIN_DEFAULT
+  return (
+    <TextField
+      store={store}
+      path={["utility_prompts", which]}
+      label={gap ? "Where a character wasn't present" : "Where a merged storyline is new to a character"}
+      rows={2}
+      about={
+        gap
+          ? "With separate contexts, a character's reply leaves out the messages written while it was away; this line stands in their place. {{char}} is the character replying, {{absentCount}} how many messages were left out, {{absentNames}} who took part in them. Example: [Wren wasn't present for 6 messages here, in which Mira and Tobin took part.] Empty adds nothing."
+          : "With separate contexts, where a merged chat joins and the character replying wasn't in it. {{mergedNames}} names the merged chat's characters. Example: [Mira and Tobin were elsewhere until now.] Empty, the default, adds nothing."
+      }
+      description={
+        stored === undefined ? (fallback === "" ? "Default: nothing" : `Default: ${JSON.stringify(fallback)}`) : undefined
+      }
     />
   )
 }
@@ -177,7 +205,7 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
         <details>
           <Tooltip label="Shows the preset’s utility prompts.">
             <summary className="cursor-pointer text-sm text-muted">
-              Show the {UTILITY.length + 4} utility prompts
+              Show the {UTILITY.length + 6} utility prompts
             </summary>
           </Tooltip>
           <div className="mt-3 flex flex-col gap-3">
@@ -188,6 +216,8 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
             <JoinWrapper store={store} which="card_join_suffix" />
             <MergeTemplate store={store} which="merge_section_prompt" />
             <MergeTemplate store={store} which="merge_join_prompt" />
+            <AbsentTemplate store={store} which="absent_gap_prompt" />
+            <AbsentTemplate store={store} which="absent_join_prompt" />
           </div>
         </details>
       </Card>

@@ -289,7 +289,7 @@ Client units, for the UI job after the server units (each with e2e at 1440 and 3
 | CU1 | **Built** (ARCHITECTURE §3.8 "The Context setting"; the choices are the installed context views, read through `ContextViews`). This chat's **Context** setting: the existing `settings.context` section (`SharedContextSetting`) becomes a choice, "One shared context" or "Separate contexts", each explained on hover | C3 | §2 |
 | CU2 | **Built** (ARCHITECTURE §3.8 "Away and Narrator in the Cast tab"; the Narrator switch is a checkbox item in the row's ⋯, since the row has no slot for a switch). **Cast tab**: an Away mark per character beside Mute, and the **Narrator** switch ("Sees everything and is never in or out of the scene"); a narrator's row has no Away mark | C8 | §2.1, §6 |
 | CU3 | **Built** (ARCHITECTURE §3.8 "Away rows in the timeline"; only changes become rows, so a mark repeating what holds shows nothing; Undo only on the scene check's departure). **Timeline away rows**: "Wren left · scene check" at the message, with Undo, labelled by who set it (the user, a character's tool, the scene check) | C9 | §5 |
-| CU4 | **Preset editor**: the gap line and the join line among the utility prompts, beside the merge framing | C4 | §2.2 |
+| CU4 | **Built** (ARCHITECTURE §3.8 "The gap line and join line in the preset editor"). **Preset editor**: the gap line and the join line among the utility prompts, beside the merge framing | C4 | §2.2 |
 | CU5 | **Inspector**: the gap line as its own labelled part; "Not sent: Wren wasn't present" for messages left out | C4 | DESIGN §7.4 [D] |
 
 Order: C1, C2, then C3. After C3, C4, C5 and C7 can run in parallel; C8 needs only C1. C6 after C4; C9 after C8. CU1 after C3, CU2 after C8, CU3 after C9, CU4 and CU5 after C4.

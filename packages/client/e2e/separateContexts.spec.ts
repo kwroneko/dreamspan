@@ -322,3 +322,30 @@ for (const width of [1440, 390])
       }
     })
   }
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`the preset's gap line and join line at ${width} ${theme}`, async ({ page }, info) => {
+      await look(page, width, theme)
+      const preset = await admin((api) => api.CreatePreset({ label: `Contexts preset ${width} ${theme}` }))
+      await page.goto(`${server().url}/library/${preset.id}`)
+      await page.getByText("Show the 13 utility prompts", { exact: true }).click()
+      const gap = page.getByRole("textbox", { name: /^Where a character wasn't present/ })
+      const join = page.getByRole("textbox", { name: /^Where a merged storyline is new to a character/ })
+      await expect(gap).toBeVisible()
+      await expect(join).toBeVisible()
+      // Each shows its default while unset: the gap line's text, the join line's nothing.
+      await expect(page.getByText(/^Default: "\[\{\{char\}\} wasn't present for \{\{absentCount\}\} messages/)).toBeVisible()
+      await expect(page.getByText("Default: nothing", { exact: true })).toBeVisible()
+      await expectLayout(page, info, `contexts-preset-${width}-${theme}`, { scope: "details[open]" })
+      await gap.fill("[{{char}} missed {{absentCount}} messages.]")
+      await page.locator("body").click({ position: { x: 1, y: 1 } })
+      await expect
+        .poll(() =>
+          admin((api) => api.OpenEditor({ refId: preset.id })).then(
+            (snapshot) => snapshot.drafts.find((draft) => draft.key.field.includes("absent_gap_prompt"))?.content
+          )
+        )
+        .toBe("[{{char}} missed {{absentCount}} messages.]")
+    })
+  }
