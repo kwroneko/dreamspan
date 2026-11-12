@@ -39,6 +39,7 @@ const DEFAULTS = {
   "message.insert-below": false,
   "message.duplicate": false,
   "message.merge": false,
+  "message.threads": false,
   "message.visibility": false,
   "message.context": false,
   "message.delete-all": false
@@ -91,6 +92,7 @@ const EVERY_REPLY_ACTION = [
   "Write your own version",
   "New version with guidance…",
   "Branch from here",
+  "Start parallel threads here…",
   "Insert message below",
   "Duplicate",
   "Merge a chat here…",

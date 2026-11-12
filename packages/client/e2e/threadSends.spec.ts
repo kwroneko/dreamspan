@@ -15,7 +15,10 @@ import { nextReply } from "./support/strip.ts"
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "12" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 
-/** Ash (the user's) with Mira and Tobin "At the Lantern" and Wren "At the docks", threads from #3. */
+/**
+ * Ash (the user's) with Mira "At the Lantern" and Wren "At the docks", threads from #3; Tobin, the
+ * user's other voice, is in neither, so each thread's reply is its one character's.
+ */
 const seed = (suffix: string) =>
   admin((api) =>
     Effect.gen(function* () {
@@ -58,7 +61,7 @@ const seed = (suffix: string) =>
         slotId: parent!,
         expectedRowVersion: rowVersion,
         threads: [
-          { name: "At the Lantern", cast: [mira.entityId as EntityId, tobin.entityId as EntityId], writesAs: null },
+          { name: "At the Lantern", cast: [mira.entityId as EntityId], writesAs: null },
           { name: "At the docks", cast: [wren.entityId as EntityId], writesAs: null }
         ]
       })

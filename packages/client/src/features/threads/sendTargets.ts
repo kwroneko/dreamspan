@@ -96,16 +96,18 @@ const planThread = async (
   writesAs: EntityId | null,
   send: Pick<PlannedSend, "text" | "images" | "decides">
 ) => {
-  const [cast, window, composer] = await Promise.all([
-    session.call((client) => client("GetCast", { chatId: session.id, forkId, slotId: null })),
+  const [window, composer] = await Promise.all([
     session.call((client) =>
       client("ReadPath", { chatId: session.id, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 60 })
     ),
     session.call((client) => client("OpenComposer", { chatId: session.id, forkId }))
   ])
-  if (!cast.ok) return cast
   if (!window.ok) return window
   if (!composer.ok) return composer
+  // The cast at that thread's tip: who is away there, as its own composer reads it.
+  const tip = window.value.entries.at(-1)?.slotId ?? null
+  const cast = await session.call((client) => client("GetCast", { chatId: session.id, forkId, slotId: tip }))
+  if (!cast.ok) return cast
   const choice = await session.call((client) =>
     client("GetComposerChoice", { chatId: session.id, draftId: composer.value.id })
   )
