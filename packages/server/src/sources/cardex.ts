@@ -127,7 +127,10 @@ export const summaryOf = (item: Summary, origin = CARDEX_ORIGIN): AdapterSummary
 }
 
 /** Optional detail metadata; never use the envelope's character text as an import. */
-export const detailMetadata = (raw: unknown, origin = CARDEX_ORIGIN): Pick<AdapterSummary, "tokenCounts"> => {
+export const detailMetadata = (
+  raw: unknown,
+  origin = CARDEX_ORIGIN
+): Pick<AdapterSummary, "tokenCounts" | "earlierOrigins"> => {
   if (!isRecord(raw)) return {}
   const counts = isRecord(raw.card) && isRecord(raw.card.token_counts) ? raw.card.token_counts : null
   const number = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -139,6 +142,29 @@ export const detailMetadata = (raw: unknown, origin = CARDEX_ORIGIN): Pick<Adapt
         >)
       : {}
   if (counts && number(counts.mes_example)) fields.mes_example = counts.mes_example
+  const earlierOrigins = Array.isArray(raw.earlier_origins)
+    ? raw.earlier_origins.filter(isRecord).flatMap((entry) => {
+        const listing = isRecord(entry.listing) ? entry.listing : null
+        const ref =
+          listing &&
+          (typeof listing.url === "string"
+            ? listing.url
+            : typeof listing.path === "string"
+              ? listing.path
+              : typeof listing.slug === "string"
+                ? `/c/${encodeURIComponent(listing.slug)}`
+                : undefined)
+        const url = onOrigin(origin, ref)
+        if (!url) return []
+        const site =
+          typeof listing?.source_label === "string"
+            ? listing.source_label
+            : typeof listing?.source === "string"
+              ? (CARDEX_SITE_LABELS[listing.source] ?? listing.source)
+              : "archive"
+        return [{ label: `Earlier listing on ${site}`, url }]
+      })
+    : []
   return {
     ...(counts && typeof counts.model === "string"
       ? {
@@ -148,7 +174,8 @@ export const detailMetadata = (raw: unknown, origin = CARDEX_ORIGIN): Pick<Adapt
             greetings: Array.isArray(counts.greetings) ? counts.greetings.filter(number) : []
           }
         }
-      : {})
+      : {}),
+    ...(earlierOrigins.length ? { earlierOrigins } : {})
   }
 }
 

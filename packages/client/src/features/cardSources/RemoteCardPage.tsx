@@ -227,6 +227,13 @@ export function RemoteCardPage() {
               </Tooltip>
             </div>
           )}
+          {summary.earlierOrigins?.map((entry) => (
+            <Tooltip key={entry.url} label="Opens the earlier listing on the archive, in a new tab.">
+              <a href={entry.url} target="_blank" rel="noopener noreferrer" className="text-sm text-accent">
+                {entry.label}
+              </a>
+            </Tooltip>
+          ))}
           {FIELDS.map(([field, label]) => {
             const text = doc[field]
             return text ? (

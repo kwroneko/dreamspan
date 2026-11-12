@@ -846,7 +846,25 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
         ],
         origins: [origin],
         main_origin: origin,
-        earlier_origins: [],
+        earlier_origins: [
+          {
+            listing: {
+              source: c.site,
+              source_label: "Synthetic site",
+              external_id: `previous-${c.slug}`,
+              path: `/o/${c.site}/previous-${c.slug}`,
+              source_url: "https://synthetic.example/previous"
+            },
+            origin: {
+              source: c.site,
+              external_id: `previous-${c.slug}`,
+              path: `/o/${c.site}/previous-${c.slug}`,
+              card_slug: c.slug
+            },
+            active_from: "2025-01-01T00:00:00Z",
+            active_to: "2026-01-01T00:00:00Z"
+          }
+        ],
         related: [],
         variants: []
       })

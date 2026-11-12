@@ -120,6 +120,7 @@ export const RemoteSummary = Schema.Struct({
       greetings: Schema.Array(Schema.Number)
     })
   ),
+  earlierOrigins: Schema.optionalKey(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String }))),
   thumb: Schema.optionalKey(Schema.String),
   image: Schema.optionalKey(Schema.String),
   version: RemoteVersion,

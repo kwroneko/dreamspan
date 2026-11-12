@@ -411,6 +411,24 @@ describe("v1 as card sources", () => {
     })
   )
 
+  it.effect("earlier origins use their nested listing, with archive-only links", () =>
+    Effect.gen(function* () {
+      const card = yield* fakeCardexAdapter(archive).card(direct(), archive.cards[0]!.slug)
+      assert.deepStrictEqual(card.summary.earlierOrigins, [
+        {
+          label: "Earlier listing on Synthetic site",
+          url: `${archive.origin}/o/${archive.cards[0]!.site}/previous-${archive.cards[0]!.slug}`
+        }
+      ])
+      assert.deepStrictEqual(
+        detailMetadata({
+          earlier_origins: [{ listing: { path: "https://elsewhere.example/x", source: "chub" } }, { listing: null }]
+        }),
+        {}
+      )
+    })
+  )
+
   it("a batch URL is in v1's canonical form: sorted, without duplicates, joined by %2C", () => {
     assert.strictEqual(batchUrl(["b-2", "a-1", "b-2"]).href, `${CARDEX_ORIGIN}/api/v1/cards/batch?ids=a-1%2Cb-2`)
   })
