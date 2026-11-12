@@ -8,6 +8,7 @@ import type { SqlClient } from "effect/sql"
 import { ownedModel } from "./generationSettings.ts"
 import { readSummary } from "./lcmReads.ts"
 import { shownImages } from "./lcmImages.ts"
+import { audienceIds } from "./lcmAudience.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
 
 /** How a job failed, as its error and its failed summary record it (the class and reason of a failed version). */
@@ -59,14 +60,23 @@ export const recordFailedSummary = (
     readonly last_slot_id: string
     readonly batch_id: string | null
     readonly input_child_ids: string | null
+    /** A view's job (db/lcmAudience.ts): its failure is that view's. */
+    readonly audience_json?: string | null
   },
   rolloutId: string | null,
   error: JobError
 ) =>
   Effect.gen(function* () {
-    const chain = yield* lcmPath(sql, userId, job.chat_id, job.last_slot_id, job.first_slot_id).pipe(
-      Effect.catchTag("NotFound", () => Effect.succeed([]))
-    )
+    const audience = job.audience_json ?? null
+    const chain = yield* lcmPath(
+      sql,
+      userId,
+      job.chat_id,
+      job.last_slot_id,
+      job.first_slot_id,
+      Number.MAX_SAFE_INTEGER,
+      audience === null ? undefined : audienceIds(audience)
+    ).pipe(Effect.catchTag("NotFound", () => Effect.succeed([])))
     if (!chain.length || chain[0]!.id !== job.first_slot_id) return null
     const children: Array<{ summaryId: string; revisionId: string }> = []
     if (job.level > 1) {
@@ -103,6 +113,7 @@ export const recordFailedSummary = (
       rollout_id: rolloutId,
       batch_id: job.batch_id,
       created_at: now,
+      audience_json: audience,
       // A failed range holds while the fork shows what it failed over, images included.
       images_json:
         job.level === 1

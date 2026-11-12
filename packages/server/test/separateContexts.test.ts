@@ -1,7 +1,7 @@
 // Separate contexts per character (spec/CHARACTER-CONTEXT.md §2, §9.2 unit C3) through the real
 // reader: in a separate context a character's reply leaves out what it wasn't present for, a
 // narrator's and a persona's see everything, the budget fills with what it knew, a rebuild
-// reproduces it, summaries covering what it missed are withheld; a shared context (the setting
+// reproduces it, no summary covering what it missed is used (unit C7 reads its own); a shared context (the setting
 // absent or "shared") is unchanged, byte for byte.
 import { assert, describe, it } from "@effect/vitest"
 import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
@@ -396,11 +396,13 @@ describe("separate contexts and summaries", () => {
       })
       const snapshot = JSON.parse(built.snapshot) as ContextSnapshot
       assert.notInclude(sentText(snapshot), "SECRET-SUMMARY")
-      assert.isTrue(snapshot.issues.some((i) => i.kind === "summaries_withheld"))
+      // Unit C7: the view's layer leaves out the stale summary written from the away version,
+      // so nothing needs withholding.
+      assert.isFalse(snapshot.issues.some((i) => i.kind === "summaries_withheld"))
     })
   )
 
-  lcmTest("summaries covering what the speaker missed are withheld, with an issue", (server) =>
+  lcmTest("a separate context reads no shared summary past where it diverged", (server) =>
     Effect.gen(function* () {
       const h = yield* lcmHarness(server, { messages: 120, summarizer: () => ({ text: "SUMMARY-TEXT" }) })
       yield* h.settle
@@ -460,7 +462,9 @@ describe("separate contexts and summaries", () => {
       const separate = yield* assemble("separate")
       assert.notInclude(sentText(separate), "SUMMARY-TEXT")
       assert.notInclude(sentText(separate), "The road ran on.")
-      assert.isTrue(separate.issues.some((i) => i.kind === "summaries_withheld"))
+      // Unit C7: Wren knew none of it, so her layer holds no shared summary and none of her own yet.
+      assert.isFalse(separate.issues.some((i) => i.kind === "summaries_withheld"))
+      assert.isFalse(separate.pieces.some((p) => p.source.kind === "summary"))
     })
   )
 })

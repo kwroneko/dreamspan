@@ -12,13 +12,14 @@ export const completedCoverage = (
   userId: UserId,
   chatId: string,
   path: readonly LcmSlot[],
-  view?: LcmView
+  view?: LcmView,
+  audience: string | null = null
 ) =>
   Effect.gen(function* () {
     const rows = yield* sql<{ id: string; first_slot_id: string; last_slot_id: string; slot_count: number }>`
       SELECT s.id,s.first_slot_id,s.last_slot_id,s.slot_count FROM summaries s JOIN chats c ON c.id=s.chat_id
       WHERE s.chat_id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
-        AND s.level=1 AND s.sealed=1 AND s.status IN ('complete','truncated')`
+        AND s.level=1 AND s.sealed=1 AND s.status IN ('complete','truncated') AND s.audience_json IS ${audience}`
     const valid = lineageValidator(sql, userId, view),
       covered = new Set<string>()
     for (const row of rows) {
@@ -42,13 +43,14 @@ export const failedHold = (
   userId: UserId,
   chatId: string,
   path: readonly LcmSlot[],
-  view?: LcmView
+  view?: LcmView,
+  audience: string | null = null
 ) =>
   Effect.gen(function* () {
     const rows = yield* sql<{ id: string; first_slot_id: string; last_slot_id: string; slot_count: number }>`
       SELECT s.id,s.first_slot_id,s.last_slot_id,s.slot_count FROM summaries s JOIN chats c ON c.id=s.chat_id
       WHERE s.chat_id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
-        AND s.level=1 AND s.sealed=1 AND s.status='failed'`
+        AND s.level=1 AND s.sealed=1 AND s.status='failed' AND s.audience_json IS ${audience}`
     const valid = lineageValidator(sql, userId, view),
       held = new Set<string>()
     for (const row of rows) {

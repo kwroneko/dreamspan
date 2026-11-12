@@ -8,7 +8,7 @@
 // layer where it covers something the viewer doesn't know. The stage and the views are each
 // registered and replaceable.
 import { Effect } from "effect"
-import { foldState } from "@rp/shared/state.ts"
+import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { viewedJoin } from "./mergeKnowledge.ts"
 import { AssemblySources, need, type Assembly, type AssemblerStage, type Cast } from "./pipeline.ts"
@@ -69,6 +69,29 @@ const fallbackViews = (() => {
   return { get: (id: string) => map.get(id), list: () => builtinContextViews }
 })()
 
+/**
+ * Each participant's identities on this path: its card and the cards it replaced (`card.swap`),
+ * whose knowledge it keeps. Only those with a replacement are listed.
+ */
+export const identitiesOf = (events: ReadonlyArray<FoldableEvent>) => {
+  const swaps = events.filter((e) => e.data.key === "card.swap")
+  const identities = new Map<string, ReadonlyArray<string>>()
+  if (swaps.length === 0) return identities
+  const original = foldState(events.filter((e) => e.data.key !== "card.swap"))
+  for (const entity of original.participants) identities.set(entity, [entity])
+  for (const { data } of swaps) {
+    if (data.key !== "card.swap") continue
+    const previous = identities.get(data.value.replaces)
+    if (!previous) continue
+    identities.delete(data.value.replaces)
+    identities.set(data.value.entity, [
+      ...new Set([...previous, ...(identities.get(data.value.entity) ?? []), data.value.entity])
+    ])
+  }
+  for (const [entity, ids] of identities) if (ids.length < 2) identities.delete(entity)
+  return identities
+}
+
 /** The view this request's history is chosen by, and whose knowledge filters it. */
 export interface Knowledge {
   readonly view: string
@@ -87,6 +110,12 @@ export const knowledgeStage: AssemblerStage = {
   id: "knowledge",
   run: (assembly) =>
     Effect.sync(() => {
+      // A view's own summary is written from what its character knew (unit C7).
+      const audience = assembly.request.summaryJob?.audience
+      if (audience?.length) {
+        assembly.knowledge = { view: "separate", viewer: audience[0]!, aliases: audience }
+        return assembly
+      }
       const state = need(assembly, "state")
       const cast = need(assembly, "cast")
       const views = assembly.request.contextViews ?? fallbackViews
@@ -99,23 +128,8 @@ export const knowledgeStage: AssemblerStage = {
         })
       const view = found ?? views.get("separate") ?? separateView
       const viewer = view.viewer({ assembly, cast, roles: state.roles })
-      const events = (assembly.events ?? []).map((e) => e.event)
-      const swaps = events.filter((e) => e.data.key === "card.swap")
-      const identities = new Map<string, ReadonlyArray<string>>()
-      if (viewer !== null && swaps.length) {
-        const original = foldState(events.filter((e) => e.data.key !== "card.swap"))
-        for (const entity of original.participants) identities.set(entity, [entity])
-        for (const { data } of swaps) {
-          if (data.key !== "card.swap") continue
-          const previous = identities.get(data.value.replaces)
-          if (!previous) continue
-          identities.delete(data.value.replaces)
-          identities.set(data.value.entity, [
-            ...new Set([...previous, ...(identities.get(data.value.entity) ?? []), data.value.entity])
-          ])
-        }
-      }
-      const aliases = viewer === null ? undefined : identities.get(viewer)
+      const aliases =
+        viewer === null ? undefined : identitiesOf((assembly.events ?? []).map((e) => e.event)).get(viewer)
       assembly.knowledge = { view: view.id, viewer, ...(aliases && aliases.length > 1 ? { aliases } : {}) }
       return assembly
     })

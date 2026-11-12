@@ -73,7 +73,8 @@ export const gapLinesStage: AssemblerStage = {
   run: (assembly) =>
     Effect.gen(function* () {
       const viewer = assembly.knowledge?.viewer ?? null
-      if (viewer === null) return assembly
+      // A view's summary request leaves what its character missed out without a line (unit C7).
+      if (viewer === null || assembly.request.summaryJob) return assembly
       const history = need(assembly, "history")
       if (!history.some((e) => e.unknown)) return assembly
       const env = need(assembly, "macros")

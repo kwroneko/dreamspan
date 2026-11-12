@@ -21,10 +21,14 @@ export const lcmStage: AssemblerStage = {
         sources.lcmDefaults ? yield* sources.lcmDefaults() : null
       )
       const leaf = historyLeafOf(need(assembly, "target"))
-      const layer = yield* sources.summaryLayer(leaf)
-      // A separate context: summaries covering what the speaker missed are withheld until
-      // summaries are kept per view (spec/CHARACTER-CONTEXT.md §9.2 C7).
+      // A separate context reads its own view's layer (spec/CHARACTER-CONTEXT.md §2.3, unit C7).
+      const viewer = assembly.knowledge?.viewer ?? null
+      const identities = viewer === null ? undefined : (assembly.knowledge?.aliases ?? [viewer])
+      const layer = yield* sources.summaryLayer(leaf, identities)
+      // A source without views (a fixture) gives the shared layer: withheld where it covers what
+      // the speaker missed.
       if (
+        !sources.viewLayers &&
         layer.cursor !== null &&
         ((assembly.knowledge?.viewer != null && layer.summaries.some((s) => !s.fresh)) ||
           !(yield* layerKnown(assembly, leaf, layer.cursorDepth)))

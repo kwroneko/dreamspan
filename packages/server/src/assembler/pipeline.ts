@@ -79,7 +79,17 @@ export interface PresetChain {
 export class AssemblySources extends Context.Service<
   AssemblySources,
   {
-    readonly summaryLayer: (leaf: string | null) => Effect.Effect<SummaryLayer, SourceError>
+    /**
+     * The summary layer through `leaf`. With a separate context's identities, that view's layer
+     * (spec/CHARACTER-CONTEXT.md §2.3): the shared summaries before its first missed message, then
+     * its own. Only a source that sets `viewLayers` reads them; others give the shared layer.
+     */
+    readonly summaryLayer: (
+      leaf: string | null,
+      identities?: ReadonlyArray<string>
+    ) => Effect.Effect<SummaryLayer, SourceError>
+    /** The source reads each view's own summaries (`summaryLayer` with identities). */
+    readonly viewLayers?: true
     readonly target: Effect.Effect<Target, SourceError>
     readonly historyRevision: (leaf: string | null, before: number) => Effect.Effect<number, SourceError>
     readonly historyStart: (leaf: string | null) => Effect.Effect<HistoryStart | null, SourceError>

@@ -14,6 +14,7 @@ import { toLlmRequest, type LlmRequestRow } from "./providers.ts"
 import { readingOnce, readSummary } from "./lcmReads.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
+import { audienceScope, viewerAudience } from "./lcmAudience.ts"
 
 /** Most summaries one coverage read returns: far more than a window of 500 messages needs. */
 const MAX_COVERAGE = 600
@@ -82,18 +83,19 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         rerun: reruns.has(s.id),
         replacementAvailable: replacements.has(s.id),
         content: withContent ? s.content : null,
+        ...(s.audience ? { audience: s.audience } : {}),
         children: s.children.map((c) => c.summaryId)
       }))
     })
 
-  const freshRanges = (userId: UserId, chatId: string, leaf: string) =>
+  const freshRanges = (userId: UserId, chatId: string, leaf: string, identities?: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const shown = yield* pathView(sql, chatId, leaf)
       const rows = yield* sql<{ id: string; created_at: number }>`WITH RECURSIVE path(id) AS (
       SELECT ${leaf} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id=s.id WHERE s.parent_slot_id IS NOT NULL
     ) SELECT s.id,s.created_at FROM ${shown ? sql`(SELECT id FROM path UNION SELECT value FROM json_each(${insertedOnPath(shown)})) path` : sql`path`}
       JOIN summaries s ON s.last_slot_id=path.id
-      WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status IN ('complete','truncated')`
+      WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status IN ('complete','truncated') AND ${audienceScope(sql, "s", identities)}`
       const memo = new Map<string, Summary>(),
         valid = lineageValidator(sql, userId, shown ?? undefined)
       const ranges: Array<Summary & { createdAt: number }> = []
@@ -132,7 +134,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
     leaf: string,
     shown: { readonly pieces: ReadonlyArray<PathPiece>; readonly end: number; readonly fork: string | null },
     from: number,
-    to: number
+    to: number,
+    identities?: ReadonlyArray<string>
   ) =>
     Effect.gen(function* () {
       const inserted = JSON.parse(insertedOnPath(shown)) as Array<string>
@@ -157,7 +160,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           last.chain_id AS last_chain, last.depth AS last_depth
         FROM shown JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = shown.id
           JOIN slots first ON first.id = s.first_slot_id JOIN slots last ON last.id = s.last_slot_id
-        WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded'
+        WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded' AND ${audienceScope(sql, "s", identities)}
           AND ${effectiveOverride(sql, "summary_superseded", shown.fork, "s.id")} IS NULL`
       return rows
         .map((r) => ({
@@ -224,9 +227,12 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         }))
       }).pipe(inSummaryFork(sql, userId, summaryId, forkId), query("ListSummaryRevisions")),
 
-    GetLcmState: ({ userId, chatId, leafSlotId, forkId }) =>
+    GetLcmState: ({ userId, chatId, leafSlotId, forkId, viewer }) =>
       Effect.gen(function* () {
         yield* owned(sql, userId, chatId, leafSlotId)
+        // A character's separate context (unit C7): the shared rows and its own.
+        const identities =
+          viewer === undefined ? undefined : (yield* viewerAudience(sql, chatId, leafSlotId, viewer)).identities
         const [settings] = yield* sql<{
           enabled: number | null
         }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
@@ -234,7 +240,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         const enabled = settings?.enabled === 1
         if (!enabled)
           return new LcmState({ chatId, leafSlotId, enabled, layer: [], failed: [], jobs: [], cursorDepth: -1 })
-        const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId)
+        const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, false, identities && { identities })
         // In a fork that shows inserted slots, numbers are positions on its display path (spec/MESSAGE-INSERT.md §3.4).
         const shown = yield* pathView(sql, chatId, leafSlotId)
 
@@ -243,8 +249,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           id: string
           last_slot_id: string
           created_at: number
-        }>`SELECT id, last_slot_id, created_at FROM summaries
-          WHERE chat_id = ${chatId} AND status = 'failed' AND sealed = 1`
+        }>`SELECT s.id, s.last_slot_id, s.created_at FROM summaries s
+          WHERE s.chat_id = ${chatId} AND s.status = 'failed' AND s.sealed = 1 AND ${audienceScope(sql, "s", identities)}`
         const fork = yield* viewAt(sql, chatId, leafSlotId)
         const rawJobs = yield* sql<{
           id: string
@@ -262,6 +268,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
             a.chain_id AS first_chain, b.chain_id AS last_chain
           FROM summarization_jobs j JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
           WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id=${fork}) AND j.status IN ('pending', 'processing', 'failed')
+            AND ${audienceScope(sql, "j", identities)}
           ORDER BY a.depth, j.level, j.id`
         // A job's range as positions (zero-based, as depths are): its ends' depths without insertions.
         const jobRows = shown
@@ -303,7 +310,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         )
         const fresh =
           allFailed.length || jobRows.some((j) => j.status === "failed")
-            ? yield* freshRanges(userId, chatId, leafSlotId)
+            ? yield* freshRanges(userId, chatId, leafSlotId, identities)
             : []
         const failed = allFailed.filter(
           (s) => !resolved(s.from, s.to, fresh, { time: failedRows.find((r) => r.id === s.id)!.created_at, id: s.id })
@@ -349,10 +356,13 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
       toDepth,
       fromPosition,
       toPosition,
-      includeResolved
+      includeResolved,
+      viewer
     }) =>
       Effect.gen(function* () {
         yield* owned(sql, userId, chatId, leafSlotId)
+        const identities =
+          viewer === undefined ? undefined : (yield* viewerAudience(sql, chatId, leafSlotId, viewer)).identities
         const shown = yield* pathView(sql, chatId, leafSlotId)
         const ids = shown
           ? yield* coverageInDisplay(
@@ -361,7 +371,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
               leafSlotId,
               shown,
               fromPosition ?? fromDepth,
-              toPosition ?? toDepth
+              toPosition ?? toDepth,
+              identities
             )
           : yield* sql<{ id: string; created_at: number }>`WITH RECURSIVE path(id, depth) AS (
             SELECT id, depth FROM slots WHERE id = ${leafSlotId}
@@ -369,7 +380,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
               WHERE s.depth >= ${fromDepth}
           ) SELECT s.id,s.created_at FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
             JOIN slots first ON first.id = s.first_slot_id
-            WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded'
+            WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded' AND ${audienceScope(sql, "s", identities)}
               AND ${effectiveOverride(sql, "summary_superseded", yield* viewAt(sql, chatId, leafSlotId), "s.id")} IS NULL
               AND path.depth >= ${fromDepth} AND first.depth <= ${toDepth}
             ORDER BY s.level, first.depth LIMIT ${MAX_COVERAGE}`
@@ -379,7 +390,9 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           yield* Effect.forEach(ids, ({ id }) => readSummary(sql, userId, id, undefined, memo, shown ?? undefined)),
           shown
         )
-        const fresh = summaries.some((s) => s.status === "failed") ? yield* freshRanges(userId, chatId, leafSlotId) : []
+        const fresh = summaries.some((s) => s.status === "failed")
+          ? yield* freshRanges(userId, chatId, leafSlotId, identities)
+          : []
         const rows = yield* toRows(
           summaries.filter((s) => s.status !== "superseded"),
           false

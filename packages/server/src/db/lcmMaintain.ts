@@ -13,6 +13,7 @@ import { type Candidate } from "../lcm/maintenance.ts"
 import type { ModelChoice } from "@rp/shared/lcmSettings.ts"
 import { type PlannedJob } from "./lcmJobs.ts"
 import { lineageValidator } from "./lcmLayer.ts"
+import { audienceIds } from "./lcmAudience.ts"
 import { type LcmSlot, lcmPath, slotInput } from "./lcmPath.ts"
 import { readSummary } from "./lcmReads.ts"
 import { insertedOnPath, pathView, seamStale } from "./lcmDisplay.ts"
@@ -42,9 +43,13 @@ export const maintain = (
     readonly leafTarget: number
     readonly clipTokens: number
     readonly budget: { readonly target: number; readonly maximum: number }
+    /** A view's own summaries (db/lcmAudience.ts); absent: the shared ones. */
+    readonly audience?: string
   }
 ) =>
   Effect.gen(function* () {
+    const audience = options.audience ?? null
+    const identities = audience === null ? undefined : audienceIds(audience)
     const fork = yield* viewAt(sql, chatId, leaf)
     const fanout = options.fanout ?? DEFAULT_FANOUT,
       condenseTarget = options.condenseTarget ?? DEFAULT_CONDENSE_TARGET
@@ -66,13 +71,13 @@ export const maintain = (
     )`
     const liveBatches = new Set(
       (yield* sql<{ batch_id: string }>`SELECT DISTINCT batch_id FROM summarization_jobs
-        WHERE chat_id = ${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND status IN ('pending', 'processing') AND batch_id IS NOT NULL`).map(
-        (r) => r.batch_id
-      )
+        WHERE chat_id = ${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND status IN ('pending', 'processing') AND batch_id IS NOT NULL
+          AND audience_json IS ${audience}`).map((r) => r.batch_id)
     )
     const rows = yield* sql<{ id: string; status: string }>`${onPath}
       SELECT s.id, s.status FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
-      WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status IN ('complete', 'truncated', 'superseded', 'failed')`
+      WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status IN ('complete', 'truncated', 'superseded', 'failed')
+        AND s.audience_json IS ${audience}`
     const choices = yield* summaryChoices(sql, chatId)
     const dismissed = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => c.summary_id))
     const candidates: Array<Candidate> = []
@@ -121,7 +126,8 @@ export const maintain = (
         a.id AS a_id, a.chain_id AS a_chain, a.depth AS a_depth, b.id AS b_id, b.chain_id AS b_chain, b.depth AS b_depth
       FROM path JOIN summarization_jobs j ON j.last_slot_id = path.id
         JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
-      WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id=${fork}) AND j.status IN ('pending', 'processing')`
+      WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id=${fork}) AND j.status IN ('pending', 'processing')
+        AND j.audience_json IS ${audience}`
     const jobs = jobRows.map(({ a_id, a_chain, a_depth, b_id, b_chain, b_depth, ...j }) => {
       if (!shown) return j
       const from = positionOf(shown.pieces, { id: a_id, chainId: a_chain, depth: a_depth })
@@ -195,16 +201,20 @@ export const maintain = (
     }
     // The chains of stale level-1 summaries: whether anything in them can still be summarized, and what to send.
     const chains = new Map<string, ReadonlyArray<LcmSlot>>()
-    const chainOf = (s: Summary) => lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId)
+    const chainOf = (s: Summary) =>
+      lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities)
     for (const s of candidates)
       if (s.level === 1 && s.status !== "superseded" && (!s.fresh || forced.has(s.id)))
         chains.set(s.id, yield* chainOf(s))
     const [last] = yield* sql<{ eager: number }>`
       SELECT eager FROM summarization_jobs WHERE chat_id = ${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND status IN ('complete', 'failed')
+        AND audience_json IS ${audience}
       ORDER BY updated_at DESC, id DESC LIMIT 1`
     // Freeze effective message inputs and every selected child revision at the authorizing reply.
     // Completion can continue that exact episode; later edits do not inherit its permission.
-    const path = candidates.length ? yield* lcmPath(sql, userId, chatId, leaf) : []
+    const path = candidates.length
+      ? yield* lcmPath(sql, userId, chatId, leaf, undefined, Number.MAX_SAFE_INTEGER, identities)
+      : []
     const byId = new Map(candidates.map((s) => [s.id as string, s]))
     const signatures: Record<string, string> = {}
     const signature = (s: Summary): string =>
@@ -229,7 +239,7 @@ export const maintain = (
         .digest("hex"))
     for (const s of candidates) signature(s)
     for (const retry of retries) {
-      const chain = yield* lcmPath(sql, userId, chatId, retry.last, retry.first)
+      const chain = yield* lcmPath(sql, userId, chatId, retry.last, retry.first, Number.MAX_SAFE_INTEGER, identities)
       signatures[`retry:${retry.ask.id}`] = createHash("sha256")
         .update(JSON.stringify([chain.map(slotInput), retry.children.map((id) => byId.get(id)?.revisionId)]))
         .digest("hex")
@@ -254,7 +264,8 @@ export const maintain = (
       result: string
       rerun_ids_json: string | null
     }>`SELECT source_summary_id AS source,result_summary_id AS result,rerun_ids_json
-      FROM summarization_jobs WHERE chat_id=${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND source_summary_id IS NOT NULL AND status='complete'`
+      FROM summarization_jobs WHERE chat_id=${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND source_summary_id IS NOT NULL AND status='complete'
+        AND audience_json IS ${audience}`
     const completed = new Map<string, Array<Summary>>()
     for (const part of finishedParts) {
       const result = byId.get(part.result)
@@ -340,7 +351,10 @@ export const maintain = (
     const refresh = [
       ...(yield* Effect.forEach(
         authorizedRetries.filter((r) => r.level === 1),
-        (r) => Effect.map(lcmPath(sql, userId, chatId, r.last, r.first), (chain) => chunkFor(chain, r.ask))
+        (r) =>
+          Effect.map(lcmPath(sql, userId, chatId, r.last, r.first, Number.MAX_SAFE_INTEGER, identities), (chain) =>
+            chunkFor(chain, r.ask)
+          )
       )).flat(),
       ...[...plan.resummarize]
         .sort((a, b) => Number(forced.has(b)) - Number(forced.has(a)))

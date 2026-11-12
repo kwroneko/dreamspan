@@ -8,6 +8,7 @@ import type { RequestImage } from "../assembler/types.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { windowPieces } from "./displayPath.ts"
 import { lcmView, placesOf, positionIn } from "./lcmDisplay.ts"
+import { knownVersions } from "./lcmAudience.ts"
 
 export interface LcmSlot {
   id: Summary["firstSlotId"]
@@ -57,6 +58,29 @@ export const lcmPathColumns = (
  * included, numbered by position (`first` not before `leaf` there: the last `limit` positions).
  */
 export const lcmPath = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  chatId: string,
+  leaf: string,
+  first?: string,
+  limit = Number.MAX_SAFE_INTEGER,
+  identities?: ReadonlyArray<string>
+) =>
+  identities === undefined
+    ? wholePath(sql, userId, chatId, leaf, first, limit)
+    : Effect.gen(function* () {
+        // A view's path (db/lcmAudience.ts): a message its character didn't know is absent.
+        const path = yield* wholePath(sql, userId, chatId, leaf, first, limit)
+        const versions = path.flatMap((slot) => (slot.versionId === null ? [] : [slot.versionId]))
+        const known = yield* knownVersions(sql, versions, identities)
+        return path.map((slot) =>
+          slot.versionId === null || known.has(slot.versionId)
+            ? slot
+            : { ...slot, versionId: null, content: "", images: [], amendCount: 0 }
+        )
+      })
+
+const wholePath = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chatId: string,

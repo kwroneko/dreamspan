@@ -16,6 +16,7 @@ import { query } from "./tx.ts"
 import { positionOf } from "./displayPath.ts"
 import { lcmView, type LcmView } from "./lcmDisplay.ts"
 import { imagesMatch } from "./lcmImages.ts"
+import { audienceIds, knownVersions } from "./lcmAudience.ts"
 
 /**
  * What one storage operation has read of summaries so far, when it keeps it (`readingOnce`):
@@ -85,6 +86,7 @@ export const readSummary = (
         first_chain: string
         last_chain: string
         images_json: string | null
+        audience_json: string | null
       }>`SELECT s.*, max(s.row_version,coalesce(ro.seq,0),coalesce(co.seq,0)) AS row_version, r.id AS revision_id, r.rollout_id AS revision_rollout_id, r.content, r.token_count, r.origin, (SELECT count(*) FROM summary_revisions p WHERE p.summary_id = s.id AND p.seq <= r.seq) AS revision_number, a.depth AS first_depth, b.depth AS last_depth, a.chain_id AS first_chain, b.chain_id AS last_chain
           FROM summaries s JOIN chats c ON c.id = s.chat_id
           LEFT JOIN fork_overrides ro ON ro.id=${effectiveOverride(sql, "summary_revision", fork, "s.id")}
@@ -112,6 +114,13 @@ export const readSummary = (
           THEN v.id ELSE NULL END AS effective, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS current_amends
         FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions iv ON iv.id=i.version_id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
         WHERE i.summary_id = ${summaryId} ORDER BY i.ordinal`
+      // A view's own summary (db/lcmAudience.ts): a message its audience didn't know is absent from
+      // it, as a hidden one is, so a correction of who was there makes it stale.
+      if (row.audience_json !== null) {
+        const ids = inputs.flatMap((i) => (i.effective === null ? [] : [i.effective]))
+        const known = yield* knownVersions(sql, ids, audienceIds(row.audience_json))
+        for (const i of inputs) if (i.effective !== null && !known.has(i.effective)) i.effective = null
+      }
       const children = yield* sql<{
         parent_id: string
         parent_revision_id: string
@@ -189,7 +198,8 @@ export const readSummary = (
         rowVersion: row.row_version,
         fresh,
         inputs: inputs.map((i) => ({ slotId: i.slot_id, versionId: i.version_id, amendCount: i.amend_count })),
-        children: children.map((p) => ({ summaryId: p.parent_id, revisionId: p.parent_revision_id }))
+        children: children.map((p) => ({ summaryId: p.parent_id, revisionId: p.parent_revision_id })),
+        ...(row.audience_json === null ? {} : { audience: audienceIds(row.audience_json) })
       })
       memo.set(summaryId, summary)
       if (shown.pieces === null) kept?.summaries.set(key, summary)

@@ -630,7 +630,9 @@ export class WriteOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       triggerVersionId: Schema.optionalKey(VersionId),
       chunks: Schema.Array(SummaryChunk),
-      requestClass: SummaryJob.fields.requestClass
+      requestClass: SummaryJob.fields.requestClass,
+      /** A separate context's view (db/lcmAudience.ts): its audience key. Absent: the shared summaries. */
+      audience: Schema.optionalKey(Schema.String)
     },
     success: Schema.Array(SummaryJob),
     error: Schema.Union([StorageError, NotFound])
@@ -649,7 +651,9 @@ export class WriteOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       triggerVersionId: Schema.optionalKey(VersionId),
       jobs: Schema.Array(PlannedJob),
-      requestClass: SummaryJob.fields.requestClass
+      requestClass: SummaryJob.fields.requestClass,
+      /** A separate context's view (db/lcmAudience.ts): its audience key. Absent: the shared summaries. */
+      audience: Schema.optionalKey(Schema.String)
     },
     success: Schema.Array(SummaryJob),
     error: Schema.Union([StorageError, NotFound])
@@ -2893,7 +2897,14 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The layer in use on the path to a leaf, with the failed summaries and unfinished jobs on it. */
   Rpc.make("GetLcmState", {
-    payload: { userId: UserId, chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: SlotId },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      leafSlotId: SlotId,
+      /** A character whose separate context to read: the shared summaries and its own (unit C7). */
+      viewer: Schema.optionalKey(EntityId)
+    },
     success: LcmState,
     error: Schema.Union([StorageError, NotFound])
   }),
@@ -2908,6 +2919,8 @@ export class ReadOps extends RpcGroup.make(
       toDepth: Schema.Int,
       fromPosition: Schema.optionalKey(Schema.Int),
       toPosition: Schema.optionalKey(Schema.Int),
+      /** As GetLcmState's. */
+      viewer: Schema.optionalKey(EntityId),
       includeResolved: Schema.optionalKey(Schema.Boolean)
     },
     success: LcmCoverage,
@@ -3546,7 +3559,9 @@ export class ReadOps extends RpcGroup.make(
       /** The fork it plans in (absent or null: the fork through the leaf, the current one first). */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       /** Without one, only new chunks are planned. A reply may start re-summarizing; a finished job only continues it. */
-      reason: Schema.optionalKey(Schema.Literals(["reply", "completion"]))
+      reason: Schema.optionalKey(Schema.Literals(["reply", "completion"])),
+      /** A separate context's view (db/lcmAudience.ts): its audience key. Absent: the shared summaries. */
+      audience: Schema.optionalKey(Schema.String)
     },
     success: SummaryPlan,
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
