@@ -34,6 +34,7 @@ export function cardexCriteriaTests() {
             expect(
               ((await (await fetch(`http://127.0.0.1:${port}/__fake/hits`)).json()) as { hits: number }).hits
             ).toBe(0)
+            await fetch(`http://127.0.0.1:${port}/__fake/count-cap?value=50`)
             if (place === "home") await home.getByRole("button", { name: "cardex", exact: true }).click()
             else {
               await showAppNavigation(page)
@@ -48,6 +49,12 @@ export function cardexCriteriaTests() {
             const scope =
               place === "home" ? home : page.locator("[data-shell-list]").filter({ visible: true }).locator("..")
             await expect(scope.locator("[data-remote-card]").first()).toBeVisible()
+            if (place === "home")
+              await expect(scope.getByRole("button", { name: "cardex", exact: true })).toContainText("50+")
+            else
+              await expect(
+                page.getByRole("combobox", { name: "Show", exact: true }).filter({ visible: true })
+              ).toContainText("50+")
             const filters = scope.getByRole("button", { name: /^Filters/ })
             await filters.click()
             const panel = scope.getByRole("region", { name: "cardex filters", exact: true })
@@ -169,6 +176,72 @@ export function cardexCriteriaTests() {
                 await expect(page).toHaveURL(/(?:sreverse|sideSreverse)=true/)
               } else await expect(direction).toBeDisabled()
             }
+            // URL state restores filters, text, sorting and direction in either surface.
+            await filters.click()
+            await panel
+              .getByRole("group", { name: "Kind", exact: true })
+              .getByRole("button", { name: "With a lorebook", exact: true })
+              .click()
+            await panel.getByRole("button", { name: "Close", exact: true }).click()
+            if (place === "home")
+              await scope
+                .getByRole("group", { name: "Sort by", exact: true })
+                .getByRole("button", { name: "Name", exact: true })
+                .click()
+            else {
+              await scope.getByRole("button", { name: /^Sort by:/ }).click()
+              await page.getByRole("menuitemcheckbox", { name: "Name", exact: true }).click()
+            }
+            const search = scope.getByRole("searchbox", { name: "Search cardex", exact: true })
+            await search.fill("synthetic")
+            await expect(
+              scope.getByText("Name sorting with search words is unavailable on cardex. Showing best matches.", {
+                exact: true
+              })
+            ).toBeVisible()
+            const url = page.url()
+            await page.reload()
+            if (place === "sidebar" && width === 390) {
+              await expect(page.getByRole("button", { name: "Chats and menu", exact: true })).toBeVisible()
+              await showAppNavigation(page)
+            }
+            await expect(page).toHaveURL(url)
+            await expect(search).toHaveValue("synthetic")
+            await expect(chips).toContainText("Kind: With a lorebook")
+            await expect(scope.getByRole("button", { name: "Order: A to Z", exact: true })).toBeVisible()
+            await clear()
+            await search.scrollIntoViewIfNeeded()
+            const results = scope.locator("[data-source-results]")
+            await expect(results).toHaveAttribute("aria-busy", "false")
+            const cards = scope.locator("[data-remote-card]")
+            const expected = (await (
+              await fetch(
+                `http://127.0.0.1:${port}/api/v1/search?q=synthetic&kind=character&nsfw=include&sort=relevance&limit=48`
+              )
+            ).json()) as { items: { slug: string }[] }
+            const firstIds = expected.items.map((item) => item.slug)
+            await expect
+              .poll(() =>
+                cards.evaluateAll((nodes) => nodes.slice(0, 48).map((node) => node.getAttribute("data-remote-card")))
+              )
+              .toEqual(firstIds)
+            const firstPageHits = async () => {
+              const hits = (await (await fetch(`http://127.0.0.1:${port}/__fake/hits`)).json()) as { paths: string[] }
+              return hits.paths.filter(
+                (path) =>
+                  path.startsWith("/api/v1/search?") && path.includes("q=synthetic") && !path.includes("cursor=")
+              ).length
+            }
+            const beforeReset = await firstPageHits()
+            await fetch(`http://127.0.0.1:${port}/__fake/expire-cursors`)
+            await cards.last().scrollIntoViewIfNeeded()
+            await expect.poll(firstPageHits).toBeGreaterThan(beforeReset)
+            await expect(results).toHaveAttribute("aria-busy", "false")
+            const restored = await cards.evaluateAll((nodes) =>
+              nodes.map((node) => node.getAttribute("data-remote-card"))
+            )
+            expect(restored.slice(0, 48)).toEqual(firstIds)
+            expect(new Set(restored).size).toBe(restored.length)
             await expectLayout(page, info, `cardex-sort-${place}-${width}-${theme}`, {
               scope: place === "home" ? "main" : "[data-shell-list]"
             })

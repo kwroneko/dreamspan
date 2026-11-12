@@ -432,6 +432,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     ...card,
     hasCover: options.coverless ? n % 3 !== 0 : true
   }))
+  let countCap = options.countCap ?? 100_000
+  let cursorEpoch = 0
   const bySlug = new Map(cards.map((c) => [c.slug, c]))
   const bySha = new Map(cards.map((c) => [c.sha256, c]))
   // The full image is a PNG; the thumbnails, as cardex's, WebP at 512 and 64 px wide.
@@ -554,7 +556,10 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     const normalized = [...params]
       .filter(([k]) => k !== "cursor" && k !== "page")
       .sort(([a], [b]) => a.localeCompare(b))
-    const queryHash = createHash("sha256").update(JSON.stringify(normalized)).digest("hex").slice(0, 12)
+    const queryHash = createHash("sha256")
+      .update(JSON.stringify([cursorEpoch, normalized]))
+      .digest("hex")
+      .slice(0, 12)
     let offset = 0
     if (params.has("cursor")) {
       const cursor = /^(\d+)\.([0-9a-f]{12})$/.exec(Buffer.from(params.get("cursor")!, "base64url").toString("utf8"))
@@ -694,6 +699,14 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
   const handle = (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://fake")
     const path = url.pathname
+    if (path === "/__fake/count-cap") {
+      countCap = Number(url.searchParams.get("value") ?? 100_000)
+      return json(res, 200, { ok: true })
+    }
+    if (path === "/__fake/expire-cursors") {
+      cursorEpoch++
+      return json(res, 200, { ok: true })
+    }
     if (path === "/__fake/hits") return json(res, 200, { hits: seen.length, paths: seen })
     if (path === "/__fake/reset") {
       seen.length = 0
@@ -735,7 +748,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       const result = search(params)
       if (result.status !== 200) return json(res, result.status, result.body)
       const body = result.body as { exact_count: number }
-      const cap = options.countCap ?? 100_000
+      const cap = countCap
       return json(res, 200, {
         total: Math.min(body.exact_count, cap),
         capped: body.exact_count >= cap,

@@ -25,9 +25,10 @@ export type ResponseKind = "json" | "card" | "image"
 
 export interface SourceHttp {
   /**
-   * A GET on one of the adapter's hosts. A non-2xx status fails: 401/403 `unauthorized` (for
-   * a source with no key, `refused`), 404
-   * `not_found`, 429 `rate_limited` (with its Retry-After), 5xx `unreachable`, any other
+   * A GET on one of the adapter's hosts. Conditional requests may return 304 without a
+   * body; other non-2xx statuses fail: 401/403 `unauthorized` (for a source with no key,
+   * `refused`), 404 `not_found`, 451 `region_unavailable`, 429 `rate_limited`
+   * (with its Retry-After), 5xx `unreachable`, any other
    * (a 400 among them) `bad_response`, with the error code a refusal's body named.
    */
   readonly get: (
