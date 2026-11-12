@@ -19,6 +19,10 @@ export const completeEmpty = (
       now = Date.now()
     const first = children[0]?.firstSlotId ?? inputs[0]!.slotId
     const last = children.at(-1)?.lastSlotId ?? inputs.at(-1)!.slotId
+    // A view's empty summary is that view's too (db/lcmAudience.ts).
+    const [job] = yield* sql<{
+      audience_json: string | null
+    }>`SELECT audience_json FROM summarization_jobs WHERE id = ${jobId}`
     yield* sql`INSERT INTO summary_revisions ${sql.insert({ id: revision, summary_id: id, content: "", token_count: 0, origin: "generated", created_at: now })}`
     yield* sql`INSERT INTO summaries ${sql.insert({
       id,
@@ -30,7 +34,8 @@ export const completeEmpty = (
       slot_count: children.length ? children.reduce((n, c) => n + c.slotCount, 0) : inputs.length,
       status: "complete",
       batch_id: batchId,
-      created_at: now
+      created_at: now,
+      audience_json: job?.audience_json ?? null
     })}`
     for (const [ordinal, input] of inputs.entries())
       yield* sql`INSERT INTO summary_inputs ${sql.insert({ summary_id: id, ordinal, slot_id: input.slotId, version_id: input.versionId, amend_count: input.amendCount })}`

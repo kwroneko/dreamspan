@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 57
+export const ASSEMBLER_VERSION = 58
 
 export type Role = "system" | "user" | "assistant"
 
@@ -365,6 +365,11 @@ export interface ContextSnapshot {
     /** False: sent without the preset, the instruction and messages only (DESIGN §8); absent is with it. */
     readonly withPreset?: boolean
     readonly prefix?: SummaryPrefix
+    /**
+     * A separate context's own summary (spec/CHARACTER-CONTEXT.md §2.3): the identities whose
+     * knowledge its material is filtered by. Absent: the whole path.
+     */
+    readonly audience?: ReadonlyArray<string>
   }
   readonly lcm?: {
     readonly cursor: string | null

@@ -23,7 +23,9 @@ export const SummaryJob = Schema.Struct({
   fallbackUsed: Schema.Int,
   maxRetries: Schema.Int,
   batchId: Schema.NullOr(Schema.String),
-  status: Schema.Literals(["pending", "processing", "complete", "failed"])
+  status: Schema.Literals(["pending", "processing", "complete", "failed"]),
+  /** A separate context's own job (db/lcmAudience.ts): its audience key; null: the shared summaries. */
+  audience: Schema.NullOr(Schema.String)
 })
 export type SummaryJob = typeof SummaryJob.Type
 export const SummaryChunk = Schema.Struct({
@@ -78,7 +80,12 @@ export const SummaryPlan = Schema.Struct({
    */
   backfill: Schema.NullOr(
     Schema.Struct({ armed: Schema.Boolean, held: Schema.Boolean, drive: Schema.Boolean, settled: Schema.Boolean })
-  )
+  ),
+  /**
+   * In a chat set to separate contexts, the audience keys of the views that have their own
+   * summaries to plan (db/lcmAudience.ts), each planned after the shared summaries.
+   */
+  views: Schema.optionalKey(Schema.Array(Schema.String))
 })
 // Storage permits a missing planning leaf; the range endpoint is always an
 // owned slot and gives such a job a valid path for its completion pass.
@@ -86,4 +93,4 @@ export const jobColumns = `j.id, j.fork_id AS forkId, j.chat_id AS chatId, c.own
  j.first_slot_id AS firstSlotId, j.last_slot_id AS lastSlotId, coalesce(j.leaf_slot_id, j.last_slot_id) AS leafSlotId,
  j.clip_tokens AS clipTokens, j.claim_epoch AS epoch, j.level, j.target_token_count AS target, j.attempts, j.request_class AS requestClass,
  j.model_json AS modelJson, j.fallback_used AS fallbackUsed, j.max_retries AS maxRetries,
- j.batch_id AS batchId, j.status`
+ j.batch_id AS batchId, j.status, j.audience_json AS audience`

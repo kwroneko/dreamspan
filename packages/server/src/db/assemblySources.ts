@@ -33,6 +33,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { knowsSql, readKnowers, readMergeRows } from "./knowers.ts"
+import { audienceKey } from "./lcmAudience.ts"
 import { resolveModel } from "@rp/shared/providers.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Schema } from "effect"
@@ -468,13 +469,15 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
 
   const history = noteHistory(sql, userId, chatId)
   const live = AssemblySources.of({
-    summaryLayer: (leaf) =>
+    viewLayers: true,
+    summaryLayer: (leaf, identities) =>
       selectSummaryLayer(
         sql,
         userId,
         chatId,
         settings.summaryBefore ? settings.summaryBefore.slot : leaf,
-        settings.partialBatch
+        settings.partialBatch,
+        identities ? { identities } : undefined
       ).pipe(
         Effect.map((layer) =>
           settings.condense
@@ -493,7 +496,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             userId,
             chatId,
             settings.summaryBefore ? settings.summaryBefore.slot : leaf,
-            layer.cursorDepth
+            layer.cursorDepth,
+            identities ? audienceKey(identities) : null
           ).pipe(Effect.map((failures) => ({ ...layer, failures })))
         ),
         // The layer's cursor is a display position already (selectSummaryLayer in a fork that
@@ -1099,6 +1103,7 @@ const replaySources = (
     return found ? Effect.succeed(found) : Effect.fail(unpinned(what))
   }
   return {
+    viewLayers: true,
     summaryLayer: () =>
       Effect.gen(function* () {
         const layer = pins.lcm

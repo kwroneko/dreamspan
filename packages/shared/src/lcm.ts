@@ -40,7 +40,9 @@ export class Summary extends Schema.Class<Summary>("Summary")({
   rowVersion: Schema.Int,
   fresh: Schema.Boolean,
   inputs: Schema.Array(SummaryInput),
-  children: Schema.Array(SummaryChild)
+  children: Schema.Array(SummaryChild),
+  /** A separate context's own summary (spec/CHARACTER-CONTEXT.md §2.3): its character's identities. Absent: the whole path. */
+  audience: Schema.optionalKey(Schema.Array(Schema.String))
 }) {}
 const SummaryStatus = Schema.Literals(["complete", "truncated", "superseded", "failed"])
 const SummaryOrigin = Schema.Literals(["generated", "user", "changeset", "imported"])
@@ -73,7 +75,9 @@ export const LcmSummary = Schema.Struct({
   resolved: Schema.optionalKey(Schema.Boolean),
   content: Schema.NullOr(Schema.String),
   /** The summaries this one condenses, in order; empty at level 1. */
-  children: Schema.Array(SummaryId)
+  children: Schema.Array(SummaryId),
+  /** A separate context's own summary: the identities of the character it was written for. Absent: shared. */
+  audience: Schema.optionalKey(Schema.Array(Schema.String))
 })
 export type LcmSummary = typeof LcmSummary.Type
 
@@ -166,7 +170,17 @@ export const BackfillCounts = Schema.Struct({
   /** Why nothing can be summarized: no model, or a context too small for two chunks between the window's ends. */
   blocked: Schema.NullOr(Schema.Literals(["no_model", "runway"])),
   /** From the model's recent output speed; null without a history of requests. */
-  seconds: Schema.NullOr(Schema.Int)
+  seconds: Schema.NullOr(Schema.Int),
+  /**
+   * In a chat set to separate contexts, the characters that get summaries of their own (each
+   * missed something), with the part of the totals above that is theirs: the messages they knew
+   * after they diverged, and the requests those come to. The shared pass is the rest.
+   */
+  views: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({ entity: EntityId, messages: Schema.Int, l1Jobs: Schema.Int, condensations: Schema.Int })
+    )
+  )
 })
 export type BackfillCounts = typeof BackfillCounts.Type
 
@@ -399,7 +413,13 @@ export class LcmApi extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
   Rpc.make("GetLcmState", {
-    payload: { chatId: ChatId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), leafSlotId: SlotId },
+    payload: {
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      leafSlotId: SlotId,
+      /** A character whose separate context to read: the shared summaries and its own (unit C7). */
+      viewer: Schema.optionalKey(EntityId)
+    },
     success: LcmState,
     error: Schema.Union([NotFound, ServerError])
   }),
@@ -417,7 +437,9 @@ export class LcmApi extends RpcGroup.make(
       fromDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       toDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
       fromPosition: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-      toPosition: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+      toPosition: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+      /** As GetLcmState's. */
+      viewer: Schema.optionalKey(EntityId)
     },
     success: LcmCoverage,
     error: Schema.Union([NotFound, ServerError])
