@@ -267,3 +267,29 @@ it.each([
 ])("permits web port %s", async (url) => {
   await makeExternalFetcher(fakeNetwork().network, { resolve: async () => [PUBLIC] })(url, controller())
 })
+it("refuses every local interface address, including public IPv4 and equivalent IPv6 spellings", async () => {
+  const fake = fakeNetwork()
+  const interfaces = () =>
+    ({
+      synthetic: [
+        { address: PUBLIC, family: "IPv4", netmask: "", mac: "", internal: false, cidr: null },
+        {
+          address: "2606:4700:4700:0:0:0:0:1111",
+          family: "IPv6",
+          netmask: "",
+          mac: "",
+          internal: false,
+          cidr: null,
+          scopeid: 0
+        }
+      ]
+    }) as ReturnType<typeof import("node:os").networkInterfaces>
+  for (const ip of [PUBLIC, "2606:4700:4700::1111"])
+    await expect(
+      makeExternalFetcher(fake.network, { interfaces, resolve: async () => [ip] })(
+        "https://media.invalid/a",
+        controller()
+      )
+    ).rejects.toThrow()
+  expect(fake.requests).toHaveLength(0)
+})

@@ -1,6 +1,7 @@
 // Untrusted message URLs never use the admin's private-host exceptions. Network checks each
 // hop with this policy and pins its checked literals on the wire (also through proxies).
 import { Resolver } from "node:dns/promises"
+import { networkInterfaces } from "node:os"
 import { BlockList, isIP } from "node:net"
 import { fileTypeFromBuffer } from "file-type"
 import type { NetworkShape } from "./Network.ts"
@@ -115,6 +116,7 @@ const resolveOffPool =
     }
   }
 interface Limits {
+  readonly interfaces?: typeof networkInterfaces
   readonly resolve?: (hostname: string, signal: AbortSignal) => Promise<ReadonlyArray<string>>
   /** DNS servers for the default resolver; the system's otherwise. */
   readonly dnsServers?: ReadonlyArray<string>
@@ -139,7 +141,14 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
         throw new ExternalMediaRefused("Only public HTTP and HTTPS media addresses without credentials are allowed")
       const hostname = target.hostname.replace(/^\[(.*)\]$/, "$1")
       const addresses = isIP(hostname) ? [hostname] : await resolve(hostname, controller.signal)
-      if (addresses.length === 0 || addresses.some((ip) => !isPublicMediaAddress(ip)))
+      const local = new BlockList()
+      for (const entries of Object.values((limits.interfaces ?? networkInterfaces)()))
+        for (const entry of entries ?? [])
+          local.addAddress(entry.address.split("%")[0]!, entry.family === "IPv6" ? "ipv6" : "ipv4")
+      if (
+        addresses.length === 0 ||
+        addresses.some((ip) => !isPublicMediaAddress(ip) || local.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4"))
+      )
         throw new ExternalMediaRefused("This media address is not public")
       return addresses
     })
