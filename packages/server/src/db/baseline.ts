@@ -1968,14 +1968,36 @@ export const baseline: ReadonlyArray<string> = [
     ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE,
     before_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
     after_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE,
-    matches INTEGER NOT NULL,
-    undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL
+    matches INTEGER NOT NULL CHECK (matches > 0),
+    undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL,
+    UNIQUE (group_id, ref_id),
+    CHECK (before_revision_id <> after_revision_id)
   ) STRICT`,
   `CREATE INDEX library_edit_items_group ON library_edit_items(group_id)`,
   `CREATE INDEX library_edit_items_ref ON library_edit_items(ref_id)`,
   `CREATE INDEX library_edit_items_before ON library_edit_items(before_revision_id)`,
   `CREATE INDEX library_edit_items_after ON library_edit_items(after_revision_id)`,
   `CREATE INDEX library_edit_items_undone ON library_edit_items(undone_by_revision_id) WHERE undone_by_revision_id IS NOT NULL`,
+  `CREATE TRIGGER library_edit_items_valid BEFORE INSERT ON library_edit_items WHEN NOT EXISTS (
+    SELECT 1 FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+      JOIN changeset_groups g ON g.id = NEW.group_id
+      JOIN entity_revisions b ON b.id = NEW.before_revision_id AND b.entity_id = e.id
+      JOIN entity_revisions a ON a.id = NEW.after_revision_id AND a.entity_id = e.id
+    WHERE r.id = NEW.ref_id AND g.owner_user_id = e.owner_user_id)
+    BEGIN ${raise("library edit revisions and group must belong to the entry's owner")}; END`,
+  `CREATE TRIGGER library_edit_items_frozen BEFORE UPDATE OF id, group_id, ref_id, before_revision_id, after_revision_id, matches ON library_edit_items
+    BEGIN ${raise("a library edit's membership never changes")}; END`,
+  ...["INSERT", "UPDATE OF undone_by_revision_id"].map(
+    (event, i) =>
+      `CREATE TRIGGER library_edit_items_undo_${i} BEFORE ${event} ON library_edit_items
+      WHEN NEW.undone_by_revision_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM entity_refs r JOIN entity_revisions v ON v.entity_id = r.entity_id
+        WHERE r.id = NEW.ref_id AND v.id = NEW.undone_by_revision_id)
+      BEGIN ${raise("a library edit's undo revision must belong to its entry")}; END`
+  ),
+  `CREATE TRIGGER library_edit_groups_owner_fixed BEFORE UPDATE OF owner_user_id ON changeset_groups
+    WHEN NEW.owner_user_id IS NOT OLD.owner_user_id AND EXISTS (SELECT 1 FROM library_edit_items WHERE group_id = OLD.id)
+    BEGIN ${raise("a library edit's owner never changes")}; END`,
   ...forkLabelSchema,
   ...shellSummaries
 ]

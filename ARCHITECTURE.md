@@ -2939,3 +2939,5 @@ Shell stream errors (review-shellrefresh, 2026-11-07): card and fork streams ret
 Library replace review (2026-11-12): Undo uses the same permission rules as restoring an editor revision: it keeps current HTML permissions, never grants agent editing, and never restores regex approval when the scripts changed or approval was revoked.
 
 Library replace draft safety (2026-11-12): preview and plan block drafts whose base conflicts with the current saved field, following CommitEditorDrafts. Undo leaves entries with later active drafts alone and reports them, preserving both the saved replace and the later unsaved text.
+
+Library replace record invariants (2026-11-12): library_edit_items enforces one entry per group, a positive match count, different before/after revisions of the entry itself, owner agreement with its group, and an undo revision of that same entry. Membership is immutable; revision/ref deletion retains the existing cascade behavior. Each row stores identifiers and counts only, no document text.
