@@ -34,6 +34,8 @@ const sizes = {
   layerTarget: Schema.optionalKey(Tokens),
   layerMax: Schema.optionalKey(Tokens),
   when: Schema.optionalKey(LcmWhen),
+  /** How a summary is written: the reply itself ("direct") or through a tool ("tool"); other ids may be registered. */
+  style: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
   /** The level-1 instruction; `{{words}}` is the summary length. */
   tail: Schema.optionalKey(Schema.String),
   /** Chunk size: the tokens of messages one summary covers. */
@@ -60,7 +62,6 @@ const ordered = Schema.makeFilter(
 export const LcmSettings = Schema.Struct({
   enabled: Schema.Boolean,
   ...sizes,
-  style: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
   /** Same-level summaries condensed into one (reference-harness's condense_fanout, 5). */
   fanout: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(2))),
   /** The output target of a condensation, in tokens (condense_target_tokens, 800). */
@@ -91,6 +92,7 @@ export type LcmField =
   | "layerTarget"
   | "layerMax"
   | "when"
+  | "style"
   | "leafInput"
   | "leafTarget"
 
@@ -106,6 +108,7 @@ export const LcmSettingsChange = Schema.Struct({
   layerTarget: Schema.optionalKey(Schema.NullOr(Tokens)),
   layerMax: Schema.optionalKey(Schema.NullOr(Tokens)),
   when: Schema.optionalKey(Schema.NullOr(LcmWhen)),
+  style: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)))),
   leafInput: Schema.optionalKey(Schema.NullOr(Tokens)),
   leafTarget: Schema.optionalKey(Schema.NullOr(Tokens))
 })
@@ -126,6 +129,7 @@ export const LCM_BUILTIN = {
   layerTarget: 14_000,
   layerMax: 18_000,
   when: "after-reply" as LcmWhen,
+  style: "direct",
   leafTarget: 600
 } as const
 
@@ -152,6 +156,7 @@ export interface ResolvedLcm {
   readonly layerTarget: number
   readonly layerMax: number
   readonly when: LcmWhen
+  readonly style: string
   /** Null: min(4,000, half the recent band). */
   readonly leafInput: number | null
   readonly leafTarget: number
@@ -198,6 +203,7 @@ export const resolveLcm = (
     layerTarget: pick("layerTarget", LCM_BUILTIN.layerTarget) as number,
     layerMax: pick("layerMax", LCM_BUILTIN.layerMax) as number,
     when: pick("when", LCM_BUILTIN.when) as LcmWhen,
+    style: pick("style", LCM_BUILTIN.style) as string,
     leafInput: pick("leafInput", null) as number | null,
     leafTarget: pick("leafTarget", LCM_BUILTIN.leafTarget) as number,
     from
@@ -221,6 +227,7 @@ export const newChatLcm = (defaults: LcmDefaults | null | undefined, enabled?: b
     layerTarget: r.layerTarget,
     layerMax: r.layerMax,
     when: r.when,
+    style: r.style,
     leafTarget: r.leafTarget,
     ...(r.tail !== null ? { tail: r.tail } : {}),
     ...(r.leafInput !== null ? { leafInput: r.leafInput } : {})
