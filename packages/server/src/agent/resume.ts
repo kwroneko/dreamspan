@@ -159,6 +159,7 @@ export const planStepResume = (
     messages.slice(at + 1).filter((m): m is ToolResultMessage => m.role === "toolResult" && upTo(m.toolCallId))
   const calls = turn.content.flatMap((p) => (p.type === "toolCall" ? [p.id] : []))
   let kept: Array<AgentMessage>
+  let replayedCalls: ReadonlySet<string> = new Set()
   if (placed.step.kind !== "tool") {
     if (edit !== undefined && edit.kind !== "text") return new StepNotResumable("Only text can replace this step.")
     const content = turn.content.map((p, i) => {
@@ -209,12 +210,15 @@ export const planStepResume = (
       if (!results.some((m) => m.toolCallId === part.id))
         return new StepNotResumable("That tool call has no result to carry on from.")
       kept = [...messages.slice(0, at), turn, ...results]
+      // Later calls remain in the assistant turn to be run again. Their old results,
+      // receipts and effects belong to the cut tail, even though their call ids are retained.
+      replayedCalls = new Set(calls.slice(index + 1))
     } else return new StepNotResumable("A tool call takes new arguments or a new result.")
   }
   return {
     policy: danglingCalls(kept).length > 0 ? "rerun" : "continue",
     transcript: kept,
     cut: messages.slice(at),
-    keptCalls: callsOf(kept).filter((id) => id !== newCallId)
+    keptCalls: callsOf(kept).filter((id) => id !== newCallId && !replayedCalls.has(id))
   }
 }

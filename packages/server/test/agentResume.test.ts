@@ -170,7 +170,19 @@ describe("resume policies", () => {
     assert.strictEqual(plan.policy, "rerun")
     assert.deepStrictEqual(roles(plan.transcript), ["rpRequest", "assistant", "toolResult"])
     assert.deepInclude(plan.transcript[2], { toolCallId: "c1", content: [{ type: "text", text: "Mott." }] })
-    assert.deepStrictEqual(plan.keptCalls, ["c1", "c2"])
+    assert.deepStrictEqual(plan.keptCalls, ["c1"])
+  })
+
+  it("only copies receipts and effects through the chosen result in a multi-call turn", () => {
+    for (const edit of [undefined, { kind: "result" as const, text: "Edited." }]) {
+      const plan = planStepResume(json(run), tools, 1, edit, "new")
+      if (plan instanceof StepNotResumable) return assert.fail(plan.message)
+      assert.deepStrictEqual(plan.keptCalls, ["c1"])
+      assert.deepStrictEqual(
+        plan.transcript.filter((m) => m.role === "toolResult").map((m) => m.toolCallId),
+        ["c1"]
+      )
+    }
   })
 
   it("resuming from an unedited call cuts after its result; a step that isn't there is refused", () => {
@@ -407,7 +419,25 @@ describe("resuming agent replies", () => {
       assert.strictEqual(before.status, "stopped")
 
       const slot = yield* reader.GetSlot({ userId: me.id, slotId: stopped.slotId })
-      const entry = yield* api.ResumeVersion({ versionId: stopped.id, expectedRowVersion: slot.entry.rowVersion })
+      const otherTab = yield* client()
+      const raced = yield* Effect.all(
+        [api, otherTab].map((tab) =>
+          tab.ResumeVersion({ versionId: stopped.id, expectedRowVersion: slot.entry.rowVersion }).pipe(
+            Effect.match({
+              onSuccess: (entry) => ({ ok: true as const, entry }),
+              onFailure: (error) => ({ ok: false as const, error })
+            })
+          )
+        ),
+        { concurrency: 2 }
+      )
+      const accepted = raced.find((result) => result.ok)
+      const rejected = raced.find((result) => !result.ok)
+      assert.isDefined(accepted)
+      assert.isDefined(rejected)
+      if (!accepted?.ok || rejected?.ok !== false) return assert.fail("expected one accepted resume")
+      assert.strictEqual(rejected.error._tag, "NotResumable")
+      const entry = accepted.entry
       const resumedId = entry.version.id
       assert.notStrictEqual(resumedId, stopped.id)
       assert.strictEqual(entry.version.origin, "resumed")
@@ -418,6 +448,15 @@ describe("resuming agent replies", () => {
         api.ResumeVersion({ versionId: stopped.id, expectedRowVersion: again.entry.rowVersion })
       )
       assert.strictEqual(refused._tag, "NotResumable")
+      const liveEdit = yield* Effect.flip(
+        api.ResumeFromStep({
+          versionId: resumedId,
+          step: 0,
+          edit: { kind: "arguments", arguments: { topic: "harbour" } },
+          expectedRowVersion: again.entry.rowVersion
+        })
+      )
+      assert.strictEqual(liveEdit._tag, "NotResumable")
       release()
       yield* eventually(() => finished(generated.events, resumedId) !== undefined)
       const resumed = finished(generated.events, resumedId)!
@@ -561,6 +600,78 @@ describe("resuming agent replies", () => {
         content: Array<{ type: string; text?: string }>
       }>
       assert.deepInclude(transcript.at(-1)!.content, { type: "text", text: "Ansel waves." })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a later state call in the same turn runs again after editing an earlier result", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      let executions = 0
+      yield* registry.rolloutTools.register({
+        ...lookup(() => Effect.succeed("A detail.")),
+        effect: "chat_state",
+        execute: (context) =>
+          Effect.gen(function* () {
+            executions++
+            const { result } = yield* context.writer
+              .ApplyRolloutEffect({
+                userId: context.userId,
+                rolloutId: context.rolloutId,
+                toolCallId: context.toolCallId,
+                events: [],
+                result: `Execution ${executions}`
+              })
+              .pipe(Effect.orDie)
+            return { text: result }
+          })
+      } as RolloutTool<never>)
+      yield* narrator(["look_up"])
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            if (tools(request.body as unknown as Body) > 0)
+              return sse(res, completionChunks(["Done."], { prompt_tokens: 20, completion_tokens: 1 }))
+            const chunks = toolCall("look_up", { topic: "first" }, "c1")
+            const delta = chunks[0]!.choices[0]!.delta!
+            if (!("tool_calls" in delta)) throw new Error("missing fixture calls")
+            delta.tool_calls.push({
+              index: 1,
+              id: "c2",
+              type: "function",
+              function: { name: "look_up", arguments: '{"topic":"second"}' }
+            })
+            sse(res, chunks)
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: mode
+      })
+      assert.strictEqual(executions, 2)
+      const me = yield* api.Whoami()
+      const reader = yield* Reader
+      const slot = yield* reader.GetSlot({ userId: me.id, slotId: version.slotId })
+      const resumed = yield* api.ResumeFromStep({
+        versionId: version.id,
+        step: 0,
+        edit: { kind: "result", text: "New first result." },
+        expectedRowVersion: slot.entry.rowVersion
+      })
+      yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+      assert.strictEqual(finished(events, resumed.version.id)!.status, "complete")
+      assert.strictEqual(executions, 3, "the kept call isn't executed; the later call is")
+      const sent = bodies(mock.requests())
+        .at(-1)!
+        .messages.filter((m) => m.role === "tool")
+      assert.deepStrictEqual(
+        sent.map((m) => m.content),
+        ["New first result.", "Execution 3"]
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
