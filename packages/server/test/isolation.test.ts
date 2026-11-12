@@ -1509,6 +1509,35 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       ]).pipe(Effect.asVoid)
   },
+  ReadMessageVersion: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.ReadMessageVersion({
+            chatId: owner.chat.chatId,
+            forkId: owner.chat.forkId,
+            versionId: owner.chat.versionId
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.ReadMessageVersion({
+            chatId: actor.chat.chatId,
+            forkId: actor.chat.forkId,
+            versionId: owner.chat.versionId
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.ReadMessageVersion({
+            chatId: actor.chat.chatId,
+            forkId: owner.chat.forkId,
+            versionId: actor.chat.versionId
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
   VersionAmendments: {
     probe: (actor, owner) => refused(actor.api.VersionAmendments({ versionId: owner.chat.versionId }), "NotFound")
   },

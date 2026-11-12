@@ -1,6 +1,7 @@
 import {
   AuthenticatedAgentApi,
   AuthenticatedChatEventsApi,
+  AuthenticatedMessageVersionApi,
   AuthenticatedChatMergeApi,
   AuthenticatedDecisionApi,
   AuthenticatedProviderListApi,
@@ -54,7 +55,7 @@ import {
 import { RpcSerialization, RpcServer, type RpcGroup } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
-import { makeChatEventHandlers, makeChatHandlers } from "./api/chats.ts"
+import { makeChatEventHandlers, makeChatHandlers, makeMessageVersionHandlers } from "./api/chats.ts"
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import {
   makeEditorHandlers,
@@ -163,6 +164,7 @@ const CoreHandlers = AppCoreApi.toLayer(
 
 const Handlers = Layer.mergeAll(
   CoreHandlers,
+  AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
   AuthenticatedShellUpdatesApi.toLayer(
     Effect.map(makeChatSetupHandlers, ({ WatchShellCards, WatchShellForks }) => ({
       WatchShellCards,

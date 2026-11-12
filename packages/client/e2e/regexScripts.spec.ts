@@ -9,6 +9,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"
 import { cardFieldsTab } from "./support/cardEditor.ts"
 
@@ -47,7 +48,7 @@ for (const width of [1440, 390])
   for (const colorScheme of ["light", "dark"] as const) {
     test(`a preset script rewrites the reply, and the original can be shown and restored: ${width}, ${colorScheme}`, async ({
       browser
-    }) => {
+    }, info) => {
       test.setTimeout(120_000)
       const { context, page } = await open(browser, width, colorScheme)
       const refId = await importJson(page, `Strip-${width}-${colorScheme}.json`, {
@@ -115,12 +116,37 @@ for (const width of [1440, 390])
       await page.reload()
       await expect(dialog.getByRole("region", { name: "Original message text" }).locator("pre")).toHaveText(REPLY)
       expect(new URL(page.url()).searchParams.get("messageDialog")).toContain("message.original-text:")
+      const slotId = (await reply.getAttribute("data-slot")) as SlotId
+      const destination = page.url()
+      // The URL keeps the version even when later messages move it outside every loaded row.
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          let parent = slotId
+          for (let n = 0; n < 240; n++) {
+            const sent = yield* api.SendMessage({
+              chatId: chat.id,
+              parentSlotId: parent,
+              branch: false,
+              content: `Later message ${n}. ` + "Rain on the harbor. ".repeat(12)
+            })
+            if (sent._tag !== "Posted") throw new Error("queued fixture")
+            parent = sent.entry.slotId
+          }
+        })
+      )
+      // Start at the bottom with no saved reading position, as a copied URL in a new tab does.
+      await page.goto(destination)
+      await page.reload()
+      await expect(page.locator(`article[data-slot="${slotId}"]`)).toHaveCount(0)
+      await expect(dialog.getByRole("region", { name: "Original message text" }).locator("pre")).toHaveText(REPLY)
+      await expectLayout(page, info, "offscreen-original", { scope: '[role="dialog"]' })
       await dialog.getByRole("button", { name: "Restore it", exact: true }).click()
       await expect(dialog).toBeHidden()
+      await page.goto(`${server().url}/chats/${chat.id}?slot=${slotId}`)
+      const restoredReply = page.locator(`article[data-slot="${slotId}"]`)
       // The restored version is shown, and no script rewrites it.
-      await expect(reply.locator(".markdown")).toContainText("secret plan")
-      await expect(reply.getByText("scripts changed this")).toHaveCount(0)
-      const slotId = (await reply.getAttribute("data-slot")) as SlotId
+      await expect(restoredReply.locator(".markdown")).toContainText("secret plan")
+      await expect(restoredReply.getByText("scripts changed this")).toHaveCount(0)
       const stored = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.ReadPath({ chatId: chat.id, leafSlotId: slotId, range: { _tag: "Bottom" }, limit: 1 })
       )
