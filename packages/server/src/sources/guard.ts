@@ -192,6 +192,7 @@ export const makeSourceHttp = (
         return yield* (adapter.key ?? "none") === "none"
           ? fail(adapter.id, "refused", `${adapter.id} refused the request`)
           : fail(adapter.id, "unauthorized", `${adapter.id} refused the key`)
+      if (status === 451) return yield* fail(adapter.id, "region_unavailable", "not available in your region")
       if (status === 404) return yield* fail(adapter.id, "not_found", "not on the source")
       if (status >= 500) return yield* fail(adapter.id, "unreachable", `${adapter.id} answered ${status}`)
       if (status < 200 || status > 299) {

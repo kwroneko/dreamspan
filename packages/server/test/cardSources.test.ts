@@ -169,6 +169,22 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("a regional file restriction is a plain regional state and can be retried", () =>
+    Effect.gen(function* () {
+      const api = yield* client({ "Remote-User": "regional-reader" })
+      // Only the card file fails; the batch lookup still works.
+      yield* Effect.promise(() =>
+        fetch(`${archive.origin}/__fake/fail?status=451&path=/api/v1/download/${archive.cards[0]!.sha256}`)
+      )
+      assert.strictEqual(
+        yield* outcome(api.SourceCard({ sourceId: "cardex", remoteId: archive.cards[0]!.slug })),
+        "SourceFailed:region_unavailable"
+      )
+      const retried = yield* api.SourceCard({ sourceId: "cardex", remoteId: archive.cards[0]!.slug })
+      assert.isString(retried.docJson)
+    })
+  )
+
   it.effect("a JSON-only card keeps its full portrait when added, including with the archive now offline", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)
@@ -938,6 +954,9 @@ describe("the guards (§6.2)", () => {
       assert.strictEqual(plain.reason, "bad_response")
       assert.isUndefined(plain.code)
       // A source with no key that answers 403 refused the request, not a key.
+      status = 451
+      const regional = yield* Effect.flip(http.get(new URL("https://archive.example/api"), "card"))
+      assert.strictEqual(regional.reason, "region_unavailable")
       status = 403
       const refused = yield* Effect.flip(http.get(new URL("https://archive.example/api"), "json"))
       assert.strictEqual(refused.reason, "refused")

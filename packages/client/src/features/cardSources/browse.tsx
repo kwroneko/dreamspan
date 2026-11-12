@@ -1040,8 +1040,18 @@ function ProblemAlert({
           {name} sent something this app can't read.
         </Alert>
       )
+    case "region_unavailable":
+      return (
+        <Alert tone="neutral" actions={retry}>
+          This card is not available in your region.
+        </Alert>
+      )
     case "refused":
-      return <Alert tone="neutral">{name} refused this request.</Alert>
+      return (
+        <Alert tone="neutral" actions={retry}>
+          {name} refused this request.
+        </Alert>
+      )
     case "not_found":
       return (
         <Alert tone="neutral" actions={retry}>

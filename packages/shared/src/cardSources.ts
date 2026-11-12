@@ -156,7 +156,8 @@ export const SourceFailure = Schema.Literals([
   "bad_response",
   "disabled",
   /** The source won't give this card: cardex lists no download for it, or an anonymous source answered 401/403. */
-  "refused"
+  "refused",
+  "region_unavailable"
 ])
 export type SourceFailure = typeof SourceFailure.Type
 

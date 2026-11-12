@@ -42,7 +42,15 @@ export const makeCardSourceHandlers = Effect.gen(function* () {
 const jsonError = (status: number, message: string) => HttpServerResponse.jsonUnsafe({ error: message }, { status })
 
 const sourceStatus = (reason: string) =>
-  reason === "rate_limited" ? 429 : reason === "disabled" ? 403 : reason === "not_found" ? 404 : 502
+  reason === "region_unavailable"
+    ? 451
+    : reason === "rate_limited"
+      ? 429
+      : reason === "disabled"
+        ? 403
+        : reason === "not_found"
+          ? 404
+          : 502
 
 /**
  * `GET /sources/held/<entityId>/file`: the newest file the source has of a card the user added
