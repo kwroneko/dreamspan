@@ -1747,7 +1747,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE INDEX fork_overrides_chat ON fork_overrides(chat_id, kind)`,
   `CREATE INDEX fork_overrides_point ON fork_overrides(fork_id, kind, target_id, seq)`,
   `CREATE INDEX fork_overrides_window ON fork_overrides(fork_id, slot_depth, seq)`,
-  `CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind)`,
+  `CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind, value_id)`,
   `CREATE INDEX fork_overrides_bin_item ON fork_overrides(bin_item_id) WHERE bin_item_id IS NOT NULL`,
   `CREATE INDEX fork_overrides_changeset ON fork_overrides(changeset_id) WHERE changeset_id IS NOT NULL`,
   `CREATE TRIGGER fork_overrides_same_chat BEFORE INSERT ON fork_overrides

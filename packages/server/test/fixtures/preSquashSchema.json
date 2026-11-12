@@ -274,7 +274,7 @@
       "type": "index",
       "name": "fork_overrides_target",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind)"
+      "sql": "CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind, value_id)"
     },
     {
       "type": "index",

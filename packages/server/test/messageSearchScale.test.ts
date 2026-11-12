@@ -15,13 +15,13 @@ import { fixtureSql } from "./support/lcmFixtures.ts"
 
 const LENGTH = 3000
 const FORKS = 300
-const SWIPES = 20
+const SWIPES = 40
 const BUDGET_MS = 1000
 
 describe("message search at scale", () => {
   const config = testConfig()
   it.effect(
-    "pages through 63,000 matching versions among 300 branches within the budget",
+    "pages through 459,000 versions in nine chats and 300 branches within the budget",
     () =>
       Effect.gen(function* () {
         const api = yield* client()
@@ -121,6 +121,51 @@ describe("message search at scale", () => {
           all.find((h) => h.text.startsWith("A swipe of the tide and the lighthouse at 0/"))!.branches,
           300
         )
+
+        // Many more chats and newer postings exercise the cursor deep in a shared index.
+        for (let i = 0; i < 8; i++) {
+          const other = yield* writer.CreateChat({
+            userId,
+            kind: "rp",
+            status: "active",
+            title: `Other ${i}`,
+            participants: [],
+            greeting: null
+          })
+          const id = other.id
+          const numbers = "WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x<1999)"
+          yield* fixtureSql(config.dataDir, [
+            {
+              sql: `${numbers}, w(y) AS (SELECT 0 UNION ALL SELECT y+1 FROM w WHERE y<20)
+              INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at)
+              SELECT ?||'-v'||x||'-'||y,?||'-s'||x,y,'complete','human','The tide and lighthouse '||x,'verbatim','user_written',1,1 FROM n CROSS JOIN w ORDER BY x,y`,
+              params: [id, id]
+            },
+            {
+              sql: `${numbers} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
+              SELECT ?||'-s'||x,?,CASE WHEN x=0 THEN NULL ELSE ?||'-s'||(x-1) END,x,?||'-v'||x||'-0',1,? FROM n`,
+              params: [id, id, id, id, other.currentForkId]
+            },
+            { sql: "UPDATE forks SET tip_slot_id=? WHERE id=?", params: [`${id}-s1999`, other.currentForkId] }
+          ])
+        }
+        const plans = yield* fixtureSql(
+          config.dataDir,
+          [
+            {
+              sql: "EXPLAIN QUERY PLAN SELECT 1 FROM fork_overrides WHERE target_id=? AND kind='select' AND value_id=?",
+              params: [`${c}-s0`, `${c}-w0-1`]
+            },
+            {
+              sql: "EXPLAIN QUERY PLAN SELECT rowid FROM versions_fts WHERE versions_fts MATCH ? AND rowid < ? ORDER BY rowid DESC LIMIT 500",
+              params: ['"lighthouse"*', 100]
+            }
+          ],
+          { readOnly: true }
+        )
+        process.stderr.write(`Search query plans: ${JSON.stringify(plans)}\n`)
+        assert.include(JSON.stringify(plans[0]), "COVERING INDEX fork_overrides_target")
+        assert.include(JSON.stringify(plans[1]), "M1<")
 
         const median = (run: Effect.Effect<unknown, unknown>) =>
           Effect.gen(function* () {

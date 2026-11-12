@@ -31,7 +31,7 @@ import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
 
 /** Full-text matches read per statement. */
-const BATCH = 500
+const BATCH = 5000
 /** Matches a page looks at most before it answers with what it found and a cursor. */
 const SCAN = 20_000
 
@@ -81,7 +81,7 @@ const searchMessages = (
       const batch = yield* sql<Candidate>`
         WITH h(seq) AS MATERIALIZED (
           SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${match}
-            AND (${before} IS NULL OR rowid < ${before}) ORDER BY rowid DESC LIMIT ${BATCH})
+            AND rowid < ${before ?? Number.MAX_SAFE_INTEGER} ORDER BY rowid DESC LIMIT ${BATCH})
         SELECT h.seq, v.id, v.slot_id, v.speaker_entity_id, v.writer, v.created_at, s.chat_id, s.chain_id,
           s.depth, s.inserted,
           (c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND v.status NOT IN ('generating', 'failed')
