@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_IMAGES } from "../assembler/images.ts"
 import { providerRequest } from "../assembler/wire.ts"
 import { liveSuffix } from "../agent/messages.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
@@ -424,12 +425,23 @@ export const layer = Layer.effect(
                   ])
                 })
                 .pipe(Effect.catch(serverFailure("CountRolloutContext")))
-              if (budget && count > budget.maximum - budget.responseReserve) {
+              // Provider image limits apply to the entire request. Hydrating the prefix
+              // and each carried user message separately must not evict a cached image.
+              const imageCount = [
+                ...prior.snapshot.request.messages,
+                ...seed.flatMap((message) => (message.role === "rpUser" ? [message.message] : []))
+              ].reduce((total, message) => total + (message.images?.length ?? 0), 0)
+              const imageOverflow =
+                snapshot.inputs.model?.vision !== false &&
+                additions.some((message) => message.role === "rpUser" && (message.message.images?.length ?? 0) > 0) &&
+                imageCount > (snapshot.inputs.model?.maxImages ?? DEFAULT_MAX_IMAGES)
+              if (imageOverflow || (budget && count > budget.maximum - budget.responseReserve)) {
                 seed = undefined
                 continuity = {
                   path: baseline,
-                  reason:
-                    "The previous run outgrew the context budget, so this request was put together again from the messages."
+                  reason: imageOverflow
+                    ? "The previous run exceeded the image limit, so this request was put together again from the messages."
+                    : "The previous run outgrew the context budget, so this request was put together again from the messages."
                 }
                 if (WORKSHOP_OVERFLOW_STEP_SUMMARIES) {
                   stepSummaries = yield* summarizeMessageSteps(reader, request, path)
