@@ -203,7 +203,7 @@ export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
     [html, message, text, mediaScope]
   )
   useEffect(() => {
-    if (styles && message && chat) chat.styles.report(message.key, styles.css)
+    if (styles && message && chat) chat.styles.report(message.key, styles.css, styles.media)
   }, [styles, message, chat])
   const [blockedText, setBlockedText] = useState<string | null>(null)
   const reportBlocked = useCallback(() => setBlockedText(text), [text])

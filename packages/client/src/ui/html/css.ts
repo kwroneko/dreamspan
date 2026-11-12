@@ -126,7 +126,8 @@ const SAFE_FUNCTIONS = new Set(
 )
 function mediaValue(value: string, scope?: string | null) {
   const remote = loads(value).remote
-  const refuse = () => ({ value: "", loads: true, remote })
+  const media: string[] = []
+  const refuse = () => ({ value: "", loads: true, remote, media: [] as string[] })
   let out = ""
   let depth = 0
   for (let i = 0; i < value.length;) {
@@ -162,8 +163,10 @@ function mediaValue(value: string, scope?: string | null) {
         if (!match) return refuse()
         const address = (match[1] ?? match[2] ?? match[3] ?? "").trim()
         const proxy = proxyMediaUrl(address, scope)
-        if (proxy) out += `url("${proxy}")`
-        else if (/^(?:data:|#)/i.test(address)) out += match[0]
+        if (proxy) {
+          media.push(proxy)
+          out += `url("${proxy}")`
+        } else if (/^(?:data:|#)/i.test(address)) out += match[0]
         else return refuse()
         i = start + match[0].length
       } else {
@@ -181,7 +184,7 @@ function mediaValue(value: string, scope?: string | null) {
       i++
     }
   }
-  return depth === 0 ? { value: out, loads: false, remote } : refuse()
+  return depth === 0 ? { value: out, loads: false, remote, media } : refuse()
 }
 
 /** A style attribute uses the same parser and value policy as the stylesheet path. */
@@ -226,6 +229,7 @@ const renameNames = (value: string, names: ReadonlySet<string>) =>
 const GROUPING = new Set(["media", "supports", "container", "starting-style", "document", "-moz-document"])
 
 export interface ScopedCss {
+  readonly media?: ReadonlyArray<string>
   readonly css: string
   /** Something from another site was left out: the message says so. */
   readonly blocked: boolean
@@ -239,6 +243,7 @@ export function scopeStyles(styles: ReadonlyArray<string>, mediaScope?: string |
       .map((one) => one.css)
       .filter((css) => css.trim() !== "")
       .join("\n"),
+    media: scoped.flatMap((one) => one.media ?? []),
     blocked: scoped.some((one) => one.blocked)
   }
 }
@@ -260,6 +265,7 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`, mediaScope?: 
       if ("nodes" in child && child.nodes) pending.push({ node: child as Container, depth: depth + 1 })
   }
   let blocked = false
+  const media: string[] = []
   const keyframes = new Set<string>()
   const fonts = new Set<string>()
   root.walkAtRules((rule) => {
@@ -271,12 +277,13 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`, mediaScope?: 
       })
   })
   const declaration = (decl: Declaration) => {
-    const { loads: loading, remote, value } = mediaValue(decl.value, mediaScope)
+    const { loads: loading, remote, value, media: urls } = mediaValue(decl.value, mediaScope)
     if (loading) {
       blocked ||= remote
       decl.remove()
       return
     }
+    media.push(...urls)
     decl.value = renameReferences(value)
     const property = decl.prop.toLowerCase()
     if (property === "animation" || property === "animation-name") decl.value = renameNames(decl.value, keyframes)
@@ -342,5 +349,5 @@ export function scopeCss(css: string, scope = `.${MESSAGE_SCOPE}`, mediaScope?: 
     else rule.remove()
   }
   visit(root, false)
-  return { css: root.toString(), blocked }
+  return { css: root.toString(), blocked, media }
 }

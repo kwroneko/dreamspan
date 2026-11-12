@@ -48,6 +48,10 @@ function useExternalMedia() {
     }
   }
 }
+/** Used by the loaded-window stylesheet to invalidate offscreen consented resources. */
+export function useExternalMediaRevision() {
+  return JSON.stringify(useExternalMedia().prefs)
+}
 const MediaChat = createContext<ChatSession | null>(null)
 export function ExternalMediaProvider({ session, children }: ChatSurfaceProps & { children: ReactNode }) {
   return <MediaChat value={session}>{children}</MediaChat>

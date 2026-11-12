@@ -31,7 +31,15 @@ for (const width of [1440, 390])
             data: {
               name: `Media ${width} ${theme}`,
               first_mes:
-                'A synthetic map.\n\n<img class="map" alt="Synthetic map" src="https://media.invalid/map.png" width="80" height="80">\n\n<style>.tile{background-image:url("https://media.invalid/tile.png");width:40px;height:40px}</style><div class="tile"></div>'
+                'A synthetic map.\n\n<img class="map" alt="Synthetic map" src="https://media.invalid/map.png" width="80" height="80">\n\n<style>.tile{background-image:url("https://media.invalid/tile.png");width:40px;height:40px}</style><div class="tile"></div>' +
+                '<span src="/media/external?url=inert-attribute"></span><style>.literal{--address:"/media/external?url=inert-style";content:\'url("/media/external?url=inert-content")\'}</style><span class="literal"></span>' +
+                "\n\n<div>" +
+                Array.from(
+                  { length: 80 },
+                  (_, i) =>
+                    `<img class="gallery" alt="Gallery ${i}" width="8" height="8" src="https://media.invalid/gallery-${i}.png">`
+                ).join("") +
+                "</div>"
             }
           })
         ),
@@ -48,12 +56,20 @@ for (const width of [1440, 390])
         })
       )
       const requests: string[] = []
+      const attempts = new Map<string, number>()
       const direct: string[] = []
       page.on("request", (request) => {
         if (new URL(request.url()).hostname === "media.invalid") direct.push(request.url())
       })
       await page.route("**/media/external?**", async (route) => {
-        requests.push(route.request().url())
+        const address = route.request().url()
+        requests.push(address)
+        const attempt = (attempts.get(address) ?? 0) + 1
+        attempts.set(address, attempt)
+        if (attempt % 2 === 1) {
+          await route.fulfill({ status: 429, headers: { "retry-after": "1", "cache-control": "no-store" } })
+          return
+        }
         await route.fulfill({
           status: 200,
           body: pixel,
@@ -76,9 +92,30 @@ for (const width of [1440, 390])
       await article.getByRole("button", { name: "Allow for this card", exact: true }).click()
       await expect(article.locator("img.custom-map")).toBeVisible()
       await expect
+        .poll(() =>
+          article
+            .locator("img.custom-map")
+            .evaluate((image) => (image as HTMLImageElement).currentSrc.startsWith("blob:"))
+        )
+        .toBe(true)
+      await expect
         .poll(() => article.locator("img.custom-map").evaluate((image) => (image as HTMLImageElement).naturalWidth))
         .toBe(1)
       await expect(article.getByText("Images from other sites are blocked.", { exact: true })).toHaveCount(0)
+      await expect
+        .poll(() =>
+          article
+            .locator("img.custom-gallery")
+            .evaluateAll(
+              (images) =>
+                images.filter(
+                  (image) =>
+                    (image as HTMLImageElement).currentSrc.startsWith("blob:") &&
+                    (image as HTMLImageElement).naturalWidth === 1
+                ).length
+            )
+        )
+        .toBe(80)
       await expect
         .poll(() =>
           requests.some((request) => new URL(request).searchParams.get("url") === "https://media.invalid/tile.png")
@@ -87,6 +124,31 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `external-media-allowed-${width}-${theme}`, { scope: "[data-testid=messages]" })
       await page.reload()
       await expect(article.locator("img.custom-map")).toBeVisible()
+      await expect
+        .poll(() =>
+          article
+            .locator("img.custom-map")
+            .evaluate((image) => (image as HTMLImageElement).currentSrc.startsWith("blob:"))
+        )
+        .toBe(true)
+      await expect
+        .poll(() => article.locator("img.custom-map").evaluate((image) => (image as HTMLImageElement).naturalWidth))
+        .toBe(1)
+      await expect
+        .poll(() =>
+          article
+            .locator("img.custom-gallery")
+            .evaluateAll(
+              (images) =>
+                images.filter(
+                  (image) =>
+                    (image as HTMLImageElement).currentSrc.startsWith("blob:") &&
+                    (image as HTMLImageElement).naturalWidth === 1
+                ).length
+            )
+        )
+        .toBe(80)
+      expect([...attempts.values()].every((count) => count >= 2)).toBe(true)
       const settings = await openPanel(page, "This chat")
       const chatChoice = settings.getByRole("combobox", { name: "Images from other sites in this chat" })
       await chatChoice.click()
@@ -116,4 +178,5 @@ for (const width of [1440, 390])
       await expect(cardChoice).toHaveText("Block")
       await expectLayout(page, info, `external-media-editor-${width}-${theme}`)
       expect(direct).toEqual([])
+      expect(requests.some((request) => request.includes("inert-"))).toBe(false)
     })
