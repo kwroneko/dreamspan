@@ -1,4 +1,5 @@
 // A message's CSS under the message-body scope (ui/html/css.ts, spec/HTML-MESSAGES.md §3.2).
+import postcss from "postcss"
 import { describe, expect, it } from "vitest"
 import { cleanStyle, loads, renameSelector, scopeCss } from "../src/ui/html/css.ts"
 
@@ -113,5 +114,48 @@ describe("cleanStyle", () => {
 
   it("splits at semicolons outside strings and brackets", () => {
     expect(cleanStyle('content: "a; b"; color: red').style).toBe('content: "a; b"; color: red')
+  })
+})
+
+describe("consented media keeps the CSS as written", () => {
+  const selectors = (css: string) => {
+    const found: string[] = []
+    postcss.parse(css).walkRules((rule) => {
+      found.push(rule.selector)
+    })
+    return found
+  }
+  // With consent, url() values become proxy URLs. Decoding the rest of the value on the way
+  // turned `\7d` into a real `}`: the declaration ended the scoped rule and a global one began.
+  it("never decodes an escape into syntax that leaves the message scope", () => {
+    const css = ".a { color: red\\7d html\\7b display\\3a none; background: url(https://media.invalid/p.png) }"
+    for (const scope of [undefined, "chat=synthetic"]) {
+      const out = scopeCss(css, undefined, scope).css
+      for (const selector of selectors(out)) expect(selector.startsWith(".message-html ")).toBe(true)
+      expect(out).not.toMatch(/}\s*html/)
+    }
+    const attribute = cleanStyle('content: "\\22 ; } html { x: y"; color: red', "chat=synthetic").style
+    expect(attribute).toContain("\\22")
+  })
+  it("leaves url() inside strings alone and keeps quotes out of proxy URLs", () => {
+    // A quote in the proxied address (or one placed inside a string) would open a string that a
+    // later rule's quote closes, after which that rule's text is read as global CSS.
+    const css = [
+      '.a { background: url("https://media.invalid/it\'s.png") }',
+      '.b { content: "url(https://media.invalid/p.png)" }',
+      ".c { content: \"' } html { display: none } '\" }"
+    ].join("\n")
+    const out = scopeCss(css, undefined, "chat=s").css
+    expect(out).not.toMatch(/url\("[^"]*'/)
+    expect(out).toContain("/media/external?chat=s&url=https%3A%2F%2Fmedia.invalid%2Fit%27s.png")
+    expect(out).not.toContain('"url("')
+    for (const selector of selectors(out)) expect(selector.startsWith(".message-html ")).toBe(true)
+  })
+  it("still proxies simple url() values and leaves escaped ones blocked", () => {
+    const proxied = scopeCss(".a { background: url('https://media.invalid/p.png') }", undefined, "chat=s").css
+    expect(proxied).toContain('url("/media/external?chat=s&url=https%3A%2F%2Fmedia.invalid%2Fp.png")')
+    const escaped = scopeCss(".a { background: u\\72l(https://media.invalid/p.png) }", undefined, "chat=s")
+    expect(escaped.css).not.toContain("media.invalid")
+    expect(escaped.css).not.toContain("background")
   })
 })

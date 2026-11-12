@@ -7,7 +7,12 @@ export const proxyMediaUrl = (raw: string, scope: string | null | undefined): st
   try {
     const url = new URL(value, "https://media.invalid")
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null
-    return `/media/external?${scope}&url=${encodeURIComponent(url.href)}`
+    // Quotes and brackets are encoded too, so the address is inert inside CSS and srcset.
+    const address = encodeURIComponent(url.href).replace(
+      /[!'()*]/g,
+      (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+    )
+    return `/media/external?${scope}&url=${address}`
   } catch {
     return null
   }

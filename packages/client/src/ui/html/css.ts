@@ -57,8 +57,8 @@ function closingQuote(text: string, start: number) {
 }
 
 /** CSS escapes decoded and comments gone, so an escape or a comment can't hide a function name. */
-function plain(value: string, lowercase = true) {
-  const decoded = value
+function plain(value: string) {
+  return value
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) => {
       const point = Number.parseInt(hex, 16)
@@ -67,7 +67,7 @@ function plain(value: string, lowercase = true) {
       )
     })
     .replace(/\\(.)/g, "$1")
-  return lowercase ? decoded.toLowerCase() : decoded
+    .toLowerCase()
 }
 /** What a value refers to: url() arguments, image-set strings and src() functions. */
 const URL_FUNCTION = /(?:url|src)\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/g
@@ -96,14 +96,19 @@ export const renameReferences = (value: string) =>
     (_, quote: string, id: string) => `url(${quote}#${renameId(id)}${quote})`
   )
 
-/** Rewrite only simple url() values. Other loading constructs retain the blocking policy. */
+/**
+ * Rewrite only simple url() values, in the value as written. Other loading constructs, an
+ * escaped or commented url(), keep the blocking policy. The rest of the value is never decoded:
+ * a decoded `\7d` would be a real `}` and end the scoped rule. Strings and comments are passed
+ * over whole, so a url() written inside a string stays text.
+ */
 function mediaValue(value: string, scope?: string | null) {
   if (!scope) return { value, ...loads(value) }
   const proxies: string[] = []
-  const decoded = plain(value, false)
-  const masked = decoded.replace(
-    /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi,
-    (whole, a: string, b: string, c: string) => {
+  const masked = value.replace(
+    /\/\*[\s\S]*?\*\/|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|url\(\s*(?:"([^"\\\n]*)"|'([^'\\\n]*)'|([^)"'\\\s]*))\s*\)/gi,
+    (whole, a: string | undefined, b: string | undefined, c: string | undefined) => {
+      if (a === undefined && b === undefined && c === undefined) return whole
       const proxy = proxyMediaUrl((a ?? b ?? c ?? "").trim(), scope)
       if (!proxy) return whole
       const index = proxies.push(proxy) - 1
