@@ -5,6 +5,7 @@ import { presenceOf, type VersionPresence } from "@rp/shared/knowledge.ts"
 import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
+import { displayThrough, slotAtPosition } from "./displayPath.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { withoutPurged } from "./stateRefs.ts"
 
@@ -39,6 +40,24 @@ export const presenceAt = Effect.fnUntraced(function* (
 
 export const castAt = (sql: SqlClient.SqlClient, chatId: string, leaf: string | null, fork: string | null) =>
   Effect.map(presenceAt(sql, chatId, leaf, fork), (at) => at.cast)
+
+/** The state before an existing slot on this fork's display path, including earlier insertions. */
+export const presenceBefore = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  slotId: string,
+  fork: string
+) {
+  const [row] = yield* sql<{ parent_slot_id: string | null }>`SELECT parent_slot_id FROM slots WHERE id = ${slotId}`
+  const shown = yield* displayThrough(sql, chatId, fork, slotId)
+  const leaf =
+    shown === null
+      ? row!.parent_slot_id
+      : shown.end === 0
+        ? null
+        : yield* slotAtPosition(sql, shown.pieces, shown.end - 1)
+  return yield* presenceAt(sql, chatId, leaf, fork)
+})
 
 /** The stored form of a presence record: NULL when nobody was away and none narrated. */
 export const presenceJson = (presence: VersionPresence | null) => (presence === null ? null : JSON.stringify(presence))
