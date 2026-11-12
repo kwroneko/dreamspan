@@ -183,6 +183,8 @@ for (const [width, theme] of [
     await docksRow.getByRole("button", { name: "Rename At the docks", exact: true }).click()
     await docksRow.getByRole("textbox", { name: "Name of thread At the docks" }).fill("Docks")
     await docksRow.getByRole("textbox", { name: "Name of thread At the docks" }).press("Enter")
+    // Saved once the field closes; an Escape before that would cancel the rename instead.
+    await expect(docksRow.getByRole("textbox")).toHaveCount(0)
     await expect(docksRow).toContainText("Docks")
     await page.keyboard.press("Escape")
     await expect(menu).toHaveCount(0)
