@@ -94,10 +94,14 @@ export const externalMediaRoute = Layer.unwrap(
         if (!fetcher) return error(403, "External media is disabled")
         const release = media.limits.acquire(session.value.user.id)
         if (!release) return HttpServerResponse.setHeader(error(429, "Too many media requests"), "retry-after", "1")
-        const result = yield* Effect.tryPromise({
-          try: (signal) => fetcher.fetch(url, signal),
-          catch: () => new Error("Media refused")
-        }).pipe(Effect.option, Effect.ensuring(Effect.sync(release)))
+        yield* Effect.addFinalizer(() => Effect.sync(release))
+        const result = yield* Effect.acquireRelease(
+          Effect.tryPromise({
+            try: (signal) => fetcher.fetch(url, signal),
+            catch: () => new Error("Media refused")
+          }),
+          (file) => Effect.promise(file.dispose)
+        ).pipe(Effect.option)
         if (Option.isNone(result)) return error(502, "This media could not be loaded safely")
         // Check again after I/O: revoking consent while a slow download runs takes effect too.
         if (
@@ -108,8 +112,9 @@ export const externalMediaRoute = Layer.unwrap(
           }))
         )
           return error(403, "Images from other sites are blocked")
-        return HttpServerResponse.uint8Array(result.value.bytes, {
+        return yield* HttpServerResponse.file(result.value.path, {
           contentType: result.value.mime,
+          chunkSize: 64 * 1024,
           headers: {
             "cache-control": "no-store",
             "x-content-type-options": "nosniff",

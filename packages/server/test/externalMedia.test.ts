@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { createServer } from "node:http"
 import { gzipSync } from "node:zlib"
 import { vi } from "vitest"
@@ -47,6 +49,8 @@ it.live("checks ownership and consent before fetching, never caches, and stops o
     let requests = 0
     let revoke = false
     const bytes = new Uint8Array([1, 2, 3])
+    const path = join(tempDir("media-response"), "pixel")
+    yield* Effect.promise(() => writeFile(path, bytes))
     yield* media.fetchers.register({
       id: "media.external",
       fetch: async () => {
@@ -55,7 +59,7 @@ it.live("checks ownership and consent before fetching, never caches, and stops o
           await Effect.runPromise(
             writer.SetExternalMedia({ userId: user.id, target: { _tag: "Chat", id: chatId }, allow: false })
           )
-        return { bytes, mime: "image/png" }
+        return { path, dispose: async () => {}, mime: "image/png" }
       }
     })
     const get = (
@@ -210,7 +214,8 @@ it.live("pins public DNS answers through the real Network transport and rechecks
     vi.stubEnv("NODE_USE_ENV_PROXY", "1")
     yield* Effect.addFinalizer(() => Effect.sync(() => vi.unstubAllEnvs()))
     const file = yield* Effect.promise(() => get("http://media.invalid/a.png", new AbortController().signal))
-    assert.deepStrictEqual(Buffer.from(file.bytes), pixel)
+    assert.deepStrictEqual(yield* Effect.promise(() => readFile(file.path)), pixel)
+    yield* Effect.promise(file.dispose)
     assert.strictEqual(lookups, 1)
     assert.deepStrictEqual(authorities, ["93.184.216.34:80"])
     assert.deepStrictEqual(hosts, ["media.invalid"])
@@ -285,6 +290,8 @@ it.live("bounds simultaneous external downloads per user before opening another 
     const started = new Promise<void>((done) => {
       ready = done
     })
+    const path = join(tempDir("media-limit-response"), "pixel")
+    yield* Effect.promise(() => writeFile(path, new Uint8Array([1])))
     let calls = 0
     yield* media.fetchers.register({
       id: "media.external",
@@ -292,7 +299,7 @@ it.live("bounds simultaneous external downloads per user before opening another 
         calls++
         if (calls === 8) ready()
         if (calls <= 8) await gate
-        return { bytes: new Uint8Array([1]), mime: "image/png" }
+        return { path, dispose: async () => {}, mime: "image/png" }
       }
     })
     yield* Effect.promise(async () => {

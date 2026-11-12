@@ -1,4 +1,5 @@
 // Synthetic untrusted media, with no real internet traffic.
+import { readFile } from "node:fs/promises"
 import { describe, expect, it } from "vitest"
 import { isPublicMediaAddress, makeExternalFetcher } from "../src/net/externalMedia.ts"
 import type { NetworkShape, TargetAddresses } from "../src/net/Network.ts"
@@ -76,7 +77,12 @@ describe("external media address policy", () => {
   it("accepts only public answers and passes the exact checked literals to the transport", async () => {
     const fake = fakeNetwork()
     const addresses = [PUBLIC, "2606:4700:4700::1111"]
-    await makeExternalFetcher(fake.network, { resolve: async () => addresses })("https://media.invalid/a", controller())
+    await (
+      await makeExternalFetcher(fake.network, { resolve: async () => addresses })(
+        "https://media.invalid/a",
+        controller()
+      )
+    ).dispose()
     expect(fake.requests[0]?.addresses).toEqual(addresses)
     for (const answers of [[], [PUBLIC, "127.0.0.1"]]) {
       await expect(
@@ -190,7 +196,8 @@ describe("external media response limits", () => {
       controller()
     )
     expect(result.mime).toBe("image/png")
-    expect(Buffer.from(result.bytes)).toEqual(pixel)
+    expect(await readFile(result.path)).toEqual(pixel)
+    await result.dispose()
     expect(fake.requests[0]?.init.credentials).toBe("omit")
     expect(Object.keys(fake.requests[0]!.init.headers!)).toEqual(["accept", "accept-encoding"])
   })
@@ -265,7 +272,9 @@ it.each([
   "https://media.invalid:80/a",
   "http://media.invalid:443/a"
 ])("permits web port %s", async (url) => {
-  await makeExternalFetcher(fakeNetwork().network, { resolve: async () => [PUBLIC] })(url, controller())
+  await (
+    await makeExternalFetcher(fakeNetwork().network, { resolve: async () => [PUBLIC] })(url, controller())
+  ).dispose()
 })
 it("refuses every local interface address, including public IPv4 and equivalent IPv6 spellings", async () => {
   const fake = fakeNetwork()

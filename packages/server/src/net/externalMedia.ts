@@ -1,7 +1,9 @@
 // Untrusted message URLs never use the admin's private-host exceptions. Network checks each
 // hop with this policy and pins its checked literals on the wire (also through proxies).
 import { Resolver } from "node:dns/promises"
-import { networkInterfaces } from "node:os"
+import { networkInterfaces, tmpdir } from "node:os"
+import { mkdtemp, open, rm } from "node:fs/promises"
+import { join } from "node:path"
 import { BlockList, isIP } from "node:net"
 import { fileTypeFromBuffer } from "file-type"
 import type { NetworkShape } from "./Network.ts"
@@ -57,38 +59,51 @@ const TYPES = new Set([
   "audio/webm"
 ])
 interface ExternalMediaFile {
-  readonly bytes: Uint8Array
+  readonly path: string
+  readonly dispose: () => Promise<void>
   readonly mime: string
 }
 class ExternalMediaRefused extends Error {}
 /** Sniff a bounded media prefix only. General file detectors also unpack archives;
  * untrusted archive sizes must never reach those parsers, even with an image header.
  * Skip bounded ID3 metadata ourselves so it cannot recurse into a disguised archive. */
-const mediaSample = (bytes: Buffer) => {
-  let sample = bytes
-  for (let tags = 0; sample.subarray(0, 3).toString("ascii") === "ID3"; tags++) {
-    if (tags >= 8 || sample.length < 10 || sample.subarray(6, 10).some((byte) => byte > 127))
-      throw new ExternalMediaRefused("Invalid audio metadata")
-    const size = sample[6]! * 128 ** 3 + sample[7]! * 128 ** 2 + sample[8]! * 128 + sample[9]!
-    const footer = sample[3] === 4 && (sample[5]! & 0x10) !== 0 ? 10 : 0
-    sample = sample.subarray(10 + size + footer)
+const mediaSample = async (path: string, size: number) => {
+  const file = await open(path, "r")
+  try {
+    let offset = 0
+    const read = async () => {
+      const bytes = Buffer.alloc(Math.min(4100, Math.max(0, size - offset)))
+      await file.read(bytes, 0, bytes.length, offset)
+      return bytes
+    }
+    let sample = await read()
+    for (let tags = 0; sample.subarray(0, 3).toString("ascii") === "ID3"; tags++) {
+      if (tags >= 8 || sample.length < 10 || sample.subarray(6, 10).some((byte) => byte > 127))
+        throw new ExternalMediaRefused("Invalid audio metadata")
+      const size = sample[6]! * 128 ** 3 + sample[7]! * 128 ** 2 + sample[8]! * 128 + sample[9]!
+      const footer = sample[3] === 4 && (sample[5]! & 0x10) !== 0 ? 10 : 0
+      offset += 10 + size + footer
+      sample = await read()
+    }
+    const ascii = (at: number, value: string) => sample.subarray(at, at + value.length).toString("latin1") === value
+    const media =
+      sample.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+      (sample[0] === 255 && sample[1] === 216 && sample[2] === 255) ||
+      ascii(0, "GIF87a") ||
+      ascii(0, "GIF89a") ||
+      (ascii(0, "RIFF") && (ascii(8, "WAVE") || ascii(8, "WEBP"))) ||
+      (ascii(4, "ftyp") &&
+        sample.length >= 16 &&
+        sample.readUInt32BE(0) >= 16 &&
+        sample.readUInt32BE(0) <= sample.length) ||
+      ascii(0, "OggS") ||
+      ascii(0, "fLaC") ||
+      (sample[0] === 255 && sample[1] !== undefined && (sample[1] & 0xe0) === 0xe0)
+    if (!media) throw new ExternalMediaRefused("Not a supported media signature")
+    return sample
+  } finally {
+    await file.close()
   }
-  const ascii = (at: number, value: string) => sample.subarray(at, at + value.length).toString("latin1") === value
-  const media =
-    sample.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
-    (sample[0] === 255 && sample[1] === 216 && sample[2] === 255) ||
-    ascii(0, "GIF87a") ||
-    ascii(0, "GIF89a") ||
-    (ascii(0, "RIFF") && (ascii(8, "WAVE") || ascii(8, "WEBP"))) ||
-    (ascii(4, "ftyp") &&
-      sample.length >= 16 &&
-      sample.readUInt32BE(0) >= 16 &&
-      sample.readUInt32BE(0) <= sample.length) ||
-    ascii(0, "OggS") ||
-    ascii(0, "fLaC") ||
-    (sample[0] === 255 && sample[1] !== undefined && (sample[1] & 0xe0) === 0xe0)
-  if (!media) throw new ExternalMediaRefused("Not a supported media signature")
-  return sample.subarray(0, 4100)
 }
 /**
  * A and AAAA answers from c-ares, never getaddrinfo (`dns.lookup`): that runs on libuv's
@@ -116,6 +131,7 @@ const resolveOffPool =
     }
   }
 interface Limits {
+  readonly temporaryDirectory?: string
   readonly interfaces?: typeof networkInterfaces
   readonly resolve?: (hostname: string, signal: AbortSignal) => Promise<ReadonlyArray<string>>
   /** DNS servers for the default resolver; the system's otherwise. */
@@ -168,10 +184,7 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
         credentials: "omit",
         redirect: "manual",
         signal: controller.signal,
-        headers: {
-          accept: [...TYPES].join(", "),
-          "accept-encoding": "identity"
-        }
+        headers: { accept: [...TYPES].join(", "), "accept-encoding": "identity" }
       })
       const mime = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? ""
       const length = Number(response.headers.get("content-length"))
@@ -181,20 +194,47 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
           "The address did not return a supported image or audio file within the size limit"
         )
       }
-      const reader = response.body?.getReader()
-      const chunks: Uint8Array[] = []
-      let size = 0
+      let byob: ReadableStreamBYOBReader | undefined
       try {
+        byob = response.body?.getReader({ mode: "byob" })
+      } catch {
+        /* Replaceable transports may supply a default stream. */
+      }
+      const reader = byob ?? response.body?.getReader()
+      const directory = await mkdtemp(join(limits.temporaryDirectory ?? tmpdir(), "rp-external-media-"))
+      const path = join(directory, "media")
+      const dispose = () => rm(directory, { recursive: true, force: true })
+      const file = await open(path, "wx", 0o600).catch(async (error) => {
+        await dispose()
+        throw error
+      })
+      const cancelReader = () => {
+        void reader?.cancel().catch(() => {})
+      }
+      controller.signal.addEventListener("abort", cancelReader, { once: true })
+      let size = 0
+      let complete = false
+      try {
+        controller.signal.throwIfAborted()
         if (reader)
           for (;;) {
-            const chunk = await reader.read()
+            const chunk = byob
+              ? await byob.read(new Uint8Array(64 * 1024))
+              : await (reader as ReadableStreamDefaultReader<Uint8Array>).read()
             if (chunk.done) break
             size += chunk.value.byteLength
             if (size > maxBytes) throw new ExternalMediaRefused("The media file is too large")
-            chunks.push(chunk.value)
+            // Await each bounded write before pulling upstream again: disk backpressure,
+            // no body-sized chunk array or concatenation. Partial writes are legal.
+            for (let at = 0; at < chunk.value.byteLength;) {
+              controller.signal.throwIfAborted()
+              const part = chunk.value.subarray(at, at + 64 * 1024)
+              const { bytesWritten } = await file.write(part)
+              if (bytesWritten === 0) throw new ExternalMediaRefused("Could not store media")
+              at += bytesWritten
+            }
           }
-        const bytes = Buffer.concat(chunks)
-        const detected = await fileTypeFromBuffer(mediaSample(bytes))
+        const detected = await fileTypeFromBuffer(await mediaSample(path, size))
         const normalize = (type: string) => {
           const base = type.split(";")[0]!.trim()
           return base === "image/apng"
@@ -208,9 +248,21 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
         const sniffed = detected ? normalize(detected.mime) : ""
         if (!TYPES.has(sniffed) || sniffed !== normalize(mime))
           throw new ExternalMediaRefused("The media bytes do not match a supported image or audio type")
-        return { bytes, mime: sniffed }
+        controller.signal.throwIfAborted()
+        complete = true
+        return { path, dispose, mime: sniffed }
       } finally {
-        await reader?.cancel()
+        controller.signal.removeEventListener("abort", cancelReader)
+        // Cancelling an already-errored stream rejects. It must never skip file cleanup.
+        await reader?.cancel().catch(() => {})
+        try {
+          await file.close()
+        } catch (error) {
+          complete = false
+          throw error
+        } finally {
+          if (!complete) await dispose()
+        }
       }
     }
     try {
