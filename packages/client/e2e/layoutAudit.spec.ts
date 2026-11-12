@@ -1,3 +1,4 @@
+import { googleConnectionTests } from "./support/googleConnection.ts"
 import { exercisePhoneFooters } from "./support/phoneFooters.ts"
 import { newflowTests } from "./support/newflows.ts"
 import { seedSplitChats } from "./support/splitChats.ts"
@@ -2733,3 +2734,6 @@ for (const width of [1440, 390])
         await local.stop()
       }
     })
+
+// Focus with --grep "Google connection"; the same surfaces as the provider gate.
+test.describe("Google connection layout", googleConnectionTests)

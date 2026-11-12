@@ -6,7 +6,7 @@ import type { GoogleOptions } from "@earendil-works/pi-ai/api/google-generative-
 import {
   convertMessages,
   convertTools,
-  getDisabledGoogleThinkingConfig,
+  getDisabledGoogleThinkingConfig as piDisabledThinkingConfig,
   isThinkingPart,
   mapStopReasonString,
   resolveGoogleFunctionCallingMode,
@@ -14,7 +14,7 @@ import {
   supportsGoogleStrictToolSampling,
   toGoogleSdkThinkingLevel,
   toGoogleThinkingLevel,
-  usesGoogleThinkingLevel
+  usesGoogleThinkingLevel as piUsesThinkingLevel
 } from "@earendil-works/pi-ai/api/google-shared"
 import { buildBaseOptions } from "@earendil-works/pi-ai/api/simple-options"
 import { clampThinkingLevel, calculateCost } from "@earendil-works/pi-ai/models"
@@ -48,6 +48,7 @@ const Chunk = Schema.StructWithRest(
   Schema.Struct({
     error: Schema.optionalKey(Schema.JsonObject),
     responseId: Schema.optionalKey(Schema.String),
+    promptFeedback: Schema.optionalKey(Schema.Struct({ blockReason: Schema.optionalKey(Schema.String) })),
     candidates: Schema.optionalKey(
       Schema.Array(
         Schema.Struct({
@@ -221,6 +222,11 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
       for await (const chunk of chunks(response)) {
         await options.onProviderStreamEvent?.(chunk, model)
         if (chunk.responseId) output.responseId ||= chunk.responseId
+        const blocked = chunk.promptFeedback?.blockReason
+        if (blocked && blocked !== "BLOCK_REASON_UNSPECIFIED") {
+          output.rawStopReason = blocked
+          output.stopReason = "error"
+        }
         const candidate = chunk.candidates?.[0]
         for (const part of candidate?.content?.parts ?? []) {
           if (part.text !== undefined) {
@@ -320,6 +326,14 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (mo
   })()
   return events
 }
+
+// pi-ai 1.0.3 predates Gemini 4's thinkingLevel control. Its transcript, level
+// mapping and all other model families still use the pinned helpers.
+const gemini4 = (model: { readonly id: string }) => /^(?:models\/)?gemini-4-(?:argon|carbon)(?:-|$)/i.test(model.id)
+const usesGoogleThinkingLevel = (model: Parameters<typeof piUsesThinkingLevel>[0]) =>
+  gemini4(model) || piUsesThinkingLevel(model)
+const getDisabledGoogleThinkingConfig = (model: Parameters<typeof piDisabledThinkingConfig>[0]) =>
+  gemini4(model) ? { thinkingLevel: toGoogleSdkThinkingLevel("LOW") } : piDisabledThinkingConfig(model)
 
 const googleBudget = (model: string, level: string) => {
   const budgets = model.includes("2.5-pro")
