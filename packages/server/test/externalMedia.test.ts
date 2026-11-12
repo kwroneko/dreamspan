@@ -66,7 +66,7 @@ it.live("checks ownership and consent before fetching, never caches, and stops o
       Effect.promise(() =>
         fetch(
           `http://127.0.0.1:${port}/media/external?${new URLSearchParams({ url: "https://media.invalid/image.png", ...scope })}`,
-          { headers: { ...(handle ? { "Remote-User": handle } : {}), ...extra } }
+          { headers: { "sec-fetch-site": "same-origin", ...(handle ? { "Remote-User": handle } : {}), ...extra } }
         )
       )
     assert.deepStrictEqual(yield* alice.GetExternalMediaPrefs({}), DEFAULT_EXTERNAL_MEDIA)
@@ -76,6 +76,19 @@ it.live("checks ownership and consent before fetching, never caches, and stops o
     assert.strictEqual((yield* get(undefined, "bob")).status, 404)
     assert.strictEqual(requests, 0)
     yield* alice.SetExternalMedia({ target: { _tag: "Card", id: entityId }, allow: true })
+    for (const site of ["cross-site", "same-site"]) {
+      assert.strictEqual(
+        (yield* get(undefined, "alice", { "sec-fetch-site": site, "sec-fetch-dest": "image" })).status,
+        403
+      )
+    }
+    const noMetadata = yield* Effect.promise(() =>
+      fetch(
+        `http://127.0.0.1:${port}/media/external?${new URLSearchParams({ url: "https://media.invalid/image.png", chat: chatId })}`,
+        { headers: { "Remote-User": "alice" } }
+      )
+    )
+    assert.strictEqual(noMetadata.status, 403)
     assert.strictEqual(requests, 0)
     const first = yield* get()
     assert.strictEqual(first.status, 200)

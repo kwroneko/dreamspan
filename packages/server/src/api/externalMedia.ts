@@ -64,6 +64,11 @@ export const externalMediaRoute = Layer.unwrap(
         const request = yield* HttpServerRequest.HttpServerRequest
         const session = yield* Effect.option(accounts.resolve(request.headers))
         if (Option.isNone(session)) return error(401, "Login required")
+        // Cross-origin <img>/<audio> GETs need not carry Origin. Require browser
+        // metadata before I/O, including on cookieless local accounts. Missing
+        // metadata fails closed; non-browser clients can supply it explicitly.
+        const site = request.headers["sec-fetch-site"]
+        if (site !== "same-origin" && site !== "none") return error(403, "Media requests must come from this app")
         const params = new URL(request.url, "http://media").searchParams
         const url = params.get("url")
         const chatId = params.get("chat")

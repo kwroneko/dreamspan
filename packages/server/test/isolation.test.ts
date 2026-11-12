@@ -3274,7 +3274,7 @@ const routes: Record<string, Probe> = {
         const response = yield* Effect.promise(() =>
           fetch(
             `http://127.0.0.1:${port}/media/external?${new URLSearchParams({ url: "https://media.invalid/a.png", ...scope })}`,
-            { headers: { cookie: actor.cookie } }
+            { headers: { cookie: actor.cookie, "sec-fetch-site": "same-origin" } }
           )
         )
         assert.strictEqual(response.status, 404)
