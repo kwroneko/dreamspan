@@ -1,7 +1,7 @@
 // Parallel threads in the client (spec/THREADS.md §5.1, §13, TH3): what the dialog decides and
 // says, which forks the branch list leaves out, the shared reads of a fork's sets, and the
 // registered parts that read them. Synthetic ids only.
-import type { EntityId, Fork, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, Fork, ForkId, SlotId } from "@rp/shared/chat.ts"
 import type { ThreadSet } from "@rp/shared/threads.ts"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { branchControlParts } from "../src/features/chat/branchParts.ts"
@@ -19,6 +19,7 @@ import {
   startRequest,
   threadName
 } from "../src/features/threads/model.ts"
+import { offeredThreads, resetTicks, setTick, ticksOf } from "../src/features/threads/sendTargets.ts"
 import { loadThreadSets, resetThreadSets, threadSetsNow } from "../src/features/threads/threadSets.ts"
 
 vi.hoisted(() => {
@@ -219,5 +220,40 @@ describe("a fork's sets, read once and shared", () => {
     await vi.waitFor(() => expect(threadSetsNow("chat-1" as never, "fork-w" as ForkId)).not.toBeNull())
     expect(part.trigger!({ ...context, view: docks })).toMatchObject({ label: "Wren" })
     expect(transform(docks).find((row) => row.key === "threads-split-1")).toBeDefined()
+  })
+})
+
+describe("the threads a send goes to (TH4)", () => {
+  afterEach(() => resetTicks())
+  const inner: ThreadSet = {
+    ...set,
+    splitId: "split-2",
+    forkId: "fork-w" as ForkId,
+    self: 0,
+    threads: [
+      { ...set.threads[1]!, ordinal: 0, starts: false },
+      { ...set.threads[1]!, ordinal: 1, forkId: "fork-x" as ForkId, openForkId: "fork-x" as ForkId, name: "Upstairs" },
+      { ...set.threads[1]!, ordinal: 2, forkId: "fork-y" as ForkId, openForkId: null, name: "Gone" }
+    ]
+  }
+
+  it("offers each other thread with a live fork once, innermost set first, never the one shown", () => {
+    // Shown: fork-w, in thread 1 of split-1 and thread 0 of split-2.
+    const outer = { ...set, self: 1 }
+    const offered = offeredThreads([inner, outer], "fork-w" as ForkId)
+    expect(offered.map((other) => [other.key, other.forkId])).toEqual([
+      ["split-2:1", "fork-x"],
+      ["split-1:0", "fork-f"]
+    ])
+  })
+
+  it("keeps ticks per fork shown, with whom to write as, until unticked", () => {
+    const chat = "chat-1" as ChatId
+    setTick(chat, "fork-f" as ForkId, "split-1:1", null)
+    setTick(chat, "fork-f" as ForkId, "split-1:1", tobin)
+    expect([...ticksOf(chat, "fork-f" as ForkId)]).toEqual([["split-1:1", tobin]])
+    expect(ticksOf(chat, "fork-w" as ForkId).size).toBe(0)
+    setTick(chat, "fork-f" as ForkId, "split-1:1", undefined)
+    expect(ticksOf(chat, "fork-f" as ForkId).size).toBe(0)
   })
 })

@@ -1105,7 +1105,58 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Int,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
+  /**
+   * One message to several threads (spec/THREADS.md §6.2; db/chatSetupWrites.ts): in each
+   * target's fork exactly SendOrQueue's append (the first target under `parentSlotId`, LeafMoved
+   * if that moved; the others under their tips now), then the reply asked for, posted or queued
+   * there; one `thread_sends` group for the copies posted, `send_group` on those queued. Only
+   * forks that are threads of one another (ThreadsRefused otherwise). Each reply's generation
+   * starts after the commit.
+   */
+  Rpc.make("SendToThreads", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      images: Schema.optionalKey(MessageImages),
+      imageDraftIds: Schema.optionalKey(ComposerImageIds),
+      commitDraft: CommitDraft,
+      targets: Schema.Array(
+        Schema.Struct({
+          forkId: ForkId,
+          parentSlotId: Schema.NullOr(SlotId),
+          /** The text as the thread's scripts left it, and what they did. */
+          content: Schema.String,
+          rewrite: Schema.optionalKey(StoredRewrite),
+          speakerEntityId: Schema.NullOr(EntityId),
+          reply: Schema.Boolean,
+          replySpeakerEntityId: Schema.NullOr(EntityId),
+          round: Schema.optionalKey(Schema.Array(EntityId)),
+          autoPick: Schema.optionalKey(Schema.Boolean)
+        })
+      ).check(Schema.isMinLength(2), Schema.isMaxLength(32))
+    },
+    success: Schema.Struct({
+      groupId: Schema.String,
+      /** In the targets' order. */
+      copies: Schema.Array(
+        Schema.Union([
+          Schema.TaggedStruct("Posted", {
+            forkId: ForkId,
+            slotId: SlotId,
+            reply: Schema.NullOr(Schema.Struct({ slotId: SlotId, versionId: VersionId }))
+          }),
+          Schema.TaggedStruct("Queued", { forkId: ForkId, queued: QueuedMessage })
+        ])
+      ),
+      chat: Chat,
+      queue: Schema.Array(QueuedMessage),
+      draft: Schema.NullOr(Draft),
+      recovered: Schema.Int
+    }),
+    error: Schema.Union([NotFound, LeafMoved, ThreadsRefused, StorageError])
+  }),
   /** Undo of starting threads: a bin item of kind `threads` (db/bin.ts `removeThreads`). */
+
   Rpc.make("UndoThreads", {
     payload: { userId: UserId, chatId: ChatId, splitId: Schema.String },
     success: BinItem,

@@ -13,6 +13,7 @@ import type { ThreadPlace } from "@rp/shared/threads.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { effectiveOverride, nextSeq, writeOverride } from "./forkState.ts"
+import { onForkPath } from "./forks.ts"
 
 /**
  * A split of fork `forkId` at slot `slotId`, writer only, inside the caller's transaction, with
@@ -113,6 +114,37 @@ export const placesOf = (
         (a.splitId < b.splitId ? 1 : a.splitId > b.splitId ? -1 : 0)
     )
     .map((c) => ({ splitId: c.splitId, ordinal: c.ordinal }))
+
+/**
+ * Whether forks are threads of one another (spec/THREADS.md §6.1): each pair shares a split, by
+ * labels and with its S on both display paths, where they're in different threads. A send to
+ * several threads goes only to such forks, one copy per thread.
+ */
+export const separateThreads = (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  forks: ReadonlyArray<{ readonly id: string; readonly tip_slot_id: string | null }>
+) =>
+  Effect.gen(function* () {
+    const candidates = yield* threadCandidates(
+      sql,
+      forks.map((fork) => fork.id)
+    )
+    const places: Array<ReadonlyArray<ThreadPlace>> = []
+    for (const fork of forks) {
+      const kept: Array<ThreadPlace> = []
+      for (const c of candidates)
+        if (c.forkId === fork.id && c.ordinal !== null && (yield* onForkPath(sql, chatId, fork, c.slotId)))
+          kept.push({ splitId: c.splitId, ordinal: c.ordinal })
+      places.push(kept)
+    }
+    return places.every((mine, i) =>
+      places.every(
+        (theirs, j) =>
+          i === j || mine.some((p) => theirs.some((q) => q.splitId === p.splitId && q.ordinal !== p.ordinal))
+      )
+    )
+  })
 
 /**
  * The splits shown at all: those with at least two threads that still have a live fork

@@ -16,6 +16,8 @@ import { makeRegistry } from "../../registry.ts"
 import { kindHides } from "./kindLooks.ts"
 import type { ReplyChoice } from "./ReplyFrom.tsx"
 import type { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
+import type { Draft } from "@rp/shared/drafts.ts"
+import type { ComposerSource } from "./composerDraft.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
 export type Placement = "banner" | "queue" | "strip" | "speaker" | "tools" | "actions"
@@ -70,6 +72,80 @@ export interface ComposerControl {
 }
 
 export const composerControls = makeRegistry<ComposerControl>()
+
+/** A send as the composer planned it: the text, who it's from, and who replies (replyPolicy.ts `planReply`). */
+export interface PlannedSend {
+  readonly session: ChatSession
+  readonly view: ChatView
+  readonly text: string
+  readonly speaker: EntityId | null
+  readonly plan: {
+    readonly replier: EntityId | null
+    readonly round: ReadonlyArray<EntityId>
+    readonly reply: boolean
+  }
+  /** The decision model may choose the reply's speaker and the round (DESIGN §2.3). */
+  readonly autoPick: boolean
+  /** "Who replies next" is on: Auto's picks are the decision model's to change, wherever this send goes. */
+  readonly decides: boolean
+  readonly composer: ComposerSource
+  readonly images?: MessageImages | undefined
+  readonly imageDraftIds?: ReadonlyArray<string> | undefined
+}
+
+/**
+ * Another way a typed message is sent (spec/PLUGINS.md §8): the first whose `takes` is true sends
+ * it in place of the plain send, and its `hint` goes after Send's explanation. `subscribe` says
+ * when `takes` or `hint` may have changed. Threads register one ("To 2 threads", spec/THREADS.md §6).
+ */
+export interface ComposerSendRoute {
+  readonly id: string
+  readonly order: number
+  readonly subscribe: (listener: () => void) => () => void
+  readonly takes: (session: ChatSession, view: ChatView) => boolean
+  readonly hint?: (session: ChatSession, view: ChatView) => string
+  readonly send: (send: PlannedSend) => Promise<{
+    readonly sent: boolean
+    readonly outcome: Outcome<unknown>
+    readonly draft: Draft | null
+    readonly recovered: number
+  }>
+}
+
+export const composerSendRoutes = makeRegistry<ComposerSendRoute>()
+
+/**
+ * The route that takes the composer's sends now, or null for the plain send, with what it adds
+ * to Send's hint.
+ */
+export function useSendRoute(
+  session: ChatSession,
+  view: ChatView
+): { readonly route: ComposerSendRoute | null; readonly hint: string } {
+  const { entries } = useSyncExternalStore(
+    composerSendRoutes.subscribe,
+    composerSendRoutes.snapshot,
+    composerSendRoutes.snapshot
+  )
+  // The snapshot is a string (the route's id and hint): what a route reads changes outside React,
+  // and a value computed beside the store would be memoized on the arguments by the React compiler.
+  const subscribe = (listener: () => void) => {
+    const stops = [...entries].map((route) => route.subscribe(listener))
+    return () => {
+      for (const stop of stops) stop()
+    }
+  }
+  const pick = () => {
+    const route = [...entries].sort((a, b) => a.order - b.order).find((route) => route.takes(session, view))
+    return route === undefined ? "" : `${route.id}\n${route.hint?.(session, view) ?? ""}`
+  }
+  const picked = useSyncExternalStore(subscribe, pick, pick)
+  const cut = picked.indexOf("\n")
+  return cut < 0
+    ? { route: null, hint: "" }
+    : { route: entries.find((route) => route.id === picked.slice(0, cut)) ?? null, hint: picked.slice(cut + 1) }
+}
+
 export const availableComposerControls = (
   placement: Placement,
   context: ComposerControlContext,

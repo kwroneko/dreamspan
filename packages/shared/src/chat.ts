@@ -323,6 +323,11 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
    */
   inserted: Schema.optionalKey(Schema.Literal(true)),
   /**
+   * Its copies in other threads when it was sent to several (spec/THREADS.md §6.3): each copy's
+   * message and the fork that posted it, while both are live. Absent: none.
+   */
+  copies: Schema.optionalKey(Schema.Array(Schema.Struct({ slotId: SlotId, forkId: ForkId }))),
+  /**
    * The side the message is on when its speaker isn't one of the cast, as the context reads
    * it (assemblySources.ts): its first version's, deleted or not, so which versions are
    * live never changes it. A human's first version is the user's, unless it's a greeting.

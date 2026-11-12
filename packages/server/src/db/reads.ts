@@ -124,7 +124,17 @@ const pathColumns = (fork: string) => `${shownVersionColumns}, s.parent_slot_id,
   (SELECT f.writer = 'human' AND f.origin <> 'greeting' FROM versions f WHERE f.slot_id = s.id AND f.fork_id IS NULL
     ORDER BY f.ordinal LIMIT 1) AS user_side,
   (SELECT f.speaker_entity_id FROM versions f WHERE f.slot_id = s.id AND f.fork_id IS NULL ORDER BY f.ordinal LIMIT 1)
-    AS first_speaker`
+    AS first_speaker,
+  ${sendCopies("s")} AS send_copies`
+
+/**
+ * Slot `s`'s copies in other threads (spec/THREADS.md §6.3), as a JSON array of [slot, fork]:
+ * one primary-key probe for a message sent to one thread, which is nearly every one.
+ */
+const sendCopies = (s: string) => `(SELECT json_group_array(json_array(o.slot_id, os.fork_id))
+  FROM thread_sends t JOIN thread_sends o ON o.group_id = t.group_id AND o.slot_id <> t.slot_id
+    JOIN slots os ON os.id = o.slot_id JOIN forks of ON of.id = os.fork_id
+  WHERE t.slot_id = ${s}.id AND os.deleted_at IS NULL AND of.deleted_at IS NULL)`
 
 /**
  * Joins slot `s` to the version fork `fork` selects (`o`) and the override that chose it

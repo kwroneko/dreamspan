@@ -102,6 +102,31 @@ export const viewOf = (view: (props: MessageActionProps) => MessageActionView) =
   }
 
 export const messageActions = makeRegistry<MessageAction>()
+
+/**
+ * What a message's delete toast offers after Undo (spec/PLUGINS.md §8): threads offer to delete a
+ * copy of the message sent to another thread too (spec/THREADS.md §6.3).
+ */
+export interface MessageDeleteOffer {
+  readonly id: string
+  readonly order: number
+  readonly actions: (
+    context: DeleteOfferContext,
+    item: BinItem
+  ) => ReadonlyArray<{ readonly label: string; readonly hint?: string; readonly onClick: () => void }>
+}
+export const messageDeleteOffers = makeRegistry<MessageDeleteOffer>()
+
+/** The message deleted, and the host's toast for anything an offer deletes in turn. */
+export interface DeleteOfferContext extends Pick<MessageActionContext, "entry" | "session"> {
+  readonly deleted: (item: BinItem) => void
+}
+
+/** Everything the registered offers add to the toast of `item`, deleted from `entry`. */
+export const deleteOffersFor = (context: DeleteOfferContext, item: BinItem) =>
+  [...messageDeleteOffers.snapshot().entries]
+    .sort((a, b) => a.order - b.order)
+    .flatMap((offer) => offer.actions(context, item))
 export const availableMessageActions = (context: MessageActionContext, snapshot = messageActions.snapshot()) =>
   [...snapshot.entries]
     .sort((a, b) => a.order - b.order)
@@ -400,7 +425,12 @@ function LoadedMessageDialog({
           hidden: entry.contextExcluded,
           report,
           toast: (outcome) => {
-            if (outcome.ok) deleted(outcome.value)
+            if (outcome.ok)
+              deleted(
+                outcome.value,
+                undefined,
+                deleteOffersFor({ entry, session, deleted: (item) => deleted(item) }, outcome.value)
+              )
             else report(outcome)
           }
         }

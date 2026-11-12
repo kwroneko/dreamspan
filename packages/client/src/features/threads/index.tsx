@@ -3,15 +3,22 @@
 // section, the timeline's row where they part, and the note editor's "Also change it in …".
 // The left panel's Threads group is the shell's `threads` section (ShellBrowser.tsx).
 import { branchControlParts } from "../chat/branchParts.ts"
+import { listNames } from "../chat/cast.ts"
 import { chatCommands } from "../chat/commands.tsx"
-import { messageActions, viewOf } from "../chat/messageActions.tsx"
+import { composerControls, composerSendRoutes } from "../chat/composerControls.tsx"
+import { messageActions, messageDeleteOffers, viewOf } from "../chat/messageActions.tsx"
+import { messageSaveOptions } from "../chat/editorHistory.tsx"
+import { messageDetails } from "../chat/messageDetails.tsx"
+import { AlsoIn, copyDeleteActions, SaveInAll } from "./copies.tsx"
 import { chatNoteActions, chatOverlays } from "../chat/presentation.tsx"
 import type { ChatSession, ChatView } from "../chat/session.ts"
 import { timelineTransforms } from "../chat/timelineContributions.tsx"
 import { AlsoChangeNote } from "./AlsoChangeNote.tsx"
 import { listedAsBranch, ownThread, splitNumber, threadName } from "./model.ts"
 import { START_HINT, StartThreadsCommandDialog, StartThreadsHereDialog } from "./StartThreadsDialog.tsx"
-import { shownForkOf, threadSetsNow, useThreadSets } from "./threadSets.ts"
+import { SendToThreadsChip } from "./SendToThreadsChip.tsx"
+import { sendToThreads, subscribeTicks, ticked } from "./sendTargets.ts"
+import { shownForkOf, subscribeThreadSets, threadSetsNow, useThreadSets } from "./threadSets.ts"
 import { ThreadsSection } from "./ThreadsSection.tsx"
 import { ThreadsTimelineRow } from "./ThreadsTimelineRow.tsx"
 
@@ -93,5 +100,46 @@ export const register = () => [
       return result
     }
   }),
-  chatNoteActions.register({ id: "threads.also-change", order: 10, component: AlsoChangeNote })
+  chatNoteActions.register({ id: "threads.also-change", order: 10, component: AlsoChangeNote }),
+  // Sending to several threads (§6): the strip's chip, and the send it takes over once one is ticked.
+  composerControls.register({ id: "composer.threads", order: 35, placement: "strip", component: SendToThreadsChip }),
+  composerSendRoutes.register({
+    id: "threads.send",
+    order: 10,
+    subscribe: (listener) => {
+      const ticks = subscribeTicks(listener)
+      const sets = subscribeThreadSets(listener)
+      return () => {
+        ticks()
+        sets()
+      }
+    },
+    takes: (_session, view) => ticked(view).length > 0,
+    hint: (_session, view) =>
+      ` here and in ${listNames(
+        ticked(view).map(
+          (other) =>
+            `“${threadName(other.thread, (id) => view.cast?.cards.find((card) => card.entityId === id)?.name ?? null)}”`
+        )
+      )}`,
+    send: sendToThreads
+  }),
+  // A message sent to several threads, afterwards (§6.3): the link to each copy, Save in both, and
+  // deleting the other copy too.
+  messageDetails.register({
+    id: "message.also-in",
+    place: "header",
+    order: 50,
+    label: "Copies in other threads",
+    description: "For a message sent to several threads: a link to its copy in each other one.",
+    component: AlsoIn
+  }),
+  messageSaveOptions.register({
+    id: "threads.save-all",
+    order: 10,
+    offers: (entry) =>
+      (entry.copies?.length ?? 0) > 0 && entry.version.writer === "human" ? { here: "Save here" } : null,
+    component: SaveInAll
+  }),
+  messageDeleteOffers.register({ id: "threads.delete-copy", order: 10, actions: copyDeleteActions })
 ]

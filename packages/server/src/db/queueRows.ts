@@ -30,6 +30,8 @@ export interface QueuedRow {
   readonly auto_pick: number
   /** A round's entry: the slot of the round's first reply, once posted. */
   readonly round_start_slot_id: string | null
+  /** A copy of a message sent to several threads: its group, written to `thread_sends` when it posts. */
+  readonly send_group: string | null
   readonly row_version: number
   readonly created_at: number
 }
