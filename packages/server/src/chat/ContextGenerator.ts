@@ -34,9 +34,17 @@ import { ChatHub } from "./ChatHub.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { planTurn } from "../agent/modes.ts"
 import type { OutputContract } from "../agent/modes.ts"
-import { type FrozenTool, frozenTool, sendMessageDefinition, severalMessageDefinition } from "../agent/tools.ts"
+import {
+  type FrozenTool,
+  frozenTool,
+  sendMessageDefinition,
+  severalMessageDefinition,
+  prepareToolSnapshots,
+  toolWriter
+} from "../agent/tools.ts"
 import { makePermit, offeredByGrants } from "../agent/approvals.ts"
 import { loaderFor, loadingWireFor, planToolLoading } from "../agent/loadingPlan.ts"
+import { dispatcherDefinition } from "../agent/dispatcher.ts"
 import { frozenOffer, loadedSet, type Skill } from "../agent/toolLoading.ts"
 import { DecisionEngine } from "../decision/engine.ts"
 import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
@@ -194,6 +202,7 @@ export const layer = Layer.effect(
             },
             mode: frozen.mode,
             checkpoints: (snapshot as ContinuousSnapshot).continuity?.breakpoints ?? [],
+            recentPrefix: ((snapshot as ContinuousSnapshot).continuity?.prefix ?? snapshot).lcm?.measure?.recentNow,
             allowsOutside: profile.allowsOutside,
             tools,
             offered: frozen.tools,
@@ -431,7 +440,13 @@ export const layer = Layer.effect(
             plan.contract === "final_text"
               ? []
               : [plan.contract === "several" ? severalMessageDefinition : sendMessageDefinition]
-          const frozenTools = [...frozenOffer(offer.tools, offer.deferred, frozenTool), ...contractTools]
+          const frozenTools: ReadonlyArray<FrozenTool> = [
+            ...frozenOffer(offer.tools, offer.deferred, frozenTool),
+            ...contractTools,
+            ...(offer.deferred.size && loadingWireFor(execution, generation.model)?.dispatcher
+              ? [{ ...dispatcherDefinition, label: "Called a loaded tool", effect: "read" as const }]
+              : [])
+          ]
           let continuity: ContinuityRecord | undefined
           let seed: ReadonlyArray<AgentMessage> | undefined
           if (agentic && plan.continuity === "resume_previous") {
@@ -483,11 +498,13 @@ export const layer = Layer.effect(
                     transcript: JSON.stringify(transcript),
                     // A deferred tool takes context only once it's loaded.
                     tools: JSON.stringify(
-                      frozenTools.filter(
-                        (t) =>
-                          (t as { readonly deferred?: true }).deferred !== true ||
-                          loadedSet(transcript, offer.deferred).has(t.name)
-                      )
+                      frozenTools.some((t) => t.name === "call_tool")
+                        ? frozenTools
+                        : frozenTools.filter(
+                            (t) =>
+                              (t as { readonly deferred?: true }).deferred !== true ||
+                              loadedSet(transcript, offer.deferred).has(t.name)
+                          )
                     )
                   })
                   .pipe(Effect.catch(serverFailure("CountRolloutContext")))
@@ -497,7 +514,7 @@ export const layer = Layer.effect(
               let elided = 0
               const room = budget ? budget.maximum - budget.responseReserve : Number.POSITIVE_INFINITY
               let needsRebuild = count > room * ELIDE_TRIGGER
-              if (needsRebuild) {
+              if (needsRebuild && !state.lcm?.enabled) {
                 const compacted = yield* elideCarried({
                   reader,
                   request,
@@ -514,6 +531,7 @@ export const layer = Layer.effect(
                   needsRebuild = false
                 }
               }
+              if (state.lcm?.enabled) needsRebuild = false
               // Provider image limits apply to the entire request. Hydrating the prefix
               // and each carried user message separately must not evict a cached image.
               const imageCount = [
@@ -524,7 +542,11 @@ export const layer = Layer.effect(
                 snapshot.inputs.model?.vision !== false &&
                 additions.some((message) => message.role === "rpUser" && (message.message.images?.length ?? 0) > 0) &&
                 imageCount > (snapshot.inputs.model?.maxImages ?? DEFAULT_MAX_IMAGES)
-              if (imageOverflow || needsRebuild || (budget && count > budget.maximum - budget.responseReserve)) {
+              if (
+                imageOverflow ||
+                needsRebuild ||
+                (!state.lcm?.enabled && budget && count > budget.maximum - budget.responseReserve)
+              ) {
                 seed = undefined
                 continuity = {
                   path: baseline,
@@ -579,6 +601,25 @@ export const layer = Layer.effect(
             })
           }
           const rolloutId = uuidv7()
+          if (agentic) {
+            const prepared = yield* prepareToolSnapshots(tools, {
+              userId,
+              chatId,
+              slotId,
+              versionId,
+              forkId: forkId ?? null,
+              leafSlotId: generation.leafSlotId as SlotId | null,
+              viewers: generation.viewers,
+              rolloutId,
+              toolCallId: "",
+              cache: new Map(),
+              reader,
+              writer: toolWriter(writer)
+            }).pipe(Effect.catchCause((cause) => serverFailure("PrepareToolSnapshots")(cause)))
+            // The snapshot keeps the frozen form; this run reads the prepared state itself.
+            if (Object.keys(prepared.frozen).length > 0) snapshot = { ...snapshot, agentToolState: prepared.frozen }
+            if (Object.keys(prepared.state).length > 0) generation = { ...generation, agentToolState: prepared.state }
+          }
           const finish = finishing(request, rolloutId)
           // Opened and closed as a resource of the stream's scope: once it's open, it's closed
           // whenever and however the generation ends, a stop before the first token included.
@@ -649,6 +690,7 @@ export const layer = Layer.effect(
                     ...(seed ? { resume: { transcript: seed, historical: continuity?.historical ?? 0 } } : {}),
                     mode: planned.mode,
                     checkpoints: continuity?.breakpoints ?? [],
+                    recentPrefix: (continuity?.prefix ?? snapshot).lcm?.measure?.recentNow,
                     allowsOutside: profile.allowsOutside,
                     tools: offer.tools,
                     offered: frozenTools,

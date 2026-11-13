@@ -8,6 +8,8 @@ export interface ChatKindProfile {
   readonly rolloutKind: "generation" | "workshop"
   readonly purpose: "generation" | "workshop"
   readonly allowsSummaries: boolean
+  /** Summaries retain agent calls and results as well as the conversation. */
+  readonly summaryTranscript?: boolean
   readonly allowsMerge: boolean
   readonly allowsStImport: boolean
   readonly exportFormats: ReadonlyArray<"txt" | "jsonl">
@@ -30,6 +32,7 @@ export const chatKinds = makeRegistry<ChatKindProfile>([
   },
   {
     id: "workshop",
+    summaryTranscript: true,
     planner: "workshop",
     allowsOutside: true,
     rolloutKind: "workshop",

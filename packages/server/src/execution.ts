@@ -6,6 +6,7 @@ import { outsideEffect } from "./agent/effects.ts"
 import { capabilityDefaults, workshopCapabilities } from "./agent/capabilities.ts"
 import { libraryEditCard, setupTools } from "./agent/tools/setup.ts"
 import { chatKinds, type ChatKindProfile } from "@rp/shared/chatKinds.ts"
+import { workshopCompactor, type RunCompactor } from "./agent/workshopCompactor.ts"
 import { workshopMode } from "./agent/workshop.ts"
 import { libraryTools } from "./agent/tools/library.ts"
 import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
@@ -55,6 +56,7 @@ export class ExecutionRegistry extends Context.Service<
     /** What a reply shows while it streams, in order: the scripts its finish runs (liveRewrites.ts). */
     readonly liveRewrites: Registry<LiveRewrite>
     readonly summaries: Registry<SummaryStrategy>
+    readonly runCompactors: Registry<RunCompactor>
     readonly summaryTools: Registry<SummaryToolFactory>
     /** Who runs on a turn, what it sees and how its output is taken (spec/AGENTIC.md §6). */
     readonly chatKinds: Registry<ChatKindProfile>
@@ -106,6 +108,7 @@ export class ExecutionRegistry extends Context.Service<
         }
       })
       const validate = (tool: RolloutTool<never>) => {
+        if (tool.id === "call_tool") throw new Error("call_tool is reserved for the tool-loading transport.")
         if (
           (outsideEffect(tool.effect) && !tool.capability) ||
           (tool.capability && !workshopCapabilities.get(tool.capability))
@@ -155,6 +158,8 @@ export class ExecutionRegistry extends Context.Service<
       yield* toolLoaders.register(makeLoadSkill() as RolloutTool<never>)
       const replies = makeRegistry<ReplyOutputStrategy>()
       const summaries = makeRegistry<SummaryStrategy>()
+      const runCompactors = makeRegistry<RunCompactor>()
+      yield* runCompactors.register(workshopCompactor)
       const summaryTools = makeRegistry<SummaryToolFactory>()
       yield* replies.register(defaultReplyOutput)
       const replyParsers = makeRegistry<ReplyParser>()
@@ -171,6 +176,7 @@ export class ExecutionRegistry extends Context.Service<
         replyParsers,
         liveRewrites,
         summaries,
+        runCompactors,
         summaryTools,
         orchestrationModes,
         chatKinds,
@@ -200,12 +206,36 @@ export const executionRegistry = Effect.gen(function* () {
 })
 
 /** A kind may replace an ambiguous public tool name without changing story semantics. */
-export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string, name: string) => {
+export const toolForKind = (
+  registry: ExecutionRegistry["Service"],
+  kind: string,
+  name: string
+): RolloutTool<never> | undefined => {
+  if (name === "call_tool") return undefined
   const exposure = registry.chatKinds.get(kind)?.allowsOutside ? registry.operationTools.get(name) : undefined
   const common = exposure ? registry.operationTool(exposure) : registry.rolloutTools.get(name)
   const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
   const tool = common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)
   if (tool?.replyTool === false && registry.chatKinds.get(kind)?.allowsOutside !== true) return undefined
+  if (tool?.storyRead === "conversation" && registry.chatKinds.get(kind)?.allowsOutside)
+    return {
+      ...tool,
+      execute: (ctx, args) =>
+        tool.execute(
+          {
+            ...ctx,
+            storyReadOf: (id) => {
+              const exposure = registry.operationTools.get(id)
+              return (
+                registry.kindTools.get(`${kind}:${id}`)?.tool.storyRead ??
+                exposure?.storyRead ??
+                registry.rolloutTools.get(id)?.storyRead
+              )
+            }
+          },
+          args
+        )
+    }
   if (!tool || registry.chatKinds.get(kind)?.allowsOutside || !tool.capability) return tool
   // Capability grants are workshop metadata. Preserve the frozen story definition shape.
   const storyTool = { ...tool }

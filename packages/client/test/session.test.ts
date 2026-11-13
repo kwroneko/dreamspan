@@ -113,6 +113,32 @@ const boundCast = (macroBindings: Record<string, string> = {}) =>
   })
 
 describe("ChatSession", () => {
+  it("ignores another branch's State, Reload and Lcm before refreshing positions or reads", () => {
+    const { s, receive } = session()
+    const internals = s as unknown as {
+      view: ReturnType<typeof s.snapshot>
+      refreshCast: () => void
+      scheduleLcm: () => void
+      reload: () => void
+    }
+    internals.view = { ...s.snapshot(), forkId: "here" as ForkId }
+    internals.refreshCast = vi.fn()
+    internals.scheduleLcm = vi.fn()
+    internals.reload = vi.fn()
+    const positions = vi.fn()
+    s.subscribePositions(positions)
+    for (const _tag of ["State", "Reload", "Lcm"] as const) receive({ _tag, forkId: "elsewhere" as ForkId })
+    expect(positions).not.toHaveBeenCalled()
+    expect(internals.refreshCast).not.toHaveBeenCalled()
+    expect(internals.scheduleLcm).not.toHaveBeenCalled()
+    expect(internals.reload).not.toHaveBeenCalled()
+    receive({ _tag: "State", forkId: "here" as ForkId })
+    expect(positions).toHaveBeenCalledOnce()
+    expect(internals.refreshCast).toHaveBeenCalledOnce()
+    expect(internals.scheduleLcm).toHaveBeenCalledOnce()
+    s.dispose()
+  })
+
   it("closing one view preserves another view's live text and reasoning", () => {
     const registry = AtomRegistry.make()
     const first = new ChatSession(chatId, null, registry, "user")

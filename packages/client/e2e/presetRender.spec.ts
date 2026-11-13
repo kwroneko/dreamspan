@@ -19,11 +19,16 @@ for (const width of [1440, 390])
           sibling?: Fiber
         }
         const w = window as unknown as {
+          __handleSeen: boolean
+          __handleRenders: number
           __promptRenders: number
           __promptChanges: number
           __promptSeen: boolean
           __REACT_DEVTOOLS_GLOBAL_HOOK__: unknown
         }
+        let lastHandle: Fiber | undefined
+        w.__handleSeen = false
+        w.__handleRenders = 0
         w.__promptChanges = 0
         w.__promptRenders = 0
         w.__promptSeen = false
@@ -44,6 +49,18 @@ for (const width of [1440, 390])
                 if (old && (fiber.flags & 1) !== 0) w.__promptRenders++
                 if (old && props.onToggle !== old.onToggle) w.__promptChanges++
               }
+              const child = props?.children as { props?: Record<string, unknown> } | undefined
+              if (
+                typeof fiber.type !== "string" &&
+                props?.label === "Moves this item within the list." &&
+                child?.props?.["aria-label"] === "Move Main Prompt"
+              ) {
+                w.__handleSeen = true
+                // A bailed-out subtree can retain PerformedWork from its last commit.
+                // Count only a new work-in-progress fiber for this handle.
+                if (old && fiber !== lastHandle && (fiber.flags & 1) !== 0) w.__handleRenders++
+                lastHandle = fiber
+              }
               visit(fiber.child)
               visit(fiber.sibling)
             }
@@ -63,8 +80,16 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/library/${refId}`)
       await expectSaveState(page, NOTHING_TO_SAVE)
       await expect
-        .poll(() => page.evaluate(() => (window as unknown as { __promptSeen: boolean }).__promptSeen))
+        .poll(() =>
+          page.evaluate(() => {
+            const w = window as unknown as { __promptSeen: boolean; __handleSeen: boolean }
+            return w.__promptSeen && w.__handleSeen
+          })
+        )
         .toBe(true)
+      const handlesBefore = await page.evaluate(
+        () => (window as unknown as { __handleRenders: number }).__handleRenders
+      )
       const rendersBefore = await page.evaluate(
         () => (window as unknown as { __promptRenders: number }).__promptRenders
       )
@@ -77,5 +102,8 @@ for (const width of [1440, 390])
       ).toBe(0)
       expect(
         (await page.evaluate(() => (window as unknown as { __promptRenders: number }).__promptRenders)) - rendersBefore
+      ).toBe(0)
+      expect(
+        (await page.evaluate(() => (window as unknown as { __handleRenders: number }).__handleRenders)) - handlesBefore
       ).toBe(0)
     })

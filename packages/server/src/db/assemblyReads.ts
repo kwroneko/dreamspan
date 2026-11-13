@@ -1,3 +1,4 @@
+import { modelName } from "@rp/shared/cardNames.ts"
 import { makeExternalMediaReadHandlers } from "./externalMedia.ts"
 import { makeSavedMediaReadHandlers } from "./savedMedia.ts"
 import type { ContinuousSnapshot } from "../agent/continuity.ts"
@@ -18,7 +19,7 @@ import type { ReplySections } from "@rp/shared/replySections.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
-import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
+import { lastBreakpoint, prefixChange, speakerPrefixChange, tokensBetween } from "../assembler/warmth.ts"
 import { bestEffortCache, documentedCacheMinimum } from "../providers/cachePolicy.ts"
 import { nextImages, estimateImage } from "../assembler/imageTokens.ts"
 import { budgetOrigins } from "../assembler/budget.ts"
@@ -274,6 +275,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             // Earlier snapshots predate frozen transform inputs; retain their original shape.
             ...(!taken.summaryAssembly && rebuilt.summaryAssembly ? { summaryAssembly: undefined } : {}),
             sources: sources.pins(),
+            ...(taken.agentToolState ? { agentToolState: taken.agentToolState } : {}),
             ...(taken.wire ? { wire: taken.wire } : {})
           })
         }
@@ -409,6 +411,29 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         const previousCount = yield* prepareTextTokens(assembler.textCounters.list(), previous.inputs.model)
         const nextCount = yield* prepareTextTokens(assembler.textCounters.list(), next.inputs.model)
         const prefixTokens = tokensBetween(previous, 0, end, previousCount)
+        const speakerCost = sameModel ? speakerPrefixChange(previous, next, nextCount) : null
+        let speakerChange: string | undefined
+        if (speakerCost) {
+          const revisions = [previous, next].flatMap((s) =>
+            s.inputs.cards.filter((c) => c.entity === s.inputs.speaker).map((c) => c.revision)
+          )
+          const rows = yield* sql<{
+            id: string
+            name: string
+            nickname: string | null
+          }>`SELECT v.id, json_extract(v.doc_json, '$.name') AS name, json_extract(v.doc_json, '$.nickname') AS nickname
+            FROM entity_revisions v JOIN entities e ON e.id = v.entity_id WHERE e.owner_user_id = ${userId} AND v.id IN ${sql.in(revisions)}`
+          const name = (s: ContextSnapshot) => {
+            const revision = s.inputs.cards.find((c) => c.entity === s.inputs.speaker)?.revision
+            const found = rows.find((r) => r.id === revision)
+            return found ? modelName({ name: found.name, nickname: found.nickname ?? undefined }) : "A character"
+          }
+          const upcoming = name(next),
+            preceding = name(previous)
+          speakerChange = `${upcoming}'s turn starts differently from ${preceding}'s: ~${speakerCost.tokens.toLocaleString("en-US")} tokens are written again when ${upcoming}'s cached copy has expired.`
+        }
+        const speakerWarning = speakerChange === undefined ? {} : { speakerChange }
+
         // A prefix below the model's minimum cacheable size is never cached (liveapi F6).
         // The provider's documented contract; a snapshot from before providers names only its kind.
         const contract = next.inputs.model.cacheContract
@@ -425,13 +450,24 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             ...boundary,
             warmth:
               nextTokens < minimum
-                ? null
+                ? speakerChange === undefined
+                  ? null
+                  : {
+                      lastRequestAt: last.started_at,
+                      ttlS: null,
+                      expiresAt: null,
+                      verified: false,
+                      prefixTokens: 0,
+                      changed: null,
+                      ...speakerWarning
+                    }
                 : {
                     lastRequestAt: last.started_at,
                     ttlS,
                     expiresAt: null,
                     verified: false,
                     prefixTokens: 0,
+                    ...speakerWarning,
                     changed: {
                       reason: `The last request was below the model's minimum cacheable size (${minimum.toLocaleString("en-US")} tokens), so nothing was cached.`,
                       tokens: nextTokens
@@ -458,7 +494,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         return {
           ...boundary,
           warmth:
-            (ttlS === null || expiresAt === null) && changed === null
+            (ttlS === null || expiresAt === null) && changed === null && speakerChange === undefined
               ? null
               : {
                   lastRequestAt: last.started_at,
@@ -466,6 +502,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   expiresAt,
                   verified: (last.cache_read ?? 0) + (last.cache_write ?? 0) > 0,
                   prefixTokens: reusable,
+                  ...speakerWarning,
                   changed
                 }
         }

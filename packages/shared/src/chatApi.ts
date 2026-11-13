@@ -327,15 +327,15 @@ export const ChatEvent = Schema.Union([
   /** The chat changed: its active leaf, title or last message. */
   Schema.TaggedStruct("Chat", { chat: Chat }),
   /** Something was deleted: windows read before it are out of date. */
-  Schema.TaggedStruct("Reload", {}),
+  Schema.TaggedStruct("Reload", { forkId: Schema.optionalKey(ForkId) }),
   /** The chat went to the bin. It's the subscription's last event. */
   Schema.TaggedStruct("Deleted", {}),
   /** The chat's send queue changed: every entry still waiting, in order. */
   Schema.TaggedStruct("Queue", { queue: Schema.Array(QueuedMessage) }),
   /** Chat state changed (participants, presence, settings): read it again. */
-  Schema.TaggedStruct("State", {}),
+  Schema.TaggedStruct("State", { forkId: Schema.optionalKey(ForkId) }),
   /** The chat's summaries changed (made, edited, selected, failed, asked for again) or LCM was switched: read GetLcmState again. */
-  Schema.TaggedStruct("Lcm", {}),
+  Schema.TaggedStruct("Lcm", { forkId: Schema.optionalKey(ForkId) }),
   /** The cache-warmth estimate changed; null when there's none to show (DESIGN §5.5). */
   Schema.TaggedStruct("Cache", NextContext.fields),
   /** A composer's speaker or reply choice changed, in this tab or another. */

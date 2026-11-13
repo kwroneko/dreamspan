@@ -1205,6 +1205,7 @@ export const useLeaveGuard = (store: EditorStore) =>
       // A chat's own note is edited at a position of its own: only the plain stores are shared.
       ...(store.chatNote ? {} : { store }),
       flush: () => store.flush(),
+      unsaved: () => store.dirtyFields().length > 0,
       refresh: () => (store.snapshot === null ? Promise.resolve() : store.refresh())
     })
     // Shown again after a reply cut revisions while it was hidden: read what changed.

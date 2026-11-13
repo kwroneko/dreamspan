@@ -1,3 +1,7 @@
+import { workshopTranscript } from "./workshopTranscript.ts"
+import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { summarySafeText } from "../agent/compaction.ts"
+import { WORKSHOP_SUMMARY_INSTRUCTION } from "@rp/shared/workshopLcm.ts"
 import { chatAllows } from "./chatKindPolicy.ts"
 import { inJobFork } from "./lcmFork.ts"
 import { viewAt } from "./forkState.ts"
@@ -122,8 +126,15 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           hashes
         )
         const imageTarget = { kind: usable.kind, api: usable.api, model: usable.key }
+        const transcripts = yield* workshopTranscript(
+          sql,
+          userId,
+          chatId,
+          readPath.flatMap((s) => (s.versionId ? [s.versionId] : []))
+        )
         const path = readPath.map((slot) => ({
           ...slot,
+          content: slot.content + (slot.versionId ? (transcripts.get(slot.versionId) ?? "") : ""),
           images:
             slot.images?.map((image) => ({
               ...image,
@@ -234,6 +245,10 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         if (!job) return yield* new NotFound({ entity: "summary job", id: jobId })
         // A view's own job (db/lcmAudience.ts): written from what its character knew.
         const identities = job.audience === null ? undefined : audienceIds(job.audience)
+        const [chat] = yield* sql<{
+          kind: string
+        }>`SELECT kind FROM chats WHERE id=${job.chatId} AND owner_user_id=${userId}`
+        const transcriptSummary = chatKinds.get(chat?.kind ?? "")?.summaryTranscript === true
         const chain = yield* lcmPath(
           sql,
           userId,
@@ -328,6 +343,32 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           })
         const settings = resolveLcm(state.lcm, defaults.lcm)
         const clipTokens = job.clipTokens
+        const transcript = transcriptSummary
+          ? yield* Effect.gen(function* () {
+              const transcripts = yield* workshopTranscript(
+                sql,
+                userId,
+                job.chatId,
+                chain.flatMap((s) => (s.versionId ? [s.versionId] : []))
+              )
+              return job.level > 1
+                ? children.map((s) => ({
+                    role: "user" as const,
+                    content: summarySafeText(JSON.stringify({ summary: s.id, content: s.content }))
+                  }))
+                : chain.map((s) => ({
+                    role: "user" as const,
+                    content: summarySafeText(
+                      JSON.stringify({
+                        message: s.position + 1,
+                        version: s.versionId,
+                        text: s.content,
+                        transcript: s.versionId ? (transcripts.get(s.versionId) ?? null) : null
+                      })
+                    )
+                  }))
+            })
+          : undefined
         const built = yield* assembler
           .assemble({
             now: prefix?.inputs.now ?? Date.now(),
@@ -348,7 +389,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
               ...(job.level > 1
                 ? { children: children.map((c) => ({ summaryId: c.id, revisionId: c.revisionId })) }
                 : {}),
-              tail: settings.tail ?? BUILTIN_SUMMARY_INSTRUCTION,
+              tail: settings.tail ?? (transcriptSummary ? WORKSHOP_SUMMARY_INSTRUCTION : BUILTIN_SUMMARY_INSTRUCTION),
+              ...(transcript ? { workshopTranscript: transcript } : {}),
               style,
               ...(settings.withPreset === "raw" ? { withPreset: false } : {}),
               ...(prefix ? { prefix } : {}),
@@ -356,6 +398,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             }
           })
           .pipe(Effect.provide(sources.layer))
+
         const rendered = new Set(
           built.pieces
             .filter((p) => p.source.kind === "message" && p.messages.length > 0)
@@ -363,10 +406,11 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         )
         const sent = built.lcm?.selected.slice(-children.length || undefined) ?? []
         if (
-          job.level === 1
+          !transcriptSummary &&
+          (job.level === 1
             ? chain.some((s) => s.versionId && !rendered.has(s.versionId))
             : sent.length !== children.length ||
-              sent.some((s, n) => s.id !== children[n]!.id || s.revision !== children[n]!.revisionId)
+              sent.some((s, n) => s.id !== children[n]!.id || s.revision !== children[n]!.revisionId))
         )
           return yield* new AssemblyFailed({
             reason: "budget",
@@ -375,7 +419,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
                 ? "The summary request cannot render its whole declared chunk."
                 : "The condensation request cannot render exactly its declared parts."
           })
-        if (built.lcm?.omitted.length)
+        if (!transcriptSummary && built.lcm?.omitted.length)
           return yield* new AssemblyFailed({
             reason: "budget",
             message: "The summary request cannot render its whole declared chunk."

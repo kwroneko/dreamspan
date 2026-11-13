@@ -13,8 +13,7 @@ import { placedSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
 import type { Skill } from "./toolLoading.ts"
 import type { FrozenTool } from "./tools.ts"
 
-/** WORKSHOP §10 question 4: the authorized initial policy; change this one constant to
- * retain only timeline text instead. Summaries for workshops remain a separate proposal. */
+/** Legacy step labels for a fresh build when Summaries is explicitly off. */
 export const WORKSHOP_OVERFLOW_STEP_SUMMARIES = true
 
 export interface ContinuityRecord {
@@ -111,9 +110,27 @@ export const previousRun = Effect.fnUntraced(function* (
     snapshot.inputs.model?.connectionId !== fresh.inputs.model?.connectionId ||
     snapshot.inputs.model?.modelId !== fresh.inputs.model?.modelId
   )
-    return { reason: "The model changed, so this request was put together again." } as const
+    return {
+      reason:
+        "The model changed, so this request was put together again. A different tool list makes it read the chat again once at full input cost."
+    } as const
   if (!isDeepStrictEqual(snapshot.inputs.model, fresh.inputs.model))
-    return { reason: "The model or connection settings changed, so this request was put together again." } as const
+    return {
+      reason:
+        "The model or connection settings changed, so this request was put together again. A different tool list makes it read the chat again once at full input cost."
+    } as const
+  if ((snapshot.lcm === undefined) !== (fresh.lcm === undefined))
+    return { reason: "The Summaries setting changed, so this request was put together again." } as const
+  // A carried prefix is a cache optimization, never authority over the live LCM layer.
+  // Compare only coverage/revisions and budgets: recent measures naturally change each turn.
+  if (
+    fresh.lcm &&
+    (!isDeepStrictEqual(snapshot.lcm?.selected, fresh.lcm.selected) ||
+      snapshot.lcm?.cursor !== fresh.lcm.cursor ||
+      !isDeepStrictEqual(snapshot.lcm?.recentBudget, fresh.lcm.recentBudget) ||
+      !isDeepStrictEqual(snapshot.lcm?.layerBudget, fresh.lcm.layerBudget))
+  )
+    return { reason: "The summaries or their limits changed, so this request was put together again." } as const
   if (!isDeepStrictEqual(snapshot.inputs.preset, fresh.inputs.preset))
     return { reason: "The preset changed, so this request was put together again." } as const
   // A capability turned on or off changes what the instructions say the assistant may do.

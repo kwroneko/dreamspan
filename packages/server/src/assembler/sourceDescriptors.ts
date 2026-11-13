@@ -68,7 +68,10 @@ const builtinDescription = (source: Source, labels: SourceLabels): SourceDescrip
       }
     }
     case "note":
-      return { label: `Note “${names.get(source.revision) ?? "unnamed"}”`, slotId: null }
+      return {
+        label: `${source.ownTurn ? "Own-turn note" : "Note"} “${names.get(source.revision) ?? "unnamed"}”`,
+        slotId: null
+      }
     case "summary":
       return {
         label: `Summary, level ${source.level}, messages ${source.from}–${source.to}, revision ${source.revisionNumber}`,

@@ -2,12 +2,38 @@ import { Tooltip } from "./Tooltip.tsx"
 // A list the user reorders: drag an item's handle with a mouse, finger or pen, or focus the
 // handle and press the up and down arrows. The handle keeps its focus as its item moves. Held
 // near the top or bottom of the list's scrolling container, a drag scrolls it.
-import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import {
+  type Dispatch,
+  type ReactNode,
+  type RefObject,
+  type SetStateAction,
+  memo,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState
+} from "react"
 
 interface Drag {
   readonly from: number
   /** Where the item would land: the index it would have once dropped. */
   readonly to: number
+}
+
+interface PointerState {
+  y: number
+  from: number
+  scroller: HTMLElement | null
+}
+
+interface HandleState<Item> {
+  readonly items: ReadonlyArray<Item>
+  readonly itemKey: (item: Item) => string
+  readonly onMove: (from: number, to: number) => void
+  readonly onSelect: ((item: Item) => void) | undefined
+  readonly drag: Drag | null
+  readonly target: (y: number) => number
 }
 
 /** The nearest ancestor that scrolls vertically. */
@@ -41,7 +67,7 @@ export function SortableList<Item>({
   children: (item: Item, handle: ReactNode) => ReactNode
 }) {
   const rows = useRef(new Map<string, HTMLLIElement>())
-  const handles = useRef(new Map<string, HTMLButtonElement>())
+  const handlesRef = useRef(new Map<string, HTMLButtonElement>())
   const [drag, setDrag] = useState<Drag | null>(null)
   const hint = useId()
   /**
@@ -50,7 +76,7 @@ export function SortableList<Item>({
    * pressed near the top doesn't scroll the list away under a pointer that hasn't moved, or
    * that is dragging down.
    */
-  const pointer = useRef<{ y: number; from: number; scroller: HTMLElement | null } | null>(null)
+  const pointerRef = useRef<PointerState | null>(null)
 
   /** The index a pointer at `y` would drop at, from the rows' middles. */
   const target = (y: number) => {
@@ -61,11 +87,16 @@ export function SortableList<Item>({
     return index === -1 ? items.length : index
   }
 
+  const latestRef = useRef<HandleState<Item>>({ items, itemKey, onMove, onSelect, drag, target })
+  useLayoutEffect(() => {
+    latestRef.current = { items, itemKey, onMove, onSelect, drag, target }
+  })
+
   const dragging = drag !== null
   useEffect(() => {
     if (!dragging) return
     let frame = requestAnimationFrame(function step() {
-      const held = pointer.current
+      const held = pointerRef.current
       const box = held?.scroller?.getBoundingClientRect()
       if (held?.scroller && box) {
         // The edges' bands, deeper at the bottom, where a panel's sticky bar may sit.
@@ -86,74 +117,6 @@ export function SortableList<Item>({
     })
     return () => cancelAnimationFrame(frame)
   })
-
-  const handleFor = (item: Item, index: number) => {
-    const key = itemKey(item)
-    return (
-      <Tooltip label="Moves this item within the list.">
-        <button
-          type="button"
-          ref={(element) => {
-            if (element) handles.current.set(key, element)
-            else handles.current.delete(key)
-          }}
-          onClick={() => onSelect?.(item)}
-          aria-label={`Move ${itemLabel(item)}`}
-          data-layout-audit-ignore={namesAsHandles ? "inset: Named drag handle is the whole outline row" : undefined}
-          aria-describedby={hint}
-          className={`${namesAsHandles ? "w-full gap-2 px-1 text-left text-xs" : "size-8"} flex min-h-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing`}
-          onKeyDown={(event) => {
-            const to = event.key === "ArrowUp" ? index - 1 : event.key === "ArrowDown" ? index + 1 : null
-            if (to === null || to < 0 || to >= items.length) return
-            event.preventDefault()
-            onMove(index, to)
-            // Moving a row in the document takes the focus from it: the moved handle gets it back.
-            requestAnimationFrame(() => handles.current.get(key)?.focus())
-          }}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return
-            event.currentTarget.setPointerCapture(event.pointerId)
-            pointer.current = {
-              y: event.clientY,
-              from: event.clientY,
-              scroller: scrollerOf(event.currentTarget)
-            }
-            setDrag({ from: index, to: index })
-          }}
-          onPointerMove={(event) => {
-            if (pointer.current) pointer.current.y = event.clientY
-            if (drag !== null) setDrag({ ...drag, to: target(event.clientY) })
-          }}
-          onPointerUp={() => {
-            if (drag === null) return
-            // Dropping below itself counts the gap it leaves.
-            const to = drag.to > drag.from ? drag.to - 1 : drag.to
-            pointer.current = null
-            setDrag(null)
-            if (to !== drag.from) onMove(drag.from, to)
-          }}
-          onPointerCancel={() => {
-            pointer.current = null
-            setDrag(null)
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-            <circle cx="5.5" cy="3.5" r="1.25" />
-            <circle cx="10.5" cy="3.5" r="1.25" />
-            <circle cx="5.5" cy="8" r="1.25" />
-            <circle cx="10.5" cy="8" r="1.25" />
-            <circle cx="5.5" cy="12.5" r="1.25" />
-            <circle cx="10.5" cy="12.5" r="1.25" />
-          </svg>
-          {namesAsHandles && (
-            <span className="min-w-0 flex-1 truncate" title={itemLabel(item)}>
-              {itemLabel(item)}
-            </span>
-          )}
-        </button>
-      </Tooltip>
-    )
-  }
 
   return (
     <>
@@ -183,11 +146,120 @@ export function SortableList<Item>({
                   : ""
               } ${drag?.from === index ? "opacity-50" : ""}`}
             >
-              {children(item, handleFor(item, index))}
+              {children(
+                item,
+                <SortableHandle
+                  itemId={key}
+                  itemLabel={itemLabel(item)}
+                  named={namesAsHandles}
+                  hint={hint}
+                  handlesRef={handlesRef}
+                  pointerRef={pointerRef}
+                  latestRef={latestRef}
+                  setDrag={setDrag}
+                />
+              )}
             </li>
           )
         })}
       </ol>
     </>
+  )
+}
+
+/** Stable handle contents; callbacks resolve the current item/index only when invoked. */
+const SortableHandle = memo(SortableHandleContent) as typeof SortableHandleContent
+
+function SortableHandleContent<Item>({
+  itemId,
+  itemLabel,
+  named,
+  hint,
+  handlesRef,
+  pointerRef,
+  latestRef,
+  setDrag
+}: {
+  itemId: string
+  itemLabel: string
+  named: boolean
+  hint: string
+  handlesRef: RefObject<Map<string, HTMLButtonElement>>
+  pointerRef: RefObject<PointerState | null>
+  latestRef: RefObject<HandleState<Item>>
+  setDrag: Dispatch<SetStateAction<Drag | null>>
+}) {
+  return (
+    <Tooltip label="Moves this item within the list.">
+      <button
+        type="button"
+        ref={(element) => {
+          if (element) handlesRef.current.set(itemId, element)
+          else handlesRef.current.delete(itemId)
+        }}
+        onClick={() => {
+          const state = latestRef.current
+          const index = state.items.findIndex((item) => state.itemKey(item) === itemId)
+          if (index >= 0) state.onSelect?.(state.items[index]!)
+        }}
+        aria-label={`Move ${itemLabel}`}
+        data-layout-audit-ignore={named ? "inset: Named drag handle is the whole outline row" : undefined}
+        aria-describedby={hint}
+        className={`${named ? "w-full gap-2 px-1 text-left text-xs" : "size-8"} flex min-h-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing`}
+        onKeyDown={(event) => {
+          const state = latestRef.current
+          const index = state.items.findIndex((item) => state.itemKey(item) === itemId)
+          const to = event.key === "ArrowUp" ? index - 1 : event.key === "ArrowDown" ? index + 1 : null
+          if (index < 0 || to === null || to < 0 || to >= state.items.length) return
+          event.preventDefault()
+          state.onMove(index, to)
+          requestAnimationFrame(() => handlesRef.current.get(itemId)?.focus())
+        }}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return
+          const state = latestRef.current
+          const index = state.items.findIndex((item) => state.itemKey(item) === itemId)
+          if (index < 0) return
+          event.currentTarget.setPointerCapture(event.pointerId)
+          pointerRef.current = {
+            y: event.clientY,
+            from: event.clientY,
+            scroller: scrollerOf(event.currentTarget)
+          }
+          setDrag({ from: index, to: index })
+        }}
+        onPointerMove={(event) => {
+          if (pointerRef.current) pointerRef.current.y = event.clientY
+          const { drag, target } = latestRef.current
+          if (drag !== null) setDrag({ ...drag, to: target(event.clientY) })
+        }}
+        onPointerUp={() => {
+          const { drag, onMove } = latestRef.current
+          if (drag === null) return
+          const to = drag.to > drag.from ? drag.to - 1 : drag.to
+          pointerRef.current = null
+          setDrag(null)
+          if (to !== drag.from) onMove(drag.from, to)
+        }}
+        onPointerCancel={() => {
+          pointerRef.current = null
+          setDrag(null)
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <circle cx="5.5" cy="3.5" r="1.25" />
+          <circle cx="10.5" cy="3.5" r="1.25" />
+          <circle cx="5.5" cy="8" r="1.25" />
+          <circle cx="10.5" cy="8" r="1.25" />
+          <circle cx="5.5" cy="12.5" r="1.25" />
+          <circle cx="10.5" cy="12.5" r="1.25" />
+        </svg>
+        {named && (
+          <span className="min-w-0 flex-1 truncate" title={itemLabel}>
+            {itemLabel}
+          </span>
+        )}
+      </button>
+    </Tooltip>
   )
 }

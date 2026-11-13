@@ -26,6 +26,7 @@ const markers: Record<string, readonly [string, IconName, string]> = {
   scenario: ["Scenario", "guidance", "Each character's Scenario, from their cards"],
   personaDescription: ["Persona", "model", "Your persona's Description, from its card"],
   dialogueExamples: ["Examples", "type", "Each character's example messages, from their cards"],
+  ownTurnNotes: ["Own-turn notes", "note", "Card notes sent only on their card’s turns"],
   newestMessage: ["Newest message", "continue", "The newest message of the chat"],
   summaries: ["Summaries", "summary", "The chat's summaries of earlier messages"]
 }
@@ -93,6 +94,7 @@ const sourceHelp: Record<string, readonly [string, string, string?]> = {
     "Older messages may be replaced by summaries or left out to fit the context; Newest message has its own placement."
   ],
   newestMessage: ["the newest message of the chat", "Edit the message in the chat."],
+  ownTurnNotes: ["the speaker’s own-turn notes", "Edit these notes in the card’s Notes tab."],
   summaries: ["the chat's summaries of earlier messages", "Edit the summaries in the chat's Summaries tab."]
 }
 

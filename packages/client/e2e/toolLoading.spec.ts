@@ -57,6 +57,36 @@ test.beforeAll(async () => {
     const chunks: Array<Buffer> = []
     req.on("data", (c: Buffer) => chunks.push(c))
     req.on("end", () => {
+      if (req.url?.startsWith("/v1/chat/completions")) {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          messages: Array<{ role: string; tool_call_id?: string }>
+        }
+        const answered = body.messages.filter((m) => m.role === "tool").at(-1)?.tool_call_id
+        const name = !answered ? "load_skill" : "call_tool"
+        const args = !answered ? { name: "cards" } : { name: "read_card", arguments: { card: "Assistant" } }
+        const delta =
+          answered === "toolu_read"
+            ? { content: "The Assistant card is practical and brief." }
+            : {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: !answered ? "toolu_load" : "toolu_read",
+                    type: "function",
+                    function: { name, arguments: JSON.stringify(args) }
+                  }
+                ]
+              }
+        res.writeHead(200, { "content-type": "text/event-stream" })
+        for (const [d, finish] of [
+          [delta, null],
+          [{}, answered === "toolu_read" ? "stop" : "tool_calls"]
+        ])
+          res.write(
+            `data: ${JSON.stringify({ id: "fake", object: "chat.completion.chunk", model: "mock", choices: [{ index: 0, delta: d, finish_reason: finish }] })}\n\n`
+          )
+        return res.end("data: [DONE]\n\n")
+      }
       if (!req.url?.startsWith("/v1/messages")) return res.writeHead(404).end()
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as {
         messages?: Array<{ content: string | Array<{ type: string; tool_use_id?: string }> }>
@@ -96,73 +126,85 @@ const settled = (chatId: ChatId, slotId: SlotId) =>
     })
   )
 
-for (const width of [1440, 390])
-  for (const theme of ["light", "dark"] as const)
-    test(`tools sent, loaded and never loaded, in the run inspector, at ${width} ${theme}`, async ({ page }, info) => {
-      test.setTimeout(120_000)
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-      await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      const run = await admin((api) =>
-        Effect.gen(function* () {
-          const connection = yield* api.CreateConnection({
-            kind: "anthropic",
-            settings: {
-              name: "Synthetic Claude",
-              baseUrl: provider.url,
-              compat: {},
-              cacheTtlS: null,
-              maxConcurrent: null,
-              presetOverrideRefId: null
-            },
-            apiKey: "sk-ant-made-up-for-tests-0000"
+for (const transport of ["native", "dispatcher"] as const)
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const)
+      test(`tools sent, loaded and never loaded, in the ${transport} run inspector, at ${width} ${theme}`, async ({
+        page
+      }, info) => {
+        test.setTimeout(120_000)
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+        const run = await admin((api) =>
+          Effect.gen(function* () {
+            const connection = yield* api.CreateConnection({
+              kind: transport === "native" ? "anthropic" : "openai-chat",
+              settings: {
+                name: "Synthetic Claude",
+                baseUrl: transport === "native" ? provider.url : `${provider.url}/v1`,
+                compat: {},
+                cacheTtlS: null,
+                maxConcurrent: null,
+                presetOverrideRefId: null,
+                ...(transport === "dispatcher" ? { providerSettings: { toolLoading: "dispatcher" as const } } : {})
+              },
+              apiKey: "sk-ant-made-up-for-tests-0000"
+            })
+            const model = yield* api.AddUserModel({
+              connectionId: connection.id,
+              key: transport === "native" ? "claude-sonnet-4-5" : "mock",
+              overrides: {}
+            })
+            yield* api.ChangeGenerationDefaults({ change: { model: { connection: connection.id, model: model.id } } })
+            const chat = yield* api.CreateWorkshop({ title: `Tool loading ${width} ${theme}` })
+            const sent = yield* api.SendMessage({
+              chatId: chat.id,
+              parentSlotId: chat.activeLeafSlotId,
+              branch: false,
+              content: "Read the Assistant card."
+            })
+            if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
+            const reply = yield* api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
+            if (reply._tag !== "Posted") return yield* Effect.die("unexpected queue")
+            return { chatId: chat.id, slotId: reply.entry.slotId }
           })
-          const model = yield* api.AddUserModel({
-            connectionId: connection.id,
-            key: "claude-sonnet-4-5",
-            overrides: {}
+        )
+        const entry = await settled(run.chatId, run.slotId)
+        expect(entry.version.status).toBe("complete")
+        // A new process must derive the same loaded groups from the saved transcript.
+        await server().restart()
+        await page.goto(`${server().url}/chats/${run.chatId}/context/${entry.version.id}#run-steps`)
+
+        const tools = page.getByRole("region", { name: "Tools offered" })
+        const sentFirst = tools.getByRole("region", { name: "Sent from the start" })
+        const loaded = tools.getByRole("region", { name: "Loaded during the run" })
+        const never = tools.getByRole("region", { name: "Never loaded" })
+        await expect(sentFirst).toBeVisible({ timeout: 30_000 })
+        await expect(sentFirst.getByRole("heading")).toHaveText(
+          new RegExp(`^Sent from the start · ${transport === "native" ? 4 : 5} tools, [\\d,]+ tokens$`)
+        )
+        await expect(sentFirst.getByRole("region", { name: "list_library" })).toBeVisible()
+        await expect(sentFirst.getByRole("region", { name: "load_skill" })).toBeVisible()
+        // The Cards skill's seven tools, with ownturn1's move_card_text and edit_card_note.
+        await expect(loaded.getByRole("heading")).toHaveText(/^Loaded during the run · 7 tools, [\d,]+ tokens$/)
+        await expect(loaded.getByRole("region", { name: "read_card" })).toContainText(
+          /[\d,]+ tokens · loaded by load_skill/
+        )
+        await expect(never.getByRole("region", { name: "start_chat" })).toBeVisible()
+        await expect(never.getByRole("region", { name: "read_card" })).toHaveCount(0)
+
+        await sentFirst.scrollIntoViewIfNeeded()
+        if (shots) {
+          mkdirSync(shots, { recursive: true })
+          await page.screenshot({
+            path: resolve(shots, `tool-loading-${transport}-${width}-${theme}.png`),
+            animations: "disabled"
           })
-          yield* api.ChangeGenerationDefaults({ change: { model: { connection: connection.id, model: model.id } } })
-          const chat = yield* api.CreateWorkshop({ title: `Tool loading ${width} ${theme}` })
-          const sent = yield* api.SendMessage({
-            chatId: chat.id,
-            parentSlotId: chat.activeLeafSlotId,
-            branch: false,
-            content: "Read the Assistant card."
-          })
-          if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
-          const reply = yield* api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
-          if (reply._tag !== "Posted") return yield* Effect.die("unexpected queue")
-          return { chatId: chat.id, slotId: reply.entry.slotId }
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+        await expectLayout(page, info, `tool-loading-${transport}-${width}-${theme}`, {
+          scope: '[aria-label="Tools offered"]'
         })
-      )
-      const entry = await settled(run.chatId, run.slotId)
-      expect(entry.version.status).toBe("complete")
-      // A new process must derive the same loaded groups from the saved transcript.
-      await server().restart()
-      await page.goto(`${server().url}/chats/${run.chatId}/context/${entry.version.id}#run-steps`)
-
-      const tools = page.getByRole("region", { name: "Tools offered" })
-      const sentFirst = tools.getByRole("region", { name: "Sent from the start" })
-      const loaded = tools.getByRole("region", { name: "Loaded during the run" })
-      const never = tools.getByRole("region", { name: "Never loaded" })
-      await expect(sentFirst).toBeVisible({ timeout: 30_000 })
-      await expect(sentFirst.getByRole("heading")).toHaveText(/^Sent from the start · 4 tools, [\d,]+ tokens$/)
-      await expect(sentFirst.getByRole("region", { name: "list_library" })).toBeVisible()
-      await expect(sentFirst.getByRole("region", { name: "load_skill" })).toBeVisible()
-      await expect(loaded.getByRole("heading")).toHaveText(/^Loaded during the run · 5 tools, [\d,]+ tokens$/)
-      await expect(loaded.getByRole("region", { name: "read_card" })).toContainText(
-        /[\d,]+ tokens · loaded by load_skill/
-      )
-      await expect(never.getByRole("region", { name: "start_chat" })).toBeVisible()
-      await expect(never.getByRole("region", { name: "read_card" })).toHaveCount(0)
-
-      await sentFirst.scrollIntoViewIfNeeded()
-      if (shots) {
-        mkdirSync(shots, { recursive: true })
-        await page.screenshot({ path: resolve(shots, `tool-loading-${width}-${theme}.png`), animations: "disabled" })
-      }
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-      await expectLayout(page, info, `tool-loading-${width}-${theme}`, { scope: '[aria-label="Tools offered"]' })
-    })
+      })

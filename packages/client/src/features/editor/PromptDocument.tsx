@@ -21,7 +21,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import { addPresetPrompt, writePresetOrder } from "./presetDraft.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
-import { charDefinitions, newestMessage, perFieldMarkers, presetOrder } from "@rp/shared/presetOrder.ts"
+import { charDefinitions, newestMessage, ownTurnNotes, perFieldMarkers, presetOrder } from "@rp/shared/presetOrder.ts"
 import { CONDITION_LABELS, conditionOf, presetWarnings, TRIGGERS } from "@rp/shared/presetConditions.ts"
 import { DIRECTION_PROMPT } from "@rp/shared/endOfRequest.ts"
 import { type FieldPath, textField } from "@rp/shared/editing.ts"
@@ -258,7 +258,7 @@ function PromptOptions({ store, path, prompt }: { store: EditorStore; path: Fiel
 
 /** Main and ST's system prompts keep their place; markers have no text to lose. */
 const deletable = (entry: PromptOrderEntry, prompt: PresetPrompt) =>
-  entry.identifier !== "main" && !prompt.system_prompt && !prompt.marker
+  entry.identifier === "ownTurnNotes" || (entry.identifier !== "main" && !prompt.system_prompt && !prompt.marker)
 
 /** How a prompt is sent: role, position, and any condition or generation types. */
 function SendBadges({ prompt }: { prompt: PresetPrompt }) {
@@ -310,6 +310,7 @@ interface RowActions {
   readonly insertBelow: () => void
   /** Offered while the order has no Definitions marker (DESIGN §5.0). */
   readonly definitionsBelow: (() => void) | undefined
+  readonly ownTurnBelow: (() => void) | undefined
 }
 
 function PromptBlock({
@@ -359,14 +360,16 @@ function PromptBlock({
   const toggleOptions = useCallback(() => latest.current.onToggleOptions(), [])
   const canOpenLarge = rowActions.openLarge !== undefined
   const canDefine = rowActions.definitionsBelow !== undefined
+  const canAddOwnTurn = rowActions.ownTurnBelow !== undefined
   const actions = useMemo<RowActions>(
     () => ({
       openLarge: canOpenLarge ? () => latest.current.rowActions.openLarge?.() : undefined,
       insertAbove: () => latest.current.rowActions.insertAbove(),
       insertBelow: () => latest.current.rowActions.insertBelow(),
+      ownTurnBelow: canAddOwnTurn ? () => latest.current.rowActions.ownTurnBelow?.() : undefined,
       definitionsBelow: canDefine ? () => latest.current.rowActions.definitionsBelow?.() : undefined
     }),
-    [canOpenLarge, canDefine]
+    [canOpenLarge, canDefine, canAddOwnTurn]
   )
   const path = at(entry.identifier)
   const namePath = [...path, "name"]
@@ -533,6 +536,15 @@ function PromptBlock({
       <MenuItem icon="plus" onClick={actions.insertBelow} description="A new empty prompt just below this one">
         Insert a prompt below
       </MenuItem>
+      {canAddOwnTurn && (
+        <MenuItem
+          icon="note"
+          onClick={actions.ownTurnBelow}
+          description="Adds the speaker’s own-turn notes here. Drag the marker to move them."
+        >
+          Insert Own-turn notes below
+        </MenuItem>
+      )}
       {canDefine && (
         <MenuItem icon="insert" onClick={actions.definitionsBelow} description={DEFINITIONS_HINT}>
           Insert a {DEFINITIONS_LABEL.toLowerCase()} below
@@ -864,6 +876,7 @@ export function PromptDocument({
       forbid_overrides: true
     })
   }
+  const hasOwnTurn = order.some((e) => e.identifier === ownTurnNotes.identifier)
   const hasDefinitions = order.some((e) => e.identifier === charDefinitions.identifier)
   const definitionsOn = order.some((e) => e.identifier === charDefinitions.identifier && e.enabled)
   const addDefinitions = (index: number) =>
@@ -1066,6 +1079,16 @@ export function PromptDocument({
           const index = order.indexOf(entry)
           return (
             <>
+              {entry.identifier === "ownTurnNotes" && (
+                <>
+                  {slot("Own-turn notes", (p) => p.mode === "section" && p.section === "own_turn")}
+                  {index < history && (
+                    <p role="status" className="px-3 py-1 text-sm text-warning">
+                      Above the history, own-turn notes rewrite the cached part whenever the speaker changes.
+                    </p>
+                  )}
+                </>
+              )}
               {entry.identifier === "charDescription" &&
                 slot("Notes with the definitions", (p) => p.mode === "section" && p.section === "card")}
               {entry.identifier === "chatHistory" && (
@@ -1107,7 +1130,8 @@ export function PromptDocument({
                     openLarge: onOpenLarge && (() => onOpenLarge(entry.identifier)),
                     insertAbove: () => add(index),
                     insertBelow: () => add(index + 1),
-                    definitionsBelow: hasDefinitions ? undefined : () => addDefinitions(index + 1)
+                    definitionsBelow: hasDefinitions ? undefined : () => addDefinitions(index + 1),
+                    ownTurnBelow: hasOwnTurn ? undefined : () => addAt(index + 1, ownTurnNotes)
                   }}
                   remove={() => {
                     if (entry.identifier === "main") return

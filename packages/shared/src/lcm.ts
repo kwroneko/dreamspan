@@ -108,6 +108,17 @@ export class LcmState extends Schema.Class<LcmState>("LcmState")({
   leafSlotId: SlotId,
   enabled: Schema.Boolean,
   layer: Schema.Array(LcmSummary),
+  /** In-run summaries on this path; read-only, originals remain in the run inspector. */
+  runSummaries: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        from: Schema.Int,
+        through: Schema.Int,
+        content: Schema.String
+      })
+    )
+  ),
   failed: Schema.Array(LcmSummary),
   jobs: Schema.Array(LcmJob),
   cursorDepth: Schema.Int,

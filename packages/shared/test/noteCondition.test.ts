@@ -19,6 +19,12 @@ const note = (condition: unknown) => ({
 })
 
 describe("a note's condition", () => {
+  it("keeps a self-referring card turn without a library id", () => {
+    expect(decode({ when: "own_turn" })).toEqual({ when: "own_turn" })
+    expect(encode(decode({ when: "own_turn" }))).toEqual({ when: "own_turn" })
+    expect(conditionCards(decode({ when: "own_turn" }))).toEqual([])
+  })
+
   it("reads the current shape, a list of cards", () => {
     expect(decode({ when: "turn", cards: ["ethan", "mira"] })).toEqual({ when: "turn", cards: ids("ethan", "mira") })
     expect(decode({ when: "not_muted", cards: ["ethan"] })).toEqual({ when: "not_muted", cards: ids("ethan") })

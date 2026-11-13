@@ -11,6 +11,7 @@ interface OpenEditor {
   /** The ref it edits and the editor's store, for a feature that acts on the same changes. */
   readonly refId?: string
   readonly store?: unknown
+  readonly unsaved?: () => boolean
 }
 
 const open = new Map<OpenEditor, number>()
@@ -60,3 +61,7 @@ export const refreshOpenEditors = () => {
   changes++
   return Promise.all([...open.keys()].map((editor) => editor.refresh()))
 }
+
+/** Entries with local text, even if browser backup storage is unavailable. */
+export const unsavedEditorRefs = () =>
+  [...open.keys()].flatMap((editor) => (editor.refId && editor.unsaved?.() ? [editor.refId] : []))

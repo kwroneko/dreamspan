@@ -29,9 +29,9 @@ export class ChatContextsApi extends RpcGroup.make(
     error: Schema.Union([NotFound, ServerError])
   }),
   /**
-   * Undo of a scene check's away mark (spec/CHARACTER-CONTEXT.md §5): the character counts as
-   * present there, and for the messages written since. False when the mark isn't the scene
-   * check's, or no longer applies.
+   * Correct a scene check's departure or return only in this tab's branch, through its next
+   * presence mark. Existing branches keep their marks and knowledge; later children inherit
+   * this correction. False when the mark isn't the scene check's, or no longer applies.
    */
   Rpc.make("UndoAwayMark", {
     payload: { chatId: ChatId, forkId: ForkId, eventId: Schema.String },

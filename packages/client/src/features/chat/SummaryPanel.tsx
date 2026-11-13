@@ -897,6 +897,23 @@ export function SummaryPanel({
           </ul>
         </section>
       )}
+      {(lcm.runSummaries?.length ?? 0) > 0 && (
+        <section aria-label="Run summaries" className="flex flex-col gap-2">
+          {heading(
+            "Earlier steps",
+            "Summaries made during a long run. Original calls and results remain in the request inspector; Changes and Undo still use their saved records."
+          )}
+          {lcm.runSummaries!.map((summary, n) => (
+            <Disclosure
+              key={summary.id}
+              title={`Summary of earlier steps ${n + 1}`}
+              hint="Opens these summary notes. Original steps remain available in the request inspector."
+            >
+              <p className="whitespace-pre-wrap break-words text-sm">{summary.content}</p>
+            </Disclosure>
+          ))}
+        </section>
+      )}
       {lcm.layer.length > 0 ? (
         <section className="flex flex-col gap-2">
           {heading(
@@ -917,9 +934,11 @@ export function SummaryPanel({
           </ul>
         </section>
       ) : (
-        <p className="text-sm text-muted">
-          Nothing is summarized yet. Summaries appear as the chat outgrows what the model is sent.
-        </p>
+        !lcm.runSummaries?.length && (
+          <p className="text-sm text-muted">
+            Nothing is summarized yet. Summaries appear as the chat outgrows what the model is sent.
+          </p>
+        )
       )}
       {extra !== null && (
         <section aria-label="Not in use" className="flex flex-col gap-2">

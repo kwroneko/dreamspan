@@ -9,7 +9,8 @@ import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { Effect, Stream } from "effect"
 import { spawn } from "node:child_process"
 import type { ServerResponse } from "node:http"
-import { Reader } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { Summarizer } from "../src/lcm/Summarizer.ts"
 import { client, clientAt, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -502,6 +503,200 @@ for (const phase of ["approval", "delegated reply"] as const)
               assert.strictEqual(finished(events, entry.version.id)!.content, "Recovered.")
             }
           }).pipe(Effect.provide(serverLayer(config)))
+        )
+      })
+    },
+    { timeout: 180_000, tags: ["slow"] }
+  )
+
+for (const phase of ["summary response", "saved compaction"] as const)
+  it.live(
+    `workshop killed during ${phase} resumes its originals without automatic or duplicate completed summaries`,
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        let recovering = false,
+          reached = false,
+          summaries = 0
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((req, res) => {
+              if (req.body?.model === "synthetic-summary") {
+                summaries++
+                if (!recovering && phase === "summary response") {
+                  reached = true
+                  return
+                }
+                return sse(
+                  res,
+                  completionChunks(["Read keeper card-7; no changes or approvals. read_run recovers originals."], {})
+                )
+              }
+              if (!JSON.stringify(req.body?.messages).includes("Workshop summary")) {
+                res.writeHead(400, { "content-type": "application/json" })
+                res.end(JSON.stringify({ error: { message: "Synthetic parked request" } }))
+                return
+              }
+              if (!recovering && phase === "saved compaction") {
+                reached = true
+                return
+              }
+              sse(res, completionChunks(["Recovered after summary."], {}))
+            })
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const seed = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const api = yield* client(),
+              reader = yield* Reader,
+              writer = yield* Writer
+            const user = yield* api.Whoami()
+            const connection = yield* api.CreateConnection({
+              kind: "openai-chat",
+              settings: {
+                name: "Synthetic crash",
+                baseUrl: `${mock.url}/v1`,
+                compat: {},
+                cacheTtlS: null,
+                maxConcurrent: null,
+                presetOverrideRefId: null
+              }
+            })
+            const main = yield* api.AddUserModel({
+              connectionId: connection.id,
+              key: "synthetic-main",
+              overrides: { context: 32768, maxOutput: 8192 }
+            })
+            const summary = yield* api.AddUserModel({
+              connectionId: connection.id,
+              key: "synthetic-summary",
+              overrides: { context: 32768, maxOutput: 2048 }
+            })
+            yield* api.ChangeGenerationDefaults({ change: { model: { connection: connection.id, model: main.id } } })
+            const chat = yield* api.CreateWorkshop({})
+            yield* writer.AddStateEvent({
+              userId: user.id,
+              chatId: chat.id,
+              slotId: null,
+              versionId: null,
+              scope: "summarizer",
+              data: { key: "model.binding", value: { connection: connection.id, model: summary.id } }
+            })
+            const events: ChatEvent[] = []
+            yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+              Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+              Effect.forkScoped
+            )
+            yield* eventually(() => events.length > 0)
+            const sent = yield* posted(
+              api.SendMessage({
+                chatId: chat.id,
+                parentSlotId: chat.activeLeafSlotId,
+                branch: false,
+                content: "Synthetic crash exercise."
+              })
+            )
+            const reply = yield* posted(
+              api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false })
+            )
+            yield* eventually(() => finished(events, reply.entry.version.id)?.status === "failed")
+            const material = yield* reader.RolloutMaterial({ userId: user.id, versionId: reply.entry.version.id })
+            const transcript: import("@earendil-works/pi-agent-core").AgentMessage[] = [
+              { role: "rpRequest", timestamp: 0 }
+            ]
+            for (let n = 0; n < 30; n++)
+              transcript.push(
+                {
+                  role: "assistant",
+                  api: "openai-completions",
+                  provider: "openai",
+                  model: "synthetic-main",
+                  timestamp: 0,
+                  stopReason: "toolUse",
+                  usage: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    totalTokens: 0,
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+                  },
+                  content: [{ type: "toolCall", id: `kept-${n}`, name: "read_card", arguments: { card: "keeper" } }]
+                },
+                {
+                  role: "toolResult",
+                  toolCallId: `kept-${n}`,
+                  toolName: "read_card",
+                  isError: false,
+                  timestamp: 0,
+                  content: [{ type: "text", text: `Original ${n} card-7. ` + "Synthetic detail. ".repeat(700) }]
+                }
+              )
+            yield* writer.SaveRolloutTranscript({
+              userId: user.id,
+              rolloutId: material.rolloutId,
+              transcript: JSON.stringify(transcript),
+              steps: 30
+            })
+            return { chatId: chat.id, versionId: reply.entry.version.id, slotId: reply.entry.slotId }
+          }).pipe(Effect.provide(serverLayer(config, undefined, Summarizer.manual)))
+        )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const process = yield* spawnServer(config),
+              api = yield* clientAt(process.port)
+            const row = (yield* api.ReadPath({
+              chatId: seed.chatId,
+              leafSlotId: null,
+              range: { _tag: "Bottom" },
+              limit: 10
+            })).entries.at(-1)!
+            yield* api.ResumeVersion({ versionId: seed.versionId, expectedRowVersion: row.rowVersion })
+            yield* eventually(() => reached, 60_000)
+            yield* process.kill()
+          })
+        )
+        recovering = true
+        const requestsAtCrash = mock.requests().length,
+          summariesAtCrash = summaries
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const api = yield* client(),
+              reader = yield* Reader,
+              user = yield* api.Whoami()
+            const row = (yield* api.ReadPath({
+              chatId: seed.chatId,
+              leafSlotId: null,
+              range: { _tag: "Bottom" },
+              limit: 10
+            })).entries.at(-1)!
+            assert.strictEqual(row.version.status, "interrupted")
+            const old = yield* reader.RolloutMaterial({ userId: user.id, versionId: row.version.id })
+            const oldMessages = JSON.parse(old.transcript!) as Array<{ role: string }>
+            assert.strictEqual(
+              oldMessages.some((m) => m.role === "rpCompaction"),
+              phase === "saved compaction"
+            )
+            yield* Effect.sleep(1000)
+            assert.lengthOf(mock.requests(), requestsAtCrash, "restart never resumes the run automatically")
+            const events: ChatEvent[] = []
+            yield* api.SubscribeChat({ chatId: seed.chatId }).pipe(
+              Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+              Effect.forkScoped
+            )
+            yield* eventually(() => events.length > 0)
+            const resumed = yield* api.ResumeVersion({ versionId: row.version.id, expectedRowVersion: row.rowVersion })
+            yield* eventually(() => finished(events, resumed.version.id)?.status === "complete", 60_000)
+            const kept = yield* reader.RolloutMaterial({ userId: user.id, versionId: resumed.version.id })
+            assert.lengthOf(
+              (JSON.parse(kept.transcript!) as Array<{ role: string }>).filter((m) => m.role === "toolResult"),
+              30
+            )
+            if (phase === "saved compaction")
+              assert.strictEqual(summaries, summariesAtCrash, "a committed compaction is never sent again")
+            else assert.isAbove(summaries, summariesAtCrash, "explicit Resume retries interrupted inference")
+          }).pipe(Effect.provide(serverLayer(config, undefined, Summarizer.manual)))
         )
       })
     },

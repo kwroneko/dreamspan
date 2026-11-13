@@ -670,6 +670,7 @@ const tools = (t: Effect.Success<ReturnType<typeof story>>, snapshot: ContextSna
     versionId: "unused" as VersionId,
     leafSlotId: leaf,
     viewers: generationOf(snapshot).viewers,
+    speaker: snapshot.inputs.speaker,
     rolloutId: "test",
     toolCallId: "test",
     cache: new Map(),
@@ -796,8 +797,8 @@ describe("merged chats per viewer (unit C6)", () => {
         if (again._tag === "Rebuilt")
           assert.deepStrictEqual((JSON.parse(again.snapshot) as ContextSnapshot).request, wren.request)
         const read = tools(t, wren)
-        assert.include(yield* read("read_messages", { from: 1, count: 20 }), "History tools are unavailable")
-        assert.include(yield* read("search_chat", { query: "DOCKS-SHARED" }), "History tools are unavailable")
+        assert.include(yield* read("read_messages", { from: 1, count: 20 }), "DOCKS-SHARED")
+        assert.include(yield* read("search_chat", { query: "DOCKS-SHARED" }), "the tide turns")
         assert.notInclude(yield* read("search_chat", { query: "MERGED-SECRET" }), "crate")
         const join = (yield* t.reader.ReadPath({
           userId: t.userId,
@@ -817,7 +818,7 @@ describe("merged chats per viewer (unit C6)", () => {
         const edited = yield* t.contextFor(t.wren)
         assert.include(sentText(edited), "the tide ebbs.")
         assert.notInclude(sentText(edited), "crate")
-        assert.include(yield* tools(t, edited)("search_chat", { query: "ebbs" }), "History tools are unavailable")
+        assert.include(yield* tools(t, edited)("search_chat", { query: "ebbs" }), "the tide ebbs")
         // One shared context sends the join as written.
         yield* t.event({ key: "context.per_speaker", value: "shared" })
         const shared = sentText(yield* t.contextFor(t.wren))
@@ -1085,6 +1086,47 @@ describe("the agent's read tools in a separate context", () => {
         assert.notProperty(forShared.inputs, "viewer")
         assert.include(yield* tools(shared, forShared)("search_chat", { query: "vault" }), "vault code")
 
+        yield* shared.writer.CreateEntity({
+          userId: shared.userId,
+          kind: "note",
+          label: "Mira private card note",
+          subtitle: "",
+          doc: {
+            schema_version: 1,
+            title: "Mira private card note",
+            content: "PRIVATE-NOTE-TEXT",
+            owner: { card: shared.mira },
+            condition: { when: "own_turn" },
+            placement: { mode: "section", section: "own_turn" },
+            exportable: true,
+            agent_editable: true
+          },
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        yield* shared.event({ key: "cast.role", value: { entity: shared.wren, role: "narrator" } })
+        for (const speaker of [shared.wren, shared.tobin]) {
+          const sharedTools = tools(shared, yield* shared.contextFor(speaker))
+          assert.notInclude(yield* sharedTools("list_notes", {}), "Mira private card note")
+          assert.include(
+            yield* sharedTools("edit_note", {
+              note: "Mira private card note",
+              find: "PRIVATE-NOTE-TEXT",
+              replace: "x"
+            }),
+            "No note is called"
+          )
+          assert.include(
+            yield* sharedTools("switch_note", { note: "Mira private card note", on: true }),
+            "No note is called"
+          )
+        }
+        assert.include(
+          yield* tools(shared, yield* shared.contextFor(shared.mira))("list_notes", {}),
+          "Mira private card note"
+        )
+
         const t = yield* story("separate")
         const note = (title: string, condition: object | null) =>
           Effect.gen(function* () {
@@ -1131,7 +1173,7 @@ describe("the agent's read tools in a separate context", () => {
 })
 
 describe("Undo of a scene check's away mark (unit C9)", () => {
-  it.live("a correction covers inherited messages at its configured branch scope and can be reversed", () =>
+  it.live("a correction covers inherited messages only in its viewing branch and can be reversed", () =>
     run(
       Effect.gen(function* () {
         const t = yield* story("separate")
@@ -1180,8 +1222,7 @@ describe("Undo of a scene check's away mark (unit C9)", () => {
         })
         assert.include(yield* peerContext, "INHERITED-SECRET")
         const original = sentText(yield* t.contextFor(t.wren))
-        if (process.env.CONTEXTS_TEST_BRANCH_SCOPE === "branch") assert.notInclude(original, "INHERITED-SECRET")
-        else assert.include(original, "INHERITED-SECRET")
+        assert.notInclude(original, "INHERITED-SECRET", "Undo on the peer must leave the original branch unchanged")
         const history = yield* t.reader.ListHistoryEdits({ userId: t.userId, chatId: t.chatId, forkId: peer.id })
         const record = history.find((edit) => edit.title === "Correct scene check")!
         assert.strictEqual(
@@ -1302,11 +1343,28 @@ describe("Undo of a scene check's away mark (unit C9)", () => {
         assert.lengthOf(undone!.corrected, 3)
         assert.include(sentText(yield* t.contextFor(t.wren)), "The password is heron.")
         assert.include(sentText(yield* t.contextFor(t.wren)), "Mira repeats it twice.")
+        const correctedRequest = yield* t.contextFor(t.wren)
+        for (const forcePath of [false, true]) {
+          const read = tools(t, correctedRequest, forcePath)
+          assert.include(yield* read("search_chat", { query: "heron" }), "The password is heron.")
+          assert.include(yield* read("read_messages", { from: 1, count: 30 }), "The password is heron.")
+        }
+        const peerSearch = yield* t.reader.SearchChat({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: peer.id,
+          leafSlotId: last.slotId,
+          tokens: ["heron"],
+          before: null,
+          limit: 10,
+          viewers: [t.wren]
+        })
+        assert.deepStrictEqual(peerSearch, [], "the untouched branch's SQL search keeps the secret hidden")
         // What she was away for before the mark stays unknown to her.
-        assert.notInclude(sentText(yield* t.contextFor(t.wren)), "vault code")
-        // Every branch showing those messages: the mark no longer applies there either.
+        assert.notInclude(sentText(correctedRequest), "vault code")
+        // Only the branch in this tab is corrected.
         assert.notInclude(yield* awayIn(t.fork()), t.wren)
-        assert.notInclude(yield* awayIn(peer.id), t.wren)
+        assert.include(yield* awayIn(peer.id), t.wren)
         const events = yield* t.reader.StateEventsAt({
           userId: t.userId,
           chatId: t.chatId,
@@ -1347,8 +1405,95 @@ describe("Undo of a scene check's away mark (unit C9)", () => {
           changesetId: correction.id
         })
         assert.strictEqual(reverted.undone, 1)
-        assert.include(yield* awayIn(peer.id), t.wren, "reversing an all-branch correction retains its recorded scope")
+        assert.include(yield* awayIn(peer.id), t.wren, "History Undo leaves the other branch alone")
         assert.notInclude(sentText(yield* t.contextFor(t.wren)), "The password is heron.")
+      })
+    )
+  )
+
+  it.live("undoing the scene check's 'back' keeps her away: what was written since leaves her context again", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        yield* t.event({ key: "away.set", value: { entity: t.wren, away: true, source: "decision" } })
+        yield* t.say(t.tobin, "WHILE-AWAY")
+        // The scene check judged that Wren came back here.
+        const back = yield* t.event({ key: "away.set", value: { entity: t.wren, away: false, source: "decision" } })
+        const first = yield* t.say(t.tobin, "AFTER-BACK-ONE")
+        const last = yield* t.say(t.mira, "AFTER-BACK-TWO")
+        const { fork: peer } = yield* t.api.CreateFork({
+          chatId: t.chatId,
+          fromForkId: t.fork(),
+          atSlotId: last.slotId
+        })
+        const wrens = Effect.map(t.contextFor(t.wren), sentText)
+        assert.include(yield* wrens, "AFTER-BACK-ONE")
+        assert.notInclude(yield* wrens, "WHILE-AWAY")
+        const awayIn = (forkId: ForkId) =>
+          Effect.map(
+            t.reader.StateEventsAt({ userId: t.userId, chatId: t.chatId, slotId: last.slotId, forkId }),
+            (events) => foldState(events).away
+          )
+        assert.notInclude((yield* awayIn(t.fork())) ?? [], t.wren)
+
+        // Only a scene check's mark can be undone: the user's own "back" is refused, both ways.
+        const user = yield* t.event({ key: "away.set", value: { entity: t.mira, away: false } })
+        assert.isNull(
+          yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: user.id })
+        )
+
+        const undone = yield* t.writer.CorrectPresence({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          eventId: back.id
+        })
+        assert.isNotNull(undone)
+        assert.includeMembers([...undone!.corrected], [first.version.id, last.version.id])
+        assert.notInclude(yield* wrens, "AFTER-BACK-ONE")
+        assert.notInclude(yield* wrens, "AFTER-BACK-TWO")
+        assert.notInclude(yield* wrens, "WHILE-AWAY")
+        assert.include(yield* awayIn(t.fork()), t.wren)
+        assert.notInclude(yield* awayIn(peer.id), t.wren)
+        const events = yield* t.reader.StateEventsAt({
+          userId: t.userId,
+          chatId: t.chatId,
+          slotId: last.slotId,
+          forkId: t.fork()
+        })
+        assert.deepInclude(
+          events.map((e) => e.data),
+          { key: "away.set", value: { entity: t.wren, away: true } },
+          "the user's own event"
+        )
+        // Undone once: the mark no longer applies, and the compensating event is no scene check's.
+        assert.isNull(
+          yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: back.id })
+        )
+        assert.isNull(
+          yield* t.writer.CorrectPresence({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.fork(),
+            eventId: undone!.eventId
+          })
+        )
+        // History keeps both and can take the correction back: she is back, and sees them again.
+        const history = yield* t.reader.ListHistoryEdits({ userId: t.userId, chatId: t.chatId, forkId: t.fork() })
+        const correction = history.find((edit) => edit.title === "Correct scene check")!
+        assert.include(correction.items[0]!.before, '"away":false')
+        assert.include(correction.items[0]!.after, '"away":true')
+        const reverted = yield* t.writer.UndoHistoryEdit({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          changesetId: correction.id
+        })
+        assert.strictEqual(reverted.undone, 1)
+        assert.include(yield* wrens, "AFTER-BACK-ONE")
+        assert.include(yield* wrens, "AFTER-BACK-TWO")
+        assert.notInclude(yield* wrens, "WHILE-AWAY")
+        assert.notInclude((yield* awayIn(peer.id)) ?? [], t.wren)
       })
     )
   )
@@ -1397,7 +1542,8 @@ it.live("peer-authored handwritten swipes retain their later independent away ma
       const before = yield* t.reader.KnowersOf({
         userId: t.userId,
         chatId: t.chatId,
-        versionIds: [own.id]
+        versionIds: [own.id],
+        forkId: peer.id
       })
       assert.notInclude(before[0]!.knowers!, t.wren)
       yield* t.writer.CorrectPresence({
@@ -1409,10 +1555,256 @@ it.live("peer-authored handwritten swipes retain their later independent away ma
       const after = yield* t.reader.KnowersOf({
         userId: t.userId,
         chatId: t.chatId,
-        versionIds: [original.version.id, own.id]
+        versionIds: [original.version.id, own.id],
+        forkId: peer.id
       })
-      assert.include(after[0]!.knowers!, t.wren)
-      assert.notInclude(after[1]!.knowers!, t.wren, "the peer swipe was written under the user's independent away mark")
+      assert.notInclude(after[0]!.knowers!, t.wren, "the peer retains the shared version's original knowledge")
+      assert.notInclude(after[1]!.knowers!, t.wren, "the peer keeps its own away mark")
+      const main = yield* t.reader.KnowersOf({
+        userId: t.userId,
+        chatId: t.chatId,
+        versionIds: [original.version.id, own.id],
+        forkId: t.fork()
+      })
+      assert.include(main[0]!.knowers!, t.wren)
+      assert.include(main[1]!.knowers!, t.wren, "the correction applies to swipes shown in the corrected branch")
     })
   )
 )
+
+it.live("Undo of a wrong return and History's inverse inherit only into later children of that branch", () =>
+  run(
+    Effect.gen(function* () {
+      const t = yield* story("separate")
+      yield* t.event({ key: "away.set", value: { entity: t.wren, away: true, source: "decision" } })
+      yield* t.say(t.mira, "Still at the docks.")
+      const back = yield* t.event({ key: "away.set", value: { entity: t.wren, away: false, source: "decision" } })
+      const secret = yield* t.say(t.mira, "FALSE-RETURN-SECRET")
+      const root = t.fork()
+      const peer = (yield* t.api.CreateFork({ chatId: t.chatId, fromForkId: root, atSlotId: secret.slotId })).fork.id
+      const known = (forkId: ForkId) =>
+        Effect.map(
+          t.reader.KnowersOf({ userId: t.userId, chatId: t.chatId, forkId, versionIds: [secret.version.id] }),
+          (rows) => rows[0]!.knowers!.includes(t.wren)
+        )
+      assert.isTrue(yield* known(root))
+      assert.isTrue(yield* known(peer))
+      yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: root, eventId: back.id })
+      assert.isFalse(yield* known(root))
+      assert.isTrue(yield* known(peer))
+      for (const forkId of [root, peer]) {
+        const matches = yield* t.reader.SearchChat({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId,
+          leafSlotId: secret.slotId,
+          tokens: ["return"],
+          before: null,
+          limit: 10,
+          viewers: [t.wren]
+        })
+        assert.strictEqual(
+          matches!.some((m) => m.content.includes("FALSE-RETURN-SECRET")),
+          forkId === peer
+        )
+      }
+      const correctedChild = (yield* t.api.CreateFork({ chatId: t.chatId, fromForkId: root, atSlotId: secret.slotId }))
+        .fork.id
+      const peerChild = (yield* t.api.CreateFork({ chatId: t.chatId, fromForkId: peer, atSlotId: secret.slotId })).fork
+        .id
+      assert.isFalse(yield* known(correctedChild))
+      assert.isTrue(yield* known(peerChild))
+      const history = yield* t.reader.ListHistoryEdits({ userId: t.userId, chatId: t.chatId, forkId: correctedChild })
+      const record = history.find((r) => r.title === "Correct scene check")!
+      assert.isDefined(record)
+      const undone = yield* t.writer.UndoHistoryEdit({
+        userId: t.userId,
+        chatId: t.chatId,
+        forkId: correctedChild,
+        changesetId: record.id
+      })
+      assert.strictEqual(undone.undone, 1)
+      assert.isTrue(yield* known(correctedChild))
+      assert.isFalse(yield* known(root), "the inverse on a child does not undo its parent's correction")
+      assert.isTrue(yield* known(peer))
+    })
+  )
+)
+
+it.live("resuming a shared reply keeps corrected presence and copies only this branch's live events", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const t = yield* story("separate")
+    const mark = yield* t.event({ key: "away.set", value: { entity: t.wren, away: true, source: "decision" } })
+    const source = yield* t.say(t.mira, "An interrupted account of the road.", true)
+    const ownMark = yield* t.writer.AddStateEvent({
+      userId: t.userId,
+      chatId: t.chatId,
+      forkId: t.fork(),
+      slotId: source.slotId,
+      versionId: source.version.id,
+      scope: null,
+      data: { key: "away.set", value: { entity: t.wren, away: true, source: "decision" } }
+    })
+    const peer = (yield* t.api.CreateFork({ chatId: t.chatId, fromForkId: t.fork(), atSlotId: source.slotId })).fork.id
+    yield* t.writer.AddStateEvent({
+      userId: t.userId,
+      chatId: t.chatId,
+      forkId: peer,
+      slotId: source.slotId,
+      versionId: source.version.id,
+      scope: null,
+      data: { key: "away.set", value: { entity: t.mira, away: true } }
+    })
+    yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: mark.id })
+    yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: ownMark.id })
+    const rollout = `source-${source.version.id}`
+    yield* fixtureSql(config.dataDir, [
+      {
+        sql: "INSERT INTO rollouts(id,chat_id,fork_id,kind,status,slot_id,role,request_class,mode,created_at,updated_at) VALUES(?,?,?,'generation','completed',?,'narrator','interactive','default',1,1)",
+        params: [rollout, t.chatId, t.fork(), source.slotId]
+      },
+      {
+        sql: "INSERT INTO rollout_payloads(rollout_id,context_snapshot_json) VALUES(?,?)",
+        params: [rollout, JSON.stringify({ agent: { contract: "final_text" } })]
+      },
+      { sql: "UPDATE versions SET rollout_id=? WHERE id=?", params: [rollout, source.version.id] }
+    ])
+    const entry = (yield* t.reader.GetSlot({ userId: t.userId, slotId: source.slotId, forkId: t.fork() })).entry
+    const resumed = yield* t.writer.StartResumedVersion({
+      userId: t.userId,
+      forkId: t.fork(),
+      versionId: source.version.id,
+      expectedRowVersion: entry.rowVersion,
+      rolloutId: `resumed-${source.version.id}`,
+      version: new NewVersion({
+        speakerEntityId: t.mira,
+        writer: "model",
+        content: source.version.content,
+        status: "generating",
+        macroMode: "verbatim",
+        origin: "resumed",
+        sourceVersionId: source.version.id
+      }),
+      transcript: "[]",
+      steps: 0,
+      keptCalls: [],
+      branch: null
+    })
+    const rows = yield* t.reader.KnowersOf({
+      userId: t.userId,
+      chatId: t.chatId,
+      forkId: resumed.forkId,
+      versionIds: [resumed.version.id]
+    })
+    assert.include(rows[0]!.knowers!, t.wren, "resuming carries this branch's corrected record")
+    const state = foldState(
+      yield* t.reader.StateEventsAt({
+        userId: t.userId,
+        chatId: t.chatId,
+        forkId: resumed.forkId,
+        slotId: source.slotId
+      })
+    )
+    assert.notInclude(state.away, t.mira, "a peer's event attached to the same version cannot enter this branch")
+    assert.notInclude(state.away, t.wren, "the suppressed decision cannot reappear under a new event id")
+    const peerState = foldState(
+      yield* t.reader.StateEventsAt({ userId: t.userId, chatId: t.chatId, forkId: peer, slotId: source.slotId })
+    )
+    assert.includeMembers([...peerState.away], [t.mira, t.wren])
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+for (const away of [true, false])
+  it.live(
+    `correction ${away ? "left" : "back"} follows swaps, preserves narrators and nested peers through repeated Undo`,
+    () =>
+      run(
+        Effect.gen(function* () {
+          const t = yield* story("separate")
+          if (!away) yield* t.event({ key: "away.set", value: { entity: t.wren, away: true } })
+          const mark = yield* t.event({ key: "away.set", value: { entity: t.wren, away, source: "decision" } })
+          const first = yield* t.say(t.mira, "SWAP-SECRET before replacement")
+          const next = yield* t.writer.ForkCard({
+            userId: t.userId,
+            refId: t.wrenRef,
+            name: "Wren next",
+            nickname: "Wren",
+            characterVersion: "2"
+          })
+          const replacement = next.entityId as EntityId
+          yield* t.event({ key: "card.swap", value: { entity: replacement, replaces: t.wren } })
+          const second = yield* t.say(t.mira, "SWAP-SECRET after replacement")
+          yield* t.event({ key: "cast.role", value: { entity: replacement, role: "narrator" } })
+          const narrated = yield* t.say(t.mira, "NARRATOR-SECRET always known")
+          const root = t.fork()
+          const forkFrom = (forkId: ForkId) =>
+            Effect.map(
+              t.writer.CreateFork({
+                userId: t.userId,
+                chatId: t.chatId,
+                fromForkId: forkId,
+                atSlotId: narrated.slotId
+              }),
+              (r) => r.fork.id
+            )
+          const peer = yield* forkFrom(root)
+          const nested = yield* forkFrom(peer)
+          const known = (forkId: ForkId) =>
+            Effect.map(
+              t.reader.KnowersOf({
+                userId: t.userId,
+                chatId: t.chatId,
+                forkId,
+                versionIds: [first.version.id, second.version.id, narrated.version.id]
+              }),
+              (r) => r.map((m, i) => m.knowers!.includes(i === 0 ? t.wren : replacement))
+            )
+          const before = yield* known(peer)
+          for (let i = 0; i < 2; i++) {
+            yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: root, eventId: mark.id })
+            assert.deepStrictEqual(yield* known(root), [away, away, true], "narrator records never become away")
+            const hits = yield* t.reader.SearchChat({
+              userId: t.userId,
+              chatId: t.chatId,
+              forkId: root,
+              leafSlotId: narrated.slotId,
+              tokens: ["secret"],
+              before: null,
+              limit: 20,
+              viewers: [t.wren, replacement]
+            })
+            assert.isTrue(
+              hits!.some((m) => m.content.includes("NARRATOR-SECRET")),
+              "indexed knowledge also preserves narrator records"
+            )
+            assert.strictEqual(
+              hits!.some((m) => m.content.includes("after replacement")),
+              away
+            )
+            assert.deepStrictEqual(yield* known(peer), before)
+            assert.deepStrictEqual(yield* known(nested), before)
+            const child = yield* forkFrom(root)
+            assert.deepStrictEqual(yield* known(child), [away, away, true])
+            const history = yield* t.reader.ListHistoryEdits({ userId: t.userId, chatId: t.chatId, forkId: root })
+            const edit = history.find((h) => h.title === "Correct scene check" && h.status === "applied")!
+            assert.isDefined(edit)
+            assert.strictEqual(
+              (yield* t.writer.UndoHistoryEdit({
+                userId: t.userId,
+                chatId: t.chatId,
+                forkId: root,
+                changesetId: edit.id
+              })).undone,
+              1
+            )
+            assert.deepStrictEqual(yield* known(root), before)
+            assert.deepStrictEqual(
+              yield* known(child),
+              [away, away, true],
+              "the second correction cannot rewrite the first correction's child"
+            )
+          }
+        })
+      )
+  )

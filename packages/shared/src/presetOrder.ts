@@ -44,6 +44,14 @@ export const newestMessage: PresetPrompt = {
   forbid_overrides: true
 }
 
+/** The speaker's card notes, movable like every other preset marker. */
+export const ownTurnNotes: PresetPrompt = {
+  ...newestMessage,
+  identifier: "ownTurnNotes",
+  name: "Own-turn notes",
+  role: "system"
+}
+
 /**
  * The whole-card "Definitions" marker (DESIGN §5.0): each character in its labelled block and
  * each persona in its own. Never added to existing orders; the editor inserts it.

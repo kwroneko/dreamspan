@@ -11,7 +11,8 @@ import {
   type Api,
   type AssistantMessage,
   type Model,
-  type Tool
+  type Tool,
+  Type
 } from "@earendil-works/pi-ai"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Cause, Effect, Exit, Fiber, Option, Queue, Result, Stream } from "effect"
@@ -38,13 +39,27 @@ import {
   toolWriter
 } from "./tools.ts"
 import { forTarget, rolloutRequest } from "./wire.ts"
+import {
+  BAD_ARGS,
+  CALL_TOOL,
+  countedTools,
+  dispatcherDefinition,
+  dispatcherMessages,
+  dispatchRefusal,
+  fitsTool,
+  missingTool,
+  resolveDispatch
+} from "./dispatcher.ts"
 import { liveSuffix } from "./messages.ts"
 import { loadedSet, loadPoints, type Skill, type ToolLoadingWire } from "./toolLoading.ts"
+import { executionRegistry } from "../execution.ts"
 
 /** What an agent turn needs beyond a plain reply's. */
 export interface AgentRun {
   readonly allowsOutside?: boolean
   readonly checkpoints?: ReadonlyArray<number>
+  /** Verbatim history already inside the frozen prefix, counted by assembly. */
+  readonly recentPrefix?: number | undefined
   readonly plan: AgentPlan
   readonly mode: string
   readonly tools: ReadonlyArray<RolloutTool<never>>
@@ -145,6 +160,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
     Effect.gen(function* () {
       const { request, generation, rolloutId, output, providers } = input
       const { plan, tools, writer } = run
+      const execution = yield* executionRegistry
       const model = generation.model!
       const registry = yield* Effect.serviceOption(ProviderRegistry)
       const target = {
@@ -216,7 +232,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           }
         : sendMessageTool(send)
       // A resume offers the definitions its snapshot froze, exactly as they were sent.
-      const frozen = (run.offered ?? tools.map(frozenTool)).filter((t) => t.name !== SEND_MESSAGE)
+      const frozen = (run.offered ?? tools.map(frozenTool)).filter(
+        (t) => t.name !== SEND_MESSAGE && t.name !== CALL_TOOL
+      )
       // Deferred tools (spec/TOOL-LOADING.md): declared from the first request where the wire API
       // declares them (Anthropic), else sent only at their load points (Responses). Without a wire
       // for this model they're all sent from the start, as before.
@@ -227,11 +245,16 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         description: t.description,
         parameters: t.parameters as Tool["parameters"]
       })
-      const piTools: ReadonlyArray<Tool> = [
+      let piTools: ReadonlyArray<Tool> = [
         ...frozen.filter((t) => !deferred.has(t.name)).map(definition),
         ...(sends ? [{ name: sendTool.name, description: sendTool.description, parameters: sendTool.parameters }] : []),
         ...(loadingWire?.declaresDeferred ? frozen.filter((t) => deferred.has(t.name)).map(definition) : [])
       ]
+      const dispatch = loadingWire?.dispatcher === true && deferred.size > 0
+      if (dispatch) {
+        const transport = run.offered?.find((t) => t.name === CALL_TOOL)
+        piTools = [...piTools, transport ? definition(transport) : dispatcherDefinition]
+      }
       const deferredDefinitions = frozen.filter((t) => deferred.has(t.name)).map(definition)
       const emit = (chunk: GenerationChunk) => void Queue.offerUnsafe(queue, chunk)
       if (several) emit({ several: true })
@@ -239,6 +262,19 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       /** The typed failure behind an `error` turn, for the version's failure class. */
       let failure: GenerationFailed | undefined
       const seed = run.resume?.transcript as ReadonlyArray<AgentMessage> | undefined
+      const room = (model.context ?? 128_000) - generation.request.samplers.max_tokens
+      let resultTurn = -1
+      let resultTokens = 0
+      const textTokens = (text: string) =>
+        runPromise(
+          run.reader.CountRolloutContext({
+            model: JSON.stringify(model),
+            request: JSON.stringify(generation.request),
+            transcript: "[]",
+            tools: "[]",
+            text
+          })
+        )
       // A resumed run counts the requests it made before, so its turn cap still holds.
       let requests = seed?.slice(historical).filter((m) => m.role === "assistant").length ?? 0
       /** Text a stop cut off: the first request sends it as the reply's start, and its output goes on from it. */
@@ -267,20 +303,25 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         // Where each deferred tool was loaded, for the provider transform. A request sent without
         // tools (the cap's) has no load points either: its history can't name undeclared tools.
         const toolLoading =
-          deferred.size > 0 && !last
+          deferred.size > 0 && !last && !dispatch
             ? { api: model.api, deferred: deferredDefinitions, loads: loadPoints(suffix, deferred) }
             : undefined
+        const requestSuffix = dispatch ? dispatcherMessages(suffix, deferredDefinitions) : suffix
         const wire = rolloutRequest(
           prefix,
           model.api,
           carried === undefined
-            ? suffix
-            : [...suffix, { ...emptyAssistant(piModel), content: [{ type: "text", text: carried }] }],
+            ? requestSuffix
+            : [...requestSuffix, { ...emptyAssistant(piModel), content: [{ type: "text", text: carried }] }],
           last ? undefined : piTools,
           {
             explicitTail: model.cacheBreakpoints === "explicit",
             replayReasoning: several || plan.continuity === "resume_previous",
-            reasoningTarget: target
+            reasoningTarget: target,
+            ...(dispatch &&
+            (model.kind === "deepseek" || (model.kind === "openrouter" && model.key.startsWith("deepseek/")))
+              ? { requireReasoning: true }
+              : {})
           }
         )
         // Text streams into the body as it comes; a tool call in the same turn makes it an
@@ -289,6 +330,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         body.prose = false
         let called = false
         let done: AssistantMessage | undefined
+        let rawArguments: Readonly<Record<string, string>> | undefined
         let partial: AssistantMessage = {
           ...emptyAssistant(piModel),
           content: carried === undefined ? [] : [{ type: "text", text: carried }]
@@ -325,8 +367,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               Stream.runForEach((event) =>
                 Effect.gen(function* () {
                   if (event.type === "waiting-cache") request.onWaitingCache?.(event.waiting)
-                  else if (event.type === "done") done = event.message
-                  else if (event.type === "toolcall") {
+                  else if (event.type === "done") {
+                    done = event.message
+                    rawArguments = event.toolArguments
+                  } else if (event.type === "toolcall") {
                     const sending = sends && event.name === SEND_MESSAGE && !last
                     // Thinking before the message is the message's reasoning; text before any
                     // call, or thinking before another tool, was a step.
@@ -404,6 +448,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             done = { ...done, content }
           }
           if (Exit.isSuccess(exit) && done) {
+            if (dispatch) done = resolveDispatch(done, frozen, loadedSet(agent.state.messages, deferred), rawArguments)
             const reason = done.stopReason === "toolUse" || done.stopReason === "length" ? done.stopReason : "stop"
             events.push({ type: "done", reason, message: done })
             events.end(done)
@@ -424,8 +469,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             stopReason: aborted ? "aborted" : "error",
             errorMessage: aborted ? "Stopped." : failure!.message
           }
-          events.push({ type: "error", reason: aborted ? "aborted" : "error", error: message })
-          events.end(message)
+          const canonical = dispatch
+            ? resolveDispatch(message, frozen, loadedSet(agent.state.messages, deferred))
+            : message
+          events.push({ type: "error", reason: aborted ? "aborted" : "error", error: canonical })
+          events.end(canonical)
         })
         return events
       }
@@ -441,8 +489,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         versionId: working.versionId,
         rolloutId,
         toolCallId,
+        transcript: () => agent.state.messages,
         leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
         viewers: generation.viewers,
+        speaker: generation.speaker ?? null,
         ...(request.storyAt === undefined ? {} : { storyAt: request.storyAt }),
         offer: {
           kind: run.kind ?? "",
@@ -454,6 +504,14 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)
       })
+      const prepareTool = (tool: RolloutTool<never>, toolCallId: string) =>
+        Effect.gen(function* () {
+          const hook = tool.snapshot
+          if (!hook || cache.has(`snapshot:${hook.key}`)) return
+          const ctx = context(toolCallId)
+          yield* hook.prepare(ctx, generation.agentToolState?.[hook.key])
+          cache.set(`snapshot:${hook.key}`, true)
+        })
       /** Calls waiting for the user, with what each will do: shown in their steps. */
       const waiting = new Map<string, ApprovalPrompt>()
       const waitingChanged = (toolCallId: string, prompt: ApprovalPrompt | null) => {
@@ -465,9 +523,26 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         name: tool.id,
         label: tool.label,
         description: tool.description,
-        parameters: tool.parameters,
+        parameters: dispatch ? Type.Any() : tool.parameters,
         executionMode: "sequential",
         execute: async (toolCallId, params, signal) => {
+          let invalidJSON = false
+          if (dispatch) {
+            const call = agent.state.messages
+              .flatMap((m) =>
+                m.role === "assistant" ? m.content.filter((p) => p.type === "toolCall" && p.id === toolCallId) : []
+              )
+              .at(-1)
+            const refusal = call?.type === "toolCall" ? dispatchRefusal(call) : undefined
+            invalidJSON = refusal === BAD_ARGS
+            const offered = frozen.find((t) => t.name === tool.id)
+            if ((refusal && refusal !== BAD_ARGS) || !offered)
+              return {
+                content: [{ type: "text", text: refusal ?? BAD_ARGS }],
+                details: null,
+                isError: true
+              }
+          }
           // Dangling calls on resume execute directly, without pi-agent's beforeToolCall hook.
           if (outsideEffect(tool.effect) && run.allowsOutside !== true)
             return {
@@ -482,7 +557,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               content: [
                 {
                   type: "text",
-                  text: `“${tool.id}” isn't loaded yet. Load it with tool_search or load_skill first.`
+                  text: dispatch
+                    ? missingTool(tool.id)
+                    : `“${tool.id}” isn't loaded yet. Load it with tool_search or load_skill first.`
                 }
               ],
               details: null,
@@ -502,6 +579,19 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                   context: context(toolCallId),
                   args: params,
                   dangling,
+                  ...(dispatch
+                    ? {
+                        unavailableText: missingTool(tool.id),
+                        validate: () =>
+                          !invalidJSON &&
+                          fitsTool(
+                            frozen.find((t) => t.name === tool.id)!,
+                            params
+                          )
+                            ? undefined
+                            : BAD_ARGS
+                      }
+                    : {}),
                   onWaiting: (prompt) => waitingChanged(toolCallId, prompt)
                 })
                 .pipe(
@@ -517,9 +607,16 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                       : Effect.succeed<ToolOutput>({ text: permit.text, isError: true })
                   )
                 )
-            : outsideEffect(tool.effect) && dangling
-              ? Effect.succeed<ToolOutput>({ text: UNCERTAIN_EFFECT, isError: true })
-              : tool.execute(context(toolCallId), params as never)
+            : dispatch &&
+                (invalidJSON ||
+                  !fitsTool(
+                    frozen.find((t) => t.name === tool.id)!,
+                    params
+                  ))
+              ? Effect.succeed<ToolOutput>({ text: BAD_ARGS, isError: true })
+              : outsideEffect(tool.effect) && dangling
+                ? Effect.succeed<ToolOutput>({ text: UNCERTAIN_EFFECT, isError: true })
+                : tool.execute(context(toolCallId), params as never)
           // A committed call's receipt takes precedence over validation against its own
           // changed state (a note may now exist, or its old passage may already be gone).
           const execute =
@@ -531,7 +628,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                   )
               : permitted
           // A stop interrupts the tool; its result says so, and a resume runs the call again.
-          const exit = await runPromise(Effect.exit(execute), {
+          const exit = await runPromise(Effect.exit(prepareTool(tool, toolCallId).pipe(Effect.andThen(execute))), {
             signal
           }).catch(() => undefined)
           if (signal?.aborted || exit === undefined || Exit.isFailure(exit))
@@ -554,16 +651,80 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             )
           }
           if (tool.effect === "chat_state" && !result.isError) run.onState?.()
+          const fullText = budgetResult(result.text)
+          let sentText = fullText
+          if (execution.chatKinds.get(run.kind ?? "")?.summaryTranscript) {
+            const turn = agent.state.messages.findLastIndex((m) => m.role === "assistant")
+            if (turn !== resultTurn) {
+              resultTurn = turn
+              resultTokens = 0
+            }
+            const quota = Math.max(128, Math.floor(room / 4))
+            const remaining = Math.max(0, quota - resultTokens)
+            if ((await textTokens(fullText)) > remaining) {
+              let marker = `\n[Result shortened for this turn. read_run with message 0 and call "${toolCallId}" recovers it.]`
+              if ((await textTokens(marker)) > remaining) marker = ""
+              let lo = 0,
+                hi = fullText.length
+              while (lo < hi) {
+                const mid = Math.ceil((lo + hi) / 2)
+                if ((await textTokens(fullText.slice(0, mid) + marker)) <= remaining) lo = mid
+                else hi = mid - 1
+              }
+              sentText = fullText.slice(0, lo) + marker
+            }
+            resultTokens += await textTokens(sentText)
+          }
           return {
-            content: [{ type: "text", text: budgetResult(result.text) }],
+            content: [{ type: "text", text: fullText }],
             // What a loading call loaded is part of the transcript: replay derives the loaded set from it.
-            details: result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : null,
+            details:
+              sentText !== fullText
+                ? { sentText, ...(result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : {}) }
+                : result.loaded?.length && !result.isError
+                  ? { loaded: [...result.loaded] }
+                  : null,
             ...(result.isError ? { isError: true } : {})
           }
         }
       }))
 
-      if (sends) agentTools.push(sendTool)
+      // Invalid envelopes have no executor. Kept only to return the same refusal as an unknown tool.
+      if (dispatch)
+        agentTools.push({
+          ...dispatcherDefinition,
+          parameters: Type.Any(),
+          label: CALL_TOOL,
+          execute: async () => ({
+            content: [{ type: "text", text: missingTool(CALL_TOOL) }],
+            details: null,
+            isError: true
+          })
+        })
+      if (sends)
+        agentTools.push(
+          dispatch
+            ? {
+                ...sendTool,
+                parameters: Type.Any(),
+                execute: async (id, params, signal) => {
+                  const call = agent.state.messages
+                    .flatMap((m) =>
+                      m.role === "assistant" ? m.content.filter((p) => p.type === "toolCall" && p.id === id) : []
+                    )
+                    .at(-1)
+                  const refusal = call?.type === "toolCall" ? dispatchRefusal(call) : undefined
+                  if (refusal || !fitsTool(sendTool, params))
+                    return {
+                      content: [{ type: "text" as const, text: refusal ?? BAD_ARGS }],
+                      details: null,
+                      isError: true
+                    }
+                  return sendTool.execute(id, params as never, signal)
+                }
+              }
+            : sendTool
+        )
       let nudged = seed?.some((m) => m.role === "rpHarness" && m.content === SEND_NUDGE) ?? false
       let nudgeSent = nudged
       const agent: Agent = new Agent({
@@ -590,6 +751,55 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                   ? [{ role: "rpHarness" as const, content: WRITE_NOW, timestamp: Date.now() }]
                   : [])
               ]
+        },
+        prepareRequest: async ({ context }, signal) => {
+          if (!execution.chatKinds.get(run.kind ?? "")?.summaryTranscript) return
+          const compactor = execution.runCompactors.get("workshop")
+          if (!compactor) throw new Error("Workshop summaries are unavailable.")
+          try {
+            const compacted = await runPromise(
+              compactor.compact({
+                reader: run.reader,
+                providers,
+                request,
+                rolloutId,
+                model,
+                prefix: generation.request,
+                recentPrefix: run.recentPrefix,
+                messages: context.messages,
+                tools: countedTools(
+                  frozen,
+                  deferred,
+                  context.messages,
+                  dispatch
+                    ? (run.offered?.find((t) => t.name === CALL_TOOL) ?? {
+                        ...dispatcherDefinition,
+                        label: "Called a loaded tool",
+                        effect: "read"
+                      })
+                    : null
+                ).concat(sends ? [sendTool as unknown as FrozenTool] : []),
+                reserve: generation.request.samplers.max_tokens,
+                leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null
+              }),
+              { signal }
+            )
+            if (JSON.stringify(compacted) !== JSON.stringify(context.messages)) {
+              agent.state.messages = [...compacted]
+              if (!(await flush())) throw new Error("The summary could not be saved.")
+              run.onState?.()
+              return { context: { ...context, messages: [...compacted] } }
+            }
+          } catch (error) {
+            failure =
+              error instanceof GenerationFailed
+                ? error
+                : new GenerationFailed({
+                    class: "server",
+                    message: "The workshop couldn't save its summary. Resume to try again."
+                  })
+            throw error
+          }
         },
         convertToLlm: async (messages) => {
           if (!messages.some((m) => m.role === "rpUser")) return liveSuffix(messages)
@@ -622,6 +832,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         streamFn,
         toolExecution: "sequential",
         beforeToolCall: async ({ toolCall }) => {
+          const refusal = dispatchRefusal(toolCall)
+          if (refusal && (!dispatch || refusal !== BAD_ARGS || toolCall.name === SEND_MESSAGE))
+            return { block: true, reason: refusal }
           const tool = tools.find((entry) => entry.id === toolCall.name)
           if (tool && outsideEffect(tool.effect) && run.allowsOutside !== true)
             return { block: true, reason: "This chat does not allow tools with outside effects." }
@@ -794,25 +1007,30 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                         })
                     )
                   )
+          const refusal = dispatchRefusal(call)
           const result = receipt
             ? {
                 content: [{ type: "text" as const, text: budgetResult(receipt.text) }],
                 details: null,
                 isError: receipt.isError
               }
-            : tool
-              ? yield* Effect.promise(() =>
-                  tool.execute(call.id, call.arguments as never, signal.signal).catch((error: unknown) => ({
-                    content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
+            : refusal && (!dispatch || refusal !== BAD_ARGS)
+              ? { content: [{ type: "text" as const, text: refusal }], details: null, isError: true }
+              : tool
+                ? yield* Effect.promise(() =>
+                    tool.execute(call.id, call.arguments as never, signal.signal).catch((error: unknown) => ({
+                      content: [
+                        { type: "text" as const, text: error instanceof Error ? error.message : String(error) }
+                      ],
+                      details: null,
+                      isError: true
+                    }))
+                  )
+                : {
+                    content: [{ type: "text" as const, text: `There's no tool “${call.name}”.` }],
                     details: null,
                     isError: true
-                  }))
-                )
-              : {
-                  content: [{ type: "text" as const, text: `There's no tool “${call.name}”.` }],
-                  details: null,
-                  isError: true
-                }
+                  }
           agent.state.messages = [
             ...agent.state.messages,
             {

@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"
 import type { AwayMark } from "@rp/shared/contextsApi.ts"
-import { awayExplanation, awayLabel, awayTransitions, awayRowsOf } from "../src/features/chat/awayMarks.ts"
+import {
+  awayExplanation,
+  awayLabel,
+  awayTransitions,
+  awayRowsOf,
+  undoExplanation
+} from "../src/features/chat/awayMarks.ts"
 
 const wren = "wren" as EntityId
 const mira = "mira" as EntityId
@@ -24,13 +30,25 @@ describe("the timeline's away rows", () => {
       ["e3", false]
     ])
   })
-  it("offers Undo only on the scene check's departure", () => {
+  it("offers Undo on the scene check's marks, left and back, and on no one else's", () => {
     const rows = awayTransitions([
       mark("e1", "s1", wren, true, "decision"),
       mark("e2", "s2", wren, false, "decision"),
       mark("e3", "s3", mira, true, "user")
     ])
-    expect(rows.map((row) => row.undoable)).toEqual([true, false, false])
+    expect(rows.map((row) => row.undoable)).toEqual([true, true, false])
+  })
+  it("explains Undo as the opposite of what the scene check said", () => {
+    const [left, back] = awayTransitions([
+      mark("e1", "s1", wren, true, "decision"),
+      mark("e2", "s2", wren, false, "decision")
+    ])
+    expect(undoExplanation(left!, name)).toBe(
+      "Wren was there after all: on this branch, counted present until the next presence mark, so Wren's replies see the messages written since."
+    )
+    expect(undoExplanation(back!, name)).toContain(
+      "Wren hadn't come back: on this branch, counted away until the next presence mark"
+    )
   })
   it("shows nothing for a narrator", () => {
     expect(awayTransitions([mark("e1", "s1", mira, true, "user")], new Set([mira]))).toEqual([])

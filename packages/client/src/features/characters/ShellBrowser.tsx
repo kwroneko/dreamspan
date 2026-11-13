@@ -47,7 +47,7 @@ import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { WindowedList } from "../../ui/WindowedList.tsx"
 import { listNames } from "../chat/cast.ts"
 import { KindBadge } from "../chat/KindBadge.tsx"
-import { useChatKindLook } from "../chat/kindLooks.ts"
+import { kindRowProps, useChatKindLook } from "../chat/kindLooks.ts"
 import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
 import {
   CharacterGrid,
@@ -263,12 +263,15 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
   const href = useRouter().buildLocation(forkLink(fork)).href
   const canBeside = useCanOpenBeside()
   const thread = fork.thread
+  const kindLook = useChatKindLook(fork.chat.kind)
+  const kindLabel = kindLook?.badge ? `, ${kindLook.badge.label}` : ""
   const label = thread ? shellThreadLabel(thread) : shellBranchLabel(fork)
   const kind = thread ? "thread" : "branch"
   const addedNames = `Added characters: ${fork.added.map((c) => c.name).join(", ")}`
   return (
     <div
       data-fork-row
+      {...kindRowProps(kindLook)}
       onClick={(event) => {
         // A dialog opened from the row is portalled elsewhere; its clicks still bubble here.
         const target = event.target as HTMLElement
@@ -334,6 +337,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
               {label}
             </span>
           )}
+          {!renaming && <KindBadge kind={fork.chat.kind} />}
           {/* While renaming, the field takes the whole title line (owner, 2026-11-05). */}
           {fork.current && fork.branches > 1 && !renaming && (
             <span data-opens-here className="flex shrink-0">
@@ -353,7 +357,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
                 <Link
                   {...forkLink(fork)}
                   onClick={openOnPlainClick(open)}
-                  aria-label={`Open ${kind} ${label}`}
+                  aria-label={`Open ${kind} ${label}${kindLabel}`}
                   aria-current={here ? "page" : undefined}
                   data-chat-id={fork.chat.id}
                   data-fork-id={fork.forkId}
@@ -370,7 +374,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
                 <button
                   type="button"
                   onClick={open}
-                  aria-label={`Open ${kind} ${label}`}
+                  aria-label={`Open ${kind} ${label}${kindLabel}`}
                   aria-current={here ? "page" : undefined}
                   data-chat-id={fork.chat.id}
                   data-fork-id={fork.forkId}
@@ -456,7 +460,8 @@ export function ForkRow({
   const besideHref = useRouter().buildLocation(forkLink(fork)).href
   const canBeside = useCanOpenBeside()
   const [menu, setMenu] = useState(false)
-  const kindBadge = useChatKindLook(fork.chat.kind)?.badge
+  const kindLook = useChatKindLook(fork.chat.kind)
+  const kindBadge = kindLook?.badge
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = fork.thread ? `Thread: ${shellThreadLabel(fork.thread)}` : shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
@@ -474,6 +479,7 @@ export function ForkRow({
   return (
     <div
       data-fork-row
+      {...kindRowProps(kindLook)}
       className={`fork-row @container/fork-row relative flex w-full shrink-0 max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <ContextMenu

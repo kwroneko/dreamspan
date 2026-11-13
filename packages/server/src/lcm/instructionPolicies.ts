@@ -1,3 +1,4 @@
+import { WORKSHOP_SUMMARY_INSTRUCTION } from "@rp/shared/workshopLcm.ts"
 import { summaryWords } from "@rp/shared/lcmSettings.ts"
 import type { ContextSnapshot } from "../assembler/types.ts"
 
@@ -15,6 +16,13 @@ export interface SummaryStyleSelector {
 }
 export const defaultSummaryStyle: SummaryStyleSelector = { id: "settings", select: (style) => style ?? "direct" }
 export const leafInstruction: SummaryInstruction = { id: "leaf", render: ({ job }) => job.tail }
+/** Workshop framing and the user's instruction are a replaceable summary policy. */
+export const workshopInstruction: SummaryInstruction = {
+  id: "workshop",
+  render: ({ job }) =>
+    WORKSHOP_SUMMARY_INSTRUCTION +
+    (job.tail === WORKSHOP_SUMMARY_INSTRUCTION ? "" : `\nUser's summary preference: ${job.tail}`)
+}
 export const condensationInstruction: SummaryInstruction = {
   id: "condensation",
   render: ({ job, target, range: span }) => {

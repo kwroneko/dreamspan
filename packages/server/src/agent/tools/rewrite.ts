@@ -89,6 +89,7 @@ interface InstructionsArgs extends Base {
   }>
 }
 interface Prepared {
+  readonly range?: { first: number; last: number } | undefined
   readonly chat: WriteChat
   readonly dependents?: ReadonlyArray<{ id: string; revision: string }>
   readonly expected: string
@@ -184,6 +185,12 @@ const replacing = (ctx: ToolContext, args: ReplaceArgs) =>
       chat,
       expected: before.stamp,
       edits: [...found.values()],
+      range: found.size
+        ? {
+            first: Math.min(...[...found.values()].map((h) => h.depth + 1)),
+            last: Math.max(...[...found.values()].map((h) => h.toDepth + 1))
+          }
+        : undefined,
       labels: [...found.values()].map((h) =>
         h.kind === "summary_revision"
           ? `Summary of messages ${h.depth + 1}–${h.toDepth + 1}`
@@ -209,6 +216,7 @@ const writing = (ctx: ToolContext, args: MessagesArgs) =>
     })
     const edits: HistoryEdit[] = []
     const labels: string[] = []
+    const positions = [...wanted]
     const byMessage = new Map(targets.map((e) => [e.message, e]))
     for (const message of args.messages) {
       const target = byMessage.get(message.message)
@@ -238,12 +246,14 @@ const writing = (ctx: ToolContext, args: MessagesArgs) =>
         after: summary.text
       })
       labels.push(`Summary ${saved.from}–${saved.to}`)
+      positions.push(saved.from, saved.to)
     }
     return {
       chat,
       expected: before.stamp,
       edits,
       labels,
+      range: positions.length ? { first: Math.min(...positions), last: Math.max(...positions) } : undefined,
       includeSwipes: false,
       summariesIncluded: (args.summaries?.length ?? 0) > 0
     } satisfies Prepared
@@ -260,7 +270,7 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
         chatId: chat.id,
         forkId: chat.currentForkId,
         slotId: chat.storyTarget ? chat.activeLeafSlotId : before.leaf,
-        displayEnd: true
+        displayEnd: !chat.storyTarget
       })
     )
     const notes: NonNullable<Prepared["notes"]>[number][] = []
@@ -380,6 +390,7 @@ const rewrite = <A extends Base>(
     )
   return {
     ...definition,
+    storyRead: "positioned",
     effect: "setup",
     capability: "chats.rewrite",
     describe: (ctx, args) =>
@@ -387,7 +398,17 @@ const rewrite = <A extends Base>(
         const p = yield* prepareChecked(ctx, args)
         ctx.cache.set(`rewrite:${ctx.toolCallId}`, p)
         return {
-          ...(p.chat.storyTarget ? { storyAt: p.chat.storyTarget } : {}),
+          ...(p.chat.storyTarget
+            ? {
+                storyAt: p.chat.storyTarget,
+                storyScope: {
+                  branch: p.chat.branchNaming!,
+                  first: p.range?.first ?? p.chat.upTo!,
+                  last: p.range?.last ?? p.chat.upTo!,
+                  ...(!p.range ? { from: true } : {})
+                }
+              }
+            : {}),
           title: `Rewrite “${p.chat.title}”`,
           rows: [
             {
@@ -397,7 +418,7 @@ const rewrite = <A extends Base>(
             {
               label: "Scope",
               value: p.chat.storyTarget
-                ? `Branch “${p.chat.branchLabel}” (${p.chat.currentForkId}); messages 1–${p.chat.upTo}. ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
+                ? `Branch “${p.chat.branchLabel}”; ${p.range ? `messages ${p.range.first}–${p.range.last}` : `from message ${p.chat.upTo}`}. ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
                 : `Only this chat's current branch (${p.chat.currentForkId}). ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
             },
             {
@@ -565,6 +586,7 @@ const readTool = (
   search: boolean
 ): RolloutTool<{ chat: string; from?: number; count?: number; offset?: number; query?: string }> => ({
   id: search ? "search_chats" : "read_chat",
+  storyRead: "positioned",
   label: search ? "Searched a chat" : "Read a chat",
   explanation: "Read another chat as you see it, including separate character contexts.",
   effect: "read",
@@ -648,6 +670,7 @@ export const historyRenameTool: RolloutTool<{
   entityId: string
 }> = {
   id: "history_rename",
+  storyRead: "positioned",
   label: "Renamed text in history",
   explanation: "Rename text in the shown branch, with Undo.",
   effect: "setup",
@@ -703,6 +726,7 @@ export const historySearchTool: RolloutTool<{
   cursor?: typeof HistoryCursor.Type
 }> = {
   id: "history_search",
+  storyRead: "refused",
   label: "Searched chat history",
   explanation: "Search the whole chat as you see it.",
   effect: "read",

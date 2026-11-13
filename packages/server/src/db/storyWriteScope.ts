@@ -1,4 +1,7 @@
 // Worker-side validation shared by rewrite and operation transactions.
+import { forkLabel } from "@rp/shared/branchNaming.ts"
+import { chatForkSummaries } from "./forkSummaries.ts"
+import type { ForkRow } from "./rows.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { StoryAt } from "@rp/shared/chat.ts"
@@ -43,14 +46,19 @@ export const checkStoryWrite = Effect.fnUntraced(function* (
     return yield* new HistoryRejected({
       message: "The story branch or position is unavailable. Send the request again."
     })
-  const [branch] = yield* sql<{
-    name: string | null
-    parent_fork_id: string | null
-  }>`SELECT name,parent_fork_id FROM forks WHERE id=${fork.id}`
+  const [branch] = yield* sql<ForkRow>`SELECT * FROM forks WHERE id=${fork.id}`
+  const summary = (yield* chatForkSummaries(sql, userId, chatId, [branch!])).get(fork.id)
+  const naming = {
+    name: branch!.name,
+    original: branch!.parent_fork_id === null,
+    split: summary?.split ?? null,
+    createdAt: branch!.created_at
+  }
   return {
     fork,
     pieces,
     upTo: leaf ? leaf.position + 1 : 0,
-    label: branch!.name?.trim() || (branch!.parent_fork_id === null ? "Original" : "Unnamed branch")
+    naming,
+    label: forkLabel(naming)
   }
 })

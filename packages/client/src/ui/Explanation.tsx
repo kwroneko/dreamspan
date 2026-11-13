@@ -4,6 +4,7 @@
 // screen or a narrow window there's no hover and no room beside, so it shows under the label in
 // muted text. A screen reader reads it as the item's description either way.
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 
 /** The window widths and pointers that show explanations inline: phones and touch screens. */
 export const inlineExplanationClass = "max-sm:block pointer-coarse:block"
@@ -40,14 +41,17 @@ const MARGIN = 8
 
 interface Shown {
   readonly text: string
+  /** Window coordinates: the box is fixed, outside the list's own box. */
   readonly top: number
+  readonly edge: number
   readonly side: "right" | "left"
   readonly maxWidth: number
 }
 
 /**
- * The box beside the highlighted item of `popup`, rendered inside its positioner (so the list's
- * own scrolling never clips it). It follows `data-highlighted` on the items that carry
+ * The box beside the highlighted item of `popup`, fixed in the window and rendered in the page
+ * body, like the list itself (so the list's own scrolling or clipping never touches it, and it
+ * is never a child of a box it hangs out of). It follows `data-highlighted` on the items that carry
  * `data-explain`, whichever way they were highlighted.
  */
 export function HighlightExplanation({ popup }: { popup: HTMLElement | null }) {
@@ -67,7 +71,8 @@ export function HighlightExplanation({ popup }: { popup: HTMLElement | null }) {
       const side = right >= WIDTH || right >= left ? "right" : "left"
       return {
         text,
-        top: row.top - frame.top,
+        top: row.top,
+        edge: side === "right" ? frame.right + GAP : window.innerWidth - frame.left + GAP,
         side,
         maxWidth: Math.min(WIDTH, Math.max(side === "right" ? right : left, 120))
       }
@@ -111,20 +116,22 @@ export function HighlightExplanation({ popup }: { popup: HTMLElement | null }) {
     else if (under > 0) element.style.translate = `0 ${under}px`
   }, [shown])
   if (!shown) return null
-  return (
+  return createPortal(
     <div
       ref={box}
       role="presentation"
       aria-hidden="true"
       data-explanation=""
+      data-layout-overlay="An explanation floats beside its list, over whatever is under it"
       style={{
         top: shown.top,
         maxWidth: shown.maxWidth,
-        ...(shown.side === "right" ? { left: `calc(100% + ${GAP}px)` } : { right: `calc(100% + ${GAP}px)` })
+        ...(shown.side === "right" ? { left: shown.edge } : { right: shown.edge })
       }}
-      className="pointer-events-none absolute z-10 w-max rounded-md bg-text px-2 py-1 text-xs text-canvas shadow-md max-sm:hidden pointer-coarse:hidden"
+      className="pointer-events-none fixed z-50 w-max rounded-md bg-text px-2 py-1 text-xs text-canvas shadow-md max-sm:hidden pointer-coarse:hidden"
     >
       {shown.text}
-    </div>
+    </div>,
+    document.body
   )
 }

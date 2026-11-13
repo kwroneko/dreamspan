@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 67
+export const ASSEMBLER_VERSION = 73
 
 export type Role = "system" | "user" | "assistant"
 
@@ -73,6 +73,7 @@ export type Source =
     }
   | {
       readonly kind: "note"
+      readonly ownTurn?: boolean
       readonly entity: string
       readonly revision: string
       readonly activation?: Extract<SourceActivation, { kind: "note" }> | undefined
@@ -336,6 +337,8 @@ export interface LoreDecisionInput {
 
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
+  /** Registered read-tool projections, frozen before their first returned result. */
+  readonly agentToolState?: Readonly<Record<string, unknown>>
   /** An agent reply's assembly options, for a rebuild. */
   readonly agentAssembly?: AgentAssembly
   /**
@@ -368,6 +371,8 @@ export interface ContextSnapshot {
     readonly samplers: AssembledRequest["samplers"]
   }
   readonly summaryJob?: {
+    /** Literal, own-workshop material frozen for summary replay; no preset or other chat. */
+    readonly workshopTranscript?: ReadonlyArray<RequestMessage>
     readonly id: string
     readonly clipTokens: number
     readonly inputs: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["inputs"][number]>
@@ -553,6 +558,9 @@ export interface InspectionNode {
 
 /** What generating needs of a snapshot, sent to the main thread apart from it. */
 export interface Generation {
+  readonly agentToolState?: Readonly<Record<string, unknown>>
+  /** The request speaker, independent of history visibility. */
+  readonly speaker?: string | null
   /** Labels and source decisions read in the same transaction as assembly; scrubbed on the main thread. */
   readonly inspection?: InspectionInputs
   readonly leafSlotId: string | null
@@ -585,7 +593,9 @@ export interface Generation {
 export const generationOf = (snapshot: ContextSnapshot): Generation => {
   const written = new Map((snapshot.templateWrites ?? []).map((t) => [t.version, t.writes]))
   return {
+    ...(snapshot.agentToolState ? { agentToolState: snapshot.agentToolState } : {}),
     leafSlotId: snapshot.inputs.leafSlotId,
+    speaker: snapshot.inputs.speaker,
     viewers: snapshot.inputs.viewer
       ? (snapshot.inputs.viewerAliases ?? [snapshot.inputs.viewer])
       : snapshot.inputs.stretchViewers
@@ -814,6 +824,7 @@ export interface ModelInput {
   readonly key: string
   readonly prefill: "none" | "assistant" | "tool_schema"
   readonly continueUnavailable?: string | undefined
+  readonly toolLoading?: "auto" | "every" | "dispatcher"
   readonly cacheBreakpoints: "auto" | "explicit" | "none"
   readonly cacheLayout?: import("@rp/shared/providers.ts").CacheLayout
   /** The context window when some source reported it. */

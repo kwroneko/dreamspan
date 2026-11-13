@@ -333,6 +333,24 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
         ...(origin.ref === null ? {} : { origin_ref: origin.ref }),
         created_at: Date.now()
       })}`
+      if (data.key === "note.activate" || data.key === "note.deactivate") {
+        // A field move is one switch, regardless of whether it came from the UI or a tool.
+        // Restrict both the group and owner: forks keep portable group ids on their own cards.
+        const pairs = yield* sql<{ id: string }>`SELECT e.id FROM entities e
+          JOIN entity_refs r ON r.entity_id = e.id JOIN entity_revisions h ON h.id = r.head_revision_id
+          JOIN entities original ON original.id = ${data.value.note}
+          JOIN entity_refs original_ref ON original_ref.entity_id = original.id
+          JOIN entity_revisions original_head ON original_head.id = original_ref.head_revision_id
+          WHERE e.owner_user_id = ${userId} AND original.owner_user_id = ${userId}
+            AND e.kind = 'note' AND e.deleted_at IS NULL AND e.id != original.id
+            AND json_extract(h.doc_json, '$.move_group') = json_extract(original_head.doc_json, '$.move_group')
+            AND json_extract(h.doc_json, '$.owner.card') = json_extract(original_head.doc_json, '$.owner.card')`
+        for (const [offset, pair] of pairs.entries()) {
+          const paired = { ...data, value: { note: pair.id as EntityId } }
+          yield* checkStateReferences(sql, userId, chatId, paired, scope)
+          yield* sql`INSERT INTO state_events ${sql.insert({ id: uuidv7(), chat_id: chatId, slot_id: slotId, version_id: versionId, seq: next!.n + offset + 1, fork_id: fork, fork_seq: yield* nextSeq(sql, chatId), key: paired.key, scope, value_json: JSON.stringify(paired.value), origin: origin.origin, ...(origin.ref === null ? {} : { origin_ref: origin.ref }), created_at: Date.now() })}`
+        }
+      }
       return { id, seq: next!.n }
     })
 

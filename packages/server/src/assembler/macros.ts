@@ -3,7 +3,8 @@ import type { CardFields, ChatMessage, MacroContext } from "@rp/shared/macros/co
 import { expand, type TextOrigin } from "@rp/shared/macros/expand.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import type { Assembly } from "./pipeline.ts"
-import type { CardInput, HistoryEntry, Source } from "./types.ts"
+import { noteCard, type CardInput, type HistoryEntry, type Source, type NoteInput } from "./types.ts"
+import { readReplaceTarget, targetCard } from "@rp/shared/docs/note.ts"
 
 /** Macros that read this generation's speaker or direction (conservatively, by name). */
 const PER_TURN = /\{\{[^}]*\b(?:speaker|direction)\b/i
@@ -76,7 +77,33 @@ export interface MessagePosition {
 }
 
 /** A card's fields as macros read them, stored text, unexpanded (ARCHITECTURE §10). */
-export const cardFields = (card: CardInput | undefined, persona: CardInput | undefined, depthPrompt?: string) => {
+export const cardFields = (
+  card: CardInput | undefined,
+  persona: CardInput | undefined,
+  depthPrompt?: string,
+  notes: ReadonlyArray<NoteInput> = []
+) => {
+  const effective = (value: CardInput | undefined) => {
+    if (!value) return value
+    const doc = { ...value.doc }
+    const seen = new Set<string>()
+    for (const note of notes) {
+      const target = readReplaceTarget(note.doc.replaces)
+      if (
+        target?.kind !== "card_field" ||
+        targetCard(target, noteCard(note.doc)) !== value.entity ||
+        seen.has(target.field)
+      )
+        continue
+      seen.add(target.field)
+      doc[target.field] = note.doc.own_position
+        ? ""
+        : note.doc.content.replace(/\{\{\s*original\s*\}\}/gi, () => value.doc[target.field])
+    }
+    return { ...value, doc }
+  }
+  card = effective(card)
+  persona = effective(persona)
   const fields: CardFields = {
     persona: persona?.doc.description ?? "",
     ...(card

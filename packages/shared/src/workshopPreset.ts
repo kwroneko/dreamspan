@@ -34,7 +34,7 @@ export const workshopPieces = (): ReadonlyArray<WorkshopPiece> => [
   },
   {
     prompt: piece("summaries", "Summaries", true),
-    explanation: "Where summaries of a long workshop go. Until it is filled, they go before the history."
+    explanation: "Summaries of earlier messages and steps. Original steps stay available."
   },
   {
     prompt: piece("skillsIndex", "Skills", true),
@@ -153,7 +153,9 @@ export const convertToWorkshop = <D extends Pick<PresetDoc, "prompts" | "order">
     0,
     ...added.map((p) => ({
       identifier: p.prompt.identifier,
-      enabled: p.prompt.identifier === "workspaceInstructions" && (instructions?.trim() ?? "") !== ""
+      enabled:
+        p.prompt.identifier === "summaries" ||
+        (p.prompt.identifier === "workspaceInstructions" && (instructions?.trim() ?? "") !== "")
     }))
   )
   return {

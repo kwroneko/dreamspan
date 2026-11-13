@@ -17,6 +17,7 @@ import {
 import {
   defaultSummaryStyle,
   leafInstruction,
+  workshopInstruction,
   condensationInstruction,
   type SummaryInstruction,
   type SummaryStyleSelector
@@ -136,6 +137,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   yield* leafPlanners.register(defaultLeafPlanner)
   yield* maintenancePlanners.register(defaultMaintenancePlanner)
   yield* summaryInstructions.register(leafInstruction)
+  yield* summaryInstructions.register(workshopInstruction)
   yield* summaryInstructions.register(condensationInstruction)
   yield* summaryStyles.register(defaultSummaryStyle)
   yield* transforms.register(makeSummaryRequestTransform(summaryInstructions))

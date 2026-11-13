@@ -322,6 +322,8 @@ export const compose = (input: {
     })
   }
 
+  if (has("summaries")) slots.set(index("summaries"), [...layer])
+
   let examplesSent = 0
   const sendExamples = () => {
     if (!has("dialogueExamples")) return
@@ -389,7 +391,7 @@ export const compose = (input: {
     }
     spend(-reserved)
     if (newChat && newChat.content) history.unshift(newChat)
-    if (layer.length) history.splice(newChat && newChat.content ? 1 : 0, 0, ...layer)
+    if (layer.length && !has("summaries")) history.splice(newChat && newChat.content ? 1 : 0, 0, ...layer)
     const newestAt = index("newestMessage")
     if (newestAt >= 0 && !input.disabled("newestMessage")) {
       const latest = history.findLastIndex((m) => m.kind === "history")

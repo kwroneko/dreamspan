@@ -59,7 +59,14 @@ const withNotes = (card: CardDoc, noteDocJson: string | null, notesDocJson: Read
       const { placement } = note
       // ST always sends its Character's Note and an import makes it on in every chat, so a note
       // that isn't (a new one, off until a chat switches it on) goes with the others.
-      if (note.exportable && note.on_by_default === true && (placement.mode === "depth" || placement.mode === "tail")) {
+      if (
+        note.exportable &&
+        note.on_by_default === true &&
+        (!note.condition || note.condition.when === "always") &&
+        !note.replaces &&
+        note.move_group === undefined &&
+        (placement.mode === "depth" || placement.mode === "tail")
+      ) {
         const depth = placement.mode === "depth" ? placement.depth : 0
         extensions = { ...extensions, depth_prompt: { prompt: note.content, depth, role: placement.role } }
       } else others.push(note)
@@ -83,6 +90,11 @@ const withNotes = (card: CardDoc, noteDocJson: string | null, notesDocJson: Read
         title: note.title,
         content: note.content,
         placement: note.placement,
+        ...(note.condition?.when === "own_turn" ? { condition: note.condition } : {}),
+        ...(note.replaces?.kind === "card_field" && note.replaces.card === undefined
+          ? { replaces: note.replaces, ...(note.own_position ? { own_position: true } : {}) }
+          : {}),
+        ...(note.move_group ? { move_group: note.move_group } : {}),
         ...(note.scan_lore ? { scan_lore: true } : {}),
         ...(note.on_by_default ? { on_by_default: true } : {})
       }))

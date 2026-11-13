@@ -280,6 +280,7 @@ for (const [kind, cacheMode] of [
         preset: { openai_max_context: 32768 }
       })
       const chat = yield* api.CreateWorkshop({})
+      yield* api.ChangeLcmSettings({ chatId: chat.id, change: { enabled: false } })
       const events = yield* watch(api, chat)
       const first = yield* send(api, chat, "First request.")
       yield* eventually(() =>
@@ -509,9 +510,10 @@ for (const change of [
       const api = yield* client()
       const fixture = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
-        model: { context: 4096 }
+        model: { context: 32768 }
       })
       const chat = yield* api.CreateWorkshop({})
+      yield* api.ChangeLcmSettings({ chatId: chat.id, change: { enabled: false } })
       const events = yield* watch(api, chat)
       const first = yield* send(api, chat, "First request.")
       yield* eventually(() =>

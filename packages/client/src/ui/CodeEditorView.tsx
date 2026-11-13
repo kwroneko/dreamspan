@@ -206,6 +206,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
             const text = update.state.sliceDoc(range.from, range.to)
             onSelected(text)
             props.onSelectionChange?.(text)
+            props.onSelectionRangeChange?.({ at: range.from, length: range.to - range.from })
           }
           if (update.docChanged && !applying) {
             deferred = null // A composition edit is now the latest user text.

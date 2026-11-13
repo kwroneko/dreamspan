@@ -1,3 +1,4 @@
+import { cardDoc } from "./support/docs.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema, Stream } from "effect"
 import { AppApi } from "@rp/shared/api.ts"
@@ -46,6 +47,69 @@ const fixture = (dataDir: string) =>
   })
 
 describe("operation tools", () => {
+  it.live("moves and edits own-turn card notes with receipted whole-effect Undo", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* fixture(config.dataDir)
+      assert.isUndefined(toolForKind(f.registry, "rp", "read_card"))
+      assert.isUndefined(toolForKind(f.registry, "rp", "list_library"))
+      const original = "Wears blue. Fears the sea."
+      const card = (yield* f.writer.CreateEntity({
+        userId: f.user.id,
+        kind: "card",
+        label: "Mira",
+        subtitle: "",
+        doc: cardDoc("Mira", { description: original }),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })).ref
+      const moved = yield* f.run("move_card_text", { card: card.id, field: "description", find: "Fears the sea." })
+      assert.isUndefined(moved.isError, moved.text)
+      const notes = yield* f.api.ListCardNotes({ cardRefId: card.id })
+      assert.lengthOf(notes, 2)
+      const own = notes.find((n) => n.doc.condition !== undefined)!
+      assert.deepStrictEqual(own.doc.condition, { when: "own_turn" })
+      assert.include((yield* f.run("read_card", { card: card.id })).text, "Fears the sea.")
+      const edit = yield* f.run("edit_card_note", { card: card.id, note: own.ref.id, content: "Now trusts the sea." })
+      assert.isUndefined(edit.isError, edit.text)
+      assert.deepStrictEqual(
+        yield* f.run("edit_card_note", { card: "missing", note: "missing", content: "ignored" }),
+        edit
+      )
+      const effects = yield* f.api.ListRolloutEffects({ chatId: f.chat.id })
+      const movedEffect = effects.find((e) => e.toolCallId === "move_card_text")!
+      const editedEffect = effects.find((e) => e.toolCallId === "edit_card_note")!
+      assert.strictEqual(yield* outcome(f.api.UndoRolloutEffect(movedEffect)), "EffectUndoRefused")
+      yield* f.api.UndoRolloutEffect(editedEffect)
+      // Undo of the edit creates a new revision, so the paired move conservatively
+      // requires its own History after any intervening write.
+      assert.include((yield* f.api.OpenEditor({ refId: own.ref.id })).doc.content as string, "Fears the sea.")
+      const second = (yield* f.writer.CreateEntity({
+        userId: f.user.id,
+        kind: "card",
+        label: "Tobin",
+        subtitle: "",
+        doc: cardDoc("Tobin", { description: original }),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })).ref
+      const again = yield* f.run(
+        "move_card_text",
+        { card: second.id, field: "description", find: "Fears the sea." },
+        "move-second"
+      )
+      assert.isUndefined(again.isError, again.text)
+      const inverse = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find(
+        (e) => e.toolCallId === "move-second"
+      )!
+      yield* f.api.UndoRolloutEffect(inverse)
+      assert.isTrue((yield* f.api.ListCardNotes({ cardRefId: second.id })).every((n) => n.doc.on_by_default === false))
+      assert.strictEqual((yield* f.api.OpenEditor({ refId: card.id })).doc.description, original)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("uses the real RenameChat handler, emits its hub event, replays once and undoes", () => {
     const config = testConfig()
     return Effect.gen(function* () {

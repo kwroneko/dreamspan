@@ -30,6 +30,7 @@ import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import { TextSearchApi } from "./textSearchApi.ts"
 import {
   EditorApi,
+  OwnTurnNoteApi,
   WorkshopPresetApi,
   ForkMergeApi,
   GalleryApi,
@@ -424,6 +425,8 @@ export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authenticat
 /** Card sources (cardSources.ts): browsing an archive through the server. */
 export const AuthenticatedCardSourcesApi = CardSourcesApi.middleware(Authentication)
 
+export const AuthenticatedOwnTurnNoteApi = OwnTurnNoteApi.middleware(Authentication)
+
 export const AuthenticatedGalleryApi = GalleryApi.middleware(Authentication)
 export const AuthenticatedExternalMediaApi = ExternalMediaApi.middleware(Authentication)
 /** Saved card media (savedMedia.ts): approved sites, approvals and lookups. */
@@ -465,6 +468,7 @@ export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Aut
 export const AuthenticatedMessageVersionApi = MessageVersionApi.middleware(Authentication)
 
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
+  .merge(AuthenticatedOwnTurnNoteApi)
   .merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedWorkshopPresetApi)
   .merge(AuthenticatedChatEventsApi)

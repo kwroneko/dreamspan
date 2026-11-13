@@ -11,6 +11,19 @@ const EffectClass = Schema.Literals(["read", "chat_state", "external", "library"
  */
 export const ApprovalPrompt = Schema.Struct({
   storyAt: StoryAtField,
+  storyScope: Schema.optionalKey(
+    Schema.Struct({
+      branch: Schema.Struct({
+        name: Schema.NullOr(Schema.String),
+        original: Schema.Boolean,
+        split: Schema.optional(Schema.NullOr(Schema.Struct({ at: Schema.Number, after: Schema.Number }))),
+        createdAt: Schema.optional(Schema.Number)
+      }),
+      first: Schema.Number,
+      last: Schema.Number,
+      from: Schema.optionalKey(Schema.Boolean)
+    })
+  ),
   rolloutId: Schema.String,
   toolCallId: Schema.String,
   /** The arguments' digest: an answer names it, so it holds only for this exact call. */
