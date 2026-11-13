@@ -153,6 +153,19 @@ for (const width of [1440, 390])
       // image-set is dropped, including its URL; the font is fetched even without its glyph.
       await expect.poll(() => [...attempts.values()].every((count) => count === 2)).toBe(true)
       expect(requests.some((request) => request.includes("image-set.png"))).toBe(false)
+      // The integrated policy admits only app-created queue blobs, never remote font URLs.
+      // Load the scoped family through the real CSP before testing glyph-triggered requests.
+      const fontFamily = await article
+        .locator(".custom-glyph")
+        .evaluate((element) => getComputedStyle(element).fontFamily)
+      await expect
+        .poll(() =>
+          page.evaluate(async (family) => {
+            const faces = await document.fonts.load(`16px ${family}`, "A")
+            return faces.length
+          }, fontFamily)
+        )
+        .toBe(1)
       const beforeStates = [...requests]
       const addresses = [...new Set(requests)].sort()
       await article.locator("input.custom-door").check()

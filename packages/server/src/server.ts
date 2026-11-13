@@ -284,6 +284,7 @@ const contentSecurityPolicy = (host: string | undefined) => {
     "style-src 'self'",
     "img-src 'self' blob: data:",
     "media-src 'self' blob: data:",
+    "font-src 'self' blob: data:",
     `connect-src 'self'${socket}`,
     "object-src 'none'",
     "base-uri 'none'",

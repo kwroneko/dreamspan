@@ -13,7 +13,7 @@ const db = new DatabaseSync(dbPath)
 db.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=30000; BEGIN IMMEDIATE; INSERT INTO fork_label_pause VALUES(1)")
 try {
   const version = db.prepare(
-    "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at) VALUES(?,?,?,'complete','human',?,'verbatim','user_written',1,1)"
+    "INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,authoring_fork_id,created_at,updated_at) VALUES(?,?,?,'complete','human',?,'verbatim','user_written',?,1,1)"
   )
   const slot = db.prepare(
     "INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,fork_id,created_at) VALUES(?,?,?,?,?,?,1)"
@@ -23,7 +23,7 @@ try {
   for (let n = 0; n < messages; n++) {
     const id = `${chatId}-s${n}`
     for (let swipe = 0; swipe < 20 + (n % 31); swipe++) {
-      version.run(`${id}-v${swipe}`, id, swipe, `Aria in garden ${n}, swipe ${swipe}.`)
+      version.run(`${id}-v${swipe}`, id, swipe, `Aria in garden ${n}, swipe ${swipe}.`, forkId)
       versions++
     }
     slot.run(id, chatId, parent, n, `${id}-v0`, forkId)
