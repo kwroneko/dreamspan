@@ -318,11 +318,12 @@ describe("operation tools", () => {
         })
         assert.isUndefined(restored.isError, restored.text)
         assert.strictEqual((yield* f.api.OpenEditor({ refId: card.id })).doc.description, "Original")
-        const target = yield* f.api.CreateWorkshop({ title: "Command target" })
-        const cast = yield* f.api.GetCast({
+        const target = yield* f.api.CreateChat({ title: "Command target" })
+        yield* f.api.SendMessage({
           chatId: target.id,
-          slotId: target.activeLeafSlotId,
-          forkId: target.currentForkId
+          parentSlotId: null,
+          branch: false,
+          content: "What happens next?"
         })
         for (const [name, args] of [
           ["list_library", { kind: "card", query: "Revision", limit: 1 }],
@@ -343,10 +344,16 @@ describe("operation tools", () => {
           swipes: true,
           summaries: true
         }
+        yield* f.writer.SetWorkshopGrant({
+          userId: f.user.id,
+          chatId: f.chat.id,
+          capability: "chats.read",
+          mode: "allow"
+        })
         const searched = yield* f.run("history_search", { chatId: target.id, forkId: target.currentForkId, search })
         assert.isUndefined(searched.isError, searched.text)
         const renamed = yield* f.run("history_rename", {
-          entityId: cast.participants[0],
+          entityId: card.entityId,
           oldName: "What",
           newName: "Which",
           scope: "this",
@@ -546,32 +553,29 @@ it.live("budgets operation after-results before recording and returning them to 
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })
 
-it.live("history rename approvals pin the complete set of saved chat targets", () => {
+it.live("history rename never expands approval to all chats", () => {
   const config = testConfig()
   return Effect.gen(function* () {
     const f = yield* fixture(config.dataDir)
-    const cast = yield* f.api.GetCast({
-      chatId: f.chat.id,
-      slotId: f.chat.activeLeafSlotId,
-      forkId: f.chat.currentForkId
-    })
+    const target = yield* f.api.CreateChat({ title: "Pinned story" })
+    yield* f.api.SendMessage({ chatId: target.id, parentSlotId: null, branch: false, content: "What happens next?" })
     const tool = toolForKind(f.registry, "workshop", "history_rename")!
     const args = {
-      entityId: cast.participants[0]!,
+      entityId: "unused",
       oldName: "What",
       newName: "Which",
       scope: "all",
-      chatId: f.chat.id,
-      forkId: f.chat.currentForkId
+      chatId: target.id,
+      forkId: target.currentForkId
     }
     const ctx = { ...f.context, toolCallId: "history-pin" }
-    const prompt = yield* tool.describe!(ctx, args as never)
-    const target = yield* f.api.CreateWorkshop({ title: "Added while waiting" })
-    const result = yield* tool.execute({ ...ctx, approvalDigest: "approved" }, args as never)
+    assert.strictEqual((yield* Effect.exit(tool.describe!(ctx, args as never)))._tag, "Failure")
+    const added = yield* f.api.CreateChat({ title: "Added while waiting" })
+    const result = yield* tool.execute(ctx, args as never)
     assert.isTrue(result.isError, result.text)
-    assert.include(result.text, "changed while waiting")
-    assert.isTrue(prompt.rows.some((r) => r.value.includes(f.chat.title)))
-    assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: target.id, forkId: target.currentForkId! }))
+    assert.include(result.text, "current branch")
+    for (const chat of [target, added])
+      assert.isEmpty(yield* f.api.ListHistoryEdits({ chatId: chat.id, forkId: chat.currentForkId! }))
     assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })

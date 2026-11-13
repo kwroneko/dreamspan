@@ -31,7 +31,7 @@ import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from "@rp/shared/snippetsApi.ts"
-import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
+import { historyReadRpcs, historyWriteRpcs, HistoryRejected, HistoryEdit } from "@rp/shared/historyApi.ts"
 import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
 import {
   MergeChanged,
@@ -622,8 +622,29 @@ export class WriteOpsChat extends RpcGroup.make(
     success: Snippet,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
+  Rpc.make("PrepareHistoryEdits", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      groupId: Schema.optionalKey(Schema.String),
+      token: Schema.optionalKey(Schema.String),
+      total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(10000)),
+      summariesIncluded: Schema.Boolean,
+      summaryIds: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(10000))),
+      edits: Schema.Array(HistoryEdit).check(Schema.isMaxLength(500))
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, HistoryRejected, StorageError])
+  }),
   historyWriteRpcs[0]
-    .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
+    .setPayload(
+      Schema.Struct({
+        ...historyWriteRpcs[0].payloadSchema.fields,
+        userId: UserId,
+        prepared: Schema.optionalKey(Schema.String)
+      })
+    )
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   historyWriteRpcs[1]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[1].payloadSchema.fields, userId: UserId }))
@@ -1903,6 +1924,49 @@ export class WriteOpsLibrary extends RpcGroup.make(
     },
     success: Schema.Unknown,
     error: Schema.Union([NotFound, EffectUndoRefused, InvalidDocument, StaleWrite, StorageError])
+  }),
+  Rpc.make("StartEditRollout", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      chatId: ChatId,
+      forkId: ForkId
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, HistoryRejected, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("ApplyAgentChangeset", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      chatId: ChatId,
+      forkId: ForkId,
+      expected: Schema.String,
+      prepared: Schema.optionalKey(Schema.String),
+      title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+      edits: Schema.Array(HistoryEdit).check(Schema.isMaxLength(10000)),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int })).check(Schema.isMaxLength(32))
+      ),
+      summariesIncluded: Schema.Boolean,
+      includeSwipes: Schema.Boolean,
+      notes: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            expectedRowVersion: Schema.Int,
+            parent: RevisionId,
+            text: Schema.String.check(Schema.isMaxLength(65536))
+          })
+        )
+      )
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, HistoryRejected, EffectUndoRefused, StorageError])
   }),
   Rpc.make("AgentCreateEntity", {
     payload: {
@@ -3422,6 +3486,63 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A chat's composer draft's restorable states, by the draft's id. */
+  Rpc.make("AgentHistorySnapshot", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      versions: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(10000))),
+      summaries: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(10000)))
+    },
+    success: Schema.Struct({
+      stamp: Schema.String,
+      name: Schema.String,
+      leaf: Schema.NullOr(SlotId),
+      dependents: Schema.Array(Schema.Struct({ id: Schema.String, revision: Schema.String }))
+    }),
+    error: Schema.Union([NotFound, HistoryRejected, StorageError])
+  }),
+  Rpc.make("AgentRewriteTargets", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      messages: Schema.Array(Schema.Int).check(Schema.isMaxLength(10000))
+    },
+    success: Schema.Array(
+      Schema.Struct({ message: Schema.Int, targetId: Schema.String, beforeId: Schema.String, before: Schema.String })
+    ),
+    error: Schema.Union([NotFound, HistoryRejected, StorageError])
+  }),
+  Rpc.make("ReadWorkshopChat", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      chatId: ChatId,
+      forkId: ForkId,
+      from: Schema.Int,
+      offset: Schema.optionalKey(Schema.Int),
+      count: Schema.Int,
+      query: Schema.optionalKey(Schema.String)
+    },
+    success: Schema.Struct({
+      messages: Schema.Array(
+        Schema.Struct({
+          message: Schema.Int,
+          slotId: Schema.String,
+          version: Schema.String,
+          speaker: Schema.String,
+          offset: Schema.Int,
+          text: Schema.String
+        })
+      ),
+      next: Schema.NullOr(Schema.Int),
+      nextOffset: Schema.NullOr(Schema.Int)
+    }),
+    error: Schema.Union([NotFound, HistoryRejected, EffectUndoRefused, StorageError])
+  }),
   Rpc.make("ComposerHistory", {
     payload: {
       userId: UserId,

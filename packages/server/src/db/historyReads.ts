@@ -114,7 +114,7 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
           SELECT o.seq, o.id AS targetId, v.id AS beforeId, v.content AS before, s.id AS slotId, d.position AS depth, d.position AS toDepth,
             o.id=${selectedIn(sql, forkId, "s")} AS selected, 0 AS level
           FROM display_slots d JOIN slots s ON s.id=d.id AND s.chat_id=${chatId}
-          JOIN versions o ON o.slot_id=s.id AND o.fork_id IS NULL ${shownJoin(sql, forkId)}
+          JOIN versions o ON ${search.messages && !search.swipes ? sql`o.id=${selectedIn(sql, forkId, "s")}` : sql`o.slot_id=s.id AND o.fork_id IS NULL`} ${shownJoin(sql, forkId)}
           WHERE (d.position>${fromDepth} OR o.seq>${afterSeq}) ${versionFilters}
           ORDER BY d.position, o.seq LIMIT 101`
                 : // A summary is in the fork's history when its first and last messages are shown.
@@ -128,7 +128,7 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
           SELECT o.seq, o.id AS targetId, v.id AS beforeId, v.content AS before, s.id AS slotId, s.depth, s.depth AS toDepth,
             o.id=${selectedIn(sql, forkId, "s")} AS selected, 0 AS level
           FROM segments g CROSS JOIN slots s ON s.chat_id=${chatId} AND s.chain_id=g.chain_id AND s.depth BETWEEN max(g.lo, ${fromDepth}) AND min(g.hi, ${throughDepth})
-          JOIN versions o ON o.slot_id=s.id AND o.fork_id IS NULL ${shownJoin(sql, forkId)}
+          JOIN versions o ON ${search.messages && !search.swipes ? sql`o.id=${selectedIn(sql, forkId, "s")}` : sql`o.slot_id=s.id AND o.fork_id IS NULL`} ${shownJoin(sql, forkId)}
           WHERE (s.depth>${fromDepth} OR o.seq>${afterSeq}) ${versionFilters}
           ORDER BY s.depth, o.seq LIMIT 101`
                 : yield* sql<Row>`
@@ -192,12 +192,26 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
           created_at: number
           fork_id: string
           name: string | null
+          workshop_chat: ChatId | null
+          workshop_name: string | null
+          workshop_version: string | null
+          workshop_slot: string | null
+          workshop_call: string | null
         }>`
         WITH RECURSIVE ancestry(id, bound) AS (
           SELECT ${forkId}, 9223372036854775807 UNION ALL
           SELECT f.parent_fork_id, min(a.bound, f.branched_at) FROM ancestry a JOIN forks f ON f.id=a.id WHERE f.parent_fork_id IS NOT NULL
-        ) SELECT c.*, f.name FROM ancestry a JOIN changesets c ON c.fork_id=a.id AND c.seq<=a.bound
-          JOIN forks f ON f.id=c.fork_id WHERE c.chat_id=${chatId} ORDER BY c.created_at DESC, c.id DESC`
+         ) SELECT c.*, f.name, w.id AS workshop_chat,w.title AS workshop_name,
+          coalesce((SELECT wm.id FROM versions wm WHERE wm.id=p.context_snapshot_json ->> '$.workshop.version'),
+            (SELECT wm.id FROM versions wm WHERE wm.rollout_id=p.context_snapshot_json ->> '$.workshop.rollout' ORDER BY wm.created_at DESC,wm.id DESC LIMIT 1)) AS workshop_version,
+          coalesce((SELECT ws.id FROM slots ws WHERE ws.id=p.context_snapshot_json ->> '$.workshop.slot'),
+            (SELECT wm.slot_id FROM versions wm WHERE wm.rollout_id=p.context_snapshot_json ->> '$.workshop.rollout' ORDER BY wm.created_at DESC,wm.id DESC LIMIT 1),
+            (SELECT wr.leaf_slot_id FROM rollouts wr WHERE wr.id=p.context_snapshot_json ->> '$.workshop.rollout')) AS workshop_slot,
+          p.context_snapshot_json ->> '$.workshop.toolCall' AS workshop_call FROM ancestry a JOIN changesets c ON c.fork_id=a.id AND c.seq<=a.bound
+          JOIN forks f ON f.id=c.fork_id
+          LEFT JOIN rollout_payloads p ON p.rollout_id=c.rollout_id
+          LEFT JOIN chats w ON w.id=p.context_snapshot_json ->> '$.workshop.chat' AND w.owner_user_id=${userId} AND w.deleted_at IS NULL
+          WHERE c.chat_id=${chatId} ORDER BY c.created_at DESC, c.id DESC`
         return yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             const raw = yield* sql<{
@@ -235,7 +249,18 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
               inherited: row.fork_id !== forkId,
               status:
                 n === items.length ? ("applied" as const) : n === 0 ? ("undone" as const) : ("partly undone" as const),
-              items
+              items,
+              ...(row.workshop_chat
+                ? {
+                    workshop: {
+                      chatId: row.workshop_chat,
+                      name: row.workshop_name ?? "Workshop",
+                      versionId: row.workshop_version,
+                      slotId: row.workshop_slot,
+                      toolCallId: row.workshop_call ?? ""
+                    }
+                  }
+                : {})
             }
           })
         )

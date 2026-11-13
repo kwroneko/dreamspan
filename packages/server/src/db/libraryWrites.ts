@@ -1,4 +1,6 @@
 import { safeAgentDocument } from "./agentDocuments.ts"
+import { makeAgentHistoryWriteHandlers } from "./agentHistoryWrites.ts"
+import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeWorkshopWriteHandlers } from "./workshopWrites.ts"
 import { archiveCandidates } from "./cardArchive.ts"
 import { newestLiveFork } from "./cardOrigins.ts"
@@ -1001,6 +1003,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       ...makeWorkshopWriteHandlers(steps, bin),
 
       ...makeLibraryReplaceWrites(steps),
+      ...makeAgentHistoryWriteHandlers(steps, yield* makeHistoryWriteHandlers),
       ...makeCardForkWriteHandlers(steps),
       ...makeForkMergeWriteHandlers(steps),
       ...makeRolloutEffectHandlers(steps)

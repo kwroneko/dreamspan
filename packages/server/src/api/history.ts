@@ -1,3 +1,4 @@
+import { prepareHistory } from "../historyPreparation.ts"
 import { Commands, makeCommand, runCommand } from "../commands.ts"
 import { RenameHistoryInput, historyReadRpcs } from "@rp/shared/historyApi.ts"
 import { HistoryRejected } from "@rp/shared/historyApi.ts"
@@ -71,11 +72,13 @@ export const makeHistoryHandlers = Effect.gen(function* () {
         if (edits.length) applications.push({ ...target, summariesIncluded: true, edits })
       }
       if (!applications.length) return 0
-      yield* writer.ApplyHistoryEdits({
-        userId: user.id,
-        title: `Rename ${params.oldName} to ${params.newName}`.slice(0, 200),
-        applications
-      })
+      yield* writer.ApplyHistoryEdits(
+        yield* prepareHistory(writer, {
+          userId: user.id,
+          title: `Rename ${params.oldName} to ${params.newName}`.slice(0, 200),
+          applications
+        })
+      )
       yield* changed(applications.map((a) => a.chatId))
       return applications.length
     }).pipe(internal("RenameHistory"))
@@ -119,7 +122,7 @@ export const makeHistoryHandlers = Effect.gen(function* () {
     ApplyHistoryEdits: (params) =>
       Effect.gen(function* () {
         const user = yield* CurrentUser
-        const result = yield* writer.ApplyHistoryEdits({ ...params, userId: user.id })
+        const result = yield* writer.ApplyHistoryEdits(yield* prepareHistory(writer, { ...params, userId: user.id }))
         yield* changed(params.applications.map((a) => a.chatId))
         return result
       }).pipe(internal("ApplyHistoryEdits")),

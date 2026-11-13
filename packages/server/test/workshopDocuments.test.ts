@@ -41,6 +41,7 @@ const fixture = (dataDir: string, api: Api) =>
       rolloutId,
       toolCallId: "unused",
       leafSlotId: null,
+      viewers: null,
       reader,
       writer,
       cache: new Map()

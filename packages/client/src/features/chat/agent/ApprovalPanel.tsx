@@ -80,9 +80,13 @@ export function ApprovalPanel({ step }: StepActionProps) {
       {approval.changes?.map((change) => (
         <div key={change.field} className="flex flex-col gap-1" data-approval-change={change.field}>
           <p className="text-xs font-medium [overflow-wrap:anywhere]">{change.field}</p>
-          {Math.max(change.before.length, change.after.length) > 4000 ? (
+          {Math.max(change.before.length, change.after.length) > 4000 || approval.changes!.length > 32 ? (
             <RevisionComparison
-              label={`Full change (${change.before.length.toLocaleString()} → ${change.after.length.toLocaleString()} characters)`}
+              label={
+                approval.changes!.length > 32
+                  ? `Full changes to ${change.field}`
+                  : `Full change (${change.before.length.toLocaleString()} → ${change.after.length.toLocaleString()} characters)`
+              }
               before={change.before}
               after={change.after}
             />

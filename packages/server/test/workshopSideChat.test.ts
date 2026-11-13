@@ -318,6 +318,7 @@ describe("side chat", () => {
         chatId: workshop.id,
         forkId: workshop.currentForkId,
         leafSlotId: null,
+        viewers: null,
         slotId: "unused" as ToolContext["slotId"],
         versionId: "unused" as VersionId,
         rolloutId: "unused",

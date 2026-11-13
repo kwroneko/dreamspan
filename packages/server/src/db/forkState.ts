@@ -260,6 +260,7 @@ interface OverrideValue {
   /** The bin item of a deletion, which a restore names. */
   readonly binItemId?: string | null
   readonly summariesDone?: boolean
+  readonly changesetId?: string | null
 }
 
 /**
@@ -283,13 +284,13 @@ export const writeOverride = (
       ORDER BY o.seq DESC LIMIT 1`
     if (own !== undefined && own.forked === 0) {
       yield* sql`UPDATE fork_overrides SET value_id = ${value.valueId}, flag = ${value.flag}, seq = ${seq},
-        bin_item_id = ${value.binItemId ?? null}, summaries_done = ${value.summariesDone ? 1 : 0}, origin = ${origin} WHERE id = ${own.id}`
+        bin_item_id = ${value.binItemId ?? null}, summaries_done = ${value.summariesDone ? 1 : 0}, changeset_id = ${value.changesetId === undefined ? sql.literal("changeset_id") : value.changesetId}, origin = ${origin} WHERE id = ${own.id}`
       return seq
     }
     yield* sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag,
-        bin_item_id, summaries_done, origin)
+        bin_item_id, summaries_done, changeset_id, origin)
       VALUES (${uuidv7()}, ${fork.chatId}, ${fork.id}, ${seq}, ${value.kind}, ${value.targetId}, ${value.slotId},
-        (SELECT depth FROM slots WHERE id = ${value.slotId}), ${value.valueId}, ${value.flag}, ${value.binItemId ?? null}, ${value.summariesDone ? 1 : 0}, ${origin})`
+        (SELECT depth FROM slots WHERE id = ${value.slotId}), ${value.valueId}, ${value.flag}, ${value.binItemId ?? null}, ${value.summariesDone ? 1 : 0}, ${value.changesetId ?? null}, ${origin})`
     return seq
   })
 

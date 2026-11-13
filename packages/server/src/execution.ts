@@ -1,3 +1,4 @@
+import { historyRenameTool, historySearchTool, rewriteTools } from "./agent/tools/rewrite.ts"
 import { makeOperationTools, type OperationRuntime } from "./agent/operations.ts"
 import { builtinOperationExposures } from "./agent/exposures/builtins.ts"
 import { rolloutEffectClasses } from "./agent/effects.ts"
@@ -78,7 +79,12 @@ export class ExecutionRegistry extends Context.Service<
         ...workshopMode,
         plan: (input) => {
           const plan = workshopMode.plan(input)
-          return { ...plan, tools: [...new Set([...plan.tools, ...operationTools.list().map((e) => e.id)])] }
+          return {
+            ...plan,
+            tools: [
+              ...new Set([...plan.tools, ...rewriteTools.map((e) => e.id), ...operationTools.list().map((e) => e.id)])
+            ]
+          }
         }
       })
       const validate = (tool: RolloutTool<never>) => {
@@ -95,6 +101,9 @@ export class ExecutionRegistry extends Context.Service<
           Effect.sync(() => validate(entry.tool)).pipe(Effect.andThen(variants.register(entry)))
       }
       yield* kindTools.register({ id: "workshop:edit_card", tool: libraryEditCard })
+      yield* kindTools.register({ id: "workshop:history_rename", tool: historyRenameTool as RolloutTool<never> })
+      yield* kindTools.register({ id: "workshop:history_search", tool: historySearchTool as RolloutTool<never> })
+      for (const tool of rewriteTools) yield* kindTools.register({ id: `workshop:${tool.id}`, tool })
       const catalog = makeRegistry<RolloutTool<never>>()
       const rolloutTools = {
         ...catalog,

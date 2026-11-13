@@ -1,3 +1,4 @@
+import { checkStoryReadScope } from "../storyReadScope.ts"
 import { documentDiff, documentChangeRows, safeAgentDocument, executableNotice } from "../../db/agentDocuments.ts"
 import { promptPreset } from "@rp/shared/docs/preset.ts"
 import { builtinPreset } from "../../db/assemblySources.ts"
@@ -33,7 +34,7 @@ const library = (ctx: ToolContext, kind: EntityKind, value: unknown) =>
     })
     return found.ref
   })
-const resolveChat = (ctx: ToolContext, value: unknown) =>
+export const resolveChat = (ctx: ToolContext, value: unknown) =>
   Effect.gen(function* () {
     const wanted = String(value)
     let before: ReturnType<typeof chatCursor> | null = null
@@ -254,11 +255,16 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
   }),
   exposure("list_chats", "ListChats", "chats.read", "read", "List your chats", {
     parameters: Schema.Struct({ limit: optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))) }),
-    adapt: (args) => Effect.succeed({ limit: args.limit ?? 20, before: null })
+    adapt: (args, ctx) => checkStoryReadScope(ctx).pipe(Effect.as({ limit: args.limit ?? 20, before: null }))
   }),
   exposure("get_cast", "GetCast", "chats.read", "read", "Read a chat's cast and settings", {
     parameters: Schema.Struct({ chat: name }),
-    adapt: (args, ctx) => chatPayload(ctx, args)
+    adapt: (args, ctx) =>
+      Effect.gen(function* () {
+        const payload = yield* chatPayload(ctx, args)
+        yield* checkStoryReadScope(ctx, payload.chatId)
+        return payload
+      })
   }),
   exposure("list_revisions", "ListRevisions", "library.read", "read", "List a library entry's revisions", {
     parameters: Schema.Struct(refArgs),

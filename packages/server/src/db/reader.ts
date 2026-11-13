@@ -1,3 +1,4 @@
+import { makeAgentHistoryReadHandlers } from "./agentHistoryReads.ts"
 import { makeMergeReadHandlers } from "./merges.ts"
 import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
 import { stateModuleHandlers } from "./stateModules.ts"
@@ -46,7 +47,11 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
         (assembler) =>
           Effect.map(
             Effect.all([
-              makeHistoryReadHandlers,
+              makeHistoryReadHandlers.pipe(
+                Effect.flatMap((history) =>
+                  Effect.map(makeAgentHistoryReadHandlers, (agent) => ({ ...history, ...agent }))
+                )
+              ),
               makeReadHandlers.pipe(Effect.provideService(BinLimitDefaults, binLimits ?? defaultBinLimits)),
               makeProviderReadHandlers,
               makeAccountReadHandlers,
