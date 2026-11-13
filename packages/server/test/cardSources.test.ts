@@ -384,6 +384,28 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
+  it.effect("a preview of an unopened remote card refuses without fetching or writing", () =>
+    Effect.gen(function* () {
+      const api = yield* client({ "Remote-User": "preview-unopened" })
+      const placeholder = remoteEntityId("cardex", archive.cards[115]!.slug)
+      const before = archive.hits()
+      const result = yield* outcome(
+        api.PreviewChat({
+          cards: [placeholder],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Hello", speakerEntityId: null },
+          replier: placeholder
+        })
+      )
+      assert.strictEqual(archive.hits(), before, "preview must never fetch an unopened card")
+      assert.strictEqual(result, "ServerError")
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), 0)
+      assert.lengthOf(yield* api.ListRecentRemote({ sourceId: "cardex" }), 0)
+      assert.lengthOf(yield* api.ListChats({ limit: 10, before: null }), 0)
+    })
+  )
+
   it.effect(
     "a chat not sent yet with a source's card previews its request, adding and sending nothing (DESIGN §2.1)",
     () =>
@@ -874,6 +896,10 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       const shown = (yield* search(alice)).items.find((item) => item.remoteId === book.slug)!
       assert.deepStrictEqual([shown.kind, shown.held?.refId], ["lorebook", added.refId])
       assert.isUndefined((yield* search(bob)).items.find((item) => item.remoteId === book.slug)?.held)
+      // Opening a lorebook uses the ordinary source read and records its kind for the recent link.
+      yield* api.SourceCard({ sourceId: "cardex", remoteId: book.slug })
+      const recent = (yield* api.ListRecentRemote({ sourceId: "cardex" })).find((item) => item.remoteId === book.slug)
+      assert.strictEqual((recent as { kind?: string })?.kind, "lorebook")
       // Its origin, read locally.
       const entityId = added.entityId
       archive.reset()
@@ -888,6 +914,13 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       const receipt = response.headers.get("x-source-version-receipt") ?? ""
       const bytes = new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))
       // The editor's Update names the file after the lorebook, so its name stays.
+      const staged = yield* importFile(bytes, { name: `${book.name}.json`, into: added.refId, mode: "merge" })
+      assert.strictEqual(staged.status, 200, yield* Effect.promise(() => staged.clone().text()))
+      const stagedResult = yield* Effect.promise(
+        () => staged.json() as Promise<{ library: { stagedRevisionId: string } }>
+      )
+      assert.isString(stagedResult.library.stagedRevisionId)
+      assert.lengthOf(yield* entries(added.refId), 2, "review must leave the in-use lorebook unchanged")
       const merged = yield* importFile(bytes, { name: `${book.name}.json`, into: added.refId })
       assert.strictEqual(merged.status, 200, yield* Effect.promise(() => merged.clone().text()))
       const updated = yield* entries(added.refId)
@@ -1666,6 +1699,23 @@ describe("the cache (§4.1)", () => {
     return { dataDir, cache: makeSourceCache({ dataDir, now, capBytes }) }
   }
   const key = (user: string, kind: "page" | "card" | "image", id: string) => ({ user, source: "cardex", kind, id })
+
+  it.effect("preview peeks neither touch nor evict files, even after their ordinary lifetime", () =>
+    Effect.gen(function* () {
+      let now = 0
+      const { cache } = fresh(() => now)
+      yield* cache.scan
+      const entry = yield* cache.put(key("preview", "card", "opened"), { bytes: new Uint8Array([1, 2, 3]) })
+      const used = entry.used
+      now += 8 * DAY
+      assert.isNull(yield* cache.peek(key("preview", "card", "missing")))
+      assert.strictEqual((yield* cache.peek(key("preview", "card", "opened")))?.used, used)
+      assert.strictEqual(cache.size(), 1)
+      assert.strictEqual((yield* cache.readBlob(entry.blob!)).length, 3)
+      yield* cache.sweep
+      assert.strictEqual(cache.size(), 0, "preview never prolongs an entry's lifetime")
+    })
+  )
 
   it.effect("pages last 10 minutes from when fetched; cards 7 days from when last opened", () =>
     Effect.gen(function* () {

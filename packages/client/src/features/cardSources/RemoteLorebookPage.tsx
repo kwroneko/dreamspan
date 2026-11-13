@@ -8,7 +8,7 @@ import { EmptyState } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useTitle } from "../shell.tsx"
 import { useSourceList } from "./browse.tsx"
-import { lorebookProblem, useAdoptRemoteLorebook } from "./remote.ts"
+import { lorebookProblem, useAdoptRemoteLorebook, useSourceCall } from "./remote.ts"
 
 export function RemoteLorebookPage() {
   const { sourceId = "", remoteId = "" } = useParams({ strict: false }) as { sourceId?: string; remoteId?: string }
@@ -16,6 +16,7 @@ export function RemoteLorebookPage() {
   const info = list?.find((s) => s.id === sourceId && s.enabled)
   const name = info?.name ?? sourceId
   const adopt = useAdoptRemoteLorebook()
+  const call = useSourceCall()
   const navigate = useNavigate()
   const [failed, setFailed] = useState<{ attempt: number; text: string } | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -24,11 +25,17 @@ export function RemoteLorebookPage() {
   useEffect(() => {
     if (!info) return
     let live = true
-    void adopt(sourceId, name, remoteId, true).then((out) => {
-      if (!live || out === null) return
-      if (!out.ok) return setFailed({ attempt, text: lorebookProblem(name, out.problem) })
-      void navigate({ to: "/library/$refId", params: { refId: out.value.refId }, replace: true })
-    })
+    void call((client) => client("SourceCard", { sourceId, remoteId }))
+      .then(async (viewed) => {
+        if (!live || viewed === null) return null
+        if (!viewed.ok) return viewed
+        return adopt(sourceId, name, remoteId, true)
+      })
+      .then((out) => {
+        if (!live || out === null) return
+        if (!out.ok) return setFailed({ attempt, text: lorebookProblem(name, out.problem) })
+        void navigate({ to: "/library/$refId", params: { refId: out.value.refId }, replace: true })
+      })
     return () => {
       live = false
     }

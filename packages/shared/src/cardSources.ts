@@ -286,6 +286,7 @@ export const RecentRemote = Schema.Struct({
   sourceId: Schema.String,
   remoteId: Schema.String,
   name: Schema.String,
+  kind: Schema.optionalKey(Schema.Literals(["character", "lorebook"])),
   creator: Schema.optionalKey(Schema.String),
   thumb: Schema.optionalKey(Schema.String),
   at: Schema.Number

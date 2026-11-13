@@ -20,7 +20,6 @@ import { Button } from "../../ui/Button.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { stageVersion } from "../cardImport/upload.ts"
-import { uploadFile } from "../library/files.ts"
 import { type EditorStore, useEditorState } from "../editor/store.ts"
 import { problemText, useSourceCall } from "./remote.ts"
 
@@ -103,63 +102,12 @@ export function SourceUpdateNotice({ store }: { store: EditorStore }) {
   ) : null
 }
 
-/**
- * A lorebook added from a source (§3.9): Update merges the newer file into it as Update from
- * file… does, and Check for a newer version asks the source. Neither is offered for a lorebook
- * that didn't come from a source that's on.
- */
-function LorebookUpdateNotice({ entityId, refId, label }: { entityId: string; refId: RefId; label: string }) {
-  const origin = useOrigin(entityId)
-  const registry = useContext(RegistryContext)
-  const action = useAction()
-  const [busy, setBusy] = useState(false)
-  const [problem, setProblem] = useState<string | null>(null)
-  if (!origin) return null
-  const update = async () => {
-    setProblem(null)
-    setBusy(true)
-    const file = await fetchNewerFile(origin)
-    if (file._tag === "Failed") {
-      setBusy(false)
-      return setProblem(file.message)
-    }
-    // A World Info file names no lorebook: the importer takes the file's name, so it keeps this one's.
-    const named = new File([file.file], `${label}.json`)
-    const merged = await uploadFile(named, refId)
-    if (merged._tag !== "Done") {
-      setBusy(false)
-      return setProblem(merged._tag === "Failed" ? merged.message : "Sign in again to update this lorebook.")
-    }
-    await action.run(
-      (client) => client("TakeRemoteVersion", { entityId, version: file.version, receipt: file.receipt }),
-      [...ORIGIN_KEYS]
-    )
-    invalidateKeys(registry, ORIGIN_KEYS)
-    setBusy(false)
-    showToast({ title: `Updated ${label} from ${origin.sourceName}` })
-  }
+/** Lorebook updates use the same explicit review as cards, in either editor. */
+function LorebookUpdateNotice(props: { entityId: string; refId: RefId; label: string }) {
   return (
     <>
-      {origin.newerVersion && (
-        <Alert
-          title={`A newer version is on ${origin.sourceName}`}
-          actions={
-            <Button
-              hint={`Merges the newer file from ${origin.sourceName} into this lorebook, as Update from file… does.`}
-              pending={busy}
-              disabled={busy}
-              onClick={() => void update()}
-            >
-              Update
-            </Button>
-          }
-        >
-          <p>Its changes aren&apos;t in this lorebook until you update it.</p>
-          {problem && <p className="text-danger">{problem}</p>}
-          {action.error && <p className="text-danger">{action.error.message}</p>}
-        </Alert>
-      )}
-      <CheckForNewer entityId={entityId} name={label} what="lorebook" />
+      <UpdateNotice {...props} what="lorebook" />
+      <CheckForNewer entityId={props.entityId} name={props.label} what="lorebook" />
     </>
   )
 }
@@ -174,7 +122,17 @@ type Open =
       readonly receipt: string
     }
 
-function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: RefId; label: string }) {
+function UpdateNotice({
+  entityId,
+  refId,
+  label,
+  what = "card"
+}: {
+  entityId: string
+  refId: RefId
+  label: string
+  what?: "card" | "lorebook"
+}) {
   const origin = useOrigin(entityId)
   const [open, setOpen] = useState<Open | null>(null)
   const [busy, setBusy] = useState<"merge" | "choices" | null>(null)
@@ -202,7 +160,11 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
   const review = async () => {
     const file = await fetched("merge")
     if (!file) return
-    const staged = await stageVersion(file.file, refId, file.link)
+    const staged = await stageVersion(
+      what === "lorebook" ? new File([file.file], `${label}.json`) : file.file,
+      refId,
+      file.link
+    )
     const revisionId = staged._tag === "Done" ? staged.result.library?.stagedRevisionId : undefined
     if (!revisionId) {
       setBusy(null)
@@ -242,25 +204,27 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
           actions={
             <>
               <Button
-                hint={`Gets the newer version from ${sourceName} and shows its changes to pick which to take into this card.`}
+                hint={`Gets the newer version from ${sourceName} and shows its changes to pick which to take into this ${what}.`}
                 pending={busy === "merge"}
                 disabled={busy !== null}
                 onClick={() => void review()}
               >
                 Review and merge
               </Button>
-              <Button
-                hint="Compares the newer version with this card, then replaces it, merges it or adds it as a separate card."
-                pending={busy === "choices"}
-                disabled={busy !== null}
-                onClick={() => void choices()}
-              >
-                More choices…
-              </Button>
+              {what === "card" && (
+                <Button
+                  hint="Compares the newer version with this card, then replaces it, merges it or adds it as a separate card."
+                  pending={busy === "choices"}
+                  disabled={busy !== null}
+                  onClick={() => void choices()}
+                >
+                  More choices…
+                </Button>
+              )}
             </>
           }
         >
-          <p>Its changes aren't in this card until you take them.</p>
+          <p>Its changes aren't in this {what} until you take them.</p>
           {problem && <p className="text-danger">{problem}</p>}
           {action.error && <p className="text-danger">{action.error.message}</p>}
         </Alert>

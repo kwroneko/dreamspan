@@ -156,7 +156,7 @@ export function useAdoptRemoteLorebook() {
       return out
     }
     const added = out.value
-    invalidateKeys(registry, ["library"])
+    invalidateKeys(registry, ["library", SOURCES_KEY])
     if (!quiet)
       showToast({
         title: added.existing ? `You have ${added.name} already.` : `Added ${added.name} to your lorebooks.`,

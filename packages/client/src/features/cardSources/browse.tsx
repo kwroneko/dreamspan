@@ -1268,7 +1268,7 @@ function RemoteLorebookTile({ card, browse }: { card: RemoteSummary; browse: Sou
             description={`Shows everything by ${card.creator} on ${info.name}, with their profile.`}
             onClick={() => showCreator(browse, card.creatorQuery ?? card.creator!)}
           >
-            Cards by {card.creator}
+            More by {card.creator}
           </MenuItem>
         )}
         {card.creatorQuery !== undefined && canHideCreator(browse) && (
@@ -1424,12 +1424,17 @@ function RecentRow({ browse }: { browse: SourceBrowse }) {
         <span className="font-normal tabular-nums">{recent.length}</span>
       </summary>
       <div className="flex min-w-0 flex-col gap-2 pb-2">
-        <ul className="flex min-w-0 gap-2 overflow-x-auto pb-1">
+        <ul className="flex min-w-0 gap-2 overflow-x-auto p-2">
           {recent.map((r) => (
             <li key={r.remoteId} className="w-16 shrink-0">
               <Tooltip label={`Shows ${r.name} again.`}>
                 <Link
-                  {...cardLink(info.id, r.remoteId)}
+                  {...(r.kind === "lorebook"
+                    ? {
+                        to: "/sources/$sourceId/lorebooks/$remoteId" as const,
+                        params: { sourceId: info.id, remoteId: r.remoteId }
+                      }
+                    : cardLink(info.id, r.remoteId))}
                   className="flex flex-col items-center gap-1 text-center text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 >
                   <Avatar
@@ -1448,7 +1453,7 @@ function RecentRow({ browse }: { browse: SourceBrowse }) {
           <Button
             variant="ghost"
             className="h-7 px-2 text-xs"
-            hint="Empties this list. Nothing is removed from your cards."
+            hint="Empties this list. Nothing is removed from your library."
             pending={action.pending}
             onClick={() =>
               void action.run((client) => client("ClearRecentRemote", { sourceId: info.id }), [SOURCES_KEY])

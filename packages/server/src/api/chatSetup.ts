@@ -194,19 +194,28 @@ export const makeDraftPreviewHandlers = Effect.gen(function* () {
         // Every card it names is the caller's, as StartChat's writes require: the persona, and
         // who speaks or replies is one of the chat's cards.
         if (persona !== null) yield* reader.GetCardForChat({ userId: id, entityId: persona })
+        for (const greeter of greeters ?? [])
+          if (!cards.includes(greeter.entityId)) return yield* new NotFound({ entity: "card", id: greeter.entityId })
         const members = new Set<string>([...cards, ...(persona === null ? [] : [persona])])
         for (const named of [first.speakerEntityId, replier ?? null])
           if (named !== null && !members.has(named)) return yield* new NotFound({ entity: "card", id: named })
         const fromSources = new Map(
           yield* Effect.forEach(remote, (card) =>
             Effect.map(
-              sources.pipe(Option.getOrThrow).prepareAdoption(user, card.sourceId, card.remoteId),
+              sources.pipe(Option.getOrThrow).preparePreview(user, card.sourceId, card.remoteId),
               ({ payload }) => [card.entityId as string, payload.file] as const
             ).pipe(
               Effect.catchTag("SourceFailed", (error) =>
                 Effect.fail(new ServerError({ message: `The card couldn't be read. ${error.message}` }))
               )
             )
+          )
+        )
+        const localCards = new Map(
+          yield* Effect.forEach(
+            [...new Set(cards)].filter((entityId) => remoteOf(entityId) === null),
+            (entityId) =>
+              Effect.map(reader.GetCardForChat({ userId: id, entityId }), (card) => [entityId, card] as const)
           )
         )
         const drawn = yield* drawGreeters(
@@ -217,7 +226,7 @@ export const makeDraftPreviewHandlers = Effect.gen(function* () {
             const file = fromSources.get(entityId)
             return file
               ? Effect.succeed(draftCardOf(entityId, file.docJson))
-              : reader.GetCardForChat({ userId: id, entityId })
+              : Effect.succeed(localCards.get(entityId)!)
           },
           "picked"
         )

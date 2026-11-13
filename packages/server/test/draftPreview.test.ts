@@ -1,3 +1,23 @@
+import { vi } from "vitest"
+
+// Trap every server HTTP transport call, including an unexpected host or endpoint. A
+// swallowed counting failure still fails the zero-call assertion. Ordinary send-comparison
+// tests use the real transport to the loopback recorder.
+const transport = vi.hoisted(() => ({ blocked: false, calls: [] as string[] }))
+vi.mock("undici", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("undici")>()
+  return {
+    ...actual,
+    fetch: (...args: Parameters<typeof actual.fetch>) => {
+      if (transport.blocked) {
+        transport.calls.push(String(args[0]))
+        return Promise.reject(new Error("Unexpected outbound HTTP during preview"))
+      }
+      return actual.fetch(...args)
+    }
+  }
+})
+
 // A chat not sent yet shows its first request (DESIGN §2.1; owner, 2026-11-12: "Make sure this
 // doesn't cause anything to be sent to inference providers"). `PreviewChat` builds what the
 // first send would send, through the same assembler, without writing anything or asking any
@@ -8,10 +28,11 @@ import { assert, describe, it } from "@effect/vitest"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Schedule } from "effect"
-import { Writer } from "../src/db/Database.ts"
-import { client, posted, serverLayer, testConfig } from "./support/config.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import { readFileSync } from "node:fs"
 import { importStPreset } from "../src/formats/preset.ts"
+import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { cardDoc } from "./support/docs.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
@@ -27,7 +48,7 @@ const mockProvider = Effect.acquireRelease(
 )
 
 /** Mira (greeting with alternates), Tobin as the user's persona, a preset, and a model counted by its own provider. */
-const setup = (api: Api, url: string) =>
+const setup = (api: Api, url: string, kind = "openai-chat", key = "mock-model") =>
   Effect.gen(function* () {
     const writer = yield* Writer
     const me = yield* api.Whoami()
@@ -48,6 +69,14 @@ const setup = (api: Api, url: string) =>
       "Mira",
       cardDoc("Mira", {
         description: "{{char}} keeps the ledger for {{user}}.",
+        character_book: loreBook([
+          loreEntry({
+            keys: ["zeppelin"],
+            vectorized: true,
+            content: "An airship crosses the river.",
+            decision_hint: "Is the airship relevant?"
+          })
+        ]).document,
         first_mes: "*{{char}} looks up.* Late again, {{user}}.",
         alternate_greetings: ["Mira waves at {{user}}."]
       })
@@ -61,7 +90,7 @@ const setup = (api: Api, url: string) =>
       importStPreset(readFileSync(new URL("./fixtures/presets/default.json", import.meta.url))).document!
     )
     const connection = yield* api.CreateConnection({
-      kind: "openai-chat",
+      kind,
       settings: {
         name: "Mock",
         baseUrl: `${url}/v1`,
@@ -74,11 +103,15 @@ const setup = (api: Api, url: string) =>
     })
     // Counting with the provider is on: a preview still counts locally.
     yield* api.SetTokenCounting({ connectionId: connection.id, via: connection.id })
-    const model = yield* api.AddUserModel({ connectionId: connection.id, key: "mock-model", overrides: {} })
+    const model = yield* api.AddUserModel({
+      connectionId: connection.id,
+      key,
+      overrides: { vision: true, tools: true }
+    })
     yield* api.SetGenerationDefaults({
       defaults: { model: { connection: connection.id, model: model.id }, preset: preset.ref.id }
     })
-    return { mira: mira.entityId as EntityId, tobin: tobin.entityId as EntityId }
+    return { mira: mira.entityId as EntityId, tobin: tobin.entityId as EntityId, connection, model }
   })
 
 /** A reply's context once its rollout has recorded it. */
@@ -103,7 +136,11 @@ describe("a chat not sent yet", () => {
         persona: tobin,
         greeting: null,
         greeters: [{ entityId: mira, greeting: 1 }],
-        first: { _tag: "Send" as const, content: "The road flooded.", speakerEntityId: tobin }
+        first: {
+          _tag: "Send" as const,
+          content: `The road flooded.${" ".repeat(8193)}Still flooded.`,
+          speakerEntityId: tobin
+        }
       }
       const preview = yield* api.PreviewChat({ ...input, replier: mira })
       assert.isNull(preview.assemblyError ?? null)
@@ -166,6 +203,228 @@ describe("a chat not sent yet", () => {
       assert.deepStrictEqual(messages, shape(sent.messages))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
+
+  it.live("includes owned first-send images without remote image counting, and rejects foreign images", () =>
+    Effect.gen(function* () {
+      const mock = yield* mockProvider
+      const api = yield* client()
+      const { mira, tobin } = yield* setup(api, mock.url)
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      const mediaId = yield* writer.RecordMessageImage({
+        userId: me.id as UserId,
+        media: { sha256: "a".repeat(64) as never, mime: "image/png", byteSize: 100, width: 512, height: 512 }
+      })
+      const input = {
+        cards: [mira],
+        persona: tobin,
+        greeting: null,
+        replier: mira,
+        first: { _tag: "Send" as const, content: "Look", speakerEntityId: tobin, images: [{ mediaId }] }
+      }
+      const preview = yield* api.PreviewChat(input)
+      assert.isNotNull(preview.request)
+      assert.isTrue(
+        preview.request!.messages.some((m) => m.images?.some((image) => image.sent)),
+        "the first send's image must be in its preview"
+      )
+      assert.isAbove(preview.imageTokens?.tokens ?? 0, 0)
+      assert.lengthOf(mock.requests(), 0, "image estimates must stay local")
+      assert.strictEqual(
+        yield* outcome(
+          api.PreviewChat({ ...input, first: { ...input.first, images: [{ mediaId: "someone-elses-image" }] } })
+        ),
+        "NotFound"
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("refuses a greeter outside the proposed cast, as the real start does", () =>
+    Effect.gen(function* () {
+      const mock = yield* mockProvider
+      const api = yield* client()
+      const { mira, tobin } = yield* setup(api, mock.url)
+      assert.strictEqual(
+        yield* outcome(
+          api.PreviewChat({
+            cards: [mira],
+            persona: null,
+            greeting: null,
+            greeters: [{ entityId: tobin, greeting: 0 }],
+            first: { _tag: "Generate", speakerEntityId: mira, direction: "" }
+          })
+        ),
+        "NotFound"
+      )
+      assert.lengthOf(mock.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("checks ownership of cast cards even when none greets", () =>
+    Effect.gen(function* () {
+      const mock = yield* mockProvider
+      const api = yield* client()
+      const { mira } = yield* setup(api, mock.url)
+      assert.strictEqual(
+        yield* outcome(
+          api.PreviewChat({
+            cards: [mira, "missing-or-foreign-card" as EntityId],
+            persona: null,
+            greeting: null,
+            greeters: [],
+            first: { _tag: "Generate", speakerEntityId: mira, direction: "" }
+          })
+        ),
+        "NotFound"
+      )
+      assert.lengthOf(mock.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  for (const [kind, key] of [
+    ["openai-chat", "unknown-model"],
+    ["openai-chat", "gpt-4o"],
+    ["openai-chat", "gpt-4"],
+    ["openai-chat", "meta-llama/llama-3.1-8b-instruct"],
+    ["openai-responses", "future-openai-model"],
+    ["openai-chat", "qwen/qwen3-8b"],
+    ["anthropic", "claude-sonnet-4-5"],
+    ["google", "gemini-2.5-pro"]
+  ])
+    it.live(
+      `zero HTTP calls for ${kind}/${key}: group, remote counts, vector lore, decisions, agents and workshop tools`,
+      () =>
+        Effect.gen(function* () {
+          const mock = yield* mockProvider
+          const api = yield* client()
+          const { mira, tobin, connection, model } = yield* setup(
+            api,
+            key === "future-openai-model" ? "https://api.openai.com" : mock.url,
+            kind,
+            key
+          )
+          const judge = yield* api.CreateConnection({
+            kind: "system-one",
+            settings: {
+              name: "Decision stub",
+              baseUrl: `${mock.url}/decide`,
+              compat: {},
+              cacheTtlS: null,
+              maxConcurrent: null,
+              presetOverrideRefId: null
+            },
+            apiKey: "sk-synthetic"
+          })
+          const judgeModel = yield* api.AddUserModel({
+            connectionId: judge.id,
+            key: "typesafe/jev-1.13",
+            overrides: {}
+          })
+          yield* api.SetDecisionSettings({
+            connectionId: judge.id,
+            model: judgeModel.id,
+            points: { lore: { on: true, threshold: 0.5 }, presence: { on: true, threshold: 0.5 } }
+          })
+          const before = mock.requests().length
+          const mediaId = yield* (yield* Writer).RecordMessageImage({
+            userId: (yield* api.Whoami()).id as UserId,
+            media: { sha256: "b".repeat(64) as never, mime: "image/png", byteSize: 100, width: 512, height: 512 }
+          })
+          transport.calls.length = 0
+          transport.blocked = true
+          const preview = yield* api.PreviewChat({
+            cards: [mira, tobin],
+            persona: null,
+            greeting: null,
+            greeters: [
+              { entityId: mira, greeting: 0 },
+              { entityId: tobin, greeting: 0 }
+            ],
+            first: { _tag: "Send", content: "A zeppelin arrives.", speakerEntityId: null, images: [{ mediaId }] },
+            replier: mira
+          })
+          assert.isNotNull(preview.request)
+          assert.strictEqual(preview.imageTokens?.count, 1)
+          assert.lengthOf(mock.requests(), before, "no inference, count, embedding, decision or model-list HTTP")
+          assert.lengthOf(yield* api.ListChats({ limit: 10, before: null }), 0)
+          // Workshops already exist when their unsent composer opens. Its estimator must stay local too,
+          // story agent mode exercises the same read path. Tool-definition counting is tested separately below.
+          const workshop = yield* api.CreateWorkshop({ title: "Unsent workshop" })
+          yield* api.ChangeCast({
+            chatId: workshop.id,
+            slotId: null,
+            change: { _tag: "Model", connection: connection.id, model: model.id }
+          })
+          const estimate = yield* api.GetNextContext({ chatId: workshop.id, leafSlotId: null })
+          assert.isNotNull(estimate.budget)
+          const chat = yield* api.CreateChat({ title: "Unsent agent" })
+          yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "AgentEnabled", on: true } })
+          yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+          // Exercise the separate tool-definition budget counter too; the composer estimator
+          // itself doesn't build a rollout or tool dispatch.
+          const reader = yield* Reader
+          const counting = {
+            model: JSON.stringify({
+              connectionId: connection.id,
+              modelId: model.id,
+              kind,
+              key,
+              api:
+                kind === "anthropic"
+                  ? "anthropic-messages"
+                  : kind === "google"
+                    ? "google-generative-ai"
+                    : kind === "openai-responses"
+                      ? "openai-responses"
+                      : "openai-completions",
+              prefill: "none",
+              cacheBreakpoints: "none",
+              context: 8192,
+              presetOverride: null
+            }),
+            request: JSON.stringify({
+              messages: [
+                {
+                  role: "user",
+                  content: "Look",
+                  images: [{ mediaId: "synthetic", estimate: { tokens: 100, basis: "formula" } }]
+                }
+              ],
+              prefill: null,
+              samplers: { max_tokens: 128, temperature: 1 },
+              useSystemPrompt: true,
+              breakpoints: [],
+              names: { user: "User", char: "Assistant", group: [] }
+            }),
+            transcript: "[]"
+          }
+          const bare = yield* reader.CountRolloutContext({ ...counting, tools: "[]" })
+          const withTools = yield* reader.CountRolloutContext({
+            ...counting,
+            tools: JSON.stringify([
+              {
+                name: "read_synthetic",
+                description: "Read a synthetic fixture.",
+                parameters: { type: "object", properties: { query: { type: "string" } } },
+                effect: "read",
+                label: "Read fixture"
+              }
+            ])
+          })
+          assert.isAbove(withTools, bare, "tool definitions are actually counted")
+          yield* Effect.sleep("100 millis")
+          assert.lengthOf(mock.requests(), before, "unsent agent/workshop estimates must never dispatch")
+          assert.deepStrictEqual(transport.calls, [], "zero outbound HTTP calls, to any host")
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              transport.blocked = false
+            })
+          ),
+          Effect.scoped,
+          Effect.provide(serverLayer(testConfig()))
+        )
+    )
 
   it.live("without a model builds nothing, even for a greeting too big to build quickly", () =>
     Effect.gen(function* () {

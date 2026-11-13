@@ -9,6 +9,7 @@ import { expect, test } from "@playwright/test"
 import type { Effect } from "effect"
 import { asUser, type Client } from "./rpc.ts"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./server.ts"
+import { openPanel } from "./panel.ts"
 import { expectLayout } from "./layoutAudit.ts"
 
 const freePort = () =>
@@ -35,7 +36,7 @@ export function cardexLorebookTests() {
           const listed = (await (
             await fetch(`${fake}/api/v1/search?q=gazetteer&kind=lorebook&sort=name&limit=10`)
           ).json()) as {
-            items: ReadonlyArray<{ slug: string; name: string }>
+            items: ReadonlyArray<{ slug: string; name: string; creator: string }>
           }
           const [first, second, third] = listed.items
           await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
@@ -70,6 +71,8 @@ export function cardexLorebookTests() {
           await tile(first!.slug).getByRole("link").click({ button: "right" })
           for (const item of ["Open", "Add to my lorebooks", "Open in a new browser tab", "Open on cardex"])
             await expect(page.getByRole("menuitem", { name: item, exact: true })).toBeVisible()
+          await expect(page.getByRole("menuitem", { name: /^More by / })).toBeVisible()
+          await expect(page.getByRole("menuitem", { name: /^Cards by / })).toHaveCount(0)
           for (const item of ["Inspect", "Add to my cards", "Start a chat"])
             await expect(page.getByRole("menuitem", { name: item, exact: true })).toHaveCount(0)
           await expectLayout(page, info, `lorebook-menu-${width}-${theme}`)
@@ -107,8 +110,23 @@ export function cardexLorebookTests() {
           await notice.scrollIntoViewIfNeeded()
           await expectLayout(page, info, `lorebook-update-${width}-${theme}`)
           await page.screenshot({ path: info.outputPath("lorebook-update.png") })
-          await page.getByRole("button", { name: "Update", exact: true }).click()
-          await expect(page.getByText(`Updated ${second!.name} from cardex`)).toBeVisible()
+          await page.getByRole("button", { name: "Review and merge", exact: true }).click()
+          const review = page.getByRole("dialog", { name: /^Merge into / })
+          await expect(review).toBeVisible()
+          await expectLayout(page, info, `lorebook-review-${width}-${theme}`)
+          expect(
+            ((await admin((api) => api.OpenEditor({ refId: secondRef.id }))).doc as { entries: unknown[] }).entries
+          ).toHaveLength(2)
+          // Cancel keeps the in-use book intact. The ordinary pending-merge notice reopens the review.
+          await page.keyboard.press("Escape")
+          await expect(review).toHaveCount(0)
+          expect(
+            ((await admin((api) => api.OpenEditor({ refId: secondRef.id }))).doc as { entries: unknown[] }).entries
+          ).toHaveLength(2)
+          await page.getByRole("button", { name: "Review and merge", exact: true }).click()
+          await expect(review).toBeVisible()
+          await review.getByRole("button", { name: "Merge", exact: true }).click()
+          await expect(page.getByText(`Merged into ${second!.name}`)).toBeVisible()
           await expect(notice).toHaveCount(0)
           await expect
             .poll(
@@ -122,6 +140,42 @@ export function cardexLorebookTests() {
             .toBe(3)
           expect((await admin((api) => api.CardOrigin({ entityId: secondRef.entityId })))?.newerVersion).toBeNull()
 
+          // The compact editor has the same review, with an attached book in use by a chat.
+          const chat = await admin((api) => api.CreateChat({ title: "Lorebook review fixture" }))
+          await admin((api) =>
+            api.ChangeCast({
+              chatId: chat.id,
+              slotId: null,
+              change: { _tag: "Lorebook", ref: secondRef.id, active: true }
+            })
+          )
+          await page.goto(`${server.url}/chats/${chat.id}`)
+          const panel = await openPanel(page, "Lorebooks")
+          await panel
+            .getByRole("list", { name: "Lorebooks in this chat" })
+            .getByRole("button", { name: new RegExp(`^${second!.name}`) })
+            .click()
+          expect((await fetch(`${fake}/__fake/publish?slug=${second!.slug}`)).status).toBe(200)
+          await panel.getByRole("button", { name: "Check for a newer version", exact: true }).click()
+          const compactNotice = panel.getByText("A newer version is on cardex", { exact: true })
+          await expect(compactNotice).toBeVisible()
+          await compactNotice.scrollIntoViewIfNeeded()
+          await expectLayout(page, info, `lorebook-compact-update-${width}-${theme}`)
+          await panel.getByRole("button", { name: "Review and merge", exact: true }).click()
+          await expect(review).toBeVisible()
+          await expectLayout(page, info, `lorebook-compact-review-${width}-${theme}`)
+          expect(
+            ((await admin((api) => api.OpenEditor({ refId: secondRef.id }))).doc as { entries: unknown[] }).entries
+          ).toHaveLength(3)
+          await page.keyboard.press("Escape")
+          await expect(review).toHaveCount(0)
+          await panel.getByRole("button", { name: "Review and merge", exact: true }).click()
+          await review.getByRole("button", { name: "Merge", exact: true }).click()
+          await expect(page.getByText(`Merged into ${second!.name}`)).toBeVisible()
+          expect(
+            ((await admin((api) => api.OpenEditor({ refId: secondRef.id }))).doc as { entries: unknown[] }).entries
+          ).toHaveLength(4)
+
           // A new browser tab loads the add-and-open page, which replaces itself with the editor.
           await page.goto(`${server.url}/sources/cardex/lorebooks/${encodeURIComponent(third!.slug)}`)
           await expect(page.getByRole("heading", { level: 1, name: third!.name })).toBeVisible({ timeout: 30_000 })
@@ -132,6 +186,16 @@ export function cardexLorebookTests() {
           expect(
             (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).filter((ref) => ref.label === third!.name)
           ).toHaveLength(1)
+          // The recent list remembers a lorebook and returns to its editor, never a character chat.
+          await page.goto(`${server.url}/?show=src.cardex&sq=gazetteer`)
+          const recent = page.locator("[data-source-recent]")
+          await recent.locator("summary").click()
+          const recentBook = recent.getByRole("link").filter({ hasText: third!.name })
+          await expect(recentBook).toHaveAttribute("href", `/sources/cardex/lorebooks/${third!.slug}`)
+          await expectLayout(page, info, `lorebook-recent-${width}-${theme}`)
+          await recentBook.click()
+          await expect(page).toHaveURL(new RegExp(`/library/`))
+          await expect(page.getByRole("heading", { level: 1, name: third!.name })).toBeVisible()
         } finally {
           await server.stop()
         }

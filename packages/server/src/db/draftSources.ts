@@ -6,6 +6,7 @@
 // typed message and the reply after it) come from the draft. A card from a card source has no
 // row yet: its document and Character's Note come with the draft, under its placeholder id.
 import type { EntityId } from "@rp/shared/chat.ts"
+import { NotFound } from "@rp/shared/errors.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
@@ -96,6 +97,16 @@ export const draftSources = (sql: SqlClient.SqlClient, draft: Draft) =>
       })
     }
     if (draft.first._tag === "Send") {
+      const images = yield* Effect.forEach(draft.first.images ?? [], (image) =>
+        Effect.gen(function* () {
+          const [media] = yield* sql<{ sha256: string; width: number | null; height: number | null }>`
+            SELECT m.sha256, m.width, m.height FROM media_assets m
+            WHERE m.id = ${image.mediaId} AND m.mime IN ('image/png','image/jpeg','image/gif','image/webp')
+              AND EXISTS (SELECT 1 FROM media_refs r WHERE r.media_id = m.id AND r.owner_user_id = ${draft.userId})`
+          if (!media) return yield* new NotFound({ entity: "media", id: image.mediaId })
+          return { mediaId: image.mediaId, ...media }
+        })
+      )
       const i = entries.length
       entries.push({
         slotId: slot(i),
@@ -104,10 +115,11 @@ export const draftSources = (sql: SqlClient.SqlClient, draft: Draft) =>
         speaker: draft.first.speakerEntityId,
         side: "user",
         content: draft.first.content,
+        ...(images.length ? { images } : {}),
         macroMode: "verbatim",
         frozen: null,
         written: false,
-        inContext: draft.first.content.length > 0,
+        inContext: draft.first.content.length > 0 || images.length > 0,
         sentAt: draft.now,
         versions: 1,
         selectedOrdinal: 0,

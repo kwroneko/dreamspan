@@ -7,7 +7,7 @@ import { TokenizerInfo } from "@rp/shared/generation.ts"
 import type { Assembler } from "../assembler/assembler.ts"
 import type { ModelInput } from "../assembler/types.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"
-import { countTokens } from "../importer/tokenizer.ts"
+import { countTokens, segmentedTokenCount } from "../importer/tokenizer.ts"
 import { calibrateText } from "../providers/textCalibration.ts"
 import { TokenCountError } from "../providers/textCounters.ts"
 import { readTextCalibration } from "./textCalibration.ts"
@@ -53,7 +53,10 @@ export const textDisplay = (
           tokenizer: new TokenizerInfo({
             id: counter?.id ?? "approximate",
             label: counter?.label(target.model) ?? "o200k_base, as an approximation",
-            exact: counter !== undefined
+            exact: counter !== undefined && !segmentedTokenCount(texts),
+            ...(segmentedTokenCount(texts)
+              ? { note: "Very long runs are counted in smaller pieces; the count is approximate." }
+              : {})
           })
         })),
         Effect.orElseSucceed(() => ({

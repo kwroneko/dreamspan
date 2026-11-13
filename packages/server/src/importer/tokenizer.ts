@@ -37,28 +37,47 @@ const encoder = (encoding: LocalEncoding) => {
   return found
 }
 
-/**
- * The length a whitespace run is counted in pieces of. Every tokenizer here merges one
- * whitespace run in time quadratic in its length (tiktoken took 2.6 s for 65,536 spaces, so
- * about 40 s for a greeting of 262,145); pieces keep it linear. A run that long is a few
- * hundred tokens either way, and pieces change its count by at most one token each.
+/** Bound individual BPE runs, including words and combining marks, as well as whitespace.
+ * Long runs can otherwise monopolize a reader for minutes. Splitting is an approximation:
+ * boundary merges can change the count, never the input text or provider request bytes.
  */
 const RUN_PIECE = 4096
-const LONG_RUN = new RegExp(`(\\s{${RUN_PIECE},})`)
 
-/** `count` over a text whose whitespace runs longer than RUN_PIECE are counted in pieces. */
+export const segmentedTokenCount = (texts: ReadonlyArray<string>) =>
+  texts.some((text) => {
+    if (text.length < RUN_PIECE) return false
+    for (const match of text.matchAll(/\s+|\S+/gu)) if (match[0].length >= RUN_PIECE) return true
+    return false
+  })
+
 const runsInPieces =
   (count: (text: string) => number) =>
   (text: string): number => {
-    if (text.length <= RUN_PIECE) return count(text)
     let total = 0
-    text.split(LONG_RUN).forEach((part, index) => {
-      if (part === "") return
-      // split() puts the captured runs at the odd indexes.
-      if (index % 2 === 0) total += count(part)
-      else for (let at = 0; at < part.length; at += RUN_PIECE) total += count(part.slice(at, at + RUN_PIECE))
-    })
-    return total
+    let start = 0
+    // A bounded per-call memo also keeps multi-megabyte repeated text cheap.
+    const pieces = new Map<string, number>()
+    for (const match of text.matchAll(/\s+|\S+/gu)) {
+      if (match[0].length < RUN_PIECE) continue
+      const at = match.index
+      total += count(text.slice(start, at))
+      const end = at + match[0].length
+      for (let pos = at; pos < end;) {
+        let next = Math.min(pos + RUN_PIECE, end)
+        // Never cut a UTF-16 pair in two.
+        if (next < end && /[\uD800-\uDBFF]/.test(text[next - 1]!)) next--
+        const piece = text.slice(pos, next)
+        let tokens = pieces.get(piece)
+        if (tokens === undefined) {
+          tokens = count(piece)
+          if (pieces.size < 32) pieces.set(piece, tokens)
+        }
+        total += tokens
+        pos = next
+      }
+      start = end
+    }
+    return total + count(text.slice(start))
   }
 
 /** Each text's token count. Special-token text ("<|endoftext|>") counts as ordinary text. */

@@ -1,3 +1,6 @@
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
+import { defaultsAtom } from "../pickers/defaults.ts"
 // A chat not sent yet shows its first request (DESIGN §2.1): the next-reply strip's Context
 // chip, with its size and a popover, and the request in a dialog (`request=first` in the URL).
 // The server builds it with the assembler a send uses and counts it locally (`PreviewChat`):
@@ -43,7 +46,11 @@ const PAUSE_MS = 400
  */
 export function useDraftPreview(input: PreviewInput | null, key: string, openRequest: () => void): DraftPreviewState {
   const call = useCaller()
-  const asked = input === null ? null : JSON.stringify([input, key])
+  // The same account selection the model/preset chips read, invalidated by settings and
+  // library changes. Its timestamp also catches a saved note/book whose id stays the same.
+  const defaults = useAtomValue(defaultsAtom)
+  const revision = AsyncResult.isSuccess(defaults) ? defaults.timestamp : null
+  const asked = input === null ? null : JSON.stringify([input, key, revision])
   const [state, setState] = useState<{ asked: string | null; preview: DraftChatPreview | null; error: string | null }>({
     asked: null,
     preview: null,
@@ -86,7 +93,7 @@ export function useDraftPreview(input: PreviewInput | null, key: string, openReq
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [asked, ask])
   return {
-    preview: state.preview,
+    preview: state.asked === asked ? state.preview : null,
     loading: asked !== null && state.asked !== asked,
     error: state.asked === asked ? state.error : null,
     openRequest
@@ -135,7 +142,7 @@ export function DraftContextChip({ draft }: PendingComposerContext) {
       onOpenChange={setOpen}
       trigger={<span className={loading ? "opacity-60" : ""}>~{compactTokens(tokens)} tokens</span>}
       triggerLabel={`Context: about ${tokens.toLocaleString()} tokens in your first request. Details`}
-      hint="The size of what your first send would send to the model"
+      hint="An approximate preview of your first request. Nothing is sent to a model."
       triggerClassName={chipClass()}
       title="Context"
     >
@@ -155,9 +162,12 @@ export function DraftContextChip({ draft }: PendingComposerContext) {
           {preview.request.tokenizer ? tokenizerText(preview.request.tokenizer) : "An estimate."} Counted here: nothing
           is sent until you send.
         </p>
+        <p className="text-xs text-muted">
+          Random choices, the current time and automatic decisions can change it when you send.
+        </p>
         <Button
           className="self-start"
-          hint="Opens the request your first send would make, message by message."
+          hint="Opens an approximate preview of your first request, message by message."
           onClick={() => {
             setOpen(false)
             draft.openRequest()
@@ -188,7 +198,7 @@ export function DraftRequestDialog({
         if (!next) onClose()
       }}
       title="Your first request"
-      description="What your first send would send to the model, built now. Nothing has been sent."
+      description="An approximate preview of your first request. Random choices, the current time and automatic decisions can change it when you send. Nothing has been sent."
       wide
     >
       {request !== null ? (

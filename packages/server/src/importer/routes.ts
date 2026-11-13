@@ -228,7 +228,8 @@ export const layer = Layer.unwrap(
       if (target !== null && target.kind !== "card" && target.parentEntityId !== null) {
         return jsonError(409, "a variant takes new versions by merging from its original")
       }
-      if (mode !== null && target?.kind !== "card") return jsonError(409, "only a card takes a new version in place")
+      if (mode !== null && target?.kind !== "card" && !(mode === "merge" && target?.kind === "lorebook"))
+        return jsonError(409, "only a card takes a new version in place")
 
       const message = NodeHttpServerRequest.toIncomingMessage(request)
       const limits = {

@@ -157,6 +157,12 @@ export interface CardSourcesShape {
     sourceId: string,
     remoteId: string
   ) => Effect.Effect<{ card: CardForChat; summary: RemoteSummary }, SourceFailed | NotFound | ServerError>
+  /** Read only the page's cached file: never fetch a card or its portrait, or touch the cache. */
+  readonly preparePreview: (
+    user: User,
+    sourceId: string,
+    remoteId: string
+  ) => Effect.Effect<PreparedAdoption, SourceFailed | NotFound | ServerError>
   /** A remote card's file made ready to add (§4.5): parsed, its page on the source in its `source`. */
   readonly prepareAdoption: (
     user: User,
@@ -968,6 +974,7 @@ const make = (options: CardSourcesOptions = {}) =>
                 sourceId,
                 remoteId,
                 name: summary.name,
+                ...(summary.kind ? { kind: summary.kind } : {}),
                 ...(summary.creator ? { creator: summary.creator } : {}),
                 ...(shown!.thumb ? { thumb: shown!.thumb } : {}),
                 at: Date.now()
@@ -1005,6 +1012,31 @@ const make = (options: CardSourcesOptions = {}) =>
               scenario: text.scenario
             })
           }
+        }),
+      preparePreview: (user, sourceId, remoteId) =>
+        Effect.gen(function* () {
+          yield* usable(user, sourceId)
+          const entry = yield* cache.peek(cacheKey(user, sourceId, "card", remoteId))
+          if (!entry?.blob)
+            return yield* new SourceFailed({
+              sourceId,
+              reason: "bad_response",
+              message: "Open this card again to preview its first request."
+            })
+          const { summary, fileName, locator } = entry.value as {
+            summary: AdapterSummary
+            fileName: string
+            locator?: string | null
+          }
+          const bytes = new Uint8Array(yield* cache.readBlob(entry.blob))
+          const parsed = yield* formats.parse(bytes, fileName).pipe(Effect.catch(storage("reading the card")))
+          return yield* preparedOf(user, sourceId, remoteId, {
+            summary,
+            fileName,
+            locator: locator ?? null,
+            parsed,
+            fetched: false
+          })
         }),
       prepareAdoption: (user, sourceId, remoteId) =>
         Effect.flatMap(cardFile(user, sourceId, remoteId), (file) => preparedOf(user, sourceId, remoteId, file)),
