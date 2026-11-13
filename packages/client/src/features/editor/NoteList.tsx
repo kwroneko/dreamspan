@@ -1,3 +1,4 @@
+import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Fragment } from "react"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 import { DocumentSwitcher } from "./DocumentSwitcher.tsx"
@@ -196,6 +197,7 @@ export function NoteBlock({
   }
   const card = typeof (doc["owner"] as { card?: unknown } | undefined)?.card === "string"
 
+  const [deleteWarning, setDeleteWarning] = useState(false)
   const remove = async () => {
     // What's typed goes with the note to the bin, and comes back with it.
     await store.flush()
@@ -424,7 +426,7 @@ export function NoteBlock({
                         icon="trash"
                         tone="danger"
                         description="Moves this note to the bin, from which it can be restored later."
-                        onClick={() => void remove()}
+                        onClick={() => (doc.move_group ? setDeleteWarning(true) : void remove())}
                       >
                         Delete the note
                       </MenuItem>
@@ -483,6 +485,21 @@ export function NoteBlock({
           </div>
         )}
       </Block>
+      <ConfirmDialog
+        open={deleteWarning}
+        onOpenChange={setDeleteWarning}
+        title="Delete this moved note?"
+        description={
+          doc.replaces
+            ? "Deleting this replacement restores the original card field, including every moved passage, in chats using this replacement. The own-turn notes stay. Restore this note from the bin to bring the split back."
+            : "This note will no longer be sent. The shared replacement stays as it is; deleting the note does not put the passage back there. Restore the note from the bin, or switch the moved group off in the chat to send the original field again."
+        }
+        confirmLabel="Delete the note"
+        onConfirm={() => {
+          setDeleteWarning(false)
+          void remove()
+        }}
+      />
       {history && (
         <RevisionsDialog
           store={store}
@@ -584,7 +601,12 @@ export function NoteList({
               className="flex min-w-0 flex-col gap-1 rounded-md border border-border p-2"
             >
               <div className="flex items-center gap-2 px-2 py-2 text-sm font-medium">
-                {(group.find((e) => e.doc.condition !== undefined) ?? group[0]!).control}
+                {
+                  (
+                    group.find((e) => e.doc.condition !== undefined && String(e.doc.content ?? "").trim() !== "") ??
+                    group[0]!
+                  ).control
+                }
                 {String(group.find((e) => e.doc.condition !== undefined)?.doc.title ?? "Moved card text")}
               </div>
               <ul className="flex min-w-0 flex-col gap-1.5">

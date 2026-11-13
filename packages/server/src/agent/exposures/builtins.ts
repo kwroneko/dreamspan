@@ -165,6 +165,67 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
         }
       })
   }),
+  exposure(
+    "move_card_text",
+    "MoveToOwnTurnNote",
+    "library.write",
+    "library",
+    "Move a saved card passage to an own-turn note",
+    {
+      parameters: Schema.Struct({
+        card: name,
+        field: Schema.Literals([
+          "description",
+          "personality",
+          "scenario",
+          "mes_example",
+          "system_prompt",
+          "post_history_instructions"
+        ]),
+        find: Schema.String.check(Schema.isMinLength(1)),
+        framing: optional(Schema.String)
+      }),
+      describe: (payload) => {
+        const before = String(payload.text),
+          at = Number(payload.at),
+          end = at + Number(payload.length)
+        return Effect.succeed({
+          title: "Move card text to an own-turn note",
+          rows: [
+            { label: "Own-turn note", value: before.slice(at, end) },
+            {
+              label: "When and where",
+              value: "Only on its card’s turns, at the preset’s Own-turn notes. The original card field stays saved."
+            }
+          ],
+          changes: [{ field: String(payload.field), before, after: before.slice(0, at) + before.slice(end) }]
+        })
+      },
+      adapt: (args, ctx) =>
+        Effect.gen(function* () {
+          const ref = yield* library(ctx, "card", args.card)
+          const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id })
+          const notes = yield* ctx.reader.ListCardNotes({ userId: ctx.userId, cardRefId: ref.id })
+          const previous = notes.find(
+            (note) => (note.doc.replaces as { field?: string } | undefined)?.field === args.field
+          )
+          const text = String(previous?.doc.content ?? saved.doc[String(args.field)] ?? "")
+          const find = String(args.find),
+            at = text.indexOf(find)
+          if (at < 0 || text.indexOf(find, at + 1) >= 0)
+            return yield* fail("Find must occur exactly once in the current shared text. Read the card again.")
+          return {
+            cardRefId: ref.id,
+            expectedRevisionId: saved.ref.headRevisionId,
+            field: args.field,
+            text,
+            at,
+            length: find.length,
+            ...(args.framing === undefined ? {} : { framing: args.framing })
+          }
+        })
+    }
+  ),
   exposure("create_preset", "CreatePreset", "library.write", "library", "Create a preset", {
     describe: (payload) =>
       Effect.succeed({

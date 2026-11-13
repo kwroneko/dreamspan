@@ -10,6 +10,7 @@ import { describeCause, type AppError } from "../../errors.ts"
 import { useSession } from "../../session.ts"
 import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { FieldTabs, useFieldTabs } from "../../ui/FieldTabs.tsx"
+import { Button } from "../../ui/Button.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
@@ -41,6 +42,8 @@ function CardField({ store, path, label, rows, render, field }: FieldViewProps &
   const listed = useAtomValue(cardNotes(store.refId))
   const notes = AsyncResult.isSuccess(listed) ? listed.value : []
   const [error, setError] = useState<AppError | null>(null)
+  const [lastMove, setLastMove] = useState<string | null>(null)
+  const [undoNotice, setUndoNotice] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [selection, setSelection] = useState({ at: 0, length: 0 })
   const selectedRange = useCallback(
@@ -64,7 +67,11 @@ function CardField({ store, path, label, rows, render, field }: FieldViewProps &
     if (noteStore) void noteStore.load()
   }, [noteStore])
   const moved = notes.filter(
-    (n) => replacement && n.doc.move_group === replacement.doc.move_group && n.doc.condition !== undefined
+    (n) =>
+      replacement &&
+      n.doc.move_group === replacement.doc.move_group &&
+      n.doc.condition !== undefined &&
+      n.doc.on_by_default === true
   )
   const move = async () => {
     if (!snapshot || selection.length === 0) return
@@ -94,8 +101,20 @@ function CardField({ store, path, label, rows, render, field }: FieldViewProps &
     setPending(false)
     if (!result.ok) return setError(result.error)
     setError(null)
+    setLastMove(result.value.editId)
+    setUndoNotice(null)
     setSelection({ at: 0, length: 0 })
     setTab("replaced")
+    if (noteStore) await noteStore.refresh()
+  }
+  const undo = async () => {
+    if (!lastMove) return
+    const result = await call((api) => api("UndoLibraryEdit", { editId: lastMove }), ["library"])
+    if (!result.ok) return setError(result.error)
+    setUndoNotice(
+      result.value.kept.length ? result.value.kept[0]!.reason : "Move undone. The original shared text is sent again."
+    )
+    if (result.value.undone > 0) setLastMove(null)
     if (noteStore) await noteStore.refresh()
   }
   const action = (
@@ -146,6 +165,20 @@ function CardField({ store, path, label, rows, render, field }: FieldViewProps &
           onSelectionRangeChange: selectedRange,
           ...(replacement ? { labelEnd: tabs, original: true } : {})
         })
+      )}
+      {lastMove && (
+        <Button
+          className="self-start"
+          hint="Undo both sides of the last move. Saved moves also appear in Search and replace’s recent edits."
+          onClick={() => void undo()}
+        >
+          Undo move
+        </Button>
+      )}
+      {undoNotice && (
+        <p role="status" className="text-xs text-muted">
+          {undoNotice}
+        </p>
       )}
       {replacement && noteStore && <MovedTokens store={noteStore} cardStore={store} moved={moved} name={name} />}
       <ErrorAlert error={error ?? (AsyncResult.isFailure(listed) ? describeCause(listed.cause) : null)} />

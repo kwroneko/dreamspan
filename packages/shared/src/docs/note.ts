@@ -10,6 +10,56 @@ export const NOTE_SCHEMA_VERSION = 1
 export const OWN_TURN_FRAMING =
   "[Background on {{char}}, as the story began. Where the story since then shows {{char}} differently, the story wins.]"
 
+/** A move may select text within HTML or whole elements/macros, never cut their syntax. */
+export const ownTurnSelectionError = (text: string, at: number, length: number): string | null => {
+  const end = at + length
+  let depth = 0
+  let start = -1
+  for (let i = 0; i < text.length - 1; i++) {
+    if (text.slice(i, i + 2) === "{{") {
+      if (depth++ === 0) start = i
+      i++
+    } else if (text.slice(i, i + 2) === "}}" && depth > 0) {
+      depth--
+      i++
+      if (depth === 0 && ((at > start && at < i + 1) || (end > start && end < i + 1)))
+        return "Select the whole macro, or leave it in the shared text."
+    }
+  }
+  const stack: string[] = []
+  for (const match of text.matchAll(/<!--[\s\S]*?-->|<\/?[a-z](?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)) {
+    const from = match.index,
+      to = from + match[0].length
+    if ((at > from && at < to) || (end > from && end < to))
+      return "Select text inside the HTML, or select a whole element."
+    if (from < at || to > end || /^<!--/.test(match[0]) || /\/\s*>$/.test(match[0])) continue
+    const tag = /^<\/?([a-z][\w:-]*)/i.exec(match[0])![1]!.toLowerCase()
+    if (
+      [
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr"
+      ].includes(tag)
+    )
+      continue
+    if (/^<\//.test(match[0])) {
+      if (stack.pop() !== tag) return "Select text inside the HTML, or select a whole element."
+    } else stack.push(tag)
+  }
+  return stack.length ? "Select text inside the HTML, or select a whole element." : null
+}
+
 /** The deepest a note goes in the chat: ST's own limit (`MAX_INJECTION_DEPTH`). */
 export const MAX_NOTE_DEPTH = 10_000
 

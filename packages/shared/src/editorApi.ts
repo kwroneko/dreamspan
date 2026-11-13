@@ -601,7 +601,7 @@ export class CardArchiveApi extends RpcGroup.make(
 export class OwnTurnNoteApi extends RpcGroup.make(
   Rpc.make("MoveToOwnTurnNote", {
     payload: MoveToOwnTurnNoteFields,
-    success: Schema.Array(LibraryRef),
+    success: Schema.Struct({ notes: Schema.Array(LibraryRef), editId: Schema.String }),
     error: Schema.Union([...Errors, EditRefused])
   })
 ) {}

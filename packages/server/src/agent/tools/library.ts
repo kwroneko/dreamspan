@@ -102,7 +102,20 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
               )
             )
           : visible
-      return { text: JSON.stringify({ ...identity(snapshot.ref), revision: snapshot.ref.headRevisionId, doc }) }
+      const notes =
+        kind === "card"
+          ? yield* context.reader.ListCardNotes({ userId: context.userId, cardRefId: snapshot.ref.id })
+          : undefined
+      return {
+        text: JSON.stringify({
+          ...identity(snapshot.ref),
+          revision: snapshot.ref.headRevisionId,
+          doc,
+          ...(notes
+            ? { notes: notes.map((note) => ({ id: note.ref.id, revision: note.ref.headRevisionId, doc: note.doc })) }
+            : {})
+        })
+      }
     }).pipe(Effect.catch(failRead))
 })
 
@@ -111,4 +124,4 @@ export const libraryTools: ReadonlyArray<RolloutTool<never>> = [
   readTool("card"),
   readTool("preset"),
   readTool("lorebook")
-]
+].map((tool) => ({ ...tool, replyTool: false as const }))

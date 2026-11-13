@@ -72,7 +72,17 @@ layer(serverLayer(testConfig()))("moving card text to notes", (it) => {
         change: { _tag: "Note", entityId: replacement.ref.entityId, active: true }
       })
       assert.isTrue((yield* api.ListChatNotes({ chatId: chat.id, slotId: null })).every((n) => n.active))
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId: null,
+        change: { _tag: "Note", entityId: own.ref.entityId, active: false }
+      })
       yield* api.MoveToOwnTurnNote({ ...args, text: "Mira wears blue. ", at: 11, length: 4 })
+      assert.isTrue(
+        (yield* api.ListChatNotes({ chatId: chat.id, slotId: null })).every((n) => !n.active),
+        "new moves inherit the group’s existing chat switch"
+      )
+
       const three = yield* api.ListCardNotes({ cardRefId: card.id })
       assert.strictEqual(three.length, 3)
       assert.strictEqual(three.filter((n) => n.doc.replaces !== undefined).length, 1)
@@ -89,6 +99,175 @@ layer(serverLayer(testConfig()))("moving card text to notes", (it) => {
       assert.isTrue(copied.every((n) => (n.doc.owner as { card: string }).card === forked.entityId))
       assert.strictEqual(copied.filter((n) => readNoteCondition(n.doc.condition).when === "own_turn").length, 2)
       assert.isTrue(copied.every((n) => n.doc.move_group === own.doc.move_group))
+    })
+  )
+})
+
+layer(serverLayer(testConfig()))("own-turn move review", (it) => {
+  it.effect("rejects cut macros and HTML tags without writing either note", () =>
+    Effect.gen(function* () {
+      const api = yield* client(),
+        writer = yield* Writer
+      const userId = (yield* api.Whoami()).id
+      for (const [text, at, length] of [
+        ["Hello {{char}}.", 8, 3],
+        ['<span title="secret">Blue.</span>', 6, 5],
+        ["<b>Blue.</b><i>Green.</i>", 3, 11]
+      ] as const) {
+        const card = (yield* writer.CreateEntity({
+          userId,
+          kind: "card",
+          label: "Mira",
+          subtitle: "",
+          doc: cardDoc("Mira", { description: text }),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })).ref
+        assert.notStrictEqual(
+          yield* outcome(
+            api.MoveToOwnTurnNote({
+              cardRefId: card.id,
+              expectedRevisionId: card.headRevisionId,
+              field: "description",
+              text,
+              at,
+              length
+            })
+          ),
+          "ok"
+        )
+        assert.strictEqual((yield* api.ListCardNotes({ cardRefId: card.id })).length, 0)
+      }
+    })
+  )
+  it.effect("records an atomic undo in library History and preserves edited notes on a conflict", () =>
+    Effect.gen(function* () {
+      const api = yield* client(),
+        writer = yield* Writer
+      const userId = (yield* api.Whoami()).id
+      const text = "Blue.\n\nInner {{char}} life."
+      const card = (yield* writer.CreateEntity({
+        userId,
+        kind: "card",
+        label: "Mira",
+        subtitle: "",
+        doc: cardDoc("Mira", { description: text }),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })).ref
+      const moved = yield* api.MoveToOwnTurnNote({
+        cardRefId: card.id,
+        expectedRevisionId: card.headRevisionId,
+        field: "description",
+        text,
+        at: 7,
+        length: text.length - 7
+      })
+      const history = yield* api.ListLibraryEdits()
+      assert.strictEqual(history[0]!.id, moved.editId)
+      assert.strictEqual(history[0]!.entries, 2)
+      assert.strictEqual((yield* api.UndoLibraryEdit({ editId: moved.editId })).undone, 2)
+      const after = yield* api.ListCardNotes({ cardRefId: card.id })
+      assert.isTrue(after.every((n) => !n.doc.on_by_default))
+      assert.strictEqual(after.find((n) => n.doc.replaces)?.doc.content, text)
+      const again = yield* api.MoveToOwnTurnNote({
+        cardRefId: card.id,
+        expectedRevisionId: card.headRevisionId,
+        field: "description",
+        text,
+        at: 7,
+        length: text.length - 7
+      })
+      assert.isTrue(
+        (yield* api.ListCardNotes({ cardRefId: card.id })).find((n) => n.doc.replaces)!.doc.on_by_default === true,
+        "moving again after Undo reactivates the shared replacement"
+      )
+      const fresh = again.notes[0]!
+      const doc = (yield* api.OpenEditor({ refId: fresh.id })).doc
+      yield* writer.EditRef({
+        userId,
+        refId: fresh.id,
+        expectedRowVersion: fresh.rowVersion,
+        doc: { ...doc, content: "Later inner life." },
+        message: null,
+        commitDraft: null
+      })
+      const refused = yield* api.UndoLibraryEdit({ editId: again.editId })
+      assert.strictEqual(refused.undone, 0)
+      assert.strictEqual(
+        (yield* api.ListCardNotes({ cardRefId: card.id })).find((n) => n.doc.replaces)?.doc.content,
+        "Blue.\n\n"
+      )
+      const shared = (yield* api.ListCardNotes({ cardRefId: card.id })).find((n) => n.doc.replaces)!
+      yield* writer.EditRef({
+        userId,
+        refId: shared.ref.id,
+        expectedRowVersion: shared.ref.rowVersion,
+        doc: { ...shared.doc, on_by_default: false },
+        message: null,
+        commitDraft: null
+      })
+      assert.notStrictEqual(
+        yield* outcome(
+          api.MoveToOwnTurnNote({
+            cardRefId: card.id,
+            expectedRevisionId: card.headRevisionId,
+            field: "description",
+            text: "Blue.\n\n",
+            at: 0,
+            length: 5
+          })
+        ),
+        "ok",
+        "a deliberately disabled group needs to be turned on before another move"
+      )
+      assert.strictEqual((yield* api.ListCardNotes({ cardRefId: card.id })).length, 3)
+    })
+  )
+})
+
+layer(serverLayer(testConfig()))("linked move source review", (it) => {
+  it.effect("refuses a linked shared replacement rather than changing text it does not send", () =>
+    Effect.gen(function* () {
+      const api = yield* client(),
+        writer = yield* Writer
+      const userId = (yield* api.Whoami()).id
+      const text = "Blue. Inner life."
+      const card = (yield* writer.CreateEntity({
+        userId,
+        kind: "card",
+        label: "Mira",
+        subtitle: "",
+        doc: cardDoc("Mira", { description: text }),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })).ref
+      const moved = yield* api.MoveToOwnTurnNote({
+        cardRefId: card.id,
+        expectedRevisionId: card.headRevisionId,
+        field: "description",
+        text,
+        at: 6,
+        length: 11
+      })
+      yield* api.CreateSharedNote({ title: "Shared description", content: "", fromNoteRefId: moved.notes[1]!.id })
+      assert.notStrictEqual(
+        yield* outcome(
+          api.MoveToOwnTurnNote({
+            cardRefId: card.id,
+            expectedRevisionId: card.headRevisionId,
+            field: "description",
+            text: "Blue. ",
+            at: 0,
+            length: 5
+          })
+        ),
+        "ok"
+      )
+      assert.strictEqual((yield* api.ListCardNotes({ cardRefId: card.id })).length, 2)
     })
   )
 })

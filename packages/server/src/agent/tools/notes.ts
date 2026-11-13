@@ -40,6 +40,7 @@ export type NotesPosition = Pick<ToolContext, "userId" | "chatId" | "forkId" | "
   readonly slotId: ToolContext["slotId"] | null
   readonly displayEnd?: boolean
   readonly viewers?: ToolContext["viewers"]
+  readonly speaker?: ToolContext["speaker"]
 }
 
 /**
@@ -108,19 +109,25 @@ export const notesAt = (context: NotesPosition) =>
         } satisfies NoteView
       })
     )
+    const groupedSwitches = noteSwitches(events, notes)
     const viewers = context.viewers
     return {
-      notes:
-        viewers == null
-          ? notes
-          : notes.filter((n) => {
-              const condition = readNoteCondition(n.doc["condition"])
-              const placement = n.doc.placement as { mode?: string; section?: string } | undefined
-              return condition.when === "own_turn" ||
-                (placement?.mode === "section" && placement.section === "own_turn")
-                ? n.card !== null && viewers.includes(n.card)
-                : condition.when !== "turn" || condition.cards.some((card) => viewers.includes(card))
-            }),
+      notes: notes
+        .map((note) => ({ ...note, active: groupedSwitches.get(note.entity) ?? note.active }))
+        .filter((n) => {
+          const condition = readNoteCondition(n.doc["condition"])
+          const placement = n.doc.placement as { mode?: string; section?: string } | undefined
+          const own =
+            condition.when === "own_turn" || (placement?.mode === "section" && placement.section === "own_turn")
+          // No speaker on user-facing note lists; agent calls always supply it. The user's
+          // workshop/side-chat assistant may read all notes in its owned library.
+          if (own && "speaker" in context && !context.speaker) return false
+          if (own && context.speaker !== undefined) return n.card === context.speaker
+          if (viewers == null) return true
+          return own
+            ? n.card !== null && viewers.includes(n.card)
+            : condition.when !== "turn" || condition.cards.some((card) => viewers.includes(card))
+        }),
       state
     }
   })

@@ -3035,7 +3035,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
   }),
   Rpc.make("MoveToOwnTurnNote", {
     payload: { userId: UserId, ...MoveToOwnTurnNoteFields },
-    success: Schema.Array(LibraryRef),
+    success: Schema.Struct({ notes: Schema.Array(LibraryRef), editId: Schema.String }),
     error: Schema.Union([NotFound, StorageError, RefOperationRefused])
   }),
   /** A new note on the card; with `link`, a slot showing that shared note of the user's. */

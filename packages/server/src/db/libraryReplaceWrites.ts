@@ -164,6 +164,28 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
           after_revision_id: string
         }>`SELECT id, ref_id, before_revision_id, after_revision_id FROM library_edit_items
           WHERE group_id = ${editId} AND undone_by_revision_id IS NULL ORDER BY id`
+        const [move] =
+          yield* sql`SELECT 1 FROM library_edit_items i JOIN entity_revisions v ON v.id = i.after_revision_id
+          WHERE i.group_id = ${editId} AND json_extract(CASE WHEN json_valid(v.origin_ref) THEN v.origin_ref ELSE '{}' END, '$.ownTurnMove') = ${editId} LIMIT 1`
+        // A moved pair has one meaning. Refuse the whole inverse when either side changed,
+        // rather than restoring shared secrets alongside a still-active private note.
+        if (move) {
+          const conflicts: Array<LibrarySkipped> = []
+          for (const item of items) {
+            const ref = yield* lib
+              .ownedRef(userId, item.ref_id)
+              .pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
+            const [draft] = yield* sql`SELECT 1 FROM drafts WHERE user_id = ${userId} AND target_kind = 'entity_field'
+              AND target_id = ${item.ref_id} AND status = 'active' LIMIT 1`
+            if (!ref || ref.head_revision_id !== item.after_revision_id || draft)
+              conflicts.push({
+                refId: item.ref_id as LibrarySkipped["refId"],
+                label: ref?.label ?? "",
+                reason: "A moved note changed since. Both sides were kept; use their History or switch the group off."
+              })
+          }
+          if (conflicts.length) return { undone: 0, kept: conflicts }
+        }
         const kept: Array<LibrarySkipped> = []
         let undone = 0
         const originRef = JSON.stringify({ undid: editId })

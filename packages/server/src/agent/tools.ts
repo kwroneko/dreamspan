@@ -33,6 +33,8 @@ export interface ToolContext {
    * present for; null: nothing left out.
    */
   readonly viewers: ReadonlyArray<string> | null
+  /** Own-turn notes follow the speaker even in shared history. */
+  readonly speaker?: string | null
   readonly reader: Reader["Service"]
   /** The writer, without what only the user may do: grants and approvals (`toolWriter`). */
   readonly writer: ToolWriter

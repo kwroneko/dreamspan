@@ -5,7 +5,7 @@ import { makeSnippetWrites } from "./snippetWrites.ts"
 // The editors' write handlers (ARCHITECTURE.md "Editing the library"). They run in the
 // writer worker, each as one transaction, through the library's own steps (libraryWrites.ts),
 // so every change flows on to the refs that follow the edited one.
-import { OWN_TURN_FRAMING, NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
+import { OWN_TURN_FRAMING, ownTurnSelectionError, NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
 import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import {
   applyDrafts,
@@ -774,9 +774,26 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           })
         if (previous && typeof previous.doc.move_group !== "string")
           return yield* refused(card, "This field already has a replacement note. Open the notes to edit it.")
+        if (previous && typeof previous.doc.link === "string")
+          return yield* refused(card, "This field shows shared text. Unlink it in Notes before moving another passage.")
         const source = previous ? String(previous.doc.content ?? "") : String(head[field] ?? "")
         if (source !== text || at + length > source.length || !source.slice(at, at + length).trim())
           return yield* refused(card, "The passage changed. Select it again before moving it.")
+        const selectionError = ownTurnSelectionError(source, at, length)
+        if (selectionError) return yield* refused(card, selectionError)
+        if (
+          previous &&
+          previous.doc.on_by_default !== true &&
+          rows.some((row) => {
+            const doc = JSON.parse(row.doc_json) as Doc
+            return (
+              doc.move_group === previous.doc.move_group &&
+              doc.replaces === undefined &&
+              String(doc.content ?? "").trim() !== ""
+            )
+          })
+        )
+          return yield* refused(card, "This moved group is off. Turn it on in Notes before moving another passage.")
         const group = previous?.doc.move_group ?? uuidv7()
         const label = `Moved from ${{ description: "Description", personality: "Personality", scenario: "Scenario", mes_example: "Example messages", system_prompt: "System prompt", post_history_instructions: "Post-history instructions" }[field]}`
         const ownCount = rows.filter((row) => {
@@ -785,12 +802,13 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         }).length
         const base = {
           ...newCardNote(card.entity_id as EntityId, ownCount ? `${label} (${ownCount + 1})` : label),
-          on_by_default: previous ? previous.doc.on_by_default === true : true,
+          on_by_default: true,
           move_group: group
         }
         const replacement = {
           ...(previous?.doc ?? base),
           title: previous?.doc.title ?? label.replace("Moved from", "Shared"),
+          on_by_default: true,
           content: source.slice(0, at) + source.slice(at + length),
           replaces: { kind: "card_field", field }
         }
@@ -814,21 +832,43 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
             sourcePath: null,
             sourceHash: null
           })
-        const replaced = previous
-          ? (yield* userEdit(
-              yield* lib.ownedRef(userId, previous.id),
-              replacement,
-              "Moved a passage to an own-turn note",
-              null
-            )).ref
-          : toLibraryRef(yield* create(replacement))
-        const own = yield* create({
+        const editId = uuidv7()
+        const title = `${label} on ${String(head.name ?? card.label)}`
+        yield* sql`INSERT INTO changeset_groups (id, owner_user_id, title, origin, created_at)
+          VALUES (${editId}, ${userId}, ${title}, 'user', ${Date.now()})`
+        const save = (ref: RefRow, doc: Doc) =>
+          Effect.gen(function* () {
+            const before = ref.head_revision_id
+            const revision = yield* steps.revision(before)
+            const after = yield* steps.insertRevision({
+              entityId: ref.entity_id,
+              schemaVersion: revision.schema_version,
+              doc: steps.encode(doc),
+              parents: [before],
+              origin: "changeset",
+              originRef: JSON.stringify({ ownTurnMove: editId }),
+              message: title
+            })
+            yield* steps.moveHead(ref.id, after, null)
+            yield* sql`INSERT INTO library_edit_items (group_id, ref_id, before_revision_id, after_revision_id, matches)
+            VALUES (${editId}, ${ref.id}, ${before}, ${after}, 1)`
+            return toLibraryRef(yield* steps.reload(ref.id))
+          })
+        // Initial revisions retain the complete pre-move text and are switched off. The
+        // existing library History can undo the entire pair without deleting later edits.
+        const replacingRef = previous
+          ? yield* lib.ownedRef(userId, previous.id)
+          : yield* create({ ...replacement, content: source, on_by_default: false })
+        const replaced = yield* save(replacingRef, replacement)
+        const ownDoc = {
           ...base,
           content: `${framing ?? OWN_TURN_FRAMING}\n\n${source.slice(at, at + length)}`,
           condition: { when: "own_turn" },
           placement: { mode: "section", section: "own_turn", role: "system" }
-        })
-        return [toLibraryRef(own), replaced]
+        }
+        const own = yield* create({ ...ownDoc, content: "", on_by_default: false })
+        const savedOwn = yield* save(own, ownDoc)
+        return { notes: [savedOwn, replaced], editId }
       }).pipe(transaction(sql, "MoveToOwnTurnNote")),
 
     CreateCardNote: ({ userId, cardRefId, title, link, chatNote }) =>

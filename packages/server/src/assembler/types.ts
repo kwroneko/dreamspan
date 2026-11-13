@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 67
+export const ASSEMBLER_VERSION = 68
 
 export type Role = "system" | "user" | "assistant"
 
@@ -554,6 +554,8 @@ export interface InspectionNode {
 
 /** What generating needs of a snapshot, sent to the main thread apart from it. */
 export interface Generation {
+  /** The request speaker, independent of history visibility. */
+  readonly speaker?: string | null
   /** Labels and source decisions read in the same transaction as assembly; scrubbed on the main thread. */
   readonly inspection?: InspectionInputs
   readonly leafSlotId: string | null
@@ -587,6 +589,7 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
   const written = new Map((snapshot.templateWrites ?? []).map((t) => [t.version, t.writes]))
   return {
     leafSlotId: snapshot.inputs.leafSlotId,
+    speaker: snapshot.inputs.speaker,
     viewers: snapshot.inputs.viewer
       ? (snapshot.inputs.viewerAliases ?? [snapshot.inputs.viewer])
       : snapshot.inputs.stretchViewers

@@ -288,7 +288,11 @@ const presetStage: AssemblerStage = {
 }
 
 /** Whether each note the events turned on or off is on, as they last left it. */
-const switchesOf = (events: ReadonlyArray<PositionedEvent>) => noteSwitches(events.map((e) => e.event))
+const switchesOf = (events: ReadonlyArray<PositionedEvent>, notes: ReadonlyArray<NoteInput> = []) =>
+  noteSwitches(
+    events.map((e) => e.event),
+    notes
+  )
 
 /** A card's note on in every chat unless the chat switches it off (`on_by_default`). */
 const onByDefault = (note: NoteInput) => noteCard(note.doc) !== null && note.doc.on_by_default === true
@@ -300,7 +304,7 @@ const onByDefault = (note: NoteInput) => noteCard(note.doc) !== null && note.doc
  * shared note that's gone (in the bin) sends nothing.
  */
 const activeNotes = (events: ReadonlyArray<PositionedEvent>, notes: ReadonlyArray<NoteInput>) => {
-  const last = switchesOf(events)
+  const last = switchesOf(events, notes)
   return notes.filter((note) => (last.get(note.entity) ?? onByDefault(note)) && note.link?.revision !== null)
 }
 
@@ -398,7 +402,11 @@ const notesStage: AssemblerStage = {
         assembly.request.summarizing &&
         !resolveLcm(state.lcm, sources.lcmDefaults ? yield* sources.lcmDefaults() : null).withNotes
       ) {
-        assembly.notes = []
+        // Moving a passage changes the shared definition, even when a summary omits
+        // notes. Dropping its replacement would restore the private original field.
+        assembly.notes = active.filter(
+          (note) => typeof note.doc.move_group === "string" && note.doc.replaces !== undefined
+        )
         return assembly
       }
       assembly.notes = active
@@ -417,8 +425,22 @@ const noteGateStage = sync("note-gate", (assembly) => {
     need(assembly, "preset").doc.utility_prompts.send_if_empty !== ""
   const cast = need(assembly, "cast")
   const active = assembly.notes ?? []
-  const switches = switchesOf(need(assembly, "events"))
-  const holds = new Map(active.map((note) => [note.entity, noteConditionHolds(note, cast)]))
+  const switches = switchesOf(need(assembly, "events"), active)
+  const holds = new Map(
+    active.map((note) => {
+      const own =
+        note.doc.condition?.when === "own_turn" ||
+        (note.doc.placement.mode === "section" && note.doc.placement.section === "own_turn")
+      const owner = noteCard(note.doc)
+      const audience = assembly.request.summaryJob?.audience
+      // Summaries are written for their audience, never for the arbitrary fallback speaker.
+      const due =
+        assembly.request.summarizing && own
+          ? owner !== null && audience !== undefined && audience.length > 0 && audience.every((id) => id === owner)
+          : noteConditionHolds(note, cast)
+      return [note.entity, due]
+    })
+  )
   assembly.noteDecisions = new Map(
     active.map((note) => {
       const condition = conditionText(note, cast)
@@ -492,7 +514,12 @@ const namesFor = (state: ChatState, cast: Cast): Names => {
  */
 const macroCard = (cast: Cast, notes: ReadonlyArray<NoteInput> | undefined) => {
   const card = cast.characters[0]
-  return cardFields(card, cast.personas[0], characterNoteText(notes, card?.entity))
+  return cardFields(
+    card,
+    cast.personas[0],
+    characterNoteText(notes, card?.entity),
+    notes?.filter((note) => noteConditionHolds(note, cast))
+  )
 }
 
 const macrosStage = sync("macros", (assembly) => {
@@ -1682,7 +1709,12 @@ const composeStage = sync("compose", (assembly) => {
     scenario: joinedField("scenario")
   }
   env.setCard({
-    ...macroCard(cast, assembly.notes),
+    ...macroCard(cast, [
+      ...(assembly.notes ?? []),
+      ...[...(assembly.replacements?.values() ?? [])]
+        .filter(({ record }) => record.status === "replaced" || record.status === "own_position")
+        .map(({ note }) => note)
+    ]),
     joinedVolatile: (Object.keys(macroFields) as Array<keyof typeof macroFields>).filter((key) => {
       const field = macroFields[key]
       return field !== null && ((swapped !== null && cast.characters.length > 1) || env.isChanging(field.piece))
