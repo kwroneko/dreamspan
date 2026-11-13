@@ -22,7 +22,8 @@ import { SqlClient } from "effect/sql"
 import { type PlacedStep, placedSteps, stepsOf } from "../agent/steps.ts"
 import type { FrozenTool } from "../agent/tools.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
-import { placedInsertions } from "./displayPath.ts"
+import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+import { pathPieces, placedInsertions, positionOf } from "./displayPath.ts"
 import { shownIn, slotDeletedIn } from "./forkState.ts"
 import { forkThrough } from "./forks.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -278,6 +279,43 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const tools = row.tools ? (JSON.parse(row.tools) as ReadonlyArray<FrozenTool>) : []
         return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0, versionId)
       }).pipe(query("RolloutSteps")),
+
+    HistoryProjectionNeeded: ({ userId, chatId, forkId, leafSlotId, viewers }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ current_fork_id: string | null }>`
+          SELECT current_fork_id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const fork = forkId ?? (yield* forkThrough(sql, chatId, leafSlotId, chat.current_fork_id))?.id ?? null
+        if (fork === null) return false
+        // Joins are few. Locate just their slots among structural runs and placed insertions;
+        // no message windows, selected prose, swipe scan or writer operation.
+        const joins = yield* sql<{ id: string; chain_id: string; depth: number; timelines: string }>`
+          SELECT s.id, s.chain_id, s.depth, m.timelines FROM chat_merges m JOIN slots s ON s.id = m.slot_id
+          WHERE m.chat_id = ${chatId} AND NOT ${slotDeletedIn(sql, fork, "s")}`
+        if (joins.length === 0) return false
+        const pieces = yield* pathPieces(sql, chatId, fork, leafSlotId)
+        const onPath = joins.filter(
+          (j) => positionOf(pieces, { id: j.id, chainId: j.chain_id, depth: j.depth }) !== null
+        )
+        if (onPath.length === 0 || (viewers.includes(STRETCH_VIEW) && !onPath.some((j) => j.timelines === "separate")))
+          return false
+        const known = yield* knowsSql(sql, viewers, fork, true)
+        const [row] = yield* sql`
+          SELECT 1 FROM json_each(${JSON.stringify(onPath.map((j) => j.id))}) asked
+          CROSS JOIN slots s ON s.id = asked.value
+          CROSS JOIN version_records v ON v.id = ${shownIn(sql, fork, "s")}
+          WHERE v.status NOT IN ('generating', 'failed') AND ${known}
+            AND NOT ${contextExcludedIn(sql, fork, "s")}
+            AND EXISTS (SELECT 1 FROM chat_merges m JOIN chat_merge_messages mm ON mm.merge_id = m.id
+              WHERE m.slot_id = s.id AND mm.included = 'verbatim' AND
+                (EXISTS (SELECT 1 FROM json_each(coalesce(mm.knowers_json,
+                  (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c
+                    WHERE c.value ->> 'from' <> 'destination'))) k
+                  WHERE k.value IN (SELECT value FROM json_each(${JSON.stringify(viewers)})))
+                OR ${viewers.includes(STRETCH_VIEW) ? sql`m.timelines <> 'separate'` : sql`0`}))
+          LIMIT 1`
+        return row !== undefined
+      }).pipe(query("HistoryProjectionNeeded")),
 
     SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit, viewers }) =>
       Effect.gen(function* () {

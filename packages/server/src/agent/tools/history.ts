@@ -325,7 +325,13 @@ const pathRead = (context: ToolContext) =>
         joined.push(...read.summaries)
         return [...read.messages]
       })
-      return { messages, missed, view, joined, restrictedJoin: view !== null && joins.size > 0 } satisfies PathRead
+      return {
+        messages,
+        missed,
+        view,
+        joined,
+        restrictedJoin: view !== null && messages.some((m) => m.joined !== undefined)
+      } satisfies PathRead
     })
   )
 
@@ -455,6 +461,7 @@ interface PrivateHistory {
   readonly messages: ReadonlyArray<PathMessage>
 }
 const PRIVATE_KEY = "history.private"
+const ORDINARY_KEY = "history.ordinary"
 const digest = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 24)
 /** The next address of the chain: the one before and this row's identity. */
 const chain = (prefix: string, key: string) => digest(JSON.stringify([prefix, key]))
@@ -474,6 +481,8 @@ const privateHistory = (context: ToolContext) =>
     Effect.gen(function* () {
       const read = yield* pathRead(context)
       if (!read.restrictedJoin) return null
+      // An ordinary frozen run must never issue unfrozen private coordinates after a racing edit.
+      if (context.cache.get(ORDINARY_KEY)) return { messages: [] } satisfies PrivateHistory
       if (read.messages.some((m) => m.unverifiable) || read.joined.some((s) => s.messages.some((m) => m.unverifiable)))
         return { messages: [], refused: true } satisfies PrivateHistory
       const seed = digest(JSON.stringify(read.view!.identities.toSorted()))
@@ -515,51 +524,32 @@ const privateHistory = (context: ToolContext) =>
     })
   )
 
-/**
- * A private view as the snapshot keeps it: the known rows' identities in order, and the view
- * numbers that don't follow on by one. No text: its size grows with the number of rows the
- * character knew, not with their prose. Addresses follow from `seed` and the identities.
- */
+/** A fixed-size commitment to the frozen address map. No history is duplicated per swipe. */
 interface FrozenHistory {
+  readonly ordinary?: true
   readonly refused?: true
-  readonly seed?: string
-  readonly keys?: ReadonlyArray<string>
-  /** [index in keys, its view number], where that number isn't the one before plus one. */
-  readonly numbers?: ReadonlyArray<readonly [number, number]>
+  readonly digest?: string
 }
 
-const freezeHistory = (state: PrivateHistory): FrozenHistory => {
-  if (state.refused) return { refused: true }
-  const numbers: Array<readonly [number, number]> = []
-  state.messages.forEach((m, i) => {
-    if (m.n !== (state.messages[i - 1]?.n ?? 0) + 1) numbers.push([i, m.n])
-  })
-  return { seed: state.seed!, keys: state.messages.map((m) => m.key!), numbers }
-}
+const freezeHistory = (state: PrivateHistory): FrozenHistory =>
+  state.refused
+    ? { refused: true }
+    : {
+        digest: createHash("sha256")
+          .update(JSON.stringify([state.seed, state.messages.map((m) => [m.key, m.n])]))
+          .digest("hex")
+      }
 
-/**
- * A frozen view read again (Resume, a step edit, a replay): its rows, numbers and addresses as
- * frozen, each row's text as the path shows it now. A row the path no longer shows as known is
- * left out, so an old address answers as a missing one; a row known only now is never added.
- */
+/** Recompute at the snapshot's causal leaf. If any identity, knowledge or number changed,
+ * fail closed for the entire old map. Neither an old address nor an old number can reach a
+ * newly known row. An unchanged map reads current text, as ordinary tools do on Resume. */
 const thawHistory = (context: ToolContext, frozen: FrozenHistory) =>
   Effect.gen(function* () {
     if (frozen.refused) return { messages: [], refused: true } satisfies PrivateHistory
-    const read = yield* pathRead(context)
-    const live = new Map<string, Array<PathMessage>>()
-    for (const m of [...read.messages, ...read.joined.flatMap((s) => s.messages)])
-      if (m.key !== undefined && !m.joined?.summary) live.set(m.key, [...(live.get(m.key) ?? []), m])
-    const numbers = new Map(frozen.numbers ?? [])
-    let prefix = frozen.seed!
-    let n = 0
-    const messages: Array<PathMessage> = []
-    for (const [i, key] of (frozen.keys ?? []).entries()) {
-      n = numbers.get(i) ?? n + 1
-      prefix = chain(prefix, key)
-      const row = live.get(key)?.shift()
-      if (row) messages.push({ n, key, address: `v${prefix}`, speaker: row.speaker, content: row.content })
-    }
-    return { seed: frozen.seed!, messages } satisfies PrivateHistory
+    const current = yield* privateHistory(context)
+    return current !== null && freezeHistory(current).digest === frozen.digest
+      ? current
+      : ({ messages: [] } satisfies PrivateHistory)
   })
 
 /** Registered with the tools, so replacing/disabling them also replaces their snapshot hook. */
@@ -573,14 +563,22 @@ interface PreparedReads {
 
 const historySnapshot = {
   key: PRIVATE_KEY,
-  /** What the snapshot stores of a prepared view: nothing when the view isn't private. */
+  /** Constant-size address commitment, or an ordinary-mode marker that keeps reads lazy. */
   freeze: (state: unknown) => {
     const view = (state as PreparedReads).prepared.get(PRIVATE_KEY) as PrivateHistory | null | undefined
-    return view ? freezeHistory(view) : undefined
+    return view
+      ? freezeHistory(view)
+      : (state as PreparedReads).prepared.has(ORDINARY_KEY)
+        ? { ordinary: true }
+        : undefined
   },
   prepare: (context: ToolContext, frozen: unknown) =>
     Effect.gen(function* () {
       if (frozen !== undefined) {
+        if ((frozen as FrozenHistory).ordinary) {
+          context.cache.set(ORDINARY_KEY, true)
+          return frozen
+        }
         // In the run that prepared it, what was read; on a Resume, step edit or replay, the frozen view.
         if ((frozen as PreparedReads).prepared instanceof Map) {
           for (const [key, value] of (frozen as PreparedReads).prepared)
@@ -589,19 +587,19 @@ const historySnapshot = {
         return frozen
       }
       if (context.viewers === null || context.leafSlotId === null) return undefined
-      // SearchChat's null contract identifies paths needing projection. Keep ordinary indexed
-      // replies from materializing their complete history just to prepare an unused read tool.
-      const indexed = yield* context.reader.SearchChat({
+      const needed = yield* context.reader.HistoryProjectionNeeded({
         userId: context.userId,
         chatId: context.chatId,
         forkId: context.forkId,
         leafSlotId: context.leafSlotId,
-        tokens: [],
-        before: null,
-        limit: 1,
-        viewers: null
+        viewers: context.viewers
       })
-      if (indexed !== null) return undefined
+      // Keep ordinary reads lazy, while refusing any private map introduced by a racing edit.
+      // This marker survives Resume without materializing an unaffected history there either.
+      if (!needed) {
+        context.cache.set(ORDINARY_KEY, true)
+        return { prepared: new Map(context.cache) } satisfies PreparedReads
+      }
       yield* privateHistory(context)
       return { prepared: new Map(context.cache) } satisfies PreparedReads
     })

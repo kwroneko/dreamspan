@@ -120,6 +120,20 @@ const expectPrivateBoundary = (tools: Effect.Success<ReturnType<typeof toolsFor>
       assert.strictEqual(yield* tools.run(id, args), REFUSAL)
   })
 
+const expectOrdinaryBoundary = (tools: Effect.Success<ReturnType<typeof toolsFor>>) =>
+  Effect.gen(function* () {
+    assert.match(yield* tools.run("read_messages", { from: 1, count: 20 }), /^Message [0-9]+,/)
+    assert.strictEqual(
+      yield* tools.run("search_chat", { query: "NONEXISTENTSYNTHETIC" }),
+      "No earlier messages match “NONEXISTENTSYNTHETIC”."
+    )
+    for (const [id, args] of [
+      ["search_summaries", { query: "MISSEDSOURCE" }],
+      ["expand_summary", { messages: "1–3" }]
+    ] as const)
+      assert.notStrictEqual(yield* tools.run(id, args), REFUSAL)
+  })
+
 describe("the agent's read tools across threads", () => {
   it.live("separate joins offer private character addresses while personas and narrators keep source numbers", () =>
     runStory(
@@ -145,8 +159,8 @@ describe("the agent's read tools across threads", () => {
           })
           const ownLine = yield* toolsFor(t, t.F, t.wren)
           assert.include(yield* ownLine.run("read_messages", { from: crates, count: 1 }), "Wren counts the crates")
-          for (const speaker of [t.mira, t.wren, t.quill])
-            yield* expectPrivateBoundary(yield* toolsFor(t, t.F, speaker))
+          yield* expectPrivateBoundary(yield* toolsFor(t, t.F, t.wren))
+          for (const speaker of [t.mira, t.quill]) yield* expectOrdinaryBoundary(yield* toolsFor(t, t.F, speaker))
           for (const speaker of [t.nara!, t.tobin]) {
             const whole = yield* toolsFor(t, t.F, speaker)
             assert.isNull(whole.viewers)
@@ -223,9 +237,10 @@ describe("the agent's read tools across threads", () => {
           const knownAddress = addressOf(original.split("\n").find((l) => l.includes("KNOWNDOCKS"))!)
           const material = yield* t.reader.RolloutMaterial({ userId: t.userId, versionId: started.entry.version.id })
           const saved = JSON.parse(material.snapshot) as ContextSnapshot
-          // The snapshot keeps the known rows' identities, not their text.
+          // The snapshot keeps a fixed-size commitment, without row identities or text.
           const pinned = JSON.stringify(saved.agentToolState)
-          assert.include(pinned, "keys")
+          assert.include(pinned, "digest")
+          assert.isBelow(Buffer.byteLength(pinned), 120)
           assert.notInclude(pinned, "KNOWNDOCKS")
           assert.notInclude(pinned, "MISSEDTHREADSECRET")
           const pathBefore = yield* t.reader.ReadPath({
@@ -263,8 +278,8 @@ describe("the agent's read tools across threads", () => {
             content?: Array<{ text?: string }>
           }>
           const firstResult = transcript.find((m) => m.role === "toolResult")!
-          assert.include(JSON.stringify(firstResult), knownAddress)
-          assert.include(JSON.stringify(firstResult), "KNOWNDOCKS")
+          assert.include(JSON.stringify(firstResult), PRIVATE_EMPTY)
+          assert.notInclude(JSON.stringify(firstResult), "KNOWNDOCKS")
           assert.notInclude(JSON.stringify(firstResult), "NEWKNOWN")
           assert.deepStrictEqual(
             (JSON.parse(resumedMaterial.snapshot) as ContextSnapshot).agentToolState,
@@ -279,7 +294,7 @@ describe("the agent's read tools across threads", () => {
             const tool = historyTools.find((tool) => tool.id === "read_messages")!
             yield* tool.snapshot!.prepare(replay, generationOf(rebuiltSnapshot).agentToolState?.[tool.snapshot!.key])
             const result = yield* tool.execute(replay, { from: knownAddress, count: 1 } as never)
-            assert.include(result.text, "KNOWNDOCKS")
+            assert.strictEqual(result.text, PRIVATE_EMPTY)
             assert.notInclude(result.text, "NEWKNOWN")
           }
           // Synthetic crash immediately before that same read's result was flushed.
@@ -306,8 +321,8 @@ describe("the agent's read tools across threads", () => {
           const continuedResult = (JSON.parse(continuedMaterial.transcript!) as Array<{ role: string }>).find(
             (m) => m.role === "toolResult"
           )!
-          assert.include(JSON.stringify(continuedResult), knownAddress)
-          assert.include(JSON.stringify(continuedResult), "KNOWNDOCKS")
+          assert.include(JSON.stringify(continuedResult), PRIVATE_EMPTY)
+          assert.notInclude(JSON.stringify(continuedResult), "KNOWNDOCKS")
           assert.notInclude(JSON.stringify(continuedResult), "NEWKNOWN")
         }),
       {
@@ -579,10 +594,10 @@ describe("the agent's read tools across threads", () => {
         yield* t.append(under, t.pell, "NESTEDSECRET")
         yield* t.join(t.D, [under], null, "separate")
         const sourceTools = yield* toolsFor(t, t.D, t.wren)
-        const sourceAddress = addressOf(yield* sourceTools.run("search_chat", { query: "PIERKNOWN" }))
+        assert.match(yield* sourceTools.run("search_chat", { query: "PIERKNOWN" }), /^Message [0-9]+,/)
         yield* t.join(t.F, [t.D], null, "separate")
         const wren = yield* toolsFor(t, t.F, t.wren)
-        assert.include(yield* wren.run("search_chat", { query: "PIERKNOWN" }), sourceAddress)
+        const sourceAddress = addressOf(yield* wren.run("search_chat", { query: "PIERKNOWN" }))
         assert.include(yield* wren.run("read_messages", { from: sourceAddress, count: 1 }), "PIERKNOWN")
         assert.strictEqual(yield* wren.run("search_chat", { query: "NESTEDSECRET" }), PRIVATE_EMPTY)
         assert.notInclude(yield* wren.run("read_messages", { from: 1, count: 20 }), "NESTEDSECRET")
@@ -593,9 +608,10 @@ describe("the agent's read tools across threads", () => {
             const mira = yield* toolsFor(t, t.F, t.mira)
             const result = yield* mira.run("search_chat", { query: "TOGETHERKNOWN" })
             if (shared) assert.include(result, "TOGETHERKNOWN")
-            else assert.strictEqual(result, PRIVATE_EMPTY)
-            assert.strictEqual(yield* mira.run("search_chat", { query: "PIERKNOWN" }), PRIVATE_EMPTY)
-            yield* expectPrivateBoundary(mira)
+            else assert.include(result, NONE)
+            assert.include(yield* mira.run("search_chat", { query: "PIERKNOWN" }), NONE)
+            if (shared) yield* expectPrivateBoundary(mira)
+            else yield* expectOrdinaryBoundary(mira)
           })
         yield* check(true)
         const tip = (yield* t.reader.ReadPath({
@@ -765,10 +781,12 @@ describe("the agent's read tools across threads", () => {
         const mira = yield* toolsFor(t, t.F, t.mira)
         const listedForMira = yield* mira.run("search_summaries", { query: "LANTERN-FOG" })
         const openedForMira = yield* mira.run("expand_summary", { messages: `${from}–${to}`, joined: "At the docks" })
-        assert.strictEqual(listedForMira, REFUSAL)
+        assert.notStrictEqual(listedForMira, REFUSAL)
+        assert.strictEqual(listedForMira, "No summaries match “LANTERN-FOG”.")
         // Only the shared summary before the threads parted.
-        assert.strictEqual(openedForMira, REFUSAL)
-        yield* expectPrivateBoundary(mira)
+        assert.notStrictEqual(openedForMira, REFUSAL)
+        assert.notInclude(openedForMira, "Wren at the docks")
+        yield* expectOrdinaryBoundary(mira)
       })
     )
   )
@@ -782,7 +800,7 @@ describe("the agent's read tools across threads", () => {
         assert.include(yield* before.run("read_messages", { from: 1, count: 20 }), "DOCKSSECRET")
         yield* t.join(t.F, [t.D])
         yield* expectPrivateBoundary(yield* toolsFor(t, t.F, t.wren))
-        yield* expectPrivateBoundary(yield* toolsFor(t, t.F, t.mira))
+        yield* expectOrdinaryBoundary(yield* toolsFor(t, t.F, t.mira))
         const whole = yield* toolsFor(t, t.F, t.tobin)
         assert.include(yield* whole.run("read_messages", { from: 1, count: 20 }), "DOCKSSECRET")
       })

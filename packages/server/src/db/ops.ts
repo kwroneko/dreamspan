@@ -4128,6 +4128,19 @@ export class ReadOps extends RpcGroup.make(
     success: MessageSearchPage,
     error: StorageError
   }),
+  /** Cheap preflight for the registered history tools: a join on this causal display path
+   * has a row this character can read. Metadata only, never materializes the path's prose. */
+  Rpc.make("HistoryProjectionNeeded", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      viewers: Schema.Array(Schema.String)
+    },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /**
    * The agent's `search_chat` over full-text search (agentReads.ts, spec/AGENTIC.md §4.5): the
    * messages on the path to `leafSlotId` in the fork, as the fork shows them, whose text has a

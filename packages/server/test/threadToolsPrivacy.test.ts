@@ -7,6 +7,7 @@ import { Effect } from "effect"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
 import { historyTools } from "../src/agent/tools/history.ts"
+import { completeFixture } from "./support/lcmFixtures.ts"
 import { runStory, type ThreadStory } from "./support/threadStory.ts"
 
 /** The history tools as a reply by `speaker` at the tip of `fork` runs them, reading as its view. */
@@ -63,7 +64,7 @@ const toolsFor = (t: ThreadStory, fork: ForkId, speaker: EntityId) =>
     }
     const run = (id: string, args: object) =>
       Effect.map(historyTools.find((tool) => tool.id === id)!.execute(context, args as never), (out) => out.text)
-    return Object.assign(run, { context })
+    return Object.assign(run, { context, snapshot })
   })
 
 const hook = historyTools.find((tool) => tool.id === "read_messages")!.snapshot!
@@ -85,6 +86,190 @@ const viewNumber = (text: string) => {
 }
 
 describe("private addresses after a join", () => {
+  it.live("an unknown join keeps ordinary results, summary tools and request bytes", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "LANTERNOWN")
+        yield* t.append(t.D, t.wren, "DOCKSUNKNOWN")
+        const before = yield* toolsFor(t, t.F, t.mira)
+        yield* t.join(t.F, [t.D])
+        const after = yield* toolsFor(t, t.F, t.mira)
+        for (const [id, args] of [
+          ["read_messages", { from: 1, count: 20 }],
+          ["search_chat", { query: "LANTERNOWN" }],
+          ["search_chat", { query: "DOCKSUNKNOWN" }],
+          ["search_summaries", { query: "DOCKSUNKNOWN" }],
+          ["expand_summary", { messages: "1–3" }]
+        ] as const)
+          assert.strictEqual(yield* after(id, args), yield* before(id, args), id)
+        assert.deepStrictEqual(after.snapshot.request, before.snapshot.request)
+      })
+    )
+  )
+
+  it.live("the only ordinary numbering gap is identical to an ordinary hidden message", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        const own = yield* t.append(t.F, t.mira, "LANTERNOWN")
+        yield* t.append(t.D, t.wren, "DOCKSUNKNOWN")
+        const ordinary = (yield* t.writer.CreateFork({
+          userId: t.userId,
+          chatId: t.chatId,
+          fromForkId: t.F,
+          atSlotId: own.slotId
+        })).fork.id as ForkId
+        const hidden = yield* t.append(ordinary, t.mira, "DOCKSUNKNOWN")
+        yield* t.writer.SetSlotHidden({ userId: t.userId, slotId: hidden.slotId, forkId: ordinary, hidden: true })
+        yield* t.join(t.F, [t.D])
+        yield* t.append(ordinary, t.mira, "MORNINGKNOWN")
+        yield* t.append(t.F, t.mira, "MORNINGKNOWN")
+        const joined = yield* toolsFor(t, t.F, t.mira)
+        const control = yield* toolsFor(t, ordinary, t.mira)
+        for (const [id, args] of [
+          ["read_messages", { from: 1, count: 20 }],
+          ["search_chat", { query: "MORNINGKNOWN" }],
+          ["read_messages", { from: 999999 }],
+          ["search_chat", { query: "DOCKSUNKNOWN" }]
+        ] as const)
+          assert.strictEqual(yield* joined(id, args), yield* control(id, args))
+        assert.deepStrictEqual(joined.snapshot.request, control.snapshot.request)
+      })
+    )
+  )
+
+  it.live("an unknown join leaves usable summaries of the character's own chain", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        const own = yield* t.append(t.F, t.mira, "LANTERNOWN")
+        const path = yield* t.reader.ReadPath({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.F,
+          leafSlotId: own.slotId,
+          range: { _tag: "Bottom" },
+          limit: 20
+        })
+        yield* completeFixture(
+          t.dataDir,
+          t.writer,
+          t.userId,
+          t.chatId,
+          path.entries.map((e) => ({
+            slotId: e.slotId,
+            versionId: e.version.id,
+            amendCount: 0
+          })),
+          [],
+          " LANTERN-SUMMARY"
+        )
+        const before = yield* toolsFor(t, t.F, t.mira)
+        const listed = yield* before("search_summaries", { query: "LANTERN-SUMMARY" })
+        assert.include(listed, "LANTERN-SUMMARY")
+        assert.match(listed, /^Messages/)
+        const expanded = yield* before("expand_summary", { messages: `1–${path.entries.length}`, max_tokens: 8000 })
+        assert.include(expanded, "LANTERNOWN")
+        yield* t.append(t.D, t.wren, "DOCKSUNKNOWN")
+        yield* t.join(t.F, [t.D])
+        const after = yield* toolsFor(t, t.F, t.mira)
+        assert.strictEqual(yield* after("search_summaries", { query: "LANTERN-SUMMARY" }), listed)
+        assert.strictEqual(
+          yield* after("expand_summary", { messages: `1–${path.entries.length}`, max_tokens: 8000 }),
+          expanded
+        )
+      })
+    )
+  )
+
+  it.live("preparing an unaffected path or viewer never reads the path", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "LANTERNOWN")
+        yield* t.append(t.D, t.wren, "DOCKSOWN")
+        yield* t.join(t.F, [t.D])
+        for (const [fork, speaker] of [
+          [t.D, t.wren],
+          [t.F, t.mira]
+        ] as const) {
+          const tools = yield* toolsFor(t, fork, speaker)
+          let paths = 0
+          const context = {
+            ...tools.context,
+            reader: {
+              ...t.reader,
+              ReadPath: ((input) => {
+                paths++
+                return t.reader.ReadPath(input)
+              }) as ToolContext["reader"]["ReadPath"]
+            }
+          }
+          const state = yield* hook.prepare(context, undefined)
+          assert.deepStrictEqual(hook.freeze!(state), { ordinary: true })
+          yield* hook.prepare({ ...context, cache: new Map() }, hook.freeze!(state))
+          assert.strictEqual(paths, 0, "ordinary Resume also needs no preflight path read")
+        }
+      })
+    )
+  )
+
+  it.live("a negative preflight cannot bypass privacy when a known join is inserted before the first tool call", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        const own = yield* t.append(t.F, t.mira, "LANTERNOWN")
+        yield* t.append(t.D, t.wren, "DOCKSUNKNOWN")
+        yield* t.join(t.F, [t.D])
+        const mira = yield* toolsFor(t, t.F, t.mira)
+        const state = yield* hook.prepare(mira.context, undefined)
+        assert.deepStrictEqual(hook.freeze!(state), { ordinary: true })
+        yield* t.append(t.U, t.mira, "UPSTAIRSKNOWN")
+        yield* t.join(t.F, [t.U], own.slotId, "separate")
+        const run = { ...mira.context, cache: new Map<string, unknown>() }
+        yield* hook.prepare(run, state)
+        const found = yield* historyTools
+          .find((tool) => tool.id === "search_chat")!
+          .execute(run, { query: "UPSTAIRSKNOWN" } as never)
+        assert.strictEqual(found.text, PRIVATE_EMPTY)
+        const replay = yield* thawed(mira.context, hook.freeze!(state))
+        assert.strictEqual(yield* replay("search_chat", { query: "UPSTAIRSKNOWN" }), PRIVATE_EMPTY)
+      })
+    )
+  )
+
+  it.live("a hidden separate join still defines the private stretch of a known together join", () =>
+    runStory(null, (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "LANTERNOWN")
+        yield* t.append(t.U, t.wren, "KNOWNTOGETHER")
+        yield* t.join(t.F, [t.U], null, "together")
+        yield* t.append(t.D, t.wren, "DOCKSKNOWN")
+        const separate = (yield* t.join(t.F, [t.D], null, "separate")).entries[0]!
+        yield* t.writer.SetSlotHidden({ userId: t.userId, slotId: separate.slotId, forkId: t.F, hidden: true })
+        const wren = yield* toolsFor(t, t.F, t.wren)
+        assert.match(yield* wren("search_chat", { query: "KNOWNTOGETHER" }), /^Message v[a-f0-9]{24} \(view #/)
+        const state = yield* hook.prepare({ ...wren.context, cache: new Map() }, undefined)
+        assert.isDefined(hook.freeze!(state), "the prepared view must freeze every private result it can issue")
+      })
+    )
+  )
+
+  it.live("a private reply freezes constant bytes rather than a list of known rows", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "LANTERNOWN")
+        yield* t.append(t.D, t.wren, "DOCKSOWN")
+        yield* t.join(t.F, [t.D])
+        const wren = yield* toolsFor(t, t.F, t.wren)
+        const state = yield* hook.prepare(wren.context, undefined)
+        const frozen = JSON.stringify(hook.freeze!(state))
+        assert.strictEqual(Buffer.byteLength(frozen), 77)
+        assert.notInclude(frozen, '"keys"')
+        assert.strictEqual(
+          yield* (yield* thawed(wren.context, hook.freeze!(state)))("read_messages", { from: 1, count: 20 }),
+          yield* wren("read_messages", { from: 1, count: 20 })
+        )
+      })
+    )
+  )
+
   it.live("the spec's example: what Wren's tools return after the docks join the Lantern", () =>
     runStory(null, (t) =>
       Effect.gen(function* () {
@@ -133,9 +318,9 @@ describe("private addresses after a join", () => {
         yield* t.append(t.D, t.wren, "AFTERNESTED")
         const inDocks = yield* toolsFor(t, t.D, t.wren)
         const docksGap =
-          viewNumber(yield* inDocks("search_chat", { query: "AFTERNESTED" })) -
-          viewNumber(yield* inDocks("search_chat", { query: "PIERKNOWN" }))
-        assert.strictEqual(docksGap, 1, "the docks' own view says nothing of Pell's storyline")
+          Number(/^Message (\d+)/.exec(yield* inDocks("search_chat", { query: "AFTERNESTED" }))![1]) -
+          Number(/^Message (\d+)/.exec(yield* inDocks("search_chat", { query: "PIERKNOWN" }))![1])
+        assert.strictEqual(docksGap, 2, "ordinary numbering charges only the hidden join slot")
         yield* t.join(t.F, [t.D], null, "separate")
         const wren = yield* toolsFor(t, t.F, t.wren)
         const pier = yield* wren("search_chat", { query: "PIERKNOWN" })
@@ -153,15 +338,15 @@ describe("private addresses after a join", () => {
     )
   )
 
-  it.live("a frozen view keeps no text, and thawed after edits resolves only rows it froze", () =>
+  it.live("a frozen view keeps constant bytes and fails closed after its address map changes", () =>
     runStory(null, (t) =>
       Effect.gen(function* () {
-        const first = yield* t.append(t.F, t.mira, "LANTERNFIRST")
-        const second = yield* t.append(t.F, t.mira, "LANTERNSECOND")
-        yield* t.append(t.F, t.mira, "LANTERNTHIRD")
+        const first = yield* t.append(t.F, t.wren, "LANTERNFIRST")
+        const second = yield* t.append(t.F, t.wren, "LANTERNSECOND")
+        yield* t.append(t.F, t.wren, "LANTERNTHIRD")
         yield* t.append(t.D, t.wren, "DOCKSMISSED")
         yield* t.join(t.F, [t.D], null, "separate")
-        const mira = yield* toolsFor(t, t.F, t.mira)
+        const mira = yield* toolsFor(t, t.F, t.wren)
         const state = yield* hook.prepare({ ...mira.context, cache: new Map() }, undefined)
         const frozen = hook.freeze!(state)
         const stored = JSON.stringify(frozen)
@@ -175,8 +360,7 @@ describe("private addresses after a join", () => {
           yield* (yield* thawed(mira.context, frozen))("read_messages", { from: 1, count: 20 }),
           before
         )
-        // A known message inserted before them: the old addresses still name the same rows, and
-        // the new one isn't part of the frozen view.
+        // A known insertion changes the map: all old reads fail closed, including numeric ones.
         const slot = yield* t.reader.GetSlot({ userId: t.userId, slotId: first.slotId, forkId: t.F })
         yield* t.writer.InsertMessage({
           userId: t.userId,
@@ -184,17 +368,66 @@ describe("private addresses after a join", () => {
           forkId: t.F,
           anchorSlotId: first.slotId,
           expectedRowVersion: slot.entry.rowVersion,
-          body: { _tag: "Write", speaker: t.mira, content: "LANTERNINSERTED" }
+          body: { _tag: "Write", speaker: t.wren, content: "LANTERNINSERTED" }
         })
         const afterInsert = yield* thawed(mira.context, frozen)
-        assert.include(yield* afterInsert("read_messages", { from: a3, count: 1 }), "LANTERNTHIRD")
+        assert.strictEqual(yield* afterInsert("read_messages", { from: a3, count: 1 }), PRIVATE_EMPTY)
         assert.strictEqual(yield* afterInsert("search_chat", { query: "LANTERNINSERTED" }), PRIVATE_EMPTY)
-        // A frozen row deleted since: its address answers as a missing one; the next still reads.
+        assert.strictEqual(yield* afterInsert("read_messages", { from: 1, count: 20 }), PRIVATE_EMPTY)
+        // A deletion cannot let a stale address or number reach another row.
         yield* t.api.DeleteMessage({ slotId: second.slotId, forkId: t.F })
         const afterDelete = yield* thawed(mira.context, frozen)
         assert.strictEqual(yield* afterDelete("read_messages", { from: a2, count: 1 }), PRIVATE_EMPTY)
-        assert.include(yield* afterDelete("read_messages", { from: a3, count: 1 }), "LANTERNTHIRD")
+        assert.strictEqual(yield* afterDelete("read_messages", { from: a3, count: 1 }), PRIVATE_EMPTY)
         assert.notInclude(yield* afterDelete("read_messages", { from: 1, count: 20 }), "DOCKSMISSED")
+      })
+    )
+  )
+
+  it.live("a frozen private map stays causal through later joins, selection, deletion, restore and Undo", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        const own = yield* t.append(t.F, t.wren, "ORIGINALKNOWN")
+        yield* t.append(t.D, t.wren, "DOCKSKNOWN")
+        yield* t.join(t.F, [t.D])
+        const tools = yield* toolsFor(t, t.F, t.wren)
+        const frozen = hook.freeze!(yield* hook.prepare({ ...tools.context, cache: new Map() }, undefined))
+        const original = yield* tools("search_chat", { query: "ORIGINALKNOWN" })
+        const address = /Message (v[a-f0-9]{24})/.exec(original)![1]!
+        const check = (expected: string) =>
+          Effect.gen(function* () {
+            const replay = yield* thawed(tools.context, frozen)
+            assert.strictEqual(yield* replay("search_chat", { query: "ORIGINALKNOWN" }), expected)
+            const result = yield* replay("read_messages", { from: address, count: 1 })
+            if (expected === PRIVATE_EMPTY) assert.strictEqual(result, PRIVATE_EMPTY)
+            else assert.include(result, "ORIGINALKNOWN")
+            assert.strictEqual(yield* replay("search_chat", { query: "LATERKNOWN" }), PRIVATE_EMPTY)
+          })
+        yield* t.append(t.D, t.wren, "LATERKNOWN")
+        yield* t.join(t.F, [t.D])
+        yield* check(original) // Later joins are beyond the frozen leaf.
+        const deleted = yield* t.api.DeleteMessage({ slotId: own.slotId, forkId: t.F })
+        yield* check(PRIVATE_EMPTY)
+        yield* t.api.RestoreBinItem({ itemId: deleted.id })
+        yield* check(original)
+        yield* t.writer.AddVersion({
+          userId: t.userId,
+          slotId: own.slotId,
+          forkId: t.F,
+          select: true,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: t.mira,
+            writer: "model",
+            content: "MISSEDREPLACEMENT",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "generated"
+          })
+        })
+        yield* check(PRIVATE_EMPTY)
+        yield* t.api.UndoThreads({ chatId: t.chatId, splitId: t.splitId })
+        yield* check(PRIVATE_EMPTY)
       })
     )
   )
@@ -206,14 +439,14 @@ describe("private addresses after a join", () => {
         yield* t.append(t.D, t.wren, "DOCKSOWN")
         yield* t.join(t.F, [t.D])
         // Wren at the docks: the chat has a merge, her path none, so her view isn't private;
-        // Mira at the Lantern: private.
+        // Wren at the Lantern: private.
         for (const [fork, speaker, isPrivate] of [
           [t.D, t.wren, false],
-          [t.F, t.mira, true]
+          [t.F, t.wren, true]
         ] as const) {
           const tools = yield* toolsFor(t, fork, speaker)
           const state = yield* hook.prepare({ ...tools.context, cache: new Map() }, undefined)
-          assert.strictEqual(hook.freeze!(state) !== undefined, isPrivate)
+          assert.strictEqual("digest" in (hook.freeze!(state) as object), isPrivate)
           let paths = 0
           const counted = {
             ...tools.context,
@@ -231,8 +464,8 @@ describe("private addresses after a join", () => {
           const text = (yield* historyTools
             .find((tool) => tool.id === "read_messages")!
             .execute(counted, { from: 1, count: 20 } as never)).text
-          assert.include(text, isPrivate ? "LANTERNOWN" : "DOCKSOWN")
-          assert.strictEqual(paths, 0)
+          assert.include(text, "DOCKSOWN")
+          assert.strictEqual(paths, isPrivate ? 0 : 1)
         }
       })
     )

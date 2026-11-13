@@ -6,6 +6,8 @@
 // request through the real workers. Synthetic data only.
 // Run: env VITEST_MAX_WORKERS=1
 //   npx vitest run --project server-slow packages/server/test/threadSummariesScale.test.ts
+import { Worker } from "node:worker_threads"
+import { databaseFile } from "../src/db/connection.ts"
 import { assert, it } from "@effect/vitest"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
@@ -97,7 +99,7 @@ it.live(
           sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999)
             INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,
               cast_json,presence_json,created_at,updated_at,authoring_fork_id)
-            SELECT '${prefix}-v'||x, '${prefix}-s'||x, 0, 'complete', CASE WHEN x % 2 = 0 THEN NULL ELSE ? END,
+            SELECT '${prefix}-v'||printf('%0${34 - prefix.length}d',x), '${prefix}-s'||x, 0, 'complete', CASE WHEN x % 2 = 0 THEN NULL ELSE ? END,
               CASE WHEN x % 2 = 0 THEN 'human' ELSE 'model' END, '${text}, line '||x||'.', 'verbatim',
               CASE WHEN x % 2 = 0 THEN 'user_written' ELSE 'generated' END, ?, ?, x, x, '${fork}' FROM n`,
           params: [speaker, cast, JSON.stringify({ away: [away] })]
@@ -106,7 +108,7 @@ it.live(
           sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999)
             INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id,chain_id)
             SELECT '${prefix}-s'||x, ?, CASE WHEN x = 1 THEN ? ELSE '${prefix}-s'||(x-1) END,
-              (SELECT depth FROM slots WHERE id = ?) + x, '${prefix}-v'||x, x, ?, (SELECT chain_id FROM slots WHERE id = ?) FROM n`,
+              (SELECT depth FROM slots WHERE id = ?) + x, '${prefix}-v'||printf('%0${34 - prefix.length}d',x), x, ?, (SELECT chain_id FROM slots WHERE id = ?) FROM n`,
           params: [chatId, head, head, fork, head]
         },
         { sql: `UPDATE forks SET tip_slot_id = '${prefix}-s2999' WHERE id = ?`, params: [fork] }
@@ -119,7 +121,7 @@ it.live(
               k(j) AS (SELECT 1 UNION ALL SELECT j+1 FROM k WHERE j < 49)
             INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,
               cast_json,presence_json,created_at,updated_at,authoring_fork_id)
-            SELECT 'docks-v'||x||'-'||j, 'docks-s'||x, j, 'complete', ?, 'model', 'Another telling of line '||x||', take '||j||'.',
+            SELECT 'docks-v'||printf('%029d',x)||'-'||j, 'docks-s'||x, j, 'complete', ?, 'model', 'Another telling of line '||x||', take '||j||'.',
               'verbatim', 'generated', ?, ?, x, x, '${docks}' FROM n JOIN k ON j < 20 + (x % 31)`,
           params: [wren, cast, JSON.stringify({ away: [mira] })]
         }
@@ -268,6 +270,28 @@ it.live(
         reader: profiled,
         writer: h.writer
       })
+      const prepareHook = historyTools.find((tool) => tool.id === "read_messages")!.snapshot!
+      for (const [operation, forkId, leaf, viewer] of [
+        ["prepare, no join on path", docks, "docks-s2999", wren],
+        ["prepare, unknown join on path", main, leafSlotId, mira]
+      ] as const) {
+        const paths = spent.get("ReadPath#") ?? 0
+        yield* time(
+          operation,
+          Effect.suspend(() =>
+            prepareHook.prepare(
+              {
+                ...context(),
+                forkId,
+                leafSlotId: leaf as SlotId,
+                viewers: [viewer]
+              },
+              undefined
+            )
+          )
+        )
+        assert.strictEqual(spent.get("ReadPath#") ?? 0, paths, "unaffected preflight reads no message windows")
+      }
       const searchTool = historyTools.find((tool) => tool.id === "search_chat")!
       const readTool = historyTools.find((tool) => tool.id === "read_messages")!
       const search = (query: string) => Effect.suspend(() => searchTool.execute(context(), { query } as never))
@@ -298,6 +322,67 @@ it.live(
       process.stdout.write(
         `THREAD_TOOLS_SNAPSHOT ${JSON.stringify({ frozenBytes: Buffer.byteLength(frozen), projectedTextBytes: Buffer.byteLength(JSON.stringify(view)), messages: view.messages.length, textBytes: view.messages.reduce((n, m) => n + Buffer.byteLength(m.content), 0) })}\n`
       )
+      assert.strictEqual(Buffer.byteLength(frozen), 77)
+      // Reconstruct the preceding implementation from the same in-memory view. Both forms go
+      // through the real StartRollout handler in the helper worker, alternating five times.
+      const rows = view.messages as ReadonlyArray<{ key: string; n: number; content: string }>
+      const oldFrozen = {
+        seed: (view as { seed?: string }).seed,
+        keys: rows.map((r) => r.key),
+        numbers: rows.flatMap((r, i) => (r.n === (rows[i - 1]?.n ?? 0) + 1 ? [] : [[i, r.n]]))
+      }
+      const withState = (kept: unknown) => JSON.stringify({ ...snapshot, agentToolState: { "history.private": kept } })
+      const holds = yield* Effect.promise(
+        () =>
+          new Promise<Array<{ label: string; bytes: number; ms: number }>>((resolve, reject) => {
+            const worker = new Worker(new URL("./support/historySnapshotWorker.ts", import.meta.url), {
+              workerData: {
+                dbPath: databaseFile(config.dataDir),
+                input: {
+                  userId: h.userId,
+                  chatId,
+                  forkId: placeholder.forkId,
+                  slotId: placeholder.slotId,
+                  versionId: placeholder.version.id,
+                  leafSlotId,
+                  rolloutId: "unused",
+                  snapshot: "unused",
+                  connectionId: snapshot.inputs.model!.connectionId,
+                  modelId: snapshot.inputs.model!.modelId,
+                  issues: [],
+                  variables: [],
+                  frozenMessages: []
+                },
+                snapshots: [
+                  { label: "before", snapshot: withState(oldFrozen) },
+                  { label: "after", snapshot: withState(JSON.parse(frozen)) }
+                ]
+              }
+            })
+            let result: Array<{ label: string; bytes: number; ms: number }> | undefined
+            worker.once("message", (message: { samples: typeof result }) => {
+              result = message.samples
+            })
+            worker.once("error", reject)
+            worker.once("exit", (code) =>
+              code === 0 && result !== undefined ? resolve(result) : reject(new Error(`history worker exited ${code}`))
+            )
+          })
+      )
+      process.stdout.write(
+        `THREAD_HISTORY_WRITER ${JSON.stringify({
+          messages: rows.length,
+          idBytes: rows.map((r) => r.key.length).sort((a, b) => a - b)[Math.floor(rows.length / 2)],
+          beforeFrozenBytes: Buffer.byteLength(JSON.stringify(oldFrozen)),
+          afterFrozenBytes: Buffer.byteLength(frozen),
+          samples: holds,
+          medians: ["before", "after"].map((label) => ({
+            label,
+            ms: median(holds.filter((r) => r.label === label).map((r) => r.ms))
+          }))
+        })}\n`
+      )
+      assert.isBelow(median(holds.filter((r) => r.label === "after").map((r) => r.ms)), 100)
       // The run reads what was prepared; a Resume, step edit or replay thaws the frozen form.
       yield* searchTool.snapshot!.prepare(warm, state)
       yield* time("read_messages for Wren, cached", readTool.execute(warm, { from: address, count: 20 } as never))
@@ -321,6 +406,8 @@ it.live(
       assert.isBelow(ms("GetLcmState for Wren"), 500)
       assert.isBelow(ms("AssembleContext for Wren"), 3_000)
       assert.isBelow(ms("search_chat for Wren"), 3_000)
+      assert.isBelow(ms("prepare, no join on path"), 100)
+      assert.isBelow(ms("prepare, unknown join on path"), 100)
       assert.isBelow(ms("read_messages for Wren, cold"), 3_000)
       assert.isBelow(ms("read_messages for Wren, cached"), 100)
       assert.isBelow(ms("read_messages for Wren, thawed on Resume"), 3_000)
