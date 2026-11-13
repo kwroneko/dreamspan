@@ -32,7 +32,8 @@ it.live("classifies every RPC and registered command; a new unclassified operati
       "SetRegexApproval",
       "SetHtmlApproval",
       "SetTokenCounting",
-      "PurgeBin"
+      "SetExternalMedia",
+      "PurgeBinItem"
     ]
     for (const tag of protectedTags) {
       if (!AppApi.requests.has(tag as never)) continue

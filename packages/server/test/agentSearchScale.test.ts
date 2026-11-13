@@ -58,25 +58,29 @@ describe("search_chat at scale", () => {
               SELECT ?||'-s'||x,?,CASE WHEN x=0 THEN NULL ELSE ?||'-s'||(x-1) END,x,?||'-v'||x,1,? FROM n`,
             params: [c, c, c, c, main]
           },
-          // A side reply at each fork's base, off the main path, naming the lighthouse too.
-          {
-            sql: `${k} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
-              SELECT ?||'-sv'||x,?||'-side'||x,0,'complete',NULL,'human','A lighthouse off the path.','verbatim','user_written',1,1 , ? FROM k`,
-            params: [c, c, main]
-          },
-          {
-            sql: `${k} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
-              SELECT ?||'-side'||x,?,?||'-s'||(15*(x+1)-1),15*(x+1),?||'-sv'||x,1,? FROM k`,
-            params: [c, c, c, c, main]
-          },
-          { sql: "UPDATE forks SET tip_slot_id=? WHERE id=?", params: [`${c}-s${LENGTH - 1}`, main] },
-          // 300 forks, each off its side reply, selecting swipes near its base.
           {
             sql: `${k} INSERT INTO forks(id,chat_id,parent_fork_id,branched_at,base_slot_id,tip_slot_id,created_at)
-              SELECT ?||'-f'||x,?,?,0,?||'-s'||(15*(x+1)-1),?||'-side'||x,1
+              SELECT ?||'-f'||x,?,?,0,?||'-s'||(15*(x+1)-1),?||'-s'||(15*(x+1)-1),1
               FROM k`,
             params: [c, c, main, c, c]
           },
+          // A side reply at each fork's base, off the main path, naming the lighthouse too.
+          {
+            sql: `${k} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at, authoring_fork_id)
+              SELECT ?||'-sv'||x,?||'-side'||x,0,'complete',NULL,'human','A lighthouse off the path.','verbatim','user_written',1,1 , ?||'-f'||x FROM k`,
+            params: [c, c, c]
+          },
+          {
+            sql: `${k} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
+              SELECT ?||'-side'||x,?,?||'-s'||(15*(x+1)-1),15*(x+1),?||'-sv'||x,1,?||'-f'||x FROM k`,
+            params: [c, c, c, c, c]
+          },
+          {
+            sql: `${k} UPDATE forks SET tip_slot_id=?||'-side'||x FROM k WHERE id=?||'-f'||x`,
+            params: [c, c]
+          },
+          { sql: "UPDATE forks SET tip_slot_id=? WHERE id=?", params: [`${c}-s${LENGTH - 1}`, main] },
+          // 300 forks, each off its side reply, selecting swipes near its base.
           {
             sql: `${k}, j(y) AS (SELECT 0 UNION ALL SELECT y+1 FROM j WHERE y<19)
               INSERT INTO fork_overrides(id,chat_id,fork_id,seq,kind,target_id,slot_id,slot_depth,value_id)

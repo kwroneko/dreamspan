@@ -10,7 +10,8 @@ import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { newCardDoc, validateDoc, withoutGrantedAgentEdits, withHtmlApprovals } from "@rp/shared/editing.ts"
 import { InvalidDocument } from "@rp/shared/editorApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import type { Rpc, RpcGroup } from "effect/rpc"
+import type { Rpc } from "effect/rpc"
+import type { OpsOf } from "./opsOf.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -43,7 +44,7 @@ type OperationName =
   | "UndoHistoryEdit"
   | "SendOrQueue"
   | "DeleteMessage"
-type OperationRpc<K> = Extract<RpcGroup.Rpcs<typeof WriteOps>, { readonly _tag: K }>
+type OperationRpc<K> = Extract<OpsOf<typeof WriteOps>, { readonly _tag: K }>
 type Operations = {
   [K in OperationName]: (
     input: Parameters<Handlers[K]>[0]
