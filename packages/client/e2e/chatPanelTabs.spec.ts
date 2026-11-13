@@ -82,7 +82,7 @@ test("This chat leads with the chat's name, your persona and summaries; the rest
   expect(at("Summarize older messages")).toBeLessThan(at("Advanced: names in prompts"))
   // Collapsed: the names, the roles and the summary settings' fields aren't shown.
   await expect(tab.getByRole("region", { name: "Names in prompts" })).toBeHidden()
-  await expect(tab.getByRole("radiogroup")).toBeHidden()
+  await expect(tab.getByRole("radiogroup", { name: "Message roles", exact: true })).toBeHidden()
   await expect(tab.getByText("Recent messages kept as written")).toHaveCount(0)
   await tab.getByText("Advanced: names in prompts", { exact: true }).click()
   await expect(tab.getByRole("form", { name: "Your name in prompts" })).toBeVisible()

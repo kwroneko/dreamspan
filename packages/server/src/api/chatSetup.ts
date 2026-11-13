@@ -1,3 +1,4 @@
+import { OperationCall } from "../agent/operations.ts"
 import { offeredGreetings, greetingPick } from "@rp/shared/greetings.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -320,21 +321,27 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
    * The fold of the chat's state after `slotId`, with every card it names, by the name and
    * avatar of the version the chat uses there (its own version's, say).
    */
-  const castAt = (user: UserId, chatId: ChatId, slotId: SlotId | null, forkId?: ForkId | null) =>
-    Effect.map(castsAt(user, chatId, [slotId], forkId), ([cast]) => cast!)
+  const castAt = (user: UserId, chatId: ChatId, slotId: SlotId | null, forkId?: ForkId | null, displayEnd = true) =>
+    Effect.map(castsAt(user, chatId, [slotId], forkId, displayEnd), ([cast]) => cast!)
 
   /**
    * The casts at several positions of one fork, as `castAt` reads each: the state at each, then
    * the cards once for every position that binds them alike, and the role projections once.
    * A chat's messages display at their own positions, one cast each (GetCasts).
    */
-  const castsAt = (user: UserId, chatId: ChatId, slotIds: ReadonlyArray<SlotId | null>, forkId?: ForkId | null) =>
+  const castsAt = (
+    user: UserId,
+    chatId: ChatId,
+    slotIds: ReadonlyArray<SlotId | null>,
+    forkId?: ForkId | null,
+    displayEnd = true
+  ) =>
     Effect.gen(function* () {
       const positions = yield* Effect.forEach(
         slotIds,
         (slotId) =>
           Effect.map(
-            reader.StateEventsAt({ userId: user, chatId, slotId, forkId: forkId ?? null, displayEnd: true }),
+            reader.StateEventsAt({ userId: user, chatId, slotId, forkId: forkId ?? null, displayEnd }),
             (events) => ({ slotId, events, state: foldState(events) })
           ),
         { concurrency: 2 }
@@ -364,7 +371,12 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             chat: {
               chatId,
               bindings: group.bindings,
-              history: { forkId: forkId ?? null, slotId: slotIds[0] ?? null, active: [...group.active] }
+              history: {
+                forkId: forkId ?? null,
+                slotId: slotIds[0] ?? null,
+                active: [...group.active],
+                ...(!displayEnd ? { through: true } : {})
+              }
             }
           })
         )
@@ -668,7 +680,11 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       }).pipe(Effect.uninterruptible, internal("StartChat")),
 
     GetCast: ({ chatId, slotId, forkId }) =>
-      Effect.flatMap(userId, (id) => castAt(id, chatId, slotId, forkId)).pipe(internal("GetCast")),
+      Effect.gen(function* () {
+        const call = yield* OperationCall
+        const exact = (call?.expected as { proof?: { storyAt?: unknown } } | undefined)?.proof?.storyAt !== undefined
+        return yield* castAt(yield* userId, chatId, slotId, forkId, !exact)
+      }).pipe(internal("GetCast")),
 
     GetCasts: ({ chatId, slotIds, forkId }) =>
       Effect.flatMap(userId, (id) => castsAt(id, chatId, slotIds, forkId)).pipe(internal("GetCasts")),
@@ -704,15 +720,18 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     ChangeCast: ({ chatId, slotId, change, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
+        const call = yield* OperationCall
+        const displayEnd =
+          (call?.expected as { proof?: { storyAt?: unknown } } | undefined)?.proof?.storyAt === undefined
         if (change._tag === "Persona") {
-          const before = yield* castAt(id, chatId, slotId, forkId)
+          const before = yield* castAt(id, chatId, slotId, forkId, displayEnd)
           const persona = new Set(before.cards.flatMap((card) => (card.persona ? [card.entityId] : [])))
           yield* writer.AddStateEvents({
             userId: id,
             chatId,
             forkId: forkId ?? null,
             slotId,
-            displayEnd: true,
+            displayEnd,
             data: [
               ...(before.participants.includes(change.entityId)
                 ? []
@@ -729,14 +748,14 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             chatId,
             forkId: forkId ?? null,
             slotId,
-            displayEnd: true,
+            displayEnd,
             versionId: null,
             scope: null,
             data: toEvent(change)
           })
         }
         hub.publish(chatId, { _tag: "State" })
-        return yield* castAt(id, chatId, slotId, forkId)
+        return yield* castAt(id, chatId, slotId, forkId, displayEnd)
       }).pipe(internal("ChangeCast")),
 
     // The notes the context assembler reads at this position: the chat's own and its characters'.

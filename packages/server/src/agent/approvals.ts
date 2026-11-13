@@ -144,6 +144,7 @@ export const makePermit =
         // Only a call on the story is bound to the asking tab's position; a library or
         // setting change can be allowed from any tab.
         ...(described?.storyAt ? { storyAt: described.storyAt } : {}),
+        ...(described?.storyScope ? { storyScope: described.storyScope } : {}),
         rolloutId,
         toolCallId,
         digest,

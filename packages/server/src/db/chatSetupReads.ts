@@ -21,9 +21,9 @@ import { chatQueue } from "./queueRows.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 import { withoutPurged } from "./stateRefs.ts"
-import { forkAt, selectedInSql, shownInSql, slotDeletedInSql } from "./forkState.ts"
+import { forkAt, selectedInSql, shownIn, shownInSql, slotDeletedInSql } from "./forkState.ts"
 import { lastShown, lastText } from "./forks.ts"
-import { displayLength, pathPieces, placedInsertions } from "./displayPath.ts"
+import { displayLength, displayThrough, pathPieces, placedInsertions } from "./displayPath.ts"
 
 /** A card's binding from the payload's, without the nulls; undefined for none. */
 const bindingOf = (
@@ -292,7 +292,10 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           const [view] = yield* sql<{ tip_slot_id: string | null }>`SELECT tip_slot_id FROM forks
             WHERE id = ${fork} AND chat_id = ${chat.chatId} AND deleted_at IS NULL`
           if (!view) return []
-          const pieces = (yield* pathPieces(sql, chat.chatId, fork, view.tip_slot_id)).map((p) => [
+          const path = chat.history.through
+            ? ((yield* displayThrough(sql, chat.chatId, fork, chat.history.slotId))?.pieces ?? [])
+            : yield* pathPieces(sql, chat.chatId, fork, view.tip_slot_id)
+          const pieces = path.map((p) => [
             p.chainId,
             p.kind === "inserted" ? p.depth : p.lo,
             p.kind === "inserted" ? p.depth : p.hi
@@ -302,6 +305,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               SELECT 1 FROM version_participants p CROSS JOIN versions v ON v.id = p.version_id
                 CROSS JOIN slots s ON s.id = v.slot_id
               WHERE p.entity_id = j.value AND s.chat_id = ${chat.chatId} AND v.purged_at IS NULL
+                AND ${chat.history.through ? sql`v.id = ${shownIn(sql, fork, "s")}` : sql`1`}
                 AND s.purged_at IS NULL AND EXISTS (SELECT 1 FROM json_each(${JSON.stringify(pieces)}) g
                   WHERE s.chain_id = g.value ->> 0 AND s.depth BETWEEN g.value ->> 1 AND g.value ->> 2))`
           const keep = new Set([...chat.history.active, ...used.map((row) => row.entity_id)])

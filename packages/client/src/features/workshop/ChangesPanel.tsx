@@ -27,7 +27,7 @@ const firstPage = Atom.family((chatId: ChatId) =>
   AppClient.query("ListRolloutEffects", { chatId, limit: PAGE }, { reactivityKeys: [EFFECTS_KEY, chatId] })
 )
 
-export function ChangesPanel({ session, view, active }: PanelProps) {
+export function ChangesPanel({ session, view, active }: Pick<PanelProps, "session" | "view" | "active">) {
   const atom = firstPage(session.id)
   const result = useAtomValue(atom)
   const refresh = useAtomRefresh(atom)
