@@ -33,11 +33,33 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       const grants = new Map<string, CapabilityMode>(
         (yield* reader.WorkshopGrants({ userId, chatId, now: Date.now() })).map((g) => [g.capability, g.mode])
       )
+      const story =
+        state.workshopAttached === undefined
+          ? null
+          : yield* reader
+              .GetChat({
+                userId,
+                chatId: state.workshopAttached as ChatId
+              })
+              .pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
       return execution.workshopCapabilities
         .list()
         .filter((capability) => offered.has(capability.id))
         .sort((a, b) => a.order - b.order)
-        .map((capability) => capabilityView(execution, grants, capability))
+        .map((capability) =>
+          capabilityView(
+            execution,
+            grants,
+            capability.id === "chats.read" && state.workshopAttached !== undefined
+              ? {
+                  ...capability,
+                  label: "Read this story",
+                  explanation: `Reads only “${story?.title?.trim() || "Unavailable story"}” in this workshop. Its messages go to this workshop's model.`,
+                  example: "Reads the story's last ten messages to sum it up."
+                }
+              : capability
+          )
+        )
     })
   return {
     ListWorkshopCapabilities: ({ chatId }) =>
@@ -83,6 +105,10 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
     UndoRolloutEffect: (input) =>
       Effect.flatMap(CurrentUser, (user) => writer.UndoRolloutEffect({ ...input, userId: user.id })).pipe(
         internal("UndoRolloutEffect")
+      ),
+    ListAttachedWorkshops: ({ chatId }) =>
+      Effect.flatMap(CurrentUser, (user) => reader.AttachedWorkshops({ userId: user.id, chatId })).pipe(
+        internal("ListAttachedWorkshops")
       ),
     CreateWorkshop: (input) =>
       Effect.flatMap(CurrentUser, (user) => writer.CreateWorkshop({ ...input, userId: user.id })).pipe(

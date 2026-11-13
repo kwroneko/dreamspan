@@ -38,7 +38,7 @@ import {
 } from "./rows.ts"
 import { checkStateReferences, withoutPurged } from "./stateRefs.ts"
 
-export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"]) => {
+export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"], creatingWorkshop = false) => {
   const { carryChatNoteDrafts } = makeDraftCarry(sql, drafts)
   /** Fails with NotFound unless `query` counts exactly one row. */
   const found = <E>(query: Effect.Effect<ReadonlyArray<{ readonly n: number }>, E>, entity: string, id: string) =>
@@ -225,6 +225,10 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     origin: { readonly origin: "user" | "rollout"; readonly ref: string | null } = { origin: "user", ref: null }
   ) =>
     Effect.gen(function* () {
+      // Creation owns this relationship. Generic user/tool state writes must never move a
+      // story-reading grant onto a different story, or put a side chat on a story's state.
+      if (data.key === "workshop.attached" && !creatingWorkshop)
+        return yield* new NotFound({ entity: "workshop attachment", id: chatId })
       if (data.key === "lcm.settings" && (slotId !== null || versionId !== null || scope !== null))
         return yield* new NotFound({ entity: "chat-wide settings", id: chatId })
       if (data.key === "lcm.settings" && data.value.enabled) yield* requireSummaries(sql, chatId)

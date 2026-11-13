@@ -249,7 +249,9 @@ export const makeAgentHandlers = Effect.gen(function* () {
     // External tools are never offered in an RP reply.
     ListReplyTools: () =>
       Effect.sync(() => {
-        const tools = registry.rolloutTools.list().filter((tool) => !outsideEffect(tool.effect))
+        const tools = registry.rolloutTools
+          .list()
+          .filter((tool) => !outsideEffect(tool.effect) && tool.replyTool !== false)
         const registered = new Set(tools.map((tool) => tool.id))
         const plan = registry.orchestrationModes.get("default")?.plan({
           state: foldState([{ scope: null, data: { key: "agent.enabled", value: { on: true } } }]),

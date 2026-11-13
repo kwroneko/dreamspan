@@ -1,5 +1,5 @@
-// The workshop's card on the Chats page (spec/WORKSHOP.md §2.2): the only place one is made, so
-// nobody slips into one from a story.
+// The workshop's card on the Chats page (spec/WORKSHOP.md §2.2): where a workshop of its own is
+// made. One beside a story is made from that story (SidePanel.tsx), never by slipping into one.
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { StartChatForm } from "../chat/ChatsPage.tsx"
 

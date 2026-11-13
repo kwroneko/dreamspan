@@ -70,3 +70,5 @@ type KindOf = { readonly kind: string } | null | undefined
 export const mergesInto = (chat: KindOf) => chat == null || chatKinds.get(chat.kind)?.allowsMerge !== false
 /** Turning summaries on (a workshop's stay off). */
 export const summarizes = (chat: KindOf) => chat == null || chatKinds.get(chat.kind)?.allowsSummaries !== false
+/** A workshop beside it, to talk about it out of character (a story's; not a workshop's). Only once the chat is known. */
+export const takesSideChat = (chat: KindOf) => chat != null && chatKinds.get(chat.kind)?.allowsSideChat === true

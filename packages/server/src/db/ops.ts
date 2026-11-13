@@ -2061,8 +2061,12 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * A workshop, with its seeds when missing. `attachTo` makes it a side chat of that story
+   * (spec/WORKSHOP.md §4): its `workshop.attached` event and its reading of the story allowed.
+   */
   Rpc.make("CreateWorkshop", {
-    payload: { userId: UserId, title: Schema.optionalKey(Schema.String) },
+    payload: { userId: UserId, title: Schema.optionalKey(Schema.String), attachTo: Schema.optionalKey(ChatId) },
     success: Chat,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -4160,6 +4164,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListRolloutEffects", {
     payload: { userId: UserId, ...EffectList },
     success: Schema.Array(RolloutEffect),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The live workshops attached to a story of the user's, newest first (db/workshopAttach.ts). */
+  Rpc.make("AttachedWorkshops", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Array(Chat),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A workshop's grants (workshopGrants.ts): capability → mode, expired ones left out. */

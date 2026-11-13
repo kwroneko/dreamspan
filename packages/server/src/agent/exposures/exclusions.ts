@@ -134,6 +134,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ListForks: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListGroupChats: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListHistoryEdits: "Not in W6's first exposures; use the bounded workshop read tools.",
+  ListAttachedWorkshops: "Not in W6's first exposures; side-chat selection is a user workflow.",
   ListLibraryEdits: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListLlmRequests: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListModelUse: "Not in W6's first exposures; use the bounded workshop read tools.",

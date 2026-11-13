@@ -11,6 +11,8 @@ export interface ChatKindProfile {
   readonly allowsMerge: boolean
   readonly allowsStImport: boolean
   readonly exportFormats: ReadonlyArray<"txt" | "jsonl">
+  /** A workshop may be attached to a chat of this kind, to talk about it beside it (spec/WORKSHOP.md §4). */
+  readonly allowsSideChat?: boolean
 }
 
 export const chatKinds = makeRegistry<ChatKindProfile>([
@@ -23,7 +25,8 @@ export const chatKinds = makeRegistry<ChatKindProfile>([
     allowsSummaries: true,
     allowsMerge: true,
     allowsStImport: true,
-    exportFormats: ["jsonl", "txt"]
+    exportFormats: ["jsonl", "txt"],
+    allowsSideChat: true
   },
   {
     id: "workshop",

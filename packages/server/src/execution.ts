@@ -9,7 +9,7 @@ import { workshopMode } from "./agent/workshop.ts"
 import { libraryTools } from "./agent/tools/library.ts"
 import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
 import { agentReplyStrategy } from "./agent/strategy.ts"
-import { historyTools } from "./agent/tools/history.ts"
+import { historyTools, storyTools } from "./agent/tools/history.ts"
 import { editCard } from "./agent/tools/cardEdit.ts"
 import { editNote, listNotes, switchNote, writeNote } from "./agent/tools/notes.ts"
 import { lookupLore } from "./agent/tools/lore.ts"
@@ -103,6 +103,7 @@ export class ExecutionRegistry extends Context.Service<
       }
       for (const tool of [
         ...historyTools,
+        ...storyTools,
         ...libraryTools,
         ...setupTools,
         lookupLore,
@@ -162,6 +163,7 @@ export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string
   const common = exposure ? registry.operationTool(exposure) : registry.rolloutTools.get(name)
   const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
   const tool = common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)
+  if (tool?.replyTool === false && registry.chatKinds.get(kind)?.allowsOutside !== true) return undefined
   if (!tool || registry.chatKinds.get(kind)?.allowsOutside || !tool.capability) return tool
   // Capability grants are workshop metadata. Preserve the frozen story definition shape.
   const storyTool = { ...tool }

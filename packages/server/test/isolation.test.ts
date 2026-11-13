@@ -1215,7 +1215,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   ListVersionEffects: {
     probe: (actor, owner) => refused(actor.api.ListVersionEffects({ versionId: owner.chat.versionId }), "NotFound")
   },
-  CreateWorkshop: { createOnly: "creates a workshop and its private defaults for the caller" },
+  CreateWorkshop: {
+    // A side chat only ever beside one's own story.
+    probe: (actor, owner) => refused(actor.api.CreateWorkshop({ attachTo: owner.chat.chatId }), "NotFound")
+  },
+  ListAttachedWorkshops: {
+    probe: (actor, owner) => refused(actor.api.ListAttachedWorkshops({ chatId: owner.chat.chatId }), "NotFound")
+  },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
   GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },
   ReadPath: {

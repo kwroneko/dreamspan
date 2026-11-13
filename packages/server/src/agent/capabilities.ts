@@ -19,6 +19,9 @@ export interface CapabilityEntry {
 
 const ALL_MODES: ReadonlyArray<CapabilityMode> = ["off", "ask", "allow"]
 
+/** Owner question: should opening a side chat allow reading its story, or ask first? */
+export const SIDE_STORY_READ_MODE: CapabilityMode = "allow"
+
 export const workshopCapabilities = makeRegistry<CapabilityEntry>([
   {
     id: "library.read",

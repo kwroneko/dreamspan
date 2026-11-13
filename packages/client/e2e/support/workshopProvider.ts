@@ -35,9 +35,10 @@ interface Script {
  * (a carried turn holds the earlier ones too); by default from the start of the request.
  */
 export const startWorkshopProvider = async (
-  options: { readonly calls?: ReadonlyArray<Script>; readonly perTask?: boolean } = {}
+  options: { readonly calls?: ReadonlyArray<Script>; readonly perTask?: boolean; readonly answer?: string } = {}
 ) => {
   const calls = options.calls ?? CALLS
+  const final = options.answer ?? WORKSHOP_ANSWER
   const bodies: Array<Body> = []
   let holding: number | null = null
   const held: Array<() => void> = []
@@ -98,7 +99,7 @@ export const startWorkshopProvider = async (
               chunk({}, "tool_calls"),
               chunk({}, null, usage)
             ])
-          : stream(res, [...words(WORKSHOP_ANSWER), chunk({}, "stop"), chunk({}, null, usage)])
+          : stream(res, [...words(final), chunk({}, "stop"), chunk({}, null, usage)])
       if (holding === done) held.push(answer)
       else answer()
     })

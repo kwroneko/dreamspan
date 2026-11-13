@@ -63,6 +63,8 @@ export interface RolloutTool<A = never> {
   /** Argument used as the plain step title, frozen with setup-tool metadata. */
   readonly titleField?: string
   readonly effect: EffectClass
+  /** False: never one of a story's reply tools (This chat's Tools list leaves it out), only a planner's. */
+  readonly replyTool?: false
   /** Model-facing, with its usage guidance: when to call it and when not to. */
   readonly description: string
   readonly parameters: TSchema
