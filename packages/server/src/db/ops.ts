@@ -25,6 +25,7 @@ import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
 import {
+  JoinThreadsInput,
   MergeChanged,
   MergeChatInput,
   MergedMessage,
@@ -270,7 +271,9 @@ export class MergeResult extends Schema.Class<MergeResult>("MergeResult")({
   slotId: SlotId,
   forkId: ForkId,
   position: Schema.Int,
-  chat: Chat
+  chat: Chat,
+  /** The joins written after it (`then`), in order, with their positions. */
+  then: Schema.optionalKey(Schema.Array(Schema.Struct({ slotId: SlotId, position: Schema.Int })))
 }) {}
 
 export class InsertResult extends Schema.Class<InsertResult>("InsertResult")({
@@ -569,10 +572,19 @@ export class WriteOps extends RpcGroup.make(
    * Merges another chat's fork into `forkId` below `at` (spec/CHAT-MERGE.md §8): recomputes the
    * preview and refuses with the new one when its digest changed (`MergeChanged`), then writes
    * the join message (appended at the fork's tip, else inserted), the merge's rows, the cast
-   * union's joins, and chats in the fork. One transaction.
+   * union's joins, and chats in the fork. One transaction. "Join threads" (spec/THREADS.md §7.1)
+   * is this op too, with `threads` (every source must be another thread here) and `then`: more
+   * threads, each planned at the same position as previewed and written directly below the one
+   * before (`MergeResult.then`), so the joins are consecutive. (WriteOps is at the compiler's
+   * type depth: a further op of its own doesn't type.)
    */
   Rpc.make("MergeChat", {
-    payload: { userId: UserId, ...MergeChatInput.fields },
+    payload: {
+      userId: UserId,
+      ...MergeChatInput.fields,
+      threads: Schema.optionalKey(Schema.Boolean),
+      then: Schema.optionalKey(JoinThreadsInput.fields.joins)
+    },
     success: MergeResult,
     error: Schema.Union([NotFound, StaleWrite, MergeRefused, MergeChanged, StorageError])
   }),

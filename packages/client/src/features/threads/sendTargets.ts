@@ -14,7 +14,7 @@ import type { ChatSession, ChatView } from "../chat/session.ts"
 import { shownForkOf, threadSetsNow } from "./threadSets.ts"
 
 /** A thread, the same in every fork of its set: `${splitId}:${ordinal}`. */
-export const threadKey = (set: Pick<ThreadSet, "splitId">, thread: Pick<ThreadInfo, "ordinal">) =>
+const threadKey = (set: Pick<ThreadSet, "splitId">, thread: Pick<ThreadInfo, "ordinal">) =>
   `${set.splitId}:${thread.ordinal}`
 
 /** The card to write as there, by thread; null: as that thread's composer writes. */
@@ -62,8 +62,8 @@ export interface Offered {
   readonly forkId: ForkId
 }
 
-/** The threads the composer can send to from the fork shown, innermost set first. */
-export const offeredThreads = (sets: ReadonlyArray<ThreadSet>, shown: ForkId): ReadonlyArray<Offered> => {
+/** The other threads of the sets the fork shown is in, with a live fork, innermost set first. */
+export const otherThreads = (sets: ReadonlyArray<ThreadSet>, shown: ForkId): ReadonlyArray<Offered> => {
   const seen = new Set<ForkId>([shown])
   return sets.flatMap((set) =>
     set.threads.flatMap((thread) => {
@@ -74,6 +74,10 @@ export const offeredThreads = (sets: ReadonlyArray<ThreadSet>, shown: ForkId): R
     })
   )
 }
+
+/** The threads the composer can send to: the other threads, less those joined here with nothing new since. */
+export const offeredThreads = (sets: ReadonlyArray<ThreadSet>, shown: ForkId): ReadonlyArray<Offered> =>
+  otherThreads(sets, shown).filter((other) => other.thread.joined?.upToDate !== true)
 
 /** The ticked threads a send from this view goes to, with whom to write as in each. */
 export const ticked = (view: ChatView) => {

@@ -1,6 +1,7 @@
 // A merged chat's entry in the timeline (spec/CHAT-MERGE.md §7): one row, "Merged “<title>” ·
 // N messages", that opens to the messages it brought in, read-only and paged, with a link to the
-// chat they came from. The copy is frozen at the merge: the other chat can change or go.
+// chat they came from. The copy is frozen at the merge: the other chat can change or go. Another
+// thread of this chat joined here reads "Joined “At the docks”" (spec/THREADS.md §7.1).
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { PathEntry } from "@rp/shared/chat.ts"
 import type { MergedMessage, MergeInfo } from "@rp/shared/mergeApi.ts"
@@ -82,34 +83,46 @@ export function MergedChatRow({ entry, session }: { entry: PathEntry; session: C
     report,
     toast
   }
+  const thread = info?.thread === true
   const title = info?.title ?? "another chat"
   const count = info ? info.messages : null
+  const what = thread ? "thread" : "chat"
   return (
     <article
-      aria-label={`Merged chat “${title}”`}
+      aria-label={thread ? `Joined thread “${title}”` : `Merged chat “${title}”`}
       data-slot={entry.slotId}
       data-merge
       data-hidden={hidden || undefined}
       className="group flex min-w-0 flex-col gap-1 rounded-lg border border-dashed border-border px-3 py-2"
     >
       <header className="flex min-h-8 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <Tooltip label={open ? "Click to hide the merged messages." : "Click to show the merged messages."}>
+        <Tooltip
+          label={
+            thread
+              ? open
+                ? "Click to hide the joined thread's messages."
+                : "Click to show the messages the joined thread brought in."
+              : open
+                ? "Click to hide the merged messages."
+                : "Click to show the merged messages."
+          }
+        >
           <button
             type="button"
             aria-expanded={open}
             onClick={toggle}
             className="flex min-w-0 items-center gap-2 rounded-md py-1 text-left font-medium outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-focus"
           >
-            <Icon name="merge" size={16} />
+            <Icon name={thread ? "threads" : "merge"} size={16} />
             <span className="min-w-0 [overflow-wrap:anywhere]">
-              Merged “{title}”
+              {thread ? "Joined" : "Merged"} “{title}”
               {count === null ? "" : ` · ${count.toLocaleString()} ${count === 1 ? "message" : "messages"}`}
             </span>
           </button>
         </Tooltip>
         {hidden && <Badge tone="neutral">Hidden</Badge>}
         {info?.sourceLive && info.sourceChatId && (
-          <Tooltip label={`Opens “${title}”, the chat these messages came from.`}>
+          <Tooltip label={`Opens “${title}”, the ${what} these messages came from.`}>
             <Link
               to="/chats/$chatId"
               params={{ chatId: info.sourceChatId }}
@@ -120,7 +133,7 @@ export function MergedChatRow({ entry, session }: { entry: PathEntry; session: C
             </Link>
           </Tooltip>
         )}
-        {info && !info.sourceLive && <span className="text-xs text-muted">The chat it came from is gone</span>}
+        {info && !info.sourceLive && <span className="text-xs text-muted">The {what} it came from is gone</span>}
         <MessageActions context={context} className="ml-auto flex justify-end" />
       </header>
       {info && (

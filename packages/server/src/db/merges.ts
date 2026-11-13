@@ -8,6 +8,7 @@ import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { NewVersion } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import { awayAt } from "@rp/shared/knowledge.ts"
 import {
   fillMergeTemplate,
   MERGE_JOIN_DEFAULT,
@@ -17,10 +18,14 @@ import {
   MergeInfo,
   ChatMergePreview,
   MergeRefused,
-  type MergeRequest
+  type MergeRequest,
+  type MergeTimelines,
+  type MergeView
 } from "@rp/shared/mergeApi.ts"
+import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { viewedJoin } from "../assembler/mergeKnowledge.ts"
 import { leftOutNote, mergedRowText, summaryRowName } from "../assembler/merges.ts"
 import { estimateTokens } from "../assembler/st.ts"
 import type { Bin } from "./bin.ts"
@@ -43,6 +48,10 @@ import { readKnowers } from "./knowers.ts"
 import { MergeResult, NotFound, StaleWrite, type ReadOps, type WriteOps } from "./ops.ts"
 import { castAt } from "./participation.ts"
 import { type ChatRow, toChat } from "./rows.ts"
+import { stateEventsThrough } from "./stateRead.ts"
+import { withoutPurged } from "./stateRefs.ts"
+import { threadCastAt } from "./threadReads.ts"
+import { joinSplit } from "./threads.ts"
 import { query, transaction } from "./tx.ts"
 
 /** The budget's bounds (spec §3): a short span still lets something through; a long one has a ceiling. */
@@ -71,12 +80,18 @@ interface SourceRow {
   readonly origin: string
   readonly cast_json: string | null
   readonly presence_json: string | null
+  /** The version's image media ids, as a JSON array; null when it has none. */
+  readonly media: string | null
 }
 
 /** One merged source message or summary, as `chat_merge_messages` keeps it. */
 interface MergedRow {
   readonly kind: "message" | "summary"
   readonly sourceSlotId: string | null
+  /** The version copied (a message's); null for a summary. */
+  readonly sourceVersionId: string | null
+  /** The copied version's image media ids; null when it had none. */
+  readonly media: ReadonlyArray<string> | null
   readonly speaker: string | null
   /** Who knew it in the source (spec/CHARACTER-CONTEXT.md §9.1); null: the whole source cast. */
   readonly knowers: ReadonlyArray<string> | null
@@ -106,9 +121,55 @@ interface MergePlan {
   readonly added: ReadonlyArray<string>
   readonly castNames: ReadonlyArray<string>
   readonly counts: Record<string, number>
+  /** The split whose other thread this joins (spec/THREADS.md §7); null for any other merge. */
+  readonly splitId: string | null
+  readonly timelines: MergeTimelines
+  /** Characters away at the join that the joined thread brings back (an `away.set` false at J each). */
+  readonly back: ReadonlyArray<string>
+  /** Who the merged side is: the source's cast, or a joined thread's characters (not away there). */
+  readonly sourceSide: ReadonlyArray<string>
 }
 
+/** The chat's state at `leaf` on `fork`'s path, its purged references left out. */
+const stateAt = (sql: SqlClient.SqlClient, chatId: string, leaf: string | null, fork: string) =>
+  Effect.gen(function* () {
+    const rows = yield* stateEventsThrough(sql, chatId as ChatId, leaf as SlotId | null, fork)
+    return foldState(
+      yield* withoutPurged(
+        sql,
+        rows.map((e) => ({
+          scope: e.scope,
+          data: { key: e.key, value: JSON.parse(e.value_json) }
+        })) as Array<FoldableEvent>
+      )
+    )
+  })
+
 const refused = (message: string) => new MergeRefused({ message })
+
+/** "Mira", "Mira and Tobin", "Mira, Tobin and Wren". */
+const nameList = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`
+
+/**
+ * A thread's name as the app shows it (the client's `threadName`): its own, else its characters
+ * at S, else "Thread 2".
+ */
+const threadTitle = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  chatId: string,
+  split: { readonly splitId: string; readonly ordinal: number }
+) =>
+  Effect.gen(function* () {
+    const [member] = yield* sql<{ name: string | null; fork_id: string; slot_id: string }>`
+      SELECT m.name, m.fork_id, x.slot_id FROM thread_members m JOIN thread_splits x ON x.id = m.split_id
+      WHERE m.split_id = ${split.splitId} AND m.ordinal = ${split.ordinal}`
+    if (member?.name?.trim()) return member.name.trim()
+    const cast = member ? yield* threadCastAt(sql, chatId, member.fork_id, member.slot_id) : []
+    const cards = new Map((yield* loadCards(sql, userId, cast)).map((c) => [c.card.entityId as string, c.card.name]))
+    return nameList(cast.flatMap((id) => cards.get(id) ?? [])) || `Thread ${split.ordinal + 1}`
+  })
 
 /**
  * The positions two display paths share from the first message: the number of leading
@@ -179,7 +240,9 @@ const readStretch = (
         ${displaySlots(sql, pieces, first, last)}
         SELECT s.id, v.id AS version_id, path.position, ${slotDeletedIn(sql, fork.id, "s")} AS deleted,
           ${contextExcludedIn(sql, fork.id)} AS excluded, v.status, v.speaker_entity_id, v.content,
-          v.created_at, f.writer AS first_writer, f.origin AS first_origin, v.origin, v.cast_json, v.presence_json
+          v.created_at, f.writer AS first_writer, f.origin AS first_origin, v.origin, v.cast_json, v.presence_json,
+          (SELECT CASE WHEN count(*) = 0 THEN NULL ELSE json_group_array(a.media_id) END
+            FROM (SELECT media_id FROM version_attachments WHERE version_id = v.id ORDER BY ordinal) a) AS media
         FROM display_slots path JOIN slots s ON s.id = path.id
         JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "s")}
         JOIN versions f ON f.id = (SELECT id FROM versions x WHERE x.slot_id = s.id ORDER BY x.ordinal LIMIT 1)
@@ -263,12 +326,22 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     }
     const continues = previousJoin >= 0
     const first = basePos + 1
-    const title = source.name?.trim() || sourceChat.title.trim() || "Untitled chat"
+    // A join (spec/THREADS.md §7): the source is another thread of this branch, called by its name.
+    const split = sameChat ? yield* joinSplit(sql, request.chatId, fork, source) : null
+    const splitId = split?.splitId ?? null
+    const title =
+      split !== null
+        ? yield* threadTitle(sql, userId, request.chatId, split)
+        : source.name?.trim() || sourceChat.title.trim() || "Untitled chat"
     if (first > sourceLength - 1)
       return yield* refused(
-        continues
-          ? `Nothing new in “${title}” since it was last merged.`
-          : `“${title}” has no messages after the part it shares with this chat.`
+        split !== null
+          ? continues
+            ? `Nothing new in “${title}” since it was last joined.`
+            : `“${title}” has nothing since the threads parted.`
+          : continues
+            ? `Nothing new in “${title}” since it was last merged.`
+            : `“${title}” has no messages after the part it shares with this chat.`
       )
     const base = basePos >= 0 ? yield* slotAtPosition(sql, sourcePieces, basePos) : null
 
@@ -355,6 +428,8 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
         rows.push({
           kind: "summary",
           sourceSlotId: s.lastSlotId,
+          sourceVersionId: null,
+          media: null,
           speaker: null,
           // A frozen summary must retain who knew all its inputs, even after its source is gone.
           // Stale inputs cannot be verified against the current source path.
@@ -386,6 +461,8 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       rows.push({
         kind: "message",
         sourceSlotId: row.id,
+        sourceVersionId: row.version_id,
+        media: row.media === null ? null : (JSON.parse(row.media) as Array<string>),
         speaker: row.speaker_entity_id,
         knowers: knownBy(row),
         name: nameOf(row),
@@ -408,7 +485,44 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     const castCards = new Map(
       (yield* loadCards(sql, userId, union as Array<EntityId>)).map((c) => [c.card.entityId as string, c.card])
     )
-    const castNames = sourceCast.map((id) => castCards.get(id)?.modelName || castCards.get(id)?.name || "someone")
+    // A join's characters away here are back from the join on, and the templates name only those in it.
+    const destState = yield* stateAt(sql, request.chatId, atId, fork.id)
+    const sourceAway = splitId === null ? [] : awayAt(yield* stateAt(sql, source.chat_id, sourceEnd, source.id))
+    const inThread = sourceCast.filter((id) => !sourceAway.includes(id))
+    const destAway = awayAt(destState)
+    const back = splitId === null ? [] : inThread.filter((id) => destAway.includes(id))
+    const named = splitId === null ? sourceCast : inThread
+    const castNames = named.map((id) => castCards.get(id)?.modelName || castCards.get(id)?.name || "someone")
+    // How the characters read it: the chat's Context setting (spec/THREADS.md §7.3). Choosing it
+    // per join in a shared-context chat waits for its assembly (TH6).
+    const timelines: MergeTimelines = (destState.contextPerSpeaker ?? "shared") === "shared" ? "together" : "separate"
+    // With separate timelines, what each character reads of it, as assembly filters it: the
+    // rows it knew, those read with the source's cast where none was recorded.
+    const views: Array<MergeView> = []
+    if (timelines === "separate") {
+      const assembled = rows
+        .filter((r) => r.included !== "summarized")
+        .map((r, ordinal) => ({
+          ordinal,
+          kind: r.kind,
+          name: r.name,
+          side: r.side,
+          speaker: r.speaker,
+          content: r.included === "verbatim" ? r.content : "",
+          included: r.included === "verbatim" ? ("verbatim" as const) : ("left_out" as const),
+          knowers: r.knowers ?? sourceCast
+        }))
+      for (const id of union) {
+        if (destState.roles[id] === "narrator" || destState.playedByMe.includes(id)) continue
+        const seen = viewedJoin(transcript, title, assembled, (knowers) => knowers.includes(id))
+        views.push({
+          entity: id as EntityId,
+          name: castCards.get(id)?.name ?? "Unknown",
+          section: seen.rows.length === 0 && seen.partial ? "" : seen.content,
+          readable: !(seen.rows.length === 0 && seen.partial)
+        })
+      }
+    }
 
     // A summary covering M in the destination is written again over the join (MESSAGE-INSERT §3.4).
     const append = atId === fork.tip_slot_id && end === fork.tip_slot_id
@@ -455,12 +569,16 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       framing: fillMergeTemplate(MERGE_SECTION_DEFAULT, title, castNames),
       section: transcript,
       join: fillMergeTemplate(MERGE_JOIN_DEFAULT, title, castNames),
-      rewrites: covering ? { from: covering.from, to: covering.to, tokens: covering.tokens } : null
+      rewrites: covering ? { from: covering.from, to: covering.to, tokens: covering.tokens } : null,
+      timelines,
+      ...(splitId === null ? {} : { thread: true, back: back as Array<EntityId> }),
+      ...(timelines === "separate" ? { views } : {})
     }
     // Hash the actual preview and frozen rows, including full texts and speaker names.
     // Text length alone misses same-length edits and swipes made while the dialog is open.
     const digest = createHash("sha256")
-      .update(JSON.stringify([request, source.tip_slot_id, sourceEnd, previewFields, rows]))
+      // The position as resolved: a join below an earlier one of the same write previews the same.
+      .update(JSON.stringify([{ ...request, at: atId }, source.tip_slot_id, sourceEnd, previewFields, rows]))
       .digest("base64url")
     const preview = new ChatMergePreview({ ...previewFields, digest })
     return {
@@ -480,7 +598,11 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       sourceCast,
       added,
       castNames,
-      counts
+      counts,
+      splitId,
+      timelines,
+      back,
+      sourceSide: named
     } satisfies MergePlan
   })
 
@@ -498,6 +620,7 @@ const mergeInfo = (sql: SqlClient.SqlClient, userId: UserId, chatId: string, slo
       cast_json: string
       counts_json: string
       created_at: number
+      split_id: string | null
     }>`SELECT m.*, EXISTS (SELECT 1 FROM forks f JOIN chats c ON c.id = f.chat_id
         WHERE f.id = m.source_fork_id AND f.chat_id = m.source_chat_id AND f.deleted_at IS NULL
           AND c.deleted_at IS NULL AND c.owner_user_id = ${userId}) AS live
@@ -518,7 +641,8 @@ const mergeInfo = (sql: SqlClient.SqlClient, userId: UserId, chatId: string, slo
       cast: (JSON.parse(row.cast_json) as Array<{ name: string; from: string }>)
         .filter((c) => c.from !== "destination")
         .map((c) => c.name),
-      createdAt: row.created_at
+      createdAt: row.created_at,
+      ...(row.split_id === null ? {} : { thread: true })
     })
   })
 
@@ -564,105 +688,186 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const graph = makeGraphWrites(sql, bin.drafts)
+
+    /**
+     * Writes a planned merge's join below `parent` (appended when `append`, else inserted), its
+     * row and frozen rows, the cast union's joins and, for a join of another thread, its
+     * characters back from J on. Inside the caller's transaction; returns the join's slot.
+     */
+    const writeMerge = (
+      userId: UserId,
+      plan: MergePlan,
+      title: string,
+      framing: string | null,
+      parent: { readonly id: string; readonly depth: number },
+      append: boolean,
+      now: number
+    ) =>
+      Effect.gen(function* () {
+        const chatId = plan.fork.chat_id
+        const version = new NewVersion({
+          speakerEntityId: null,
+          writer: "human",
+          content: plan.transcript,
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "merge"
+        })
+        const { slotId, version: row } = yield* graph.insertSlot(
+          chatId,
+          parent,
+          version,
+          now,
+          plan.fork.id,
+          [],
+          0,
+          !append
+        )
+        if (append)
+          yield* sql`UPDATE forks SET tip_slot_id = ${slotId}, row_version = row_version + 1 WHERE id = ${plan.fork.id}`
+        else yield* writeInsert(sql, { id: plan.fork.id, chatId }, slotId, 1)
+        // The join pins the union: the merged-in characters took part (DESIGN §3.5).
+        yield* sql`UPDATE version_records SET cast_json = ${JSON.stringify(plan.union)} WHERE id = ${row.id}`
+        for (const entity of plan.added)
+          yield* graph.insertStateEvent(
+            userId,
+            chatId,
+            slotId,
+            null,
+            null,
+            { key: "participant.join", value: { entity: entity as EntityId } },
+            plan.fork.id
+          )
+        // A joined thread's characters are here again from the join on (spec/THREADS.md §7.1).
+        for (const entity of plan.back)
+          yield* graph.insertStateEvent(
+            userId,
+            chatId,
+            slotId,
+            null,
+            null,
+            { key: "away.set", value: { entity: entity as EntityId, away: false } },
+            plan.fork.id
+          )
+        const mergeId = uuidv7()
+        const inDestination = new Set(plan.destCast)
+        const inSource = new Set(plan.sourceSide)
+        yield* sql`INSERT INTO chat_merges ${sql.insert({
+          id: mergeId,
+          chat_id: chatId,
+          slot_id: slotId,
+          fork_id: plan.fork.id,
+          source_chat_id: plan.sourceChatId,
+          source_fork_id: plan.sourceForkId,
+          source_tip_slot_id: plan.sourceEnd,
+          base_slot_id: plan.base,
+          start_slot_id: plan.start,
+          title: title.trim().slice(0, 200) || plan.preview.sourceTitle,
+          framing: framing?.trim() ? framing.trim().slice(0, 2_000) : null,
+          cast_json: JSON.stringify(
+            plan.preview.cast.map((c) => ({
+              entity: c.entity,
+              name: c.name,
+              from: inSource.has(c.entity) ? (inDestination.has(c.entity) ? "both" : "source") : "destination"
+            }))
+          ),
+          counts_json: JSON.stringify(plan.counts),
+          created_at: now,
+          timelines: plan.timelines,
+          split_id: plan.splitId
+        })}`
+        for (let i = 0; i < plan.rows.length; i += 200)
+          yield* sql`INSERT INTO chat_merge_messages ${sql.insert(
+            plan.rows.slice(i, i + 200).map((r, n) => ({
+              merge_id: mergeId,
+              ordinal: i + n,
+              kind: r.kind,
+              source_slot_id: r.sourceSlotId,
+              source_version_id: r.sourceVersionId,
+              media_json: r.media === null ? null : JSON.stringify(r.media),
+              speaker_entity_id: r.speaker,
+              knowers_json: r.knowers === null ? null : JSON.stringify(r.knowers),
+              speaker_name: r.name,
+              side: r.side,
+              content: r.content,
+              sent_at: r.sentAt,
+              included: r.included
+            }))
+          )}`
+        return slotId
+      })
+
+    /** After the joins: the fork chatted in, the chat's row, and each join's position now. */
+    const finish = (forkId: string, chatId: string, slots: ReadonlyArray<string>, now: number) =>
+      Effect.gen(function* () {
+        // Merging adds a message: the fork is chatted in (ARCHITECTURE §3.8).
+        yield* graph.chatIn(forkId, now)
+        const [chat] = yield* sql<ChatRow>`
+          UPDATE chats SET last_message_at = ${now},
+            status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+            row_version = row_version + 1
+          WHERE id = ${chatId} RETURNING *`
+        const [tip] = yield* sql<{ tip: string | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${forkId}`
+        const pieces = yield* pathPieces(sql, chatId, forkId, tip!.tip)
+        const results: Array<MergeResult> = []
+        for (const slotId of slots)
+          results.push(
+            new MergeResult({
+              slotId: slotId as SlotId,
+              forkId: forkId as ForkId,
+              position: positionOf(pieces, (yield* slotPlace(sql, chatId, slotId))!)!,
+              chat: toChat(chat!)
+            })
+          )
+        return results
+      })
+
     return {
-      MergeChat: ({ userId, title, framing, digest, ...request }) =>
+      MergeChat: ({ userId, title, framing, digest, threads, then = [], ...request }) =>
         Effect.gen(function* () {
           const now = Date.now()
-          const plan = yield* mergePlan(sql, userId, request)
-          if (plan.preview.digest !== digest) return yield* new MergeChanged({ preview: plan.preview })
-          const chatId = request.chatId
-          const version = new NewVersion({
-            speakerEntityId: null,
-            writer: "human",
-            content: plan.transcript,
-            status: "complete",
-            macroMode: "verbatim",
-            origin: "merge"
-          })
-          const { slotId, version: row } = yield* graph.insertSlot(
-            chatId,
-            plan.at,
-            version,
-            now,
-            plan.fork.id,
-            [],
-            0,
-            !plan.append
-          )
-          if (plan.append)
-            yield* sql`UPDATE forks SET tip_slot_id = ${slotId}, row_version = row_version + 1 WHERE id = ${plan.fork.id}`
-          else yield* writeInsert(sql, { id: plan.fork.id, chatId }, slotId, 1)
-          // The join pins the union: the merged-in characters took part (DESIGN §3.5).
-          yield* sql`UPDATE version_records SET cast_json = ${JSON.stringify(plan.union)} WHERE id = ${row.id}`
-          for (const entity of plan.added)
-            yield* graph.insertStateEvent(
+          const joins = [{ forkId: request.source.forkId, title, framing, digest }, ...then]
+          if (new Set(joins.map((join) => join.forkId)).size !== joins.length)
+            return yield* refused("Each thread can be joined once at a time.")
+          const slots: Array<string> = []
+          let at: SlotId | null = request.at
+          let place: { parent: { id: string; depth: number }; append: boolean } | null = null
+          // Several threads joined at once (spec/THREADS.md §7.1): each planned at the same
+          // position, as its preview was, and written below the one before.
+          for (const join of joins) {
+            const plan = yield* mergePlan(sql, userId, {
+              ...request,
+              at,
+              source: { chatId: request.chatId, forkId: join.forkId },
+              ...(join === joins[0] ? { source: request.source } : {})
+            })
+            if (plan.preview.digest !== join.digest) return yield* new MergeChanged({ preview: plan.preview })
+            if (threads && plan.splitId === null)
+              return yield* refused(`“${plan.preview.sourceTitle}” isn't another thread of this branch.`)
+            at = plan.at.id as SlotId
+            const target: { parent: { id: string; depth: number }; append: boolean } = place ?? {
+              parent: plan.at,
+              append: plan.append
+            }
+            const slotId: string = yield* writeMerge(
               userId,
-              chatId,
-              slotId,
-              null,
-              null,
-              { key: "participant.join", value: { entity: entity as EntityId } },
-              plan.fork.id
+              plan,
+              join.title,
+              join.framing,
+              target.parent,
+              target.append,
+              now
             )
-          const mergeId = uuidv7()
-          const inDestination = new Set(plan.destCast)
-          const inSource = new Set(plan.sourceCast)
-          yield* sql`INSERT INTO chat_merges ${sql.insert({
-            id: mergeId,
-            chat_id: chatId,
-            slot_id: slotId,
-            fork_id: plan.fork.id,
-            source_chat_id: plan.sourceChatId,
-            source_fork_id: plan.sourceForkId,
-            source_tip_slot_id: plan.sourceEnd,
-            base_slot_id: plan.base,
-            start_slot_id: plan.start,
-            title: title.trim().slice(0, 200) || plan.preview.sourceTitle,
-            framing: framing?.trim() ? framing.trim().slice(0, 2_000) : null,
-            cast_json: JSON.stringify(
-              plan.preview.cast.map((c) => ({
-                entity: c.entity,
-                name: c.name,
-                from: inSource.has(c.entity) ? (inDestination.has(c.entity) ? "both" : "source") : "destination"
-              }))
-            ),
-            counts_json: JSON.stringify(plan.counts),
-            created_at: now
-          })}`
-          for (let i = 0; i < plan.rows.length; i += 200)
-            yield* sql`INSERT INTO chat_merge_messages ${sql.insert(
-              plan.rows.slice(i, i + 200).map((r, n) => ({
-                merge_id: mergeId,
-                ordinal: i + n,
-                kind: r.kind,
-                source_slot_id: r.sourceSlotId,
-                speaker_entity_id: r.speaker,
-                knowers_json: r.knowers === null ? null : JSON.stringify(r.knowers),
-                speaker_name: r.name,
-                side: r.side,
-                content: r.content,
-                sent_at: r.sentAt,
-                included: r.included
-              }))
-            )}`
-          // Merging adds a message: the fork is chatted in (ARCHITECTURE §3.8).
-          yield* graph.chatIn(plan.fork.id, now)
-          const [chat] = yield* sql<ChatRow>`
-            UPDATE chats SET last_message_at = ${now},
-              status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
-              row_version = row_version + 1
-            WHERE id = ${chatId} RETURNING *`
-          const [tip] = yield* sql<{
-            tip: string | null
-          }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${plan.fork.id}`
-          const pieces = yield* pathPieces(sql, chatId, plan.fork.id, tip!.tip)
-          const position = positionOf(pieces, (yield* slotPlace(sql, chatId, slotId))!)!
-          return new MergeResult({
-            slotId: slotId as SlotId,
-            forkId: plan.fork.id as ForkId,
-            position,
-            chat: toChat(chat!)
-          })
+            slots.push(slotId)
+            place = { parent: { id: slotId, depth: target.parent.depth + 1 }, append: target.append }
+          }
+          const [first, ...rest] = yield* finish(request.forkId, request.chatId, slots, now)
+          return rest.length === 0
+            ? first!
+            : new MergeResult({
+                ...first!,
+                then: rest.map((result) => ({ slotId: result.slotId, position: result.position }))
+              })
         }).pipe(transaction(sql, "MergeChat"))
     } satisfies Partial<WriteHandlers>
   })

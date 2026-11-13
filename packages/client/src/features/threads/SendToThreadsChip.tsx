@@ -16,7 +16,7 @@ import { splitNumber, threadName } from "./model.ts"
 import { offeredThreads, setTick, useTicks } from "./sendTargets.ts"
 import { shownForkOf, useThreadSets } from "./threadSets.ts"
 
-export const CHIP_HINT = "Choose other threads that get this message too. Each one replies on its own."
+const CHIP_HINT = "Choose other threads that get this message too. Each one replies on its own."
 
 /** "As there": the card that thread's composer writes as. */
 const AS_THERE = "as-there"

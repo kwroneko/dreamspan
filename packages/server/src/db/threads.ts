@@ -147,6 +147,35 @@ export const separateThreads = (
   })
 
 /**
+ * The split two forks are different threads of (spec/THREADS.md §7): of the splits both see on
+ * their display paths, the innermost where they're in different threads, with the thread `from`
+ * is in there; null when they aren't threads of one another. A join of one into the other
+ * records it (`chat_merges.split_id`).
+ */
+export const joinSplit = (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  into: { readonly id: string; readonly tip_slot_id: string | null },
+  from: { readonly id: string; readonly tip_slot_id: string | null }
+) =>
+  Effect.gen(function* () {
+    const candidates = yield* threadCandidates(sql, [into.id, from.id])
+    const kept = (fork: typeof into) =>
+      Effect.filter(
+        candidates.filter((c) => c.forkId === fork.id && c.ordinal !== null),
+        (c) => onForkPath(sql, chatId, fork, c.slotId)
+      )
+    const mine = yield* kept(into)
+    const theirs = yield* kept(from)
+    const shared = mine
+      .filter((p) => theirs.some((q) => q.splitId === p.splitId && q.ordinal !== p.ordinal))
+      .sort((a, b) => b.depth - a.depth)[0]
+    return shared === undefined
+      ? null
+      : { splitId: shared.splitId, ordinal: theirs.find((q) => q.splitId === shared.splitId)!.ordinal }
+  })
+
+/**
  * The splits shown at all: those with at least two threads that still have a live fork
  * (`live`: each live fork's places). A split whose other threads are all deleted (its Undo,
  * or each deleted by hand) shows nowhere, and its places are left out (§5.2).

@@ -6,6 +6,7 @@ import type { ThreadSet } from "@rp/shared/threads.ts"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { branchControlParts } from "../src/features/chat/branchParts.ts"
 import type { ChatSession, ChatView } from "../src/features/chat/session.ts"
+import { messageActions } from "../src/features/chat/messageActions.tsx"
 import { messageRows, timelineTransforms } from "../src/features/chat/timelineContributions.tsx"
 import { register } from "../src/features/threads/index.tsx"
 import {
@@ -19,7 +20,8 @@ import {
   startRequest,
   threadName
 } from "../src/features/threads/model.ts"
-import { offeredThreads, resetTicks, setTick, ticksOf } from "../src/features/threads/sendTargets.ts"
+import { joinOffered } from "../src/features/threads/JoinThreadsDialog.tsx"
+import { offeredThreads, otherThreads, resetTicks, setTick, ticksOf } from "../src/features/threads/sendTargets.ts"
 import { UNDO_HINT } from "../src/features/threads/ThreadsSection.tsx"
 import { loadThreadSets, resetThreadSets, threadSetsNow } from "../src/features/threads/threadSets.ts"
 
@@ -317,5 +319,54 @@ describe("the threads a send goes to (TH4)", () => {
     expect(ticksOf(chat, "fork-w" as ForkId).size).toBe(0)
     setTick(chat, "fork-f" as ForkId, "split-1:1", undefined)
     expect(ticksOf(chat, "fork-f" as ForkId).size).toBe(0)
+  })
+})
+
+describe("joining threads (TH5)", () => {
+  beforeEach(() => resetThreadSets())
+  afterEach(() => resetThreadSets())
+  const docks = (joined?: { upToDate: boolean }) => ({
+    ...set,
+    threads: [
+      set.threads[0]!,
+      { ...set.threads[1]!, ...(joined ? { joined: { slotId: "slot-55" as SlotId, number: 55, ...joined } } : {}) }
+    ]
+  })
+  const viewOn = (forkId: string) =>
+    ({ chat: { id: "chat-1", currentForkId: "fork-f", rowVersion: 1 }, forkId }) as unknown as ChatView
+  const load = async (sets: ReadonlyArray<ThreadSet>) => {
+    const call = vi.fn(async () => ({ ok: true as const, value: sets }))
+    loadThreadSets({ id: "chat-1", call } as unknown as ChatSession, "chat-1" as never, "fork-f" as ForkId, "1/0")
+    await vi.waitFor(() => expect(threadSetsNow("chat-1" as never, "fork-f" as ForkId)).not.toBeNull())
+  }
+
+  it("offers a join while another thread has something not joined here, and sends only to those", async () => {
+    await load([docks()])
+    expect(joinOffered(viewOn("fork-f"))).toBe(true)
+    expect(offeredThreads([docks()], "fork-f" as ForkId)).toHaveLength(1)
+    // Joined, and the docks went on: offered again, to join and to send to.
+    resetThreadSets()
+    await load([docks({ upToDate: false })])
+    expect(joinOffered(viewOn("fork-f"))).toBe(true)
+    expect(offeredThreads([docks({ upToDate: false })], "fork-f" as ForkId)).toHaveLength(1)
+    // Joined with nothing new since: neither, though the picker still lists it.
+    resetThreadSets()
+    await load([docks({ upToDate: true })])
+    expect(joinOffered(viewOn("fork-f"))).toBe(false)
+    expect(offeredThreads([docks({ upToDate: true })], "fork-f" as ForkId)).toEqual([])
+    expect(otherThreads([docks({ upToDate: true })], "fork-f" as ForkId).map((other) => other.key)).toEqual([
+      "split-1:1"
+    ])
+  })
+
+  it("registers Join a thread here in the place group", () => {
+    const dispose = register()
+    try {
+      expect(messageActions.list().find((action) => action.id === "message.join-thread")).toMatchObject({
+        group: "place"
+      })
+    } finally {
+      for (const close of dispose.reverse()) close()
+    }
   })
 })
