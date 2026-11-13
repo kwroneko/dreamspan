@@ -14,6 +14,7 @@ import { parseOptionalInt } from "./data.ts"
 
 /** The provider settings as the form holds them: only what the user changed, numbers as typed. */
 export interface ProviderDraft {
+  readonly toolLoading?: "auto" | "every" | "dispatcher"
   readonly auth?: string
   readonly region?: string
   readonly project?: string
@@ -49,6 +50,7 @@ export const parseProviderDraft = (provider: ProviderInfo | undefined, draft: Pr
   const project = draft.project?.trim() ?? ""
   const settings: ProviderSettings = {
     ...provider?.defaults,
+    ...(draft.toolLoading !== undefined ? { toolLoading: draft.toolLoading } : {}),
     ...(draft.auth !== undefined ? { auth: draft.auth } : {}),
     ...(region !== "" ? { region } : {}),
     ...(project !== "" ? { project } : {}),
@@ -314,6 +316,34 @@ export function ProviderAdvanced({
       title="Advanced"
       hint={`Click to show what ${provider.label} sets up: caching and how tokens are counted.`}
     >
+      <Field
+        label="Tool loading"
+        about="Automatic uses measured provider profiles. Trying the dispatcher is untested for other providers and models."
+        description="Changing the tool list makes the next request read the chat again once, at full input cost. An active run keeps its saved choice."
+      >
+        <Select<NonNullable<ProviderDraft["toolLoading"]>>
+          items={[
+            {
+              value: "auto",
+              label: "Automatic (measured profiles)",
+              description: "Uses measured loading profiles; other targets get every tool from the start."
+            },
+            {
+              value: "every",
+              label: "Every tool from the start",
+              description: "Sends every tool definition on every request, without loading tools later."
+            },
+            {
+              value: "dispatcher",
+              label: "Try dispatcher (untested)",
+              description:
+                "Tries a fixed dispatcher on this connection. Cache behavior is untested outside the measured profiles."
+            }
+          ]}
+          value={settings.toolLoading ?? "auto"}
+          onValueChange={(toolLoading) => onChange({ ...draft, toolLoading })}
+        />
+      </Field>
       {shows("cacheBreakpoints") && (
         <Field label="Cache markers" about="Where requests mark the parts the provider should keep for reuse.">
           <Select

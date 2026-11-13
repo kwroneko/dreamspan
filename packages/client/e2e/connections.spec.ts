@@ -1,3 +1,4 @@
+import { dispatcherConnectionTests } from "./support/dispatcherConnections.ts"
 import { logoutFromSettings } from "./support/appMenu.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -249,3 +250,5 @@ test("another user never sees someone's connections", async ({ browser }) => {
   await expect(alice.locator("body")).not.toContainText("Alice's private gateway")
   await alice.close()
 })
+
+dispatcherConnectionTests()

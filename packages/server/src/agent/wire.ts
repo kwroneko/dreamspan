@@ -18,7 +18,12 @@ const signedDetails = (signature: string | undefined): ReadonlyArray<unknown> | 
   }
 }
 
-const completionsMessage = (m: Message, replayReasoning = false, target?: ReasoningTarget): unknown => {
+const completionsMessage = (
+  m: Message,
+  replayReasoning = false,
+  target?: ReasoningTarget,
+  requireReasoning = false
+): unknown => {
   if (m.role === "assistant") {
     const text = m.content
       .filter((p) => p.type === "text")
@@ -55,7 +60,7 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
       ...(calls.length ? { tool_calls: calls } : {}),
       ...(details
         ? { reasoning_details: details }
-        : reasoning && (calls.length || reasoningField)
+        : (reasoning || (requireReasoning && calls.length)) && (calls.length || reasoningField)
           ? { [reasoningField ?? "reasoning_content"]: reasoning }
           : {})
     }
@@ -102,6 +107,8 @@ export const rolloutRequest = (
   tools: ReadonlyArray<Tool> | undefined,
   options: {
     readonly explicitTail?: boolean
+    /** DeepSeek requires the field even when the replayed call has no visible thinking. */
+    readonly requireReasoning?: boolean
     readonly replayReasoning?: boolean
     readonly reasoningTarget?: ReasoningTarget
   } = {}
@@ -114,7 +121,9 @@ export const rolloutRequest = (
           ...prefix.payload,
           messages: [
             ...(prefix.payload.messages as Array<unknown>),
-            ...suffix.map((message) => completionsMessage(message, options.replayReasoning, options.reasoningTarget))
+            ...suffix.map((message) =>
+              completionsMessage(message, options.replayReasoning, options.reasoningTarget, options.requireReasoning)
+            )
           ]
         }
       : prefix.payload

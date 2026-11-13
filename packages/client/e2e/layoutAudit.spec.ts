@@ -1,3 +1,4 @@
+import { dispatcherConnectionTests } from "./support/dispatcherConnections.ts"
 import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
 import { workshopChatTests } from "./support/workshopChat.ts"
 import { workshopApprovalTests } from "./support/workshopApprovals.ts"
@@ -52,6 +53,7 @@ if (process.env.LAYOUT_AUDIT_WORKSHOP_ONLY === "1") {
   workshopChatTests()
   workshopApprovalTests()
 }
+if (process.env.LAYOUT_AUDIT_DISPATCHER_ONLY === "1") dispatcherConnectionTests()
 if (process.env.LAYOUT_AUDIT_RESUME_ONLY === "1") agentResumeTests()
 
 test.describe("model picker catalog layout", () => {

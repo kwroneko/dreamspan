@@ -80,6 +80,8 @@ const CacheBreakpoints = Schema.Literals(["auto", "explicit", "none"])
  * can change in the connection's advanced settings. A connection stores only what the user changed.
  */
 export const ProviderSettings = Schema.Struct({
+  /** Automatic follows measured profiles; dispatcher is an explicit untested override. */
+  toolLoading: Schema.optionalKey(Schema.Literals(["auto", "every", "dispatcher"])),
   /** How the key signs requests: one of the provider's `auth` choices. */
   auth: Schema.optionalKey(Schema.String),
   /** Where cache markers go: the provider's default placement, at each reusable section, or none. */

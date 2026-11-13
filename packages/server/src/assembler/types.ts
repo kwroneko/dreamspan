@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 63
+export const ASSEMBLER_VERSION = 64
 
 export type Role = "system" | "user" | "assistant"
 
@@ -784,6 +784,7 @@ export interface ModelInput {
   readonly key: string
   readonly prefill: "none" | "assistant" | "tool_schema"
   readonly continueUnavailable?: string | undefined
+  readonly toolLoading?: "auto" | "every" | "dispatcher"
   readonly cacheBreakpoints: "auto" | "explicit" | "none"
   readonly cacheLayout?: import("@rp/shared/providers.ts").CacheLayout
   /** The context window when some source reported it. */

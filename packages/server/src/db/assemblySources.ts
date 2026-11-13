@@ -946,13 +946,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const providers = yield* CurrentProviderDefinitions
         const provider = findProvider(providers, c.provider, c.kind, c.baseUrl)
         const cacheContract = provider ? provider.cacheContract : c.kind
-        const effective = resolveModel(
-          m.key,
-          m.upstream,
-          m.overrides,
-          c.compat,
-          resolveProviderSettings(provider, c.providerSettings)
-        )
+        const providerSettings = resolveProviderSettings(provider, c.providerSettings)
+        const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat, providerSettings)
         resolvedModel = {
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
@@ -979,6 +974,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             c.baseUrl,
             { ...(m.upstream.fixed ? { fixed: m.upstream.fixed } : {}), route: effective.route }
           ),
+          ...(providerSettings.toolLoading ? { toolLoading: providerSettings.toolLoading } : {}),
           cacheBreakpoints: effective.cacheBreakpoints.value,
           cacheLayout: effective.cacheLayout.value,
           vision: effective.vision.value,

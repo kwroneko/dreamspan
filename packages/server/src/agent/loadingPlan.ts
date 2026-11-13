@@ -31,7 +31,10 @@ export const loaderFor = (execution: ExecutionRegistry["Service"], frozen: Froze
 /** The registered wire that carries deferred tools for this model, if any supports it. */
 export const loadingWireFor = (execution: ExecutionRegistry["Service"], model: ModelInput | null) => {
   const wire = model ? execution.toolLoadingWires.get(model.api) : undefined
-  return wire && model && wire.supports(model) ? wire : undefined
+  if (!model || model.toolLoading === "every") return undefined
+  if (model.toolLoading !== "dispatcher" && wire?.supports(model)) return wire
+  const dispatcher = execution.toolLoadingWires.get("dispatcher")
+  return dispatcher?.supports(model) ? dispatcher : undefined
 }
 
 export const planToolLoading = (
@@ -50,7 +53,7 @@ export const planToolLoading = (
   Effect.gen(function* () {
     const { execution } = deps
     const profile = execution.toolLoadingProfiles.get(input.kind)
-    const wire = input.model ? execution.toolLoadingWires.get(input.model.api) : undefined
+    const wire = loadingWireFor(execution, input.model)
     const unsplit = { offer: { tools: input.tools, deferred: new Set<string>() }, cardSkills: [] }
     if (!profile || !wire || !input.model || !wire.supports(input.model)) return unsplit
     // The cards the assistant speaks as, at the revisions this request was assembled with.

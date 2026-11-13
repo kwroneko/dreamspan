@@ -1,7 +1,10 @@
+import { CALL_TOOL, dispatcherDefinition } from "../agent/dispatcher.ts"
+import { loadingWireFor } from "../agent/loadingPlan.ts"
+import type { ContinuousSnapshot } from "../agent/continuity.ts"
 import { outsideEffect } from "../agent/effects.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 type RetryModel = { readonly connection: ConnectionId; readonly model: ModelId }
-import type { ContextSnapshot, Generation } from "../assembler/types.ts"
+import type { Generation } from "../assembler/types.ts"
 // The agent RPCs (@rp/shared/agentApi.ts). Storage checks the version or chat is the caller's.
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { foldState, permissionKey } from "@rp/shared/state.ts"
@@ -36,6 +39,7 @@ const agentVersionResumer = Effect.gen(function* () {
   const hub = yield* ChatHub
   const generations = yield* Generations
   const generator = yield* Generator
+  const execution = yield* ExecutionRegistry
   /**
    * A new version that carries on `versionId`'s run as `plan` keeps it (spec/AGENTIC.md §4.2):
    * written with its rollout in one transaction, then generated from the kept transcript.
@@ -90,8 +94,37 @@ const agentVersionResumer = Effect.gen(function* () {
           )
         const model = (JSON.parse(assembled.generation) as Generation).model
         if (!model) return yield* new GenerationUnavailable({ message: "The chosen model is unavailable." })
-        const frozen = JSON.parse(snapshot) as ContextSnapshot
-        snapshot = JSON.stringify({ ...frozen, inputs: { ...frozen.inputs, model } })
+        const frozen = JSON.parse(snapshot) as ContinuousSnapshot
+        const dispatcher = loadingWireFor(execution, model)?.dispatcher && frozen.agent?.tools.some((t) => t.deferred)
+        const transport = frozen.agent?.tools.find((t) => t.name === CALL_TOOL)
+        const tools = frozen.agent?.tools.filter((t) => t.name !== CALL_TOOL)
+        snapshot = JSON.stringify({
+          ...frozen,
+          inputs: { ...frozen.inputs, model },
+          ...(tools
+            ? {
+                agent: {
+                  ...frozen.agent,
+                  tools: [
+                    ...tools,
+                    ...(dispatcher
+                      ? [transport ?? { ...dispatcherDefinition, label: "Called a loaded tool", effect: "read" }]
+                      : [])
+                  ]
+                }
+              }
+            : {}),
+          ...(frozen.continuity
+            ? {
+                continuity: {
+                  ...frozen.continuity,
+                  parent: undefined,
+                  reason:
+                    "The model changed. If its tool list changes, the next request reads the chat again once at full input cost."
+                }
+              }
+            : {})
+        })
         chosen = { connection: model.connectionId as never, model: model.modelId as never }
       }
       if (options?.direction !== undefined)

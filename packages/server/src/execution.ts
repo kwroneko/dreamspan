@@ -99,6 +99,7 @@ export class ExecutionRegistry extends Context.Service<
         }
       })
       const validate = (tool: RolloutTool<never>) => {
+        if (tool.id === "call_tool") throw new Error("call_tool is reserved for the tool-loading transport.")
         if (
           (outsideEffect(tool.effect) && !tool.capability) ||
           (tool.capability && !workshopCapabilities.get(tool.capability))
@@ -188,6 +189,7 @@ export const executionRegistry = Effect.gen(function* () {
 
 /** A kind may replace an ambiguous public tool name without changing story semantics. */
 export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string, name: string) => {
+  if (name === "call_tool") return undefined
   const exposure = registry.chatKinds.get(kind)?.allowsOutside ? registry.operationTools.get(name) : undefined
   const common = exposure ? registry.operationTool(exposure) : registry.rolloutTools.get(name)
   const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
