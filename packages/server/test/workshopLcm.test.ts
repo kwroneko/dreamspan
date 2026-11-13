@@ -248,6 +248,10 @@ it.live(
         assert.notInclude(data, "You are the workshop assistant in a roleplay app")
       }
       const snapshot = JSON.parse(material.snapshot) as ContextSnapshot
+      // merge-batch10: the history tools' private-view hook (threads6) freezes only its constant
+      // ordinary marker for a workshop's own reads (no private address map), and the compacted
+      // run's replay below still rebuilds the identical request.
+      assert.deepStrictEqual(snapshot.agentToolState, { "history.private": { ordinary: true } })
       const replay = yield* reader.RebuildContext({ userId: user.id, snapshot: material.snapshot })
       assert.strictEqual(replay._tag, "Rebuilt")
       if (replay._tag === "Rebuilt") assert.deepStrictEqual(JSON.parse(replay.snapshot).request, snapshot.request)
