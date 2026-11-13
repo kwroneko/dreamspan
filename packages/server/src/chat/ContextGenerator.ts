@@ -518,7 +518,7 @@ export const layer = Layer.effect(
           }
           const rolloutId = uuidv7()
           if (agentic) {
-            const agentToolState = yield* prepareToolSnapshots(tools, {
+            const prepared = yield* prepareToolSnapshots(tools, {
               userId,
               chatId,
               slotId,
@@ -532,10 +532,9 @@ export const layer = Layer.effect(
               reader,
               writer: toolWriter(writer)
             }).pipe(Effect.catchCause((cause) => serverFailure("PrepareToolSnapshots")(cause)))
-            if (Object.keys(agentToolState).length > 0) {
-              snapshot = { ...snapshot, agentToolState }
-              generation = { ...generation, agentToolState }
-            }
+            // The snapshot keeps the frozen form; this run reads the prepared state itself.
+            if (Object.keys(prepared.frozen).length > 0) snapshot = { ...snapshot, agentToolState: prepared.frozen }
+            if (Object.keys(prepared.state).length > 0) generation = { ...generation, agentToolState: prepared.state }
           }
           const finish = finishing(request, rolloutId)
           // Opened and closed as a resource of the stream's scope: once it's open, it's closed

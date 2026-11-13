@@ -73,7 +73,10 @@ export interface RolloutTool<A = never> {
    * undefined means this tool needs no frozen state for this view. */
   readonly snapshot?: {
     readonly key: string
+    /** The state, or (Resume, step edit, replay) what `freeze` kept of it, made ready for this run. */
     readonly prepare: (context: ToolContext, frozen: unknown) => Effect.Effect<unknown, unknown>
+    /** What the snapshot stores of a prepared state (absent: the state itself). */
+    readonly freeze?: (state: unknown) => unknown
   }
   /**
    * What the call will do, for its approval (spec/WORKSHOP.md §3.4), worked out by the server from
@@ -87,19 +90,26 @@ export interface RolloutTool<A = never> {
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
 
-/** Prepare registered projections before StartRollout freezes its snapshot. */
+/**
+ * Prepare registered projections before StartRollout freezes its snapshot: `state` for this
+ * run, `frozen` (each hook's `freeze` of it) for the snapshot.
+ */
 export const prepareToolSnapshots = (tools: ReadonlyArray<RolloutTool<never>>, context: ToolContext) =>
   Effect.gen(function* () {
     const state: Record<string, unknown> = {}
+    const frozen: Record<string, unknown> = {}
     const seen = new Set<string>()
     for (const tool of tools) {
       const hook = tool.snapshot
       if (!hook || seen.has(hook.key)) continue
       seen.add(hook.key)
       const value = yield* hook.prepare(context, undefined)
-      if (value !== undefined) state[hook.key] = value
+      if (value === undefined) continue
+      state[hook.key] = value
+      const kept = hook.freeze ? hook.freeze(value) : value
+      if (kept !== undefined) frozen[hook.key] = kept
     }
-    return state
+    return { state, frozen }
   })
 
 /**

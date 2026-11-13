@@ -236,6 +236,24 @@ it.live(
       assert.notInclude(built.snapshot, "The Lantern at night, line 2999.")
       // The agent's search as Wren's reply runs it (TH8): the path, the join's 3,000 rows, her knowledge.
       const snapshot = JSON.parse(built.snapshot) as ContextSnapshot
+      const spent = new Map<string, number>()
+      const profiled = new Proxy(h.reader, {
+        get: (target, key) => {
+          const op = (target as unknown as Record<string, unknown>)[key as string]
+          if (typeof op !== "function") return op
+          return (input: unknown) => {
+            const started = performance.now()
+            return (op as (i: unknown) => Effect.Effect<unknown>)(input).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  spent.set(key as string, (spent.get(key as string) ?? 0) + performance.now() - started)
+                  spent.set(`${key as string}#`, (spent.get(`${key as string}#`) ?? 0) + 1)
+                })
+              )
+            )
+          }
+        }
+      })
       const context = (): ToolContext => ({
         userId: h.userId,
         chatId,
@@ -247,7 +265,7 @@ it.live(
         rolloutId: "test",
         toolCallId: "test",
         cache: new Map(),
-        reader: h.reader,
+        reader: profiled,
         writer: h.writer
       })
       const searchTool = historyTools.find((tool) => tool.id === "search_chat")!
@@ -266,13 +284,36 @@ it.live(
       assert.include(read.text, "The docks at night, line 2999.")
       assert.notInclude(read.text, "The Lantern at night")
       const warm = context()
-      const state = yield* time("prepare private history snapshot", searchTool.snapshot!.prepare(warm, undefined))
-      process.stdout.write(
-        `THREAD_TOOLS_SNAPSHOT ${JSON.stringify({ bytes: Buffer.byteLength(JSON.stringify(state)), messages: (state as { messages: ReadonlyArray<unknown> }).messages.length })}\n`
+      // What a reply's generation prepares (one path read), and what its snapshot keeps of it.
+      const state = yield* time(
+        "prepare private history snapshot, cold",
+        Effect.suspend(() => searchTool.snapshot!.prepare(context(), undefined)),
+        1
       )
+      const view = (state as { prepared: ReadonlyMap<string, unknown> }).prepared.get("history.private") as {
+        messages: ReadonlyArray<{ content: string }>
+      }
+      const frozen = JSON.stringify(searchTool.snapshot!.freeze!(state))
+      assert.notInclude(frozen, "The docks at night")
+      process.stdout.write(
+        `THREAD_TOOLS_SNAPSHOT ${JSON.stringify({ frozenBytes: Buffer.byteLength(frozen), projectedTextBytes: Buffer.byteLength(JSON.stringify(view)), messages: view.messages.length, textBytes: view.messages.reduce((n, m) => n + Buffer.byteLength(m.content), 0) })}\n`
+      )
+      // The run reads what was prepared; a Resume, step edit or replay thaws the frozen form.
+      yield* searchTool.snapshot!.prepare(warm, state)
       yield* time("read_messages for Wren, cached", readTool.execute(warm, { from: address, count: 20 } as never))
       yield* time("search_chat for Wren, cached", searchTool.execute(warm, { query: "docks night 2999" } as never))
+      const thawed = yield* time(
+        "read_messages for Wren, thawed on Resume",
+        Effect.suspend(() => {
+          const resumed = context()
+          return searchTool
+            .snapshot!.prepare(resumed, JSON.parse(frozen))
+            .pipe(Effect.andThen(readTool.execute(resumed, { from: address, count: 20 } as never)))
+        })
+      )
+      assert.strictEqual(thawed.text, read.text)
 
+      process.stdout.write(`THREAD_TOOLS_PROFILE ${JSON.stringify(Object.fromEntries(spent))}\n`)
       process.stdout.write(`THREAD_SUMMARIES_SCALE ${JSON.stringify(samples)}\n`)
       const ms = (operation: string) => samples.find((s) => s.operation === operation)!.ms
       assert.isBelow(ms("JoinThreads, separately"), 1_500)
@@ -282,6 +323,7 @@ it.live(
       assert.isBelow(ms("search_chat for Wren"), 3_000)
       assert.isBelow(ms("read_messages for Wren, cold"), 3_000)
       assert.isBelow(ms("read_messages for Wren, cached"), 100)
+      assert.isBelow(ms("read_messages for Wren, thawed on Resume"), 3_000)
     }).pipe(Effect.scoped, Effect.provide(server.layer))
   },
   600_000

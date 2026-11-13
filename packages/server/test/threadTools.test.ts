@@ -223,8 +223,10 @@ describe("the agent's read tools across threads", () => {
           const knownAddress = addressOf(original.split("\n").find((l) => l.includes("KNOWNDOCKS"))!)
           const material = yield* t.reader.RolloutMaterial({ userId: t.userId, versionId: started.entry.version.id })
           const saved = JSON.parse(material.snapshot) as ContextSnapshot
+          // The snapshot keeps the known rows' identities, not their text.
           const pinned = JSON.stringify(saved.agentToolState)
-          assert.include(pinned, "KNOWNDOCKS")
+          assert.include(pinned, "keys")
+          assert.notInclude(pinned, "KNOWNDOCKS")
           assert.notInclude(pinned, "MISSEDTHREADSECRET")
           const pathBefore = yield* t.reader.ReadPath({
             userId: t.userId,

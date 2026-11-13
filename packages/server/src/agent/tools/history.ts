@@ -19,6 +19,12 @@ interface PathMessage {
   /** Immutable row identity, used only to derive a private address. */
   readonly unverifiable?: boolean
   readonly story?: number
+  /**
+   * Its place among the messages that could be read where it stands (the path's shown messages,
+   * or a join's frozen message rows), for counting a private view's gaps: a hidden message, or a
+   * join a source left out of its rows, never counts as one missed.
+   */
+  readonly rank?: number
   readonly key?: string
   readonly address?: string
   readonly speaker: string
@@ -178,10 +184,13 @@ const joinRows = (
   if (seen.rows.length === 0 && seen.partial) return { messages: [], summaries: [] }
   const at = new Map(join.rows.map((row) => [row.ordinal, row]))
   let story = 0
+  let rank = 0
   const stories = new Map<number, number>()
+  const ranks = new Map<number, number>()
   for (const row of join.rows) {
     if (row.kind === "message" && row.sourceJoin !== false) story++
     stories.set(row.ordinal, story)
+    if (row.kind === "message") ranks.set(row.ordinal, rank++)
   }
   const number = (position: number | null | undefined) => (position == null ? null : position + 1)
   const messages = seen.rows.flatMap((row): Array<PathMessage> => {
@@ -192,6 +201,7 @@ const joinRows = (
         n,
         key: stored.sourceVersionId ?? `${key}:${row.ordinal}`,
         story: stories.get(row.ordinal)!,
+        ...(ranks.has(row.ordinal) ? { rank: ranks.get(row.ordinal)! } : {}),
         unverifiable: row.kind === "message" && stored.sourceJoin !== false,
         speaker: row.name,
         content: row.content,
@@ -220,6 +230,7 @@ const joinRows = (
               n,
               key: row.sourceVersionId ?? `${key}:${row.ordinal}`,
               story: stories.get(row.ordinal)!,
+              rank: ranks.get(row.ordinal)!,
               unverifiable: row.sourceJoin !== false,
               speaker: row.name,
               content: row.content,
@@ -285,6 +296,7 @@ const pathRead = (context: ToolContext) =>
           : yield* missedBy(context, entries, view)
       const joined: Array<JoinedSummary> = []
       let story = 0
+      let rank = 0
       const messages = entries.flatMap((entry): Array<PathMessage> => {
         const { version } = entry
         if (joins.has(entry.slotId)) story++
@@ -297,7 +309,10 @@ const pathRead = (context: ToolContext) =>
         )
           return []
         const join = joins.get(entry.slotId)
-        if (join === undefined) return missed.has(n) ? [] : [{ ...name({ ...version, n }), key: version.id, story }]
+        if (join === undefined) {
+          const at = rank++
+          return missed.has(n) ? [] : [{ ...name({ ...version, n }), key: version.id, story, rank: at }]
+        }
         if (away.has(n)) return []
         const applies = view !== null && (!view.stretch || stretches.has(n))
         const read = joinRows(
@@ -432,18 +447,24 @@ const JOINED_READ_REFUSAL = "History tools are unavailable for this separate thr
 const PRIVATE_EMPTY = "No earlier messages match."
 type Address = number | string
 
-/** Only projected rows are persisted: no source positions, missed ids or counts. */
+/** Only projected rows: no source positions, missed ids or counts (frozen as `FrozenHistory`). */
 interface PrivateHistory {
   readonly refused?: boolean
+  /** The address chain's start: the viewer's identities, hashed. */
+  readonly seed?: string
   readonly messages: ReadonlyArray<PathMessage>
 }
 const PRIVATE_KEY = "history.private"
 const digest = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 24)
+/** The next address of the chain: the one before and this row's identity. */
+const chain = (prefix: string, key: string) => digest(JSON.stringify([prefix, key]))
 
 /**
  * One sequence of the view's known rows. Numbers advance across known rows, preserving a
- * bounded absence only between two known positions in the same storyline. A join starts a
- * new storyline: its unseen prefix/suffix and the destination's other line cost no numbers.
+ * bounded absence only between two known positions in the same storyline, counted in readable
+ * messages (`rank`): a hidden message, or a nested join its source left out of the frozen rows,
+ * costs no number. A join starts a new storyline: its unseen prefix/suffix and the
+ * destination's other line cost no numbers.
  * Each address commits to known row identities before it, never to unseen rows or positions.
  */
 const privateHistory = (context: ToolContext) =>
@@ -455,7 +476,8 @@ const privateHistory = (context: ToolContext) =>
       if (!read.restrictedJoin) return null
       if (read.messages.some((m) => m.unverifiable) || read.joined.some((s) => s.messages.some((m) => m.unverifiable)))
         return { messages: [], refused: true } satisfies PrivateHistory
-      let prefix = digest(JSON.stringify(read.view!.identities.toSorted()))
+      const seed = digest(JSON.stringify(read.view!.identities.toSorted()))
+      let prefix = seed
       let n = 0
       let previous: { group: string; position: number } | undefined
       let section = 0
@@ -463,8 +485,8 @@ const privateHistory = (context: ToolContext) =>
       const messages: Array<PathMessage> = []
       const add = (row: PathMessage, group: string, position: number) => {
         n += previous?.group === group ? Math.max(1, position - previous.position) : 1
-        prefix = digest(JSON.stringify([prefix, row.key]))
-        messages.push({ n, address: `v${prefix}`, speaker: row.speaker, content: row.content })
+        prefix = chain(prefix, row.key!)
+        messages.push({ n, key: row.key!, address: `v${prefix}`, speaker: row.speaker, content: row.content })
         previous = { group, position }
       }
       for (const row of read.messages) {
@@ -473,7 +495,7 @@ const privateHistory = (context: ToolContext) =>
             section++
             join = undefined
           }
-          add(row, `path:${row.story}`, row.n)
+          add(row, `path:${row.story}`, row.rank!)
           continue
         }
         if (join !== row.n) {
@@ -486,21 +508,84 @@ const privateHistory = (context: ToolContext) =>
           const summary = read.joined.find(
             (s) => s.at === row.n && s.from === row.joined!.from && s.to === row.joined!.to
           )
-          for (const message of summary?.messages ?? [])
-            add(message, `${group}:${message.story}`, message.joined!.from!)
-        } else add(row, `${group}:${row.story}`, row.joined.from ?? (previous?.position ?? 0) + 1)
+          for (const message of summary?.messages ?? []) add(message, `${group}:${message.story}`, message.rank!)
+        } else add(row, `${group}:${row.story}`, row.rank!)
       }
-      return { messages } satisfies PrivateHistory
+      return { seed, messages } satisfies PrivateHistory
     })
   )
 
+/**
+ * A private view as the snapshot keeps it: the known rows' identities in order, and the view
+ * numbers that don't follow on by one. No text: its size grows with the number of rows the
+ * character knew, not with their prose. Addresses follow from `seed` and the identities.
+ */
+interface FrozenHistory {
+  readonly refused?: true
+  readonly seed?: string
+  readonly keys?: ReadonlyArray<string>
+  /** [index in keys, its view number], where that number isn't the one before plus one. */
+  readonly numbers?: ReadonlyArray<readonly [number, number]>
+}
+
+const freezeHistory = (state: PrivateHistory): FrozenHistory => {
+  if (state.refused) return { refused: true }
+  const numbers: Array<readonly [number, number]> = []
+  state.messages.forEach((m, i) => {
+    if (m.n !== (state.messages[i - 1]?.n ?? 0) + 1) numbers.push([i, m.n])
+  })
+  return { seed: state.seed!, keys: state.messages.map((m) => m.key!), numbers }
+}
+
+/**
+ * A frozen view read again (Resume, a step edit, a replay): its rows, numbers and addresses as
+ * frozen, each row's text as the path shows it now. A row the path no longer shows as known is
+ * left out, so an old address answers as a missing one; a row known only now is never added.
+ */
+const thawHistory = (context: ToolContext, frozen: FrozenHistory) =>
+  Effect.gen(function* () {
+    if (frozen.refused) return { messages: [], refused: true } satisfies PrivateHistory
+    const read = yield* pathRead(context)
+    const live = new Map<string, Array<PathMessage>>()
+    for (const m of [...read.messages, ...read.joined.flatMap((s) => s.messages)])
+      if (m.key !== undefined && !m.joined?.summary) live.set(m.key, [...(live.get(m.key) ?? []), m])
+    const numbers = new Map(frozen.numbers ?? [])
+    let prefix = frozen.seed!
+    let n = 0
+    const messages: Array<PathMessage> = []
+    for (const [i, key] of (frozen.keys ?? []).entries()) {
+      n = numbers.get(i) ?? n + 1
+      prefix = chain(prefix, key)
+      const row = live.get(key)?.shift()
+      if (row) messages.push({ n, key, address: `v${prefix}`, speaker: row.speaker, content: row.content })
+    }
+    return { seed: frozen.seed!, messages } satisfies PrivateHistory
+  })
+
 /** Registered with the tools, so replacing/disabling them also replaces their snapshot hook. */
+/**
+ * What preparing read, handed to the run in memory (never stored): the path and the private view,
+ * so the run's first read doesn't read the whole path a second time.
+ */
+interface PreparedReads {
+  readonly prepared: ReadonlyMap<string, unknown>
+}
+
 const historySnapshot = {
   key: PRIVATE_KEY,
+  /** What the snapshot stores of a prepared view: nothing when the view isn't private. */
+  freeze: (state: unknown) => {
+    const view = (state as PreparedReads).prepared.get(PRIVATE_KEY) as PrivateHistory | null | undefined
+    return view ? freezeHistory(view) : undefined
+  },
   prepare: (context: ToolContext, frozen: unknown) =>
     Effect.gen(function* () {
       if (frozen !== undefined) {
-        context.cache.set(PRIVATE_KEY, frozen)
+        // In the run that prepared it, what was read; on a Resume, step edit or replay, the frozen view.
+        if ((frozen as PreparedReads).prepared instanceof Map) {
+          for (const [key, value] of (frozen as PreparedReads).prepared)
+            if (!context.cache.has(key)) context.cache.set(key, value)
+        } else context.cache.set(PRIVATE_KEY, yield* thawHistory(context, frozen as FrozenHistory))
         return frozen
       }
       if (context.viewers === null || context.leafSlotId === null) return undefined
@@ -517,7 +602,8 @@ const historySnapshot = {
         viewers: null
       })
       if (indexed !== null) return undefined
-      return (yield* privateHistory(context)) ?? undefined
+      yield* privateHistory(context)
+      return { prepared: new Map(context.cache) } satisfies PreparedReads
     })
 }
 
