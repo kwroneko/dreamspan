@@ -88,8 +88,11 @@ export const serverPort = Effect.map(HttpServer.HttpServer, ({ address }) => {
  */
 const testApi: RpcGroup.RpcGroup<AppRpcs> = AppApi
 export const client = (headers: Record<string, string> = {}, address = "127.0.0.1") =>
+  Effect.flatMap(serverPort, (port) => clientAt(port, headers, address))
+
+/** The same client to a server on `port`: one a test started as its own process, say. */
+export const clientAt = (port: number, headers: Record<string, string> = {}, address = "127.0.0.1") =>
   Effect.gen(function* () {
-    const port = yield* serverPort
     const protocol = yield* Layer.build(
       RpcClient.layerProtocolSocket().pipe(
         Layer.provide(Socket.layerWebSocket(`ws://${address}:${port}/rpc`)),

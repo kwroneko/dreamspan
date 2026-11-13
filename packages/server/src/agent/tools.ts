@@ -46,6 +46,17 @@ export interface ToolContext {
    * browser tab the request came from showed it. Absent: nothing says where, so they don't read.
    */
   readonly storyAt?: import("@rp/shared/chat.ts").StoryAt
+  /**
+   * The run's frozen offer and what of it is loaded at this call (spec/TOOL-LOADING.md), for the
+   * loading tools. Absent outside an agent run.
+   */
+  readonly offer?: {
+    readonly kind: string
+    readonly tools: ReadonlyArray<FrozenTool>
+    readonly loaded: ReadonlySet<string>
+    /** The offered skills, registered or card-carried, frozen with the run. */
+    readonly cardSkills: ReadonlyArray<import("./toolLoading.ts").Skill>
+  }
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */
@@ -54,6 +65,8 @@ export interface ToolOutput {
   readonly effects?: ReadonlyArray<RolloutEffectRecord>
   readonly text: string
   readonly isError?: boolean
+  /** Deferred tools this call loaded (spec/TOOL-LOADING.md): stored as the result's `details.loaded`. */
+  readonly loaded?: ReadonlyArray<string>
 }
 
 export interface RolloutTool<A = never> {
@@ -66,6 +79,11 @@ export interface RolloutTool<A = never> {
   /** User-facing, the chat settings' tools list: what it lets the model do, as a checkbox label. */
   readonly explanation?: string
   readonly capability?: string
+  /**
+   * A capability that applies to this call only, from its arguments and the run's offer: the
+   * permit then decides as for a tool with that capability (`load_skill` for a card's own skill).
+   */
+  readonly capabilityFor?: (context: ToolContext, args: A) => string | undefined
   /** Argument used as the plain step title, frozen with setup-tool metadata. */
   readonly titleField?: string
   readonly effect: EffectClass
@@ -79,12 +97,13 @@ export interface RolloutTool<A = never> {
   /**
    * What the call will do, for its approval (spec/WORKSHOP.md §3.4), worked out by the server from
    * the real arguments and the items they name: the target's own name, an edit's fields before
-   * and after. Absent: the arguments as they are.
+   * and after. Absent: the arguments as they are. `storyAt`: the call reads or changes the story
+   * at the request's position, so only a tab still showing it may allow it.
    */
   readonly describe?: (
     context: ToolContext,
     args: A
-  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes">, unknown>
+  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt">, unknown>
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
 
@@ -118,6 +137,8 @@ export interface FrozenTool {
   readonly titleField?: string
   readonly effect: EffectClass
   readonly label: string
+  /** Declared but not loaded from the start: a loading tool makes it callable (spec/TOOL-LOADING.md). */
+  readonly deferred?: true
 }
 
 export const frozenTool = (tool: RolloutTool<never>): FrozenTool => ({

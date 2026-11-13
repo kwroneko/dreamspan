@@ -414,6 +414,7 @@ describe("side chat request", () => {
   it.live("keeps a queued send's story position while the story and sending tab move", () => {
     const config = testConfig()
     return Effect.gen(function* () {
+      let targetChat = ""
       let release: (() => void) | undefined
       const mock = yield* Effect.acquireRelease(
         Effect.promise(() =>
@@ -422,6 +423,19 @@ describe("side chat request", () => {
             if (!toolNames(body).includes("read_story")) return sse(res, completionChunks(["Story reply."], {}))
             if (results(body).length === 0) return sse(res, call("read_story", { count: 20 }, "read"))
             if (!release) release = () => sse(res, completionChunks(["Out of character."], {}))
+            else if (results(body).length === 1)
+              sse(
+                res,
+                call(
+                  "rewrite_messages",
+                  {
+                    chat: targetChat,
+                    title: "Queued rewrite",
+                    messages: [{ message: 1, text: "QUEUED_WRITE_SENTINEL" }]
+                  },
+                  "queued-write"
+                )
+              )
             else sse(res, completionChunks(["Queued answer."], {}))
           })
         ),
@@ -433,6 +447,7 @@ describe("side chat request", () => {
         model: { context: 65536 },
         preset: { openai_max_context: 65536 }
       })
+      targetChat = story.chat.id
       const position = at(yield* api.GetChat({ chatId: story.chat.id }))
       const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })
       const events: Array<ChatEvent> = []
@@ -465,11 +480,13 @@ describe("side chat request", () => {
       yield* posted(
         api.SendMessage({
           chatId: story.chat.id,
-          parentSlotId: position.leafSlotId,
-          branch: false,
+          parentSlotId: story.chat.activeLeafSlotId,
+          branch: true,
           content: "STORY_LATER"
         })
       )
+      const movedStory = at(yield* api.GetChat({ chatId: story.chat.id }))
+      assert.notStrictEqual(movedStory.forkId, position.forkId)
       const before = mock.requests().length
       release!()
       yield* eventually(() =>
@@ -486,6 +503,10 @@ describe("side chat request", () => {
         assert.notInclude(reads, "STORY_LATER")
       }
       assert.include(results(mock.requests().at(-1)!.body as Body)[0]!, 'up_to_message="1"')
+      const read = (forkId: typeof position.forkId) =>
+        api.ReadPath({ chatId: story.chat.id, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 })
+      assert.strictEqual((yield* read(position.forkId)).entries[0]!.version.content, "QUEUED_WRITE_SENTINEL")
+      assert.notStrictEqual((yield* read(movedStory.forkId)).entries[0]!.version.content, "QUEUED_WRITE_SENTINEL")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

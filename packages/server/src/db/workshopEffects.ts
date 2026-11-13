@@ -1,3 +1,6 @@
+import { checkStoryWrite } from "./storyWriteScope.ts"
+import { displayEndOf } from "./displayPath.ts"
+import type { StoryAt } from "@rp/shared/chat.ts"
 import { safeAgentDocument } from "./agentDocuments.ts"
 import { historyCurrent, historyFork } from "./historyShared.ts"
 import { nextReceiptTime, pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
@@ -611,8 +614,34 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               input.capability,
               Effect.gen(function* () {
                 const expected = input.expected as { payload?: Record<string, unknown>; proof?: unknown }
+                const storyAt = (expected?.proof as { storyAt?: StoryAt } | undefined)?.storyAt
+                let storyPosition: Effect.Success<ReturnType<typeof checkStoryWrite>> = undefined
+                const chatTargets =
+                  typeof value.chatId === "string"
+                    ? [value.chatId]
+                    : Array.isArray(value.chats)
+                      ? value.chats.map((c: { chatId: string }) => c.chatId)
+                      : Array.isArray(value.applications)
+                        ? value.applications.map((c: { chatId: string }) => c.chatId)
+                        : []
+                for (const chatId of chatTargets) {
+                  storyPosition = yield* checkStoryWrite(sql, input.userId, input.rolloutId, chatId, storyAt)
+                  if (storyPosition) {
+                    if ("forkId" in value && value.forkId !== storyAt!.forkId)
+                      return yield* refuseOperation("This change names another story branch.")
+                    for (const field of ["slotId", "parentSlotId", "leaf"])
+                      if (field in value && value[field] !== storyAt!.leafSlotId)
+                        return yield* refuseOperation("This change must use the story tab’s position.")
+                    if (
+                      input.operation === "SendOrQueue" &&
+                      (yield* displayEndOf(sql, chatId, storyPosition.fork)) !== storyAt!.leafSlotId
+                    )
+                      return yield* refuseOperation("Open the end of this branch before asking for a reply there.")
+                  }
+                }
                 if (expected?.proof) {
                   const proof = expected.proof as {
+                    storyAt?: StoryAt
                     chat?: { id: import("@rp/shared/chat.ts").ChatId }
                     chats?: ReadonlyArray<{ id: import("@rp/shared/chat.ts").ChatId }>
                     historyTargets?: ReadonlyArray<{ chatId: string; forkId: string }>
@@ -648,7 +677,11 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       )
                   }
                   const current = proof.chat
-                    ? yield* operationInfo(sql, { userId: input.userId, chatId: proof.chat.id })
+                    ? yield* operationInfo(sql, {
+                        userId: input.userId,
+                        chatId: proof.chat.id,
+                        ...(proof.storyAt ? { storyAt: proof.storyAt } : {})
+                      })
                     : null
                   if (proof.chat && JSON.stringify(current!.proof) !== JSON.stringify(proof.chat))
                     return yield* refuseOperation("The saved chat changed while waiting. Read it again and ask again.")
@@ -759,7 +792,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       kind: policy!.kind,
                       targetKind: policy!.targetKind,
                       targetId: policy!.target(value as never, after as never),
-                      title: policy!.label,
+                      title: storyPosition
+                        ? `${policy!.label} · ${storyPosition.label} (${storyAt!.forkId}) · from message ${storyPosition.upTo}`
+                        : policy!.label,
                       undo: {
                         operation: input.operation,
                         input: value,

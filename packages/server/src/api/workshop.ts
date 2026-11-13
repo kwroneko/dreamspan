@@ -9,6 +9,8 @@ import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { capabilityView } from "../agent/capabilities.ts"
 import { cancelCapability, deliverAnswer } from "../agent/approvals.ts"
+import { CARD_SKILLS } from "../agent/tools/loading.ts"
+import { matchPatterns } from "../agent/toolLoading.ts"
 
 export const makeWorkshopHandlers = Effect.gen(function* () {
   const writer = yield* Writer
@@ -30,6 +32,10 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           return capability ? [capability] : []
         })
       )
+      // A kind that loads some of its tools as it goes may load a card's skills (spec/TOOL-LOADING.md §6).
+      const loading = execution.toolLoadingProfiles.get(chat.kind)
+      const planned = plan?.tools ?? []
+      if (loading && matchPatterns(planned, loading.immediate).length < planned.length) offered.add(CARD_SKILLS)
       const grants = new Map<string, CapabilityMode>(
         (yield* reader.WorkshopGrants({ userId, chatId, now: Date.now() })).map((g) => [g.capability, g.mode])
       )
@@ -79,7 +85,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         if (mode === "off") cancelCapability(chatId, capability)
         return yield* capabilitiesOf(userId, chatId)
       }).pipe(internal("SetWorkshopGrant")),
-    AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note }) =>
+    AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note, storyAt }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
         const text = note?.trim() ?? ""
@@ -88,6 +94,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           rolloutId,
           toolCallId,
           digest,
+          ...(storyAt ? { storyAt } : {}),
           answer,
           note: text === "" ? null : text
         })

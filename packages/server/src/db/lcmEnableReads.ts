@@ -74,7 +74,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
       FROM path p JOIN slots s ON s.id = p.id JOIN ${sql.literal(identities ? "version_records" : "versions")} v ON v.id = ${shownIn(sql, fork, "s")}
       WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND (${contextExcludedIn(sql, fork)} = 0 OR p.depth <= ${shownThrough})
         AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
-        AND v.content_length > 0 AND ${identities ? knowsSql(sql, identities, fork) : sql`1`}`
+        AND v.content_length > 0 AND ${identities ? yield* knowsSql(sql, identities, fork) : sql`1`}`
       return row ?? { n: 0, tokens: 0 }
     })
 

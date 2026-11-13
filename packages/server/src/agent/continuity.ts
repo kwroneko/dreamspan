@@ -10,6 +10,7 @@ import { ASSEMBLER_VERSION, type ContextSnapshot } from "../assembler/types.ts"
 import type { Reader } from "../db/Database.ts"
 import type { GenerationRequest } from "../chat/Generator.ts"
 import { placedSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
+import type { Skill } from "./toolLoading.ts"
 import type { FrozenTool } from "./tools.ts"
 
 /** WORKSHOP §10 question 4: the authorized initial policy; change this one constant to
@@ -31,6 +32,7 @@ export type ContinuousSnapshot = ContextSnapshot & {
   readonly continuity?: ContinuityRecord
   readonly storyAt?: StoryAt
   readonly storyStamp?: string | null
+  readonly agent?: { readonly tools: ReadonlyArray<FrozenTool>; readonly cardSkills?: ReadonlyArray<Skill> }
 }
 
 /** A gone or unowned story has no reusable read material. */
@@ -119,6 +121,18 @@ export const previousRun = Effect.fnUntraced(function* (
     return {
       reason: "What the assistant may do here changed, so this request was put together again."
     } as const
+  // Loading results belong to this exact catalog and skill material. A new card or edited
+  // skill must not acquire the previous run's loads, instructions or cached personality.
+  if (snapshot.agent?.tools.some((t) => t.deferred) || fresh.agent?.tools.some((t) => t.deferred)) {
+    if (
+      !isDeepStrictEqual(snapshot.agent?.tools, fresh.agent?.tools) ||
+      !isDeepStrictEqual(snapshot.agent?.cardSkills, fresh.agent?.cardSkills) ||
+      !isDeepStrictEqual(snapshot.inputs.cards, fresh.inputs.cards)
+    )
+      return {
+        reason: "The cards, skills or available tools changed, so this request was put together again."
+      } as const
+  }
   if (stored.effectsReason) return { reason: stored.effectsReason } as const
   const transcript = JSON.parse(stored.transcript) as Array<AgentMessage>
   const posts = transcript.flatMap((m) =>

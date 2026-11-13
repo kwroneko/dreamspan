@@ -37,7 +37,8 @@ COPY packages/server/package.json packages/server/
 COPY packages/server/src packages/server/src
 COPY --from=build /app/packages/client/dist packages/client/dist
 COPY --from=build /app/packages/server/dist/workers packages/server/dist/workers
-RUN mkdir -p /data && chown node:node /data
+# The two guarded development imports must fail plainly in this image.
+RUN test ! -d packages/server/src/dev && mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data
 EXPOSE 8080

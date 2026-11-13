@@ -46,6 +46,7 @@ import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected, HistoryEdit } from "@rp/shared/historyApi.ts"
 import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
 import {
+  JoinThreadsInput,
   MergeChanged,
   MergeChatInput,
   MergedMessage,
@@ -676,6 +677,17 @@ export class WriteOpsChat extends RpcGroup.make(
     success: MergeResult,
     error: Schema.Union([NotFound, StaleWrite, MergeRefused, MergeChanged, StorageError])
   }),
+  /**
+   * "Join threads" (spec/THREADS.md §7.1): merges each of `joins`, every one another thread of
+   * this branch, as `MergeChat` would, each planned at `at` as previewed and written directly
+   * below the one before, so the joins are consecutive; plus the joined threads' characters back
+   * at each J. One transaction; the results in order.
+   */
+  Rpc.make("JoinThreads", {
+    payload: { userId: UserId, ...JoinThreadsInput.fields },
+    success: Schema.Array(MergeResult),
+    error: Schema.Union([NotFound, StaleWrite, MergeRefused, MergeChanged, StorageError])
+  }),
   Rpc.make("DeleteChatGroup", {
     payload: {
       userId: UserId,
@@ -1226,7 +1238,58 @@ export class WriteOpsChat extends RpcGroup.make(
     success: Schema.Int,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
+  /**
+   * One message to several threads (spec/THREADS.md §6.2; db/chatSetupWrites.ts): in each
+   * target's fork exactly SendOrQueue's append (the first target under `parentSlotId`, LeafMoved
+   * if that moved; the others under their tips now), then the reply asked for, posted or queued
+   * there; one `thread_sends` group for the copies posted, `send_group` on those queued. Only
+   * forks that are threads of one another (ThreadsRefused otherwise). Each reply's generation
+   * starts after the commit.
+   */
+  Rpc.make("SendToThreads", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      images: Schema.optionalKey(MessageImages),
+      imageDraftIds: Schema.optionalKey(ComposerImageIds),
+      commitDraft: CommitDraft,
+      targets: Schema.Array(
+        Schema.Struct({
+          forkId: ForkId,
+          parentSlotId: Schema.NullOr(SlotId),
+          /** The text as the thread's scripts left it, and what they did. */
+          content: Schema.String,
+          rewrite: Schema.optionalKey(StoredRewrite),
+          speakerEntityId: Schema.NullOr(EntityId),
+          reply: Schema.Boolean,
+          replySpeakerEntityId: Schema.NullOr(EntityId),
+          round: Schema.optionalKey(Schema.Array(EntityId)),
+          autoPick: Schema.optionalKey(Schema.Boolean)
+        })
+      ).check(Schema.isMinLength(2), Schema.isMaxLength(32))
+    },
+    success: Schema.Struct({
+      groupId: Schema.String,
+      /** In the targets' order. */
+      copies: Schema.Array(
+        Schema.Union([
+          Schema.TaggedStruct("Posted", {
+            forkId: ForkId,
+            slotId: SlotId,
+            reply: Schema.NullOr(Schema.Struct({ slotId: SlotId, versionId: VersionId }))
+          }),
+          Schema.TaggedStruct("Queued", { forkId: ForkId, queued: QueuedMessage })
+        ])
+      ),
+      chat: Chat,
+      queue: Schema.Array(QueuedMessage),
+      draft: Schema.NullOr(Draft),
+      recovered: Schema.Int
+    }),
+    error: Schema.Union([NotFound, LeafMoved, ThreadsRefused, StorageError])
+  }),
   /** Undo of starting threads: a bin item of kind `threads` (db/bin.ts `removeThreads`). */
+
   Rpc.make("UndoThreads", {
     payload: { userId: UserId, chatId: ChatId, splitId: Schema.String },
     success: BinItem,
@@ -2066,6 +2129,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
   }),
   Rpc.make("StartEditRollout", {
     payload: {
+      storyAt: StoryAtField,
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
@@ -2078,6 +2142,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
   }),
   Rpc.make("ApplyAgentChangeset", {
     payload: {
+      storyAt: StoryAtField,
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
@@ -2249,6 +2314,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
    */
   Rpc.make("AnswerToolApproval", {
     payload: {
+      storyAt: StoryAtField,
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
@@ -4350,7 +4416,8 @@ export class ReadOps extends RpcGroup.make(
    * word starting with each of `tokens` (all of them; none: any), newest first, before display
    * position `before` when given; hidden and unfinished ones left out, template messages
    * (greetings) always, for the caller to fill in and match. Null when the fork places inserted
-   * messages, whose numbering the display path gives: the caller reads the path instead.
+   * messages, whose numbering the display path gives, or the chat has a merge, whose join the
+   * caller reads row by row (spec/THREADS.md §11, TH8): the caller reads the path instead.
    */
   Rpc.make("SearchChat", {
     payload: {
@@ -4400,7 +4467,41 @@ export class ReadOps extends RpcGroup.make(
         knowers: Schema.NullOr(Schema.Array(Schema.String)),
         away: Schema.optionalKey(Schema.Array(Schema.String)),
         content: Schema.optionalKey(Schema.String),
-        readable: Schema.optionalKey(Schema.Boolean)
+        readable: Schema.optionalKey(Schema.Boolean),
+        /** In a separate join's parallel stretch (the viewed display path), where a stretch view applies. */
+        stretched: Schema.optionalKey(Schema.Boolean)
+      })
+    ),
+    error: StorageError
+  }),
+  /**
+   * The joins among these slots of the chat (`chat_merges`, agentReads.ts): each one's title, how
+   * the characters read it (`timelines`) and its frozen rows in order, with where each was in the
+   * source and who knew it there (the source's cast where none was kept). The agent's read tools
+   * read a join row by row (spec/THREADS.md §11, TH8). Point lookups by slot.
+   */
+  Rpc.make("JoinRows", {
+    payload: { userId: UserId, chatId: ChatId, slotIds: Schema.Array(Schema.String) },
+    success: Schema.Array(
+      Schema.Struct({
+        slotId: Schema.String,
+        title: Schema.String,
+        timelines: Schema.String,
+        rows: Schema.Array(
+          Schema.Struct({
+            ordinal: Schema.Int,
+            kind: Schema.Literals(["message", "summary"]),
+            name: Schema.String,
+            side: Schema.Literals(["user", "assistant"]),
+            speaker: Schema.NullOr(Schema.String),
+            content: Schema.String,
+            included: Schema.Literals(["verbatim", "summarized", "left_out"]),
+            knowers: Schema.Array(Schema.String),
+            /** Where it was in the source, as zero-based display positions; null: not recorded. */
+            from: Schema.NullOr(Schema.Int),
+            to: Schema.NullOr(Schema.Int)
+          })
+        )
       })
     ),
     error: StorageError
@@ -4502,7 +4603,7 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("WorkshopOperationInfo", {
-    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId) },
+    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId), storyAt: StoryAtField },
     success: Schema.Struct({
       user: User,
       settings: Schema.Array(
@@ -4527,7 +4628,13 @@ export class ReadOps extends RpcGroup.make(
    * mode, the frozen snapshot and the transcript as last saved, and the version's own status.
    */
   Rpc.make("CountRolloutContext", {
-    payload: { model: Schema.String, request: Schema.String, transcript: Schema.String, tools: Schema.String },
+    payload: {
+      model: Schema.String,
+      request: Schema.String,
+      transcript: Schema.String,
+      tools: Schema.String,
+      continuation: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Int,
     error: StorageError
   }),

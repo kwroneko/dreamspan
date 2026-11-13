@@ -2,10 +2,10 @@
 // the rollout's own transcript after it. pi-ai converts the suffix for the APIs it converts the
 // prefix for; Chat Completions gets the assembled messages exactly in `payload`, so the suffix
 // is added there in the wire's own form. The summarizer's tool loop shares this.
-import type { Message, Tool } from "@earendil-works/pi-ai"
+import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai"
 import type { ProviderRequest } from "../assembler/wire.ts"
 import type { ModelInput } from "../assembler/types.ts"
-type ReasoningTarget = Pick<ModelInput, "api" | "kind" | "key">
+type ReasoningTarget = Pick<ModelInput, "api" | "kind" | "key"> & { readonly provider?: string | undefined }
 
 /** A suffix message as Chat Completions takes it: assistant `tool_calls`, `role: "tool"` results. */
 const signedDetails = (signature: string | undefined): ReadonlyArray<unknown> | undefined => {
@@ -34,7 +34,9 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
       .join("")
     // pi-ai stores OpenRouter's opaque reasoning_details in thinkingSignature.
     // Replaying only visible thinking loses encrypted reasoning required by Claude/Gemini.
-    const provider = target?.kind === "openai-chat" || target?.kind === "openai-responses" ? "openai" : target?.kind
+    const provider =
+      target?.provider ??
+      (target?.kind === "openai-chat" || target?.kind === "openai-responses" ? "openai" : target?.kind)
     const sameModel = !target || (m.api === target.api && m.model === target.key && m.provider === provider)
     const details =
       replayReasoning && sameModel
@@ -49,6 +51,9 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
           )
         : undefined
     const reasoningField = field?.type === "thinking" ? field.thinkingSignature : undefined
+    // DeepSeek's thinking mode refuses (400) a replayed call turn without `reasoning_content`,
+    // and takes an empty one (live, 2026-11-12): a turn another model wrote has none to send.
+    const emptyReasoning = target?.kind === "deepseek" && calls.length > 0 && !reasoning
     return {
       role: "assistant",
       content: text,
@@ -57,7 +62,9 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
         ? { reasoning_details: details }
         : reasoning && (calls.length || reasoningField)
           ? { [reasoningField ?? "reasoning_content"]: reasoning }
-          : {})
+          : emptyReasoning
+            ? { reasoning_content: "" }
+            : {})
     }
   }
   if (m.role === "toolResult") {
@@ -88,6 +95,36 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
   }
   return { role: "system", content: typeof m.content === "string" ? m.content : m.content.map((p) => p.text).join("") }
 }
+
+/**
+ * The suffix as `target` may be sent it (spec/AGENTIC.md §12.3): thinking another model wrote,
+ * and the signatures that go with it, are left out of its turns. A provider accepts signed
+ * reasoning only from the model that signed it, and pi-ai would otherwise turn unsigned
+ * thinking into the turn's visible text. Text, tool calls and results stay as they were.
+ */
+export const forTarget = (
+  suffix: ReadonlyArray<Message>,
+  target: Pick<ModelInput, "api" | "key"> & { readonly provider?: string | undefined }
+): Array<Message> =>
+  suffix.map((m) => {
+    if (
+      m.role !== "assistant" ||
+      (m.api === target.api &&
+        m.model === target.key &&
+        (target.provider === undefined || m.provider === target.provider))
+    )
+      return m
+    if (!m.content.some((p) => p.type === "thinking" || (p.type === "toolCall" && p.thoughtSignature))) return m
+    const content: AssistantMessage["content"] = []
+    for (const p of m.content) {
+      if (p.type === "thinking") continue
+      if (p.type === "toolCall" && p.thoughtSignature) {
+        const { thoughtSignature: _signature, ...call } = p
+        content.push(call)
+      } else content.push(p)
+    }
+    return { ...m, content }
+  })
 
 /**
  * The request for one step of a rollout: the frozen prefix, then `suffix`, with `tools`.

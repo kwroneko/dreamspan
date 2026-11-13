@@ -1,10 +1,5 @@
 // Each unexposed RPC is an explicit decision. New operations must be classified here or exposed.
 export const operationExclusions: Readonly<Record<string, string>> = {
-  CopyNoteToBranch: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
-  StartThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
-  RenameThread: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
-  UndoThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
-  ThreadsOf: "Not in W6's first exposures; use the bounded workshop read tools.",
   AddRemoteVersionAsCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   AddUserModel: "User-only security, consent, account, credential or network configuration.",
   AdoptRemoteCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
@@ -33,6 +28,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   CommitForkMerge: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ComposerHistory: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ContinueVersion: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  CopyNoteToBranch: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   CountTokens: "Not in W6's first exposures; use the bounded workshop read tools.",
   CreateCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   CreateCardNote: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
@@ -125,6 +121,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   HistoryEditCost: "Not in W6's first exposures; use the bounded workshop read tools.",
   ImpersonationNotice: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   InsertMessage: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  JoinThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   LibraryGenealogy: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   LinkStImportChat: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ListActivity: "Not in W6's first exposures; use the bounded workshop read tools.",
@@ -198,6 +195,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   RenameGroup: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   RenameHistory: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   RenameHistoryTargets: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  RenameThread: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ReplaceCredentialKey: "User-only security, consent, account, credential or network configuration.",
   ResolveUpdate: "Not in W6's first exposures; use the bounded workshop read tools.",
   RestoreBinItem: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
@@ -226,6 +224,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SelectSummaryRevision: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SelectVersion: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SendMessage: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  SendToThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetCardAvatarCrop: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetCardParent: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetCardSourceAdminDisabled: "User-only security, consent, account, credential or network configuration.",
@@ -279,6 +278,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   StartChat: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   StartStImport: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   StartStPathImport: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  StartThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   StopGeneration: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SubscribeChat: "Streaming UI subscription; a tool must return a bounded result.",
   SubscribeNotices: "Streaming UI subscription; a tool must return a bounded result.",
@@ -286,6 +286,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SwitchBranch: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   TakeRemoteVersion: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   TestConnection: "User-only security, consent, account, credential or network configuration.",
+  ThreadsOf: "Not in W6's first exposures; use the bounded workshop read tools.",
   UndoAwayMark: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UndoCardArchive: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UndoForkMerge: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
@@ -293,6 +294,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   UndoLibraryEdit: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UndoRolloutEffect: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UndoRolloutEffects: "Not exposed: undoing a whole reply's changes is the user's, from the Changes tab.",
+  UndoThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UnhideImportedRun: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UnlinkNote: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   UpdateConnection: "User-only security, consent, account, credential or network configuration.",
@@ -306,8 +308,11 @@ export const operationExclusions: Readonly<Record<string, string>> = {
 }
 
 export const commandExclusions: Readonly<Record<string, string>> = {
-  "thread.start": "Starting parallel threads is outside W6 and needs a complete undo adapter.",
   "chat.merge": "Merging chats is outside W6 and needs a complete undo adapter.",
+  "thread.join": "Joining threads is a merge: outside W6 and needs a complete undo adapter.",
+  "thread.send":
+    "Sending to several threads posts and starts replies in each: outside W6 and needs its own undo adapter.",
+  "thread.start": "Starting threads is outside W6; its Undo goes through the bin, not an approved undo adapter.",
   "message.insert": "The insertion workflow is not in W6 and needs its own undo adapter."
 }
 

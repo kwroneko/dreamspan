@@ -139,6 +139,9 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/chats/${chatId}`)
       let settings = await openPanel(page, "This chat")
       const context = () => settings.getByRole("radiogroup", { name: "Context" })
+      await expect(
+        settings.getByText("One shared context also shares earlier messages", { exact: false })
+      ).toBeVisible()
       await expect(context().getByRole("radio", { name: /^One shared context/ })).toBeChecked()
       await expect(context().getByRole("radio", { name: /^Separate contexts/ })).not.toBeChecked()
       // The explanation: what it does, when, what the model sees, with an example.

@@ -66,13 +66,27 @@ const fitting = (widths: ReadonlyArray<number>, more: number, room: number, acti
   return shown
 }
 
+/** Wait for measurement so focusing a tab never targets the invisible sizing pass. */
+function useInitialTabFocus(list: { readonly current: HTMLDivElement | null }, ready: boolean, wanted: boolean) {
+  const restored = useRef(false)
+  useLayoutEffect(() => {
+    if (!ready || !wanted || restored.current) return
+    const selected = list.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+    if (selected) {
+      selected.focus({ preventScroll: true })
+      restored.current = true
+    }
+  }, [list, ready, wanted])
+}
+
 export function ToolTabs({
   tabs,
   value,
   onValueChange,
   label,
   moreLabel = MORE,
-  end
+  end,
+  focusOnMount = false
 }: {
   tabs: ReadonlyArray<ToolTab>
   /** The open tab; one that isn't a tool leaves none selected. */
@@ -83,6 +97,8 @@ export function ToolTabs({
   moreLabel?: string
   /** After the row: a close button, say. */
   end?: ReactNode
+  /** Restore the selected tab after a pending chat becomes a saved chat. */
+  focusOnMount?: boolean
 }) {
   const row = useRef<HTMLDivElement>(null)
   const ruler = useRef<HTMLDivElement>(null)
@@ -104,6 +120,7 @@ export function ToolTabs({
   }, [key])
   const active = tabs.findIndex((tab) => tab.value === value)
   const ready = room !== null && widths.length === tabs.length + 1
+  useInitialTabFocus(row, ready, focusOnMount)
   const shown = ready ? fitting(widths.slice(0, -1), widths.at(-1)!, room, active) : tabs.map((_, index) => index)
   const visible = tabs.filter((_, index) => shown.includes(index))
   const hidden = tabs.filter((_, index) => !shown.includes(index))
@@ -201,12 +218,14 @@ export function SubjectTabs({
   tabs,
   value,
   onValueChange,
-  label
+  label,
+  focusOnMount = false
 }: {
   tabs: ReadonlyArray<SubjectTab>
   value: string
   onValueChange: (value: string) => void
   label: string
+  focusOnMount?: boolean
 }) {
   const list = useRef<HTMLDivElement>(null)
   const ruler = useRef<HTMLDivElement>(null)
@@ -245,8 +264,9 @@ export function SubjectTabs({
     })
     return () => cancelAnimationFrame(frame)
   }, [value, key, room, widths])
-  if (tabs.length === 0) return null
   const ready = room !== null && widths.length === tabs.length
+  useInitialTabFocus(list, ready, focusOnMount)
+  if (tabs.length === 0) return null
   const sum = (pick: (width: { full: number; short: number }, index: number) => number) =>
     widths.reduce((total, width, index) => total + pick(width, index), 0)
   const open = tabs.findIndex((tab) => tab.value === value)

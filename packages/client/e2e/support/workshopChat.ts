@@ -201,7 +201,7 @@ export function workshopChatTests() {
             await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"))
           }
           const chip = nextReply(page).getByRole("button", { name: /^What the assistant may do: / })
-          await expect(chip).toHaveText(/Can: 5 · Asks: 2/)
+          await expect(chip).toHaveText(/Can: 5 · Asks: 3/)
           await expect(
             nextReply(page).getByRole("button", { name: /replies now$|^Reply now$|^No one to reply$/ })
           ).toHaveCount(0)
@@ -229,12 +229,12 @@ export function workshopChatTests() {
             )
             await expect(row.getByRole("button", { name: "Off", exact: true })).toBeVisible()
           }
-          for (const id of ["chats.read", "generate"]) {
+          for (const id of ["chats.read", "generate", "skills.card"]) {
             await expect(
               popover.locator(`[data-capability="${id}"]`).getByRole("button", { name: "Ask first", exact: true })
             ).toHaveAttribute("aria-pressed", "true")
           }
-          await expect(popover.locator("[data-capability]")).toHaveCount(7)
+          await expect(popover.locator("[data-capability]")).toHaveCount(8)
           await expect(popover.getByText("These hold for this workshop only.")).toBeVisible()
           await shot("capabilities")
           await expectLayout(page, info, `workshop-capabilities-${width}-${theme}`, { scope: '[role="dialog"]' })
@@ -259,7 +259,8 @@ export function workshopChatTests() {
           if (width === 390) await stopped.getByText("stopped", { exact: true }).click()
           else await showActions(stopped)
           const beforeResume = provider.bodies.length
-          const resume = stopped.getByRole("button", { name: "Resume", exact: true })
+          // A stopped reply also has Resume beside it (DESIGN §7.5); either carries it on.
+          const resume = stopped.getByRole("button", { name: "Resume", exact: true }).first()
           if (await resume.isVisible()) await resume.click()
           else await messageMenu(stopped, /^Resume/)
           await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeResume)

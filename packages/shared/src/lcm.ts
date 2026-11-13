@@ -113,7 +113,13 @@ export class LcmState extends Schema.Class<LcmState>("LcmState")({
   cursorDepth: Schema.Int,
   cursorSlotId: Schema.optionalKey(Schema.NullOr(SlotId)),
   /** The cursor's position on the display path; its depth in a fork without insertions. */
-  cursorPosition: Schema.optionalKey(Schema.Int)
+  cursorPosition: Schema.optionalKey(Schema.Int),
+  /**
+   * A join that kept each character to its own thread is on the path (spec/THREADS.md §7.3,
+   * TH7): in a chat with one shared context, characters that missed part of it have summaries
+   * of their own, so "Summaries of" offers them. Absent: none.
+   */
+  stretchViews: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 /** Every summary on the path overlapping a range of message depths, for the coverage rail. */

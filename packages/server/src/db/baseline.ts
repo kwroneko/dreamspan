@@ -2256,7 +2256,10 @@ export const baseline: ReadonlyArray<string> = [
     -- for everyone) or 'separate'; a registered storage kind, frozen with the row.
     timelines TEXT NOT NULL DEFAULT 'together',
     -- Soft: the thread split whose thread this joins, when the source is one (§4.1).
-    split_id TEXT
+    split_id TEXT,
+    -- The slot immediately before a separate join's destination stretch; NULL: path start.
+    -- Resolve the live display interval after it through J, including later insertions.
+    stretch_before_slot_id TEXT
   ) STRICT`,
   `CREATE INDEX chat_merges_chat ON chat_merges(chat_id)`,
   `CREATE INDEX chat_merges_source_fork ON chat_merges(chat_id, source_fork_id)`,
@@ -2283,6 +2286,10 @@ export const baseline: ReadonlyArray<string> = [
     source_version_id TEXT,
     -- The copied version's image media ids; NULL when it had none.
     media_json TEXT CHECK (media_json IS NULL OR (json_valid(media_json) AND json_type(media_json) = 'array')),
+    -- Where it was in the source, as zero-based display positions: a message's own, a summary's
+    -- first and last (the agent's read tools name a joined row by it, spec/THREADS.md §11).
+    source_from INTEGER,
+    source_to INTEGER,
     PRIMARY KEY (merge_id, ordinal)
   ) STRICT, WITHOUT ROWID`,
   `CREATE TRIGGER chat_merge_messages_frozen BEFORE UPDATE ON chat_merge_messages

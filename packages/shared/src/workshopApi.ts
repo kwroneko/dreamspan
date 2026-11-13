@@ -1,3 +1,4 @@
+import { StoryAtField } from "./chat.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Chat } from "./chat.ts"
@@ -158,6 +159,7 @@ export class WorkshopApi extends RpcGroup.make(
    */
   Rpc.make("AnswerToolApproval", {
     payload: {
+      storyAt: StoryAtField,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       digest: Schema.String,

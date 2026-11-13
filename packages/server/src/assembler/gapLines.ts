@@ -3,8 +3,10 @@
 // messages it was present for (or before its own reply, when it's back), one system message
 // without a name says so, from the preset's `absent_gap_prompt`. Nothing is said before the
 // character's first message, nor for a merged-in storyline it was never in; there the optional
-// join line (`absent_join_prompt`, empty by default) is sent at the merge point. Its own stage,
-// after `merge-layout`, registered and replaceable like the others.
+// join line (`absent_join_prompt`, empty by default) is sent at the merge point. In a chat read
+// whole, a separate join (spec/THREADS.md §7.3) gets only the join line: the other thread's
+// stretch is someone else's storyline. Its own stage, after `merge-layout`, registered and
+// replaceable like the others.
 import { Effect } from "effect"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { ABSENT_GAP_DEFAULT, ABSENT_JOIN_DEFAULT } from "@rp/shared/knowledge.ts"
@@ -72,7 +74,10 @@ export const gapLinesStage: AssemblerStage = {
   id: "gap-lines",
   run: (assembly) =>
     Effect.gen(function* () {
-      const viewer = assembly.knowledge?.viewer ?? null
+      const whole = assembly.knowledge?.viewer ?? null
+      // Read whole, only a separate join's stretch is filtered: a join line, never a gap line.
+      const stretch = whole === null ? (assembly.knowledge?.stretch ?? null) : null
+      const viewer = whole ?? stretch?.viewer ?? null
       // A view's summary request leaves what its character missed out without a line (unit C7).
       if (viewer === null || assembly.request.summaryJob) return assembly
       const history = need(assembly, "history")
@@ -81,11 +86,13 @@ export const gapLinesStage: AssemblerStage = {
       const cast = need(assembly, "cast")
       const utility = need(assembly, "preset").doc.utility_prompts
       // The viewer under every identity it had (card replacements): never named in its own line.
-      const self = new Set(assembly.knowledge?.aliases ?? [viewer])
+      const self = new Set((stretch ? stretch.aliases : assembly.knowledge?.aliases) ?? [viewer])
       const projected = [...need(assembly, "projected")]
       // {{char}} is the character the line is for, as in the tail directive.
       const own = cast.speaker ? { names: { char: modelName(cast.speaker.doc) } } : {}
-      const { stretches, joins } = stretchesOf(assembly, history)
+      const found = stretchesOf(assembly, history)
+      const stretches = stretch ? [] : found.stretches
+      const joins = found.joins
       const gap = utility.absent_gap_prompt ?? ABSENT_GAP_DEFAULT
       // Those who took part and have since left the cast are named too, from their cards (read
       // only when a line names one, so a chat where nobody left reads nothing more).

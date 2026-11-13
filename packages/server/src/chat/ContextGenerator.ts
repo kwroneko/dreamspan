@@ -36,6 +36,8 @@ import { planTurn } from "../agent/modes.ts"
 import type { OutputContract } from "../agent/modes.ts"
 import { type FrozenTool, frozenTool, sendMessageDefinition, severalMessageDefinition } from "../agent/tools.ts"
 import { makePermit, offeredByGrants } from "../agent/approvals.ts"
+import { loaderFor, loadingWireFor, planToolLoading } from "../agent/loadingPlan.ts"
+import { frozenOffer, loadedSet, type Skill } from "../agent/toolLoading.ts"
 import { DecisionEngine } from "../decision/engine.ts"
 import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
 
@@ -146,6 +148,7 @@ export const layer = Layer.effect(
             readonly contract: OutputContract
             readonly turnCap: number
             readonly tools: ReadonlyArray<FrozenTool>
+            readonly cardSkills?: ReadonlyArray<Skill>
             readonly inspection?: Generation["inspection"]
           }
         }
@@ -172,7 +175,7 @@ export const layer = Layer.effect(
         if (!profile)
           return yield* new GenerationFailed({ class: "unavailable", message: "This chat kind is unavailable." })
         const tools = frozen.tools.flatMap((t) => {
-          const tool = toolForKind(execution, chat.kind, t.name)
+          const tool = toolForKind(execution, chat.kind, t.name) ?? loaderFor(execution, t)
           return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
         })
         const reply = strategy.run({
@@ -194,6 +197,9 @@ export const layer = Layer.effect(
             allowsOutside: profile.allowsOutside,
             tools,
             offered: frozen.tools,
+            kind: chat.kind,
+            cardSkills: frozen.cardSkills ?? [],
+            ...(loadingWireFor(execution, model) ? { loadingWire: loadingWireFor(execution, model)! } : {}),
             reader,
             writer,
             permit: makePermit({
@@ -409,13 +415,33 @@ export const layer = Layer.effect(
                   Effect.catch(serverFailure("StoryReadStamp"))
                 )) ?? null
             }
+          // Dynamic tool loading (spec/TOOL-LOADING.md): what's sent from the start, what's loaded later.
+          const { offer, cardSkills } = agentic
+            ? yield* planToolLoading(
+                { execution, reader, userId },
+                {
+                  kind: chat.kind,
+                  tools,
+                  model: generation.model,
+                  cards: snapshot.inputs.cards.filter((c) => !state.playedByMe.includes(c.entity as never))
+                }
+              )
+            : { offer: { tools, deferred: new Set<string>() }, cardSkills: [] }
+          const contractTools =
+            plan.contract === "final_text"
+              ? []
+              : [plan.contract === "several" ? severalMessageDefinition : sendMessageDefinition]
+          const frozenTools = [...frozenOffer(offer.tools, offer.deferred, frozenTool), ...contractTools]
           let continuity: ContinuityRecord | undefined
           let seed: ReadonlyArray<AgentMessage> | undefined
           if (agentic && plan.continuity === "resume_previous") {
             const path = yield* readContinuityPath(reader, request, parent).pipe(
               Effect.catch(serverFailure("ReadContinuityPath"))
             )
-            const prior = yield* previousRun(reader, request, path, snapshot)
+            const prior = yield* previousRun(reader, request, path, {
+              ...snapshot,
+              agent: { tools: frozenTools, cardSkills }
+            })
             const baseline = path.map(pathStamp)
             if ("reason" in prior)
               continuity = {
@@ -455,12 +481,14 @@ export const layer = Layer.effect(
                     model: JSON.stringify(snapshot.inputs.model),
                     request: JSON.stringify(prior.snapshot.request),
                     transcript: JSON.stringify(transcript),
-                    tools: JSON.stringify([
-                      ...tools.map(frozenTool),
-                      ...(plan.contract === "final_text"
-                        ? []
-                        : [plan.contract === "several" ? severalMessageDefinition : sendMessageDefinition])
-                    ])
+                    // A deferred tool takes context only once it's loaded.
+                    tools: JSON.stringify(
+                      frozenTools.filter(
+                        (t) =>
+                          (t as { readonly deferred?: true }).deferred !== true ||
+                          loadedSet(transcript, offer.deferred).has(t.name)
+                      )
+                    )
                   })
                   .pipe(Effect.catch(serverFailure("CountRolloutContext")))
               let count = yield* countSeed(seed)
@@ -573,12 +601,8 @@ export const layer = Layer.effect(
                       contract: plan.contract,
                       turnCap: plan.turnCap,
                       inspection: generation.inspection,
-                      tools: [
-                        ...tools.map(frozenTool),
-                        ...(plan.contract === "final_text"
-                          ? []
-                          : [plan.contract === "several" ? severalMessageDefinition : sendMessageDefinition])
-                      ]
+                      tools: frozenTools,
+                      ...(cardSkills.length ? { cardSkills } : {})
                     }
                   )}}`
                 : assembled.snapshot,
@@ -626,7 +650,11 @@ export const layer = Layer.effect(
                     mode: planned.mode,
                     checkpoints: continuity?.breakpoints ?? [],
                     allowsOutside: profile.allowsOutside,
-                    tools,
+                    tools: offer.tools,
+                    offered: frozenTools,
+                    kind: chat.kind,
+                    cardSkills,
+                    ...(loadingWireFor(execution, model) ? { loadingWire: loadingWireFor(execution, model)! } : {}),
                     reader,
                     writer,
                     permit: makePermit({ registries: execution, reader, writer, userId, chatId, rolloutId }),
@@ -645,6 +673,6 @@ export const layer = Layer.effect(
         })
       )
 
-    return Option.some({ generate })
+    return Option.some({ kind: "provider" as const, generate, requiresModel: true })
   })
 )

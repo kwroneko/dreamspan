@@ -26,6 +26,11 @@ describe("whose summaries the panel shows", () => {
     ).toEqual(["Wren"])
     expect(summaryViewers(null)).toEqual([])
   })
+  it("offers them in a shared context once a join kept each character to its own thread", () => {
+    expect(summaryViewers(cast({}), { stretchViews: true }).map((v) => v.name)).toEqual(["Mira", "Wren"])
+    expect(summaryViewers(cast({ contextPerSpeaker: "shared" }), {})).toEqual([])
+    expect(summaryViewers(cast({}), null)).toEqual([])
+  })
   it("names a summary's character by any of its identities, and none for a shared one", () => {
     expect(audienceName({}, cast({}))).toBeNull()
     expect(audienceName({ audience: ["old-wren", "wren"] }, cast({}))).toBe("Wren")

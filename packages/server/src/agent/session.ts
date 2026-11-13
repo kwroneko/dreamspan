@@ -21,6 +21,7 @@ import type { Reader, Writer } from "../db/Database.ts"
 import { GenerationFailed, type GenerationChunk, type GenerationRequest } from "../chat/Generator.ts"
 import type { ReplyOutputStrategy } from "../chat/replyOutput.ts"
 import type { Providers, ProviderError } from "../providers/Providers.ts"
+import { ProviderRegistry } from "../providers/registry.ts"
 import type { AgentPlan } from "./modes.ts"
 import { countSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
 import { danglingCalls } from "./resume.ts"
@@ -36,8 +37,9 @@ import {
   type ToolOutput,
   toolWriter
 } from "./tools.ts"
-import { rolloutRequest } from "./wire.ts"
+import { forTarget, rolloutRequest } from "./wire.ts"
 import { liveSuffix } from "./messages.ts"
+import { loadedSet, loadPoints, type Skill, type ToolLoadingWire } from "./toolLoading.ts"
 
 /** What an agent turn needs beyond a plain reply's. */
 export interface AgentRun {
@@ -50,8 +52,14 @@ export interface AgentRun {
   readonly writer: Writer["Service"]
   readonly onChanged?: (chatId: import("@rp/shared/chat.ts").ChatId) => void
   readonly onState?: () => void
-  /** The tool definitions to offer as a snapshot froze them (a resume); absent: `tools`' own. */
+  /** The tool definitions to offer as frozen into the snapshot; absent: `tools`' own. */
   readonly offered?: ReadonlyArray<FrozenTool>
+  /** The chat kind, for the loading tools' skill lookups (spec/TOOL-LOADING.md). */
+  readonly kind?: string
+  /** All offered skills, frozen with the run (the persisted field retains its original name). */
+  readonly cardSkills?: ReadonlyArray<Skill>
+  /** How this model's wire API carries deferred tools; absent: every tool is sent from the start. */
+  readonly loadingWire?: ToolLoadingWire
   /** Carrying on a stopped run (resume.ts): its kept transcript, and text cut off to continue. */
   readonly resume?: {
     readonly transcript: ReadonlyArray<unknown>
@@ -82,6 +90,13 @@ export const SEND_NUDGE = "Send your reply with send_message."
 
 /** A tool result's `details` when a stop cut the call off: resume runs the call again. */
 const INTERRUPTED = { interrupted: true } as const
+
+/**
+ * How often a turn being streamed is saved as it is (spec/AGENTIC.md §12.2), as a plain reply's
+ * text is (Generations): a process killed mid-turn leaves it as a stop would, so Resume carries
+ * its text on instead of losing it.
+ */
+const PARTIAL_SAVE_MS = 2000
 
 /** The contract's tool (DESIGN §7.2): the message, ending the turn; one a turn. */
 const sendMessageTool = (onSend: (message: string) => boolean): AgentTool => ({
@@ -131,6 +146,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       const { request, generation, rolloutId, output, providers } = input
       const { plan, tools, writer } = run
       const model = generation.model!
+      const registry = yield* Effect.serviceOption(ProviderRegistry)
+      const target = {
+        ...model,
+        provider: Option.isSome(registry) ? registry.value.kinds.get(model.kind)?.piProvider : undefined
+      }
       const services = yield* Effect.context<never>()
       const runFork = Effect.runForkWith(services)
       const runPromise = Effect.runPromiseWith(services)
@@ -197,14 +217,22 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         : sendMessageTool(send)
       // A resume offers the definitions its snapshot froze, exactly as they were sent.
       const frozen = (run.offered ?? tools.map(frozenTool)).filter((t) => t.name !== SEND_MESSAGE)
+      // Deferred tools (spec/TOOL-LOADING.md): declared from the first request where the wire API
+      // declares them (Anthropic), else sent only at their load points (Responses). Without a wire
+      // for this model they're all sent from the start, as before.
+      const loadingWire = run.loadingWire
+      const deferred = new Set(loadingWire ? frozen.filter((t) => t.deferred === true).map((t) => t.name) : [])
+      const definition = (t: FrozenTool): Tool => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters as Tool["parameters"]
+      })
       const piTools: ReadonlyArray<Tool> = [
-        ...frozen.map((t) => ({
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters as Tool["parameters"]
-        })),
-        ...(sends ? [{ name: sendTool.name, description: sendTool.description, parameters: sendTool.parameters }] : [])
+        ...frozen.filter((t) => !deferred.has(t.name)).map(definition),
+        ...(sends ? [{ name: sendTool.name, description: sendTool.description, parameters: sendTool.parameters }] : []),
+        ...(loadingWire?.declaresDeferred ? frozen.filter((t) => deferred.has(t.name)).map(definition) : [])
       ]
+      const deferredDefinitions = frozen.filter((t) => deferred.has(t.name)).map(definition)
       const emit = (chunk: GenerationChunk) => void Queue.offerUnsafe(queue, chunk)
       if (several) emit({ several: true })
 
@@ -217,6 +245,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       let continuation = run.resume?.continuation
       /** What this turn streamed into the body: any output, and text in particular. */
       const body = { text: false, prose: false }
+      let partialSavedAt = Date.now()
       const streamFn: StreamFn = (piModel, transcript, options) => {
         const events = createAssistantMessageEventStream()
         if (options?.signal?.aborted) {
@@ -233,7 +262,14 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         const carried = continuation
         continuation = undefined
         const last = requests >= plan.turnCap || carried !== undefined
-        const suffix = liveSuffix(transcript.messages)
+        // Another model's thinking isn't sent to this one (a resume on another model, §12.3).
+        const suffix = forTarget(liveSuffix(transcript.messages), target)
+        // Where each deferred tool was loaded, for the provider transform. A request sent without
+        // tools (the cap's) has no load points either: its history can't name undeclared tools.
+        const toolLoading =
+          deferred.size > 0 && !last
+            ? { api: model.api, deferred: deferredDefinitions, loads: loadPoints(suffix, deferred) }
+            : undefined
         const wire = rolloutRequest(
           prefix,
           model.api,
@@ -244,7 +280,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           {
             explicitTail: model.cacheBreakpoints === "explicit",
             replayReasoning: several || plan.continuity === "resume_previous",
-            reasoningTarget: model
+            reasoningTarget: target
           }
         )
         // Text streams into the body as it comes; a tool call in the same turn makes it an
@@ -257,6 +293,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           ...emptyAssistant(piModel),
           content: carried === undefined ? [] : [{ type: "text", text: carried }]
         }
+        let saveTimer: ReturnType<typeof setTimeout> | undefined
         const fiber = runFork(
           providers
             .stream({
@@ -274,7 +311,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 payload: wire.payload,
                 breakpoints: wire.breakpoints,
                 ...(run.checkpoints?.length ? { preserveBreakpoints: true } : {}),
-                ...(wire.stable ? { stable: wire.stable } : {})
+                ...(wire.stable ? { stable: wire.stable } : {}),
+                ...(toolLoading ? { toolLoading } : {})
               },
               attribution: {
                 purpose: input.purpose ?? "generation",
@@ -326,6 +364,20 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                       ...partial,
                       content: [...(same ? partial.content.slice(0, -1) : partial.content), block]
                     }
+                    // At most every PARTIAL_SAVE_MS, and once more that long after a delta, so a
+                    // stream that stalls and then dies with the app still leaves its text.
+                    const due = partialSavedAt + PARTIAL_SAVE_MS - Date.now()
+                    if (due <= 0) {
+                      if (saveTimer !== undefined) clearTimeout(saveTimer)
+                      saveTimer = undefined
+                      partialSavedAt = Date.now()
+                      savePartial(partial)
+                    } else
+                      saveTimer ??= setTimeout(() => {
+                        saveTimer = undefined
+                        partialSavedAt = Date.now()
+                        savePartial(partial)
+                      }, due)
                     const decoded = yield* output.decode(event)
                     if (Result.isFailure(decoded) || called) return
                     body.text = true
@@ -341,6 +393,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         options?.signal?.addEventListener("abort", abort, { once: true })
         fiber.addObserver((exit) => {
           options?.signal?.removeEventListener("abort", abort)
+          if (saveTimer !== undefined) clearTimeout(saveTimer)
+          saveTimer = undefined
           if (Exit.isSuccess(exit) && done && carried !== undefined) {
             // The reply goes on from the text cut off: one turn, as if it had never stopped.
             const at = done.content.findIndex((p) => p.type === "text")
@@ -390,6 +444,12 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
         viewers: generation.viewers,
         ...(request.storyAt === undefined ? {} : { storyAt: request.storyAt }),
+        offer: {
+          kind: run.kind ?? "",
+          tools: frozen,
+          loaded: loadedSet(agent.state.messages, deferred),
+          cardSkills: run.cardSkills ?? []
+        },
         reader: run.reader,
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)
@@ -415,13 +475,30 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               details: null,
               isError: true
             }
+          // A deferred tool runs only once a loading call made it callable; loading grants nothing,
+          // so everything below applies to it exactly as to a tool sent from the start.
+          if (deferred.has(tool.id) && !loadedSet(agent.state.messages, deferred).has(tool.id))
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `“${tool.id}” isn't loaded yet. Load it with tool_search or load_skill first.`
+                }
+              ],
+              details: null,
+              isError: true
+            }
           const dangling = seed !== undefined && danglingCalls(seed).some((call) => call.id === toolCallId)
           // The capability's standing decides, asking the user first where it says so; without
           // a permit, a dangling call with outside effects may already have happened.
           const permitted: Effect.Effect<ToolOutput> = run.permit
             ? run
                 .permit({
-                  tool,
+                  // A call-specific capability (a card's own skill) is checked as the tool's.
+                  tool: (() => {
+                    const capability = tool.capabilityFor?.(context(toolCallId), params as never)
+                    return capability ? { ...tool, capability } : tool
+                  })(),
                   context: context(toolCallId),
                   args: params,
                   dangling,
@@ -479,7 +556,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           if (tool.effect === "chat_state" && !result.isError) run.onState?.()
           return {
             content: [{ type: "text", text: budgetResult(result.text) }],
-            details: null,
+            // What a loading call loaded is part of the transcript: replay derives the loaded set from it.
+            details: result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : null,
             ...(result.isError ? { isError: true } : {})
           }
         }
@@ -602,6 +680,30 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         flushing = saving.then(() => undefined)
         return saving
       }
+      /** The turn being streamed, saved after the turns before it, as a stop would leave it. */
+      const savePartial = (turn: AssistantMessage) => {
+        const messages = [
+          ...agent.state.messages,
+          { ...turn, stopReason: "aborted" as const, errorMessage: "The app stopped while this turn was written." }
+        ]
+        flushing = flushing.then(() =>
+          runPromise(
+            writer
+              .SaveRolloutTranscript({
+                userId: request.userId,
+                rolloutId,
+                transcript: JSON.stringify(messages),
+                steps: countSteps(agent.state.messages)
+              })
+              .pipe(
+                Effect.asVoid,
+                Effect.catchCause((cause) =>
+                  Effect.logWarning(`saving rollout ${rolloutId}'s turn so far failed`, cause)
+                )
+              )
+          )
+        )
+      }
       const shown = new Map<string, string>()
       const showSteps = (final: boolean) => {
         const posted = several
@@ -672,19 +774,45 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         yield* Effect.addFinalizer(() => Effect.sync(() => signal.abort()))
         for (const call of dangling) {
           const tool = agentTools.find((t) => t.name === call.name)
-          const result = tool
-            ? yield* Effect.promise(() =>
-                tool.execute(call.id, call.arguments as never, signal.signal).catch((error: unknown) => ({
-                  content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
+          // A completed write is evidence even after its tool was removed. Reading its
+          // receipt never grants permission to execute a new call.
+          const receipt =
+            call.name === SEND_MESSAGE
+              ? null
+              : yield* run.reader
+                  .RolloutToolReceipt({
+                    userId: request.userId,
+                    rolloutId,
+                    toolCallId: call.id
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      () =>
+                        new GenerationFailed({
+                          class: "server",
+                          message: "The app couldn't check whether this tool already finished. Resume to try again."
+                        })
+                    )
+                  )
+          const result = receipt
+            ? {
+                content: [{ type: "text" as const, text: budgetResult(receipt.text) }],
+                details: null,
+                isError: receipt.isError
+              }
+            : tool
+              ? yield* Effect.promise(() =>
+                  tool.execute(call.id, call.arguments as never, signal.signal).catch((error: unknown) => ({
+                    content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
+                    details: null,
+                    isError: true
+                  }))
+                )
+              : {
+                  content: [{ type: "text" as const, text: `There's no tool “${call.name}”.` }],
                   details: null,
                   isError: true
-                }))
-              )
-            : {
-                content: [{ type: "text" as const, text: `There's no tool “${call.name}”.` }],
-                details: null,
-                isError: true
-              }
+                }
           agent.state.messages = [
             ...agent.state.messages,
             {

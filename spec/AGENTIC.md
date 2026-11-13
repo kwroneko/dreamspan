@@ -50,7 +50,7 @@
 | Decision models: System-One `{model, state, questions}`, points routing/records/checks/audit/late_addition/implicit_reply/memory, `DecisionEngine.evaluate(point, input, ctx)`, a heuristic fallback per point, every billed attempt accounted | The same engine shape and the same wire body, with RP points `presence` and `lore` (§7) and the existing refusal judge kept as it is. Every call is opt-in per connection | Provider-send consent (owner rule) |
 | Console: `LiveRollout`/`Rollout` views, SSE `rollout_seed`, tentative deltas | Steps inline in the version (§7.4 [D]), live over the chat's existing subscription, with a `Steps` seed on subscribe | |
 
-reference-harness mechanisms not taken, and why: dynamic tool loading (`load_skill`, `tool_search`), since RP toolsets are small and stable, which keeps the cache intact; session records, follow-up folding and session claims, which are chat-platform concerns; image cap, since the provider boundary already caps images (ARCHITECTURE §16 "Images").
+reference-harness mechanisms not taken, and why: dynamic tool loading (`load_skill`, `tool_search`) for RP, since RP toolsets are small and stable, which keeps the cache intact (workshops take it: [TOOL-LOADING.md](TOOL-LOADING.md)); session records, follow-up folding and session claims, which are chat-platform concerns; image cap, since the provider boundary already caps images (ARCHITECTURE §16 "Images").
 
 ## 2. Timeline and rollouts; the commit pipeline
 
@@ -334,3 +334,75 @@ Each unit is sized for one agent session, ships with its tests, moves its text i
 | U10 | **Decision models**: engine, `system-one` provider kind, `presence` and `lore` points, settings | U1 (independent of U2–U9) | `decision/*`, `providers/builtins.ts`, `assembler/loreStages.ts`, client connection settings | reference-harness's decision tests ported (parsing, malformed billing, timeout fallback, disabled points send nothing); lore admission frozen in the snapshot; presence events attached |
 
 Order: U1, then U2, U3 and U4 in parallel, then U5, then U6. U7 can start after U2. U8 comes after U6. U9 waits for `noteoverrides`. U10 is independent after U1.
+
+## 12. Resuming anything stopped midway (resume1, 2026-11-12)
+
+**Status:** the owner's requirement is **[D]** (owner, 2026-11-12): "Our harness needs to support resuming anything that was stopped midway. If the system crashes mid rollout, you have to prompt with a new message. No reason for that to be the case. Same with model errors. It must be possible to resume mid-rollout. Whatever request failed to send will be sent with eg, a new model when the user resumes." Everything else in this section is **[P]**. Built with it: ARCHITECTURE §16, "Agent rollouts", "Resume".
+
+### 12.1 The audit
+
+Each case was reproduced against a scripted provider (`test/resumeAudit.test.ts`; kills in the slow `test/resumeKill.test.ts`). "Before" is master `44c46181`.
+
+| Case | Before | Now |
+|---|---|---|
+| Stopped while the final text streams | Resume keeps the text and continues it through a prefill on a model that takes one; else resamples the turn | Same |
+| Stopped while text streams on a model without prefill, or while thinking streams | Resume samples the turn again from the identical request | Same |
+| Stopped between tool calls, the next request unanswered | Resume sends that request again | Same |
+| Stopped during the second of two parallel calls | The finished call keeps its result; the cut one runs again | Same |
+| Stopped before the first word | Server resumes from the saved request; the client's Resume was disabled ("stopped before its first step") | Resume enabled |
+| Provider refusal before any text (400, 401, context overflow, content filter, 429 and 5xx after retries) | Version `failed` with the provider's words; Resume disabled in the client when nothing was written, so a failed first request needed a new message or a swipe | Resume enabled; it sends the same request |
+| Connection dropped before an answer | Classed "overloaded" ("Connection error.") | Classed "network" |
+| The app killed while text streams | Version `interrupted`; the transcript on disk had only the turns before the cut, so Resume resampled the turn and the text was lost from the run | The turn being streamed is saved every 2 s and 2 s after its last delta; Resume continues it |
+| The app killed while a request after a tool call waits | Version `interrupted`; Resume sends that request again | Same, now covered by a kill test |
+| Nothing sent after a restart until the user resumes | Yes | Same, covered by the kill tests |
+| The user changes the chat's model, then resumes | Resume sent the run to the model it started with | It goes to the model the chat uses now (§12.3) |
+| The user changes the model, then swipes or continues the last reply | The swipe or Continue used the model from before the change | Uses the model the composer shows |
+| A tab closes mid-run | The run goes on; another tab sees it finish | Same |
+| Plain (non-agent) reply stopped or failed | Text saved every 2 s while deltas arrive, so a stream that stalls kept its last text unsaved; Continue (latest message) and › (new version) carry it on | Saved within 2 s even when the stream stalls; both go to the model the composer shows; Resume beside the failure (§12.7) |
+| The provider accepts the request, then sends nothing | "Writing…" until the user stops it | Fails after 300 s of silence ("no_response"), editable per connection (§12.6) |
+| The Tools setting changed, then resume | The run kept the tools it froze | Offered the tools the chat has now (§12.4) |
+| The chat changed so the request can't be built (a deleted card, say) | Resume blocked with the assembly's message | Resume says so and offers to send the saved request unchanged (§12.5) |
+| A DeepSeek thinking model resumes a run another model started with tool calls | 400: the API demands reasoning for each replayed tool-call turn | An empty reasoning field is sent for those turns (§12.3) |
+| Workshop reply stopped or failed | Same paths as agent replies; approvals re-asked after a restart | Same |
+
+### 12.2 What a resume keeps
+
+- **[P]** The turn being written is saved with the transcript while it streams: at most every 2 s, and once more 2 s after its last delta, marked as a stop would mark it. A crash then loses at most the last 2 s of the turn.
+- **[P]** Text cut off is kept and continued through a prefill when the model takes one; otherwise the turn is sampled again. Thinking cut off is never continued: the turn is sampled again. A tool call cut off is dropped and resampled; a call without its result runs again.
+- **[P]** A restart never sends anything by itself (reference-harness: no auto-resume). The reply reads "interrupted" until the user resumes it.
+
+### 12.3 Resume on the model chosen now
+
+- **[P]** Resume, Continue and a new version use the model the composer shows with the reply last: a model chosen while the stopped reply is the last message applies to it. Resume reads the chat's binding at the reply (`StateEventsAt` with `displayEnd`), because a generation's own assembly reads the state before the reply. "Retry with…" (a named model) still wins.
+- **[P]** With the same model, the frozen request is sent byte for byte, so the provider's cache still holds. The same model is the same connection (unedited) and model; settings edited on it since the run, a provider route included, don't make it another (merge-batch9, so a run's tool loading keeps its route). With another model, the run keeps its messages and transcript, and takes the new model's settings: samplers, context budget and cache layout. The old request's cache checkpoints are dropped, since they index the old model's wire.
+- **[P]** Thinking another model wrote, and its signatures (Anthropic's signed thinking, Gemini's thought signatures, OpenRouter's reasoning details), are left out of the new model's request. Text, tool calls and tool results are converted into the new API's own form. The transcript records which model wrote each turn.
+- **[P]** DeepSeek in thinking mode refuses a replayed assistant turn with tool calls but no `reasoning_content` (400, "must be passed back"). When the target is DeepSeek, such a turn (another model's, whose thinking was left out) is sent with `reasoning_content: ""`. Tried against the live API on 2026-11-12: missing gives 400, empty gives 200; with thinking off, all forms give 200.
+
+### 12.4 Resume with the tools the chat has now
+
+- **[P]** Resume applies the chat's settings as changed since the run: the planner is asked what it offers with the settings before the reply (as the run had them) and with the settings now, and what it adds or removes between the two is added to or taken off the run's frozen tools. A planner or tool replaced in code since then leaves the run's offer as it was. A tool kept from the run keeps its frozen definition, so an unchanged list sends the request byte for byte. A tool new to the run is offered only if a new run would offer it (its grant). The output contract's tool stays as frozen. A workshop tool the run was already offered stays offered even when its grant is now off; calling it is refused as before.
+- **[P]** A removed tool is no longer offered. Calls to it that already finished keep their results in the transcript. A call to it still waiting for its result runs through the agent loop's own refusal ("Tool X not found"), which the model sees as the result. The agent instructions in the frozen system prompt may still name the old tools.
+- **[P]** Cache cost: the tools sit near the start of the request, so changing them misses the provider's cached prefix after them once (Anthropic, OpenAI, DeepSeek), and that resume pays for the whole request uncached. Later steps cache again.
+
+### 12.5 The saved request
+
+- **[P]** When the request can't be built from the chat as it is now (a deleted card, a broken preset), Resume never sends the old one silently. It refuses with the reason, and the message offers **Send the saved request**: the frozen request, model and tools exactly as the run stopped with them.
+
+### 12.6 A provider that sends nothing
+
+- **[P]** A request fails when the provider sends nothing for 300 s (reason "no_response", "The provider sent nothing back"). The clock starts when the request leaves (after any cache wait) and restarts on every byte, so keep-alive comments and pings count. It isn't retried: the user resumes, possibly on another model. Each connection can change it: Advanced, "Wait for a response (seconds)".
+- Documented provider behaviour behind the default: DeepSeek closes the connection if inference hasn't started after 10 minutes and sends keep-alive comments meanwhile; OpenRouter sends processing comments; Anthropic sends pings and documents no stream idle limit. A long silent thinking phase with no keep-alives is the case the default must not cut, hence 5 minutes rather than less.
+
+### 12.7 Resume beside a failed or interrupted reply
+
+- **[P]** A reply that failed shows Resume inside its error box; one the app stopped mid-write shows a note, "The app stopped while this reply was being written.", with Resume. An agent reply's run goes on. A plain reply with text is continued (as Continue, without the composer's guidance); one with no text is written again as a new version. Either way the model and settings the chat has now apply.
+
+### 12.8 Review follow-ups (built; obsolete as implementation proposals)
+
+- **[P]** Removing the reply's model binding follows the account's current default for Resume, Continue and a new version. With no default, the action refuses before creating a version or sending anything. It never recovers the earlier binding from the reply's parent.
+- **[P]** When the model changes, size the frozen request, kept transcript, tools and any continuation against the new context budget before creating the resumed version or running a pending call. A run that cannot fit asks for a model with more room; no transcript is silently trimmed. Unchanged-model replay retains its previous behavior, including existing small-budget workshops whose tool definitions alone exceed the budget.
+- **[P]** A pending call with a committed receipt keeps its recorded result even if its tool has since been removed. This does not permit another execution. Provider identity comes from the provider registry when deciding whether thinking and signatures belong to the target, including kinds whose names differ from their provider's.
+- **[P]** A committed outside effect remains in the resumed reply's Changes list even when the process died before its transcript result was saved: the matching receipt copied to the new run proves the result and preserves Undo and the regeneration warning.
+- **[P]** A stopped reply also has visible Resume beside its status, including plain replies. The existing status-note and button patterns are reused.
+
+Built by review-resume1; implementation and verification: ARCHITECTURE §16.

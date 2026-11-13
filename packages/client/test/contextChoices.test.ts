@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { contextChoices } from "../src/features/chat/contextChoices.ts"
+import { contextChoices, JOINS_READ_WHOLE } from "../src/features/chat/contextChoices.ts"
 import { replyDetail } from "../src/features/chat/ReplyFrom.tsx"
 
 const views = [
@@ -17,6 +17,13 @@ describe("the Context setting's choices", () => {
   it("follows the chat's view, and a change being written", () => {
     expect(contextChoices({ contextPerSpeaker: "separate", contextViews: views }).value).toBe("separate")
     expect(contextChoices({ contextPerSpeaker: "separate", contextViews: views }, "shared").value).toBe("shared")
+  })
+  it("says on one shared context, while another is on, that earlier joins are then read whole", () => {
+    const shared = (current?: string) =>
+      contextChoices({ ...(current ? { contextPerSpeaker: current } : {}), contextViews: views }).options[0]!
+    expect(shared("separate").description).toBe(`Every reply sees the whole chat. ${JOINS_READ_WHOLE}`)
+    expect(shared().description).toBe("Every reply sees the whole chat.")
+    expect(shared("shared").description).toBe("Every reply sees the whole chat.")
   })
   it("names a view that isn't installed, first, saying what happens meanwhile", () => {
     const { value, options } = contextChoices({ contextPerSpeaker: "threads", contextViews: views })

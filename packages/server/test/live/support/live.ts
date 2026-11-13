@@ -68,7 +68,7 @@ const keyOf = (name: string) => {
   }
 }
 /** The key for a route, from RP_LIVE_KEY_DIR. */
-const liveKey = (route: string) => {
+export const liveKey = (route: string) => {
   const name = route.split("/")[0]!
   const key = keyOf(name)
   if (!key) throw new Error(`No key file named "${name}" in RP_LIVE_KEY_DIR`)
@@ -317,7 +317,7 @@ const WORDS = {
 }
 
 /** Deterministic synthetic lore of about `tokens` tokens (four characters each), led by `nonce`. */
-const lore = (nonce: string, tokens: number, seed = 1) => {
+export const lore = (nonce: string, tokens: number, seed = 1) => {
   let state = seed * 2654435761
   const pick = <A>(list: ReadonlyArray<A>) => {
     state = (state * 1103515245 + 12345) >>> 0

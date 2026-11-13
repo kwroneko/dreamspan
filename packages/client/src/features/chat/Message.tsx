@@ -1,5 +1,5 @@
 import { useMediaPermit } from "./externalMedia.tsx"
-import { messageEditorTools, messageTextEditor } from "./editorHistory.tsx"
+import { messageEditorTools, messageTextEditor, useMessageSaveOptions } from "./editorHistory.tsx"
 // One message: who wrote it (avatar and name, with the registered message details: time and
 // model in the header, number, generation time and tokens under the portrait;
 // messageDetails.tsx), its versions (swipe through them, pick one in the version picker, or
@@ -37,7 +37,7 @@ import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { messageSide, useCast } from "./cast.ts"
-import { invokeMessageAction, messageActions, MessageActions } from "./messageActions.tsx"
+import { deleteOffersFor, invokeMessageAction, messageActions, MessageActions } from "./messageActions.tsx"
 import { ReasoningPanels } from "./Reasoning.tsx"
 import { useDisplayContext } from "./DisplaySettings.tsx"
 import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
@@ -132,18 +132,35 @@ function BodyText({
   )
 }
 
+/** Resume stays visible beside every stopped, interrupted or failed reply. */
+function ResumeButton({ onResume }: { onResume: () => void }) {
+  return (
+    <Button
+      variant="secondary"
+      className="self-start"
+      hint="Carries this reply on from where it stopped, as a new version, with the model and settings the chat has now. Nothing new is written for you."
+      onClick={onResume}
+    >
+      Resume
+    </Button>
+  )
+}
+
 function VersionBody({
   version,
   session,
   parentSlotId,
   depth,
-  placement
+  placement,
+  onResume
 }: {
   version: Version
   session: ChatSession
   parentSlotId: SlotId | null
   depth: number
   placement: 1 | 2
+  /** For a reply that failed or was interrupted: carries it on. */
+  onResume?: (() => void) | undefined
 }) {
   const live = useAtomValue(liveText(version.id))
   const waiting = useAtomValue(waitingCache(version.id))
@@ -175,11 +192,28 @@ function VersionBody({
         </p>
       )}
       {version.status === "failed" && version.error && (
-        <div role="note" className="rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
+        <div
+          role="note"
+          className="flex flex-col gap-2 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger"
+        >
           <p>
             Failed ({version.error.class}): {version.error.message}
           </p>
           <SlotOutlet slot={versionFailureActions} props={{ version }} />
+          {onResume && <ResumeButton onResume={onResume} />}
+        </div>
+      )}
+      {(version.status === "interrupted" || version.status === "stopped") && onResume && (
+        <div
+          role="note"
+          className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-text"
+        >
+          <p>
+            {version.status === "stopped"
+              ? "This reply was stopped."
+              : "The app stopped while this reply was being written."}
+          </p>
+          <ResumeButton onResume={onResume} />
         </div>
       )}
     </div>
@@ -202,11 +236,17 @@ function Editor({
   onCaretTaken,
   onScrollIntoView,
   onSave,
+  onSaveWith,
+  offerSaves,
   onCancel
 }: {
   draft: MessageDraft
   label: string
   saveLabel: string
+  /** Saves, then runs `after` with the text saved: a registered save option's (messageSaveOptions). */
+  onSaveWith: (after: (text: string) => Promise<void>) => void
+  /** An edit of the message's text, where the registered save options are offered. */
+  offerSaves: boolean
   source: Version | undefined
   session: ChatSession
   entry: PathEntry
@@ -241,6 +281,10 @@ function Editor({
       : ""
 
   const commandSnapshot = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot, chatCommands.snapshot)
+  const offered = useMessageSaveOptions(entry)
+  const saves = offerSaves ? offered : []
+  // Beside another way to save ("Save in both"), Save says where it saves ("Save here").
+  const shownSave = saves[0]?.here ?? saveLabel
   // The editor opens where the message is: when its text takes focus the first time, Save
   // and Cancel under it come into view too, with the caret at the end just above them.
   const actions = useRef<HTMLDivElement>(null)
@@ -331,7 +375,7 @@ function Editor({
         />
       )}
       <div ref={actions} className="flex flex-wrap items-center gap-2">
-        <Tooltip label={`${saveLabel} (Ctrl+Enter)`}>
+        <Tooltip label={`${shownSave} (Ctrl+Enter)`}>
           <Button
             type="submit"
             variant="primary"
@@ -341,9 +385,21 @@ function Editor({
             }
           >
             <Icon name="check" />
-            {saveLabel}
+            {shownSave}
           </Button>
         </Tooltip>
+        {saves.map(({ option }) => (
+          <option.component
+            key={option.id}
+            entry={entry}
+            session={session}
+            disabled={
+              imagesBusy ||
+              !availableCommands(commands, commandSnapshot).some((command) => command.id === "message.save")
+            }
+            save={onSaveWith}
+          />
+        ))}
         <Button
           onClick={onCancel}
           hint={
@@ -618,7 +674,12 @@ export const Message = memo(function Message({
   /** A delete says so, with Undo (DESIGN §6.2). */
   const toast = (outcome: Outcome<BinItem>) => {
     report(outcome)
-    if (outcome.ok) deleted(outcome.value)
+    if (outcome.ok)
+      deleted(
+        outcome.value,
+        undefined,
+        deleteOffersFor({ entry, session, deleted: (item) => deleted(item) }, outcome.value)
+      )
   }
 
   const defaultStep = (step: -1 | 1) => stepVersion(entry, session, !!generated, report, step, load)
@@ -764,6 +825,12 @@ export const Message = memo(function Message({
       parentSlotId={entry.parentSlotId}
       depth={positionOf(entry)}
       placement={model ? 2 : 1}
+      onResume={
+        version.writer === "model" &&
+        (version.status === "failed" || version.status === "interrupted" || version.status === "stopped")
+          ? () => void session.resumeReply(entry).then(report)
+          : undefined
+      }
     />
   )
   // The version controls: in the footer, or in the bar over the version shown while composing.
@@ -783,6 +850,37 @@ export const Message = memo(function Message({
       }}
     />
   )
+  /** Saves the editor's text; then `after`, a save option's (messageSaveOptions), with that text. */
+  const saveEdit = async (after?: (text: string) => Promise<void>) => {
+    if (editor === undefined) return
+    // Saving an open edit names its original source, even if an import
+    // selected another version while its draft save was still in flight.
+    // Its revision must be fresh: the version list can still be cached
+    // after another tab amended a human version without changing the count.
+    const target = editor.target
+    const source =
+      target._tag === "Edit" ? (await load(true))?.find((candidate) => candidate.id === target.versionId) : undefined
+    if (target._tag === "Edit" && source === undefined) return
+    const submitted = await editor.ready()
+    const { text, draft, images } = submitted
+    const outcome =
+      editing === "edit"
+        ? await session.edit({ ...entry, version: source! }, text, draft, images)
+        : await session.writeVersion(entry, text, draft, images)
+    report(outcome)
+    if (!outcome.ok) return
+    await after?.(text)
+    // An edit of a generated version, or of one being written, is saved as a new one; so is
+    // your own version, which shows where it went among the many it was composed from.
+    if (editing === "write" || source!.writer !== "human" || source!.status === "generating")
+      setSavedAs((outcome.value as PathEntry).versionCount)
+    // Text typed while it was being saved stays in the editor, which stays open.
+    if (!editor.committed(submitted)) return
+    // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
+    if (draft === null) await editor.discard()
+    session.closeEditor(editor)
+  }
+
   const editorView = editor !== undefined && (
     <Editor
       key={editing}
@@ -811,35 +909,9 @@ export const Message = memo(function Message({
         report(outcome)
         if (outcome.ok) session.closeEditor(editor)
       }}
-      onSave={async () => {
-        // Saving an open edit names its original source, even if an import
-        // selected another version while its draft save was still in flight.
-        // Its revision must be fresh: the version list can still be cached
-        // after another tab amended a human version without changing the count.
-        const target = editor.target
-        const source =
-          target._tag === "Edit"
-            ? (await load(true))?.find((candidate) => candidate.id === target.versionId)
-            : undefined
-        if (target._tag === "Edit" && source === undefined) return
-        const submitted = await editor.ready()
-        const { text, draft, images } = submitted
-        const outcome =
-          editing === "edit"
-            ? await session.edit({ ...entry, version: source! }, text, draft, images)
-            : await session.writeVersion(entry, text, draft, images)
-        report(outcome)
-        if (!outcome.ok) return
-        // An edit of a generated version, or of one being written, is saved as a new one; so is
-        // your own version, which shows where it went among the many it was composed from.
-        if (editing === "write" || source!.writer !== "human" || source!.status === "generating")
-          setSavedAs((outcome.value as PathEntry).versionCount)
-        // Text typed while it was being saved stays in the editor, which stays open.
-        if (!editor.committed(submitted)) return
-        // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
-        if (draft === null) await editor.discard()
-        session.closeEditor(editor)
-      }}
+      offerSaves={editing === "edit"}
+      onSaveWith={(after) => void saveEdit(after)}
+      onSave={() => void saveEdit()}
     />
   )
 
@@ -1019,9 +1091,19 @@ export const Message = memo(function Message({
           </footer>
         </div>
         {error && (
-          <p role="alert" className="text-sm text-danger">
-            {error.message}
-          </p>
+          <div role="alert" className="flex flex-col gap-2 text-sm text-danger">
+            <p>{error.message}</p>
+            {error.tag === "NotResumable" && error.reason === "saved_request" && (
+              <Button
+                variant="secondary"
+                className="self-start"
+                hint="Sends the request this reply stopped with, unchanged: the context, model and tools it had then, not the chat's settings now."
+                onClick={() => void session.resumeVersion(entry, { saved: true }).then(report)}
+              >
+                Send the saved request
+              </Button>
+            )}
+          </div>
         )}
       </div>
     </article>

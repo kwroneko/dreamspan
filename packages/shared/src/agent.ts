@@ -1,6 +1,7 @@
 // What an agent rollout shows of its work (spec/AGENTIC.md §5.1): its steps, live while it runs
 // and afterwards from its transcript.
 import { Schema } from "effect"
+import { StoryAtField } from "./chatPosition.ts"
 
 const EffectClass = Schema.Literals(["read", "chat_state", "external", "library", "setup", "outside"])
 
@@ -9,6 +10,7 @@ const EffectClass = Schema.Literals(["read", "chat_state", "external", "library"
  * arguments and the items they name (spec/WORKSHOP.md §3.4): never the model's own wording of it.
  */
 export const ApprovalPrompt = Schema.Struct({
+  storyAt: StoryAtField,
   rolloutId: Schema.String,
   toolCallId: Schema.String,
   /** The arguments' digest: an answer names it, so it holds only for this exact call. */
@@ -68,7 +70,12 @@ export type StepsSummary = typeof StepsSummary.Type
  */
 export class NotResumable extends Schema.TaggedError<NotResumable>()("NotResumable", {
   versionId: Schema.String,
-  message: Schema.String
+  message: Schema.String,
+  /**
+   * The chat's context can't be built now (a deleted lorebook, say), but the stopped run's own
+   * request is still stored: the user may send it unchanged (`ResumeVersion`'s `saved`).
+   */
+  savedRequest: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 /**
@@ -89,7 +96,13 @@ export const OfferedTool = Schema.Struct({
   label: Schema.String,
   description: Schema.String,
   parameters: Schema.Unknown,
-  effect: EffectClass
+  effect: EffectClass,
+  /** The definition's size in tokens, counted with the run's model's tokenizer where the app has one. */
+  tokens: Schema.optionalKey(Schema.Int),
+  /** Declared but not sent from the start: a loading call made it callable (spec/TOOL-LOADING.md). */
+  deferred: Schema.optionalKey(Schema.Boolean),
+  /** The loading call that loaded it in this run, when one did. */
+  loadedBy: Schema.optionalKey(Schema.String)
 })
 export type OfferedTool = typeof OfferedTool.Type
 

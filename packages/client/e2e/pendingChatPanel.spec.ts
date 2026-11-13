@@ -150,3 +150,75 @@ test("a character added in the pending Cast tab is in the chat the first send ma
   await expect(saved.getByRole("listitem", { name: "Panel Wren" })).toBeVisible()
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Panel Wren & Panel Ivo")
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`saved-only URL and first-send tab continuity: ${width} ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      const { wren } = await setup(page)
+      await page.goto(`${server().url}/cards/${wren.entityId}/chat?panel=workshop`)
+      await expect(page).toHaveURL(/panel=chat(?:&|$)/)
+      await expect(page.getByRole("tabpanel", { name: "This chat", exact: true })).toBeVisible()
+      // Close the phone sheet so the composer can be used, then select a tab whose position
+      // and focus must survive the first send. Programmatic click leaves focus on that tab.
+      if (width === 390) await page.keyboard.press("Escape")
+      await page.getByLabel("Message", { exact: true }).fill("Keep the panel steady.")
+      await openPanel(page, "Notes")
+      const notes = page.getByRole("tab", { name: "Notes", exact: true })
+      await notes.focus()
+      if (width === 390)
+        await page.locator('[data-layout-overlay="Modal sheet covers the page"]').evaluate(async (sheet) => {
+          await Promise.all(sheet.getAnimations().map((animation) => animation.finished))
+        })
+      await notes.evaluate((element) => {
+        const before = element.getBoundingClientRect()
+        const samples: Array<{ x: number; y: number; focused: boolean; connected: boolean }> = []
+        const state = { done: false, samples, before: { x: before.x, y: before.y } }
+        ;(window as unknown as { tabContinuity: typeof state }).tabContinuity = state
+        const sample = () => {
+          const current = [...document.querySelectorAll<HTMLElement>('[data-chat-panel-tabs] [role="tab"]')].find(
+            (tab) => tab.textContent?.trim() === "Notes"
+          )
+          const box = current?.getBoundingClientRect()
+          samples.push({
+            x: box?.x ?? -1,
+            y: box?.y ?? -1,
+            focused: document.activeElement === current,
+            connected: current?.isConnected ?? false
+          })
+          if (!state.done) requestAnimationFrame(sample)
+        }
+        sample()
+      })
+      await page
+        .getByRole("button", { name: "Send", exact: true, includeHidden: true })
+        .evaluate((button: HTMLButtonElement) => button.click())
+      await expect(page).toHaveURL(/\/chats\/[^/?]+\?.*panel=notes/)
+      await expect(page.getByRole("tabpanel", { name: "Notes" })).not.toContainText("Available once the chat is saved")
+      await expect(notes).toBeFocused()
+      const continuity = await page.evaluate(() => {
+        const state = (
+          window as unknown as {
+            tabContinuity: {
+              done: boolean
+              before: { x: number; y: number }
+              samples: Array<{ x: number; y: number; focused: boolean; connected: boolean }>
+            }
+          }
+        ).tabContinuity
+        state.done = true
+        return state
+      })
+      expect(continuity.samples.length).toBeGreaterThan(0)
+      for (const sample of continuity.samples) {
+        expect(sample.connected).toBe(true)
+        expect(sample.focused).toBe(true)
+        expect(Math.abs(sample.x - continuity.before.x)).toBeLessThanOrEqual(1)
+        expect(Math.abs(sample.y - continuity.before.y)).toBeLessThanOrEqual(1)
+      }
+      expect((await tabNames(page)).savedOnly).toEqual(["Workshop"])
+      await openPanel(page, "Workshop")
+      await expect(page).toHaveURL(/panel=workshop/)
+      await expect(page.getByRole("button", { name: "Start a workshop", exact: true })).toBeVisible()
+    })

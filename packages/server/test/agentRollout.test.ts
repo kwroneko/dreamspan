@@ -645,9 +645,11 @@ describe("agent rollouts", () => {
           label: "Looked something up",
           description: "Looks up a detail of the story.",
           parameters: lookup.parameters,
-          effect: "read"
+          effect: "read",
+          tokens: run.tools[0]!.tokens!
         }
       ])
+      assert.ok(run.tools[0]!.tokens! > 0)
       assert.deepStrictEqual(
         run.entries.map((e) => (e.role === "assistant" ? { role: e.role, parts: e.parts } : e)),
         [

@@ -141,6 +141,9 @@ export const makePermit =
           text: "This change couldn't be described safely. Read the item again before trying."
         } as const
       const prompt: ApprovalPrompt = {
+        // Only a call on the story is bound to the asking tab's position; a library or
+        // setting change can be allowed from any tab.
+        ...(described?.storyAt ? { storyAt: described.storyAt } : {}),
         rolloutId,
         toolCallId,
         digest,
