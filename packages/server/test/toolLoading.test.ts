@@ -27,11 +27,12 @@ import {
 import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
 import { planStepResume, StepNotResumable } from "../src/agent/resume.ts"
+import { installPluginToolDefinitions } from "./support/pluginToolDefinitions.ts"
 
 type AnyTool = RolloutTool<never>
 
 const workshopTools = Effect.gen(function* () {
-  const registry = yield* ExecutionRegistry
+  const registry = yield* installPluginToolDefinitions
   const plan = registry.orchestrationModes.get("workshop")!.plan({ state: foldState([]), kind: "workshop" })
   return { registry, tools: plan.tools.map((name) => toolForKind(registry, "workshop", name)!) }
 })

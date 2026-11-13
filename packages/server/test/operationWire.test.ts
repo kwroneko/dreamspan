@@ -7,13 +7,14 @@ import { foldState } from "@rp/shared/state.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import { severalMessageDefinition } from "../src/agent/tools.ts"
 import { prepareTokenizer } from "../src/importer/tokenizer.ts"
+import { installPluginToolDefinitions } from "./support/pluginToolDefinitions.ts"
 
 // A recommendation for the report, deliberately not wired into production defaults.
 const PROPOSED_WORKSHOP_CONTEXT_TOKENS = 32_768
 
 it.live("serializes all offered workshop definitions in every provider format with valid schema references", () =>
   Effect.gen(function* () {
-    const registry = yield* ExecutionRegistry
+    const registry = yield* installPluginToolDefinitions
     const plan = registry.orchestrationModes.get("workshop")!.plan({ state: foldState([]), kind: "workshop" })
     const tools = [
       ...plan.tools.map((name) => {

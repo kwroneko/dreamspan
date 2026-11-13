@@ -26,7 +26,7 @@ interface Body {
 
 interface Script {
   readonly name: string
-  readonly arguments: object
+  readonly arguments: object | ((body: Body) => object)
 }
 
 /**
@@ -35,7 +35,11 @@ interface Script {
  * (a carried turn holds the earlier ones too); by default from the start of the request.
  */
 export const startWorkshopProvider = async (
-  options: { readonly calls?: ReadonlyArray<Script>; readonly perTask?: boolean; readonly answer?: string } = {}
+  options: {
+    readonly calls?: ReadonlyArray<Script>
+    readonly perTask?: boolean
+    readonly answer?: string | ((body: Body) => string)
+  } = {}
 ) => {
   const calls = options.calls ?? CALLS
   const final = options.answer ?? WORKSHOP_ANSWER
@@ -92,14 +96,23 @@ export const startWorkshopProvider = async (
                     index: 0,
                     id: `call_${done + 1}`,
                     type: "function",
-                    function: { name: call.name, arguments: JSON.stringify(call.arguments) }
+                    function: {
+                      name: call.name,
+                      arguments: JSON.stringify(
+                        typeof call.arguments === "function" ? call.arguments(body) : call.arguments
+                      )
+                    }
                   }
                 ]
               }),
               chunk({}, "tool_calls"),
               chunk({}, null, usage)
             ])
-          : stream(res, [...words(final), chunk({}, "stop"), chunk({}, null, usage)])
+          : stream(res, [
+              ...words(typeof final === "function" ? final(body) : final),
+              chunk({}, "stop"),
+              chunk({}, null, usage)
+            ])
       if (holding === done) held.push(answer)
       else answer()
     })

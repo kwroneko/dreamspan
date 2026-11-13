@@ -216,16 +216,23 @@ describe("workshop setup effects", () => {
           "chats.rewrite",
           "settings",
           "generate",
+          "plugins.write",
+          "plugins.apply",
           "skills.card"
         ]
       )
       assert.deepStrictEqual(
         capabilities.map((c) => c.mode),
-        ["allow", "ask", "allow", "allow", "allow", "allow", "ask", "ask"]
+        ["allow", "ask", "allow", "allow", "allow", "allow", "ask", "allow", "ask", "ask"]
       )
       assert.deepStrictEqual(
         capabilities.map((c) => c.modes),
-        [["allow"], ...Array.from({ length: 7 }, () => ["off", "ask", "allow"] as const)]
+        [
+          ["allow"],
+          ...Array.from({ length: 7 }, () => ["off", "ask", "allow"] as const),
+          ["off", "ask"],
+          ["off", "ask", "allow"]
+        ]
       )
       const registry = yield* ExecutionRegistry
       yield* registry.workshopCapabilities.register({

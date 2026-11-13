@@ -1,6 +1,7 @@
 // Under a workshop step that changed things outside the chat (spec/WORKSHOP.md §3.6): each change,
 // with Undo and Open. Read with the reply's other changes (`ListVersionEffects`) once its call is
 // done; a step that finished after the list was read reads it again, once.
+import { syncClientPlugins } from "../../pluginLifecycle.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useRef, useSyncExternalStore } from "react"
@@ -30,6 +31,13 @@ function Effects({ step, version }: StepActionProps) {
     asked.current = true
     refresh()
   }, [mine, refresh])
+  const synced = useRef(false)
+  useEffect(() => {
+    if (!synced.current && mine?.some((e) => e.kind.startsWith("plugin."))) {
+      synced.current = true
+      void syncClientPlugins().catch(() => undefined)
+    }
+  }, [mine])
   if (mine === null || mine.length === 0) return null
   return (
     <div className="ml-5 flex flex-col gap-1" aria-label="What this step changed" role="group">

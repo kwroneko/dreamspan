@@ -11,17 +11,23 @@ import {
   confined,
   pluginFolder
 } from "./repo.ts"
+import { authorRepo, createAuthorRepo } from "./authorRepo.ts"
 import type { RepoRequest } from "./repoTask.ts"
 const [dataDir, folder] = process.argv.slice(2) as [string, string]
 try {
   const request = JSON.parse(await readFile(join(folder, "request.json"), "utf8")) as RepoRequest
   const repo = pluginFolder(dataDir, request.owner, request.id)
   let result: unknown = null
-  if (request.op === "save")
+  if (request.op === "authorCreate")
+    result = await createAuthorRepo(dataDir, request.owner, request.id, request.files, request.key)
+  else if (request.op === "save")
     result = await saveFiles(dataDir, request.owner, request.id, request.files, request.initial, request.message)
   else {
     await confined(dataDir, repo)
     switch (request.op) {
+      case "author":
+        result = await authorRepo(dataDir, request.owner, request.id, request.request)
+        break
       case "verify":
         result = await snapshot(dataDir, request.owner, request.id, request.commit)
         break

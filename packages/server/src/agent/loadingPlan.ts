@@ -52,9 +52,16 @@ export const planToolLoading = (
 ): Effect.Effect<{ readonly offer: ToolOffer<Tool>; readonly cardSkills: ReadonlyArray<Skill> }> =>
   Effect.gen(function* () {
     const { execution } = deps
+    const actor = input.tools.some((t) => t.adminOnly)
+      ? yield* deps.reader.WorkshopOperationInfo({ userId: deps.userId }).pipe(
+          Effect.map((info) => info.user),
+          Effect.orElseSucceed(() => undefined)
+        )
+      : undefined
+    const tools = input.tools.filter((t) => !t.adminOnly || actor?.role === "admin")
     const profile = execution.toolLoadingProfiles.get(input.kind)
     const wire = loadingWireFor(execution, input.model)
-    const unsplit = { offer: { tools: input.tools, deferred: new Set<string>() }, cardSkills: [] }
+    const unsplit = { offer: { tools, deferred: new Set<string>() }, cardSkills: [] }
     if (!profile || !wire || !input.model || !wire.supports(input.model)) return unsplit
     // The cards the assistant speaks as, at the revisions this request was assembled with.
     const cards = yield* Effect.forEach(input.cards, (card) =>
@@ -77,7 +84,7 @@ export const planToolLoading = (
     )
     let listed: ReadonlyArray<Skill> = []
     const offer = splitOffer({
-      tools: input.tools,
+      tools,
       profile,
       wire,
       target: input.model,

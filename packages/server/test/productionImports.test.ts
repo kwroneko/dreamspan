@@ -255,6 +255,26 @@ const computedReviews: Record<string, string> = {
 
 /** Every filesystem read is classified; a new expression requires review. */
 const readReviews: Record<string, { reason: string; expressions: Array<string> }> = {
+  "packages/server/src/plugins/reference.ts": {
+    reason:
+      "Shipped allowlisted agent/plugin/API source only; bounded index, confined non-link UTF-8 files, and finite API topic declarations. Source workspaces are included by final Docker COPY.",
+    expressions: [
+      "readdir(join(root, p), { withFileTypes: true })",
+      'readFile(join(root, p), "utf8")',
+      'readFile(join(root, "packages/plugin-api/src", doc.side + ".ts"), "utf8")',
+      'readFile( join(root, topic === "stateKeys" ? "packages/shared/src/state.ts" : "packages/shared/src/macros/registry.ts"), "utf8" )'
+    ]
+  },
+  "packages/server/src/plugins/authorRepo.ts": {
+    reason:
+      "Private operation journals and creation markers inside validated plugin Git metadata; no caller-selected journal paths, links or source execution. Directory listing only detects an existing repository.",
+    expressions: [
+      'readFile(file, "utf8")',
+      'readFile(join(journals, request.undo + ".json"), "utf8")',
+      'readFile(marker, "utf8")',
+      "readdir(folder)"
+    ]
+  },
   "packages/server/src/plugins/serve.ts": {
     reason:
       "The Vite build manifest shipped with the configured client dist; facade points only to a validated assets filename.",

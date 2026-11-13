@@ -2305,6 +2305,12 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.String,
     error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
   }),
+  /** Files/Git are changed outside SQLite, then this owner-scoped transaction marks the external undo. */
+  Rpc.make("CompletePluginUndo", {
+    payload: { userId: UserId, ...EffectKey, result: Schema.Record(Schema.String, Schema.Unknown) },
+    success: RolloutEffect,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
   Rpc.make("UndoRolloutEffect", {
     payload: { userId: UserId, ...EffectKey },
     success: RolloutEffect,
@@ -4666,6 +4672,20 @@ export class ReadOps extends RpcGroup.make(
    * The approval of a call, in its rollout or the runs it was resumed from, with the same
    * arguments: what a resume needs to know whether the call can have run.
    */
+  /** Rechecked under the plugin lifecycle lock, including a consumed exact-call approval. */
+  Rpc.make("AuthorizePluginTool", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      capability: Schema.String,
+      digest: Schema.optionalKey(Schema.String),
+      requireApproval: Schema.Boolean,
+      rollback: Schema.optionalKey(Schema.Boolean)
+    },
+    success: User,
+    error: Schema.Union([NotFound, ApprovalRefused, StorageError])
+  }),
   Rpc.make("ToolApprovalFor", {
     payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String, digest: Schema.String },
     success: Schema.NullOr(
@@ -4678,6 +4698,16 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The effects a version's run made: its own calls, kept calls of the runs it resumed included. */
+  Rpc.make("RolloutEffectsForRun", {
+    payload: { userId: UserId, chatId: ChatId, rolloutId: Schema.String },
+    success: Schema.Array(RolloutEffect),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("RolloutEffectFor", {
+    payload: { userId: UserId, ...EffectKey },
+    success: RolloutEffect,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("VersionEffects", {
     payload: { userId: UserId, versionId: Schema.String },
     success: Schema.Array(RolloutEffect),

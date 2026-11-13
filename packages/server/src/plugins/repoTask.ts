@@ -4,7 +4,16 @@ import { readFile, writeFile, rm, lstat } from "node:fs/promises"
 import { join } from "node:path"
 import { confined, limits, validPath } from "./repo.ts"
 import { runPluginChild } from "./process.ts"
+import type { AuthorRequest } from "./authorRepo.ts"
 export type RepoRequest =
+  | { readonly op: "author"; readonly owner: string; readonly id: string; readonly request: AuthorRequest }
+  | {
+      readonly op: "authorCreate"
+      readonly owner: string
+      readonly id: string
+      readonly files: Record<string, string>
+      readonly key: string
+    }
   | {
       readonly op: "save"
       readonly owner: string

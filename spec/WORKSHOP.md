@@ -67,6 +67,8 @@ The owner's stated end goal (phase6 brief, 2026-11-12): the app becomes a self-c
 - **Plugins** are git repositories under `DATA_DIR/plugins/`, enabled at a pinned commit ([D]), checked and bundled at enable and at startup, and switched off with a report when they break. Server code loads in the main thread by `import()` of a bundle and in the database workers through the built `StateModules`/`AssemblyModules` module lists; client code loads as same-origin ES modules against one host module, before the router is built (§5).
 - **The agent writes plugins** with file, check, commit, enable and roll-back tools. The user approves only enabling (and, unless allowed for the session, each new commit), and can recover without the agent from Settings → Plugins or a plugin-free start (§6).
 
+**Built P4 authoring (2026-11-13):** WORKSHOP §9's P4 row and the authoring subset of §§6.1–6.4 are implemented and obsolete as implementation proposals; see ARCHITECTURE §17, “Workshop plugin authoring”. Dedicated confined tools, working/committed checks, generated API references, bounded shipped-source reference, receipts/Undo and exact-version consent are built. P5's `plugin_copy_builtin` and editable copies remain unbuilt. Session trust remains Open and dormant. The Every-tool fallback retains its reviewed declarations and therefore exceeds P4's zero-or-one-line cost target; ARCHITECTURE records the measured limitation. No Proposed item is promoted to Decided; no baseline change relative to P3.
+
 ## 1. Deltas from the build and from reference-harness
 
 ### 1.1 What the build already has

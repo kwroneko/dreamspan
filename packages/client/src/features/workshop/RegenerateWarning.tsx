@@ -4,6 +4,7 @@
 // standing the new version goes ahead at once. Otherwise it lists them and offers "Undo them,
 // then make a new version" (newest first, stopping at the first refused), "Keep them and make a new
 // version", or Cancel.
+import { syncClientPlugins } from "../../pluginLifecycle.ts"
 import { useEffect, useRef, useState } from "react"
 import type { AppError } from "../../errors.ts"
 import { ErrorAlert } from "../../actions.tsx"
@@ -59,6 +60,7 @@ function Warning({ asked }: { asked: WarningRequest }) {
         return
       }
     }
+    if (standing.some((e) => e.kind.startsWith("plugin."))) await syncClientPlugins()
     asked.settle(true)
   }
   const fixed = standing.filter((effect) => effect.undo === null).length

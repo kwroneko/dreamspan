@@ -10,6 +10,7 @@ const EffectClass = Schema.Literals(["read", "chat_state", "external", "library"
  * arguments and the items they name (spec/WORKSHOP.md §3.4): never the model's own wording of it.
  */
 export const ApprovalPrompt = Schema.Struct({
+  plugin: Schema.optionalKey(Schema.Struct({ id: Schema.String, commit: Schema.String })),
   storyAt: StoryAtField,
   storyScope: Schema.optionalKey(
     Schema.Struct({

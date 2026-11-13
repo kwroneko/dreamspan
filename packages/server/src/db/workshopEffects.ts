@@ -460,6 +460,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
     /** One effect's undo, inside the caller's transaction; one already undone stays as it is. */
     const undoRow = (userId: UserId, row: EffectRow) =>
       Effect.gen(function* () {
+        if (row.kind.startsWith("plugin.")) return yield* refuse("Plugin file undo must run through the host.")
         if (row.undone_at !== null) return toRolloutEffect(row)
         const undoer = rolloutUndoers.get(row.kind)
         if (!undoer || row.undo_json === null)
@@ -1031,6 +1032,19 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
             }
           })
         ),
+      CompletePluginUndo: (input) =>
+        Effect.gen(function* () {
+          yield* owned(input)
+          const [row] =
+            yield* sql<EffectRow>`SELECT * FROM rollout_effects WHERE rollout_id = ${input.rolloutId} AND tool_call_id = ${input.toolCallId} AND seq = ${input.seq}`
+          if (!row || !row.kind.startsWith("plugin.")) return yield* refuse("That plugin change is unavailable.")
+          if (row.undone_at === null)
+            yield* sql`UPDATE rollout_effects SET undone_at = ${Date.now()}, undo_result_json = ${JSON.stringify(input.result)}
+            WHERE rollout_id = ${input.rolloutId} AND tool_call_id = ${input.toolCallId} AND seq = ${input.seq}`
+          const [done] =
+            yield* sql<EffectRow>`SELECT * FROM rollout_effects WHERE rollout_id = ${input.rolloutId} AND tool_call_id = ${input.toolCallId} AND seq = ${input.seq}`
+          return toRolloutEffect(done!)
+        }).pipe(transaction(sql, "CompletePluginUndo")),
       UndoRolloutEffect: (input) =>
         Effect.gen(function* () {
           yield* owned(input)
@@ -1084,6 +1098,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       | "AgentReviseEntity"
       | "AgentCloneCard"
       | "AgentStartChat"
+      | "CompletePluginUndo"
       | "UndoRolloutEffect"
       | "UndoRolloutEffects"
     >

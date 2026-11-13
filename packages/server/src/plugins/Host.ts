@@ -24,6 +24,8 @@ import { Notices } from "../chat/Notices.ts"
 import { Network } from "../net/Network.ts"
 import { checkPlugin, readBuild, readClientBuild } from "./check.ts"
 import { declaredHandles, type RegistrationRegistry } from "./handles.ts"
+import { makePluginAuthoring } from "../agent/tools/plugins.ts"
+import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
 import { repoTask } from "./repoTask.ts"
 import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
 
@@ -39,6 +41,7 @@ const attempt = <A>(run: () => Promise<A>) =>
 export class PluginHost extends Context.Service<
   PluginHost,
   {
+    readonly undoEffect: (actor: User, effect: RolloutEffect) => Effect.Effect<RolloutEffect, unknown>
     readonly clients: (actor: User) => Effect.Effect<ReadonlyArray<ClientPlugin>, unknown>
     readonly clientAsset: (actor: User, target: Version) => Effect.Effect<Uint8Array, unknown>
     readonly list: (actor: User) => Effect.Effect<ReadonlyArray<typeof PluginView.Type>, Failure | unknown>
@@ -392,6 +395,7 @@ export class PluginHost extends Context.Service<
           return result
         })
       const service = PluginHost.of({
+        undoEffect: (actor, effect) => authoring.undoEffect(actor, effect),
         clients,
         clientAsset: (actor, target) =>
           Semaphore.withPermit(assetChecks)(
@@ -554,6 +558,34 @@ export class PluginHost extends Context.Service<
             })
           )
       })
+      const dirty = (actor: User, target: Target) =>
+        Effect.gen(function* () {
+          const owner = yield* authorize(actor, target)
+          const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+          const pin = pins.value[target.id]
+          if (pin) {
+            yield* authorizeLocal(actor, target)
+            if (!pin.suspended)
+              yield* suspend(actor, owner, target.id, {
+                commit: pin.commit,
+                appStamp: "",
+                ok: false,
+                step: "snapshot",
+                message: "Plugin changed; turn on its new version to apply it",
+                at: Date.now()
+              })
+          } else yield* close(owner, target.id)
+        })
+      const authoring = makePluginAuthoring({
+        host: { ...service, get: details },
+        lock,
+        dataDir: config.dataDir,
+        reader,
+        writer,
+        rollback,
+        dirty
+      })
+      for (const tool of authoring.tools) yield* execution.rolloutTools.register(tool)
       if (config.plugins) {
         const users = yield* reader.ListUsers()
         const pins = yield* reader.AllPluginPins()

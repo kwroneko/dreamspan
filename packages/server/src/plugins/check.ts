@@ -32,7 +32,8 @@ export const checkPlugin = async (
   dataDir: string,
   owner: string,
   id: string,
-  commit: string
+  commit: string,
+  authoring?: { readonly working: boolean; readonly admin: boolean; readonly historical?: boolean }
 ): Promise<PluginReport> => {
   const appStamp = await pluginAppStamp()
   const report: PluginReport = {
@@ -59,7 +60,9 @@ export const checkPlugin = async (
       staging,
       appStamp,
       build,
-      checkedReports.get(build) ?? ""
+      authoring ? "" : (checkedReports.get(build) ?? ""),
+      authoring?.historical ? "historical" : authoring?.working ? "working" : "commit",
+      authoring?.admin === false ? "regular" : "admin"
     ])
     if (!child.ok) return report
     const checked = JSON.parse(await readFile(join(staging, "check.json"), "utf8")) as PluginReport
@@ -68,12 +71,13 @@ export const checkPlugin = async (
     await rm(build, { recursive: true, force: true })
     await rename(staging, build)
     staging = undefined
-    checkedReports.set(
-      build,
-      createHash("sha256")
-        .update(await readFile(join(build, "check.json")))
-        .digest("hex")
-    )
+    if (authoring?.admin !== false)
+      checkedReports.set(
+        build,
+        createHash("sha256")
+          .update(await readFile(join(build, "check.json")))
+          .digest("hex")
+      )
     return checked
   } catch {
     return report

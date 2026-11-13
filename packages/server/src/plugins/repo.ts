@@ -11,6 +11,7 @@ export const limits = { file: 512 * 1024, bytes: 8 * 1024 * 1024, files: 256 }
 export const validPath = (path: string) => {
   if (
     !path ||
+    !path.isWellFormed() ||
     path.length > 240 ||
     path.includes("\\") ||
     path.includes("\0") ||
@@ -82,7 +83,7 @@ export const diskFiles = async (folder: string): Promise<Map<string, Uint8Array>
   if (files.has(".gitmodules")) throw new Error("Plugin submodules are refused")
   return files
 }
-const safeGit = async (folder: string) => {
+export const safeGit = async (folder: string) => {
   const metadata = await lstat(join(folder, ".git"))
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Git metadata links are refused")
   let count = 0,
@@ -155,13 +156,22 @@ export const sameTree = (a: Map<string, Uint8Array>, b: Map<string, Uint8Array>)
     return other !== undefined && Buffer.from(value).equals(other)
   })
 
-export const snapshot = async (dataDir: string, owner: string, id: string, commit: string, build?: string) => {
+export const snapshot = async (
+  dataDir: string,
+  owner: string,
+  id: string,
+  commit: string,
+  build?: string,
+  working = false,
+  historical = false
+) => {
   const folder = await confined(dataDir, pluginFolder(dataDir, owner, id))
   await safeGit(folder)
-  if ((await git.resolveRef({ fs, dir: folder, ref: "HEAD" })) !== commit)
+  if (!working && !historical && (await git.resolveRef({ fs, dir: folder, ref: "HEAD" })) !== commit)
     throw new Error("Plugin HEAD differs from pinned commit")
   const tree = await commitFiles(folder, commit)
-  if (!sameTree(tree, await diskFiles(folder))) throw new Error("Plugin working tree differs from pinned commit")
+  if (!historical && !sameTree(tree, await diskFiles(folder)))
+    throw new Error("Plugin working tree differs from pinned commit")
   if (build) {
     await confined(dataDir, build, true)
     for (const [path, contents] of tree) {

@@ -97,6 +97,9 @@ export interface RolloutTool<A = never> {
   /** Argument used as the plain step title, frozen with setup-tool metadata. */
   readonly titleField?: string
   readonly effect: EffectClass
+  /** Mandatory consent, or a separately validated reversible rollback. Off still refuses. */
+  readonly approval?: "always" | "rollback"
+  readonly adminOnly?: true
   /** False: never one of a story's reply tools (This chat's Tools list leaves it out), only a planner's. */
   readonly replyTool?: false
   /** Model-facing, with its usage guidance: when to call it and when not to. */
@@ -123,7 +126,7 @@ export interface RolloutTool<A = never> {
   readonly describe?: (
     context: ToolContext,
     args: A
-  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope">, unknown>
+  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin">, unknown>
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
 
@@ -155,6 +158,7 @@ export const prepareToolSnapshots = (tools: ReadonlyArray<RolloutTool<never>>, c
  */
 export const USER_ONLY_WRITES = [
   "SetPluginPins",
+  "CompletePluginUndo",
   "SetWorkshopGrant",
   "AnswerToolApproval",
   "RequestToolApproval",

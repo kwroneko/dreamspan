@@ -94,7 +94,7 @@ describe("workshop effect storage", () => {
           result: "Committed",
           effects: [
             {
-              kind: "plugin.commit",
+              kind: "review.commit",
               targetKind: "plugin",
               targetId: "synthetic-plugin",
               title: "Committed a synthetic plugin",

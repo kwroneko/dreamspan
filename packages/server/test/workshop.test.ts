@@ -1,5 +1,6 @@
 import { rewriteTools } from "../src/agent/tools/rewrite.ts"
 import { builtinOperationExposures } from "../src/agent/exposures/builtins.ts"
+import { PLUGIN_TOOLS } from "../src/agent/tools/plugins.ts"
 import { WORKSHOP_HISTORY_TOOLS } from "../src/agent/tools/runs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { mainPrompt } from "@rp/shared/presetOrder.ts"
@@ -240,6 +241,7 @@ describe("workshop", () => {
           "clone_card",
           "start_chat",
           ...WORKSHOP_HISTORY_TOOLS,
+          ...PLUGIN_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
           "send_message"
@@ -523,6 +525,7 @@ describe("workshop", () => {
           "clone_card",
           "start_chat",
           ...WORKSHOP_HISTORY_TOOLS,
+          ...PLUGIN_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
           "send_message"

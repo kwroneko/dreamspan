@@ -117,7 +117,15 @@ export const makePermit =
           (g) => [g.capability, g.mode]
         )
       )
-      const mode = resolveMode(registries, grants, tool.capability, tool.effect)
+      const resolved = resolveMode(registries, grants, tool.capability, tool.effect)
+      const mode =
+        resolved === "off"
+          ? "off"
+          : tool.approval === "always"
+            ? "ask"
+            : tool.approval === "rollback"
+              ? "allow"
+              : resolved
       const capability = tool.capability ?? `effect:${tool.effect}`
       const capabilityLabel = registries.workshopCapabilities.get(tool.capability ?? "")?.label ?? tool.label
       if (mode === "off") return { run: false, text: unavailableText ?? offText(capabilityLabel) } as const
@@ -151,6 +159,7 @@ export const makePermit =
       const prompt: ApprovalPrompt = {
         // Only a call on the story is bound to the asking tab's position; a library or
         // setting change can be allowed from any tab.
+        ...(described?.plugin ? { plugin: described.plugin } : {}),
         ...(described?.storyAt ? { storyAt: described.storyAt } : {}),
         ...(described?.storyScope ? { storyScope: described.storyScope } : {}),
         rolloutId,

@@ -4805,6 +4805,42 @@ const storage: Record<
     ),
   WorkshopGrants: (reader, actor, owner) =>
     refused(reader.WorkshopGrants({ userId: actor.user.id, chatId: owner.chat.chatId, now: 0 }), "NotFound"),
+  AuthorizePluginTool: (reader, actor, owner) =>
+    refused(
+      reader.AuthorizePluginTool({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        toolCallId: "plugin",
+        capability: "plugins.apply",
+        requireApproval: true
+      }),
+      "NotFound"
+    ),
+  RolloutEffectsForRun: (reader, actor, owner) =>
+    refused(
+      reader.RolloutEffectsForRun({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        rolloutId: owner.chat.rolloutId
+      }),
+      "NotFound"
+    ),
+  RolloutEffectFor: (reader, actor, owner) =>
+    refused(
+      reader.RolloutEffectFor({ userId: actor.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "plugin", seq: 0 }),
+      "NotFound"
+    ),
+  CompletePluginUndo: (reader, actor, owner, writer) =>
+    refused(
+      writer.CompletePluginUndo({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        toolCallId: "plugin",
+        seq: 0,
+        result: {}
+      }),
+      "NotFound"
+    ),
   ToolApprovalFor: (reader, actor, owner) =>
     refused(
       reader.ToolApprovalFor({

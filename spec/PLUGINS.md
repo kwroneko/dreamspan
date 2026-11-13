@@ -9,6 +9,8 @@
 
 **Built P3 settings and consent; independently reviewed (2026-11-13):** WORKSHOP §9's P3 row and the Settings/consent/recovery subset of §§5.1, 5.6, 6.3 and 8 are implemented and obsolete as implementation proposals; see ARCHITECTURE §17, “Settings → Plugins and consent”. The existing Settings patterns, exact-version consent, durable details/check/data metadata, Turn off, previous-enabled-version Go back and data deletion are built. Session trust remains Open (PLUGINS §10 question 1; WORKSHOP §10 question 3): updates always ask; no automatic/session trust behavior was inferred. An earlier version that adds declared access asks again. P4–P5, installation fetching, internal overrides and the future sandbox remain unbuilt. Proposed details remain **[P]**. No baseline change relative to P2.
 
+**Built P4 authoring (2026-11-13):** WORKSHOP §9's P4 row and the authoring subset of §§6.1–6.4 are implemented and obsolete as implementation proposals; see ARCHITECTURE §17, “Workshop plugin authoring”. Dedicated confined tools, working/committed checks, generated API references, bounded shipped-source reference, receipts/Undo and exact-version consent are built. P5's `plugin_copy_builtin` and editable copies remain unbuilt. Session trust remains Open and dormant. The Every-tool fallback retains its reviewed declarations and therefore exceeds P4's zero-or-one-line cost target; ARCHITECTURE records the measured limitation. No Proposed item is promoted to Decided; no baseline change relative to P3.
+
 ---
 
 ## 1. What the owner decided (2026-10-11)
