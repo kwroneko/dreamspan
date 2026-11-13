@@ -47,21 +47,32 @@ describe("workshop policies", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("refuses enabling workshop summaries through every state write path", () => {
+  it.live("allows workshop summaries (WORKSHOP-CONTEXT §2.4) through every state write path", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()
       const workshop = yield* api.CreateWorkshop({})
-      assert.strictEqual(yield* outcome(api.SetLcmEnabled({ chatId: workshop.id, enabled: true })), "NotFound")
-      assert.strictEqual(
-        yield* outcome(api.ChangeLcmSettings({ chatId: workshop.id, change: { enabled: true } })),
-        "NotFound"
-      )
       const user = yield* api.Whoami()
-      const writer = yield* Writer
+      const reader = yield* Reader
+      const planOf = () =>
+        reader.PlanSummaries({
+          userId: user.id,
+          chatId: workshop.id,
+          leafSlotId: workshop.activeLeafSlotId!,
+          reason: "reply"
+        })
+      assert.strictEqual(yield* outcome(api.SetLcmEnabled({ chatId: workshop.id, enabled: false })), "ok")
+      assert.isFalse((yield* planOf()).enabled)
+      assert.strictEqual(yield* outcome(api.SetLcmEnabled({ chatId: workshop.id, enabled: true })), "ok")
+      assert.isTrue((yield* planOf()).enabled)
+      assert.strictEqual(
+        yield* outcome(api.ChangeLcmSettings({ chatId: workshop.id, change: { enabled: false } })),
+        "ok"
+      )
+      assert.isFalse((yield* planOf()).enabled)
       assert.strictEqual(
         yield* outcome(
-          writer.AddStateEvent({
+          (yield* Writer).AddStateEvent({
             userId: user.id,
             chatId: workshop.id,
             slotId: null,
@@ -70,38 +81,15 @@ describe("workshop policies", () => {
             data: { key: "lcm.settings", value: { enabled: true } }
           })
         ),
-        "NotFound"
+        "ok"
       )
-      const plan = yield* (yield* Reader).PlanSummaries({
-        userId: user.id,
-        chatId: workshop.id,
-        leafSlotId: workshop.activeLeafSlotId!,
-        reason: "reply"
-      })
+      assert.isTrue((yield* planOf()).enabled)
       assert.strictEqual(
         yield* outcome(
-          (yield* Reader).EstimateBackfill({
-            userId: user.id,
-            chatId: workshop.id,
-            leafSlotId: workshop.activeLeafSlotId!
-          })
+          reader.EstimateBackfill({ userId: user.id, chatId: workshop.id, leafSlotId: workshop.activeLeafSlotId! })
         ),
-        "NotFound"
+        "ok"
       )
-      assert.strictEqual(
-        yield* outcome(
-          writer.EnqueueSummaries({
-            userId: user.id,
-            chatId: workshop.id,
-            leafSlotId: workshop.activeLeafSlotId!,
-            chunks: [],
-            requestClass: "interactive"
-          })
-        ),
-        "NotFound"
-      )
-      assert.isFalse(plan.enabled)
-      assert.isEmpty(plan.chunks)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
   it.live("refuses importing SillyTavern history into a workshop", () => {

@@ -196,7 +196,8 @@ export const layer = (options: DatabaseOptions) => {
       const providers = yield* ProviderDefinitions
       const WriterLive = Layer.effect(
         Writer,
-        Effect.map(RpcClient.make(WriteOps), (calls) =>
+        // The union comes from `OpsOf`, not inferred against the group (TS2589 past ~400 operations).
+        Effect.map(RpcClient.make<OpsOf<typeof WriteOps>>(WriteOps), (calls) =>
           providerDefinitionClient(stateModuleClient(calls, stateModules), providers)
         )
       ).pipe(

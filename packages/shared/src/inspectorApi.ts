@@ -294,7 +294,9 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   continuity: Schema.optionalKey(
     Schema.Struct({
       parentVersionId: Schema.optionalKey(VersionId),
-      reason: Schema.optionalKey(Schema.String)
+      reason: Schema.optionalKey(Schema.String),
+      /** Older tool results left out of the carried request to make room. */
+      elided: Schema.optionalKey(Schema.Int)
     })
   ),
   chatId: ChatId,

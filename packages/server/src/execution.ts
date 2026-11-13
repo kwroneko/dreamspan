@@ -11,6 +11,7 @@ import { libraryTools } from "./agent/tools/library.ts"
 import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
 import { agentReplyStrategy } from "./agent/strategy.ts"
 import { historyTools, storyTools } from "./agent/tools/history.ts"
+import { runTools, workshopHistoryVariants } from "./agent/tools/runs.ts"
 import { editCard } from "./agent/tools/cardEdit.ts"
 import { editNote, listNotes, switchNote, writeNote } from "./agent/tools/notes.ts"
 import { lookupLore } from "./agent/tools/lore.ts"
@@ -104,6 +105,7 @@ export class ExecutionRegistry extends Context.Service<
       yield* kindTools.register({ id: "workshop:history_rename", tool: historyRenameTool as RolloutTool<never> })
       yield* kindTools.register({ id: "workshop:history_search", tool: historySearchTool as RolloutTool<never> })
       for (const tool of rewriteTools) yield* kindTools.register({ id: `workshop:${tool.id}`, tool })
+      for (const variant of workshopHistoryVariants) yield* kindTools.register(variant)
       const catalog = makeRegistry<RolloutTool<never>>()
       const rolloutTools = {
         ...catalog,
@@ -113,6 +115,7 @@ export class ExecutionRegistry extends Context.Service<
       for (const tool of [
         ...historyTools,
         ...storyTools,
+        ...runTools,
         ...libraryTools,
         ...setupTools,
         lookupLore,

@@ -2,54 +2,46 @@ import type { RefId } from "@rp/shared/library.ts"
 /** One writer transaction creates the seeds, their setting, the chat and its greeting. */
 import { type ChatId, type EntityId, NewVersion } from "@rp/shared/chat.ts"
 import { newCardDoc } from "@rp/shared/editing.ts"
-import { promptPreset, type PresetDoc } from "@rp/shared/docs/preset.ts"
-import { charDefinitions, mainPrompt, newestMessage } from "@rp/shared/presetOrder.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
-import { builtinPreset } from "./assemblySources.ts"
 import type { Bin } from "./bin.ts"
 import type { LibrarySteps } from "./editorWrites.ts"
-import { readDefaults, newChatLcmSettings } from "./generationSettings.ts"
+import { newChatLcmSettings, ownedPersona, readDefaults } from "./generationSettings.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { writeGrant } from "./workshopGrants.ts"
 import { SIDE_STORY_READ_MODE } from "../agent/capabilities.ts"
 import { type ChatRow, toChat } from "./rows.ts"
-import { putUserSetting, readSetting } from "./settings.ts"
+import { putUserSetting } from "./settings.ts"
 import { transaction } from "./tx.ts"
-
-const assistant = {
-  ...newCardDoc("Assistant"),
-  description:
-    "Practical and brief. You say what you're about to change, change it, then say what you changed. You don't describe changes you haven't made.",
-  first_mes: "What would you like to work on, {{user}}?"
-}
-const preset: PresetDoc = {
-  ...promptPreset(builtinPreset),
-  prompts: [
-    {
-      ...mainPrompt,
-      content:
-        "You are the workshop assistant in a roleplay app. You help {{user}} with the app itself: characters, chats, prompt presets, lorebooks, settings, and plugins that change how the app works. You don't roleplay here."
-    },
-    charDefinitions,
-    { ...newestMessage, identifier: "chatHistory", name: "Chat history" },
-    newestMessage
-  ],
-  order: ["main", "charDefinitions", "chatHistory", "newestMessage"].map((identifier) => ({
-    identifier,
-    enabled: true
-  })),
-  utility_prompts: { ...builtinPreset.utility_prompts, new_chat_prompt: "", new_group_chat_prompt: "" },
-  prefill: { assistant: "", impersonation: "", continue: false, continue_postfix: "" }
-}
+import {
+  ownedCard,
+  readStoredWorkshopDefaults,
+  type StoredWorkshopDefaults,
+  workshopDefaultsOf
+} from "./workshopDefaults.ts"
+import { defaultSeed } from "./workshopSeeds.ts"
 
 export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
   const { sql } = steps
   const graph = makeGraphWrites(sql, bin.drafts, true)
+  /** Whether a persona is the account's story persona, or a card cast, played or speaking in `story`. */
+  const inStory = (userId: UserId, story: string, persona: string) =>
+    Effect.gen(function* () {
+      if ((yield* readDefaults(sql, userId)).persona === persona) return true
+      const [hit] = yield* sql<{ n: number }>`SELECT 1 AS n FROM state_events
+        WHERE chat_id = ${story} AND key IN ('participant.join', 'played_by_me.set')
+          AND (value_json ->> '$.entity' = ${persona}
+            OR EXISTS (SELECT 1 FROM json_each(value_json, '$.entities') WHERE value = ${persona}))
+        UNION ALL SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id
+          WHERE s.chat_id = ${story} AND v.speaker_entity_id = ${persona}
+        LIMIT 1`
+      return hit !== undefined
+    })
   return {
-    CreateWorkshop: ({ userId, title, attachTo }) =>
+    CreateWorkshop: ({ userId, title, attachTo, card: chosenCard, persona: chosenPersona }) =>
       Effect.gen(function* () {
         // A side chat's story: the user's, live, of a kind that takes one (spec/WORKSHOP.md §4).
         const [story] =
@@ -59,10 +51,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
                 WHERE id = ${attachTo} AND owner_user_id = ${userId} AND deleted_at IS NULL AND status = 'active'`
         if (attachTo !== undefined && (!story || chatKinds.get(story.kind)?.allowsSideChat !== true))
           return yield* new NotFound({ entity: "chat", id: attachTo })
-        const stored = (yield* readSetting(sql, "user", userId, "workshop.defaults")).value as {
-          card: string
-          preset: string
-        } | null
+        const stored = yield* readStoredWorkshopDefaults(sql, userId)
         // A deleted or foreign seed is replaced individually; the other editable seed survives.
         const seed = (kind: "card" | "preset", id: string | undefined) =>
           Effect.gen(function* () {
@@ -71,25 +60,70 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           WHERE e.owner_user_id = ${userId} AND e.kind = ${kind} AND e.deleted_at IS NULL
             AND e.purged_at IS NULL AND ${kind === "card" ? sql`e.id = ${id ?? null}` : sql`r.id = ${id ?? null}`}`
             if (existing) return existing
+            // The registered default of its kind (db/workshopSeeds.ts).
+            const entry = defaultSeed(kind)
+            if (!entry) return yield* new NotFound({ entity: kind, id: "workshop default" })
             return yield* steps.createUpstream({
               userId,
               kind,
-              label: kind === "card" ? "Assistant" : "Workshop",
+              label: entry.label,
               subtitle: "",
-              doc: steps.encode(kind === "card" ? assistant : preset),
+              doc: steps.encode(entry.doc() as never),
               schemaVersion: 1,
               origin: "import",
-              originRef: kind === "card" ? "builtin:workshop-assistant@1" : "builtin:workshop-preset@1",
+              originRef: entry.originRef,
               sourcePath: null,
               sourceHash: null
             })
           })
-        const card = yield* seed("card", stored?.card)
-        const prompt = yield* seed("preset", stored?.preset)
-        const defaults = { card: card.entity_id, preset: prompt.id }
-        if (!stored || stored.card !== defaults.card || stored.preset !== defaults.preset)
+        const defaultCard = yield* seed("card", stored?.card || undefined)
+        const prompt = yield* seed("preset", stored?.preset || undefined)
+        // The workshop persona, independent of the story default (owner, 2026-11-12): made once,
+        // with the first seeds, from the account's display name, and never made again once it
+        // was chosen, cleared or deleted (a deleted one leaves the workshop without a persona).
+        let persona: string | null =
+          typeof stored?.persona === "string" && (yield* ownedPersona(sql, userId, stored.persona))
+            ? stored.persona
+            : null
+        if (stored?.persona === undefined) {
+          const [account] = yield* sql<{
+            display_name: string
+          }>`SELECT display_name FROM users WHERE id = ${userId}`
+          const name = account?.display_name.trim() || "Me"
+          const made = yield* steps.createUpstream({
+            userId,
+            kind: "card",
+            label: name,
+            subtitle: "",
+            doc: steps.encode(newCardDoc(name) as never),
+            schemaVersion: 1,
+            origin: "import",
+            originRef: "builtin:workshop-persona@1",
+            sourcePath: null,
+            sourceHash: null
+          })
+          yield* sql`INSERT OR IGNORE INTO entity_tags (entity_id, tag) VALUES (${made.entity_id}, 'persona')`
+          persona = made.entity_id
+        }
+        const defaults: StoredWorkshopDefaults = { card: defaultCard.entity_id, preset: prompt.id, persona }
+        if (
+          !stored ||
+          stored.card !== defaults.card ||
+          stored.preset !== defaults.preset ||
+          stored.persona !== defaults.persona
+        )
           yield* putUserSetting(sql, userId, "workshop.defaults", defaults)
-        const account = yield* readDefaults(sql, userId)
+        // This workshop's own choices; they never change the defaults.
+        if (chosenCard !== undefined && !(yield* ownedCard(sql, userId, chosenCard)))
+          return yield* new NotFound({ entity: "card", id: chosenCard })
+        if (chosenPersona != null && !(yield* ownedPersona(sql, userId, chosenPersona)))
+          return yield* new NotFound({ entity: "persona", id: chosenPersona })
+        const card =
+          chosenCard === undefined
+            ? defaultCard
+            : (yield* sql<{ entity_id: string; id: string }>`SELECT entity_id, id FROM entity_refs
+                WHERE entity_id = ${chosenCard} ORDER BY id LIMIT 1`)[0]!
+        const account = { persona: chosenPersona === undefined ? persona : chosenPersona }
         const at = Date.now()
         const chatId = uuidv7() as ChatId
         const storyTitle = story?.title?.trim()
@@ -105,20 +139,27 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         }
         yield* graph.insertStateEvent(userId, chatId, null, null, null, {
           key: "lcm.settings",
-          value: yield* newChatLcmSettings(sql, userId, false)
+          // As a new story chat: the user's default (spec/WORKSHOP-CONTEXT.md §2.4).
+          value: yield* newChatLcmSettings(sql, userId)
         })
-        // A side chat beside a story doesn't play the account persona: its card is a story
-        // character, whose description and book would put the story's roleplay in its context.
-        const persona = attachTo === undefined ? account.persona : null
-        for (const entity of new Set([card.entity_id, ...(persona ? [persona] : [])]))
+        // A side chat plays the workshop persona too, but never the account's story persona nor a
+        // card of its story: their descriptions and books would put the story's roleplay in its
+        // context (workfix1). It then has none, and {{user}} is the account name.
+        const played =
+          attachTo === undefined || !account.persona
+            ? account.persona
+            : (yield* inStory(userId, attachTo, account.persona))
+              ? null
+              : account.persona
+        for (const entity of new Set([card.entity_id, ...(played ? [played] : [])]))
           yield* graph.insertStateEvent(userId, chatId, null, null, null, {
             key: "participant.join",
             value: { entity: entity as EntityId }
           })
-        if (persona)
+        if (played)
           yield* graph.insertStateEvent(userId, chatId, null, null, null, {
             key: "played_by_me.set",
-            value: { entities: [persona] }
+            value: { entities: [played as EntityId] }
           })
         yield* graph.insertStateEvent(userId, chatId, null, null, null, {
           key: "preset.binding",
@@ -143,6 +184,20 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`
         const [row] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
         return toChat(row!)
-      }).pipe(transaction(sql, "CreateWorkshop"))
+      }).pipe(transaction(sql, "CreateWorkshop")),
+    /** The workshop persona only; the story default persona (`chat.persona`) never changes here. */
+    SetWorkshopPersona: ({ userId, persona }) =>
+      Effect.gen(function* () {
+        if (persona !== null && !(yield* ownedPersona(sql, userId, persona)))
+          return yield* new NotFound({ entity: "persona", id: persona })
+        const stored = yield* readStoredWorkshopDefaults(sql, userId)
+        // Before the first workshop there are no seeds yet: empty ids make it seed them.
+        yield* putUserSetting(sql, userId, "workshop.defaults", {
+          card: stored?.card ?? "",
+          preset: stored?.preset ?? "",
+          persona
+        })
+        return yield* workshopDefaultsOf(sql, userId)
+      }).pipe(transaction(sql, "SetWorkshopPersona"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
 }

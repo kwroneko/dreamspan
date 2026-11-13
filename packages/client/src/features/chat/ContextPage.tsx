@@ -686,6 +686,9 @@ function Inspector({ run }: { run: RunContext }) {
             ) : (
               run.continuity.reason
             )}
+            {run.continuity.elided
+              ? ` Older tool results were left out to make room (${counted(run.continuity.elided, "result")}); the assistant can read them again.`
+              : ""}
           </p>
         )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">

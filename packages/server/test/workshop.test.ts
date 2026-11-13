@@ -1,5 +1,6 @@
 import { rewriteTools } from "../src/agent/tools/rewrite.ts"
 import { builtinOperationExposures } from "../src/agent/exposures/builtins.ts"
+import { WORKSHOP_HISTORY_TOOLS } from "../src/agent/tools/runs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { mainPrompt } from "@rp/shared/presetOrder.ts"
 import { textField } from "@rp/shared/editing.ts"
@@ -117,15 +118,27 @@ describe("workshop", () => {
       const state = foldState(
         yield* reader.StateEventsAt({ userId: user.id, chatId: first.id, slotId: first.activeLeafSlotId })
       )
-      assert.deepStrictEqual(state.playedByMe, [persona.entityId])
-      assert.deepStrictEqual(state.participants, [card.entityId, persona.entityId])
+      // The story default persona is not the workshop's: a workshop persona is made once instead.
+      const workshopPersona = (yield* api.GetWorkshopDefaults({})).persona!
+      assert.notStrictEqual(workshopPersona, persona.entityId)
+      assert.deepStrictEqual(state.playedByMe, [workshopPersona])
+      assert.deepStrictEqual(state.participants, [card.entityId, workshopPersona])
       assert.strictEqual(state.presetBindings[""]?.ref, preset.id)
-      assert.strictEqual(state.lcm?.enabled, false)
+      // Summaries start as a new story chat's do (WORKSHOP-CONTEXT §2.4).
+      const story = yield* api.CreateChat({ title: "Synthetic story" })
+      const storyState = foldState(
+        yield* reader.StateEventsAt({ userId: user.id, chatId: story.id, slotId: story.activeLeafSlotId })
+      )
+      assert.deepStrictEqual(state.lcm, storyState.lcm)
       yield* edit(api, card.id, "first_mes", "An edited greeting.")
       yield* edit(api, preset.id, "main", "Edited workshop prompt.")
       const second = yield* api.CreateWorkshop({})
       assert.lengthOf(
         (yield* api.ListLibrary({ kind: "card" })).filter((r) => r.label === "Assistant"),
+        1
+      )
+      assert.lengthOf(
+        (yield* api.ListLibrary({ kind: "card" })).filter((r) => r.entityId === workshopPersona),
         1
       )
       assert.lengthOf(yield* api.ListLibrary({ kind: "preset" }), 1)
@@ -222,6 +235,7 @@ describe("workshop", () => {
           "edit_lorebook",
           "clone_card",
           "start_chat",
+          ...WORKSHOP_HISTORY_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
           "send_message"
@@ -503,6 +517,7 @@ describe("workshop", () => {
           "edit_lorebook",
           "clone_card",
           "start_chat",
+          ...WORKSHOP_HISTORY_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
           "send_message"

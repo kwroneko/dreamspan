@@ -20,12 +20,26 @@ import { SIDE_CHAT_TAB, TALK_ABOUT } from "./sideChat.ts"
 import { StepEffects } from "./StepEffects.tsx"
 import { talkAbout } from "./talkAbout.ts"
 import { WorkshopStartCard } from "./StartCard.tsx"
+import { ConvertPresetButton } from "./ConvertPreset.tsx"
+import { registerWorkshopPersona } from "./workshopPersona.tsx"
+import { editorActions } from "../editor/editorSlots.ts"
+import { panelEditorActions } from "../editor/panelActions.tsx"
+import type { EditorStore } from "../editor/store.ts"
+
+const convert = (compact: boolean) =>
+  function ConvertAction({ store }: { store: EditorStore }) {
+    return <ConvertPresetButton store={store} compact={compact} />
+  }
 
 const RegenerateWarning = lazy(() => import("./RegenerateWarning.tsx"))
 
 export const register = () => [
   chatKindLooks.register(workshopLook),
+  ...registerWorkshopPersona(),
   chatStartSections.register({ id: "workshop.start", order: 20, component: WorkshopStartCard }),
+  // A story preset made into a workshop one (spec/WORKSHOP-CONTEXT.md §4.4), in the large and side-panel editors.
+  editorActions.register({ id: "workshop.convert-preset", order: 20, component: convert(false) }),
+  panelEditorActions.register({ id: "workshop.convert-preset", order: 30, component: convert(true) }),
   // After the cache chip, where Next stands in a story chat.
   composerControls.register({
     id: CAPABILITY_CHIP,

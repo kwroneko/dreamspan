@@ -11,6 +11,7 @@ import { foldState } from "@rp/shared/state.ts"
 import { Effect, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { storyTools } from "../src/agent/tools/history.ts"
+import { runTools } from "../src/agent/tools/runs.ts"
 import { type ToolContext, type RolloutTool, toolWriter } from "../src/agent/tools.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import { client, login, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
@@ -364,6 +365,51 @@ describe("side chat", () => {
         .pipe(Effect.catch((error) => Effect.succeed({ isError: true, text: String(error) })))
       assert.isTrue(preview.isError)
       assert.notInclude(preview.text, "LATER_TEXT")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("gives back an earlier run's story reads only at the same position of the unchanged story", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => provider()),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const userId = (yield* api.Whoami()).id
+      const story = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {}
+      })
+      const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })
+      const first = yield* storyOf(api, workshop)
+      yield* turn(api, workshop, "What happened so far?", undefined, first)
+      const leaf = (yield* api.GetChat({ chatId: workshop.id })).activeLeafSlotId
+      const readRun = runTools.find((t) => t.id === "read_run")! as RolloutTool<Record<string, unknown>>
+      const stepsAt = (at: StoryAt | undefined) =>
+        Effect.gen(function* () {
+          const context = { ...(yield* contextFor(userId, workshop, at)), leafSlotId: leaf }
+          return (yield* readRun.execute(context, { message: 3, max_tokens: 8000 })).text
+        })
+      // The same position of the same story: the run's reads, as a carried request would keep them.
+      const same = yield* stepsAt(first)
+      assert.include(same, "read_story")
+      assert.include(same, "Late again")
+      // The story moves on: neither the new position nor the old one (its story changed) gets them.
+      yield* posted(
+        api.SendMessage({
+          chatId: story.chat.id,
+          parentSlotId: first.leafSlotId,
+          branch: false,
+          content: "A later message."
+        })
+      )
+      for (const at of [yield* storyOf(api, workshop), first, undefined]) {
+        const withheld = yield* stepsAt(at)
+        assert.include(withheld, "read_story")
+        assert.notInclude(withheld, "Late again")
+        assert.include(withheld, "read it again with read_story")
+      }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

@@ -134,7 +134,7 @@ const pathRead = (context: ToolContext) =>
  */
 const namer = (context: ToolContext, speakerIds: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const { playedByMe } = foldState(
+    const { playedByMe, participants } = foldState(
       yield* context.reader.StateEventsAt({
         userId: context.userId,
         chatId: context.chatId,
@@ -143,12 +143,17 @@ const namer = (context: ToolContext, speakerIds: ReadonlyArray<string>) =>
       })
     )
     const persona = playedByMe.at(-1) ?? null
-    const speakers = [...new Set([...speakerIds, ...(persona ? [persona] : [])])]
+    // A model reply stored without a speaker, in a chat with one voice, is that voice's: a
+    // workshop's assistant writes its replies so (spec/WORKSHOP-CONTEXT.md §3.3).
+    const voices = participants.filter((p) => !playedByMe.includes(p))
+    const voice = voices.length === 1 ? voices[0]! : null
+    const speakers = [...new Set([...speakerIds, ...(persona ? [persona] : []), ...(voice ? [voice] : [])])]
     const cards = speakers.length
       ? yield* context.reader.CastCards({ userId: context.userId, entityIds: speakers as Array<EntityId> })
       : []
     const names = new Map(cards.map((card) => [card.entityId as string, card.modelName ?? card.name]))
     const user = (persona && names.get(persona)) ?? "User"
+    const unnamed = (voice && names.get(voice)) ?? "Narrator"
     return (message: {
       readonly n: number
       readonly speakerEntityId: string | null
@@ -156,7 +161,7 @@ const namer = (context: ToolContext, speakerIds: ReadonlyArray<string>) =>
       readonly macroMode: string
       readonly content: string
     }): PathMessage => {
-      const speaker = names.get(message.speakerEntityId ?? "") ?? (message.writer === "human" ? user : "Narrator")
+      const speaker = names.get(message.speakerEntityId ?? "") ?? (message.writer === "human" ? user : unnamed)
       const content =
         message.macroMode === "template"
           ? message.content.replace(/\{\{char\}\}/gi, speaker).replace(/\{\{user\}\}/gi, user)

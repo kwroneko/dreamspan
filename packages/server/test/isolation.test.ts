@@ -1220,11 +1220,36 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) => refused(actor.api.ListVersionEffects({ versionId: owner.chat.versionId }), "NotFound")
   },
   CreateWorkshop: {
-    // A side chat only ever beside one's own story.
-    probe: (actor, owner) => refused(actor.api.CreateWorkshop({ attachTo: owner.chat.chatId }), "NotFound")
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // A side chat only ever beside one's own story.
+        yield* refused(actor.api.CreateWorkshop({ attachTo: owner.chat.chatId }), "NotFound")
+        // Another user's card as the assistant or as the persona.
+        yield* refused(actor.api.CreateWorkshop({ card: owner.cardId }), "NotFound")
+        yield* refused(actor.api.CreateWorkshop({ persona: owner.cardId }), "NotFound")
+      })
   },
   ListAttachedWorkshops: {
     probe: (actor, owner) => refused(actor.api.ListAttachedWorkshops({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  GetWorkshopDefaults: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetWorkshopPersona({ persona: owner.cardId })
+        const mine = yield* actor.api.GetWorkshopDefaults({})
+        assert.notStrictEqual(mine.persona, owner.cardId)
+        yield* owner.api.SetWorkshopPersona({ persona: null })
+      })
+  },
+  SetWorkshopPersona: {
+    probe: (actor, owner) => refused(actor.api.SetWorkshopPersona({ persona: owner.cardId }), "NotFound")
+  },
+  ConvertPresetToWorkshop: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.ConvertPresetToWorkshop({ refId: owner.refId, label: "Taken", choices: [], instructions: "" }),
+        "NotFound"
+      )
   },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
   GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },

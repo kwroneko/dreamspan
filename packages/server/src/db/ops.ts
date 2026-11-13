@@ -29,7 +29,8 @@ import {
   RolloutEffectRecord,
   EffectUndoRefused,
   ReplyEffects,
-  UndoAllReport
+  UndoAllReport,
+  WorkshopDefaults
 } from "@rp/shared/workshopApi.ts"
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
@@ -2273,8 +2274,19 @@ export class WriteOpsLibrary extends RpcGroup.make(
    * (spec/WORKSHOP.md §4): its `workshop.attached` event and its reading of the story allowed.
    */
   Rpc.make("CreateWorkshop", {
-    payload: { userId: UserId, title: Schema.optionalKey(Schema.String), attachTo: Schema.optionalKey(ChatId) },
+    payload: {
+      userId: UserId,
+      title: Schema.optionalKey(Schema.String),
+      attachTo: Schema.optionalKey(ChatId),
+      card: Schema.optionalKey(Schema.String),
+      persona: Schema.optionalKey(Schema.NullOr(Schema.String))
+    },
     success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SetWorkshopPersona", {
+    payload: { userId: UserId, persona: Schema.NullOr(Schema.String) },
+    success: WorkshopDefaults,
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("StartChat", {
@@ -4239,7 +4251,8 @@ export class ReadOps extends RpcGroup.make(
           instructions: Schema.String,
           speakerCardOnly: Schema.Boolean,
           workshop: Schema.optionalKey(Schema.Boolean),
-          stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
+          stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+          response: Schema.optionalKey(Schema.Literals(["model"]))
         })
       ),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
@@ -4441,6 +4454,12 @@ export class ReadOps extends RpcGroup.make(
       )
     }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** What new workshops start with (db/workshopDefaults.ts). */
+  Rpc.make("WorkshopDefaults", {
+    payload: { userId: UserId },
+    success: WorkshopDefaults,
+    error: StorageError
   }),
   /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
   Rpc.make("ListRolloutEffects", {

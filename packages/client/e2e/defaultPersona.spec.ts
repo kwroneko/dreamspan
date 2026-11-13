@@ -53,7 +53,7 @@ for (const width of [1440, 390]) {
     const setDefault = page.getByRole("menuitem", { name: "Set as default persona", exact: true })
     await setDefault.focus()
     await expect(setDefault).toHaveAccessibleDescription(
-      "New chats start with this persona. Existing chats keep theirs."
+      "New story chats start with this persona. Existing chats keep theirs; workshops have their own."
     )
     await setDefault.click()
     await expect.poll(async () => (await setting()).persona).toBe(a.entityId)

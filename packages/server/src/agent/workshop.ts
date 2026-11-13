@@ -1,5 +1,6 @@
 import type { OrchestrationMode } from "./modes.ts"
 import { STORY_TOOLS } from "./tools/history.ts"
+import { WORKSHOP_HISTORY_TOOLS } from "./tools/runs.ts"
 
 // What a capability turned off in this workshop is (spec/WORKSHOP.md §3.4) is named in the instructions.
 const workshopInstructions = (off: ReadonlyArray<string>) =>
@@ -28,6 +29,8 @@ export const workshopMode: OrchestrationMode = {
       "edit_lorebook",
       "clone_card",
       "start_chat",
+      // The conversation's own history (spec/WORKSHOP-CONTEXT.md §3.3).
+      ...WORKSHOP_HISTORY_TOOLS,
       // A side chat reads its story (§4); nothing else offers these.
       ...(state.workshopAttached === undefined ? [] : STORY_TOOLS)
     ],
@@ -39,7 +42,8 @@ export const workshopMode: OrchestrationMode = {
         workshopInstructions(context?.off ?? []) +
         (STORY_TOOLS.some((tool) => offered.includes(tool)) ? SIDE_CHAT : ""),
       speakerCardOnly: false,
-      workshop: true
+      workshop: true,
+      response: "model"
     }
   })
 }

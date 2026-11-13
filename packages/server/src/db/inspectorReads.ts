@@ -353,7 +353,8 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
                   ...(snapshot.continuity.parent
                     ? { parentVersionId: snapshot.continuity.parent.versionId as VersionId }
                     : {}),
-                  ...(snapshot.continuity.reason ? { reason: snapshot.continuity.reason } : {})
+                  ...(snapshot.continuity.reason ? { reason: snapshot.continuity.reason } : {}),
+                  ...(snapshot.continuity.elided ? { elided: snapshot.continuity.elided } : {})
                 }
               }
             : {}),
