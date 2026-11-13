@@ -86,6 +86,218 @@ const viewNumber = (text: string) => {
 }
 
 describe("private addresses after a join", () => {
+  it.live("a later unseen join cannot change an ordinary frozen shared-context search", () =>
+    runStory(null, (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "LANTERNKNOWN")
+        const tools = yield* toolsFor(t, t.F, t.wren)
+        const original = yield* tools("search_chat", { query: "LANTERNKNOWN" })
+        assert.include(original, "LANTERNKNOWN")
+        const frozen = hook.freeze!(yield* hook.prepare(tools.context, undefined))
+        assert.deepStrictEqual(frozen, { ordinary: true })
+        yield* t.append(t.U, t.pell, "UNSEENUPSTAIRS")
+        yield* t.join(t.F, [t.U], null, "separate")
+        const replay = yield* thawed(tools.context, frozen)
+        assert.strictEqual(yield* replay("search_chat", { query: "LANTERNKNOWN" }), original)
+      })
+    )
+  )
+
+  it.live("a later unseen separate join cannot retroactively restrict a frozen shared-context view", () =>
+    runStory(null, (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "LANTERNMISSED")
+        yield* t.append(t.D, t.wren, "DOCKSKNOWN")
+        const firstJoin = (yield* t.join(t.F, [t.D], null, "separate")).entries[0]!
+        yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: firstJoin.slotId,
+          versionId: null,
+          scope: null,
+          data: { key: "away.set", value: { entity: t.wren, away: true } }
+        })
+        yield* t.append(t.F, t.mira, "SHAREDKNOWN")
+        const tools = yield* toolsFor(t, t.F, t.wren)
+        const original = yield* tools("search_chat", { query: "SHAREDKNOWN" })
+        assert.include(original, "SHAREDKNOWN", "outside the first separate stretch, the context is shared")
+        const frozen = hook.freeze!(yield* hook.prepare(tools.context, undefined))
+        yield* t.append(t.U, t.pell, "UNSEENUPSTAIRS")
+        yield* t.join(t.F, [t.U], null, "separate")
+        const replay = yield* thawed(tools.context, frozen)
+        assert.strictEqual(yield* replay("search_chat", { query: "SHAREDKNOWN" }), original)
+      })
+    )
+  )
+
+  it.live("whole-path search retains its existing fallback when a join is hidden", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "LANTERNOWN")
+        yield* t.append(t.D, t.wren, "DOCKSKNOWN")
+        const joined = (yield* t.join(t.F, [t.D])).entries[0]!
+        yield* t.writer.SetSlotHidden({ userId: t.userId, slotId: joined.slotId, forkId: t.F, hidden: true })
+        const tools = yield* toolsFor(t, t.F, t.mira)
+        const result = yield* historyTools
+          .find((tool) => tool.id === "search_chat")!
+          .execute(
+            {
+              ...tools.context,
+              viewers: null,
+              cache: new Map()
+            },
+            { query: "ANTERNOWN" } as never
+          )
+        assert.strictEqual(result.text, "Message 4, Mira: LANTERNOWN")
+      })
+    )
+  )
+
+  it.live("preflight preserves a regenerated join's speaker exception after an earlier split", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        const anchor = yield* t.append(t.F, t.mira, "LANTERNANCHOR")
+        yield* t.append(t.D, t.wren, "DOCKSKNOWN")
+        const joined = (yield* t.join(t.F, [t.D])).entries[0]!
+        const at = yield* t.reader.GetSlot({ userId: t.userId, slotId: anchor.slotId, forkId: t.F })
+        yield* t.api.StartThreads({
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: anchor.slotId,
+          expectedRowVersion: at.entry.rowVersion,
+          threads: [
+            { name: "The Lantern again", cast: [t.mira], writesAs: null },
+            { name: "The yard", cast: [t.wren], writesAs: null }
+          ]
+        })
+        yield* t.writer.AddVersion({
+          userId: t.userId,
+          slotId: joined.slotId,
+          forkId: t.F,
+          select: true,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: t.wren,
+            writer: "model",
+            content: joined.version.content,
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "generated"
+          })
+        })
+        const tools = yield* toolsFor(t, t.F, t.wren)
+        const expected = yield* tools("search_chat", { query: "DOCKSKNOWN" })
+        assert.include(expected, "DOCKSKNOWN")
+        const context = { ...tools.context, cache: new Map<string, unknown>() }
+        yield* hook.prepare(context, undefined)
+        const result = yield* historyTools
+          .find((tool) => tool.id === "search_chat")!
+          .execute(context, { query: "DOCKSKNOWN" } as never)
+        assert.strictEqual(result.text, expected)
+      })
+    )
+  )
+
+  it.live("an unknown join cannot change ordinary indexed search matching", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "LANTERNOWN")
+        yield* t.append(t.D, t.wren, "DOCKSUNKNOWN")
+        const before = yield* toolsFor(t, t.F, t.mira)
+        const expected = yield* before("search_chat", { query: "ANTERNOWN" })
+        yield* t.join(t.F, [t.D])
+        const after = yield* toolsFor(t, t.F, t.mira)
+        assert.strictEqual(yield* after("search_chat", { query: "ANTERNOWN" }), expected)
+      })
+    )
+  )
+
+  it.live("an unseen inserted join cannot change a frozen private map or its own-story gap", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.D, t.wren, "DOCKSKNOWN")
+        yield* t.join(t.F, [t.D])
+        const start = yield* t.append(t.F, t.wren, "KNOWNBEFORE")
+        yield* t.writer.AddStateEvent({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.F,
+          slotId: start.slotId,
+          versionId: null,
+          scope: null,
+          data: { key: "away.set", value: { entity: t.wren, away: true } }
+        })
+        const missed = yield* t.append(t.F, t.mira, "MISSEDMIDDLE")
+        const end = yield* t.append(t.F, t.wren, "KNOWNAFTER")
+        const tools = yield* toolsFor(t, t.F, t.wren)
+        const context = { ...tools.context, forkId: t.F, leafSlotId: end.slotId as SlotId }
+        const before = (id: string, args: object) =>
+          Effect.map(historyTools.find((tool) => tool.id === id)!.execute(context, args as never), (out) => out.text)
+        const original = yield* before("search_chat", { query: "KNOWNAFTER" })
+        assert.strictEqual(viewNumber(original) - viewNumber(yield* before("search_chat", { query: "KNOWNBEFORE" })), 2)
+        const frozen = hook.freeze!(yield* hook.prepare(context, undefined))
+        yield* t.append(t.U, t.pell, "UNSEENUPSTAIRS")
+        yield* t.join(t.F, [t.U], missed.slotId, "separate")
+        const insertedPath = yield* t.reader.ReadPath({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.F,
+          leafSlotId: null,
+          range: { _tag: "Bottom" },
+          limit: 30
+        })
+        assert.isAbove(insertedPath.entries.filter((e) => e.version.origin === "merge").length, 1)
+        const replay = yield* thawed(context, frozen)
+        assert.strictEqual(yield* replay("search_chat", { query: "KNOWNAFTER" }), original)
+        const after = yield* toolsFor(t, t.F, t.wren)
+        assert.strictEqual(yield* after("search_chat", { query: "KNOWNAFTER" }), original)
+        assert.deepStrictEqual(after.snapshot.request, tools.snapshot.request)
+      })
+    )
+  )
+
+  it.live("a positive preflight racing a hidden join must still freeze ordinary mode", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.D, t.wren, "DOCKSKNOWN")
+        const join = (yield* t.join(t.F, [t.D])).entries[0]!
+        const tools = yield* toolsFor(t, t.F, t.wren)
+        const context = {
+          ...tools.context,
+          reader: {
+            ...t.reader,
+            HistoryProjectionNeeded: ((input) =>
+              t.reader.HistoryProjectionNeeded(input).pipe(
+                Effect.tap(() =>
+                  t.writer.SetSlotHidden({
+                    userId: t.userId,
+                    slotId: join.slotId,
+                    forkId: tools.context.forkId!,
+                    hidden: true
+                  })
+                )
+              )) as ToolContext["reader"]["HistoryProjectionNeeded"]
+          }
+        }
+        const frozen = hook.freeze!(yield* hook.prepare(context, undefined))
+        yield* t.writer.SetSlotHidden({
+          userId: t.userId,
+          slotId: join.slotId,
+          forkId: tools.context.forkId!,
+          hidden: false
+        })
+        const replay = { ...tools.context, cache: new Map<string, unknown>() }
+        yield* hook.prepare(replay, frozen)
+        const result = yield* historyTools
+          .find((tool) => tool.id === "search_chat")!
+          .execute(replay, { query: "DOCKSKNOWN" } as never)
+        assert.strictEqual(result.text, PRIVATE_EMPTY)
+        assert.deepStrictEqual(frozen, { ordinary: true })
+      })
+    )
+  )
+
   it.live("an unknown join keeps ordinary results, summary tools and request bytes", () =>
     runStory("separate", (t) =>
       Effect.gen(function* () {
@@ -129,9 +341,21 @@ describe("private addresses after a join", () => {
           ["read_messages", { from: 1, count: 20 }],
           ["search_chat", { query: "MORNINGKNOWN" }],
           ["read_messages", { from: 999999 }],
-          ["search_chat", { query: "DOCKSUNKNOWN" }]
-        ] as const)
-          assert.strictEqual(yield* joined(id, args), yield* control(id, args))
+          ["read_messages", { from: 5, count: 1 }],
+          ["search_chat", { query: "DOCKSUNKNOWN" }],
+          ["search_chat", { query: "ANTERNOWN" }],
+          ["search_chat", { query: "" }],
+          ["search_summaries", { query: "DOCKSUNKNOWN" }],
+          ["expand_summary", { messages: "1–3" }],
+          ["expand_summary", { messages: "invalid", joined: "At the docks" }]
+        ] as const) {
+          const tool = historyTools.find((tool) => tool.id === id)!
+          assert.strictEqual(
+            JSON.stringify(yield* tool.execute(joined.context, args as never)),
+            JSON.stringify(yield* tool.execute(control.context, args as never)),
+            id
+          )
+        }
         assert.deepStrictEqual(joined.snapshot.request, control.snapshot.request)
       })
     )

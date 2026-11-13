@@ -4149,6 +4149,8 @@ export class ReadOps extends RpcGroup.make(
    * (greetings) always, for the caller to fill in and match. Null when the fork places inserted
    * messages, whose numbering the display path gives, or the chat has a merge, whose join the
    * caller reads row by row (spec/THREADS.md §11, TH8): the caller reads the path instead.
+   * ordinaryOnly excludes all join slots and retains indexed matching after the caller
+   * verifies that none of its projected rows came from joins.
    */
   Rpc.make("SearchChat", {
     payload: {
@@ -4159,6 +4161,9 @@ export class ReadOps extends RpcGroup.make(
       tokens: Schema.Array(Schema.String),
       before: Schema.NullOr(Schema.Int),
       limit: Schema.Int,
+      /** The caller verified that its path exposes no joined rows. Search ordinary rows only,
+       * preserving indexed matching even when another unseen thread was joined. */
+      ordinaryOnly: Schema.optionalKey(Schema.Boolean),
       /**
        * A separate context's viewer, as its identities through card replacements: only messages
        * it knew (spec/CHARACTER-CONTEXT.md §3, C5).
@@ -4189,6 +4194,8 @@ export class ReadOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      /** Bound stretch joins by the original reply's causal horizon, including on Resume. */
+      leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId)),
       versionIds: Schema.Array(Schema.String),
       viewers: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
     },

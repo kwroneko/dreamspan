@@ -113,6 +113,7 @@ const missedBy = (context: ToolContext, entries: ReadonlyArray<PathEntry>, view:
         userId: context.userId,
         chatId: context.chatId,
         forkId: context.forkId,
+        leafSlotId: context.leafSlotId,
         versionIds: ids.slice(at, at + KNOWERS_BATCH),
         viewers: context.viewers
       })
@@ -299,7 +300,6 @@ const pathRead = (context: ToolContext) =>
       let rank = 0
       const messages = entries.flatMap((entry): Array<PathMessage> => {
         const { version } = entry
-        if (joins.has(entry.slotId)) story++
         const n = numberOf(entry)
         if (
           entry.contextExcluded ||
@@ -323,6 +323,9 @@ const pathRead = (context: ToolContext) =>
           applies ? (knowers) => view.identities.some((id) => knowers.includes(id)) : () => true
         )
         joined.push(...read.summaries)
+        // An unseen/hidden join has exactly the effect of a hidden ordinary message. It
+        // cannot split an own-story absence, renumber later rows or invalidate a frozen map.
+        if (read.messages.length > 0) story++
         return [...read.messages]
       })
       return {
@@ -377,7 +380,12 @@ const namer = (context: ToolContext, speakerIds: ReadonlyArray<string>) =>
  * The messages before the one being generated that full-text search finds for `words`, newest
  * first (reader `SearchChat`); null where the fork places inserted messages, so the path is read.
  */
-const searched = (context: ToolContext, words: ReadonlyArray<string>, before: number | undefined) =>
+const searched = (
+  context: ToolContext,
+  words: ReadonlyArray<string>,
+  before: number | undefined,
+  ordinaryOnly = false
+) =>
   Effect.gen(function* () {
     if (context.leafSlotId === null) return [] as ReadonlyArray<PathMessage>
     const rows = yield* context.reader.SearchChat({
@@ -388,6 +396,7 @@ const searched = (context: ToolContext, words: ReadonlyArray<string>, before: nu
       tokens: words.flatMap((w) => w.match(/[\p{L}\p{N}]+/gu) ?? []),
       before: before === undefined ? null : before - 1,
       limit: 200,
+      ...(ordinaryOnly ? { ordinaryOnly: true } : {}),
       viewers: context.viewers
     })
     if (rows === null) return null
@@ -600,7 +609,7 @@ const historySnapshot = {
         context.cache.set(ORDINARY_KEY, true)
         return { prepared: new Map(context.cache) } satisfies PreparedReads
       }
-      yield* privateHistory(context)
+      if ((yield* privateHistory(context)) === null) context.cache.set(ORDINARY_KEY, true)
       return { prepared: new Map(context.cache) } satisfies PreparedReads
     })
 }
@@ -666,7 +675,12 @@ const searchChat: RolloutTool<{
         if (typeof before_message === "string") return { text: PRIVATE_EMPTY }
         // The indexed reader returns null for every chat containing a merge. Keep ordinary
         // no-merge searches indexed; a joined view must pass the same guard before any output.
-        const found = indexed ?? (yield* pathMessages(context)).toReversed()
+        const path = indexed === null ? yield* pathMessages(context) : []
+        const ordinary =
+          indexed === null && context.viewers !== null && !path.some((m) => m.joined !== undefined)
+            ? yield* searched(context, words, before_message, true)
+            : null
+        const found = indexed ?? ordinary ?? path.toReversed()
         const hits = found
           .filter(
             (m) =>

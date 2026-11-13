@@ -4558,6 +4558,37 @@ const storage: Record<
     ),
   ListRolloutEffects: (reader, actor, owner) =>
     refused(reader.ListRolloutEffects({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
+  HistoryProjectionNeeded: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      const input = {
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        forkId: owner.chat.forkId,
+        leafSlotId: owner.chat.slotId,
+        viewers: [owner.cardId]
+      }
+      yield* refused(reader.HistoryProjectionNeeded(input), "NotFound")
+      yield* refused(reader.HistoryProjectionNeeded({ ...input, chatId: actor.chat.chatId }), "NotFound")
+      yield* refused(
+        reader.HistoryProjectionNeeded({ ...input, chatId: actor.chat.chatId, forkId: actor.chat.forkId }),
+        "NotFound"
+      )
+    }),
+  SearchChatOrdinaryOnly: (reader, actor, owner) =>
+    refused(
+      reader.SearchChat({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        forkId: owner.chat.forkId,
+        leafSlotId: owner.chat.slotId,
+        tokens: [],
+        before: null,
+        limit: 20,
+        viewers: [owner.cardId],
+        ordinaryOnly: true
+      }),
+      "NotFound"
+    ),
   WorkshopGrants: (reader, actor, owner) =>
     refused(reader.WorkshopGrants({ userId: actor.user.id, chatId: owner.chat.chatId, now: 0 }), "NotFound"),
   ToolApprovalFor: (reader, actor, owner) =>

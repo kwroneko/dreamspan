@@ -11,7 +11,8 @@ import { databaseFile } from "../src/db/connection.ts"
 import { assert, it } from "@effect/vitest"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
+import { ExecutionRegistry } from "../src/execution.ts"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
 import { historyTools } from "../src/agent/tools/history.ts"
@@ -19,6 +20,8 @@ import { testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmServer } from "./support/lcmHarness.ts"
+import { eventually } from "./support/generation.ts"
+import { completionChunks, sse } from "./support/mockProvider.ts"
 
 const median = (ns: ReadonlyArray<number>) => [...ns].sort((a, b) => a - b)[Math.floor(ns.length / 2)]!
 
@@ -397,6 +400,114 @@ it.live(
         })
       )
       assert.strictEqual(thawed.text, read.text)
+
+      // Actual Generate -> first received text delta, with an immediate loopback provider.
+      // Paired control forces the preceding eager path preparation; all other work is the
+      // same. This measures the preflight's contribution without a real provider's latency.
+      const registry = yield* ExecutionRegistry
+      const firstTokens = new Map<string, number>()
+      const completed = new Set<string>()
+      let subscribed = false
+      yield* h.api.SubscribeChat({ chatId }).pipe(
+        Stream.runForEach((batch) =>
+          Effect.sync(() => {
+            subscribed = true
+            for (const e of batch) {
+              if (e._tag === "Delta" && e.text.length && !firstTokens.has(e.versionId))
+                firstTokens.set(e.versionId, performance.now())
+              if (e._tag === "Version" && e.version.status !== "generating") completed.add(e.version.id)
+            }
+          })
+        ),
+        Effect.forkScoped
+      )
+      yield* eventually(() => subscribed)
+      h.mock.setHandler((_request, res) =>
+        sse(
+          res,
+          completionChunks(["Morning light."], {
+            prompt_tokens: 10,
+            completion_tokens: 3
+          })
+        )
+      )
+      const tokenSamples: Array<{ shape: string; preflight: string; ms: number }> = []
+      for (const [shape, source, leaf, speaker] of [
+        ["no join on path", docks, "docks-s2999", wren],
+        ["unknown join", main, leafSlotId, mira],
+        ["known join", main, leafSlotId, wren]
+      ] as const) {
+        for (let n = 0; n < 3; n++)
+          for (const preflight of ["eager control", "probe"] as const)
+            yield* Effect.gen(function* () {
+              if (preflight === "eager control")
+                yield* registry.rolloutTools.register({
+                  ...readTool,
+                  snapshot: {
+                    ...prepareHook,
+                    prepare: (ctx, frozen) =>
+                      prepareHook.prepare(
+                        {
+                          ...ctx,
+                          reader: {
+                            ...ctx.reader,
+                            HistoryProjectionNeeded: (() =>
+                              Effect.succeed(true)) as ToolContext["reader"]["HistoryProjectionNeeded"]
+                          }
+                        },
+                        frozen
+                      )
+                  }
+                })
+              const forkId = (yield* h.writer.CreateFork({
+                userId: h.userId,
+                chatId,
+                fromForkId: source,
+                atSlotId: leaf as SlotId
+              })).fork.id as ForkId
+              for (const data of [
+                { key: "agent.enabled", value: { on: true } },
+                { key: "agent.tools", value: { tools: ["read_messages"] } },
+                { key: "context.per_speaker", value: "separate" },
+                { key: "lcm.settings", value: { enabled: false } }
+              ] as const)
+                yield* h.writer.AddStateEvent({
+                  userId: h.userId,
+                  chatId,
+                  forkId,
+                  slotId: data.key === "lcm.settings" ? null : (leaf as SlotId),
+                  versionId: null,
+                  scope: null,
+                  data
+                })
+              const start = performance.now()
+              const generated = yield* h.api.Generate({
+                chatId,
+                forkId,
+                parentSlotId: leaf as SlotId,
+                branch: false,
+                speakerEntityId: speaker
+              })
+              assert.strictEqual(generated._tag, "Posted")
+              if (generated._tag !== "Posted") return
+              const id = generated.entry.version.id
+              yield* eventually(() => completed.has(id), 30_000)
+              assert.isTrue(firstTokens.has(id), "the subscription received a first text delta")
+              tokenSamples.push({ shape, preflight, ms: firstTokens.get(id)! - start })
+            }).pipe(Effect.scoped)
+      }
+      process.stdout.write(
+        `THREAD_FIRST_TOKEN ${JSON.stringify({
+          samples: tokenSamples,
+          medians: [...new Set(tokenSamples.map((s) => s.shape))].flatMap((shape) =>
+            ["eager control", "probe"].map((preflight) => ({
+              shape,
+              preflight,
+              ms: median(tokenSamples.filter((s) => s.shape === shape && s.preflight === preflight).map((s) => s.ms))
+            }))
+          )
+        })}\n`
+      )
 
       process.stdout.write(`THREAD_TOOLS_PROFILE ${JSON.stringify(Object.fromEntries(spent))}\n`)
       process.stdout.write(`THREAD_SUMMARIES_SCALE ${JSON.stringify(samples)}\n`)

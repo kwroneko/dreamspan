@@ -32,6 +32,7 @@ import { makeLibraryQueries } from "./library.ts"
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { query } from "./tx.ts"
 import { knowsSql, readKnowers } from "./knowers.ts"
+import { threadStretches } from "./threadStretches.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
 const FEW = 2000
@@ -286,7 +287,10 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           SELECT current_fork_id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
         const fork = forkId ?? (yield* forkThrough(sql, chatId, leafSlotId, chat.current_fork_id))?.id ?? null
-        if (fork === null) return false
+        const [position] = yield* sql`
+          SELECT 1 FROM forks f JOIN slots s ON s.chat_id = f.chat_id
+          WHERE f.id = ${fork} AND f.chat_id = ${chatId} AND f.deleted_at IS NULL AND s.id = ${leafSlotId}`
+        if (!position) return yield* new NotFound({ entity: "history position", id: chatId })
         // Joins are few. Locate just their slots among structural runs and placed insertions;
         // no message windows, selected prose, swipe scan or writer operation.
         const joins = yield* sql<{ id: string; chain_id: string; depth: number; timelines: string }>`
@@ -299,12 +303,14 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         )
         if (onPath.length === 0 || (viewers.includes(STRETCH_VIEW) && !onPath.some((j) => j.timelines === "separate")))
           return false
-        const known = yield* knowsSql(sql, viewers, fork, true)
+        const known = yield* knowsSql(sql, viewers, fork, true, leafSlotId)
+        // readKnowers exempts a selected join's own speaker from fork-away corrections too.
         const [row] = yield* sql`
           SELECT 1 FROM json_each(${JSON.stringify(onPath.map((j) => j.id))}) asked
           CROSS JOIN slots s ON s.id = asked.value
           CROSS JOIN version_records v ON v.id = ${shownIn(sql, fork, "s")}
-          WHERE v.status NOT IN ('generating', 'failed') AND ${known}
+          WHERE v.status NOT IN ('generating', 'failed')
+            AND (${known} OR v.speaker_entity_id IN (SELECT value FROM json_each(${JSON.stringify(viewers)})))
             AND NOT ${contextExcludedIn(sql, fork, "s")}
             AND EXISTS (SELECT 1 FROM chat_merges m JOIN chat_merge_messages mm ON mm.merge_id = m.id
               WHERE m.slot_id = s.id AND mm.included = 'verbatim' AND
@@ -317,7 +323,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return row !== undefined
       }).pipe(query("HistoryProjectionNeeded")),
 
-    SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit, viewers }) =>
+    SearchChat: ({ userId, chatId, forkId, leafSlotId, tokens, before, limit, viewers, ordinaryOnly }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ readonly current_fork_id: string | null }>`
           SELECT current_fork_id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -328,7 +334,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         // FTS indexes a join as one text: the tools read it row by row, each row as its viewer
         // knew it (spec/THREADS.md §11), so a merged chat is searched over its path.
         const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`
-        if (merged!.n > 0) return null
+        if (merged!.n > 0 && !ordinaryOnly) return null
         // Each token as the start of a word, quoted so FTS syntax in it is only text.
         const match = tokens.length ? tokens.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" AND ") : null
         type Row = {
@@ -339,9 +345,10 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly content: string
         }
         const shown = sql`(${before} IS NULL OR s.depth < ${before})
+            AND ${ordinaryOnly ? sql`NOT EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)` : sql`1`}
             AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
             AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
-            AND ${viewers == null ? sql`1` : yield* knowsSql(sql, viewers, fork)}`
+            AND ${viewers == null ? sql`1` : yield* knowsSql(sql, viewers, fork, false, leafSlotId)}`
         const onPath = sql`EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)`
         // Few matches in the whole chat (a rare word): start from them, each checked against the
         // path, with the path's template messages (matched once their names are filled in). Many
@@ -440,16 +447,22 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }))
       }).pipe(query("JoinRows")),
 
-    KnowersOf: ({ userId, chatId, forkId, versionIds, viewers }) =>
+    KnowersOf: ({ userId, chatId, forkId, leafSlotId, versionIds, viewers }) =>
       Effect.gen(function* () {
         // A fork of another chat is none of this one's: its corrections don't apply.
+        const fork = forkId == null ? null : sql`(SELECT id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId})`
+        const ranges =
+          leafSlotId !== undefined && viewers?.includes(STRETCH_VIEW)
+            ? yield* threadStretches(sql, fork, leafSlotId)
+            : undefined
         return yield* readKnowers(
           sql,
           chatId,
           sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`,
           versionIds,
           viewers,
-          forkId == null ? null : sql`(SELECT id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId})`
+          fork,
+          ranges
         )
       }).pipe(query("KnowersOf")),
 

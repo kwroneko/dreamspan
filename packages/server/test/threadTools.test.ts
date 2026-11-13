@@ -9,6 +9,7 @@ import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/
 import { Effect } from "effect"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
+import { prepareToolSnapshots } from "../src/agent/tools.ts"
 import { historyTools } from "../src/agent/tools/history.ts"
 import { eventually, finished } from "./support/generation.ts"
 import { completionChunks, sse } from "./support/mockProvider.ts"
@@ -67,6 +68,9 @@ const toolsFor = (t: ThreadStory, fork: ForkId, speaker: EntityId) =>
       reader: t.reader,
       writer: t.writer
     }
+    // Exercise the production preflight too: a false negative must not silently disable
+    // useful private reads on any of the lifecycle shapes below.
+    yield* prepareToolSnapshots(historyTools, context)
     const run = (id: string, args: object) =>
       Effect.map(historyTools.find((tool) => tool.id === id)!.execute(context, args as never), (out) => out.text)
     return { viewers: context.viewers, run, context, snapshot }
@@ -649,6 +653,7 @@ describe("the agent's read tools across threads", () => {
         // legacy frozen compound row explicitly: its nested provenance must fail closed.
         const context: ToolContext = {
           ...tools.context,
+          cache: new Map(),
           reader: {
             ...t.reader,
             JoinRows: ((input) =>
@@ -665,6 +670,7 @@ describe("the agent's read tools across threads", () => {
               )) as ToolContext["reader"]["JoinRows"]
           }
         }
+        yield* prepareToolSnapshots(historyTools, context)
         for (const [id, args] of [
           ["read_messages", { from: 1 }],
           ["read_messages", { from: 999999 }],
