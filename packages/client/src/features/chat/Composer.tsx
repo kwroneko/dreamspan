@@ -610,6 +610,12 @@ export function Composer({
   const shownError = error ?? saveError ?? viewPrefs.error
 
   const controls: ComposerControlContext = {
+    draft: {
+      append: (text) => {
+        if (editing === null) draft.type(draft.snapshot().text + text)
+        else editor.type((editor.snapshot()?.text ?? "") + text)
+      }
+    },
     compact: phone,
     recoverQueued: (withdrawn, images) => {
       if (images?.length) attachmentInput?.restore(images)

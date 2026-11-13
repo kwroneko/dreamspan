@@ -1,6 +1,7 @@
 // Server-owned environment names (ARCHITECTURE §2). Startup validates these
 // against the SDK scrub rules before importing the application.
 export const serverEnvironment = {
+  PLUGINS: "PLUGINS",
   HOST: "HOST",
   PORT: "PORT",
   DATA_DIR: "DATA_DIR",

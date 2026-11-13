@@ -14,7 +14,8 @@ const SLOW_SERVER_FILES = [
   // Process spawns, with time limits on startup and shutdown.
   "test/startup.test.ts",
   "test/shutdown.test.ts",
-  "test/resumeKill.test.ts"
+  "test/resumeKill.test.ts",
+  "test/pluginHost.test.ts"
 ]
 
 /**

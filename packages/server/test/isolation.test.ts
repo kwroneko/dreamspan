@@ -214,6 +214,92 @@ const userDraftOf = (owner: Party) =>
   })
 
 const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
+  ListPlugins: {
+    createOnly:
+      "Lists instance plugins and only the caller's user folder; plugin account isolation is also covered in pluginHost."
+  },
+  GetPlugin: { createOnly: "User plugin targets derive the owner from CurrentUser; no owner id is accepted." },
+  ListClientPlugins: { createOnly: "Returns instance plugins and the caller's own enabled client entries." },
+  CreatePlugin: {
+    adminOnly: (actor) =>
+      Effect.all([
+        refused(actor.api.CreatePlugin({ scope: "instance", id: "synthetic", files: {} }), "PluginRejected"),
+        refused(actor.api.CreatePlugin({ scope: "user", id: "synthetic", files: {} }), "PluginRejected")
+      ]).pipe(Effect.asVoid)
+  },
+  CommitPlugin: {
+    adminOnly: (actor) =>
+      Effect.all([
+        refused(
+          actor.api.CommitPlugin({ scope: "instance", id: "synthetic", files: {}, message: "test" }),
+          "PluginRejected"
+        ),
+        refused(
+          actor.api.CommitPlugin({ scope: "user", id: "synthetic", files: {}, message: "test" }),
+          "PluginRejected"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  PluginLog: {
+    adminOnly: (actor) => refused(actor.api.PluginLog({ scope: "instance", id: "synthetic" }), "PluginRejected")
+  },
+  PluginDiff: {
+    adminOnly: (actor) =>
+      refused(
+        actor.api.PluginDiff({ scope: "instance", id: "synthetic", before: "0".repeat(40), after: "0".repeat(40) }),
+        "PluginRejected"
+      )
+  },
+  CheckPlugin: {
+    adminOnly: (actor) =>
+      Effect.all([
+        refused(
+          actor.api.CheckPlugin({ scope: "instance", id: "synthetic", commit: "0".repeat(40) }),
+          "PluginRejected"
+        ),
+        refused(actor.api.CheckPlugin({ scope: "user", id: "synthetic", commit: "0".repeat(40) }), "PluginRejected")
+      ]).pipe(Effect.asVoid)
+  },
+  EnablePlugin: {
+    adminOnly: (actor) =>
+      Effect.all([
+        refused(
+          actor.api.EnablePlugin({ scope: "instance", id: "synthetic", commit: "0".repeat(40), consent: true }),
+          "PluginRejected"
+        ),
+        refused(
+          actor.api.EnablePlugin({ scope: "user", id: "synthetic", commit: "0".repeat(40), consent: true }),
+          "PluginRejected"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  GoBackPlugin: {
+    adminOnly: (actor) =>
+      Effect.all([
+        refused(actor.api.GoBackPlugin({ scope: "instance", id: "synthetic", expectedRevision: 0 }), "PluginRejected"),
+        refused(actor.api.GoBackPlugin({ scope: "user", id: "synthetic", expectedRevision: 0 }), "PluginRejected")
+      ]).pipe(Effect.asVoid)
+  },
+  PinPluginCommit: {
+    adminOnly: (actor) =>
+      Effect.all([
+        refused(
+          actor.api.PinPluginCommit({ scope: "instance", id: "synthetic", commit: "0".repeat(40), consent: true }),
+          "PluginRejected"
+        ),
+        refused(
+          actor.api.PinPluginCommit({ scope: "user", id: "synthetic", commit: "0".repeat(40), consent: true }),
+          "PluginRejected"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  DisablePlugin: {
+    adminOnly: (actor) => refused(actor.api.DisablePlugin({ scope: "instance", id: "synthetic" }), "PluginRejected")
+  },
+  DeletePluginData: {
+    adminOnly: (actor) => refused(actor.api.DeletePluginData({ scope: "instance", id: "synthetic" }), "PluginRejected")
+  },
+
   GetUserDraft: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

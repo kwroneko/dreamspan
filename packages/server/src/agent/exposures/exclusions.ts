@@ -1,5 +1,19 @@
 // Each unexposed RPC is an explicit decision. New operations must be classified here or exposed.
 export const operationExclusions: Readonly<Record<string, string>> = {
+  GoBackPlugin: "Plugin management stays user-only until P4 supplies its approval workflow.",
+  ListPlugins: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  GetPlugin: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  CreatePlugin: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  CommitPlugin: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  PluginLog: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  PluginDiff: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  CheckPlugin: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  EnablePlugin: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  PinPluginCommit: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  DisablePlugin: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  DeletePluginData: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+  ListClientPlugins: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
+
   AddRemoteVersionAsCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   AddUserModel: "User-only security, consent, account, credential or network configuration.",
   AdoptRemoteCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",

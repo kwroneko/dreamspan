@@ -1,0 +1,16 @@
+{
+  "name": "@rp/plugin-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./src/server.ts",
+    "./worker": "./src/worker.ts",
+    "./client": "./src/client.ts"
+  },
+  "dependencies": {
+    "effect": "4.0.1",
+    "react": "19.3.0",
+    "@types/react": "19.3.0"
+  }
+}

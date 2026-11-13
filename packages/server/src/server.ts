@@ -1,3 +1,7 @@
+import { pluginRoutes } from "./plugins/serve.ts"
+import { PluginHost } from "./plugins/Host.ts"
+import { makePluginHandlers } from "./api/plugins.ts"
+import { AuthenticatedPluginApi } from "@rp/shared/api.ts"
 import { ExternalMedia, externalMediaRoute, makeExternalMediaHandlers } from "./api/externalMedia.ts"
 import { AuthenticatedExternalMediaApi, AuthenticatedSavedMediaApi } from "@rp/shared/api.ts"
 import { makeSavedMediaHandlers, SavedMedia, savedMediaRoute } from "./api/savedMedia.ts"
@@ -198,6 +202,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),
   AuthenticatedWorkshopApi.toLayer(makeWorkshopHandlers),
+  AuthenticatedPluginApi.toLayer(makePluginHandlers),
   AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
@@ -699,6 +704,7 @@ export const serverWith = <E>(
     Layer.mergeAll(
       RpcRoute,
       HealthRoute,
+      pluginRoutes,
       FramePanelRoute,
       AuthRoutes,
       ImportRoutes.layer,
@@ -735,9 +741,14 @@ export const serverWith = <E>(
           Layer.provideMerge(ChatHub.layer)
         )
     ),
-    Layer.provideMerge(ExecutionRegistry.layer),
-    Layer.provideMerge(Commands.layer),
-    Layer.provideMerge(Notices.layer),
+    Layer.provideMerge(
+      PluginHost.layer.pipe(
+        Layer.provideMerge(ExecutionRegistry.layer),
+        Layer.provideMerge(Commands.layer),
+        Layer.provideMerge(Notices.layer),
+        Layer.provideMerge(decisions)
+      )
+    ),
     Layer.provideMerge(sources),
     Layer.provideMerge(ExternalMedia.layer),
     // Saved card media (spec/SAVED-MEDIA.md): its task downloads between writer transactions.

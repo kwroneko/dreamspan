@@ -1,3 +1,4 @@
+import { PluginId, PluginPins, PluginData, PluginRejected } from "@rp/shared/plugins.ts"
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
 import {
   MediaApprovalHost,
@@ -1836,6 +1837,34 @@ export class WriteOpsChat extends RpcGroup.make(
 ) {}
 
 export class WriteOpsLibrary extends RpcGroup.make(
+  Rpc.make("SetPluginPins", {
+    payload: { userId: UserId, owner: Schema.String, value: PluginPins, revision: Schema.Int },
+    success: Schema.Void,
+    error: Schema.Union([PluginRejected, StaleWrite, StorageError])
+  }),
+  Rpc.make("SetPluginData", {
+    payload: {
+      userId: UserId,
+      pluginId: PluginId,
+      owner: Schema.String,
+      key: Schema.String,
+      value: Schema.Unknown,
+      revision: Schema.Int
+    },
+    success: Schema.Void,
+    error: Schema.Union([PluginRejected, StaleWrite, StorageError])
+  }),
+  Rpc.make("DeletePluginData", {
+    payload: {
+      userId: UserId,
+      pluginId: PluginId,
+      owner: Schema.String,
+      key: Schema.NullOr(Schema.String),
+      revision: Schema.Int
+    },
+    success: Schema.Void,
+    error: Schema.Union([PluginRejected, StaleWrite, StorageError])
+  }),
   // --- Library import (ARCHITECTURE.md §11). The file was parsed in a format worker;
   // documents cross as JSON text, which costs the main thread a copy, not a walk.
   /**
@@ -3433,6 +3462,30 @@ export class WriteOpsLibrary extends RpcGroup.make(
 export class WriteOps extends WriteOpsChat.merge(WriteOpsLibrary) {}
 
 export class ReadOps extends RpcGroup.make(
+  Rpc.make("GetPluginPins", {
+    payload: { userId: UserId, owner: Schema.String },
+    success: Schema.Struct({ value: PluginPins, revision: Schema.Int }),
+    error: Schema.Union([PluginRejected, StorageError])
+  }),
+  Rpc.make("AllPluginPins", {
+    success: Schema.Array(Schema.Struct({ owner: Schema.String, value: PluginPins })),
+    error: StorageError
+  }),
+  Rpc.make("GetPluginData", {
+    payload: { userId: UserId, pluginId: PluginId, owner: Schema.String, key: Schema.String },
+    success: Schema.NullOr(PluginData),
+    error: Schema.Union([PluginRejected, StorageError])
+  }),
+  Rpc.make("PluginDataInfo", {
+    payload: { userId: UserId, pluginId: PluginId, owner: Schema.String },
+    success: Schema.Array(Schema.Struct({ key: Schema.String, bytes: Schema.Int })),
+    error: Schema.Union([PluginRejected, StorageError])
+  }),
+  Rpc.make("ListPluginData", {
+    payload: { userId: UserId, pluginId: PluginId, owner: Schema.String },
+    success: Schema.Array(PluginData),
+    error: Schema.Union([PluginRejected, StorageError])
+  }),
   /** What a merge would bring (spec/CHAT-MERGE.md §3), as `MergeChat` computes it. */
   Rpc.make("PreviewChatMerge", {
     payload: { userId: UserId, ...MergeRequest.fields },
