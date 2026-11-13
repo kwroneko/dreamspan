@@ -29,22 +29,31 @@ const setup = async (page: Page) => {
   }
 }
 
-/** Every tab the open panel offers: its tools (with those under More) and its cast strip. */
+/**
+ * Every tab the open panel offers: its tools (with those under More) and its cast strip; and
+ * which of the tools are registered as offered only once the chat is saved (`savedOnly`).
+ */
 const tabNames = async (page: Page) => {
   const tools = page.getByRole("tablist", { name: "Chat panel" })
   await expect(tools).toBeVisible()
   const names = await tools.getByRole("tab").allInnerTexts()
+  const savedOnly = await tools.locator("[data-saved-only]").allInnerTexts()
   const more = page.getByRole("button", { name: "More tools", exact: true })
   if (await more.isVisible()) {
     await more.click()
     const menu = page.getByRole("menu", { name: "More tools", exact: true })
     await expect(menu.getByRole("menuitem").last()).toBeVisible()
     names.push(...(await menu.getByRole("menuitem").allInnerTexts()))
+    savedOnly.push(...(await menu.locator("[data-saved-only]").allInnerTexts()))
     await page.keyboard.press("Escape")
     await expect(menu).toHaveCount(0)
   }
   const cast = await page.getByRole("tablist", { name: "Characters", exact: true }).getByRole("tab").allInnerTexts()
-  return [...names.map((name) => name.trim()).sort(), "|", ...cast.map((name) => name.trim())]
+  const trim = (list: Array<string>) => list.map((name) => name.trim())
+  return {
+    tabs: [...trim(names).sort(), "|", ...trim(cast)],
+    savedOnly: trim(savedOnly).sort()
+  }
 }
 
 test("a pending chat's side panel resizes and has the saved chat's tabs", async ({ page }) => {
@@ -72,7 +81,22 @@ test("a pending chat's side panel resizes and has the saved chat's tabs", async 
   await expect(page.getByRole("tabpanel", { name: "Notes" })).not.toContainText("Available once the chat is saved")
   await expect(page.getByRole("tabpanel", { name: "Notes" })).toBeVisible()
   await expect.poll(async () => Math.abs(((await panel.boundingBox())?.width ?? 0) - width)).toBeLessThanOrEqual(1)
-  expect(await tabNames(page)).toEqual(pendingTabs)
+  // The same tabs, apart from those registered as offered only once the chat is saved: the
+  // Workshop tab, whose workshop is attached to the saved chat (spec/WORKSHOP.md §4).
+  const saved = await tabNames(page)
+  expect(pendingTabs.savedOnly).toEqual([])
+  expect(saved.savedOnly).toEqual(["Workshop"])
+  expect(pendingTabs.tabs).not.toContain("Workshop")
+  expect(saved.tabs.filter((name) => !saved.savedOnly.includes(name))).toEqual(pendingTabs.tabs)
+  // With no workshop beside it yet, the tab explains itself and offers to start one.
+  await openPanel(page, "Workshop")
+  const start = page
+    .getByRole("tabpanel", { name: "Workshop" })
+    .getByRole("button", { name: "Start a workshop", exact: true })
+  await expect(start).toBeVisible()
+  await expect(start).toHaveAccessibleDescription(
+    "Starts a new workshop beside this chat, to talk about it out of character."
+  )
 })
 
 test("the first send opens the saved chat with no loading skeleton or placeholder title", async ({ page }) => {

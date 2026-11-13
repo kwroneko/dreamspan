@@ -57,6 +57,7 @@ export const register = () => [
     order: 96,
     icon: "tool",
     fill: true,
+    savedOnly: true,
     available: (view) => takesSideChat(view.chat),
     component: lazyPanel(
       () =>

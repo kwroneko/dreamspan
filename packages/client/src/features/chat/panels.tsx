@@ -48,6 +48,12 @@ export interface PanelDescriptor {
    * there, in its place, and says it opens once the chat is saved.
    */
   readonly pending?: ComponentType<PendingPanelProps>
+  /**
+   * Offered only once the chat is saved: a chat not made yet leaves the tab out rather than
+   * showing it in its place, for a tab whose content can't exist before the first send (the
+   * Workshop tab: a workshop is attached to a saved chat).
+   */
+  readonly savedOnly?: boolean
   readonly available?: (view: ChatView) => boolean
   /**
    * Where its tabs go: "tools" (the default), a row of icons and labels that never wraps, what

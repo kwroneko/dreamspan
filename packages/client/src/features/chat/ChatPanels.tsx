@@ -225,7 +225,7 @@ export function ChatSidePanel({
     return () => clearTimeout(id)
   }, [])
   if (!visited.has(tab)) setVisited(new Set([...visited, tab]))
-  const all = usePanelTabs(content.view, tab)
+  const all = usePanelTabs(content.view, tab).filter((t) => !("pending" in content && t.descriptor.savedOnly))
   const tools = all.filter((t) => (t.descriptor.placement ?? "tools") === "tools")
   const cast = all.filter((t) => t.descriptor.placement === "cast")
   const nav = (
@@ -237,6 +237,7 @@ export function ChatSidePanel({
             dirty: dirty.has(t.value) || editorChanges.some((ref) => t.descriptor.holdsEditor?.(ref, t.value)),
             label: t.label,
             icon: t.descriptor.icon,
+            savedOnly: t.descriptor.savedOnly,
             // A tab with nothing to show before the first send says so where it's described.
             description:
               "pending" in content && !t.descriptor.pending

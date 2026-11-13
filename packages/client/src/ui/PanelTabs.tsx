@@ -18,6 +18,8 @@ interface ToolTab {
   readonly icon: IconName
   /** What the tab holds, beside it on hover and focus, and under it in More. */
   readonly description?: string | undefined
+  /** Offered only once its chat is saved; marked `data-saved-only` so the tab strip says which. */
+  readonly savedOnly?: boolean | undefined
 }
 
 interface SubjectTab {
@@ -131,6 +133,7 @@ export function ToolTabs({
                     key={tab.value}
                     value={tab.value}
                     data-unsaved={tab.dirty || undefined}
+                    data-saved-only={tab.savedOnly || undefined}
                     aria-description={tab.dirty ? "Unsaved changes" : undefined}
                     className={`group ${panelToolClass} data-active:border-accent data-active:text-text`}
                   >
@@ -173,7 +176,7 @@ export function ToolTabs({
                   description={tab.description}
                   onClick={() => onValueChange(tab.value)}
                 >
-                  <span className="relative pr-3">
+                  <span className="relative pr-3" data-saved-only={tab.savedOnly || undefined}>
                     {tab.label}
                     {tab.dirty && <UnsavedDot />}
                   </span>
