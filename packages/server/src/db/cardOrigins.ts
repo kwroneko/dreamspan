@@ -45,6 +45,25 @@ type Drafts = ReturnType<typeof makeDraftStore>
 /** Where a source's card's drafts are: `remote_card`, `<source>:<remote>`. */
 const remoteTarget = (sourceId: string, remoteId: string) => `${sourceId}:${remoteId}`
 
+/**
+ * What an adopted file is, by its document: a lorebook's has top-level `entries` and no
+ * greeting, a card's the reverse (a card's own book is under `character_book`). A standalone
+ * lorebook from a source (spec/CARD-SOURCES.md §3.9) is added as a lorebook.
+ */
+const adoptedKind = (docJson: string): "card" | "lorebook" => {
+  try {
+    const doc: unknown = JSON.parse(docJson)
+    return typeof doc === "object" &&
+      doc !== null &&
+      Array.isArray((doc as { entries?: unknown }).entries) &&
+      !("first_mes" in doc)
+      ? "lorebook"
+      : "card"
+  } catch {
+    return "card"
+  }
+}
+
 /** `StartChat`'s write (chatSetupWrites.ts), run after the adoptions in their transaction. */
 type StartChat = (
   payload: Parameters<Writes["StartChat"]>[0]
@@ -66,7 +85,9 @@ export const newestLiveFork = (sql: SqlClient.SqlClient, userId: UserId, entityI
       FROM family f
       JOIN entities e ON e.id = f.id
       JOIN entity_refs r ON r.entity_id = e.id
-      WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL
+      WHERE e.owner_user_id = ${userId} AND e.kind IN ('card', 'lorebook')
+        AND e.kind = (SELECT o.kind FROM entities o WHERE o.id = ${entityId})
+        AND e.deleted_at IS NULL AND e.purged_at IS NULL
       ORDER BY e.created_at DESC, e.id DESC
       LIMIT 1`,
     (rows) => rows[0]
@@ -316,7 +337,10 @@ export const makeAdoptWriteHandlers = (
       locator
     }: Parameters<Writes["AdoptRemoteCard"]>[0]) =>
       Effect.gen(function* () {
-        yield* recognizeRemoteFile(sql, userId, sourceId, remoteId, remoteVersion, file.sourceHash, locator)
+        const kind = adoptedKind(file.docJson)
+        // Recognizing an imported file by its hash is for cards (§3.7); a lorebook is found by its origin.
+        if (kind === "card")
+          yield* recognizeRemoteFile(sql, userId, sourceId, remoteId, remoteVersion, file.sourceHash, locator)
         const held = yield* heldCard(userId, sourceId, remoteId)
         if (held) {
           yield* moveDrafts(userId, sourceId, remoteId, held.refId)
@@ -325,7 +349,7 @@ export const makeAdoptWriteHandlers = (
         // Unverified Sources claims cannot reserve an archive identity or block a real Add.
         yield* sql`DELETE FROM card_origins WHERE owner_user_id = ${userId}
           AND source_id = ${sourceId} AND remote_id = ${remoteId} AND remote_version = ''`
-        const imported = yield* importFile({ userId, intoRefId: null, kind: "card", ...file })
+        const imported = yield* importFile({ userId, intoRefId: null, kind, ...file })
         yield* sql`INSERT INTO card_origins ${sql.insert({
           entity_id: imported.ref.entityId,
           owner_user_id: userId,

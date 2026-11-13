@@ -1681,7 +1681,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
    * transaction: what `ImportFile` stores for a new card file, then its `card_origins` row.
    * A card the user already has from there (a live card, archived or not) is answered
    * instead, with `existing`, so it's never added twice; an origin whose card is in the bin
-   * or purged is let go, and the card is added again.
+   * or purged is let go, and the card is added again. A standalone lorebook's file (§3.9) is
+   * added the same way, as a lorebook: its document says which (`adoptedKind`).
    */
   Rpc.make("AdoptRemoteCard", {
     payload: AdoptFields,

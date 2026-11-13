@@ -119,6 +119,8 @@ const RemoteVersion = Schema.Struct({
 /** A card as the source lists it. `thumb` and `image` are keys this server issued, never URLs. */
 export const RemoteSummary = Schema.Struct({
   remoteId: Schema.String,
+  /** A standalone lorebook rather than a character (§3.9); absent for a card. */
+  kind: Schema.optionalKey(Schema.Literal("lorebook")),
   name: Schema.String,
   creator: Schema.optionalKey(Schema.String),
   /** The creator as the source's creator filter takes it (cardex: `site/handle`), when it isn't the name. */
