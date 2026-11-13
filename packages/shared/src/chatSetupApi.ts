@@ -350,7 +350,7 @@ export class Cast extends Schema.Class<Cast>("Cast")({
 }) {}
 
 import { FirstTurn, StartChatInput } from "./chatStart.ts"
-export { FirstTurn, StartChatInput }
+export { FirstTurn }
 
 /** A change to who's in a chat, or to its settings, from a position on. */
 export const CastChange = Schema.Union([

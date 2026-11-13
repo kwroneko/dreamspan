@@ -20,10 +20,10 @@ import { newChatLcmSettings } from "./generationSettings.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 
 /** The chat id the draft's sources answer to: no chat has it, so no chat-owned row is read. */
-export const DRAFT_CHAT = "draft" as ChatId
+const DRAFT_CHAT = "draft" as ChatId
 
 /** A greeter as `StartChat` takes it (`greeters` in ops.ts), its options frozen and picked. */
-export interface DraftGreeter {
+interface DraftGreeter {
   readonly entityId: string
   readonly greeting: number | null
   readonly options: ReadonlyArray<{
