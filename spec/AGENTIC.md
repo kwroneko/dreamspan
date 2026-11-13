@@ -358,7 +358,11 @@ Each case was reproduced against a scripted provider (`test/resumeAudit.test.ts`
 | The user changes the chat's model, then resumes | Resume sent the run to the model it started with | It goes to the model the chat uses now (§12.3) |
 | The user changes the model, then swipes or continues the last reply | The swipe or Continue used the model from before the change | Uses the model the composer shows |
 | A tab closes mid-run | The run goes on; another tab sees it finish | Same |
-| Plain (non-agent) reply stopped or failed | Text saved every 2 s; Continue (latest message) and › (new version) carry it on | Same; both now go to the model the composer shows |
+| Plain (non-agent) reply stopped or failed | Text saved every 2 s while deltas arrive, so a stream that stalls kept its last text unsaved; Continue (latest message) and › (new version) carry it on | Saved within 2 s even when the stream stalls; both go to the model the composer shows; Resume beside the failure (§12.7) |
+| The provider accepts the request, then sends nothing | "Writing…" until the user stops it | Fails after 300 s of silence ("no_response"), editable per connection (§12.6) |
+| The Tools setting changed, then resume | The run kept the tools it froze | Offered the tools the chat has now (§12.4) |
+| The chat changed so the request can't be built (a deleted card, say) | Resume blocked with the assembly's message | Resume says so and offers to send the saved request unchanged (§12.5) |
+| A DeepSeek thinking model resumes a run another model started with tool calls | 400: the API demands reasoning for each replayed tool-call turn | An empty reasoning field is sent for those turns (§12.3) |
 | Workshop reply stopped or failed | Same paths as agent replies; approvals re-asked after a restart | Same |
 
 ### 12.2 What a resume keeps
@@ -372,10 +376,27 @@ Each case was reproduced against a scripted provider (`test/resumeAudit.test.ts`
 - **[P]** Resume, Continue and a new version use the model the composer shows with the reply last: a model chosen while the stopped reply is the last message applies to it. Resume reads the chat's binding at the reply (`StateEventsAt` with `displayEnd`), because a generation's own assembly reads the state before the reply. "Retry with…" (a named model) still wins.
 - **[P]** With the same model, the frozen request is sent byte for byte, so the provider's cache still holds. With another model, the run keeps its messages and transcript, and takes the new model's settings: samplers, context budget and cache layout. The old request's cache checkpoints are dropped, since they index the old model's wire.
 - **[P]** Thinking another model wrote, and its signatures (Anthropic's signed thinking, Gemini's thought signatures, OpenRouter's reasoning details), are left out of the new model's request. Text, tool calls and tool results are converted into the new API's own form. The transcript records which model wrote each turn.
+- **[P]** DeepSeek in thinking mode refuses a replayed assistant turn with tool calls but no `reasoning_content` (400, "must be passed back"). When the target is DeepSeek, such a turn (another model's, whose thinking was left out) is sent with `reasoning_content: ""`. Tried against the live API on 2026-11-12: missing gives 400, empty gives 200; with thinking off, all forms give 200.
 
-### 12.4 Left for later
+### 12.4 Resume with the tools the chat has now
 
-- No stall timeout: a provider that accepts the request and then sends nothing waits until the user stops it. Example: a gateway that holds the socket open for ten minutes; the reply shows "Writing…" all that time.
-- An assembly that fails now (a deleted card, say) blocks Resume, with the assembly's message, though the frozen request could still be sent.
-- The tools stay as the run froze them, even when the user changed the Tools setting before resuming.
+- **[P]** Resume applies the chat's settings as changed since the run: the planner is asked what it offers with the settings before the reply (as the run had them) and with the settings now, and what it adds or removes between the two is added to or taken off the run's frozen tools. A planner or tool replaced in code since then leaves the run's offer as it was. A tool kept from the run keeps its frozen definition, so an unchanged list sends the request byte for byte. A tool new to the run is offered only if a new run would offer it (its grant). The output contract's tool stays as frozen. A workshop tool the run was already offered stays offered even when its grant is now off; calling it is refused as before.
+- **[P]** A removed tool is no longer offered. Calls to it that already finished keep their results in the transcript. A call to it still waiting for its result runs through the agent loop's own refusal ("Tool X not found"), which the model sees as the result. The agent instructions in the frozen system prompt may still name the old tools.
+- **[P]** Cache cost: the tools sit near the start of the request, so changing them misses the provider's cached prefix after them once (Anthropic, OpenAI, DeepSeek), and that resume pays for the whole request uncached. Later steps cache again.
+
+### 12.5 The saved request
+
+- **[P]** When the request can't be built from the chat as it is now (a deleted card, a broken preset), Resume never sends the old one silently. It refuses with the reason, and the message offers **Send the saved request**: the frozen request, model and tools exactly as the run stopped with them.
+
+### 12.6 A provider that sends nothing
+
+- **[P]** A request fails when the provider sends nothing for 300 s (reason "no_response", "The provider sent nothing back"). The clock starts when the request leaves (after any cache wait) and restarts on every byte, so keep-alive comments and pings count. It isn't retried: the user resumes, possibly on another model. Each connection can change it: Advanced, "Wait for a response (seconds)".
+- Documented provider behaviour behind the default: DeepSeek closes the connection if inference hasn't started after 10 minutes and sends keep-alive comments meanwhile; OpenRouter sends processing comments; Anthropic sends pings and documents no stream idle limit. A long silent thinking phase with no keep-alives is the case the default must not cut, hence 5 minutes rather than less.
+
+### 12.7 Resume beside a failed or interrupted reply
+
+- **[P]** A reply that failed shows Resume inside its error box; one the app stopped mid-write shows a note, "The app stopped while this reply was being written.", with Resume. An agent reply's run goes on. A plain reply with text is continued (as Continue, without the composer's guidance); one with no text is written again as a new version. Either way the model and settings the chat has now apply.
+
+### 12.8 Left for later
+
 - The model's binding taken off at the reply (back to the default) isn't seen by Resume: it uses the binding from before the reply.

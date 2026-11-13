@@ -1052,6 +1052,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 - **[D]** Anything stopped midway can be resumed without a new message: a crash mid-rollout, a model error. The request that failed is sent when the user resumes, to a new model if the user chose one (owner, 2026-11-12). Design and audit: AGENTIC §12. **Built** (resume1, 2026-11-12; ARCHITECTURE §16).
 - **[P]** (resume1) The turn being written is saved while it streams, so a crash loses at most its last 2 s; a restart sends nothing until the user resumes.
 - **[P]** (resume1) Resume, Continue and a new version use the model the composer shows with the reply last. With the same model the frozen request is sent byte for byte; with another, the messages and transcript are kept, the new model's settings and cache layout apply, and other models' thinking and signatures are left out.
+- **[P]** (resume1) Resume offers the tools the chat has now; a removed tool isn't offered, finished calls keep their results. When the request can't be built from the chat now, Resume says why and offers to send the saved request unchanged, never silently.
+- **[P]** (resume1) A provider that sends nothing for 300 s fails the request ("no_response", not retried); each connection can change the wait. Any byte, keep-alives included, restarts the clock.
+- **[P]** (resume1) Failed and interrupted replies show Resume beside their status: an agent run goes on; a plain reply is continued, or written again when it has no text.
 
 ### 7.6 Decision models
 - **[D]** Jev and similar decision models are integrated as in reference-harness (`spec/DECISION-MODEL.md`), but are **never mandatory**. Each decision point has a heuristic fallback. Phase 4 design: AGENTIC §7 (points `presence` and `lore`, opt-in per connection). **Built** (phase4decide, 2026-11-05; ARCHITECTURE §16 "Decision models").

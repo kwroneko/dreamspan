@@ -63,38 +63,43 @@ const agentVersionResumer = Effect.gen(function* () {
   const generator = yield* Generator
   const execution = yield* ExecutionRegistry
   /**
-   * The tools the chat offers now, as the stopped run's definitions where they're the same
-   * tools (spec/AGENTIC.md §12.3), or undefined when that's what the run froze. Its output
-   * contract's tool stays as frozen.
+   * The tools the chat offers now (spec/AGENTIC.md §12.4), or undefined when that's what the run
+   * froze. Only a change of the chat's settings since the run counts: the planner sees the state
+   * before the reply (as the run did) and the state now, and what it adds or removes between the
+   * two is added to or removed from the frozen offer. A planner or tool replaced since then
+   * (code, not the user's settings) leaves the run's offer as it was. A tool kept keeps its frozen
+   * definition; the output contract's tool stays.
    */
   const toolsNow = (at: {
     readonly userId: UserId
     readonly chatId: ChatId
-    readonly state: ChatState
+    readonly then: ChatState
+    readonly now: ChatState
     readonly frozen: ReadonlyArray<FrozenTool>
   }) =>
     Effect.gen(function* () {
       const chat = yield* reader.GetChat({ userId: at.userId, chatId: at.chatId })
       const profile = execution.chatKinds.get(chat.kind)
       if (!profile) return undefined
-      const planned = planTurn(execution.orchestrationModes, at.state, chat.kind, profile.planner)
-      if ("unavailable" in planned) return undefined
-      const candidates = planned.plan.tools.flatMap((id) => {
+      const before = planTurn(execution.orchestrationModes, at.then, chat.kind, profile.planner)
+      const after = planTurn(execution.orchestrationModes, at.now, chat.kind, profile.planner)
+      if ("unavailable" in before || "unavailable" in after) return undefined
+      const removed = new Set(before.plan.tools.filter((id) => !after.plan.tools.includes(id)))
+      const candidates = after.plan.tools.flatMap((id) => {
+        if (before.plan.tools.includes(id) || at.frozen.some((t) => t.name === id)) return []
         const tool = toolForKind(execution, chat.kind, id)
         return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
       })
-      // A workshop capability turned off isn't offered anew; one the run was offered stays and
-      // is refused when called, as it is mid-run (spec/WORKSHOP.md §3.4), so the model is told why.
-      const { tools: granted } = yield* offeredByGrants(
+      // A tool new to the run is offered only as a new run would offer it; one the run was offered
+      // stays even if its capability was turned off, and is refused when called, as it is mid-run
+      // (spec/WORKSHOP.md §3.4), so the model is told why.
+      const { tools: added } = yield* offeredByGrants(
         { registries: execution, reader, userId: at.userId, chatId: at.chatId },
         candidates
       )
-      const tools = candidates.filter((tool) => granted.includes(tool) || at.frozen.some((t) => t.name === tool.id))
       const contract = new Set([sendMessageDefinition.name, severalMessageDefinition.name])
-      const now = [
-        ...tools.map((tool) => at.frozen.find((t) => t.name === tool.id) ?? frozenTool(tool)),
-        ...at.frozen.filter((t) => contract.has(t.name))
-      ]
+      const kept = at.frozen.filter((t) => !contract.has(t.name) && !removed.has(t.name))
+      const now = [...kept, ...added.map(frozenTool), ...at.frozen.filter((t) => contract.has(t.name))]
       return isDeepStrictEqual(
         now.map((t) => t.name),
         at.frozen.map((t) => t.name)
@@ -129,7 +134,8 @@ const agentVersionResumer = Effect.gen(function* () {
       if (material.versionStatus === "generating" || material.status === "running")
         return yield* refuse("It's still being written.")
       const source = yield* reader.GetVersion({ userId, versionId })
-      const chatId = (yield* reader.GetSlot({ userId, slotId: source.slotId, forkId })).chatId
+      const sourceSlot = yield* reader.GetSlot({ userId, slotId: source.slotId, forkId })
+      const chatId = sourceSlot.chatId
       const frozen = JSON.parse(material.snapshot) as ContextSnapshot
       const frozenAgent = (frozen as Frozen).agent
       let planned: ResumePlan | StepNotResumable
@@ -193,7 +199,15 @@ const agentVersionResumer = Effect.gen(function* () {
             })
           : frozen
         const tools = frozenAgent?.tools
-          ? yield* toolsNow({ userId, chatId, state, frozen: frozenAgent.tools })
+          ? yield* toolsNow({
+              userId,
+              chatId,
+              then: foldState(
+                yield* reader.StateEventsAt({ userId, chatId, slotId: sourceSlot.entry.parentSlotId, forkId })
+              ),
+              now: state,
+              frozen: frozenAgent.tools
+            })
           : undefined
         if (tools) rebuilt = { ...rebuilt, agent: { ...frozenAgent, tools } } as ContextSnapshot
         if (modelChanged || tools) snapshot = JSON.stringify(rebuilt)
