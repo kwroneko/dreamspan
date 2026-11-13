@@ -50,6 +50,7 @@ import { type Copy, copiesOf, pendingOf } from "../editor/backup.ts"
 import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf } from "./messageDraft.ts"
 import { beforeReply, chatStateChanged } from "./replyHooks.ts"
 import { guardReply } from "./replyGuards.ts"
+import { noReplyExtras, type ReplyExtrasSource } from "./replyExtras.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -227,6 +228,12 @@ export class ChatSession {
 
   /** Queries completed since this session began already cover its initial snapshot. */
   readonly startedAt = Date.now()
+
+  /** What its surface adds to each request that starts a reply (a side chat's story position). */
+  private replyExtras: ReplyExtrasSource = noReplyExtras
+  setReplyExtras(source: ReplyExtrasSource) {
+    this.replyExtras = source
+  }
 
   constructor(
     chatId: ChatId,
@@ -1509,7 +1516,8 @@ export class ChatSession {
           ...(reply ? {} : { reply: false }),
           ...(reply && round.length > 0 ? { round } : {}),
           ...(reply && autoPick ? { autoPick } : {}),
-          ...(composer === undefined ? {} : { composer: commitOf(composer) })
+          ...(composer === undefined ? {} : { composer: commitOf(composer) }),
+          ...this.replyExtras()
         })
       ),
       (value) => (value._tag === "Queued" ? value.queue : null)
@@ -1556,7 +1564,8 @@ export class ChatSession {
           ...(direction.trim() === "" ? {} : { direction }),
           ...(round.length > 0 ? { round } : {}),
           ...(autoPick ? { autoPick } : {}),
-          ...(composer === undefined ? {} : { composer: commitOf(composer) })
+          ...(composer === undefined ? {} : { composer: commitOf(composer) }),
+          ...this.replyExtras()
         })
       ),
       (value) => (value._tag === "Queued" ? value.queue : null)
@@ -1678,7 +1687,8 @@ export class ChatSession {
         slotId: entry.slotId,
         forkId: this.view.forkId,
         expectedRowVersion: entry.rowVersion,
-        ...(direction === undefined ? {} : { direction })
+        ...(direction === undefined ? {} : { direction }),
+        ...this.replyExtras()
       })
     )
   }
@@ -1697,7 +1707,8 @@ export class ChatSession {
         versionId: entry.version.id,
         forkId: this.view.forkId,
         expectedRowVersion: entry.rowVersion,
-        ...(direction ? { direction } : {})
+        ...(direction ? { direction } : {}),
+        ...this.replyExtras()
       })
     )
   }
@@ -1713,7 +1724,8 @@ export class ChatSession {
       client("ResumeVersion", {
         versionId: entry.version.id,
         forkId: this.view.forkId,
-        expectedRowVersion: entry.rowVersion
+        expectedRowVersion: entry.rowVersion,
+        ...this.replyExtras()
       })
     )
   }

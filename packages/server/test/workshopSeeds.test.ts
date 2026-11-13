@@ -22,9 +22,16 @@ describe("workshop seed lifecycle", () => {
           Array.from({ length: 8 }, () => api.CreateWorkshop({})),
           { concurrency: 8 }
         )
-        const card = (yield* api.ListLibrary({ kind: "card" }))[0]!
+        // The workshop persona is made once with the first seeds, however many workshops start at once.
+        const persona = (yield* api.GetWorkshopDefaults({})).persona!
+        const cards = yield* api.ListLibrary({ kind: "card" })
+        assert.lengthOf(cards, 2)
+        assert.lengthOf(
+          cards.filter((r) => r.entityId === persona),
+          1
+        )
+        const card = cards.find((r) => r.entityId !== persona)!
         const preset = (yield* api.ListLibrary({ kind: "preset" }))[0]!
-        assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), 1)
         assert.lengthOf(yield* api.ListLibrary({ kind: "preset" }), 1)
         const stateOf = (chat: (typeof chats)[number]) =>
           reader
@@ -32,18 +39,18 @@ describe("workshop seed lifecycle", () => {
             .pipe(Effect.map(foldState))
         for (const chat of chats) {
           const state = yield* stateOf(chat)
-          assert.deepStrictEqual(state.participants, [card.entityId])
+          assert.deepStrictEqual(state.participants, [card.entityId, persona])
           assert.strictEqual(state.presetBindings[""]?.ref, preset.id)
         }
         for (const ref of [card, preset]) yield* api.SetRefArchived({ refId: ref.id, archived: true })
         const archived = yield* api.CreateWorkshop({})
-        assert.deepStrictEqual((yield* stateOf(archived)).participants, [card.entityId])
+        assert.deepStrictEqual((yield* stateOf(archived)).participants, [card.entityId, persona])
         assert.strictEqual((yield* stateOf(archived)).presetBindings[""]?.ref, preset.id)
         for (const kind of ["card", "preset"] as const)
           assert.lengthOf(yield* api.ListLibrary({ kind, archived: true }), 1)
         for (const ref of [card, preset]) yield* writer.DeleteEntity({ userId: user.id, entityId: ref.entityId })
         const replacement = yield* api.CreateWorkshop({})
-        const newCard = (yield* api.ListLibrary({ kind: "card" }))[0]!
+        const newCard = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.entityId !== persona)!
         const newPreset = (yield* api.ListLibrary({ kind: "preset" }))[0]!
         assert.notStrictEqual(newCard.entityId, card.entityId)
         assert.notStrictEqual(newPreset.id, preset.id)

@@ -295,7 +295,8 @@ export class Generations extends Context.Service<
               chatId: outcome.chatId,
               slotId: next.slotId,
               versionId: next.versionId,
-              ...(next.forkId === undefined ? {} : { forkId: next.forkId })
+              ...(next.forkId === undefined ? {} : { forkId: next.forkId }),
+              ...(next.storyAt === undefined ? {} : { storyAt: next.storyAt })
             })
           yield* publishPosted(userId, outcome.chatId, outcome.posted)
         })

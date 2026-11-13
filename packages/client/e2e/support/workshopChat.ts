@@ -407,7 +407,8 @@ export function workshopChatTests() {
           if (width === 390)
             await expect(page.getByRole("dialog", { name: `Workshop · ${title}`, exact: true })).toBeVisible()
           await expect(settings.getByRole("switch", { name: "Tools", exact: true })).toHaveCount(0)
-          await expect(settings.getByRole("region", { name: "Summaries" })).toHaveCount(0)
+          // Workshops summarize like stories (spec/WORKSHOP-CONTEXT.md §2.4).
+          await expect(settings.getByRole("region", { name: "Summaries" })).toBeVisible()
           await expect(settings.getByRole("region", { name: "Who replies" })).toHaveCount(0)
           await expect(settings.getByRole("switch", { name: "Card swap", exact: true })).toBeVisible()
           await shot("this-chat")

@@ -831,6 +831,8 @@ it.live("bulk rewrites and Undo retain thread absences while the side chat reads
       assert.lengthOf(known, 2)
       assert.isTrue(known.every((k) => k.away?.includes(t.wren)))
       const side = yield* t.api.CreateWorkshop({ attachTo: t.chatId })
+      // The story's tab shows the user's current thread: the side chat reads there.
+      const shown = yield* t.reader.GetChat({ userId: t.userId, chatId: t.chatId })
       const context: ToolContext = {
         userId: t.userId,
         chatId: side.id,
@@ -843,7 +845,8 @@ it.live("bulk rewrites and Undo retain thread absences while the side chat reads
         viewers: [t.wren],
         reader: t.reader,
         writer: t.writer,
-        cache: new Map()
+        cache: new Map(),
+        storyAt: { chatId: t.chatId, forkId: shown.currentForkId!, leafSlotId: shown.activeLeafSlotId }
       }
       const read = storyTools.find((tool) => tool.id === "read_story")! as RolloutTool<Record<string, unknown>>
       const whole = yield* read.execute(context, { count: 20 })

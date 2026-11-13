@@ -1,4 +1,5 @@
-import { checkStoryReadScope } from "../storyReadScope.ts"
+import { attachedStory, checkStoryReadScope } from "../storyReadScope.ts"
+import { storyTools } from "./history.ts"
 import { prepareHistory } from "../../historyPreparation.ts"
 import { foldState } from "@rp/shared/state.ts"
 // Workshop history tools. Target text is prepared on the server, never returned by a rewrite.
@@ -22,6 +23,26 @@ const key = (ctx: ToolContext) => ({
   ...(ctx.approvalDigest ? { approvalDigest: ctx.approvalDigest } : {})
 })
 const fail = (message: string) => Effect.fail(new ToolInputRefused(message))
+/**
+ * A side chat reads its story only where the user's tab shows it (spec/WORKSHOP.md §4): the
+ * general chat readers hand the attached story to the story tools, which read at the request's
+ * position, never past it, and quote what they return.
+ */
+const besideStory = (ctx: ToolContext, chatId: string) =>
+  Effect.map(attachedStory(ctx), (attached) => attached !== undefined && attached === chatId)
+const storyTool = (id: "read_story" | "search_story") =>
+  storyTools.find((tool) => tool.id === id)! as unknown as RolloutTool<Record<string, unknown>>
+const storyArgs = (
+  search: boolean,
+  args: { from?: number; count?: number; offset?: number; query?: string }
+): Record<string, unknown> =>
+  search
+    ? { query: args.query ?? "", ...(args.offset ? { offset: args.offset } : {}) }
+    : {
+        ...(args.from === undefined ? {} : { from: args.from }),
+        ...(args.count === undefined ? {} : { count: args.count }),
+        ...(args.offset ? { offset: args.offset } : {})
+      }
 const safely = <E>(effect: Effect.Effect<ToolOutput, E>) =>
   effect.pipe(
     Effect.catch((error) => {
@@ -552,6 +573,10 @@ const readTool = (
       const chat = yield* resolveChat(ctx, args.chat)
       yield* checkStoryReadScope(ctx, chat.id)
       ctx.cache.set(`read-chat:${ctx.toolCallId}`, chat)
+      if (yield* besideStory(ctx, chat.id)) {
+        const story = storyTool(search ? "search_story" : "read_story")
+        return yield* story.describe!(ctx, storyArgs(search, args))
+      }
       return {
         title: `${search ? "Search" : "Read"} “${chat.title}”`,
         rows: [
@@ -570,6 +595,8 @@ const readTool = (
         const chat =
           (ctx.cache.get(`read-chat:${ctx.toolCallId}`) as Chat | undefined) ?? (yield* resolveChat(ctx, args.chat))
         yield* checkStoryReadScope(ctx, chat.id)
+        if (yield* besideStory(ctx, chat.id))
+          return yield* storyTool(search ? "search_story" : "read_story").execute(ctx, storyArgs(search, args))
         if (!chat.currentForkId) return { text: "This chat has no branch.", isError: true }
         const result = yield* ctx.reader.ReadWorkshopChat({
           ...key(ctx),
@@ -654,6 +681,8 @@ export const historyRenameTool: RolloutTool<{
     )
 }
 
+const SEARCH_STORY = "Beside a story, search it with search_story: it reads the story where the user's tab shows it."
+
 export const historySearchTool: RolloutTool<{
   chatId: import("@rp/shared/chat.ts").ChatId
   forkId: import("@rp/shared/chat.ts").ForkId
@@ -704,6 +733,7 @@ export const historySearchTool: RolloutTool<{
     Effect.gen(function* () {
       const chat = yield* resolveChat(ctx, args.chatId)
       yield* checkStoryReadScope(ctx, chat.id)
+      if (yield* besideStory(ctx, chat.id)) return yield* fail(SEARCH_STORY)
       return {
         title: `Search “${chat.title}”`,
         rows: [
@@ -724,6 +754,7 @@ export const historySearchTool: RolloutTool<{
   execute: (ctx, args) =>
     safely(
       Effect.gen(function* () {
+        if (yield* besideStory(ctx, args.chatId)) return yield* fail(SEARCH_STORY)
         yield* ctx.reader.ReadWorkshopChat({ ...key(ctx), chatId: args.chatId, forkId: args.forkId, from: 1, count: 1 })
         const result = yield* ctx.reader.PreviewHistory({ userId: ctx.userId, ...args })
         const hits = result.hits.slice(0, 4).map((hit) => ({

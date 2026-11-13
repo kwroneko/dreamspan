@@ -68,6 +68,20 @@ describe("text token counts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
+  it.live("marks segmented counts approximate, including cached results", () =>
+    Effect.gen(function* () {
+      const provider = yield* mock((_request, res) => res.writeHead(500).end())
+      const api = yield* client()
+      yield* useModel(api, "openai-chat", `${provider.url}/v1`, "gpt-4o")
+      for (let i = 0; i < 2; i++) {
+        const counted = yield* api.CountTokens({ texts: ["x".repeat(65536)] })
+        assert.isFalse(counted.tokenizer.exact)
+        assert.include(counted.tokenizer.note ?? "", "smaller pieces")
+      }
+      assert.lengthOf(provider.requests(), 0)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live(
     "open models count locally through the bundled format worker on routers and local servers",
     () =>

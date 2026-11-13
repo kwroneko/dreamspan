@@ -23,6 +23,11 @@ export interface GenerationRequest {
   readonly model?: { readonly connection: ConnectionId; readonly model: ModelId }
   /** An approved workshop send permits this reply only, without auxiliary provider workflows. */
   readonly replyOnly?: boolean
+  /**
+   * A side chat's request (spec/WORKSHOP.md §4): where its story tools read the story, as the
+   * browser tab it was sent from showed it. Absent: the story can't be read for this reply.
+   */
+  readonly storyAt?: import("@rp/shared/chat.ts").StoryAt
   readonly onWaitingCache?: (waiting: boolean) => void
   /**
    * Continue: the version starts with this text and reasoning (the version it continues),

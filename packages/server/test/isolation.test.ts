@@ -1193,6 +1193,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  UndoRolloutEffects: {
+    probe: (actor, owner) =>
+      refused(actor.api.UndoRolloutEffects({ chatId: owner.chat.chatId, rolloutId: owner.chat.rolloutId }), "NotFound")
+  },
   SetWorkshopGrant: {
     probe: (actor, owner) =>
       refused(
@@ -1216,11 +1220,36 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) => refused(actor.api.ListVersionEffects({ versionId: owner.chat.versionId }), "NotFound")
   },
   CreateWorkshop: {
-    // A side chat only ever beside one's own story.
-    probe: (actor, owner) => refused(actor.api.CreateWorkshop({ attachTo: owner.chat.chatId }), "NotFound")
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // A side chat only ever beside one's own story.
+        yield* refused(actor.api.CreateWorkshop({ attachTo: owner.chat.chatId }), "NotFound")
+        // Another user's card as the assistant or as the persona.
+        yield* refused(actor.api.CreateWorkshop({ card: owner.cardId }), "NotFound")
+        yield* refused(actor.api.CreateWorkshop({ persona: owner.cardId }), "NotFound")
+      })
   },
   ListAttachedWorkshops: {
     probe: (actor, owner) => refused(actor.api.ListAttachedWorkshops({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  GetWorkshopDefaults: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetWorkshopPersona({ persona: owner.cardId })
+        const mine = yield* actor.api.GetWorkshopDefaults({})
+        assert.notStrictEqual(mine.persona, owner.cardId)
+        yield* owner.api.SetWorkshopPersona({ persona: null })
+      })
+  },
+  SetWorkshopPersona: {
+    probe: (actor, owner) => refused(actor.api.SetWorkshopPersona({ persona: owner.cardId }), "NotFound")
+  },
+  ConvertPresetToWorkshop: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.ConvertPresetToWorkshop({ refId: owner.refId, label: "Taken", choices: [], instructions: "" }),
+        "NotFound"
+      )
   },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
   GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },
@@ -2355,6 +2384,29 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           }),
           "NotFound"
         )
+      })
+  },
+  PreviewChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const send = (speakerEntityId: EntityId | null) => ({ _tag: "Send" as const, content: "hi", speakerEntityId })
+        const base = { persona: null, greeting: null, first: send(null) }
+        // Their card as the chat's card, the persona, the speaker, the replier, or a greeter.
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [owner.cardId] }), "NotFound")
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [actor.cardId], persona: owner.cardId }), "NotFound")
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [actor.cardId], first: send(owner.cardId) }), "NotFound")
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [actor.cardId], replier: owner.cardId }), "NotFound")
+        yield* refused(
+          actor.api.PreviewChat({
+            ...base,
+            cards: [actor.cardId],
+            greeters: [{ entityId: owner.cardId, greeting: 0 }]
+          }),
+          "NotFound"
+        )
+        // Their own card previews.
+        const own = yield* actor.api.PreviewChat({ ...base, cards: [actor.cardId], replier: actor.cardId })
+        assert.isNotNull(own.budget)
       })
   },
   GetCast: {

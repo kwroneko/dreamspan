@@ -94,7 +94,11 @@ const changeSchemas = [
   Schema.TaggedStruct("Lorebook", { ref: name, active: Schema.Boolean }),
   Schema.TaggedStruct("CardLorebook", { entityId: name, on: Schema.Boolean }),
   Schema.TaggedStruct("AgentEnabled", { on: Schema.Boolean }),
-  Schema.TaggedStruct("AgentTools", { tools: Schema.Array(name).check(Schema.isMaxLength(100)) }),
+  Schema.TaggedStruct("AgentTools", {
+    tools: Schema.NullOr(Schema.Array(name).check(Schema.isMaxLength(100))).annotate({
+      description: "The tools the chat offers, by id; null clears the chat's choice so it follows the app default."
+    })
+  }),
   Schema.TaggedStruct("CardsRotation", { on: Schema.Boolean }),
   Schema.TaggedStruct("ReplyOrder", { order: name }),
   Schema.TaggedStruct("Join", { entityId: name }),

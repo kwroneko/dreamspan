@@ -2,7 +2,8 @@
 // authenticated user, and storage enforces ownership, so another user's ids are NotFound.
 // Documents from the client are validated against their kind's schema here or in the writer.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { PRESET_SCHEMA_VERSION, promptPreset } from "@rp/shared/docs/preset.ts"
+import { PRESET_SCHEMA_VERSION, type PresetDoc, promptPreset } from "@rp/shared/docs/preset.ts"
+import { convertToWorkshop } from "@rp/shared/workshopPreset.ts"
 import { builtinPreset } from "../db/assemblySources.ts"
 import { CARD_SCHEMA_VERSION } from "@rp/shared/docs/card.ts"
 import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
@@ -580,6 +581,31 @@ export const makeEditorHandlers = Effect.gen(function* () {
       }).pipe(settle("DeleteNote"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
   return remoteAware(handlers)
+})
+
+/** Workshop conversion is separate from the core handler group (its type-size bound). */
+export const makeWorkshopPresetHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const writer = yield* Writer
+  return {
+    ConvertPresetToWorkshop: ({ refId, label, choices, instructions }) =>
+      Effect.gen(function* () {
+        const owner = (yield* CurrentUser).id
+        const source = yield* reader.OpenEditor({ userId: owner, refId })
+        if (source.ref.kind !== "preset") return yield* new NotFound({ entity: "preset", id: refId })
+        const { ref } = yield* writer.CreateEntity({
+          userId: owner,
+          kind: "preset",
+          label,
+          subtitle: "",
+          doc: convertToWorkshop(source.doc as PresetDoc, choices, instructions),
+          schemaVersion: PRESET_SCHEMA_VERSION,
+          origin: "user",
+          sourcePath: null
+        })
+        return ref
+      }).pipe(settle("ConvertPresetToWorkshop"))
+  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").WorkshopPresetApi.of>[0]
 })
 
 /** ForkMergeApi's handlers, served by their own layer (AppCoreApi's note). */

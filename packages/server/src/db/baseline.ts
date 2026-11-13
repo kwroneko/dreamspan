@@ -1430,6 +1430,8 @@ export const baseline: ReadonlyArray<string> = [
     -- A round's entry: the slot of the round's first reply, once there is one, so the turns
     -- already decided can be shown (DESIGN §2.3).
     round_start_slot_id TEXT REFERENCES slots(id) ON DELETE SET NULL,
+    -- A side chat's story position for the reply this entry asks for (spec/WORKSHOP.md §4).
+    story_at_json TEXT CHECK (story_at_json IS NULL OR json_valid(story_at_json)),
     CHECK (round = 0 OR kind = 'generate'),
     CHECK (held = 0 OR round = 1),
     CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0),

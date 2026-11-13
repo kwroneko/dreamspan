@@ -30,6 +30,8 @@ export interface QueuedRow {
   readonly auto_pick: number
   /** A round's entry: the slot of the round's first reply, once posted. */
   readonly round_start_slot_id: string | null
+  /** A side chat's story position (StoryAt JSON) for the reply it asks for; null elsewhere. */
+  readonly story_at_json: string | null
   readonly row_version: number
   readonly created_at: number
 }

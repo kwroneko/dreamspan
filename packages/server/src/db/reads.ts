@@ -974,7 +974,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         )
       }).pipe(query("ListBranches")),
 
-    GetSlot: ({ userId, slotId, forkId }) =>
+    GetSlot: ({ userId, slotId, forkId, onForkOnly }) =>
       Effect.gen(function* () {
         const [owned] = yield* sql<{ chat_id: ChatId }>`
           SELECT s.chat_id FROM slots s JOIN chats c ON c.id = s.chat_id
@@ -983,11 +983,19 @@ export const makeReadHandlers = Effect.gen(function* () {
         const fork = forkId
           ? (yield* liveFork(yield* ownedChat(userId, owned.chat_id), forkId)).id
           : yield* forkAt(sql, owned.chat_id, slotId)
+        let position: number | null = null
+        if (onForkOnly) {
+          const shown = yield* liveFork(yield* ownedChat(userId, owned.chat_id), fork as ForkId | null)
+          const place = yield* slotPlace(sql, owned.chat_id, slotId)
+          const pieces = yield* pathPieces(sql, owned.chat_id, shown.id, shown.tip_slot_id)
+          position = place === null ? null : positionOf(pieces, place)
+          if (position === null) return yield* new NotFound({ entity: "slot on branch", id: slotId })
+        }
         const [row] = yield* sql<PathRow>`
           SELECT ${withFork(sql, fork, pathColumns)}, ${fork} AS shown_fork_id FROM slots s ${viewJoin(sql, fork)}
           WHERE s.id = ${slotId}`
         if (row!.slot_deleted !== 0) return yield* new NotFound({ entity: "slot", id: slotId })
-        return { chatId: owned.chat_id, entry: toPathEntry(row!) }
+        return { chatId: owned.chat_id, entry: toPathEntry({ ...row!, ...(position === null ? {} : { position }) }) }
       }).pipe(query("GetSlot")),
 
     VersionAmendments: ({ userId, versionId }) =>

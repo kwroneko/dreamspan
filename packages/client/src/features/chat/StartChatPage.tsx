@@ -67,6 +67,7 @@ import { firstId, PendingChat, pendingOptions, pendingTitle } from "./pendingCha
 import { chatColumns } from "./presentation.tsx"
 import { seedChat } from "./session.ts"
 import { preloadChatPage } from "./chatPageLoader.ts"
+import { DraftRequestDialog, type PreviewInput, useDraftPreview } from "./draftRequest.tsx"
 
 /**
  * One greeting of the chat not made yet, as the saved chat shows a message: the portrait, the
@@ -160,7 +161,12 @@ function Pending({
   const composerId = useId()
   const action = useAction()
   const navigate = useNavigate()
-  const navigationSearch = useSearch({ strict: false }) as { panel?: string; character?: string; guidance?: string }
+  const navigationSearch = useSearch({ strict: false }) as {
+    panel?: string
+    character?: string
+    guidance?: string
+    request?: string
+  }
   const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
   const view = pending.view(state)
   const { greeters, picks, persona, fallbackNote } = state
@@ -276,6 +282,53 @@ function Pending({
   const prefs = viewPrefs.prefs
   // Cards from a card source, added by the first turn (spec/CARD-SOURCES.md §4.5).
   const adding = greeters.filter((greeter) => remoteOf(greeter.card.entityId) !== null).map((greeter) => greeter.card)
+  // Each greeting as shown, expanded before the first request is asked for, so it carries what
+  // the greetings' random and time macros drew, as the send does.
+  const shownGreetings = greeters.map((_, at) =>
+    options[at]!.length === 0 ? null : expandGreeting(at, effectivePicks[at]!)
+  )
+  /** Who greets, with what each greeting shown drew: the first send's, and the preview's. */
+  const greeterChoices = () =>
+    greeters.map((greeter, at) => {
+      const shown = draws(at).get(effectivePicks[at] ?? 0)
+      return {
+        entityId: greeter.card.entityId,
+        greeting: Math.max(0, effectivePicks[at] ?? 0),
+        ...(shown === undefined ? {} : { frozen: shown })
+      }
+    })
+
+  // The first request, as the first send would make it now (DESIGN §2.1): Send's with text in
+  // the box, else Generate's (with guidance, the text directs it).
+  const personaNow = playing?.entityId ?? null
+  const previewInput: PreviewInput | null =
+    !viewPrefs.ready || action.pending
+      ? null
+      : {
+          guidance,
+          cards: greeters.map((greeter) => greeter.card.entityId),
+          persona: personaNow,
+          greeting: null,
+          greeters: greeterChoices(),
+          ...(!guidance && text.trim() !== ""
+            ? {
+                first: { _tag: "Send" as const, content: text, speakerEntityId: speakerId },
+                replier: replyId
+              }
+            : { first: { _tag: "Generate" as const, speakerEntityId: speakerId, direction: guidance ? text : "" } })
+        }
+  const requestOpen = navigationSearch.request === "first"
+  const setRequestOpen = (open: boolean) =>
+    void navigate({
+      to: ".",
+      search: (prev: Record<string, unknown>) => ({ ...prev, request: open ? "first" : undefined }),
+      resetScroll: false
+    })
+  const draft = useDraftPreview(
+    previewInput,
+    JSON.stringify([view.cast?.model ?? null, view.cast?.preset ?? null]),
+    () => setRequestOpen(true)
+  )
 
   const start = async (first: "send" | "generate") => {
     if (!viewPrefs.ready || action.pending || (first === "send" && text.trim() === "")) return
@@ -298,14 +351,7 @@ function Pending({
             persona: personaId,
             greeting: null,
             ...(group === null ? {} : { title: group.name }),
-            greeters: greeters.map((greeter, at) => {
-              const shown = draws(at).get(effectivePicks[at] ?? 0)
-              return {
-                entityId: greeter.card.entityId,
-                greeting: Math.max(0, effectivePicks[at] ?? 0),
-                ...(shown === undefined ? {} : { frozen: shown })
-              }
-            }),
+            greeters: greeterChoices(),
             first:
               first === "send"
                 ? { _tag: "Send", content: submitted, speakerEntityId: speakerId }
@@ -410,7 +456,8 @@ function Pending({
     start,
     view,
     onSettings: show,
-    adds: adding.map((card) => card.name).join(", ")
+    adds: adding.map((card) => card.name).join(", "),
+    draft
   }
 
   return (
@@ -461,7 +508,7 @@ function Pending({
                       groupOnly={greetingPick(options[at]!, effectivePicks[at]!)!.groupOnly}
                       index={options[at]!.findIndex((option) => option.index === effectivePicks[at])}
                       onIndex={(index) => pending.pick(at, options[at]![index]!.index)}
-                      text={expandGreeting(at, effectivePicks[at]!)}
+                      text={shownGreetings[at]!}
                     />
                   )
                 )}
@@ -532,6 +579,7 @@ function Pending({
             <StripRow scroll={phone}>
               <PendingComposerControls placement="strip" context={controls} />
             </StripRow>
+            <DraftRequestDialog open={requestOpen} onClose={() => setRequestOpen(false)} draft={draft} />
           </div>
         </div>
         {panel !== null && place.show && (

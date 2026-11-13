@@ -22,6 +22,7 @@ import { makeCoalescer, makeLimiter } from "../src/sources/limiter.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
+import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
 const archive = await startFakeArchive({ cards: 120 })
 afterAll(() => archive.close())
@@ -381,6 +382,83 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       })
       assert.lengthOf(held, 0)
     })
+  )
+
+  it.effect("a preview of an unopened remote card refuses without fetching or writing", () =>
+    Effect.gen(function* () {
+      const api = yield* client({ "Remote-User": "preview-unopened" })
+      const placeholder = remoteEntityId("cardex", archive.cards[115]!.slug)
+      const before = archive.hits()
+      const result = yield* outcome(
+        api.PreviewChat({
+          cards: [placeholder],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Send", content: "Hello", speakerEntityId: null },
+          replier: placeholder
+        })
+      )
+      assert.strictEqual(archive.hits(), before, "preview must never fetch an unopened card")
+      assert.strictEqual(result, "ServerError")
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), 0)
+      assert.lengthOf(yield* api.ListRecentRemote({ sourceId: "cardex" }), 0)
+      assert.lengthOf(yield* api.ListChats({ limit: 10, before: null }), 0)
+    })
+  )
+
+  it.effect(
+    "a chat not sent yet with a source's card previews its request, adding and sending nothing (DESIGN §2.1)",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client({ "Remote-User": "src-carol" })
+        const card = archive.cards[11]!
+        const placeholder = remoteEntityId("cardex", card.slug)
+        yield* api.SourceCardForChat({ sourceId: "cardex", remoteId: card.slug })
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((_request, res) =>
+              sse(res, completionChunks(["Hi."], { prompt_tokens: 10, completion_tokens: 1 }))
+            )
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const connection = yield* api.CreateConnection({
+          kind: "openai-chat",
+          settings: {
+            name: "Mock",
+            baseUrl: `${mock.url}/v1`,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          },
+          apiKey: "sk-synthetic"
+        })
+        yield* api.SetTokenCounting({ connectionId: connection.id, via: connection.id })
+        const model = yield* api.AddUserModel({ connectionId: connection.id, key: "mock-model", overrides: {} })
+        yield* api.SetGenerationDefaults({
+          defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+        })
+        const library = yield* api.ListLibrary({ kind: "card" })
+        const hits = archive.hits()
+        const preview = yield* api.PreviewChat({
+          cards: [placeholder],
+          persona: null,
+          greeting: null,
+          greeters: [{ entityId: placeholder, greeting: 0 }],
+          first: { _tag: "Send", content: "Hello there", speakerEntityId: null },
+          replier: placeholder
+        })
+        const text = JSON.stringify(preview.request?.messages.map((m) => m.content))
+        assert.include(text, `${card.name} is a synthetic character`, "the card's description, as adding it stores it")
+        assert.include(text, "Hello there")
+        // The card came from the cache; nothing was added, made or sent to the model's provider.
+        assert.strictEqual(archive.hits(), hits)
+        assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), library.length)
+        assert.lengthOf(yield* api.ListChats({ limit: 10, before: null }), 0)
+        yield* Effect.promise(() => new Promise((done) => setTimeout(done, 500)))
+        assert.lengthOf(mock.requests(), 0)
+      }).pipe(Effect.scoped)
   )
 
   it.effect("a first send with a source's card adds the card and makes its chat together (§4.5)", () =>
@@ -775,6 +853,93 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       const origin = yield* api.CardOrigin({ entityId: added.entityId })
       assert.deepStrictEqual([origin?.remoteVersion, origin?.newerVersion], [next.sha256, null])
       assert.isNull(yield* api.CardOrigin({ entityId: separate.entityId }))
+    })
+  )
+
+  it.effect("a standalone lorebook is added to the lorebooks once, held in results, and updated by merge (§3.9)", () =>
+    Effect.gen(function* () {
+      const api = yield* client(alice)
+      const book = archive.lorebooks[1]!
+      const cards = (yield* api.ListLibrary({ kind: "card" })).length
+      const before = (yield* api.ListLibrary({ kind: "lorebook" })).length
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: book.slug })
+      assert.isFalse(added.existing)
+      assert.strictEqual(added.name, book.name)
+      const lorebooks = yield* api.ListLibrary({ kind: "lorebook" })
+      assert.lengthOf(lorebooks, before + 1)
+      assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), cards)
+      const ref = lorebooks.find((r) => r.id === added.refId)!
+      assert.strictEqual(ref.entityId, added.entityId)
+      // Named as the archive lists it: a World Info file names no lorebook.
+      assert.strictEqual(ref.label, book.name)
+      const opened = (refId: string) =>
+        Effect.map(
+          api.OpenEditor({ refId: refId as RefId }),
+          (editor) => editor.doc as { name: string; entries: ReadonlyArray<{ content: string }> }
+        )
+      const entries = (refId: string) => Effect.map(opened(refId), (doc) => doc.entries)
+      assert.strictEqual((yield* opened(added.refId)).name, book.name)
+      assert.lengthOf(yield* entries(added.refId), 2)
+      // Opened again (a click, a link, a new tab): the same lorebook, nothing new.
+      const again = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: book.slug })
+      assert.deepStrictEqual([again.existing, again.refId], [true, added.refId])
+      assert.lengthOf(yield* api.ListLibrary({ kind: "lorebook" }), before + 1)
+      // Results mark it as the user's, for them only.
+      const search = (who: Record<string, string>) =>
+        Effect.flatMap(client(who), (c) =>
+          c.SourceSearch({
+            sourceId: "cardex",
+            query: { ...emptySourceQuery, filters: { kind: "lorebook" } },
+            page: null
+          })
+        )
+      const shown = (yield* search(alice)).items.find((item) => item.remoteId === book.slug)!
+      assert.deepStrictEqual([shown.kind, shown.held?.refId], ["lorebook", added.refId])
+      assert.isUndefined((yield* search(bob)).items.find((item) => item.remoteId === book.slug)?.held)
+      // Opening a lorebook uses the ordinary source read and records its kind for the recent link.
+      yield* api.SourceCard({ sourceId: "cardex", remoteId: book.slug })
+      const recent = (yield* api.ListRecentRemote({ sourceId: "cardex" })).find((item) => item.remoteId === book.slug)
+      assert.strictEqual((recent as { kind?: string })?.kind, "lorebook")
+      // Its origin, read locally.
+      const entityId = added.entityId
+      archive.reset()
+      assert.strictEqual((yield* api.CardOrigin({ entityId }))?.remoteVersion, book.sha256)
+      assert.strictEqual(archive.hits(), 0)
+      // The author adds an entry: Check finds it; Update merges the newer file in, as Update from file… does.
+      const next = archive.publish(book.slug)
+      assert.strictEqual((yield* api.CheckRemoteVersion({ entityId })).newerVersion, next.sha256)
+      const response = yield* newerFile(entityId, alice)
+      assert.strictEqual(response.status, 200)
+      assert.strictEqual(response.headers.get("x-remote-version"), next.sha256)
+      const receipt = response.headers.get("x-source-version-receipt") ?? ""
+      const bytes = new Uint8Array(yield* Effect.promise(() => response.arrayBuffer()))
+      // The editor's Update names the file after the lorebook, so its name stays.
+      const staged = yield* importFile(bytes, { name: `${book.name}.json`, into: added.refId, mode: "merge" })
+      assert.strictEqual(staged.status, 200, yield* Effect.promise(() => staged.clone().text()))
+      const stagedResult = yield* Effect.promise(
+        () => staged.json() as Promise<{ library: { stagedRevisionId: string } }>
+      )
+      assert.isString(stagedResult.library.stagedRevisionId)
+      assert.lengthOf(yield* entries(added.refId), 2, "review must leave the in-use lorebook unchanged")
+      const merged = yield* importFile(bytes, { name: `${book.name}.json`, into: added.refId })
+      assert.strictEqual(merged.status, 200, yield* Effect.promise(() => merged.clone().text()))
+      const updated = yield* entries(added.refId)
+      assert.strictEqual((yield* opened(added.refId)).name, book.name)
+      assert.lengthOf(updated, 3)
+      assert.isTrue(updated.some((entry) => entry.content.includes("garden")))
+      const taken = yield* api.TakeRemoteVersion({ entityId, version: next.sha256, receipt })
+      assert.deepStrictEqual([taken.remoteVersion, taken.newerVersion], [next.sha256, null])
+      // A successor on the archive under a new slug is followed by the lorebook's stable listing.
+      const successor = archive.publishSuccessor(book.slug)
+      assert.strictEqual((yield* api.CheckRemoteVersion({ entityId })).newerVersion, successor.sha256)
+      const newer = yield* newerFile(entityId, alice)
+      assert.strictEqual(newer.status, 200)
+      assert.strictEqual(newer.headers.get("x-remote-version"), successor.sha256)
+      // Nobody else sees, checks or fetches it.
+      const theirs = yield* client(bob)
+      assert.isNull(yield* theirs.CardOrigin({ entityId }))
+      assert.strictEqual(yield* outcome(theirs.CheckRemoteVersion({ entityId })), "NotFound")
+      assert.strictEqual((yield* newerFile(entityId, bob)).status, 404)
     })
   )
 
@@ -1534,6 +1699,23 @@ describe("the cache (§4.1)", () => {
     return { dataDir, cache: makeSourceCache({ dataDir, now, capBytes }) }
   }
   const key = (user: string, kind: "page" | "card" | "image", id: string) => ({ user, source: "cardex", kind, id })
+
+  it.effect("preview peeks neither touch nor evict files, even after their ordinary lifetime", () =>
+    Effect.gen(function* () {
+      let now = 0
+      const { cache } = fresh(() => now)
+      yield* cache.scan
+      const entry = yield* cache.put(key("preview", "card", "opened"), { bytes: new Uint8Array([1, 2, 3]) })
+      const used = entry.used
+      now += 8 * DAY
+      assert.isNull(yield* cache.peek(key("preview", "card", "missing")))
+      assert.strictEqual((yield* cache.peek(key("preview", "card", "opened")))?.used, used)
+      assert.strictEqual(cache.size(), 1)
+      assert.strictEqual((yield* cache.readBlob(entry.blob!)).length, 3)
+      yield* cache.sweep
+      assert.strictEqual(cache.size(), 0, "preview never prolongs an entry's lifetime")
+    })
+  )
 
   it.effect("pages last 10 minutes from when fetched; cards 7 days from when last opened", () =>
     Effect.gen(function* () {

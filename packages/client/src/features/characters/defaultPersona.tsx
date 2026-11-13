@@ -14,7 +14,8 @@ import { chatCardActions } from "../chat/presentation.tsx"
 import { defaultsAtom } from "../pickers/defaults.ts"
 import { shellAtom } from "./shellData.tsx"
 
-const DEFAULT_PERSONA_HINT = "New chats start with this persona. Existing chats keep theirs."
+const DEFAULT_PERSONA_HINT =
+  "New story chats start with this persona. Existing chats keep theirs; workshops have their own."
 const CLEAR_HINT = "New chats start with no persona."
 
 export function useDefaultPersona() {

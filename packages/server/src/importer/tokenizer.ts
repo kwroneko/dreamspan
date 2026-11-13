@@ -37,18 +37,61 @@ const encoder = (encoding: LocalEncoding) => {
   return found
 }
 
+/** Bound individual BPE runs, including words and combining marks, as well as whitespace.
+ * Long runs can otherwise monopolize a reader for minutes. Splitting is an approximation:
+ * boundary merges can change the count, never the input text or provider request bytes.
+ */
+const RUN_PIECE = 4096
+
+export const segmentedTokenCount = (texts: ReadonlyArray<string>) =>
+  texts.some((text) => {
+    if (text.length < RUN_PIECE) return false
+    for (const match of text.matchAll(/\s+|\S+/gu)) if (match[0].length >= RUN_PIECE) return true
+    return false
+  })
+
+const runsInPieces =
+  (count: (text: string) => number) =>
+  (text: string): number => {
+    let total = 0
+    let start = 0
+    // A bounded per-call memo also keeps multi-megabyte repeated text cheap.
+    const pieces = new Map<string, number>()
+    for (const match of text.matchAll(/\s+|\S+/gu)) {
+      if (match[0].length < RUN_PIECE) continue
+      const at = match.index
+      total += count(text.slice(start, at))
+      const end = at + match[0].length
+      for (let pos = at; pos < end;) {
+        let next = Math.min(pos + RUN_PIECE, end)
+        // Never cut a UTF-16 pair in two.
+        if (next < end && /[\uD800-\uDBFF]/.test(text[next - 1]!)) next--
+        const piece = text.slice(pos, next)
+        let tokens = pieces.get(piece)
+        if (tokens === undefined) {
+          tokens = count(piece)
+          if (pieces.size < 32) pieces.set(piece, tokens)
+        }
+        total += tokens
+        pos = next
+      }
+      start = end
+    }
+    return total + count(text.slice(start))
+  }
+
 /** Each text's token count. Special-token text ("<|endoftext|>") counts as ordinary text. */
 export const prepareTokenizer = async (encoding: LocalEncoding): Promise<(text: string) => number> => {
   if (encoding === "llama3") {
     const { default: tokenizer } = await import("llama3-tokenizer-js")
-    return (text) => (text === "" ? 0 : tokenizer.encode(text, { bos: false, eos: false }).length)
+    return runsInPieces((text) => (text === "" ? 0 : tokenizer.encode(text, { bos: false, eos: false }).length))
   }
   if (encoding !== "o200k_base" && encoding !== "cl100k_base") {
     const tokenizer = await hfEncoder(encoding)
-    return (text) => (text === "" ? 0 : tokenizer.encode(text, { add_special_tokens: false }).ids.length)
+    return runsInPieces((text) => (text === "" ? 0 : tokenizer.encode(text, { add_special_tokens: false }).ids.length))
   }
   const tiktoken = await encoder(encoding)
-  return (text) => (text === "" ? 0 : tiktoken.encode(text, [], []).length)
+  return runsInPieces((text) => (text === "" ? 0 : tiktoken.encode(text, [], []).length))
 }
 
 /** Batch counting and assembly use the same loaded tokenizer. */

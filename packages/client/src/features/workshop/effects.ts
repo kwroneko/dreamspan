@@ -63,3 +63,33 @@ export const undoHint = (effect: RolloutEffect) =>
       : effect.kind === "library.revise"
         ? "Puts the item back as it was before, as a new revision."
         : "Undoes this change."
+
+/** The changes one reply's run made, as the Changes tab groups them. */
+export interface ReplyChanges {
+  readonly rolloutId: string
+  /** Newest first, as listed. */
+  readonly effects: ReadonlyArray<RolloutEffect>
+  /** When its first change was made. */
+  readonly startedAt: number
+}
+
+/**
+ * Changes grouped by the reply that made them (its run), in the order the newest first list meets
+ * them; pages read later join the group their reply already has.
+ */
+export const groupByReply = (rows: ReadonlyArray<RolloutEffect>): ReadonlyArray<ReplyChanges> => {
+  const groups = new Map<string, Array<RolloutEffect>>()
+  for (const row of rows) {
+    const group = groups.get(row.rolloutId)
+    if (group) group.push(row)
+    else groups.set(row.rolloutId, [row])
+  }
+  return [...groups].map(([rolloutId, effects]) => ({
+    rolloutId,
+    effects,
+    startedAt: Math.min(...effects.map((e) => e.createdAt))
+  }))
+}
+
+/** "Undo all of this reply" is offered while any of its changes can still be undone. */
+export const undoAllOffered = (group: ReplyChanges) => group.effects.some(undoable)

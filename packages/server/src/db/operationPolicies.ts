@@ -224,12 +224,7 @@ const statePolicy = (id: string): OperationPolicy =>
         >
         if (changes.some((c) => !allowedStateKeys.has(c.key)))
           return yield* refuseOperation("This chat change is not exposed to tools.")
-        const snapshot = yield* stateSnapshot(sql, userId, input)
-        if (changes.some((c) => c.key === "agent.tools") && snapshot.state.agentTools === null)
-          return yield* refuseOperation(
-            "The previous tool selection uses defaults and cannot yet be restored by Undo. Set an explicit selection first."
-          )
-        return snapshot
+        return yield* stateSnapshot(sql, userId, input)
       }),
     undo: (sql, ops, userId, input, before, after) =>
       Effect.gen(function* () {
@@ -265,13 +260,8 @@ const statePolicy = (id: string): OperationPolicy =>
             push(previous ? (previous.on ? "lorebook.attach" : "lorebook.detach") : "lorebook.remove", c.value)
           }
           if (c.key === "agent.enabled") push(c.key, { on: old.agentEnabled ?? false })
-          if (c.key === "agent.tools") {
-            if (old.agentTools === null)
-              return yield* refuseOperation(
-                "The previous tool selection used defaults. Undo is unavailable until it has an explicit selection."
-              )
-            push(c.key, { tools: old.agentTools })
-          }
+          // null: the chat followed the app default, and does again.
+          if (c.key === "agent.tools") push(c.key, { tools: old.agentTools })
           if (c.key === "cards.rotation") push(c.key, { on: old.cardsRotation ?? false })
           if (c.key === "reply.order") push(c.key, old.replyOrder ?? "natural")
         }

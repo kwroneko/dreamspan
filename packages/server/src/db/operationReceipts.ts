@@ -1,6 +1,7 @@
 // A write commits before its RPC handler can shape the model's result. Preserve that
 // crash interval explicitly, then replace the pending result exactly once before delivery.
-import { Schema } from "effect"
+import type { SqlClient } from "effect/sql"
+import { Effect, Schema } from "effect"
 
 const Pending = Schema.Struct({
   operationReceipt: Schema.Literal("pending"),
@@ -27,3 +28,12 @@ export const recoveredOperationText = (text: string) => {
     ? `This change already committed before its result was saved. Do not repeat it. Saved result: ${JSON.stringify(pending.value)}`
     : text
 }
+
+/** Called inside the serial writer transaction; provider call ids never order effects. */
+export const nextReceiptTime = (sql: SqlClient.SqlClient, rolloutId: string) =>
+  Effect.map(
+    sql<{
+      at: number
+    }>`SELECT coalesce(max(created_at), 0) AS at FROM rollout_receipts WHERE rollout_id = ${rolloutId}`,
+    ([previous]) => Math.max(Date.now(), previous!.at + 1)
+  )

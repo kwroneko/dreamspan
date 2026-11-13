@@ -25,10 +25,17 @@ import { StImportApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
 import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
-import { InspectorApi } from "./inspectorApi.ts"
+import { DraftPreviewApi, InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import { TextSearchApi } from "./textSearchApi.ts"
-import { EditorApi, ForkMergeApi, GalleryApi, CardArchiveApi, PanelApprovalApi } from "./editorApi.ts"
+import {
+  EditorApi,
+  WorkshopPresetApi,
+  ForkMergeApi,
+  GalleryApi,
+  CardArchiveApi,
+  PanelApprovalApi
+} from "./editorApi.ts"
 import { CardSourcesApi } from "./cardSources.ts"
 import {
   AccountRejected,
@@ -410,6 +417,7 @@ export class AppCoreApi extends RpcGroup.make(
 
 /** The fork merge RPCs (editorApi.ts), authenticated like the rest. */
 export const AuthenticatedForkMergeApi = ForkMergeApi.middleware(Authentication)
+export const AuthenticatedWorkshopPresetApi = WorkshopPresetApi.middleware(Authentication)
 
 export const AuthenticatedCardArchiveApi = CardArchiveApi.middleware(Authentication)
 
@@ -448,6 +456,9 @@ export class AuthenticatedDecisionApi extends DecisionApi.middleware(Authenticat
 /** Text search across chats (textSearchApi.ts). */
 export class AuthenticatedTextSearchApi extends TextSearchApi.middleware(Authentication) {}
 
+/** The first request of a chat not sent yet (inspectorApi.ts). */
+export class AuthenticatedDraftPreviewApi extends DraftPreviewApi.middleware(Authentication) {}
+
 /** The providers a new connection starts from (providerApi.ts). */
 export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Authentication) {}
 
@@ -455,6 +466,7 @@ export const AuthenticatedMessageVersionApi = MessageVersionApi.middleware(Authe
 
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedForkMergeApi)
+  .merge(AuthenticatedWorkshopPresetApi)
   .merge(AuthenticatedChatEventsApi)
   .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedWorkshopApi)
@@ -472,7 +484,8 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedChatThreadsApi)
   .merge(AuthenticatedShellUpdatesApi)
   .merge(AuthenticatedProviderListApi)
-  .merge(AuthenticatedTextSearchApi) {}
+  .merge(AuthenticatedTextSearchApi)
+  .merge(AuthenticatedDraftPreviewApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

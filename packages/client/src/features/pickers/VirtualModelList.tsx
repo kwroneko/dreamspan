@@ -5,7 +5,7 @@ import { useImperativeHandle, useLayoutEffect, useRef, useState, type Ref, type 
 import type { ModelChoice } from "../chat/modelChoices.ts"
 import { Icon } from "../../ui/Icon.tsx"
 import { ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
-import { modelConnection, modelDetail, modelName, modelTime } from "./modelList.ts"
+import { modelConnection, modelDetail, modelName, modelTime, modelWindow, modelWindowHint } from "./modelList.ts"
 
 export type ModelRow =
   { readonly heading: string; readonly key: string } | { readonly model: ModelChoice; readonly key: string }
@@ -139,7 +139,9 @@ export function VirtualModelList({
                   data-picker-row={row.model.value}
                   className="grid h-full grid-cols-[minmax(0,1fr)_2rem] items-center gap-2 rounded-md pr-2 hover:bg-surface-raised"
                 >
-                  <Tooltip label={`Choose ${row.model.label}. ${modelTime(used.get(row.model.value))}`}>
+                  <Tooltip
+                    label={`Choose ${row.model.label}. ${modelTime(used.get(row.model.value))}.${modelWindowHint(row.model)}`}
+                  >
                     <button
                       type="button"
                       role="radio"
@@ -159,7 +161,14 @@ export function VirtualModelList({
                         <span className="truncate text-xs text-muted">
                           {modelConnection(row.model).name} · {row.model.modelKey ?? row.model.label}
                         </span>
-                        <span className="truncate text-xs text-muted">{modelDetail(used.get(row.model.value))}</span>
+                        <span className="truncate text-xs text-muted">
+                          {modelWindow(row.model) && (
+                            <span className={row.model.window?.assumed ? "text-warning" : ""}>
+                              {modelWindow(row.model)} ·{" "}
+                            </span>
+                          )}
+                          {modelDetail(used.get(row.model.value))}
+                        </span>
                       </span>
                     </button>
                   </Tooltip>

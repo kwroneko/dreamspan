@@ -12,7 +12,8 @@ export const DEFAULT_SAMPLERS: PresetSamplers = {
   top_a: 0,
   min_p: 0,
   repetition_penalty: 1,
-  openai_max_context: 4095,
+  // The model's window replaces it (withModelSettings); ASSUMED_CONTEXT when nothing reports one.
+  openai_max_context: 128_000,
   openai_max_tokens: 300,
   max_context_unlocked: false,
   seed: -1,

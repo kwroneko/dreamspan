@@ -4,7 +4,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionId } from "@rp/shared/providers.ts"
 import { NewVersion } from "@rp/shared/chat.ts"
 import { promptPreset } from "@rp/shared/docs/preset.ts"
-import { DEFAULT_SAMPLERS } from "@rp/shared/modelSettings.ts"
+import { DEFAULT_SAMPLERS, withModelSettings } from "@rp/shared/modelSettings.ts"
 import * as Database from "../src/db/Database.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { importPromptPreset, importStSettings, exportPromptPreset } from "../src/formats/presetSettings.ts"
@@ -31,6 +31,20 @@ const file = JSON.stringify({
 })
 
 describe("separate ST preset import surfaces", () => {
+  it("uses model windows on every compatibility seed and preserves deliberate small settings", () => {
+    const legacy = importStPreset(file).document!
+    for (const context of [null, 200_000]) {
+      assert.strictEqual(withModelSettings(legacy, {}, context, null).samplers.openai_max_context, context ?? 128_000)
+      for (const chosen of [4095, 4096, 16_384])
+        assert.strictEqual(
+          withModelSettings(legacy, { samplers: { openai_max_context: chosen } }, context, null).samplers
+            .openai_max_context,
+          chosen
+        )
+    }
+    const absent = importStSettings('{"temperature":0.5}', "model")
+    assert.isUndefined(absent.model?.samplers?.openai_max_context)
+  })
   it("imports prompt text and reports ignored settings without keeping model or connection data", () => {
     const imported = importPromptPreset(file)
     assert.ok(imported.document)
@@ -51,6 +65,19 @@ describe("separate ST preset import surfaces", () => {
     assert.strictEqual(imported.model?.stream, false)
     assert.isNull(imported.connection)
     assert.notInclude(JSON.stringify(imported), "never-import-me")
+  })
+  it("drops SillyTavern's default context size (4,095) and keeps any other, so the model's window applies", () => {
+    const withContext = (size: number) =>
+      importStSettings(JSON.stringify({ ...(JSON.parse(file) as object), openai_max_context: size }), "model")
+    const untouched = withContext(4095)
+    assert.isUndefined(untouched.model?.samplers?.openai_max_context)
+    assert.ok(untouched.report.issues.some((issue) => issue.code === "settings.default_context"))
+    assert.strictEqual(untouched.model?.samplers?.temperature, 0.37)
+    for (const size of [4096, 8192, 200_000]) {
+      const chosen = withContext(size)
+      assert.strictEqual(chosen.model?.samplers?.openai_max_context, size)
+      assert.notOk(chosen.report.issues.some((issue) => issue.code === "settings.default_context"))
+    }
   })
   it("imports API type, URL and model name without keys, and reports all ignored parts", () => {
     const imported = importStSettings(file, "connection")
