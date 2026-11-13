@@ -5,6 +5,10 @@ import { Config, Context, Layer, Schema } from "effect"
 const defaultClientDist = fileURLToPath(new URL("../../client/dist", import.meta.url))
 
 const AppConfigFromEnv = Config.all({
+  plugins: Config.String(serverEnvironment.PLUGINS).pipe(
+    Config.withDefault("on"),
+    Config.map((value) => value !== "off")
+  ),
   host: Config.String(serverEnvironment.HOST).pipe(Config.withDefault("127.0.0.1")),
   /** 0 takes any free port; the startup log names it. */
   port: Config.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65535 })), serverEnvironment.PORT).pipe(

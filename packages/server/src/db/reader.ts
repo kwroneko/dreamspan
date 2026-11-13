@@ -1,3 +1,4 @@
+import { makePluginReadHandlers } from "./pluginData.ts"
 import { makeAgentHistoryReadHandlers } from "./agentHistoryReads.ts"
 import { makeMergeReadHandlers } from "./merges.ts"
 import { libraryMergePolicies, defaultLibraryMergePolicy } from "@rp/shared/forkMerge.ts"
@@ -71,7 +72,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               makeMessageSearchHandlers,
               makeLibraryReplaceReadHandlers,
               makeWorkshopGrantReadHandlers,
-              makeWorkshopAttachReadHandlers
+              makeWorkshopAttachReadHandlers,
+              makePluginReadHandlers
             ]),
             ([
               history,
@@ -93,7 +95,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               messageSearch,
               libraryReplace,
               grants,
-              attached
+              attached,
+              plugins
             ]) =>
               ReadOps.of(
                 stateModuleHandlers(
@@ -118,7 +121,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                       ...messageSearch,
                       ...libraryReplace,
                       ...grants,
-                      ...attached
+                      ...attached,
+                      ...plugins
                     })
                   )
                 )

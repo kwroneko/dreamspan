@@ -500,6 +500,12 @@
     },
     {
       "type": "index",
+      "name": "plugin_data_owner",
+      "tbl_name": "plugin_data",
+      "sql": "CREATE INDEX plugin_data_owner ON plugin_data(owner_user_id)"
+    },
+    {
+      "type": "index",
       "name": "queued_messages_chat",
       "tbl_name": "queued_messages",
       "sql": "CREATE INDEX queued_messages_chat ON queued_messages(chat_id, seq)"
@@ -1319,6 +1325,12 @@
       "name": "models",
       "tbl_name": "models",
       "sql": "CREATE TABLE models ( id TEXT PRIMARY KEY, connection_id TEXT NOT NULL REFERENCES connections(id), model_key TEXT NOT NULL, source TEXT NOT NULL CHECK (source IN ('fetched', 'user')), upstream_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(upstream_json)), overrides_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(overrides_json)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), fetched_at INTEGER, missing_since INTEGER, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, UNIQUE (connection_id, model_key) ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "plugin_data",
+      "tbl_name": "plugin_data",
+      "sql": "CREATE TABLE plugin_data ( plugin_id TEXT NOT NULL CHECK (length(plugin_id) BETWEEN 1 AND 64), owner_user_id TEXT NOT NULL, key TEXT NOT NULL CHECK (length(key) BETWEEN 1 AND 200), value_json TEXT NOT NULL CHECK (json_valid(value_json) AND length(CAST(value_json AS BLOB)) <= 524288), revision INTEGER NOT NULL CHECK (revision > 0), updated_at INTEGER NOT NULL, PRIMARY KEY (plugin_id, owner_user_id, key) ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "table",
@@ -2255,6 +2267,24 @@
       "name": "network_cache_update",
       "tbl_name": "settings",
       "sql": "CREATE TRIGGER network_cache_update AFTER UPDATE ON settings WHEN NEW.scope = 'app' AND NEW.scope_id = '' AND NEW.key = 'network' BEGIN UPDATE connections SET cache_revision = cache_revision + 1; END"
+    },
+    {
+      "type": "trigger",
+      "name": "plugin_data_identity_fixed",
+      "tbl_name": "plugin_data",
+      "sql": "CREATE TRIGGER plugin_data_identity_fixed BEFORE UPDATE OF plugin_id, owner_user_id, key ON plugin_data BEGIN SELECT RAISE(ABORT, 'plugin data never changes identity'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "plugin_data_owner_insert",
+      "tbl_name": "plugin_data",
+      "sql": "CREATE TRIGGER plugin_data_owner_insert BEFORE INSERT ON plugin_data WHEN NEW.owner_user_id <> '' AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.owner_user_id) BEGIN SELECT RAISE(ABORT, 'plugin data needs an owner'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "plugin_data_user_deleted",
+      "tbl_name": "users",
+      "sql": "CREATE TRIGGER plugin_data_user_deleted AFTER DELETE ON users BEGIN DELETE FROM plugin_data WHERE owner_user_id = OLD.id; END"
     },
     {
       "type": "trigger",

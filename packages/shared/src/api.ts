@@ -1,3 +1,4 @@
+import { PluginApi } from "./plugins.ts"
 import { ExternalMediaApi } from "./externalMedia.ts"
 import { SavedMediaApi } from "./savedMedia.ts"
 import { WorkshopApi } from "./workshopApi.ts"
@@ -467,7 +468,10 @@ export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Aut
 
 export const AuthenticatedMessageVersionApi = MessageVersionApi.middleware(Authentication)
 
+export class AuthenticatedPluginApi extends PluginApi.middleware(Authentication) {}
+
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
+  .merge(AuthenticatedPluginApi)
   .merge(AuthenticatedOwnTurnNoteApi)
   .merge(AuthenticatedForkMergeApi)
   .merge(AuthenticatedWorkshopPresetApi)

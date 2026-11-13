@@ -98,6 +98,16 @@ export default defineConfig({
     react(),
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
+    {
+      name: "plugin-host-development",
+      configureServer(dev) {
+        dev.middlewares.use("/plugin-host.mjs", (_request, response) => {
+          response.setHeader("content-type", "text/javascript; charset=utf-8")
+          response.setHeader("cache-control", "no-store")
+          response.end('export * from "/src/pluginHost.ts"; export { default } from "/src/pluginHost.ts";')
+        })
+      }
+    },
     frameBootstrap,
     frameLibraries,
     {
@@ -109,9 +119,24 @@ export default defineConfig({
   ],
   build: {
     sourcemap: true,
+    manifest: true,
     rolldownOptions: {
-      input: { index: "index.html", "frame-bootstrap": "src/frame/bootstrap.ts" },
+      preserveEntrySignatures: "strict",
+      input: { index: "index.html", pluginHost: "src/pluginHost.ts", "frame-bootstrap": "src/frame/bootstrap.ts" },
       output: {
+        // Both app entries share their initial dependencies, rather than making a request
+        // per small shared module. Vendor code stays separate for parallel parsing. Keep entry bodies separate: main awaits plugin imports.
+        codeSplitting: {
+          groups: [
+            { name: "app-vendor", tags: ["$initial"], test: /[\\/]node_modules[\\/]/ },
+            { name: "app-contracts", tags: ["$initial"], test: /packages[\\/]shared[\\/]src[\\/]/ },
+            {
+              name: "app-shared",
+              tags: ["$initial"],
+              test: (id) => !/\.html$|\/src\/(?:main\.tsx|pluginHost\.ts|frame\/bootstrap\.ts)$/.test(id)
+            }
+          ]
+        },
         // The bootstrap is served as a classic script. Keep its action token and captured
         // native getters out of the panel's global scope, after bundling and minification.
         banner: (chunk) => (chunk.name === "frame-bootstrap" ? "(() => {" : ""),
@@ -122,6 +147,20 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    fs: {
+      // Keep Vite's sensitive-file defaults and deny the plugin data tree too.
+      // With DATA_DIR=./data it falls inside Vite's workspace allowlist; only
+      // the authenticated /plugins proxy may serve its checked, enabled bundle.
+      deny: [
+        ".env",
+        ".env.*",
+        "*.{crt,pem,key,p12,pfx,cer,der}",
+        ".npmrc",
+        ".yarnrc.yml",
+        "**/.git/**",
+        "**/plugins/**"
+      ]
+    },
     proxy: {
       "/rpc": { target: server.replace(/^http/, "ws"), ws: true },
       "/auth": { target: server },
@@ -144,6 +183,7 @@ export default defineConfig({
           }
         }
       },
+      "/plugins": { target: server },
       "/healthz": { target: server },
       // The panel frames' page, with its own CSP; its bootstrap is served from source above.
       "/frame/panel": { target: server }

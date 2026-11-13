@@ -48,6 +48,7 @@ import { writeScaleFolder } from "./support/stScaleFolder.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { modelCatalog } from "./support/modelCatalog.ts"
 import { messageMenu } from "./support/message.ts"
+import { pluginFiles } from "./support/plugin.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
@@ -546,6 +547,13 @@ test.describe("synthetic library and every app surface", () => {
     })
     provider = await startProvider()
     cookie = await loginCookie(server, ADMIN.handle, ADMIN.password)
+    if (process.env.LAYOUT_AUDIT_PLUGIN === "1") {
+      const id = "layout-fixture"
+      const commit = await admin((api) => api.CreatePlugin({ scope: "instance", id, files: pluginFiles(id) }))
+      expect(await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
+        ok: true
+      })
+    }
     const cards = await admin((api) => api.ListLibrary({ kind: "card" }))
     if (
       (cards.length < 422 || !existsSync(join(work, "scale-import-complete"))) &&
@@ -913,6 +921,12 @@ test.describe("synthetic library and every app surface", () => {
         if (process.env.LAYOUT_AUDIT_GUIDANCE_ONLY === "1") {
           const scope = '.chat-column:has([data-testid="composer"])'
           await page.goto(`${server.url}/chats/${chatId}`)
+          if (process.env.LAYOUT_AUDIT_PLUGIN === "1") {
+            await expect(page.getByRole("button", { name: "Roll layout-fixture" })).toBeVisible()
+            await showAppNavigation(page)
+            await audit("default-sidebar")
+            await hideAppNavigation(page)
+          }
           const toggle = page.getByRole("switch", { name: "Guidance", exact: true })
           await expect(toggle).toBeEnabled()
           if (await toggle.isChecked()) await toggle.click()

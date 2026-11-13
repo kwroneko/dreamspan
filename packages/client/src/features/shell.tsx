@@ -59,7 +59,10 @@ export const useTitle = (title: string) => {
 
 export function CenteredPage({ children }: { children: ReactNode }) {
   return (
-    <main className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center gap-4 px-4 py-10">{children}</main>
+    <main className="mx-auto flex min-h-full w-full max-w-sm flex-col justify-center gap-4 px-4 py-10">
+      <SlotOutlet slot={appBanners} props={{}} only="plugins.host" />
+      {children}
+    </main>
   )
 }
 

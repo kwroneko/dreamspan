@@ -9,7 +9,7 @@ import { type FormEvent, useEffect, useState } from "react"
 import { ErrorAlert } from "../actions.tsx"
 import { describeCause } from "../errors.ts"
 import { routes } from "../routes.tsx"
-import { login, type LoginOutcome, safeNext, sessionAtom } from "../session.ts"
+import { login, type LoginOutcome, safeNext, sessionAtom, SessionContext } from "../session.ts"
 import { Button, buttonClass } from "../ui/Button.tsx"
 import { Field, formText, Input, PasswordInput } from "../ui/Field.tsx"
 import { Loading } from "../ui/Spinner.tsx"
@@ -147,7 +147,11 @@ function SignedIn({ session, next }: { session: Session; next: string }) {
             Continue
           </Link>
         </Tooltip>
-        {session.via === "session" && <LogoutButton />}
+        {session.via === "session" && (
+          <SessionContext value={session}>
+            <LogoutButton />
+          </SessionContext>
+        )}
       </div>
     </div>
   )
