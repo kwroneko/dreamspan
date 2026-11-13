@@ -50,7 +50,9 @@ export const knowsSql = (
   sql: SqlClient.SqlClient,
   viewers: ReadonlyArray<string>,
   fork?: ForkRef,
-  partialMerges = false
+  partialMerges = false,
+  /** A tool's frozen causal horizon; absent for planning a full fork's summary view. */
+  leaf?: string | null
 ) =>
   Effect.gen(function* () {
     const ids = JSON.stringify(viewers)
@@ -77,7 +79,7 @@ export const knowsSql = (
         AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
           WHERE a.value = c.value))) AND ${kept}) END`
     return viewers.includes(STRETCH_VIEW)
-      ? sql`(NOT ${stretchedSql(sql, yield* threadStretches(sql, fork ?? null))} OR ${rule})`
+      ? sql`(NOT ${stretchedSql(sql, yield* threadStretches(sql, fork ?? null, leaf))} OR ${rule})`
       : rule
   })
 

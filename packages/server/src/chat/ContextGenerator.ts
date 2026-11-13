@@ -34,7 +34,14 @@ import { ChatHub } from "./ChatHub.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { planTurn } from "../agent/modes.ts"
 import type { OutputContract } from "../agent/modes.ts"
-import { type FrozenTool, frozenTool, sendMessageDefinition, severalMessageDefinition } from "../agent/tools.ts"
+import {
+  type FrozenTool,
+  frozenTool,
+  sendMessageDefinition,
+  severalMessageDefinition,
+  prepareToolSnapshots,
+  toolWriter
+} from "../agent/tools.ts"
 import { makePermit, offeredByGrants } from "../agent/approvals.ts"
 import { loaderFor, loadingWireFor, planToolLoading } from "../agent/loadingPlan.ts"
 import { frozenOffer, loadedSet, type Skill } from "../agent/toolLoading.ts"
@@ -579,6 +586,25 @@ export const layer = Layer.effect(
             })
           }
           const rolloutId = uuidv7()
+          if (agentic) {
+            const prepared = yield* prepareToolSnapshots(tools, {
+              userId,
+              chatId,
+              slotId,
+              versionId,
+              forkId: forkId ?? null,
+              leafSlotId: generation.leafSlotId as SlotId | null,
+              viewers: generation.viewers,
+              rolloutId,
+              toolCallId: "",
+              cache: new Map(),
+              reader,
+              writer: toolWriter(writer)
+            }).pipe(Effect.catchCause((cause) => serverFailure("PrepareToolSnapshots")(cause)))
+            // The snapshot keeps the frozen form; this run reads the prepared state itself.
+            if (Object.keys(prepared.frozen).length > 0) snapshot = { ...snapshot, agentToolState: prepared.frozen }
+            if (Object.keys(prepared.state).length > 0) generation = { ...generation, agentToolState: prepared.state }
+          }
           const finish = finishing(request, rolloutId)
           // Opened and closed as a resource of the stream's scope: once it's open, it's closed
           // whenever and however the generation ends, a stop before the first token included.

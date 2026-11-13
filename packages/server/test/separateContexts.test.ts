@@ -796,8 +796,8 @@ describe("merged chats per viewer (unit C6)", () => {
         if (again._tag === "Rebuilt")
           assert.deepStrictEqual((JSON.parse(again.snapshot) as ContextSnapshot).request, wren.request)
         const read = tools(t, wren)
-        assert.include(yield* read("read_messages", { from: 1, count: 20 }), "History tools are unavailable")
-        assert.include(yield* read("search_chat", { query: "DOCKS-SHARED" }), "History tools are unavailable")
+        assert.include(yield* read("read_messages", { from: 1, count: 20 }), "DOCKS-SHARED")
+        assert.include(yield* read("search_chat", { query: "DOCKS-SHARED" }), "the tide turns")
         assert.notInclude(yield* read("search_chat", { query: "MERGED-SECRET" }), "crate")
         const join = (yield* t.reader.ReadPath({
           userId: t.userId,
@@ -817,7 +817,7 @@ describe("merged chats per viewer (unit C6)", () => {
         const edited = yield* t.contextFor(t.wren)
         assert.include(sentText(edited), "the tide ebbs.")
         assert.notInclude(sentText(edited), "crate")
-        assert.include(yield* tools(t, edited)("search_chat", { query: "ebbs" }), "History tools are unavailable")
+        assert.include(yield* tools(t, edited)("search_chat", { query: "ebbs" }), "the tide ebbs")
         // One shared context sends the join as written.
         yield* t.event({ key: "context.per_speaker", value: "shared" })
         const shared = sentText(yield* t.contextFor(t.wren))

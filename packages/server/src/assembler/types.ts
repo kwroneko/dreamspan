@@ -336,6 +336,8 @@ export interface LoreDecisionInput {
 
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
+  /** Registered read-tool projections, frozen before their first returned result. */
+  readonly agentToolState?: Readonly<Record<string, unknown>>
   /** An agent reply's assembly options, for a rebuild. */
   readonly agentAssembly?: AgentAssembly
   /**
@@ -553,6 +555,7 @@ export interface InspectionNode {
 
 /** What generating needs of a snapshot, sent to the main thread apart from it. */
 export interface Generation {
+  readonly agentToolState?: Readonly<Record<string, unknown>>
   /** Labels and source decisions read in the same transaction as assembly; scrubbed on the main thread. */
   readonly inspection?: InspectionInputs
   readonly leafSlotId: string | null
@@ -585,6 +588,7 @@ export interface Generation {
 export const generationOf = (snapshot: ContextSnapshot): Generation => {
   const written = new Map((snapshot.templateWrites ?? []).map((t) => [t.version, t.writes]))
   return {
+    ...(snapshot.agentToolState ? { agentToolState: snapshot.agentToolState } : {}),
     leafSlotId: snapshot.inputs.leafSlotId,
     viewers: snapshot.inputs.viewer
       ? (snapshot.inputs.viewerAliases ?? [snapshot.inputs.viewer])

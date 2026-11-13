@@ -274,6 +274,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             // Earlier snapshots predate frozen transform inputs; retain their original shape.
             ...(!taken.summaryAssembly && rebuilt.summaryAssembly ? { summaryAssembly: undefined } : {}),
             sources: sources.pins(),
+            ...(taken.agentToolState ? { agentToolState: taken.agentToolState } : {}),
             ...(taken.wire ? { wire: taken.wire } : {})
           })
         }
