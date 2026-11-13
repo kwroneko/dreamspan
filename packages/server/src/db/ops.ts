@@ -3302,10 +3302,10 @@ export class WriteOpsLibrary extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * Undo of an away mark the scene check set (spec/CHARACTER-CONTEXT.md §5, unit C9), in one
-   * transaction: the user's presence event replaces the decision's, and every version written
-   * since that recorded the character away for it is corrected to count it present
-   * (`db/decisions.ts`). Null when the event isn't a live away mark of the scene check.
+   * Undo of a departure or return the scene check set, in this fork only (C9 [D]). One
+   * transaction replaces the event and overlays recorded presence through the next presence
+   * mark or the displayed tip. Existing peers retain their rows, knowledge and summaries;
+   * children made later inherit the correction. Null unless this fork shows a live scene check.
    */
   Rpc.make("CorrectPresence", {
     payload: { userId: UserId, chatId: ChatId, forkId: ForkId, eventId: Schema.String },
@@ -3313,7 +3313,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
       Schema.Struct({
         /** The user's event that replaced the decision's. */
         eventId: Schema.String,
-        /** The versions whose presence record was corrected. */
+        /** The existing versions covered by this branch's correction. */
         corrected: Schema.Array(VersionId)
       })
     ),

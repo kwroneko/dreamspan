@@ -740,3 +740,89 @@ for (const width of [1440, 390])
       })
     })
   }
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`Undo keeps a second tab's branch independent at ${width} ${theme}`, async ({ page, context }, info) => {
+      await look(page, width, theme)
+      const { chatId, slotId, forkId } = await threeCharacters()
+      const ids = await castIds()
+      await admin((api) =>
+        api.ChangeCast({ chatId, forkId, slotId, change: { _tag: "ContextPerSpeaker", view: "separate" } })
+      )
+      // Synthetic scene-check result: no model request is needed to seed the shared mark.
+      await Effect.runPromise(
+        fixtureSql(server().dataDir, [
+          { sql: "UPDATE chats SET state_seq=state_seq+1 WHERE id=?", params: [chatId] },
+          {
+            sql: `INSERT INTO state_events(id,chat_id,slot_id,seq,key,value_json,origin,created_at,fork_id,fork_seq)
+              SELECT lower(hex(randomblob(16))), ?, ?, (SELECT coalesce(max(seq),0)+1 FROM state_events WHERE chat_id=?),
+                'away.set', ?, 'user', 1, ?, (SELECT state_seq FROM chats WHERE id=?)`,
+            params: [
+              chatId,
+              slotId,
+              chatId,
+              JSON.stringify({ entity: ids.wren, away: true, source: "decision" }),
+              forkId!,
+              chatId
+            ]
+          }
+        ])
+      )
+      const sent = await admin((api) =>
+        api.SendMessage({ chatId, forkId, parentSlotId: slotId, branch: false, content: "The shared secret is heron." })
+      )
+      if (sent._tag !== "Posted") throw new Error("synthetic message queued")
+      const peer = await admin((api) => api.CreateFork({ chatId, fromForkId: forkId, atSlotId: sent.entry.slotId }))
+      const other = await context.newPage()
+      await other.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      const reads = { marks: 0, cast: 0, path: 0, next: 0, summaries: 0 }
+      other.on("websocket", (socket) =>
+        socket.on("framesent", ({ payload }) => {
+          const wire = typeof payload === "string" ? payload : payload.toString()
+          for (const [key, methods] of Object.entries({
+            marks: ["GetAwayMarks"],
+            cast: ["GetCast", "GetCasts"],
+            path: ["ReadPath"],
+            next: ["GetNextContext"],
+            summaries: ["GetLcmState", "GetLcmCoverage"]
+          })) {
+            if (methods.some((method) => wire.includes(`"${method}"`))) reads[key as keyof typeof reads]++
+          }
+        })
+      )
+      try {
+        await page.goto(`${server().url}/chats/${chatId}?fork=${forkId}`)
+        await other.goto(`${server().url}/chats/${chatId}?fork=${peer.fork.id}`)
+        const left = (tab: Page) => tab.locator("[data-away-row]").filter({ hasText: "Wren left · scene check" })
+        await expect(left(page)).toBeVisible()
+        await expect(left(other)).toBeVisible()
+        await expect(left(other).getByRole("button", { name: "Undo", exact: true })).toBeVisible()
+        // Let opening estimates and shell subscriptions settle before counting invalidations.
+        await expect.poll(() => reads.marks).toBeGreaterThan(0)
+        await other.waitForTimeout(800)
+        const beforeReads = { ...reads }
+        const unchangedRow = await left(other).elementHandle()
+        await left(page).getByRole("button", { name: "Undo", exact: true }).click()
+        await expect(left(page)).toHaveCount(0)
+        await expect(left(other)).toBeVisible()
+        await other.waitForTimeout(800)
+        expect(await unchangedRow!.evaluate((node) => node.isConnected)).toBe(true)
+        expect(reads).toEqual(beforeReads)
+        await expectLayout(other, info, `branch-undo-peer-${width}-${theme}`, { scope: "[data-away-row]" })
+        const marks = await admin((api) =>
+          api.GetAwayMarks({ chatId, forkId: peer.fork.id, slotId: sent.entry.slotId })
+        )
+        expect(marks.some((m) => m.entityId === ids.wren && m.away && m.by === "decision")).toBe(true)
+        const history = await admin((api) => api.ListHistoryEdits({ chatId, forkId: forkId! }))
+        expect(history.some((r) => r.title === "Correct scene check")).toBe(true)
+        expect(await admin((api) => api.ListHistoryEdits({ chatId, forkId: peer.fork.id }))).toEqual([])
+        await page.reload()
+        await other.reload()
+        await expect(left(page)).toHaveCount(0)
+        await expect(left(other)).toBeVisible()
+      } finally {
+        await other.close()
+      }
+    })
+  }

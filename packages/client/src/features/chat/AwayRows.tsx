@@ -59,7 +59,7 @@ function Row({ row, session }: { row: AwayRow; session: ChatSession }) {
             variant="ghost"
             className="h-7 px-2 text-xs"
             pending={undoing}
-            hint={`${who} was there after all: counted present from here, so ${who}'s replies see the messages written since.`}
+            hint={`${who} was there after all: on this branch, ${who}'s replies see the messages written since, until the next presence mark.`}
             onClick={() => void undo()}
           >
             Undo

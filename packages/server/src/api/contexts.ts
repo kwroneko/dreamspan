@@ -25,7 +25,7 @@ export const makeChatContextsHandlers = Effect.gen(function* () {
         const corrected = yield* writer.CorrectPresence({ userId: id, ...payload })
         if (corrected === null) return false
         // The cast and the rows read again; what's generated next reads the correction.
-        hub.publish(payload.chatId, { _tag: "State" })
+        hub.publish(payload.chatId, { _tag: "State", forkId: payload.forkId })
         return true
       }).pipe(internal("UndoAwayMark"))
   }

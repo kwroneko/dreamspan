@@ -9,6 +9,7 @@ import type { SqlClient } from "effect/sql"
 import type { Fragment } from "effect/sql/Statement"
 import { effectiveOverride, type ForkRef } from "./forkState.ts"
 import { threadStretches, stretchedSql } from "./threadStretches.ts"
+import { readPresenceRanges, rangedPresence, rangeAway, rangeAwaySql } from "./presenceRanges.ts"
 
 /**
  * SQL: whether fork `fork` counts card expression `card` not present for slot `slot`'s message
@@ -53,11 +54,12 @@ export const knowsSql = (
   partialMerges = false
 ) =>
   Effect.gen(function* () {
+    const ranges = yield* readPresenceRanges(sql, fork ?? null)
     const ids = JSON.stringify(viewers)
     const kept =
       fork === undefined || fork === null
         ? sql`1`
-        : sql`NOT EXISTS (SELECT 1 FROM json_each(${ids}) cv WHERE ${correctedAwaySql(sql, fork, "s.id", "cv.value")})`
+        : sql`NOT EXISTS (SELECT 1 FROM json_each(${ids}) cv WHERE ${correctedAwaySql(sql, fork, "s.id", "cv.value")} OR ${rangeAwaySql(sql, ranges, "cv.value")} = 1)`
     const rule = sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
     THEN ${
       partialMerges
@@ -74,8 +76,8 @@ export const knowsSql = (
     } AND ${kept}
     ELSE EXISTS (SELECT 1 FROM json_each(${ids}) viewer WHERE viewer.value = v.speaker_entity_id)
       OR ((v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${ids}))
-        AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
-          WHERE a.value = c.value))) AND ${kept}) END`
+        AND coalesce(${rangeAwaySql(sql, ranges, "c.value")}, EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
+          WHERE a.value = c.value)) = 0)) AND ${kept}) END`
     return viewers.includes(STRETCH_VIEW)
       ? sql`(NOT ${stretchedSql(sql, yield* threadStretches(sql, fork ?? null))} OR ${rule})`
       : rule
@@ -99,10 +101,14 @@ export const readKnowers = (
   ranges?: ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>
 ) =>
   Effect.gen(function* () {
+    const corrections = yield* readPresenceRanges(sql, fork ?? null)
     const stretches = ranges ?? (viewers?.includes(STRETCH_VIEW) ? yield* threadStretches(sql, fork ?? null) : [])
     const rows = yield* sql<{
       id: string
       slot_id: string
+      chain_id: string
+      depth: number
+      seq: number
       cast_json: string | null
       presence_json: string | null
       speaker_entity_id: string | null
@@ -112,7 +118,7 @@ export const readKnowers = (
       content: string
       away_json: string | null
       stretched: number
-    }>`SELECT metadata.id, ${stretchedSql(sql, stretches)} AS stretched, metadata.slot_id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
+    }>`SELECT metadata.id, ${stretchedSql(sql, stretches)} AS stretched, s.chain_id, s.depth, coalesce((SELECT seq FROM versions source WHERE source.id=metadata.source_version_id AND metadata.fork_id IS NOT NULL), metadata.seq) AS seq, metadata.slot_id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
         ${
           fork == null
             ? sql`NULL`
@@ -144,7 +150,7 @@ export const readKnowers = (
           : knowersOf({
               cast: row.cast_json === null ? null : (JSON.parse(row.cast_json) as Array<string>),
               speaker: row.speaker_entity_id,
-              presence: parsePresence(row.presence_json)
+              presence: rangedPresence(parsePresence(row.presence_json), corrections, row.chain_id, row.depth, row.seq)
             })
       ])
     )
@@ -152,11 +158,16 @@ export const readKnowers = (
       const row = byId.get(versionId)
       const all = row === undefined ? null : recorded.get(versionId)!
       const absent = row?.away_json ? (JSON.parse(row.away_json) as Array<string>) : []
+      if (row)
+        for (const card of new Set(corrections.flatMap((r) => r.identities))) {
+          if (card !== row.speaker_entity_id && rangeAway(corrections, row.chain_id, row.depth, row.seq, card) === true)
+            absent.push(card)
+        }
       const away = absent.length > 0 ? absent : undefined
       const knowers = all === null || away === undefined ? all : [...all].filter((id) => !away.includes(id))
       const merge = row?.merge_id ? merged.get(row.merge_id) : undefined
       const view =
-        merge && viewers
+        merge && viewers && !viewers.some((id) => absent.includes(id))
           ? viewedJoin(row!.content, row!.merge_title!, merge, (ids) => viewers.some((id) => ids.includes(id)))
           : null
       return {

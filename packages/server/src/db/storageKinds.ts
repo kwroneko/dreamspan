@@ -123,7 +123,8 @@ export const storageKinds = makeRegistry<StorageKind>([
       "insert",
       "image_exclude",
       // The per-branch correction of who was present (spec/THREADS.md §3.4, §16.2).
-      "presence_away"
+      "presence_away",
+      "presence_range"
     ]
   },
   {

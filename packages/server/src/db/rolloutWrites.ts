@@ -8,10 +8,13 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { effectRef } from "./rolloutEffects.ts"
-import { nextSeq, insertFork } from "./forkState.ts"
+import { nextSeq, insertFork, eventApplies } from "./forkState.ts"
 import type { ForkRow } from "./rows.ts"
 import type { StorageError, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
+import { parsePresence } from "@rp/shared/knowledge.ts"
+import { presenceJson } from "./participation.ts"
+import { readPresenceRanges, rangedPresence } from "./presenceRanges.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 
@@ -109,9 +112,22 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
             FROM rollout_payloads WHERE rollout_id = ${source.rollout_id}`
           yield* sql`INSERT INTO lore_activations (rollout_id, entries_json, message_offset)
             SELECT ${rolloutId}, entries_json, message_offset FROM lore_activations WHERE rollout_id = ${source.rollout_id}`
+          // A continued version carries the source as this branch knows it. Raw presence is
+          // shared evidence; a retrospective correction may exist only in this fork.
+          const [presence] = yield* sql<{ presence_json: string | null; chain_id: string; depth: number; seq: number }>`
+            SELECT t.presence_json, s.chain_id, s.depth,
+              coalesce((SELECT seq FROM versions original WHERE original.id=v.source_version_id AND v.fork_id IS NOT NULL),v.seq) AS seq
+            FROM versions v JOIN version_texts t ON t.version_seq=v.seq JOIN slots s ON s.id=v.slot_id WHERE v.id=${versionId}`
+          const effectivePresence = rangedPresence(
+            parsePresence(presence!.presence_json),
+            yield* readPresenceRanges(sql, added.forkId),
+            presence!.chain_id,
+            presence!.depth,
+            presence!.seq
+          )
           yield* sql`UPDATE version_records SET rollout_id = ${rolloutId},
               cast_json = (SELECT cast_json FROM version_records WHERE id = ${versionId}),
-              presence_json = (SELECT presence_json FROM version_records WHERE id = ${versionId}), updated_at = ${now}
+              presence_json = ${presenceJson(effectivePresence)}, updated_at = ${now}
             WHERE id = ${added.version.id}`
           // The stopped version's own events (its variables), and the effects of the tool calls
           // kept, so they apply while the new version is shown; the cut calls' stay behind.
@@ -127,7 +143,7 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
             readonly slot_depth: number | null
           }>`
             SELECT key, scope, value_json, origin, origin_ref, slot_chain_id, slot_depth
-            FROM state_events WHERE version_id = ${versionId} ORDER BY seq`
+            FROM state_events e WHERE e.version_id = ${versionId} AND ${eventApplies(sql, added.forkId, "e")} ORDER BY e.seq`
           const copied = events.filter((e) => !e.origin_ref?.startsWith(prefix) || kept.has(e.origin_ref))
           if (copied.length > 0) {
             const [next] = yield* sql<{ n: number }>`

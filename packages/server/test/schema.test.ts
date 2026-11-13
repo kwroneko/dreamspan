@@ -150,6 +150,46 @@ describe("version authoring provenance", () => {
   })
 })
 
+describe("branch presence ranges", () => {
+  it("rejects malformed ranges and cards or chains belonging to another account or chat", () => {
+    const owner = user(),
+      c = chat(owner),
+      s = slot(c, null)
+    run("INSERT INTO entities(id,owner_user_id,kind,created_at) VALUES('range-card',?,'card',1)", owner)
+    const otherOwner = user(),
+      other = chat(otherOwner),
+      otherSlot = slot(other, null)
+    run("INSERT INTO entities(id,owner_user_id,kind,created_at) VALUES('other-card',?,'card',1)", otherOwner)
+    const chain = get<{ chain_id: string }>("SELECT chain_id FROM slots WHERE id=?", s.slotId).chain_id
+    const foreignChain = get<{ chain_id: string }>("SELECT chain_id FROM slots WHERE id=?", otherSlot.slotId).chain_id
+    const value = { identities: ["range-card"], away: false, cutoff: 20, spans: [{ chain, lo: 0, hi: 10 }] }
+    const insert = (payload: unknown, flag: number | null = 1) =>
+      run(
+        "INSERT INTO fork_overrides(id,chat_id,fork_id,seq,kind,target_id,slot_id,slot_depth,value_id,flag) VALUES(?,?,?,1,'presence_range',?,?,0,?,?)",
+        id("range"),
+        c.chatId,
+        c.chatId,
+        id("target"),
+        s.slotId,
+        JSON.stringify(payload),
+        flag
+      )
+    insert(value)
+    for (const bad of [
+      {},
+      { ...value, away: null },
+      { ...value, cutoff: -1 },
+      { ...value, identities: [] },
+      { ...value, identities: ["other-card"] },
+      { ...value, spans: [{ chain: foreignChain, lo: 0, hi: 1 }] },
+      { ...value, spans: [{ chain, lo: 3, hi: 2 }] }
+    ])
+      expect(() => insert(bad)).toThrow(/presence range/)
+    expect(() => insert(value, null)).toThrow(/presence range/)
+    expect(() => run("UPDATE fork_overrides SET value_id='{}' WHERE kind='presence_range'")).toThrow(/presence range/)
+  })
+})
+
 describe("version payload separation", () => {
   it("presence corrections use chat-bounded covering presence probes, independent of swipe prose", () => {
     const plan = all<{
