@@ -12,6 +12,11 @@ import { Effect, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { storyTools } from "../src/agent/tools/history.ts"
 import { type ToolContext, type RolloutTool, toolWriter } from "../src/agent/tools.ts"
+import { planToolLoading } from "../src/agent/loadingPlan.ts"
+import { frozenTool } from "../src/agent/tools.ts"
+import { resolveDispatch, dispatchRefusal } from "../src/agent/dispatcher.ts"
+import type { AssistantMessage } from "@earendil-works/pi-ai"
+import type { ModelInput } from "../src/assembler/types.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import { client, login, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
@@ -74,7 +79,7 @@ const provider = (hold: () => boolean = () => false, cast = false) =>
       done === 0
         ? call("read_story", {}, "call_read")
         : done === 1
-          ? call("search_story", { query: "flooded" }, "call_search")
+          ? call("search_story", { query: cast ? "Late again" : "flooded" }, "call_search")
           : done === 2 && cast
             ? call("get_cast", { chat: "Ledger" }, "call_cast")
             : completionChunks(["You took the other road."], {})
@@ -996,19 +1001,145 @@ it.effect("sidechat2: every registered workshop tool declares how it reads story
     const plan = registry.orchestrationModes
       .get("workshop")!
       .plan({ kind: "workshop", state: { ...state, workshopAttached: "synthetic-story" } })
-    const check = () => {
-      for (const id of plan.tools)
+    const check = (ids: ReadonlyArray<string> = plan.tools) => {
+      for (const id of ids)
         assert.isDefined(
-          toolForKind(registry, "workshop", id)?.storyRead,
+          (toolForKind(registry, "workshop", id) ?? registry.toolLoaders.get(id))?.storyRead,
           `${id} must declare how it reads the tab's position (or why it cannot read the story)`
         )
     }
     check()
+    const partitions: Array<ReadonlyArray<string>> = []
+    for (const model of [
+      { kind: "anthropic", api: "anthropic-messages", key: "claude-sonnet-4-5" },
+      { kind: "openai-chat", api: "openai-completions", key: "synthetic", toolLoading: "dispatcher" }
+    ]) {
+      const { offer } = yield* planToolLoading(
+        { execution: registry, reader: {} as Reader["Service"], userId: "synthetic" as UserId },
+        {
+          kind: "workshop",
+          tools: plan.tools.map((id) => toolForKind(registry, "workshop", id)!),
+          model: model as ModelInput,
+          cards: []
+        }
+      )
+      const names = offer.tools.map((t) => t.id)
+      check(names)
+      partitions.push(names)
+      assert.isTrue(offer.deferred.has("get_cast"))
+      const resolved = resolveDispatch(
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "audit",
+              name: "call_tool",
+              arguments: { name: "get_cast", arguments: { chat: "synthetic" } }
+            }
+          ]
+        } as unknown as AssistantMessage,
+        offer.tools.map((t) => ({
+          ...frozenTool(t),
+          ...(offer.deferred.has(t.id) ? { deferred: true as const } : {})
+        })),
+        new Set(["get_cast"])
+      )
+      const call = resolved.content[0]!
+      assert.isTrue(call.type === "toolCall" && call.name === "get_cast" && dispatchRefusal(call) === undefined)
+    }
     // An added operation without a declaration fails this guard, even when its effect is read.
     const exposed = registry.operationTools.get("get_cast")!
     const undeclared = { ...exposed }
     delete undeclared.storyRead
     yield* registry.operationTools.register(undeclared)
-    assert.throws(check, /get_cast must declare/)
+    assert.throws(() => check(), /get_cast must declare/)
+    for (const names of partitions) assert.throws(() => check(names), /get_cast must declare/)
   }).pipe(Effect.scoped, Effect.provide(ExecutionRegistry.layer))
 )
+
+it.live("review: loaded dispatcher story tools keep the tab's position and show no branch ids in approvals", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    let storyId = ""
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        startMockProvider((request, res) => {
+          const body = request.body as Body
+          if (!toolNames(body).includes("call_tool")) return sse(res, completionChunks(["Story reply."], {}))
+          const done = results(body).length
+          sse(
+            res,
+            done === 0
+              ? call("tool_search", { query: "select:get_cast,change_chat" }, "load")
+              : done === 1
+                ? call("call_tool", { name: "get_cast", arguments: { chat: storyId } }, "cast")
+                : done === 2
+                  ? call(
+                      "call_tool",
+                      { name: "change_chat", arguments: { chat: storyId, change: { _tag: "AgentEnabled", on: true } } },
+                      "setup"
+                    )
+                  : completionChunks(["Done."], {})
+          )
+        })
+      ),
+      (m) => Effect.promise(() => m.close())
+    )
+    const api = yield* client()
+    const story = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "dispatcher" } },
+      model: {}
+    })
+    storyId = story.chat.id
+    const original = yield* api.GetChat({ chatId: storyId as Chat["id"] })
+    const at: StoryAt = { chatId: original.id, forkId: original.currentForkId!, leafSlotId: original.activeLeafSlotId }
+    const originalPreset = yield* api.CreatePreset({ label: "ALPHA setup" })
+    const siblingPreset = yield* api.CreatePreset({ label: "BRAVO setup" })
+    yield* api.ChangeCast({
+      chatId: original.id,
+      forkId: at.forkId,
+      slotId: at.leafSlotId,
+      change: { _tag: "Preset", ref: originalPreset.id }
+    })
+    const sibling = yield* api.CreateFork({
+      chatId: original.id,
+      fromForkId: at.forkId,
+      atSlotId: at.leafSlotId,
+      name: "Sibling"
+    })
+    yield* api.ChangeCast({
+      chatId: original.id,
+      forkId: sibling.fork.id,
+      slotId: at.leafSlotId,
+      change: { _tag: "Preset", ref: siblingPreset.id }
+    })
+    const workshop = yield* api.CreateWorkshop({ attachTo: original.id })
+    yield* api.SetWorkshopGrant({ chatId: workshop.id, capability: "chats.setup", mode: "ask" })
+    const prompts: Array<ApprovalPrompt> = []
+    const reply = yield* turn(api, workshop, "Review the setup, then enable tools.", prompts, at)
+    const transcript = yield* api.GetRunTranscript({ versionId: reply.id })
+    const cast = transcript.entries.find((e) => e.role === "toolResult" && e.tool === "get_cast")
+    assert.isTrue(cast?.role === "toolResult")
+    if (cast?.role === "toolResult") {
+      assert.include(cast.text, originalPreset.id)
+      assert.notInclude(cast.text, siblingPreset.id)
+    }
+    const approval = prompts.find((p) => p.capability === "chats.setup")!
+    assert.isDefined(approval.storyScope)
+    assert.notInclude(JSON.stringify(approval.rows), at.forkId)
+    const effects = yield* api.ListVersionEffects({ versionId: reply.id })
+    assert.lengthOf(effects, 1)
+    assert.notInclude(effects[0]!.title, at.forkId)
+    assert.isTrue((yield* api.GetCast({ chatId: original.id, forkId: at.forkId, slotId: at.leafSlotId })).agentEnabled)
+    assert.isFalse(
+      Boolean(
+        (yield* api.GetCast({ chatId: original.id, forkId: sibling.fork.id, slotId: at.leafSlotId })).agentEnabled
+      )
+    )
+    yield* api.UndoRolloutEffect(effects[0]!)
+    assert.isFalse(
+      Boolean((yield* api.GetCast({ chatId: original.id, forkId: at.forkId, slotId: at.leafSlotId })).agentEnabled)
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})

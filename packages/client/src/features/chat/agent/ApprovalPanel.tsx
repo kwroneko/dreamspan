@@ -3,7 +3,7 @@
 // edit changes, and the answers. Allow lets this one call run; Allow in this workshop also lets the
 // assistant do this kind of thing here without asking; Decline tells it not to, with a note if the
 // user writes one. The answer names the call's arguments' digest, so it holds for this call only.
-import { storyScopeText } from "@rp/shared/branchNaming.ts"
+import { StoryScope } from "../../workshop/StoryScope.tsx"
 import type { ApprovalAnswer } from "@rp/shared/workshopApi.ts"
 import { ReplyExtrasContext } from "../replyExtras.ts"
 import { useContext, useState } from "react"
@@ -59,7 +59,9 @@ export function ApprovalPanel({ step }: StepActionProps) {
       </div>
       {approval.uncertain && <Alert tone="warning">{UNCERTAIN_TEXT}</Alert>}
       {approval.storyScope && (
-        <p className="text-xs font-medium [overflow-wrap:anywhere]">{storyScopeText(approval.storyScope)}</p>
+        <p className="text-xs font-medium [overflow-wrap:anywhere]">
+          <StoryScope scope={approval.storyScope} at={approval.storyAt} />
+        </p>
       )}
       {approval.rows.length > 0 && (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs" aria-label="What it will write">

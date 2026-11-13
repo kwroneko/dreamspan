@@ -803,6 +803,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                         operation: input.operation,
                         ...(storyPosition
                           ? {
+                              storyAt,
                               storyScope: {
                                 branch: storyPosition.naming,
                                 first: storyPosition.upTo,

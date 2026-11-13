@@ -138,7 +138,7 @@ const readRun: RolloutTool<{
         const stands = run.steps.some((s) => readsStory(s.tool)) ? yield* storyReadsStand(context, run) : true
         const steps = stands
           ? run.steps
-          : run.steps.map((s) => (readsStory(s.tool) ? { ...s, result: STORY_WITHHELD } : s))
+          : run.steps.map((s) => (readsStory(s.tool) ? { ...s, args: {}, result: STORY_WITHHELD } : s))
         const words = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean)
         const chosen = steps.filter(
           (s) =>

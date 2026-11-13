@@ -58,7 +58,17 @@ const forModel = (
     inputs: { ...snapshot.inputs, model: now.model },
     request: { ...snapshot.request, samplers: now.samplers },
     ...(now.budget ? { contextBudget: now.budget } : {}),
-    ...(continuity ? { continuity: { ...continuity, breakpoints: [] } } : {})
+    ...(continuity
+      ? {
+          continuity: {
+            ...continuity,
+            parent: undefined,
+            breakpoints: [],
+            reason:
+              "The model changed. If its tool list changes, the next request reads the chat again once at full input cost."
+          }
+        }
+      : {})
   } as ContextSnapshot
 }
 
@@ -290,7 +300,11 @@ const agentVersionResumer = Effect.gen(function* () {
           model: JSON.stringify(resumedSnapshot.inputs.model),
           request: JSON.stringify(resumedSnapshot.request),
           transcript: JSON.stringify(planned.transcript),
-          tools: JSON.stringify(offered.filter((t) => !deferred.has(t.name) || loaded.has(t.name))),
+          tools: JSON.stringify(
+            offered.some((t) => t.name === CALL_TOOL)
+              ? offered
+              : offered.filter((t) => !deferred.has(t.name) || loaded.has(t.name))
+          ),
           ...(planned.continuation === undefined ? {} : { continuation: planned.continuation })
         })
         if (count > budget.maximum - budget.responseReserve)

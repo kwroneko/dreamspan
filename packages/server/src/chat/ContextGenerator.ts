@@ -490,11 +490,13 @@ export const layer = Layer.effect(
                     transcript: JSON.stringify(transcript),
                     // A deferred tool takes context only once it's loaded.
                     tools: JSON.stringify(
-                      frozenTools.filter(
-                        (t) =>
-                          (t as { readonly deferred?: true }).deferred !== true ||
-                          loadedSet(transcript, offer.deferred).has(t.name)
-                      )
+                      frozenTools.some((t) => t.name === "call_tool")
+                        ? frozenTools
+                        : frozenTools.filter(
+                            (t) =>
+                              (t as { readonly deferred?: true }).deferred !== true ||
+                              loadedSet(transcript, offer.deferred).has(t.name)
+                          )
                     )
                   })
                   .pipe(Effect.catch(serverFailure("CountRolloutContext")))

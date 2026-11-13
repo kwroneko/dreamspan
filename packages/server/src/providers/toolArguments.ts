@@ -7,6 +7,8 @@ export const captureToolArguments = () => {
   const argumentsById: Record<string, string> = {}
   const chatIds = new Map<number, string>()
   const responseIds = new Map<number, string>()
+  const anthropicIds = new Map<number, string>()
+  const anthropicDeltas = new Set<number>()
   const item = (value: unknown, index?: number) => {
     const call = record(value)
     if (call?.type !== "function_call" || typeof call.call_id !== "string") return
@@ -20,6 +22,25 @@ export const captureToolArguments = () => {
     observe: (value: unknown) => {
       const event = record(value)
       if (!event) return
+      if (typeof event.index === "number") {
+        const block = record(event.content_block)
+        if (event.type === "content_block_start" && block?.type === "tool_use" && typeof block.id === "string") {
+          anthropicIds.set(event.index, block.id)
+          argumentsById[block.id] = JSON.stringify(block.input ?? {})
+          anthropicDeltas.delete(event.index)
+        }
+        const delta = record(event.delta)
+        const id = anthropicIds.get(event.index)
+        if (
+          event.type === "content_block_delta" &&
+          delta?.type === "input_json_delta" &&
+          typeof delta.partial_json === "string" &&
+          id !== undefined
+        ) {
+          argumentsById[id] = (anthropicDeltas.has(event.index) ? (argumentsById[id] ?? "") : "") + delta.partial_json
+          anthropicDeltas.add(event.index)
+        }
+      }
       if (Array.isArray(event.choices)) {
         const calls = record(record(event.choices[0])?.delta)?.tool_calls
         if (Array.isArray(calls)) {

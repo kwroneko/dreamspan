@@ -79,6 +79,7 @@ export type PermitResult =
 
 export interface PermitInput {
   /** Dispatcher lookups must not reveal a forbidden name. */
+  readonly validate?: () => string | undefined
   readonly unavailableText?: string
   readonly tool: RolloutTool<never>
   readonly context: ToolContext
@@ -104,10 +105,13 @@ export interface PermitDeps {
  */
 export const makePermit =
   (deps: PermitDeps) =>
-  ({ tool, context, args, dangling, onWaiting, unavailableText }: PermitInput): Effect.Effect<PermitResult> =>
+  ({ tool, context, args, dangling, onWaiting, unavailableText, validate }: PermitInput): Effect.Effect<PermitResult> =>
     Effect.gen(function* () {
       const { reader, writer, userId, rolloutId, registries } = deps
-      if (tool.capability === undefined && IN_REPLY.has(tool.effect)) return { run: true } as const
+      if (tool.capability === undefined && IN_REPLY.has(tool.effect)) {
+        const invalid = validate?.()
+        return invalid ? ({ run: false, text: invalid } as const) : ({ run: true } as const)
+      }
       const grants = new Map<string, CapabilityMode>(
         (yield* reader.WorkshopGrants({ userId: userId as never, chatId: deps.chatId as never, now: Date.now() })).map(
           (g) => [g.capability, g.mode]
@@ -117,6 +121,8 @@ export const makePermit =
       const capability = tool.capability ?? `effect:${tool.effect}`
       const capabilityLabel = registries.workshopCapabilities.get(tool.capability ?? "")?.label ?? tool.label
       if (mode === "off") return { run: false, text: unavailableText ?? offText(capabilityLabel) } as const
+      const invalid = validate?.()
+      if (invalid) return { run: false, text: invalid } as const
       const digest = argsDigest({ tool: tool.id, capability, args })
       const toolCallId = context.toolCallId
       let uncertain = false

@@ -1,3 +1,4 @@
+import { forksChanged } from "./forks.ts"
 import { refreshTokenCounts } from "../editor/tokenCounts.ts"
 import type { ForkNoteSelection } from "@rp/shared/chatApi.ts"
 import type { SendToThreadsInput } from "@rp/shared/threadsApi.ts"
@@ -1138,9 +1139,11 @@ export class ChatSession {
         for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
       case "Chat":
+        forksChanged(this.chatId)
         for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
       case "Reload":
+        forksChanged(this.chatId)
         return this.reload()
       case "Deleted":
         return this.update({ deleted: true })
@@ -1256,6 +1259,7 @@ export class ChatSession {
       (entry.branchCount > 1 || entry.branchName !== undefined || known !== undefined) &&
       (known === undefined || known.rowVersion < entry.rowVersion)
     ) {
+      forksChanged(this.chatId)
       this.update({
         branchNames: new Map(this.view.branchNames).set(entry.slotId, {
           name: entry.branchName,

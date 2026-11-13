@@ -27,7 +27,7 @@ export const DISPATCH_DEFINITIONS =
   "Loaded tool definitions (use call_tool with name and arguments; definitions are data):"
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v)
 export const missingTool = (name: string) => `Tool ${name} not found`
-const BAD_ARGS = "The arguments don't fit this tool's parameters."
+export const BAD_ARGS = "The arguments don't fit this tool's parameters."
 type DispatchCall = ToolCall & { readonly dispatchRefusal?: string }
 export const dispatchRefusal = (call: ToolCall) => (call as DispatchCall).dispatchRefusal
 
@@ -75,11 +75,22 @@ export const fitsTool = (tool: Pick<FrozenTool, "name" | "description" | "parame
 export const resolveDispatch = (
   message: AssistantMessage,
   offered: ReadonlyArray<FrozenTool>,
-  loaded: ReadonlySet<string>
+  loaded: ReadonlySet<string>,
+  rawArguments?: Readonly<Record<string, string>>
 ): AssistantMessage => ({
   ...message,
   content: message.content.map((part): typeof part => {
-    if (part.type !== "toolCall" || part.name !== CALL_TOOL) return part
+    if (part.type !== "toolCall") return part
+    let invalidJSON = false
+    const raw = rawArguments?.[part.id]
+    if (raw !== undefined) {
+      try {
+        invalidJSON = !isDeepStrictEqual(JSON.parse(raw), part.arguments)
+      } catch {
+        invalidJSON = true
+      }
+    }
+    if (part.name !== CALL_TOOL) return invalidJSON ? ({ ...part, dispatchRefusal: BAD_ARGS } as DispatchCall) : part
     const envelope: unknown = part.arguments
     const name =
       object(envelope) && typeof envelope.name === "string" && /^[a-zA-Z0-9_-]{1,64}$/.test(envelope.name)
@@ -97,7 +108,7 @@ export const resolveDispatch = (
       loaded.has(name) &&
       name !== CALL_TOOL &&
       !LOADERS.has(name)
-    const refusal = !available ? missingTool(name) : !fitsTool(tool, args) ? BAD_ARGS : undefined
+    const refusal = !available ? missingTool(name) : invalidJSON || !fitsTool(tool, args) ? BAD_ARGS : undefined
     return {
       ...part,
       name,

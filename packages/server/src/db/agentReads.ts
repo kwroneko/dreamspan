@@ -1,3 +1,4 @@
+import { CALL_TOOL, dispatcherMessages } from "../agent/dispatcher.ts"
 import { recoveredOperationText } from "./operationReceipts.ts"
 import { continuityEffectsReason, toRolloutEffect } from "./workshopEffects.ts"
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
@@ -530,6 +531,8 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const target = JSON.parse(model) as ModelInput
         const count = yield* prepareTextTokens(assembler.textCounters.list(), target)
         const definitions = JSON.parse(tools) as ReadonlyArray<FrozenTool>
+        const dispatch = definitions.some((t) => t.name === CALL_TOOL)
+        const declared = dispatch ? definitions.filter((t) => !t.deferred) : definitions
         const assembled = JSON.parse(request) as AssembledRequest
         const history = JSON.parse(transcript) as Array<AgentMessage>
         const images = [
@@ -540,8 +543,22 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const wire = rolloutRequest(
           providerRequest(assembled, target),
           target.api,
-          forTarget(liveSuffix(history), target),
-          definitions as ReadonlyArray<Tool>,
+          forTarget(
+            dispatch
+              ? dispatcherMessages(
+                  liveSuffix(history),
+                  definitions
+                    .filter((t) => t.deferred)
+                    .map((t) => ({
+                      name: t.name,
+                      description: t.description,
+                      parameters: t.parameters as Tool["parameters"]
+                    }))
+                )
+              : liveSuffix(history),
+            target
+          ),
+          declared as ReadonlyArray<Tool>,
           { replayReasoning: true, reasoningTarget: target }
         )
         const messages =
@@ -556,7 +573,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           imageTokens +
           count(JSON.stringify(messages)) +
           count(wire.context.systemPrompt ?? "") +
-          count(JSON.stringify(definitions)) +
+          count(JSON.stringify(declared)) +
           (continuation === undefined ? 0 : count(JSON.stringify({ role: "assistant", content: continuation })) + 3)
         )
       }).pipe(query("CountRolloutContext")),

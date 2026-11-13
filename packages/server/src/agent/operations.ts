@@ -164,10 +164,12 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
                 chats?: ReadonlyArray<{ id: string; title: string }>
               }
             | undefined
-          const rows = Object.entries(payload as object).map(([label, value]) => ({
-            label,
-            value: typeof value === "string" ? value : JSON.stringify(value)
-          }))
+          const rows = Object.entries(payload as object)
+            .filter(([label]) => !proof?.storyAt || !["chatId", "forkId", "slotId", "leaf"].includes(label))
+            .map(([label, value]) => ({
+              label,
+              value: typeof value === "string" ? value : JSON.stringify(value)
+            }))
           for (const chat of proof?.chats ?? [])
             rows.unshift({ label: "affected chat", value: `${chat.title} (${chat.id})` })
           if (proof?.storyAt)
