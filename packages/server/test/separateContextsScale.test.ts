@@ -396,6 +396,37 @@ it.live(
       assert.isBelow(ms("separate: Wren"), ms("shared: Wren") * 1.5 + 200, "the filter adds at most a bounded share")
       assert.isBelow(ms("knewThrough 3,000"), 1_000)
       assert.isBelow(ms("CorrectPresence"), 1_000)
+      // Exercise the move writer, not just assembly, with the same 300-branch graph.
+      const ref = (yield* h.api.ListLibrary({ kind: "card" })).find((ref) => ref.entityId === mira)!
+      const opened = yield* h.api.OpenEditor({ refId: ref.id })
+      const publicText = "blue ".repeat(1_000)
+      const privateText = "OWN-TURN-SCALE-PRIVATE " + "sea ".repeat(2_000)
+      const original = publicText + privateText
+      const saved = yield* h.writer.EditRef({
+        userId: h.userId,
+        refId: ref.id,
+        expectedRowVersion: opened.ref.rowVersion,
+        doc: { ...opened.doc, description: original },
+        message: null,
+        commitDraft: null
+      })
+      const moveStarted = performance.now()
+      const moved = yield* h.api.MoveToOwnTurnNote({
+        cardRefId: ref.id,
+        expectedRevisionId: saved.ref.headRevisionId,
+        field: "description",
+        text: original,
+        at: publicText.length,
+        length: privateText.length
+      })
+      const moveMs = performance.now() - moveStarted
+      assert.notInclude(sentText(yield* assemble(wrenRow)), "OWN-TURN-SCALE-PRIVATE")
+      assert.include(sentText(yield* assemble(miraRow)), "OWN-TURN-SCALE-PRIVATE")
+      assert.strictEqual((yield* h.api.OpenEditor({ refId: ref.id })).doc.description, original)
+      assert.strictEqual((yield* h.api.UndoLibraryEdit({ editId: moved.editId })).undone, 2)
+      process.stdout.write(
+        `OWN_TURN_SCALE ${JSON.stringify({ branches: 300, publicTokens: 1000, privateTokens: 2000, moveMs })}\n`
+      )
     }).pipe(Effect.scoped, Effect.provide(server.layer))
   },
   600_000

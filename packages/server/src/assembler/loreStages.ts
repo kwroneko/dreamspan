@@ -114,11 +114,17 @@ export const loreActivationStage: AssemblerStage = {
       )
       const env = need(assembly, "macros")
       const cast = need(assembly, "cast")
+      const replacements = [...(assembly.replacements?.values() ?? [])]
+        .filter(({ record }) => record.status === "replaced" || record.status === "own_position")
+        .map(({ note }) => note)
       const sharedWork = { remaining: 4_000_000 }
       const optionsFor = (book: LorebookInput) => ({
         sharedWork,
         ...(book.card
-          ? { names: { char: modelName(book.card.doc) }, card: cardFields(book.card, cast.personas[0]) }
+          ? {
+              names: { char: modelName(book.card.doc) },
+              card: cardFields(book.card, cast.personas[0], undefined, replacements)
+            }
           : {})
       })
       const books = inputs.map((book) => {
@@ -153,6 +159,7 @@ export const loreActivationStage: AssemblerStage = {
       const continuing = need(assembly, "target").continues
       if (continuing?.text) messages.unshift(`${cast.speaker ? modelName(cast.speaker.doc) : ""}: ${continuing.text}`)
       const char = cast.characters[0]
+      const fields = cardFields(char, cast.personas[0], undefined, replacements)
       const preview = (field: string, text: string) => env.preview(`lore:scan:${field}`, text, { sharedWork })
       // Due notes with `scan_lore`, whole and expanded, as ST's `addInject` scans its extension
       // prompts: whatever their placement and the scan depth. A card's is expanded as it's sent
@@ -205,10 +212,10 @@ export const loreActivationStage: AssemblerStage = {
         trigger: cast.type,
         decisions: new Map(admissions.map((a) => [a.entry, a.probability])),
         descriptions: {
-          persona_description: preview("persona", cast.personas[0]?.doc.description ?? ""),
-          character_description: preview("description", char?.doc.description ?? ""),
-          character_personality: preview("personality", char?.doc.personality ?? ""),
-          scenario: preview("scenario", char?.doc.scenario ?? ""),
+          persona_description: preview("persona", fields.persona ?? ""),
+          character_description: preview("description", fields.description ?? ""),
+          character_personality: preview("personality", fields.personality ?? ""),
+          scenario: preview("scenario", fields.scenario ?? ""),
           creator_notes: preview("creator_notes", char?.doc.creator_notes ?? ""),
           character_depth_prompt: preview("depth_prompt", characterNoteText(assembly.notes, char?.entity))
         }

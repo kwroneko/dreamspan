@@ -701,3 +701,15 @@ export const makeCardArchiveHandlers = Effect.gen(function* () {
       )
   } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").CardArchiveApi.of>[0]
 })
+
+/** The move has its own small handler group, as the gallery and workshop conversion do. */
+export const makeOwnTurnNoteHandlers = Effect.gen(function* () {
+  const writer = yield* Writer
+  const warmth = yield* CacheWarmth
+  return {
+    MoveToOwnTurnNote: (args) =>
+      Effect.flatMap(CurrentUser, (user) =>
+        writer.MoveToOwnTurnNote({ userId: user.id, ...args }).pipe(Effect.tap(() => warmth.refreshUser(user.id)))
+      ).pipe(settle("MoveToOwnTurnNote"))
+  } satisfies Parameters<typeof import("@rp/shared/editorApi.ts").OwnTurnNoteApi.of>[0]
+})

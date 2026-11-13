@@ -38,6 +38,7 @@ export interface CodeEditorProps {
   mono?: boolean | undefined
   readOnly?: boolean | undefined
   onChange: (value: string) => void
+  onSelectionRangeChange?: ((range: { readonly at: number; readonly length: number }) => void) | undefined
   onSelectionChange?: ((text: string) => void) | undefined
   onBlur?: (() => void) | undefined
 }

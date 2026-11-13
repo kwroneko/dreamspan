@@ -70,6 +70,11 @@ type Section = Extract<Placement, { mode: "section" }>["section"]
  */
 const PLACES = [
   {
+    value: "section:own_turn",
+    label: "At the preset's Own-turn notes",
+    description: "Only this card’s notes on its turn, where the preset puts Own-turn notes."
+  },
+  {
     value: "section:context_start",
     label: "Start of context",
     description: "The very first thing sent, before everything in the preset."
@@ -120,6 +125,7 @@ const PLACES = [
 type Place = (typeof PLACES)[number]["value"]
 
 const DECIDED: ReadonlyArray<Place> = [
+  "section:own_turn",
   "section:context_start",
   "section:after_main_prompt",
   "depth",
@@ -145,6 +151,7 @@ const shortPlace = (placement: Placement | undefined): string => {
       return "Not placed"
     case "section":
       return {
+        own_turn: "Own-turn notes",
         context_start: "Start of context",
         after_main_prompt: "With the definitions",
         tail_start: "Start of tail",
@@ -164,9 +171,11 @@ const aboveHistory = (placement: Placement | undefined) =>
  * A condition as its chip says it: "Aria's turn", "Aria's or Bram's turn", "While Bram isn't
  * muted". A card not in this chat never counts, so only the others are named, unless none is.
  */
-const conditionText = (stored: unknown, cards: ReadonlyArray<NoteCard>) => {
+const conditionText = (stored: unknown, cards: ReadonlyArray<NoteCard>, owner?: string) => {
   const condition = readNoteCondition(stored)
   if (condition.when === "always") return null
+  if (condition.when === "own_turn")
+    return `Only on ${cards.find((c) => c.entity === owner)?.name ?? "its card"}'s turns`
   const named = condition.cards.flatMap((entity) => cards.find((card) => card.entity === entity)?.name ?? [])
   const names = named.length > 0 ? named : ["A card not in this chat"]
   // A long list names two, so the chip fits a phone's row.
@@ -214,9 +223,11 @@ function PlacementField({
     store.setValue(path, next)
   }
   // An older or imported place still shows, when the note is there already.
-  const items = PLACES.filter((p) => DECIDED.includes(p.value) || p.value === placeOf(placement)).map((p) =>
-    card && p.value === "section:after_main_prompt" ? { ...p, description: CARD_DEFINITIONS } : p
-  )
+  const items = PLACES.filter(
+    (p) =>
+      (DECIDED.includes(p.value) || p.value === placeOf(placement)) &&
+      (p.value !== "section:own_turn" || card || p.value === placeOf(placement))
+  ).map((p) => (card && p.value === "section:after_main_prompt" ? { ...p, description: CARD_DEFINITIONS } : p))
   return (
     // Side by side while they fit, each at its own width, wrapping only when the panel is narrow.
     <>
@@ -280,6 +291,11 @@ function PlacementField({
 type When = NoteCondition["when"]
 
 const WHEN: ReadonlyArray<{ readonly value: When; readonly label: string; readonly description: string }> = [
+  {
+    value: "own_turn",
+    label: "On its card's turn",
+    description: "Sent only when this note’s own card speaks, including a new version or continuation."
+  },
   { value: "always", label: "Always", description: "Sent on every turn while it's on." },
   {
     value: "turn",
@@ -331,19 +347,28 @@ function ConditionField({ store, cards }: { store: EditorStore; cards: ReadonlyA
   const ownCard = Predicate.isObject(owner) && Predicate.isString(owner["card"]) ? owner["card"] : null
   const first = cards.find((card) => card.entity === ownCard)?.entity ?? cards[0]?.entity
   const set = (next: When, chosen: ReadonlyArray<string>) =>
-    store.setValue(["condition"], next === "always" || chosen.length === 0 ? undefined : { when: next, cards: chosen })
+    store.setValue(
+      ["condition"],
+      next === "own_turn"
+        ? { when: next }
+        : next === "always" || chosen.length === 0
+          ? undefined
+          : { when: next, cards: chosen }
+    )
   return (
     <>
       <div className="min-w-52 flex-[3]">
         <Field label="When it applies">
           <Select
-            items={WHEN.filter((w) => w.value === "always" || named.length > 0 || cards.length > 0)}
+            items={WHEN.filter((w) =>
+              w.value === "own_turn" ? ownCard !== null : w.value === "always" || named.length > 0 || cards.length > 0
+            )}
             value={when}
             onValueChange={(next) => set(next, named.length > 0 ? named : first === undefined ? [] : [first])}
           />
         </Field>
       </div>
-      {when !== "always" && (
+      {when !== "always" && when !== "own_turn" && (
         <div className="min-w-48 flex-[4]">
           <Field label="Characters">
             <MultiSelect
@@ -625,7 +650,8 @@ export const noteState = (doc: Doc, cards: ReadonlyArray<NoteCard>, names: NoteT
       : doc["own_position"] === true
         ? `${shortPlace(doc["placement"] as Placement | undefined)} · replaces ${what}`
         : `In place of ${what}`
-  return [place, conditionText(doc["condition"], cards) ?? "always"].join(" · ")
+  const owner = Predicate.isObject(doc.owner) && Predicate.isString(doc.owner.card) ? doc.owner.card : undefined
+  return [place, conditionText(doc["condition"], cards, owner) ?? "always"].join(" · ")
 }
 
 /**

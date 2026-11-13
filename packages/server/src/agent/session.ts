@@ -490,6 +490,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         transcript: () => agent.state.messages,
         leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
         viewers: generation.viewers,
+        speaker: generation.speaker ?? null,
         ...(request.storyAt === undefined ? {} : { storyAt: request.storyAt }),
         offer: {
           kind: run.kind ?? "",

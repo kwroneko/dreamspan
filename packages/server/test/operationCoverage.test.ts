@@ -48,7 +48,7 @@ it.live("classifies every RPC and registered command; a new unclassified operati
       assert.isFalse(exposures.some((e) => "rpc" in e.operation && e.operation.rpc === tag))
     }
     assert.notInclude(exposedCastChanges, "AgentPermission")
-    assert.strictEqual(builtinOperationExposures.length, 20)
+    assert.strictEqual(builtinOperationExposures.length, 21)
   }).pipe(Effect.provide(serverLayer(testConfig())))
 )
 
@@ -91,10 +91,9 @@ it.effect("keeps workshop operations out of story and unknown kind tool catalogs
     for (const name of ["history_search", "list_chats", "get_cast", "generate_reply", "rename_chat"])
       for (const kind of ["rp", "unknown"]) assert.isUndefined(toolForKind(registry, kind, name), `${kind}: ${name}`)
     assert.isDefined(toolForKind(registry, "rp", "read_messages"))
-    assert.strictEqual(
-      toolForKind(registry, "rp", "list_library")!.parameters,
-      registry.rolloutTools.get("list_library")!.parameters
-    )
+    for (const name of ["list_library", "read_card", "read_preset", "read_lorebook"])
+      for (const kind of ["rp", "unknown"]) assert.isUndefined(toolForKind(registry, kind, name))
+    assert.isDefined(toolForKind(registry, "workshop", "list_library"))
   }).pipe(Effect.provide(ExecutionRegistry.layer))
 )
 

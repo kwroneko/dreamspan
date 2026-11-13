@@ -3308,6 +3308,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   ListCardNotes: {
     probe: (actor, owner) => refused(actor.api.ListCardNotes({ cardRefId: owner.editor.cardRefId }), "NotFound")
   },
+  MoveToOwnTurnNote: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const opened = yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })
+        yield* refused(
+          actor.api.MoveToOwnTurnNote({
+            cardRefId: owner.editor.cardRefId,
+            expectedRevisionId: opened.ref.headRevisionId,
+            field: "description",
+            text: "A",
+            at: 0,
+            length: 1
+          }),
+          "NotFound"
+        )
+      })
+  },
   CreateCardNote: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

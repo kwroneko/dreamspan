@@ -41,12 +41,20 @@ export const applySummaryPrefix = (snapshot: ContextSnapshot, prefix?: SummaryPr
     JSON.stringify(prefix.inputs.preset) !== JSON.stringify(snapshot.inputs.preset)
   )
     return snapshot
-  // Even the same character can have its presence corrected since the trigger. Reuse
-  // a private prefix only when its current pieces still agree; a changed history macro
-  // or a note no longer sent must not be restored from the frozen trigger.
+  // A frozen reply prefix can hold own-turn notes, even in shared context. Reuse
+  // it only while its pieces agree with the summary audience and current definitions.
   if (
-    snapshot.inputs.viewer &&
-    prefix.pieces.some((old) => !snapshot.pieces.some((current) => current.id === old.id && current.text === old.text))
+    prefix.pieces.some(
+      (old) =>
+        (snapshot.inputs.viewer || old.source.kind === "note" || old.source.kind === "card") &&
+        !snapshot.pieces.some((current) => current.id === old.id && current.text === old.text)
+    ) ||
+    snapshot.pieces.some(
+      (current) =>
+        (current.source.kind === "note" || current.source.kind === "card") &&
+        current.messages.some((i) => i < boundary(snapshot)) &&
+        !prefix.pieces.some((old) => old.id === current.id && old.text === current.text)
+    )
   )
     return snapshot
   const end = boundary(snapshot),

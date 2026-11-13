@@ -780,7 +780,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           slotId,
           cards: cards as Array<EntityId>
         })
-        return yield* Effect.forEach(entries, (entry) =>
+        const notes = yield* Effect.forEach(entries, (entry) =>
           Effect.gen(function* () {
             const revisionId = state.noteRevisions[entry.ref.entityId] as RevisionId | undefined
             const pinned =
@@ -803,6 +803,11 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             })
           })
         )
+        const grouped = noteSwitches(
+          events,
+          notes.map((note) => ({ entity: note.ref.entityId, doc: note.doc }))
+        )
+        return notes.map((note) => new ChatNote({ ...note, active: grouped.get(note.ref.entityId) ?? note.active }))
       }).pipe(internal("ListChatNotes")),
 
     CreateChatNote: ({ chatId, title, link, forkId, replaces, content }) =>

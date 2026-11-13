@@ -104,6 +104,44 @@ describe("card export", () => {
     })
   })
 
+  it("round-trips self-referring moves without library ids and never makes them ST depth prompts", async () => {
+    const card = { ...imported(stCardV2()), extensions: {}, description: "Blue coat. A secret." }
+    const own = cardNote({
+      title: "Moved from Description",
+      content: "A secret.",
+      condition: { when: "own_turn" },
+      placement: { mode: "depth", depth: 0, role: "system" },
+      on_by_default: true,
+      move_group: "move-1"
+    })
+    const replacement = cardNote({
+      title: "Shared Description",
+      content: "Blue coat.",
+      replaces: { kind: "card_field", field: "description" },
+      on_by_default: true,
+      move_group: "move-1"
+    })
+    const nowShared = { ...own, condition: { when: "always" } as const }
+    expect(
+      JSON.parse(new TextDecoder().decode(await exportNotes(card, nowShared, [replacement]))).data.extensions
+    ).not.toHaveProperty("depth_prompt")
+    for (const first of [own, replacement]) {
+      const bytes = await exportNotes(card, first, [first === own ? replacement : own])
+      const text = new TextDecoder().decode(bytes)
+      expect(text).not.toContain(OWNER)
+      const data = JSON.parse(text).data
+      expect(data.description).toBe("Blue coat. A secret.")
+      expect(data.extensions).not.toHaveProperty("depth_prompt")
+      const back = await parsed(bytes)
+      expect(back.notes).toContainEqual(
+        expect.objectContaining({ condition: { when: "own_turn" }, move_group: "move-1" })
+      )
+      expect(back.notes).toContainEqual(
+        expect.objectContaining({ replaces: { kind: "card_field", field: "description" }, move_group: "move-1" })
+      )
+    }
+  })
+
   it("exports exportable notes only, and an import brings them back as card notes", async () => {
     const card = imported(stCardV2())
     const { extensions: _dropped, ...rest } = card

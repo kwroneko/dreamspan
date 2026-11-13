@@ -10,6 +10,9 @@ import type { EditorStore } from "./store.ts"
 
 /** What a view adds to the field it renders. */
 export interface FieldViewExtra {
+  /** Show the stored field through inner views, bypassing replacement presentations. */
+  readonly original?: boolean | undefined
+  readonly onSelectionRangeChange?: ((range: { readonly at: number; readonly length: number }) => void) | undefined
   /** Controls in the box's strip, before its own. */
   readonly tools?: ReactNode
   /** At the end of the label's row; a row of its own above the box when the label is hidden. */
@@ -17,6 +20,7 @@ export interface FieldViewExtra {
 }
 
 export interface FieldViewProps {
+  readonly original?: boolean | undefined
   readonly store: EditorStore
   readonly path: FieldPath
   readonly label: string

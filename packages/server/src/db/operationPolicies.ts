@@ -279,7 +279,46 @@ const statePolicy = (id: string): OperationPolicy =>
         return {}
       })
   })
+const ownTurnSnapshot = (sql: SqlClient.SqlClient, userId: UserId, input: { cardRefId: RefId }) =>
+  Effect.gen(function* () {
+    const card = yield* refSnapshot(sql, userId, { refId: input.cardRefId })
+    const notes = yield* sql<{
+      id: string
+      head: string
+      row_version: number
+      draft: string
+    }>`SELECT r.id, r.head_revision_id AS head, r.row_version,
+      (SELECT coalesce(json_group_array(json_array(id, row_version)), '[]') FROM
+        (SELECT id, row_version FROM drafts WHERE user_id = ${userId} AND target_id = r.id AND target_kind = 'entity_field' AND status = 'active' ORDER BY id)) AS draft
+      FROM entity_refs r JOIN entities e ON e.id = r.entity_id JOIN entity_revisions h ON h.id = r.head_revision_id
+      WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
+        AND json_extract(h.doc_json, '$.owner.card') = ${card.ref.entity_id} ORDER BY r.id`
+    const edits = yield* sql<{ id: string }>`SELECT DISTINCT i.group_id AS id FROM library_edit_items i
+      JOIN entity_refs r ON r.id = i.ref_id JOIN entities e ON e.id = r.entity_id
+      JOIN entity_revisions h ON h.id = r.head_revision_id JOIN entity_revisions a ON a.id = i.after_revision_id
+      WHERE e.owner_user_id = ${userId} AND json_extract(h.doc_json, '$.owner.card') = ${card.ref.entity_id}
+        AND json_extract(CASE WHEN json_valid(a.origin_ref) THEN a.origin_ref ELSE '{}' END, '$.ownTurnMove') = i.group_id ORDER BY i.group_id`
+    return { card, notes, edits }
+  })
+
 export const operationPolicies = makeRegistry<OperationPolicy>([
+  policy<Input<"MoveToOwnTurnNote">, Effect.Success<ReturnType<typeof ownTurnSnapshot>>>({
+    id: "MoveToOwnTurnNote",
+    label: "Moved card text to an own-turn note",
+    capability: "library.write",
+    kind: "changeset.apply",
+    targetKind: "entity",
+    target: (_input, after) => after.card.ref.entity_id,
+    before: ownTurnSnapshot,
+    undo: (_sql, ops, userId, _input, before, after) =>
+      Effect.gen(function* () {
+        for (const edit of after.edits.filter((edit) => !before.edits.some((old) => old.id === edit.id))) {
+          const result = yield* ops.UndoLibraryEdit({ userId, editId: edit.id })
+          if (result.kept.length) return yield* refuseOperation("A moved note changed since. Open its History.")
+        }
+        return {}
+      })
+  }),
   settingsPolicy("SetAgentSetting", []),
   statePolicy("AddStateEvent"),
   statePolicy("AddStateEvents"),

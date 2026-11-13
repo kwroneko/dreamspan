@@ -25,6 +25,7 @@ export function CardTextEditor({
   expand,
   autoFocus,
   flash,
+  onSelectionRangeChange,
   onChange,
   onBlur
 }: {
@@ -49,6 +50,7 @@ export function CardTextEditor({
   autoFocus?: boolean | undefined
   /** Text just added, marked briefly and scrolled into view. */
   flash?: { readonly at: number; readonly length: number } | undefined
+  onSelectionRangeChange?: ((range: { readonly at: number; readonly length: number }) => void) | undefined
   onChange: (value: string) => void
   onBlur?: (() => void) | undefined
 }) {
@@ -106,6 +108,7 @@ export function CardTextEditor({
         }}
         status={status}
         expand={expand}
+        onSelectionRangeChange={onSelectionRangeChange}
         onChange={onChange}
         onBlur={onBlur}
       />

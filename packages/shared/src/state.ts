@@ -707,15 +707,39 @@ const apply = (state: ChatState, { data, scope }: FoldableEvent): ChatState => {
 }
 
 /**
- * The notes the events turned on or off, as they last left each (DESIGN §4.1). A note they
- * never named keeps its default: a card's note with `on_by_default` is on, every other note off.
+ * The notes the events turned on or off, as they last left each (DESIGN §4.1). With notes
+ * supplied, a moved group follows its last explicit switch, including later members. A note
+ * without a switch keeps its default: a card’s `on_by_default`, otherwise off.
  */
-export const noteSwitches = (events: Iterable<FoldableEvent>) => {
-  const last = new Map<string, boolean>()
-  for (const { data } of events) {
-    if (data.key === "note.activate") last.set(data.value.note, true)
-    if (data.key === "note.deactivate") last.set(data.value.note, false)
+export const noteSwitches = (
+  events: Iterable<FoldableEvent>,
+  notes: Iterable<{
+    readonly entity: string
+    readonly doc: Readonly<Record<string, unknown>>
+  }> = []
+) => {
+  const groups = new Map<string, string[]>()
+  const groupOf = new Map<string, string>()
+  for (const { entity, doc } of notes) {
+    const owner = doc.owner as { readonly card?: unknown } | null | undefined
+    if (typeof owner?.card !== "string" || typeof doc.move_group !== "string") continue
+    const key = JSON.stringify([owner.card, doc.move_group])
+    const members = groups.get(key) ?? []
+    members.push(entity)
+    groups.set(key, members)
+    groupOf.set(entity, key)
   }
+  const last = new Map<string, boolean>()
+  const grouped = new Map<string, boolean>()
+  for (const { data } of events) {
+    if (data.key !== "note.activate" && data.key !== "note.deactivate") continue
+    const group = groupOf.get(data.value.note)
+    if (group === undefined) last.set(data.value.note, data.key === "note.activate")
+    else grouped.set(group, data.key === "note.activate")
+  }
+  // A switch belongs to the card-scoped group, including passages moved later. Project
+  // once after folding, so repeated group events remain linear in events plus members.
+  for (const [key, on] of grouped) for (const entity of groups.get(key)!) last.set(entity, on)
   return last
 }
 

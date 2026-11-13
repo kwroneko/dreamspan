@@ -35,7 +35,7 @@ import {
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
-import { EditRefused, LibraryLabel } from "@rp/shared/editorApi.ts"
+import { MoveToOwnTurnNoteFields, EditRefused, LibraryLabel } from "@rp/shared/editorApi.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
@@ -3031,6 +3031,11 @@ export class WriteOpsLibrary extends RpcGroup.make(
     payload: { userId: UserId, refId: RefId, expectedRowVersion: Schema.Int, crop: Schema.NullOr(AvatarCrop) },
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  Rpc.make("MoveToOwnTurnNote", {
+    payload: { userId: UserId, ...MoveToOwnTurnNoteFields },
+    success: Schema.Struct({ notes: Schema.Array(LibraryRef), editId: Schema.String }),
+    error: Schema.Union([NotFound, StorageError, RefOperationRefused])
   }),
   /** A new note on the card; with `link`, a slot showing that shared note of the user's. */
   Rpc.make("CreateCardNote", {

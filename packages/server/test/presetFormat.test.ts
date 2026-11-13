@@ -55,6 +55,7 @@ describe("importing an ST chat-completion preset", () => {
       "dialogueExamples",
       "chatHistory",
       "newestMessage",
+      "ownTurnNotes",
       "jailbreak"
     ])
     expect(doc.order.find((e) => e.identifier === "enhanceDefinitions")?.enabled).toBe(false)
@@ -141,7 +142,10 @@ describe("importing an ST chat-completion preset", () => {
     expect(codes(result).filter((c) => c === "preset.unknown_field")).toHaveLength(2)
     expect(
       doc.order
-        .filter((e) => !["newestMessage", "groupNudge", "impersonationPrompt", "direction"].includes(e.identifier))
+        .filter(
+          (e) =>
+            !["ownTurnNotes", "newestMessage", "groupNudge", "impersonationPrompt", "direction"].includes(e.identifier)
+        )
         .slice(12)
         .map((e) => e.enabled)
     ).toEqual([true, true, false, true])
@@ -224,7 +228,8 @@ describe("ST's prompt and order sanitizing", () => {
       "charDescription",
       "charPersonality",
       "scenario",
-      "personaDescription"
+      "personaDescription",
+      "ownTurnNotes"
     ])
     // Every prompt but the four end-of-request texts, which are never in the order.
     expect(fromPartial.order).toHaveLength(fromPartial.prompts.length - 4)
@@ -296,7 +301,7 @@ describe("ST's prompt and order sanitizing", () => {
   it("uses ST's default order when the preset has no global order", () => {
     const result = load({ prompts: [], prompt_order: [{ character_id: 100000, order: [] }] })
     // ST's twelve and the newest-message marker; the end-of-request texts are outside the order.
-    expect(result.doc.order).toHaveLength(13)
+    expect(result.doc.order).toHaveLength(14)
     expect(codes(result, "warning")).toContain("preset.no_global_order")
     expect(issue(result, "preset.prompt_orders_dropped")?.message).toContain("100000")
   })
@@ -412,7 +417,7 @@ describe("exporting to an ST chat-completion preset", () => {
         expect(
           (file.prompt_order as Array<{ character_id: number; order: Array<{ identifier: string }> }>).map((o) => ({
             ...o,
-            order: o.order.filter((e) => e.identifier !== "newestMessage" && e.identifier !== "direction")
+            order: o.order.filter((e) => !["ownTurnNotes", "newestMessage", "direction"].includes(e.identifier))
           }))
         ).toEqual([global])
       } else if (key === "extensions") {
@@ -719,7 +724,7 @@ describe("cases where ST's behaviour is easy to miss", () => {
 
   it("says where a global order without a list differs from ST", () => {
     const result = load({ prompts: [], prompt_order: [{ character_id: 100001 }] })
-    expect(result.doc.order).toHaveLength(13)
+    expect(result.doc.order).toHaveLength(14)
     expect(issue(result, "preset.no_global_order")?.message).toContain("ST would send none")
   })
 
@@ -872,7 +877,7 @@ describe("conditions (DESIGN §2.2)", () => {
     expect(doc.utility_prompts.impersonation_prompt).toBe("")
     expect(doc.utility_prompts.continue_nudge_prompt).toBe("")
     const ids = doc.order.map((e) => e.identifier)
-    expect(ids.slice(0, 4)).toEqual(["main", "chatHistory", "newestMessage", "jailbreak"])
+    expect(ids.slice(0, 5)).toEqual(["main", "chatHistory", "newestMessage", "ownTurnNotes", "jailbreak"])
     for (const id of ["groupNudge", "impersonationPrompt", "continueNudge", "directionPrompt"])
       expect(ids).not.toContain(id)
     expect(codes(result)).toEqual(expect.arrayContaining(["preset.group_nudge_prompt", "preset.impersonation_prompt"]))

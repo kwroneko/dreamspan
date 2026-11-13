@@ -507,8 +507,66 @@ const editLibraryDocument = (kind: "preset" | "lorebook", schema: Schema.Top): R
       )
   }
 }
+type CardNoteEdit = { readonly card: string; readonly note: string; readonly content: string }
+const prepareCardNote = (ctx: ToolContext, args: CardNoteEdit) =>
+  Effect.gen(function* () {
+    const ref = yield* findRef(ctx, "card", args.card)
+    remember(ctx, "card", args.card, ref)
+    const notes = yield* ctx.reader.ListCardNotes({ userId: ctx.userId, cardRefId: ref.id })
+    const matches = notes.filter(
+      (note) =>
+        note.ref.id === args.note ||
+        String(note.doc.title ?? note.ref.label).toLocaleLowerCase() === args.note.toLocaleLowerCase()
+    )
+    if (matches.length !== 1) return yield* Effect.fail(new ToolInputRefused("Choose one note id from read_card."))
+    const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: matches[0]!.ref.id })
+    if (saved.doc.link)
+      return yield* Effect.fail(
+        new ToolInputRefused("This note shows shared text. Edit the shared note in its editor.")
+      )
+    remember(ctx, "note", args.note, saved.ref)
+    return saved
+  })
+const editCardNote: RolloutTool<CardNoteEdit> = {
+  id: "edit_card_note",
+  label: "Edited a card note",
+  explanation: "Edit a saved card note’s text with Undo.",
+  effect: "library",
+  capability: "library.write",
+  description:
+    "Edits the saved text of one card note, including its own-turn framing. Read the card first for note names and ids. Conditions, placement and replacement targets are kept. Unsaved drafts remain unsaved.",
+  parameters: Type.Object({ card: name, note: name, content: text }, strict),
+  summarize: ({ card, note }) => `${card}: ${note}`,
+  describe: (ctx, args) =>
+    Effect.gen(function* () {
+      const saved = yield* prepareCardNote(ctx, args)
+      ctx.cache.set(`approval:card-note:${ctx.toolCallId}`, saved)
+      return {
+        title: `Edit the note “${saved.ref.label}”`,
+        rows: [],
+        changes: [{ field: "Text", before: String(saved.doc.content ?? ""), after: args.content }]
+      }
+    }),
+  execute: (ctx, args) =>
+    safely(
+      Effect.gen(function* () {
+        const saved =
+          (ctx.cache.get(`approval:card-note:${ctx.toolCallId}`) as
+            Effect.Success<ReturnType<typeof prepareCardNote>> | undefined) ?? (yield* prepareCardNote(ctx, args))
+        return {
+          text: yield* ctx.writer.AgentReviseEntity({
+            ...key(ctx),
+            refId: saved.ref.id,
+            expectedRowVersion: saved.ref.rowVersion,
+            doc: { ...saved.doc, content: args.content }
+          })
+        }
+      })
+    )
+}
 export const libraryEditCard = receiptFirst(editCard)
 export const setupTools: ReadonlyArray<RolloutTool<never>> = [
+  receiptFirst(editCardNote),
   receiptFirst(createCard),
   receiptFirst(cloneCard),
   receiptFirst(startChat),

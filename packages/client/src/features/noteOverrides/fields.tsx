@@ -38,7 +38,7 @@ export function ReplacedFieldView(props: FieldViewProps) {
     title: string
     context: PresetContext | null | undefined
   } | null>(null)
-  if (!chat || !target) return props.render()
+  if (!chat || !target || props.original) return props.render()
   const shownNote: NoteReplacementView | null =
     replacement ??
     (made && made.context === workspace?.context

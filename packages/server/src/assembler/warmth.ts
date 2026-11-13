@@ -209,3 +209,51 @@ export const prefixChange = (
   }
   return null
 }
+
+/** A conditional cost warning, separate from whether the shared prefix is actually warm. */
+export const speakerPrefixChange = (
+  last: ContextSnapshot,
+  next: ContextSnapshot,
+  countText?: (text: string) => number
+): { readonly tokens: number } | null => {
+  if (!last.inputs.speaker || !next.inputs.speaker || last.inputs.speaker === next.inputs.speaker) return null
+  if (
+    last.inputs.model?.modelId !== next.inputs.model?.modelId ||
+    last.inputs.model?.connectionId !== next.inputs.model?.connectionId
+  )
+    return null
+  const starts = (snapshot: ContextSnapshot) => {
+    const history = Math.min(
+      Infinity,
+      ...snapshot.pieces.flatMap((p) => (p.source.kind === "message" ? p.messages : []))
+    )
+    return {
+      history,
+      own: snapshot.pieces.some(
+        (p) => p.source.kind === "note" && p.source.ownTurn && p.messages.some((at) => at < history)
+      )
+    }
+  }
+  const previousStart = starts(last),
+    nextStart = starts(next)
+  if (!Number.isFinite(previousStart.history) || !Number.isFinite(nextStart.history)) return null
+  if (!previousStart.own && !nextStart.own) return null
+  // Identical self-conditioned passages at ordinary positions can share a prefix.
+  // Appended history alone must not make that a speaker-dependent start.
+  const prefix = (snapshot: ContextSnapshot, history: number) =>
+    canonicalJson(snapshot.request.messages.slice(0, history).map(wireDigest))
+  if (prefix(last, previousStart.history) === prefix(next, nextStart.history)) return null
+  const mapped = (snapshot: ContextSnapshot) =>
+    snapshot.wire?.messages ??
+    (snapshot.inputs.model
+      ? wireContext(snapshot.request, snapshot.inputs.model).messages
+      : snapshot.request.messages.map((m, i) => ({ ...m, inputs: [i] })))
+  const before = mapped(last),
+    after = mapped(next)
+  const at = after.findIndex((m, i) => !before[i] || wireDigest(m) !== wireDigest(before[i]!))
+  if (at < 0) return null
+  const images = wireImages(after, next.request)
+  return {
+    tokens: after.reduce((sum, m, i) => (i < at ? sum : sum + tokensOf({ ...m, images: images[i] }, countText)), 0)
+  }
+}

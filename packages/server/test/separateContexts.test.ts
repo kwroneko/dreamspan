@@ -670,6 +670,7 @@ const tools = (t: Effect.Success<ReturnType<typeof story>>, snapshot: ContextSna
     versionId: "unused" as VersionId,
     leafSlotId: leaf,
     viewers: generationOf(snapshot).viewers,
+    speaker: snapshot.inputs.speaker,
     rolloutId: "test",
     toolCallId: "test",
     cache: new Map(),
@@ -1084,6 +1085,47 @@ describe("the agent's read tools in a separate context", () => {
         const forShared = yield* shared.contextFor(shared.wren)
         assert.notProperty(forShared.inputs, "viewer")
         assert.include(yield* tools(shared, forShared)("search_chat", { query: "vault" }), "vault code")
+
+        yield* shared.writer.CreateEntity({
+          userId: shared.userId,
+          kind: "note",
+          label: "Mira private card note",
+          subtitle: "",
+          doc: {
+            schema_version: 1,
+            title: "Mira private card note",
+            content: "PRIVATE-NOTE-TEXT",
+            owner: { card: shared.mira },
+            condition: { when: "own_turn" },
+            placement: { mode: "section", section: "own_turn" },
+            exportable: true,
+            agent_editable: true
+          },
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+        yield* shared.event({ key: "cast.role", value: { entity: shared.wren, role: "narrator" } })
+        for (const speaker of [shared.wren, shared.tobin]) {
+          const sharedTools = tools(shared, yield* shared.contextFor(speaker))
+          assert.notInclude(yield* sharedTools("list_notes", {}), "Mira private card note")
+          assert.include(
+            yield* sharedTools("edit_note", {
+              note: "Mira private card note",
+              find: "PRIVATE-NOTE-TEXT",
+              replace: "x"
+            }),
+            "No note is called"
+          )
+          assert.include(
+            yield* sharedTools("switch_note", { note: "Mira private card note", on: true }),
+            "No note is called"
+          )
+        }
+        assert.include(
+          yield* tools(shared, yield* shared.contextFor(shared.mira))("list_notes", {}),
+          "Mira private card note"
+        )
 
         const t = yield* story("separate")
         const note = (title: string, condition: object | null) =>
