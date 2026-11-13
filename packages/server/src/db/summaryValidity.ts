@@ -162,13 +162,15 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
     if (!tracking) return
     const moved = yield* sql<{ chat_id: string; stamp: number }>`SELECT chat_id, stamp FROM shell_moved`
     if (moved.length > 0) {
+      // Resolve sparse touches before their versions: a covering index must not turn
+      // settlement into a scan of every version in the database.
       // An alternative changes every fork's historical participation only when it
       // adds evidence. Its selection is already tracked by the fork override.
       // In particular, editing an old shared message must not walk every frozen
       // branch just to rediscover the same cast and human-author activity.
       yield* sql`INSERT INTO shell_touches(kind, chat_id, ref)
         SELECT DISTINCT ${SLOT}, t.chat_id, v.slot_id FROM shell_touches t
-        JOIN versions v ON v.id = t.ref JOIN slots s ON s.id = v.slot_id
+        CROSS JOIN versions v ON v.id = t.ref CROSS JOIN slots s ON s.id = v.slot_id
         WHERE t.kind = ${VERSION} AND v.purged_at IS NULL AND (
           EXISTS (SELECT 1 FROM version_participants p WHERE p.version_id = v.id AND NOT EXISTS (
             SELECT 1 FROM versions other JOIN version_participants op ON op.version_id = other.id
@@ -194,17 +196,17 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
         -- swipes pinned together before joining them to the forks' segments.
         touched(chat_id, chain_id, depth, author, at, slot_id, version_id) AS MATERIALIZED (
           SELECT DISTINCT s.chat_id, s.chain_id, s.depth, NULL, NULL, s.id, NULL
-          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id
-            JOIN slots s ON s.id = t.ref WHERE t.kind = ${SLOT}
+          FROM shell_touches t CROSS JOIN kept k ON k.chat_id = t.chat_id
+            CROSS JOIN slots s ON s.id = t.ref WHERE t.kind = ${SLOT}
           UNION SELECT s.chat_id, s.chain_id, s.depth, v.speaker_entity_id,
             CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END, s.id, NULL
-          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id JOIN versions v ON v.id = t.ref
-            JOIN slots s ON s.id = v.slot_id
+          FROM shell_touches t CROSS JOIN kept k ON k.chat_id = t.chat_id CROSS JOIN versions v ON v.id = t.ref
+            CROSS JOIN slots s ON s.id = v.slot_id
           WHERE t.kind = ${VERSION} AND v.writer = 'human' AND v.speaker_entity_id IS NOT NULL
             AND v.purged_at IS NULL AND s.inserted = 0
           UNION SELECT s.chat_id, s.chain_id, s.depth, NULL, NULL, s.id, v.id
-          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id JOIN versions v ON v.id = t.ref
-            JOIN slots s ON s.id = v.slot_id WHERE t.kind = ${TEXT}),
+          FROM shell_touches t CROSS JOIN kept k ON k.chat_id = t.chat_id CROSS JOIN versions v ON v.id = t.ref
+            CROSS JOIN slots s ON s.id = v.slot_id WHERE t.kind = ${TEXT}),
         segments(fork_id, chat_id, chain_id, lo, hi) AS (
           SELECT f.id, f.chat_id, s.chain_id, h.depth, s.depth FROM kept k
             CROSS JOIN forks f ON f.chat_id = k.chat_id

@@ -38,6 +38,47 @@ import { changedFields, type FieldChange } from "./fields.ts"
 /** How long typing pauses before the text is saved. */
 const SAVE_DELAY_MS = 600
 
+/** Retain equal snapshot nodes so unrelated field subscribers do not all render again.
+ * Descriptors and key order come from the new snapshot; non-document objects stay untouched. */
+const shareSnapshot = (previous: unknown, next: unknown): unknown => {
+  if (Object.is(previous, next)) return previous
+  if (previous === null || next === null || typeof previous !== "object" || typeof next !== "object") return next
+  const array = Array.isArray(next)
+  const prototype = Object.getPrototypeOf(next)
+  if (
+    Array.isArray(previous) !== array ||
+    Object.getPrototypeOf(previous) !== prototype ||
+    (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null)
+  )
+    return next
+  const keys = Reflect.ownKeys(next)
+  const oldKeys = Reflect.ownKeys(previous)
+  let equal = keys.length === oldKeys.length && keys.every((key, index) => key === oldKeys[index])
+  const changes: Array<readonly [string | symbol, PropertyDescriptor]> = []
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(next, key)!
+    if (!("value" in descriptor)) return next
+    const old = Object.getOwnPropertyDescriptor(previous, key)
+    const value = shareSnapshot(old && "value" in old ? old.value : undefined, descriptor.value)
+    if (
+      !old ||
+      !("value" in old) ||
+      old.enumerable !== descriptor.enumerable ||
+      old.configurable !== descriptor.configurable ||
+      old.writable !== descriptor.writable ||
+      !Object.is(value, old.value)
+    )
+      equal = false
+    if (!Object.is(value, descriptor.value)) changes.push([key, { ...descriptor, value }])
+  }
+  if (equal) return previous
+  if (changes.length === 0) return next
+  const descriptors = Object.getOwnPropertyDescriptors(next)
+  for (const [key, descriptor] of changes)
+    Object.defineProperty(descriptors, key, { value: descriptor, enumerable: true, configurable: true, writable: true })
+  return array ? Object.defineProperties([], descriptors) : Object.create(prototype, descriptors)
+}
+
 /** A field's base and what's typed on it. */
 interface FieldDraft {
   conflict: ReplayConflict | null
@@ -342,7 +383,7 @@ export class EditorStore {
         return content === null ? [] : [{ field: key, content }]
       })
     this.liveDoc = applyDrafts(kind, this.head, values).doc
-    this.valueDoc = withHeld(this.liveDoc, this.held())
+    this.valueDoc = shareSnapshot(this.valueDoc, withHeld(this.liveDoc, this.held())) as Doc
   }
 
   /** A preset's structural changes waiting for the unsaved bar's Save; null when there are none. */

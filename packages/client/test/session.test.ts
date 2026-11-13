@@ -164,6 +164,55 @@ describe("ChatSession", () => {
     }
   })
 
+  it("bounds retained historical casts while keeping observed positions and their identities", async () => {
+    vi.useFakeTimers()
+    const { s } = session()
+    const calls: Array<Array<SlotId | null>> = []
+    const internals = s as unknown as {
+      call: (
+        rpc: (client: (name: string, input: { slotIds: Array<SlotId | null> }) => unknown) => unknown
+      ) => Promise<unknown>
+      positionCasts: Map<string, Cast | "loading">
+    }
+    const casts = new Map<string, Cast>()
+    internals.call = async (rpc) => ({
+      ok: true,
+      value: rpc((_name, input) => {
+        calls.push(input.slotIds)
+        return input.slotIds.map((slot) => {
+          const cast = boundCast({ user: `At ${slot}` })
+          casts.set(slot ?? "", cast)
+          return cast
+        })
+      })
+    })
+    const retain = (s as unknown as { subscribePosition?: (slot: SlotId, listener: () => void) => () => void })
+      .subscribePosition
+    const stops = Array.from({ length: 550 }, (_, n) =>
+      retain ? retain(`p${n}` as SlotId, () => {}) : s.subscribePositions(() => {})
+    )
+    try {
+      for (let n = 0; n < 2000; n++) {
+        s.castAfter(`p${n}` as SlotId)
+        if (n % 100 === 99) await vi.advanceTimersByTimeAsync(0)
+      }
+      expect(internals.positionCasts.size).toBe(550)
+      const reads = calls.length
+      for (let n = 0; n < 550; n++) expect(s.castAfter(`p${n}` as SlotId)).toBe(casts.get(`p${n}`))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(calls).toHaveLength(reads)
+      for (const stop of stops.splice(0)) stop()
+      expect(internals.positionCasts.size).toBeLessThanOrEqual(500)
+      expect(s.castAfter("p550" as SlotId)).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(s.castAfter("p550" as SlotId)).toBe(casts.get("p550"))
+    } finally {
+      for (const stop of stops) stop()
+      s.dispose()
+      vi.useRealTimers()
+    }
+  })
+
   for (const stale of ["success", "failure"] as const)
     it(`ignores a positional cast batch's stale ${stale} after a state change`, async () => {
       vi.useFakeTimers()

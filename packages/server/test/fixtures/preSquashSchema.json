@@ -652,7 +652,7 @@
       "type": "index",
       "name": "slots_chat_depth",
       "tbl_name": "slots",
-      "sql": "CREATE INDEX slots_chat_depth ON slots(chat_id, depth)"
+      "sql": "CREATE INDEX slots_chat_depth ON slots(chat_id, depth, id, parent_slot_id, created_at, deleted_at, purged_at, selected_version_id)"
     },
     {
       "type": "index",
@@ -671,6 +671,12 @@
       "name": "slots_selected_version",
       "tbl_name": "slots",
       "sql": "CREATE INDEX slots_selected_version ON slots(selected_version_id)"
+    },
+    {
+      "type": "index",
+      "name": "slots_shell_chain",
+      "tbl_name": "slots",
+      "sql": "CREATE INDEX slots_shell_chain ON slots(chain_id, depth, id, chat_id, parent_slot_id, created_at, deleted_at, purged_at, selected_version_id)"
     },
     {
       "type": "index",
@@ -1025,6 +1031,18 @@
       "name": "versions_rollout",
       "tbl_name": "versions",
       "sql": "CREATE INDEX versions_rollout ON versions(rollout_id) WHERE rollout_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "versions_shell",
+      "tbl_name": "versions",
+      "sql": "CREATE INDEX versions_shell ON versions(slot_id, id, purged_at, status, speaker_entity_id, origin, created_at, seq, content_length, ordinal)"
+    },
+    {
+      "type": "index",
+      "name": "versions_slot_human_authors",
+      "tbl_name": "versions",
+      "sql": "CREATE INDEX versions_slot_human_authors ON versions(slot_id, writer, speaker_entity_id, origin, created_at, purged_at, ordinal) WHERE writer = 'human' AND speaker_entity_id IS NOT NULL AND purged_at IS NULL"
     },
     {
       "type": "index",

@@ -460,6 +460,28 @@ export class ChatSession {
   /** Bumped when position state changes, including a switch away and back to the same fork. */
   private positionGeneration = 0
   private readonly positionListeners = new Set<() => void>()
+  private readonly observedPositions = new Map<string, number>()
+
+  /** Visible bodies retain their position, including expanded originals outside the main window. */
+  readonly subscribePosition = (slotId: SlotId | null, listener: () => void) => {
+    const key = slotId ?? ""
+    this.observedPositions.set(key, (this.observedPositions.get(key) ?? 0) + 1)
+    const stop = this.subscribePositions(listener)
+    return () => {
+      stop()
+      const remaining = this.observedPositions.get(key)! - 1
+      if (remaining) this.observedPositions.set(key, remaining)
+      else this.observedPositions.delete(key)
+      this.trimPositions()
+    }
+  }
+
+  private trimPositions() {
+    for (const [key, cast] of this.positionCasts) {
+      if (this.positionCasts.size <= MAX_LOADED) break
+      if (cast !== "loading" && !this.observedPositions.has(key)) this.positionCasts.delete(key)
+    }
+  }
 
   readonly subscribePositions = (listener: () => void) => {
     this.positionListeners.add(listener)
@@ -472,7 +494,12 @@ export class ChatSession {
   castAfter(slotId: SlotId | null): Cast | undefined {
     const key = slotId ?? ""
     const known = this.positionCasts.get(key)
-    if (known !== undefined) return known === "loading" ? undefined : known
+    if (known !== undefined) {
+      // Map order is recency: keep the positions still being read when old history leaves view.
+      this.positionCasts.delete(key)
+      this.positionCasts.set(key, known)
+      return known === "loading" ? undefined : known
+    }
     this.positionCasts.set(key, "loading")
     const forkId = this.view.forkId
     if (this.castBatch === null || this.castBatch.forkId !== forkId) {
@@ -509,6 +536,7 @@ export class ChatSession {
         if (result.ok && result.value[i]) this.positionCasts.set(key, result.value[i])
         else this.positionCasts.delete(key)
       })
+      this.trimPositions()
       for (const listener of this.positionListeners) listener()
     }
   }
@@ -578,6 +606,7 @@ export class ChatSession {
     if (!PERF) return
     const { entries, older, newer, loading, error } = this.view
     perf.window = {
+      castReady: this.view.cast !== null,
       loaded: entries.length,
       first: entries[0]?.slotId ?? "",
       older: older !== null,

@@ -7,7 +7,7 @@ import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 // neither a physical leaf nor a tip shared by several forks identifies a view.
 // Check for overrides once per view; untouched chats use the base selection and
 // deletion columns without per-message lineage lookups.
-export const shellSlotsQuery = `WITH RECURSIVE views AS MATERIALIZED (
+const slotsQuery = (evidence: boolean) => `WITH RECURSIVE views AS MATERIALIZED (
   SELECT f.id AS fork_id, c.id AS chat_id, f.tip_slot_id,
     EXISTS(SELECT 1 FROM fork_overrides o WHERE o.chat_id = c.id) AS has_overrides
   FROM json_each(?) j CROSS JOIN forks f ON f.id = j.value CROSS JOIN chats c ON c.id = f.chat_id
@@ -24,10 +24,14 @@ SELECT g.fork_id, s.id, s.depth, s.chat_id, s.parent_slot_id,
   s.created_at, CASE WHEN CASE WHEN g.has_overrides THEN ${slotDeletedInSql("g.fork_id", "s")}
     ELSE s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL END THEN 1 END AS deleted_at,
   v.status, v.speaker_entity_id AS speaker, CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at,
-  v.seq AS version_seq, v.content_length, ${slotParticipantsSql("s")} AS participants, ${slotHumanAuthorsSql("s")} AS human_authors
+  v.seq AS version_seq, v.content_length, ${evidence ? slotParticipantsSql("s") : "'[]'"} AS participants, ${evidence ? slotHumanAuthorsSql("s") : "'[]'"} AS human_authors
   FROM segments g CROSS JOIN slots s ON s.chat_id = g.chat_id AND s.chain_id = g.chain_id AND s.depth BETWEEN g.lo AND g.hi
-  JOIN versions v ON v.id = CASE WHEN g.has_overrides THEN ${shownInSql("g.fork_id", "s")}
+  JOIN versions v ON v.slot_id = s.id AND v.id = CASE WHEN g.has_overrides THEN ${shownInSql("g.fork_id", "s")}
     ELSE s.selected_version_id END ORDER BY s.depth, s.id`
+
+export const shellSlotsQuery = slotsQuery(true)
+/** Split markers/previews never consume historical participation or human-author activity. */
+export const shellOutlineSlotsQuery = slotsQuery(false)
 
 export const shellEventsQuery = `SELECT f.id AS fork_id, e.fork_id AS source_fork_id, e.chat_id, e.slot_id, e.scope, e.key, e.value_json
   FROM json_each(?) j CROSS JOIN forks f ON f.id = j.value CROSS JOIN chats c ON c.id = f.chat_id
@@ -57,8 +61,13 @@ export const shellPlainForksQuery = `SELECT f.id FROM json_each(?) j CROSS JOIN 
  * Every slot of the chats given (a JSON array of ids) as `shellSlotsQuery` reads it for a fork
  * of `shellPlainForksQuery`'s: the chat's tree once, for all such forks to walk their paths in.
  */
-export const shellTreeQuery = `SELECT NULL AS fork_id, s.id, s.depth, s.chat_id, s.parent_slot_id, s.created_at,
+const treeQuery = (
+  evidence: boolean
+) => `SELECT NULL AS fork_id, s.id, s.depth, s.chat_id, s.parent_slot_id, s.created_at,
   CASE WHEN s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL THEN 1 END AS deleted_at,
   v.status, v.speaker_entity_id AS speaker, CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at,
-  v.seq AS version_seq, v.content_length, ${slotParticipantsSql("s")} AS participants, ${slotHumanAuthorsSql("s")} AS human_authors
-  FROM json_each(?) j CROSS JOIN slots s ON s.chat_id = j.value JOIN versions v ON v.id = s.selected_version_id`
+  v.seq AS version_seq, v.content_length, ${evidence ? slotParticipantsSql("s") : "'[]'"} AS participants, ${evidence ? slotHumanAuthorsSql("s") : "'[]'"} AS human_authors
+  FROM json_each(?) j CROSS JOIN slots s ON s.chat_id = j.value JOIN versions v ON v.slot_id = s.id AND v.id = s.selected_version_id`
+
+export const shellTreeQuery = treeQuery(true)
+export const shellOutlineTreeQuery = treeQuery(false)

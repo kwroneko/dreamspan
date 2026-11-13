@@ -18,7 +18,7 @@ import {
   parseMarkdownIntoBlocks,
   Streamdown
 } from "streamdown"
-import { fixMarkdownMapped, stFormatting } from "./stFormatting.ts"
+import { fixMarkdownMapped, fixMarkdownRuns, stFormatting } from "./stFormatting.ts"
 import { MESSAGE_SCOPE, messageFontClass, scopeStyles } from "./html/css.ts"
 import { BlockedMediaNote, htmlComponents, MediaBlocked } from "./html/HtmlParts.tsx"
 import {
@@ -34,7 +34,14 @@ import { htmlFinish, htmlMark, htmlPrepare, htmlRaw, htmlSanitize, urlAddress } 
 import { savedMediaRevision, subscribeSavedMedia } from "./html/savedMedia.ts"
 import type { MessageTextProps } from "./Markdown.tsx"
 import { withDefinitions } from "./referenceDefinitions.ts"
-import { sourcePositions, type SourceChar, type PositionedNode } from "./sourcePositions.ts"
+import {
+  sourcePositions,
+  packSourceOffsets,
+  packSourceRuns,
+  type SourceChar,
+  type SourceOffsets,
+  type PositionedNode
+} from "./sourcePositions.ts"
 
 const [harden] = defaultRehypePlugins.harden as [unknown, unknown]
 // The hardener replaces blocked images with a caption and otherwise drops their
@@ -150,7 +157,7 @@ function PositionedBlock(props: BlockProps) {
     () =>
       [
         ...(parse ? htmlPlugins(html.parts, props.index, html.mediaScope, html.saved) : rehypePlugins),
-        [sourcePositions, { offsets: JSON.parse(key) as SourceChar[] }]
+        [sourcePositions, { offsets: JSON.parse(key) as SourceOffsets }]
       ] as Plugins,
     [key, parse, html, props.index]
   )
@@ -219,25 +226,38 @@ export function StMarkdown({ text, sourceText = text }: MessageTextProps) {
   const [blockedText, setBlockedText] = useState<string | null>(null)
   const reportBlocked = useCallback(() => setBlockedText(text), [text])
   const { fixed, renderedBlocks, sourceBlocks } = useMemo(() => {
+    const indexed = fixMarkdownRuns(text)
+    const normalized = indexed.text.replace(/\r\n|\r/g, "\n")
+    const parsed = parseMarkdownIntoBlocks(normalized)
+    // While a display transform catches up with a stream, its previous answer can
+    // still be an unchanged prefix. Those characters have the same source offsets.
+    if (sourceText.startsWith(text) && normalized === indexed.text) {
+      let cursor = 0
+      const sourceBlocks = parsed.map((block) => {
+        const start = normalized.indexOf(block, cursor)
+        cursor = start + block.length
+        return packSourceRuns(indexed.runs, start, cursor)
+      })
+      return { fixed: normalized, renderedBlocks: [...withDefinitions(normalized, parsed)], sourceBlocks }
+    }
     const fixed = fixMarkdownMapped(text)
     const display = displayRanges(sourceText, text)
     const mapped = fixed.offsets.map((offset) => (offset === null ? null : (display[offset] ?? null)))
     const offsets: SourceChar[] = []
     // Streamdown's block parser normalizes line endings before reporting blocks.
     // Normalize explicitly so parser positions still address the stored CRLF range.
-    const normalized = fixed.text.replace(/\r\n|\r|[^\r]/g, (char, at: number) => {
+    fixed.text.replace(/\r\n|\r|[^\r]/g, (char, at: number) => {
       const first = mapped[at]
       const last = mapped[at + char.length - 1]
       offsets.push(first && last ? [first[0], last[1]] : null)
       return char === "\r\n" || char === "\r" ? "\n" : char
     })
-    const parsed = parseMarkdownIntoBlocks(normalized)
     let cursor = 0
     const sourceBlocks: string[] = []
     for (const block of parsed) {
       const start = normalized.indexOf(block, cursor)
       cursor = start + block.length
-      sourceBlocks.push(JSON.stringify(offsets.slice(start, cursor)))
+      sourceBlocks.push(packSourceOffsets(offsets.slice(start, cursor)))
     }
     return { fixed: normalized, renderedBlocks: [...withDefinitions(normalized, parsed)], sourceBlocks }
   }, [text, sourceText])

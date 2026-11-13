@@ -204,7 +204,7 @@ export const maintain = (
     // The chains of stale level-1 summaries: whether anything in them can still be summarized, and what to send.
     const chains = new Map<string, ReadonlyArray<LcmSlot>>()
     const chainOf = (s: Summary) =>
-      lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities)
+      lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities, false)
     for (const s of candidates)
       if (s.level === 1 && s.status !== "superseded" && (!s.fresh || forced.has(s.id)))
         chains.set(s.id, yield* chainOf(s))
@@ -215,7 +215,7 @@ export const maintain = (
     // Freeze effective message inputs and every selected child revision at the authorizing reply.
     // Completion can continue that exact episode; later edits do not inherit its permission.
     const path = candidates.length
-      ? yield* lcmPath(sql, userId, chatId, leaf, undefined, Number.MAX_SAFE_INTEGER, identities)
+      ? yield* lcmPath(sql, userId, chatId, leaf, undefined, Number.MAX_SAFE_INTEGER, identities, false)
       : []
     const byId = new Map(candidates.map((s) => [s.id as string, s]))
     const signatures: Record<string, string> = {}
@@ -241,7 +241,16 @@ export const maintain = (
         .digest("hex"))
     for (const s of candidates) signature(s)
     for (const retry of retries) {
-      const chain = yield* lcmPath(sql, userId, chatId, retry.last, retry.first, Number.MAX_SAFE_INTEGER, identities)
+      const chain = yield* lcmPath(
+        sql,
+        userId,
+        chatId,
+        retry.last,
+        retry.first,
+        Number.MAX_SAFE_INTEGER,
+        identities,
+        false
+      )
       signatures[`retry:${retry.ask.id}`] = createHash("sha256")
         .update(JSON.stringify([chain.map(slotInput), retry.children.map((id) => byId.get(id)?.revisionId)]))
         .digest("hex")
@@ -354,8 +363,9 @@ export const maintain = (
       ...(yield* Effect.forEach(
         authorizedRetries.filter((r) => r.level === 1),
         (r) =>
-          Effect.map(lcmPath(sql, userId, chatId, r.last, r.first, Number.MAX_SAFE_INTEGER, identities), (chain) =>
-            chunkFor(chain, r.ask)
+          Effect.map(
+            lcmPath(sql, userId, chatId, r.last, r.first, Number.MAX_SAFE_INTEGER, identities, false),
+            (chain) => chunkFor(chain, r.ask)
           )
       )).flat(),
       ...[...plan.resummarize]

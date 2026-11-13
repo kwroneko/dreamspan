@@ -506,7 +506,8 @@ export const baseline: ReadonlyArray<string> = [
     CHECK ((parent_slot_id IS NULL) = (depth = 0))
   ) STRICT`,
   `CREATE INDEX slots_parent ON slots(parent_slot_id)`,
-  `CREATE INDEX slots_chat_depth ON slots(chat_id, depth)`,
+  // Cover the plain shell tree: cold library reads need no scattered slot records.
+  `CREATE INDEX slots_chat_depth ON slots(chat_id, depth, id, parent_slot_id, created_at, deleted_at, purged_at, selected_version_id)`,
   // Hot graph/flag reads never visit the payload's overflow pages.
   `CREATE TABLE versions (
     seq INTEGER PRIMARY KEY REFERENCES version_texts(version_seq) DEFERRABLE INITIALLY DEFERRED,
@@ -636,6 +637,13 @@ export const baseline: ReadonlyArray<string> = [
   // Startup's InterruptGenerations finds the few generating versions without scanning every
   // message: 8.5 s at 500,000 messages before (fux1).
   `CREATE INDEX versions_generating ON versions(id) WHERE status = 'generating'`,
+  // Cover selected shell metadata and every retained swipe's identity together.
+  // The shell joins by slot and version so both reads stay on these index pages.
+  `CREATE INDEX versions_shell ON versions(slot_id, id, purged_at, status, speaker_entity_id, origin, created_at, seq, content_length, ordinal)`,
+  // Human authors are sparse among model swipes; include the predicate columns too
+  // so SQLite can answer from the index without opening version records.
+  `CREATE INDEX versions_slot_human_authors ON versions(slot_id, writer, speaker_entity_id, origin, created_at, purged_at, ordinal)
+    WHERE writer = 'human' AND speaker_entity_id IS NOT NULL AND purged_at IS NULL`,
   // An indexed projection of each version's cast and author; no join event establishes
   // historical participation. Copies carry cast_json with their other version fields.
   `CREATE TABLE version_participants (
@@ -1929,6 +1937,9 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, PRIMARY KEY(user_id, chat_id)) STRICT`,
   `CREATE INDEX chats_owner_live ON chats(owner_user_id, id) WHERE deleted_at IS NULL`,
   `CREATE UNIQUE INDEX slots_chain ON slots(chain_id, depth)`,
+  // Overridden shell paths use the same metadata as a shared tree, by chain range.
+  // Keep the separate unique chain/depth constraint intact.
+  `CREATE INDEX slots_shell_chain ON slots(chain_id, depth, id, chat_id, parent_slot_id, created_at, deleted_at, purged_at, selected_version_id)`,
   `CREATE INDEX state_events_chain ON state_events(chat_id, slot_chain_id, slot_depth)`,
   `CREATE TRIGGER slots_chain_assigned AFTER INSERT ON slots BEGIN
     UPDATE slots SET chain_id = coalesce(

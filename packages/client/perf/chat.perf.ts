@@ -18,6 +18,7 @@ let dataDir: string
 test.beforeAll(async () => {
   const prepared = await prepare()
   fixture = prepared.fixture
+  console.log(JSON.stringify({ fixtureShape: fixture.shape }))
   dataDir = prepared.dataDir
   server = await startServer(dataDir)
 })
@@ -469,11 +470,15 @@ test("swipe through versions", async ({ page }) => {
   const from = await now(page)
   for (let i = 0; i < 3; i++) {
     await row.getByRole("button", { name: "Previous version" }).click()
-    await expect(row.getByText(`${3 - i} / 4`)).toBeVisible()
+    await expect(
+      row.getByRole("button", { name: `Version ${3 - i} of 4: choose a version`, exact: true })
+    ).toBeVisible()
   }
   for (let i = 0; i < 3; i++) {
     await row.getByRole("button", { name: "Next version" }).click()
-    await expect(row.getByText(`${2 + i} / 4`)).toBeVisible()
+    await expect(
+      row.getByRole("button", { name: `Version ${2 + i} of 4: choose a version`, exact: true })
+    ).toBeVisible()
   }
   const measured = await since(page, from)
   const clicks = measured.events.filter((e) => e.name === "click" || e.name === "pointerup" || e.name === "pointerdown")
@@ -512,6 +517,11 @@ test("switch the chat panel's tabs in the 100,000-message chat", async ({ page }
   await onScreen(page)
   const toolTabs = page.getByRole("tablist", { name: "Chat panel" })
   await expect(toolTabs).toBeVisible()
+  // Initial cast data changes rows independently of switching tabs. Start once it settles.
+  await page.waitForFunction(
+    () => (window as unknown as { __rpPerf?: { window: { castReady: boolean } } }).__rpPerf?.window.castReady
+  )
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
   // The panel loads every tab's code once it's idle.
   await page.waitForTimeout(2000)
   await page.evaluate(() => ((window as unknown as { __tabs: { codeWaits: number } }).__tabs.codeWaits = 0))
@@ -573,13 +583,14 @@ test("switch chats mid-stream", async ({ page }) => {
   await page.waitForTimeout(1500)
   const from = await now(page)
   let started = Date.now()
-  await page.getByRole("link", { name: "← Chats" }).click()
-  await page.getByRole("link", { name: fixture.short[0]!.title }).click()
+  await page
+    .getByRole("link", { name: `Open chat ${fixture.short[0]!.title}`, exact: true })
+    .first()
+    .click()
   await onScreen(page)
   const awayMs = Date.now() - started
   await page.waitForTimeout(1000)
   started = Date.now()
-  await page.goBack()
   await page.goBack()
   await expect(page.getByText("generating", { exact: true }).first()).toBeVisible()
   const backMs = Date.now() - started
@@ -689,6 +700,8 @@ test("a long reply, past 4,000 tokens", async ({ page }) => {
     pinnedPx: round(Math.max(...fromEnd)),
     ...frameStats(measured)
   })
+  // An ended or stalled stream must not pass by measuring an idle browser.
+  expect(updates).toBeGreaterThanOrEqual(20)
   expect(words1).toBeGreaterThan(words0)
   expect(bodies / updates).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
   expect(scriptMsPerSecond).toBeLessThanOrEqual(budgets.longReplyScriptMsPerSecond)
@@ -717,7 +730,9 @@ test("parallel swipes under one slot", async ({ page }) => {
   )
   const row = page.locator(`article[data-slot="${swipes.slot}"]`)
   await expect(row.getByText("generating", { exact: true })).toBeVisible()
-  await expect(row.getByRole("group", { name: "Versions" })).toHaveText(`‹${swipes.versions}›`)
+  await expect(
+    row.getByRole("button", { name: `Version ${swipes.versions} of ${swipes.versions}: choose a version`, exact: true })
+  ).toBeVisible()
   await page.waitForTimeout(1000)
   const from = await now(page)
   const counters0 = await counters(page)
@@ -730,7 +745,12 @@ test("parallel swipes under one slot", async ({ page }) => {
 
   // The one before, still generating off screen, kept its text: it shows it, and it grows.
   await row.getByRole("button", { name: "Previous version" }).click()
-  await expect(row.getByText(`${swipes.versions - 1} / ${swipes.versions}`)).toBeVisible()
+  await expect(
+    row.getByRole("button", {
+      name: `Version ${swipes.versions - 1} of ${swipes.versions}: choose a version`,
+      exact: true
+    })
+  ).toBeVisible()
   const length = async () => ((await row.locator(".markdown").textContent()) ?? "").length
   const before = await length()
   await page.waitForTimeout(800)

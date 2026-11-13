@@ -15,7 +15,14 @@ import type { SqlClient, SqlError } from "effect/sql"
 import { pathPieces } from "./displayPath.ts"
 import { shownIn, slotDeletedIn } from "./forkState.ts"
 import type { ForkRow } from "./rows.ts"
-import { shellEventsQuery, shellPlainForksQuery, shellSlotsQuery, shellTreeQuery } from "./shellQueries.ts"
+import {
+  shellEventsQuery,
+  shellPlainForksQuery,
+  shellSlotsQuery,
+  shellTreeQuery,
+  shellOutlineSlotsQuery,
+  shellOutlineTreeQuery
+} from "./shellQueries.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { settleSummaries } from "./summaryValidity.ts"
 import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
@@ -87,10 +94,11 @@ export const summaryStamps = (sql: SqlClient.SqlClient, userId: string) =>
  * and their events (`shellSlotsQuery`, `shellEventsQuery`, by fork id). Iterative, so deep
  * imported paths need no recursion.
  */
-export const computeForkSummaries = (
+const computeSummaries = (
   sql: SqlClient.SqlClient,
   records: ReadonlyArray<ForkRow>,
-  pathsOnly = records.length <= 2
+  pathsOnly = records.length <= 2,
+  evidence = true
 ): Effect.Effect<Array<ForkSummary>, SqlError.SqlError> =>
   Effect.gen(function* () {
     if (records.length === 0) return []
@@ -116,16 +124,17 @@ export const computeForkSummaries = (
       // Many frozen children can share one overridden parent. Their own paths
       // still use the shared tree; only distinct overridden paths consume rows.
       if (overridden.length > batchSize && pathCount > batchSize) {
-        const summaries = yield* computeForkSummaries(
+        const summaries = yield* computeSummaries(
           sql,
           // A plain child's parent can have newer overrides outside the child's
           // frozen lineage. It still needs a path batch to read that parent;
           // including it here would recurse on the same records indefinitely.
           records.filter((r) => !needsPath(r)),
-          false
+          false,
+          evidence
         )
         for (let at = 0; at < overridden.length; at += batchSize)
-          summaries.push(...(yield* computeForkSummaries(sql, overridden.slice(at, at + batchSize), true)))
+          summaries.push(...(yield* computeSummaries(sql, overridden.slice(at, at + batchSize), true, evidence)))
         return summaries
       }
     }
@@ -154,10 +163,16 @@ export const computeForkSummaries = (
     const own = walked.filter((r) => !plain.has(r.id))
     const treeChats = [...new Set(walked.flatMap((r) => (plain.has(r.id) ? [r.chat_id] : [])))]
     const slots =
-      own.length === 0 ? [] : yield* sql.unsafe<Slot>(shellSlotsQuery, [JSON.stringify(own.map((r) => r.id))])
+      own.length === 0
+        ? []
+        : yield* sql.unsafe<Slot>(evidence ? shellSlotsQuery : shellOutlineSlotsQuery, [
+            JSON.stringify(own.map((r) => r.id))
+          ])
     const trees = new Map<string, Map<string, Slot>>()
     if (treeChats.length > 0)
-      for (const slot of yield* sql.unsafe<Slot>(shellTreeQuery, [JSON.stringify(treeChats)])) {
+      for (const slot of yield* sql.unsafe<Slot>(evidence ? shellTreeQuery : shellOutlineTreeQuery, [
+        JSON.stringify(treeChats)
+      ])) {
         const tree = trees.get(slot.chat_id) ?? new Map<string, Slot>()
         tree.set(slot.id, slot)
         trees.set(slot.chat_id, tree)
@@ -232,8 +247,8 @@ export const computeForkSummaries = (
               SELECT ${record.id} AS fork_id, s.id, s.chat_id, s.parent_slot_id, s.created_at, s.depth,
                 CASE WHEN ${slotDeletedIn(sql, record.id, "s")} THEN 1 END AS deleted_at,
                 v.status, v.speaker_entity_id AS speaker, v.seq AS version_seq, v.content_length,
-                ${sql.literal(slotParticipantsSql("s"))} AS participants,
-                ${sql.literal(slotHumanAuthorsSql("s"))} AS human_authors,
+                ${sql.literal(evidence ? slotParticipantsSql("s") : "'[]'")} AS participants,
+                ${sql.literal(evidence ? slotHumanAuthorsSql("s") : "'[]'")} AS human_authors,
                 CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at
               FROM slots s JOIN versions v ON v.id = ${shownIn(sql, record.id, "s")}
               WHERE ${sql.in("s.id", ids)}`
@@ -387,6 +402,13 @@ export const computeForkSummaries = (
     return summaries.map((summary, i) => ({ ...summary, preview: previews[i]! }))
   })
 
+/** Complete shell summaries, including every retained swipe's participation evidence. */
+export const computeForkSummaries = (
+  sql: SqlClient.SqlClient,
+  records: ReadonlyArray<ForkRow>,
+  pathsOnly = records.length <= 2
+) => computeSummaries(sql, records, pathsOnly)
+
 /**
  * Where each of chat `chatId`'s live forks `records` parts from its parent and when its last
  * message is, for a read: the stored summaries where valid, computing only the stale forks now (a
@@ -423,10 +445,10 @@ export const chatForkSummaries = (
         }
       ])
     )
-    for (const s of yield* computeForkSummaries(
-      sql,
-      records.filter((record) => !byFork.has(record.id))
-    ))
+    const missing = records.filter((record) => !byFork.has(record.id))
+    // This read returns only previews, split markers and threads, never the shell's
+    // cast/activity fields. Do not scan all alternatives to compute fields it discards.
+    for (const s of yield* computeSummaries(sql, missing, missing.length <= 2, false))
       byFork.set(s.forkId, { endAt: s.endAt, split: s.split, preview: s.preview, threads: s.threads })
 
     return byFork

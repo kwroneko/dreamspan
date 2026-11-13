@@ -22,7 +22,16 @@ export const perf = {
   rowRenders: 0,
   listRenders: 0,
   /** The open chat's window: what the harness reports when a scenario gets stuck. */
-  window: { loaded: 0, first: "", older: false, newer: false, paging: false, loading: false, error: "" }
+  window: {
+    castReady: false,
+    loaded: 0,
+    first: "",
+    older: false,
+    newer: false,
+    paging: false,
+    loading: false,
+    error: ""
+  }
 }
 
 /** The versions whose message body is mounted, so an update to one can be told from one off screen. */
