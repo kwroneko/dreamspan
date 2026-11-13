@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 64
+export const ASSEMBLER_VERSION = 65
 
 export type Role = "system" | "user" | "assistant"
 
@@ -455,6 +455,7 @@ export interface SummaryLayer {
 
 /** What one context's sources read, by id and revision, each read keyed by its request (invariant 6). */
 export interface SourcePins {
+  readonly stretches?: ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>
   /** The image token counts and calibration the assembly read (absent before they were pinned). */
   readonly imageTokenFacts?: import("./pipeline.ts").ImageTokenFacts | undefined
   /** The account's summarization defaults as the assembly read them (absent before they were pinned). */

@@ -8,6 +8,7 @@ import { viewedJoin } from "../assembler/mergeKnowledge.ts"
 import type { SqlClient } from "effect/sql"
 import type { Fragment } from "effect/sql/Statement"
 import { effectiveOverride, type ForkRef } from "./forkState.ts"
+import { threadStretches, stretchedSql } from "./threadStretches.ts"
 
 /**
  * SQL: whether fork `fork` counts card expression `card` not present for slot `slot`'s message
@@ -37,15 +38,6 @@ export const isStretchView = (identities: ReadonlyArray<string> | undefined) =>
   identities !== undefined && identities.includes(STRETCH_VIEW)
 
 /**
- * SQL: whether slot `s` is in a live separate join's parallel stretch (the join and the
- * destination's messages from its span's start, on the join's path), by chain and depth.
- */
-const inStretchSql = (sql: SqlClient.SqlClient) =>
-  sql`EXISTS (SELECT 1 FROM chat_merges sm JOIN slots js ON js.id = sm.slot_id, json_each(sm.stretch_json) g
-    WHERE sm.chat_id = s.chat_id AND sm.stretch_json IS NOT NULL AND js.deleted_at IS NULL
-      AND g.value ->> 'chain' = s.chain_id AND s.depth BETWEEN g.value ->> 'lo' AND g.value ->> 'hi')`
-
-/**
  * Whether the viewer knew the version `v` of slot `s` (SQL, both aliases in scope). `viewers` is
  * the viewer's identities: itself and the cards it replaced on this fork (`card.swap`). In fork
  * `fork` (when given), a card the fork counts not present for the message (`correctedAwaySql`)
@@ -59,13 +51,14 @@ export const knowsSql = (
   viewers: ReadonlyArray<string>,
   fork?: ForkRef,
   partialMerges = false
-) => {
-  const ids = JSON.stringify(viewers)
-  const kept =
-    fork === undefined || fork === null
-      ? sql`1`
-      : sql`NOT EXISTS (SELECT 1 FROM json_each(${ids}) cv WHERE ${correctedAwaySql(sql, fork, "s.id", "cv.value")})`
-  const rule = sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
+) =>
+  Effect.gen(function* () {
+    const ids = JSON.stringify(viewers)
+    const kept =
+      fork === undefined || fork === null
+        ? sql`1`
+        : sql`NOT EXISTS (SELECT 1 FROM json_each(${ids}) cv WHERE ${correctedAwaySql(sql, fork, "s.id", "cv.value")})`
+    const rule = sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
     THEN ${
       partialMerges
         ? sql`EXISTS (
@@ -83,8 +76,10 @@ export const knowsSql = (
       OR ((v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${ids}))
         AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
           WHERE a.value = c.value))) AND ${kept}) END`
-  return viewers.includes(STRETCH_VIEW) ? sql`(NOT ${inStretchSql(sql)} OR ${rule})` : rule
-}
+    return viewers.includes(STRETCH_VIEW)
+      ? sql`(NOT ${stretchedSql(sql, yield* threadStretches(sql, fork ?? null))} OR ${rule})`
+      : rule
+  })
 
 /**
  * Each version's knowers, in the order asked; null: known to everyone (or not found); and
@@ -100,9 +95,11 @@ export const readKnowers = (
   owned: Fragment,
   versionIds: ReadonlyArray<string>,
   viewers?: ReadonlyArray<string> | null,
-  fork?: ForkRef
+  fork?: ForkRef,
+  ranges?: ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>
 ) =>
   Effect.gen(function* () {
+    const stretches = ranges ?? (viewers?.includes(STRETCH_VIEW) ? yield* threadStretches(sql, fork ?? null) : [])
     const rows = yield* sql<{
       id: string
       slot_id: string
@@ -115,7 +112,7 @@ export const readKnowers = (
       content: string
       away_json: string | null
       stretched: number
-    }>`SELECT metadata.id, ${inStretchSql(sql)} AS stretched, metadata.slot_id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
+    }>`SELECT metadata.id, ${stretchedSql(sql, stretches)} AS stretched, metadata.slot_id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
         ${
           fork == null
             ? sql`NULL`

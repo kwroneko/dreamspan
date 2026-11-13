@@ -173,6 +173,34 @@ it.live(
       )) as unknown as [[{ stretch_json: string }]]
       assert.lengthOf(JSON.parse(merge.stretch_json) as Array<unknown>, 1, "the Lantern's stretch, one segment")
 
+      const sharedPlan = yield* time(
+        "PlanSummaries shared read",
+        h.reader.PlanSummaries({ userId: h.userId, chatId, leafSlotId, reason: "reply" }),
+        1
+      )
+      const planned = [
+        {
+          audience: null as string | null,
+          chunks: sharedPlan.chunks.length,
+          refresh: sharedPlan.refresh.length,
+          condensations: sharedPlan.condensations.length
+        }
+      ]
+      for (const audience of sharedPlan.views ?? []) {
+        const view = yield* time(
+          "PlanSummaries private read",
+          h.reader.PlanSummaries({ userId: h.userId, chatId, leafSlotId, reason: "reply", audience }),
+          1
+        )
+        planned.push({
+          audience,
+          chunks: view.chunks.length,
+          refresh: view.refresh.length,
+          condensations: view.condensations.length
+        })
+      }
+      process.stdout.write(`THREAD_SUMMARIES_PASSES ${JSON.stringify(planned)}\n`)
+      assert.lengthOf(sharedPlan.views ?? [], 2, "only the two characters who missed a line need extra passes")
       const plan = yield* time(
         "PlanSummaries after a reply",
         h.summarizer.planNow({ userId: h.userId, chatId, leafSlotId }, "reply"),

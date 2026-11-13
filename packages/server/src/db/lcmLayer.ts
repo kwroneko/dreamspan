@@ -201,6 +201,8 @@ export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId, view?
  */
 export interface LayerView {
   readonly identities: ReadonlyArray<string>
+  /** A summary chunk uses its planning view even when the chunk ends before its join. */
+  readonly unknownFrom?: number | null
 }
 
 export const selectSummaryLayer = (
@@ -233,7 +235,11 @@ export const selectSummaryLayer = (
     const found: Array<Summary> = []
     // A view (db/lcmAudience.ts): the shared summaries end before its first message it didn't know.
     const unknownFrom =
-      view === undefined || leaf === null ? null : yield* firstUnknownPosition(sql, chatId, leaf, view.identities)
+      view === undefined || leaf === null
+        ? null
+        : view.unknownFrom !== undefined
+          ? view.unknownFrom
+          : yield* firstUnknownPosition(sql, chatId, leaf, view.identities)
     const sharedEnds =
       unknownFrom === null
         ? null

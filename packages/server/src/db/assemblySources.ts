@@ -16,7 +16,7 @@ import {
   versionDeletedIn,
   viewAt
 } from "./forkState.ts"
-import { selectSummaryLayer, selectFailedRanges } from "./lcmLayer.ts"
+import { selectSummaryLayer, selectFailedRanges, type LayerView } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
@@ -35,7 +35,8 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { isStretchView, knowsSql, readKnowers, readMergeRows } from "./knowers.ts"
-import { audienceKey, stretchOnPath } from "./lcmAudience.ts"
+import { threadStretches } from "./threadStretches.ts"
+import { audienceKey, firstUnknownPosition, stretchOnPath } from "./lcmAudience.ts"
 import { resolveModel } from "@rp/shared/providers.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Schema } from "effect"
@@ -72,6 +73,7 @@ import { displayHistoryRevision, historyRevision } from "./historyChanges.ts"
 import { previousStartIn } from "./historyStart.ts"
 import {
   displayEnd,
+  displayEndOf,
   displayEvents,
   displayLength,
   displaySlots,
@@ -363,6 +365,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
       return { ref: row.ref, revision: row.revision, scope, doc: withEndOfRequest(doc).doc } satisfies PresetInput
     })
 
+  let stretchPins: SourcePins["stretches"]
   let layerPins: SourcePins["lcm"]
   // Read only by a separate context, so pinned only when read: a shared one's snapshot is unchanged.
   const knowerPins: Array<NonNullable<SourcePins["knowers"]>[number]> = []
@@ -483,15 +486,31 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     viewLayers: true,
     summaryLayer: (leaf, asked) =>
       // A stretch view (db/knowers.ts) only where a separate join is on the path; elsewhere the shared layer.
-      Effect.flatMap(isStretchView(asked) ? stretchOnPath(sql, chatId, leaf) : Effect.succeed(true), (applies) => {
+      Effect.gen(function* () {
+        // A private summary's continuity belongs to the planning fork, including when its
+        // material and preceding layer end before J. The prefix must never fall back to the
+        // shared chain of the destination's missed messages.
+        const privateChunk = isStretchView(asked) && settings.summaryBefore !== undefined
+        const applies = privateChunk || !isStretchView(asked) || (yield* stretchOnPath(sql, chatId, leaf))
         const identities = applies ? asked : undefined
-        return selectSummaryLayer(
+        let view: LayerView | undefined = identities ? { identities } : undefined
+        if (privateChunk && identities) {
+          const forkId = yield* viewAt(sql, chatId, leaf)
+          const [fork] = yield* sql<{ id: string; tip_slot_id: string | null }>`
+            SELECT id, tip_slot_id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
+          const end = fork ? yield* displayEndOf(sql, chatId, fork) : null
+          view = {
+            identities,
+            unknownFrom: end === null ? null : yield* firstUnknownPosition(sql, chatId, end, identities)
+          }
+        }
+        return yield* selectSummaryLayer(
           sql,
           userId,
           chatId,
           settings.summaryBefore ? settings.summaryBefore.slot : leaf,
           settings.partialBatch,
-          identities ? { identities } : undefined
+          view
         ).pipe(
           Effect.map((layer) =>
             settings.condense
@@ -894,10 +913,25 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return count
       }),
 
+    stretches: (leaf) =>
+      Effect.gen(function* () {
+        const ranges = yield* threadStretches(sql, yield* viewAt(sql, chatId, leaf ?? null), leaf)
+        if (ranges.length) stretchPins = ranges
+        return ranges
+      }),
+
     knowers: (versionIds) =>
       Effect.gen(function* () {
         // In the fork read: what it counts each card not present for (spec/THREADS.md §5.2).
-        const found = yield* readKnowers(sql, chatId, owned, versionIds, null, yield* viewAt(sql, chatId, null))
+        const found = yield* readKnowers(
+          sql,
+          chatId,
+          owned,
+          versionIds,
+          null,
+          yield* viewAt(sql, chatId, null),
+          stretchPins ?? []
+        )
         knowerPins.push({ key: keyOf(versionIds), found })
         return found
       }),
@@ -915,7 +949,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const unknown = sql`EXISTS (SELECT 1 FROM path JOIN slots s ON s.id = path.id
           JOIN version_records v ON v.id = ${selected}
           WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
-            AND NOT ${knowsSql(sql, aliases ?? [viewer], fork)}) AS unknown`
+            AND NOT ${yield* knowsSql(sql, aliases ?? [viewer], fork)}) AS unknown`
         const [row] =
           onDisplay === null
             ? yield* sql<{ unknown: number }>`
@@ -1080,6 +1114,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         ...pins,
         target: pins.target!,
         ...(layerPins ? { lcm: layerPins } : {}),
+        ...(stretchPins ? { stretches: stretchPins } : {}),
         ...(knowerPins.length ? { knowers: knowerPins } : {}),
         ...(knewPins.length ? { knewThrough: knewPins } : {})
       },
@@ -1116,6 +1151,7 @@ const replaySources = (
   }
   return {
     viewLayers: true,
+    ...(pins.stretches ? { stretches: () => Effect.succeed(pins.stretches!) } : {}),
     summaryLayer: () =>
       Effect.gen(function* () {
         const layer = pins.lcm

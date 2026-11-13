@@ -305,7 +305,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const shown = sql`(${before} IS NULL OR s.depth < ${before})
             AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
             AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
-            AND ${viewers == null ? sql`1` : knowsSql(sql, viewers, fork)}`
+            AND ${viewers == null ? sql`1` : yield* knowsSql(sql, viewers, fork)}`
         const onPath = sql`EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)`
         // Few matches in the whole chat (a rare word): start from them, each checked against the
         // path, with the path's template messages (matched once their names are filled in). Many

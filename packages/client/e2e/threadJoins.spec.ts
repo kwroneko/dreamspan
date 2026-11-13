@@ -16,13 +16,17 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
  * Ash (the user's) with Mira "At the Lantern" and Wren "At the docks", threads from #3: the docks
  * go on for #4 and #5, the Lantern for #4, which the user is in.
  */
-const seed = (suffix: string) =>
+const seed = (suffix: string, extraThreads = 0) =>
   admin((api) =>
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title: `Harbor ${suffix}` })
       const card = (name: string) => api.CreateCard({ label: `Synthetic ${name}`, name })
       const [mira, wren, ash] = yield* Effect.all([card("Mira"), card("Wren"), card("Ash")])
-      for (const c of [mira, wren, ash])
+      const extra = yield* Effect.forEach(
+        Array.from({ length: extraThreads }, (_, i) => i),
+        (i) => card(`Guest ${i + 3}`)
+      )
+      for (const c of [mira, wren, ash, ...extra])
         yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: c.entityId } })
       yield* api.ChangeCast({
         chatId: chat.id,
@@ -55,12 +59,19 @@ const seed = (suffix: string) =>
         expectedRowVersion: at.rowVersion,
         threads: [
           { name: "At the Lantern", cast: [mira.entityId as EntityId], writesAs: null },
-          { name: "At the docks", cast: [wren.entityId as EntityId], writesAs: null }
+          { name: "At the docks", cast: [wren.entityId as EntityId], writesAs: null },
+          ...extra.map((c, i) => ({
+            name: `Thread ${i + 3} by the northern gardens`,
+            cast: [c.entityId as EntityId],
+            writesAs: null
+          }))
         ]
       })
       const docks = started.forkIds[1]!
       const first = yield* say(docks, at.slotId, "Wren counts the crates on the pier.", wren)
       yield* say(docks, first.slotId, "A lantern swings on the last boat.", wren)
+      for (const [i, c] of extra.entries())
+        yield* say(started.forkIds[i + 2]!, at.slotId, `Guest ${i + 3} tends the garden.`, c)
       // Written last, so the chat opens on the Lantern.
       yield* say(main, at.slotId, "Mira asks the keeper for two rooms.", mira)
       return { chatId: chat.id as ChatId, lantern: main, docks }
@@ -84,6 +95,8 @@ const joinDialog = (page: Page) => page.getByRole("dialog", { name: "Join thread
 
 for (const [width, theme] of [
   [390, "light"],
+  [390, "dark"],
+  [1440, "light"],
   [1440, "dark"]
 ] as const)
   test(`the join dialog lays out at ${width} (${theme})`, async ({ page }, info) => {
@@ -94,6 +107,27 @@ for (const [width, theme] of [
     await expect(dialog.getByTestId("merge-relation")).toHaveText("Joins 2 messages since #3")
     await expectLayout(page, info, `join threads ${width} ${theme}`, { scope: '[role="dialog"]' })
   })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`ten threads remain reachable at ${width} (${theme})`, async ({ page }, info) => {
+      const { chatId } = await seed(`ten ${width} ${theme}`, 8)
+      await open(page, `/chats/${chatId}`, width, theme)
+      await (await chatMenu(page)).getByRole("menuitem", { name: "Join threads…", exact: true }).click()
+      const dialog = joinDialog(page)
+      const picker = dialog.getByRole("group", { name: "Threads to join" })
+      await expect(picker.getByRole("checkbox")).toHaveCount(9)
+      const last = picker.getByRole("checkbox", { name: "Thread 10 by the northern gardens" })
+      await last.scrollIntoViewIfNeeded()
+      await expect(last).toBeEnabled()
+      await last.check()
+      await expect(last).toBeChecked()
+      await expectLayout(page, info, `ten join threads ${width} ${theme}`, { scope: '[role="dialog"]' })
+      const join = dialog.getByRole("button", { name: "Join", exact: true })
+      await join.scrollIntoViewIfNeeded()
+      await expect(join).toBeEnabled()
+      await expectLayout(page, info, `ten join threads submit ${width} ${theme}`, { scope: '[role="dialog"]' })
+    })
 
 test("joining the docks into the Lantern: one Joined row, Joined at #5, not offered again", async ({ page }) => {
   const { chatId, lantern, docks } = await seed("join")

@@ -4184,6 +4184,7 @@ export class ReadOps extends RpcGroup.make(
         knowers: Schema.NullOr(Schema.Array(Schema.String)),
         away: Schema.optionalKey(Schema.Array(Schema.String)),
         content: Schema.optionalKey(Schema.String),
+        stretched: Schema.optionalKey(Schema.Boolean),
         readable: Schema.optionalKey(Schema.Boolean)
       })
     ),

@@ -15,7 +15,7 @@ import { displaySlots } from "./displayPath.ts"
 import { pathView } from "./lcmDisplay.ts"
 import { isStretchView, knowsSql } from "./knowers.ts"
 import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
-import { onPath } from "./forks.ts"
+import { stretchesAt } from "./threadStretches.ts"
 import { type ChatState, type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { identitiesOf } from "../assembler/knowledge.ts"
 import { stateEventsThrough } from "./stateRead.ts"
@@ -49,13 +49,7 @@ export const audienceScope = (sql: SqlClient.SqlClient, alias: string, identitie
  * indexed read of the chat's merges, then a path probe per such join (few).
  */
 export const stretchOnPath = (sql: SqlClient.SqlClient, chatId: string, leaf: string | null) =>
-  Effect.gen(function* () {
-    if (leaf === null) return false
-    const joins = yield* sql<{ slot_id: string }>`SELECT m.slot_id FROM chat_merges m JOIN slots j ON j.id = m.slot_id
-      WHERE m.chat_id = ${chatId} AND m.stretch_json IS NOT NULL AND j.deleted_at IS NULL`
-    for (const join of joins) if (yield* onPath(sql, chatId, leaf, join.slot_id)) return true
-    return false
-  })
+  Effect.map(stretchesAt(sql, chatId, leaf), (ranges) => ranges.length > 0)
 
 /** A stretch view's identities: the character's, with `STRETCH_VIEW`. */
 const stretchView = (identities: ReadonlyArray<string>) => [...new Set([...identities, STRETCH_VIEW])]
@@ -101,14 +95,13 @@ export const knownVersions = (
   identities: ReadonlyArray<string>,
   fork?: ForkRef
 ) =>
-  versionIds.length === 0
-    ? Effect.succeed(new Set<string>())
-    : Effect.map(
-        sql<{ id: string }>`SELECT v.id FROM json_each(${JSON.stringify([...new Set(versionIds)])}) r
-          CROSS JOIN version_records v ON v.id = r.value CROSS JOIN slots s ON s.id = v.slot_id
-          WHERE ${knowsSql(sql, identities, fork, true)}`,
-        (rows) => new Set(rows.map((row) => row.id))
-      )
+  Effect.gen(function* () {
+    if (versionIds.length === 0) return new Set<string>()
+    const rule = yield* knowsSql(sql, identities, fork, true)
+    const rows = yield* sql<{ id: string }>`SELECT v.id FROM json_each(${JSON.stringify([...new Set(versionIds)])}) r
+      CROSS JOIN version_records v ON v.id = r.value CROSS JOIN slots s ON s.id = v.slot_id WHERE ${rule}`
+    return new Set(rows.map((row) => row.id))
+  })
 
 /**
  * Whether the identities knew every message a summary was written from: its inputs' recorded
@@ -121,15 +114,15 @@ export const inputsKnown = (
   identities: ReadonlyArray<string>,
   fork?: ForkRef
 ) =>
-  Effect.map(
-    sql<{ unknown: number }>`WITH RECURSIVE parts(id) AS (
+  Effect.gen(function* () {
+    const rows = yield* sql<{ unknown: number }>`WITH RECURSIVE parts(id) AS (
         SELECT ${summaryId} UNION SELECT p.parent_id FROM summary_parents p JOIN parts ON p.summary_id = parts.id
       ) SELECT EXISTS (SELECT 1 FROM parts JOIN summary_inputs i ON i.summary_id = parts.id
         JOIN version_records v ON v.id = i.version_id JOIN slots s ON s.id = v.slot_id
         WHERE NOT CASE WHEN (SELECT audience_json FROM summaries WHERE id=${summaryId}) IS NOT NULL
-          THEN ${knowsSql(sql, identities, fork, true)} ELSE ${knowsSql(sql, identities, fork)} END) AS unknown`,
-    ([row]) => (row?.unknown ?? 0) === 0
-  )
+          THEN ${yield* knowsSql(sql, identities, fork, true)} ELSE ${yield* knowsSql(sql, identities, fork)} END) AS unknown`
+    return (rows[0]?.unknown ?? 0) === 0
+  })
 
 /**
  * The display position of the first message on the path to `leaf` the identities didn't know, as its fork
@@ -158,7 +151,7 @@ export const firstUnknownPosition = (
         WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
           AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
           AND (v.content_length > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id=v.id))
-          AND NOT ${knowsSql(sql, identities, fork)}`
+          AND NOT ${yield* knowsSql(sql, identities, fork)}`
     return row?.position ?? null
   })
 

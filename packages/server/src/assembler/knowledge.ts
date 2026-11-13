@@ -9,6 +9,7 @@
 // registered and replaceable.
 import { Effect } from "effect"
 import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
+import { historyLeafOf } from "./types.ts"
 import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { viewedJoin } from "./mergeKnowledge.ts"
@@ -110,6 +111,7 @@ export interface Knowledge {
     readonly viewer: string
     readonly aliases?: ReadonlyArray<string>
     readonly stored?: boolean
+    readonly ranges?: ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>
   }
 }
 
@@ -121,13 +123,23 @@ export interface Knowledge {
 export const knowledgeStage: AssemblerStage = {
   id: "knowledge",
   run: (assembly) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
+      const sources = yield* AssemblySources
       // A view's own summary is written from what its character knew (unit C7).
       const audience = assembly.request.summaryJob?.audience
       // A stretch view's (spec/THREADS.md §7.3, TH7): only the separate joins' stretches.
       const own = audience?.filter((id) => id !== STRETCH_VIEW) ?? []
       if (audience?.length && own.length && own.length < audience.length) {
-        assembly.knowledge = { view: "shared", viewer: null, stretch: { viewer: own[0]!, aliases: own, stored: true } }
+        assembly.knowledge = {
+          view: "shared",
+          viewer: null,
+          stretch: {
+            viewer: own[0]!,
+            aliases: own,
+            stored: true,
+            ...(sources.stretches ? { ranges: yield* sources.stretches() } : {})
+          }
+        }
         return assembly
       }
       if (audience?.length) {
@@ -154,7 +166,17 @@ export const knowledgeStage: AssemblerStage = {
       assembly.knowledge =
         stretch === null
           ? { view: view.id, viewer, ...alias }
-          : { view: view.id, viewer, stretch: { viewer: stretch, ...alias } }
+          : {
+              view: view.id,
+              viewer,
+              stretch: {
+                viewer: stretch,
+                ...alias,
+                ...(sources.stretches
+                  ? { ranges: yield* sources.stretches(historyLeafOf(need(assembly, "target"))) }
+                  : {})
+              }
+            }
       return assembly
     })
 }
@@ -205,8 +227,8 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
       return yield* filterKnown(assembly, entries, assembly.knowledge?.aliases ?? [viewer], () => true)
     const stretch = assembly.knowledge?.stretch
     if (!stretch) return entries
-    if (stretch.stored) {
-      // As the joins recorded their stretches: the same messages its summary's inputs leave out.
+    if (stretch.ranges?.length === 0) return entries
+    if (stretch.ranges || stretch.stored) {
       const ids = entries.filter((e) => e.inContext).map((e) => e.versionId)
       const found = ids.length ? yield* sources.knowers(ids) : []
       const stretched = new Set(found.flatMap((k) => (k.stretched ? [k.versionId] : [])))

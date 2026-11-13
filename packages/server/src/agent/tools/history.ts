@@ -4,6 +4,7 @@
 import { Type } from "@earendil-works/pi-ai"
 import type { EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
+import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
@@ -254,6 +255,8 @@ const searchChat: RolloutTool<{
     safely(
       "search_chat",
       Effect.gen(function* () {
+        if (context.viewers?.includes(STRETCH_VIEW))
+          return { text: "History tools are unavailable for this separate thread view.", isError: true }
         const words = wordsOf(query)
         if (words.length === 0) return { text: "Give some words to search for.", isError: true }
         const who = speaker?.trim().toLowerCase()
@@ -288,6 +291,8 @@ const readMessages: RolloutTool<{ readonly from: number; readonly count?: number
     safely(
       "read_messages",
       Effect.gen(function* () {
+        if (context.viewers?.includes(STRETCH_VIEW))
+          return { text: "History tools are unavailable for this separate thread view.", isError: true }
         const messages = yield* pathMessages(context)
         const last = messages.at(-1)?.n ?? 0
         const read = messages.filter((m) => m.n >= from).slice(0, Math.min(count, 20))
@@ -388,6 +393,8 @@ const expandSummary: RolloutTool<{ readonly messages: string; readonly max_token
     safely(
       "expand_summary",
       Effect.gen(function* () {
+        if (context.viewers?.includes(STRETCH_VIEW))
+          return { text: "History tools are unavailable for this separate thread view.", isError: true }
         const wanted = range(messages)
         if (!wanted) return { text: "Name the summary by its messages, as “120–180”.", isError: true }
         const tree = yield* summaryTree(context)
@@ -440,6 +447,8 @@ const searchSummaries: RolloutTool<{ readonly query: string; readonly limit?: nu
     safely(
       "search_summaries",
       Effect.gen(function* () {
+        if (context.viewers?.includes(STRETCH_VIEW))
+          return { text: "History tools are unavailable for this separate thread view.", isError: true }
         const words = wordsOf(query)
         if (words.length === 0) return { text: "Give some words to search for.", isError: true }
         const tree = yield* summaryTree(context)

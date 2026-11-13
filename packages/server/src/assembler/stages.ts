@@ -2735,7 +2735,9 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
   // Read whole, a separate join's stretch makes a character's history its own from there.
   const viewer =
     assembly.knowledge?.viewer ??
-    (assembly.parallelStretches?.length ? (assembly.knowledge?.stretch?.viewer ?? null) : null)
+    (assembly.knowledge?.stretch?.ranges?.length || assembly.parallelStretches?.length
+      ? (assembly.knowledge?.stretch?.viewer ?? null)
+      : null)
   const byView = previous?.state?.cacheHistoryByView
   const previousHistory = viewer === null ? previous?.state?.cacheHistory : byView?.[viewer]
   assembly.breakpoints = placeBreakpoints(

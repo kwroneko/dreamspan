@@ -24,7 +24,12 @@ const summarize = (request: Recorded) => {
   return { text: `Seen:${body.includes("LANTERN") ? " lantern" : ""}${body.includes("DOCKS") ? " docks" : ""}.` }
 }
 
-const story = (server: Parameters<typeof lcmHarness>[0], timelines: MergeTimelines) =>
+const story = (
+  server: Parameters<typeof lcmHarness>[0],
+  timelines: MergeTimelines,
+  inserted: false | "span" | "join" = false,
+  intermittent = false
+) =>
   Effect.gen(function* () {
     const h = yield* lcmHarness(server, {
       messages: 30,
@@ -98,12 +103,29 @@ const story = (server: Parameters<typeof lcmHarness>[0], timelines: MergeTimelin
         return row
       })
     const lantern: Array<SlotId> = []
-    for (let n = 0; n < 24; n++) lantern.push((yield* say(F, mira, `LANTERN ${n}. ${filler}`)).slotId as SlotId)
+    for (let n = 0; n < 24; n++)
+      lantern.push(
+        (yield* say(
+          F,
+          intermittent && n % 2 ? wren : mira,
+          `${intermittent && n % 2 ? "OWN-LINE" : "LANTERN"} ${n}. ${filler}`
+        )).slotId as SlotId
+      )
     for (let n = 0; n < 24; n++) yield* say(D, wren, `DOCKS ${n}. ${filler}`)
+    if (inserted)
+      yield* writer.InsertMessage({
+        userId,
+        chatId,
+        forkId: F,
+        anchorSlotId: lantern[1]!,
+        expectedRowVersion: (yield* reader.GetSlot({ userId, slotId: lantern[1]!, forkId: F })).entry.rowVersion,
+        body: { _tag: "Write", speaker: mira, content: `INSERT-SECRET. ${filler}` }
+      })
+    const at = inserted === "join" ? lantern[20]! : null
     const preview = yield* api.PreviewChatMerge({
       chatId,
       forkId: F,
-      at: null,
+      at,
       source: { chatId, forkId: D },
       includeLeftOut: false,
       timelines
@@ -111,7 +133,7 @@ const story = (server: Parameters<typeof lcmHarness>[0], timelines: MergeTimelin
     yield* api.JoinThreads({
       chatId,
       forkId: F,
-      at: null,
+      at,
       includeLeftOut: false,
       timelines,
       joins: [{ forkId: D, title: preview.sourceTitle, framing: null, digest: preview.digest }]
@@ -119,6 +141,20 @@ const story = (server: Parameters<typeof lcmHarness>[0], timelines: MergeTimelin
     const J = yield* tipOf(F)
     for (let n = 0; n < 70; n++) yield* say(F, n % 2 ? wren : mira, `After ${n}. ${filler}`)
     yield* h.settle
+    const summaryRequests = Effect.map(
+      fixtureSql(
+        h.dataDir,
+        [
+          {
+            sql: `SELECT p.context_snapshot_json AS snapshot FROM summarization_jobs j
+        JOIN rollout_payloads p ON p.rollout_id = j.rollout_id WHERE j.chat_id = ?`,
+            params: [chatId]
+          }
+        ],
+        { readOnly: true }
+      ),
+      ([rows]) => (rows as unknown as Array<{ snapshot: string }>).map((r) => JSON.parse(r.snapshot) as ContextSnapshot)
+    )
     const summaries = Effect.map(
       fixtureSql(
         h.dataDir,
@@ -183,6 +219,7 @@ const story = (server: Parameters<typeof lcmHarness>[0], timelines: MergeTimelin
       jDepth: yield* depthOf(J),
       lantern,
       summaries,
+      summaryRequests,
       replyBy
     }
   })
@@ -192,10 +229,51 @@ const stretchAudience = (entity: string) => JSON.stringify([entity, STRETCH_VIEW
 
 describe("summaries across splits and joins (TH7)", () => {
   lcmTest(
+    "private summary continuity before the join excludes the missed parts of a partially known destination",
+    (server) =>
+      Effect.gen(function* () {
+        const t = yield* story(server, "separate", false, true)
+        const requests = (yield* t.summaryRequests).filter((s) => s.summaryJob?.audience?.includes(t.wren))
+        assert.isNotEmpty(requests)
+        assert.isTrue(requests.some((s) => sentText(s).includes("OWN-LINE")))
+        for (const s of requests)
+          assert.notMatch(sentText(s), /LANTERN|Seen: lantern/, "continuity must belong to the private view too")
+        assert.notMatch(sentText(yield* t.replyBy(t.wren)), /LANTERN|Seen: lantern/)
+      }),
+    { timeout: 240_000 }
+  )
+
+  for (const placement of ["span", "join"] as const)
+    lcmTest(
+      `summary requests exclude an inserted missed message (${placement})`,
+      (server) =>
+        Effect.gen(function* () {
+          const t = yield* story(server, "separate", placement)
+          const requests = yield* t.summaryRequests
+          const wren = requests.filter((s) => s.summaryJob?.audience?.includes(t.wren))
+          assert.isNotEmpty(wren, "the inserted join creates Wren's own summary pass")
+          assert.isTrue(
+            requests.some((s) => !s.summaryJob?.audience && sentText(s).includes("INSERT-SECRET")),
+            "shared inputs contain the synthetic secret"
+          )
+          for (const request of wren)
+            assert.notInclude(sentText(request), "INSERT-SECRET", "the actual summary input is private")
+          assert.notInclude(sentText(yield* t.replyBy(t.wren)), "INSERT-SECRET")
+        }),
+      { timeout: 240_000 }
+    )
+
+  lcmTest(
     "a separate join in one shared context: one shared chain before S, then each character's own, free of the line it missed",
     (server) =>
       Effect.gen(function* () {
         const t = yield* story(server, "separate")
+        const requests = yield* t.summaryRequests
+        assert.isTrue(requests.some((s) => s.summaryJob?.audience?.includes(t.wren)))
+        for (const s of requests) {
+          if (s.summaryJob?.audience?.includes(t.wren)) assert.notMatch(sentText(s), /LANTERN|Seen: lantern/)
+          if (s.summaryJob?.audience?.includes(t.mira)) assert.notMatch(sentText(s), /DOCKS|Seen: docks/)
+        }
         const all = yield* t.summaries
         const shared = all.filter((s) => s.audience === null)
         const wren = all.filter((s) => s.audience === stretchAudience(t.wren))

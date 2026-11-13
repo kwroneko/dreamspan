@@ -66,7 +66,9 @@ describe("what each speaker reads at a join", () => {
         Effect.gen(function* () {
           const { lanternSlot } = yield* play(t)
           // Wren's last request at the docks, before the join.
-          const atDocks = texts(yield* t.requestFor(t.D, t.wren))
+          const docksRequest = yield* t.requestFor(t.D, t.wren)
+          const atDocks = texts(docksRequest)
+          const beforeMira = yield* t.requestFor(t.F, t.mira)
 
           // The dialog's choice: offered in a shared-context chat, with each character's view.
           const together = yield* t.preview(t.F, t.D)
@@ -97,13 +99,27 @@ describe("what each speaker reads at a join", () => {
             messages.findIndex((m) => m.includes("The tide turns under a thin moon."))
           assert.isAbove(tide(after), 0)
           assert.deepStrictEqual(after.slice(0, tide(after) + 1), atDocks.slice(0, tide(atDocks) + 1))
+          assert.deepStrictEqual(
+            forWren.request.messages.slice(0, tide(after) + 1),
+            docksRequest.request.messages.slice(0, tide(atDocks) + 1)
+          )
 
           // Mira: the Lantern, nothing of the docks.
-          const mira = yield* t.contextFor(t.F, t.mira)
+          const miraRequest = yield* t.requestFor(t.F, t.mira)
+          assert.deepStrictEqual(
+            miraRequest.request.messages,
+            beforeMira.request.messages,
+            "an unaffected character keeps the complete request bytes"
+          )
+          const mira = sentText(miraRequest)
           assert.include(mira, "stokes the fire")
           assert.include(mira, "two rooms")
           assert.notInclude(mira, "crates on the pier")
           assert.notInclude(mira, SECTION)
+
+          const absent = yield* t.contextFor(t.F, t.quill)
+          assert.notInclude(absent, "stokes the fire")
+          assert.notInclude(absent, "crates on the pier")
 
           // Nara, the narrator: both, the docks as the labelled section, as together.
           const nara = yield* t.contextFor(t.F, t.nara!)

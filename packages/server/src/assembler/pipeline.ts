@@ -1,3 +1,4 @@
+import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import type { LoreReceipt, LoreTimingState } from "./loreTiming.ts"
 // The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §15).
 import type { SourceActivation } from "@rp/shared/inspectorApi.ts"
@@ -148,6 +149,9 @@ export class AssemblySources extends Context.Service<
      * everyone (nothing recorded). A merge's join is known to its source's cast. Fixtures
      * without it: everyone knew everything.
      */
+    readonly stretches?: (
+      leaf?: string | null
+    ) => Effect.Effect<ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>, SourceError>
     readonly knowers?: (versionIds: ReadonlyArray<string>) => Effect.Effect<
       ReadonlyArray<{
         readonly versionId: string
@@ -502,10 +506,19 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
         cards,
         ...(presence ? { presence } : {}),
         // A separate context's viewer, for the tools to read as the history did (C5).
-        ...(assembly.knowledge?.viewer
+        ...(assembly.knowledge?.viewer || assembly.knowledge?.stretch?.ranges?.length
           ? {
-              viewer: assembly.knowledge.viewer,
-              ...(assembly.knowledge.aliases ? { viewerAliases: assembly.knowledge.aliases } : {})
+              viewer: assembly.knowledge!.viewer ?? assembly.knowledge!.stretch!.viewer,
+              ...(assembly.knowledge!.viewer
+                ? assembly.knowledge!.aliases
+                  ? { viewerAliases: assembly.knowledge!.aliases }
+                  : {}
+                : {
+                    viewerAliases: [
+                      ...(assembly.knowledge!.stretch!.aliases ?? [assembly.knowledge!.stretch!.viewer]),
+                      STRETCH_VIEW
+                    ]
+                  })
             }
           : {}),
         model: assembly.model ?? null
