@@ -187,7 +187,8 @@ for (const transport of ["native", "dispatcher"] as const)
         )
         await expect(sentFirst.getByRole("region", { name: "list_library" })).toBeVisible()
         await expect(sentFirst.getByRole("region", { name: "load_skill" })).toBeVisible()
-        await expect(loaded.getByRole("heading")).toHaveText(/^Loaded during the run · 5 tools, [\d,]+ tokens$/)
+        // The Cards skill's seven tools, with ownturn1's move_card_text and edit_card_note.
+        await expect(loaded.getByRole("heading")).toHaveText(/^Loaded during the run · 7 tools, [\d,]+ tokens$/)
         await expect(loaded.getByRole("region", { name: "read_card" })).toContainText(
           /[\d,]+ tokens · loaded by load_skill/
         )
