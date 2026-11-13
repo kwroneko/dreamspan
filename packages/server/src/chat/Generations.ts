@@ -28,7 +28,7 @@ import { GenerationFailed, type GenerationRequest, Generator, type GeneratorShap
 const SAVE_EVERY_MS = 2000
 /** How often a stalled stream checks for text not saved yet. */
 const SAVE_TICK_MS = 500
-const SAVE_TICK = Symbol("save")
+const SAVE_TICK: unique symbol = Symbol("save")
 
 /** The longest pause between two live rewrites of one reply (see `pump`). */
 const LIVE_PAUSE_MS = 100
@@ -461,7 +461,7 @@ export class Generations extends Context.Service<
             // A tick in the same loop as the chunks, so a stream that stalls still gets its
             // text saved, and never after the final save.
             Stream.merge(
-              Stream.map(Stream.tick(SAVE_TICK_MS), () => SAVE_TICK),
+              Stream.map(Stream.tick(SAVE_TICK_MS), (): typeof SAVE_TICK => SAVE_TICK),
               { haltStrategy: "left" }
             ),
             Stream.runForEach((chunk) =>

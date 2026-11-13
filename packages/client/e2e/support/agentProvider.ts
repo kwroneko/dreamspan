@@ -17,6 +17,7 @@ export const startAgentProvider = async () => {
   /** The tool results a request has when it's held or failed: QUERIES.length is the final answer. */
   let holding: number | null = null
   let failing: number | null = null
+  let failingPlain = false
   const held: Array<() => void> = []
   const bodies: Array<{ messages: Array<{ role: string }>; tools?: unknown }> = []
   const chunk = (delta: object, finish: string | null = null, usage?: object) =>
@@ -55,6 +56,11 @@ export const startAgentProvider = async () => {
       bodies.push(body)
       const usage = { prompt_tokens: 400, completion_tokens: 12 }
       if (!body.tools) {
+        if (failingPlain) {
+          failingPlain = false
+          res.writeHead(400, { "content-type": "application/json" })
+          return res.end(JSON.stringify({ error: { message: "The synthetic provider refused this request." } }))
+        }
         return stream(res, [
           chunk({ role: "assistant", content: PLAIN_REPLY }),
           chunk({}, "stop"),
@@ -111,6 +117,10 @@ export const startAgentProvider = async () => {
     /** Answers the next request with `at` tool results with an error. */
     fail: (at: number) => {
       failing = at
+    },
+    /** Answers the next request without tools (a plain reply) with an error. */
+    failPlain: () => {
+      failingPlain = true
     },
     release: () => {
       holding = null
