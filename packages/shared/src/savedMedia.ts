@@ -6,7 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { NotFound, ServerError } from "./errors.ts"
 import { RefId } from "./library.ts"
 
-export const MEDIA_KINDS = ["image", "audio", "video", "font"] as const
+const MEDIA_KINDS = ["image", "audio", "video", "font"] as const
 export const MediaKind = Schema.Literals(MEDIA_KINDS)
 export type MediaKind = typeof MediaKind.Type
 
@@ -67,9 +67,6 @@ export const mediaKey = (raw: string): string | null => {
 /** Where a saved file is served: the app's own origin, for the account that saved it. */
 export const savedMediaPath = (mediaId: string) => `/media/saved/${encodeURIComponent(mediaId)}`
 
-export const SavedMediaState = Schema.Literals(["approval", "pending", "saved", "failed", "declined"])
-export type SavedMediaState = typeof SavedMediaState.Type
-
 export const SavedMediaLookup = Schema.Struct({
   url: Schema.String,
   /** The saved file, when there is one. */
@@ -102,7 +99,7 @@ export const MediaChoice = Schema.Literals(["approve", "approve-subdomains", "on
 export type MediaChoice = typeof MediaChoice.Type
 
 /** Which entries an approval is about: these refs' current revisions, or everything waiting. */
-export const MediaApprovalScope = Schema.Struct({
+const MediaApprovalScope = Schema.Struct({
   refIds: Schema.NullOr(Schema.Array(RefId).check(Schema.isMaxLength(2000)))
 })
 

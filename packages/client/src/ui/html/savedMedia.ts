@@ -25,6 +25,7 @@ export const makeSavedMediaStore = (schedule: (run: () => void, ms: number) => u
   const known = new Map<string, SavedMediaAnswer>()
   const queued = new Set<string>()
   const asking = new Set<string>()
+  let generation = 0
   let flushing = false
   let revision = 0
   const listeners = new Set<() => void>()
@@ -34,6 +35,7 @@ export const makeSavedMediaStore = (schedule: (run: () => void, ms: number) => u
   }
   const flush = () => {
     flushing = false
+    const version = generation
     const ask = lookup
     if (!ask) return
     const urls = [...queued].slice(0, BATCH)
@@ -48,6 +50,7 @@ export const makeSavedMediaStore = (schedule: (run: () => void, ms: number) => u
     if (!urls.length) return
     void ask(urls).then(
       (answers) => {
+        if (version !== generation) return
         let changed = false
         const found = new Map((answers ?? []).map((answer) => [answer.url, answer]))
         if (known.size > MAX_KNOWN) known.clear()
@@ -56,7 +59,7 @@ export const makeSavedMediaStore = (schedule: (run: () => void, ms: number) => u
           const answer = found.get(url)
           const next: SavedMediaAnswer = answer?.mediaId
             ? { kind: "saved", path: savedMediaPath(answer.mediaId) }
-            : answer?.waiting
+            : answer?.waiting || answers === null
               ? PENDING
               : MISSING
           const before = known.get(url)
@@ -66,14 +69,21 @@ export const makeSavedMediaStore = (schedule: (run: () => void, ms: number) => u
           )
             changed = true
           known.set(url, next)
-          if (next === PENDING && answers !== null) schedule(() => enqueue(url), POLL_MS)
+          if (next === PENDING)
+            schedule(() => {
+              if (version === generation) enqueue(url)
+            }, POLL_MS)
         }
         if (changed) bump()
       },
       () => {
+        if (version !== generation) return
         for (const url of urls) {
           asking.delete(url)
-          known.set(url, MISSING)
+          known.set(url, PENDING)
+          schedule(() => {
+            if (version === generation) enqueue(url)
+          }, POLL_MS)
         }
         bump()
       }
@@ -97,7 +107,9 @@ export const makeSavedMediaStore = (schedule: (run: () => void, ms: number) => u
     },
     /** Installed by the signed-in app (features/savedMedia); without one nothing is saved. */
     install(next: Lookup | null) {
+      generation++
       lookup = next
+      asking.clear()
       known.clear()
       queued.clear()
       bump()
@@ -113,6 +125,8 @@ export const makeSavedMediaStore = (schedule: (run: () => void, ms: number) => u
     },
     /** Asks again about everything (after an approval, a retry or a site change). */
     forget() {
+      generation++
+      asking.clear()
       known.clear()
       bump()
     },

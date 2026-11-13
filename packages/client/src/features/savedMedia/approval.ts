@@ -4,7 +4,7 @@
 import type { RefId } from "@rp/shared/library.ts"
 
 /** These entries' media, or (null) every file of the account waiting for approval. */
-export type ApprovalRequest = { readonly refIds: ReadonlyArray<RefId> | null }
+type ApprovalRequest = { readonly refIds: ReadonlyArray<RefId> | null }
 
 let current: ApprovalRequest | null = null
 const listeners = new Set<() => void>()

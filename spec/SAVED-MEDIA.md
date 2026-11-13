@@ -38,7 +38,7 @@ A card's HTML and CSS can name media on other sites: `<img src="https://…">`, 
   Closing the dialog decides nothing: the files keep waiting.
 - **[P] When the dialog shows:** after importing files on the Import page (one dialog for the whole batch), after adding a card from a card source, and at the end of a folder import (every waiting site of the account). An edit saved in the editor doesn't open a dialog; the entry's **Saved media** section shows the marker and a **Review** button that opens it.
 - **[P] Without a user present** (a card updated from its source, an import run by the server): approved sites are fetched, the rest wait, and the entry shows "N media files need approval".
-- **[P] Redirects:** followed only to a site that's approved too (for "This time only", only within the same host), at most five, each checked as the first request. A redirect elsewhere fails the file ("Moved to a site you haven't approved").
+- **[P] Redirects:** followed only to a site that's approved too (for "This time only", only within the same host), at most five, each checked as the first request. The current account list is checked before and after DNS on every hop; removing a site puts its pending files back into approval. A redirect elsewhere fails the file ("Moved to a site you haven't approved").
 
 ### 3.3 Fetching
 
@@ -50,13 +50,13 @@ A card's HTML and CSS can name media on other sites: `<img src="https://…">`, 
   - at most 16 MiB a file (fonts 4 MiB), 15 s a file, 128 MiB and 3 minutes of downloads per entry revision, four downloads at once on the server and two per account;
   - the type comes from the bytes (`file-type` on a bounded sample, archives refused before it): PNG, JPEG, GIF, WebP, AVIF; MP3, Ogg, WAV, FLAC, AAC, M4A, WebM audio; MP4 and WebM video; WOFF, WOFF2, TTF and OTF fonts. The response's own type header isn't trusted. **SVG is refused**, as are HTML, scripts and anything else.
 - **[P] Storage:** the bytes go in the existing content-addressed media store (`DATA_DIR/media/<2 hex>/<sha256>`, `media_assets`), so the same file saved by two cards or two accounts is one file. Each account's saved addresses are rows of `saved_media` (address, host, kind, state, file, reason), shared by all its entries; `revision_media` says which revisions name which address. That is the per-revision map from address to file.
-- **[P] Serving:** `GET /media/saved/<file id>`, for the account that saved it only, with the stored type, `nosniff`, `Content-Disposition: attachment`, `Cross-Origin-Resource-Policy: same-origin`, a `sandbox; default-src 'none'` CSP and a private immutable cache. None of the allowed types is a page, and the CSP sandboxes it if it were opened as one.
+- **[P] Serving:** `GET /media/saved/<file id>`, for the account that saved it only, with the stored type, `nosniff`, `Content-Disposition: attachment`, `Cross-Origin-Resource-Policy: same-origin`, a `sandbox; default-src 'none'` CSP and `Cache-Control: private, no-store` with the cookie and proxy identity header in `Vary` (review-rehost1: cross-login browser cache isolation). None of the allowed types is a page, and the CSP sandboxes it if it were opened as one.
 
 ### 3.4 Showing a message
 
 - **[D]** Card text isn't rewritten. **[P]** When a message renders, each remote address is looked up (batched, `LookupSavedMedia`) among the account's saved files. A saved one is shown from `/media/saved/…`, whatever entry or message it's in. One still downloading shows a blank placeholder and is asked about again. Any other address follows HTML-MESSAGES' consent rules unchanged: blocked by default, proxied when allowed.
 - **[P]** Saved audio plays without the consent (it's this app's own file). Video stays out, saved or not, as before: showing saved video is a later step (the server already keeps MP4 and WebM).
-- **[P] No state rule needed:** the existing download queue (HTML-MESSAGES step 5) fetches every address a message's stylesheet names when the message is shown, whatever selectors match, and swaps in local copies. So `.custom-door:checked ~ .custom-room { background: url(https://tracker.example/opened) }` makes its one request when the message shows (only with consent, and never if saved), not when the door is opened: it can't tell the site what you did. An earlier draft of this spec refused remote addresses in stateful rules; that would have dropped working card styling for no gain, so it wasn't built.
+- **[P] Built and browser-verified (review-rehost1), obsolete as an implementation proposal. No state rule needed:** the existing download queue (HTML-MESSAGES step 5) fetches every address a message's stylesheet names when the message is shown, whatever selectors match, and swaps in local copies. So `.custom-door:checked ~ .custom-room { background: url(https://tracker.example/opened) }` makes its one request when the message shows (only with consent, and never if saved), not when the door is opened: it can't tell the site what you did. An earlier draft of this spec refused remote addresses in stateful rules; that would have dropped working card styling for no gain, so it wasn't built. Browser request counts with no-store/no-cache responses stay unchanged across checkbox, hover, `:has()`, attribute, viewport/media, container, animation and late glyph changes. This applies to accepted URL syntax: `image-set()` is already refused, and `unicode-range` is already stripped. The glyph test uses a synthetic font mapping only the late glyph; the queue fetches it up front despite native font selection being lazy.
 
 ### 3.5 The entry's status
 
@@ -67,7 +67,7 @@ A card's HTML and CSS can name media on other sites: `<img src="https://…">`, 
 
 - **[P] Forks and versions:** a fork, a merge, a restore and a new version are new revisions; their addresses join the account's rows, so nothing already saved is fetched again.
 - **[P] Updates from a source:** the new revision's new addresses are fetched or wait for approval; old revisions keep theirs.
-- **[P] Garbage collection:** purging an entry deletes its revisions, and their `revision_media` rows with them. The hourly media sweep then deletes the account's addresses no revision names any more, the files nothing else uses, and their bytes on disk.
+- **[P] Garbage collection:** purging an entry deletes its revisions, and their `revision_media` rows with them. The hourly media sweep waits for the account’s queued revision scans to finish, then deletes the account's addresses no revision names any more, the files nothing else uses, and their bytes on disk.
 
 ## 4. The existing consent, compared
 
@@ -78,3 +78,7 @@ HTML-MESSAGES' "Images from other sites" is per card and per chat (and an accoun
 ## 5. Open
 
 - **[O]** Media a model writes into a reply (an address not in any saved entry) keeps the consent rules. Recommendation: offer to save it from the message's blocked-media note, through the same approved sites and the same fetcher, rather than fetching while viewing.
+
+## 6. Review deltas (built, 2026-11-12; obsolete as implementation proposals)
+
+Saved lookup failures keep a placeholder and retry instead of falling back to a remote request. Account/lookup generation changes discard old replies and polling callbacks. Every received decompressed chunk counts toward the process-local revision budget, including rejected bodies and concurrent downloads; per-file deadlines use the remaining revision time. Budgets are retained for up to 2,000 recent revisions and reset on process restart; these are download-work caps, not durable account quotas. Saved file responses require authorization on every use and cannot survive in a browser HTTP cache across logins. See ARCHITECTURE §12 for the implemented boundary.

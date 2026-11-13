@@ -31,7 +31,7 @@ const KIND_NAMES: Record<MediaKind, readonly [string, string]> = {
 }
 
 /** "3 images, 1 font". */
-export const describeKinds = (kinds: MediaApprovalHost["kinds"]) =>
+const describeKinds = (kinds: MediaApprovalHost["kinds"]) =>
   kinds.map(({ kind, files }) => `${files} ${KIND_NAMES[kind][files === 1 ? 0 : 1]}`).join(", ")
 
 function ApprovalDialog() {

@@ -39,13 +39,38 @@ it("asks in batches, answers saved, waiting and missing, and asks again about wa
     downloaded = true
     await vi.advanceTimersByTimeAsync(3100)
     expect(store.answer("https://cards.invalid/b.png")).toEqual({ kind: "saved", path: "/media/saved/b" })
-    // A failed lookup shows what consent allows, without asking forever.
+    // A failed lookup must not authorize contacting the remote site.
     store.install(async () => {
       throw new Error("offline")
     })
     store.answer("https://cards.invalid/c.png")
     await vi.advanceTimersByTimeAsync(30)
-    expect(store.answer("https://cards.invalid/c.png").kind).toBe("missing")
+    expect(store.answer("https://cards.invalid/c.png").kind).toBe("pending")
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it("discards a previous account's in-flight lookup", async () => {
+  vi.useFakeTimers()
+  try {
+    const store = makeSavedMediaStore()
+    let reply!: (value: { url: string; mediaId: string; waiting: boolean }[]) => void
+    store.install(
+      () =>
+        new Promise((resolve) => {
+          reply = resolve
+        })
+    )
+    const url = "https://cards.invalid/private.png"
+    store.answer(url)
+    await vi.advanceTimersByTimeAsync(30)
+    store.install(async () => [])
+    reply([{ url, mediaId: "alice-only", waiting: false }])
+    await Promise.resolve()
+    expect(store.answer(url).kind).toBe("pending")
+    await vi.advanceTimersByTimeAsync(30)
+    expect(store.answer(url).kind).toBe("missing")
   } finally {
     vi.useRealTimers()
   }

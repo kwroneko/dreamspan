@@ -26,7 +26,7 @@ import { query, transaction } from "./tx.ts"
 
 const KEY = "media.saved.hosts"
 
-export const readMediaHosts = (sql: SqlClient.SqlClient, userId: string) =>
+const readMediaHosts = (sql: SqlClient.SqlClient, userId: string) =>
   readSetting(sql, "user", userId, KEY).pipe(
     Effect.map(({ value }) => {
       if (value === null) return DEFAULT_MEDIA_HOSTS
@@ -321,13 +321,22 @@ export const makeSavedMediaWriteHandlers = Effect.gen(function* () {
         }
         if (add !== undefined) hosts = withHost(hosts, add.host, add.subdomains)
         yield* putUserSetting(sql, userId, KEY, hosts)
+        if (remove !== undefined) {
+          const pending = yield* scoped(sql, userId, null, "pending")
+          const revoked = pending.filter((row) => !hostApproved(hosts, row.host)).map((row) => row.id)
+          if (revoked.length)
+            yield* sql`UPDATE saved_media SET state = 'approval', once = 0, updated_at = ${at}
+              WHERE once = 0 AND id IN (SELECT value FROM json_each(${JSON.stringify(revoked)}))`
+        }
         if (add !== undefined) yield* releaseApproved(sql, userId, hosts, at)
         return hosts
       }).pipe(transaction(sql, "ChangeMediaHosts")),
     PruneSavedMedia: () =>
       Effect.gen(function* () {
         const gone = yield* sql<{ media_id: string | null }>`DELETE FROM saved_media
-          WHERE NOT EXISTS (SELECT 1 FROM revision_media WHERE media = saved_media.id) RETURNING media_id`
+          WHERE NOT EXISTS (SELECT 1 FROM revision_media WHERE media = saved_media.id)
+            AND NOT EXISTS (SELECT 1 FROM saved_media_scans WHERE owner_user_id = saved_media.owner_user_id)
+          RETURNING media_id`
         const files = [...new Set(gone.flatMap((row) => (row.media_id === null ? [] : [row.media_id])))]
         if (files.length)
           // A file goes only when nothing names it: no account's reference, no saved address,

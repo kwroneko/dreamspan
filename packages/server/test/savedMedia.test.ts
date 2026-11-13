@@ -188,12 +188,15 @@ it.live("saves approved media once, serves it locally and leaves the card unchan
       decisions: [
         { host: "cards.test", choice: "approve-subdomains" },
         { host: "other.test", choice: "once" },
-        { host: "private.test", choice: "once" },
+        { host: "private.test", choice: "approve" },
         { host: "rebind.test", choice: "once" },
         { host: "declined.test", choice: "decline" }
       ]
     })
-    assert.deepStrictEqual((yield* alice.GetMediaHosts()).hosts.at(-1), { host: "cards.test", subdomains: true })
+    assert.deepStrictEqual(
+      (yield* alice.GetMediaHosts()).hosts.find((host) => host.host === "cards.test"),
+      { host: "cards.test", subdomains: true }
+    )
     yield* saved.settle
 
     const status = yield* alice.GetSavedMediaStatus({ refId: ref.id })
@@ -207,7 +210,7 @@ it.live("saves approved media once, serves it locally and leaves the card unchan
     assert.strictEqual(reason("evil.svg"), "It isn't an image, sound, video or font this app keeps.")
     assert.strictEqual(reason("big.png"), "The file is too large.")
     assert.strictEqual(reason("moved.png"), "It moved to a site you haven't approved.")
-    assert.strictEqual(reason("cards.test/to-private.png"), "It moved to a site you haven't approved.")
+    assert.strictEqual(reason("cards.test/to-private.png"), "Its address isn't a public web address.")
     assert.strictEqual(reason("private.test/pixel.png"), "Its address isn't a public web address.")
     assert.strictEqual(reason("rebind.png"), "Its address isn't a public web address.")
     // The private and declined sites were never contacted; nothing identifying was sent.
@@ -251,6 +254,8 @@ it.live("saves approved media once, serves it locally and leaves the card unchan
     const served = yield* get("alice")
     assert.strictEqual(served.status, 200)
     assert.deepStrictEqual(Buffer.from(yield* Effect.promise(() => served.arrayBuffer())), PNG)
+    assert.strictEqual(served.headers.get("cache-control"), "private, no-store")
+    assert.strictEqual(served.headers.get("vary")?.toLowerCase(), "cookie, remote-user")
     assert.strictEqual(served.headers.get("content-type"), "image/png")
     assert.strictEqual(served.headers.get("x-content-type-options"), "nosniff")
     assert.strictEqual(served.headers.get("content-disposition"), "attachment")
@@ -260,6 +265,24 @@ it.live("saves approved media once, serves it locally and leaves the card unchan
       "sandbox; default-src 'none'; frame-ancestors 'none'"
     )
     assert.strictEqual((yield* get("bob")).status, 404)
+    const ranged = yield* Effect.promise(() =>
+      fetch(`http://127.0.0.1:${port}/media/saved/${found!.mediaId}`, {
+        headers: { "Remote-User": "alice", range: "bytes=0-7" }
+      })
+    )
+    assert.include([200, 206], ranged.status)
+    assert.strictEqual(ranged.headers.get("content-type"), "image/png")
+    assert.strictEqual(ranged.headers.get("content-security-policy"), served.headers.get("content-security-policy"))
+    yield* Effect.promise(() => ranged.arrayBuffer())
+    for (const path of ["%2e%2e%2fsecret", "unknown-id"])
+      assert.strictEqual(
+        (yield* Effect.promise(() =>
+          fetch(`http://127.0.0.1:${port}/media/saved/${path}`, {
+            headers: { "Remote-User": "alice" }
+          })
+        )).status,
+        404
+      )
 
     // The card is as it was: same head, same document, same export.
     const after = yield* reader.ExportSource({ userId: user.id, refId: ref.id })
@@ -307,5 +330,133 @@ it.live("lists the site approval list's changes and fetches waiting files once a
     const status = yield* alice.GetSavedMediaStatus({ refId: ref.id })
     // The transport is off in tests, so it fails rather than reaching anything.
     assert.strictEqual(status.approval, 0)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ authMode: "proxy" }))))
+)
+
+it.live("rechecks approval after a queued download was admitted", () =>
+  Effect.gen(function* () {
+    const { server, seen } = mediaServer()
+    yield* Effect.acquireRelease(
+      Effect.promise(() => new Promise<void>((done) => server.listen(0, "127.0.0.1", done))),
+      () => Effect.promise(() => new Promise<void>((done) => server.close(() => done())))
+    )
+    const fetcher = makeSavedMediaFetcher(forwarding((server.address() as { port: number }).port), {
+      interfaces: () => ({}),
+      resolve: async () => [PUBLIC]
+    })
+    let began!: () => void
+    let release!: () => void
+    const started = new Promise<void>((done) => {
+      began = done
+    })
+    const held = new Promise<void>((done) => {
+      release = done
+    })
+    const saved = yield* SavedMedia
+    yield* saved.fetchers.register({
+      id: "media.saved",
+      fetch: async (...args) => {
+        began()
+        await held
+        return fetcher(...args)
+      }
+    })
+    const alice = yield* client({ "Remote-User": "alice" })
+    const user = yield* alice.Whoami()
+    const writer = yield* Writer
+    const { ref } = yield* writer.CreateEntity({
+      userId: user.id,
+      kind: "card",
+      label: "Revoked",
+      subtitle: "",
+      doc: cardDoc("Revoked", { first_mes: '<img src="https://cards.test/pixel.png">' }),
+      schemaVersion: 1,
+      origin: "user",
+      sourcePath: null
+    })
+    yield* alice.ListMediaApproval({ refIds: [ref.id] })
+    yield* alice.ChangeMediaHosts({ add: { host: "cards.test", subdomains: false } })
+    yield* Effect.promise(() => started)
+    yield* alice.ChangeMediaHosts({ remove: "cards.test" })
+    release()
+    yield* saved.settle
+    assert.deepStrictEqual(seen, [])
+    assert.strictEqual((yield* alice.GetSavedMediaStatus({ refId: ref.id })).approval, 1)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ authMode: "proxy" }))))
+)
+
+it.live("charges refused bodies against the revision download budget", () =>
+  Effect.gen(function* () {
+    let requests = 0
+    const body = Buffer.alloc(16 * 1024 * 1024, 1) // unsupported media, refused after sniffing
+    const server = createServer((_request, response) => {
+      requests++
+      response.writeHead(200, { "content-type": "image/png" }).end(body)
+    })
+    yield* Effect.acquireRelease(
+      Effect.promise(() => new Promise<void>((done) => server.listen(0, "127.0.0.1", done))),
+      () => Effect.promise(() => new Promise<void>((done) => server.close(() => done())))
+    )
+    const saved = yield* SavedMedia
+    yield* saved.fetchers.register({
+      id: "media.saved",
+      fetch: makeSavedMediaFetcher(forwarding((server.address() as { port: number }).port), {
+        interfaces: () => ({}),
+        resolve: async () => [PUBLIC]
+      })
+    })
+    const alice = yield* client({ "Remote-User": "alice" })
+    const user = yield* alice.Whoami()
+    yield* alice.ChangeMediaHosts({ add: { host: "cards.test", subdomains: false } })
+    const writer = yield* Writer
+    const { ref } = yield* writer.CreateEntity({
+      userId: user.id,
+      kind: "card",
+      label: "Budget",
+      subtitle: "",
+      doc: cardDoc("Budget", {
+        first_mes: Array.from({ length: 10 }, (_, i) => `<img src="https://cards.test/${i}.png">`).join("")
+      }),
+      schemaVersion: 1,
+      origin: "user",
+      sourcePath: null
+    })
+    yield* alice.GetSavedMediaStatus({ refId: ref.id })
+    yield* saved.settle
+    assert.isAtMost(requests, 9) // at most one in-flight peer when the 128 MiB budget runs out
+    assert.isTrue(
+      (yield* alice.GetSavedMediaStatus({ refId: ref.id })).failed.some((file) => /limit/.test(file.reason))
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ authMode: "proxy" }))))
+)
+
+it.live("keeps one-time grants scoped to their files and the default host removable", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const user = yield* alice.Whoami()
+    yield* alice.ChangeMediaHosts({ remove: "cardex.zip" })
+    const writer = yield* Writer
+    const create = (text: string) =>
+      writer.CreateEntity({
+        userId: user.id,
+        kind: "card",
+        label: "One-time",
+        subtitle: "",
+        doc: cardDoc("One-time", { first_mes: text }),
+        schemaVersion: 1,
+        origin: "import",
+        sourcePath: null
+      })
+    const first = yield* create('<img src="https://once.test/first.png">')
+    yield* alice.ListMediaApproval({ refIds: [first.ref.id] })
+    yield* alice.DecideMediaApproval({ refIds: [first.ref.id], decisions: [{ host: "once.test", choice: "once" }] })
+    yield* (yield* SavedMedia).settle
+    const second = yield* create('<img src="https://once.test/second.png"><img src="https://cardex.zip/i/third.png">')
+    assert.strictEqual((yield* alice.GetSavedMediaStatus({ refId: second.ref.id })).approval, 2)
+    assert.deepStrictEqual((yield* alice.GetMediaHosts()).hosts, [])
+    assert.deepStrictEqual(yield* alice.ListMediaApproval({ refIds: [second.ref.id] }), [
+      { host: "cardex.zip", files: 1, kinds: [{ kind: "image", files: 1 }] },
+      { host: "once.test", files: 1, kinds: [{ kind: "image", files: 1 }] }
+    ])
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ authMode: "proxy" }))))
 )

@@ -25,13 +25,13 @@ import { internal } from "./internal.ts"
 
 const MiB = 1024 * 1024
 /** Per entry revision: what its downloads may take together (§3.3). */
-export const REVISION_BYTES = 128 * MiB
-export const REVISION_MS = 3 * 60_000
+const REVISION_BYTES = 128 * MiB
+const REVISION_MS = 3 * 60_000
 const SERVER_DOWNLOADS = 4
 const USER_DOWNLOADS = 2
 const IDLE_MS = 3_000
 
-export type SavedMediaFetch = ReturnType<typeof makeExternalFetcher>
+type SavedMediaFetch = ReturnType<typeof makeExternalFetcher>
 export const makeSavedMediaFetcher = (
   network: Parameters<typeof makeExternalFetcher>[0],
   limits: Parameters<typeof makeExternalFetcher>[1] = {}
@@ -45,11 +45,11 @@ export const makeSavedMediaFetcher = (
   })
 
 /** Why a download failed, as the entry's Saved media section says it. */
-export const failureReason = (error: unknown): string => {
+const failureReason = (error: unknown): string => {
   if (error instanceof RedirectRefused) return "It moved to a site you haven't approved."
   if (!(error instanceof ExternalMediaRefused)) return "The site couldn't be reached."
   const message = error.message
-  if (message.startsWith("It moved")) return message
+  if (message.startsWith("It moved") || message.startsWith("This entry")) return message
   if (/not public|Only public/.test(message)) return "Its address isn't a public web address."
   if (/too large|size limit/.test(message)) return "The file is too large."
   if (/too long/.test(message)) return "The site took too long to answer."
@@ -125,19 +125,33 @@ export class SavedMedia extends Context.Service<SavedMedia, SavedMediaShape>()("
           if (budget.bytes >= REVISION_BYTES || budget.ms >= REVISION_MS)
             return yield* record(item.id, "This entry's media limit was reached.")
           // Approved by the account's list, or for these files only (that host alone).
-          const allowHost = (host: string) =>
-            hostApproved(item.hosts, host) || (item.once && normalizeHost(host) === item.host)
-          if (!allowHost(item.host)) return yield* record(item.id, "Its site isn't approved any more.")
+          const allowHost = async (host: string) => {
+            const hosts = await Effect.runPromise(reader.GetMediaHosts({ userId: item.ownerUserId }))
+            return hostApproved(hosts, host) || (item.once && normalizeHost(host) === item.host)
+          }
+          if (!(yield* Effect.tryPromise(() => allowHost(item.host))))
+            return yield* record(item.id, "Its site isn't approved any more.")
           const fetcher = fetchers.get("media.saved")
           if (!fetcher) return yield* record(item.id, "Saving media is turned off.")
           const started = Date.now()
           const result = yield* Effect.acquireUseRelease(
-            Effect.tryPromise({ try: (signal) => fetcher.fetch(item.url, signal, { allowHost }), catch: (e) => e }),
+            Effect.tryPromise({
+              try: (signal) =>
+                fetcher.fetch(item.url, signal, {
+                  allowHost,
+                  timeoutMs: Math.max(1, REVISION_MS - budget.ms),
+                  onBytes: (bytes) => {
+                    budget.bytes += bytes
+                    if (budget.bytes > REVISION_BYTES || budget.ms + Date.now() - started >= REVISION_MS)
+                      throw new ExternalMediaRefused("This entry's media limit was reached.")
+                  }
+                }),
+              catch: (e) => e
+            }),
             (file) =>
               Effect.gen(function* () {
                 const bytes = yield* Effect.tryPromise(() => readFile(file.path))
                 const sha256 = createHash("sha256").update(bytes).digest("hex")
-                budget.bytes += bytes.byteLength
                 return yield* holds.holding(
                   [sha256],
                   storeMedia(config.dataDir, sha256, bytes).pipe(
@@ -296,13 +310,15 @@ export const savedMediaRoute = Layer.unwrap(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
         const session = yield* Effect.option(accounts.resolve(request.headers))
-        if (Option.isNone(session)) return HttpServerResponse.text("Login required", { status: 401 })
+        if (Option.isNone(session))
+          return HttpServerResponse.text("Login required", { status: 401, headers: { "cache-control": "no-store" } })
         const id = (yield* HttpRouter.params).id ?? ""
         if (id === "" || id.length > 100) return notFound()
         const file = yield* reader.GetSavedMediaFile({ userId: session.value.user.id, mediaId: id })
         if (file === null || !isMediaPath(file.path) || !SAVED_MEDIA_TYPES.has(file.mime)) return notFound()
         const headers = {
-          "cache-control": "private, max-age=31536000, immutable",
+          "cache-control": "private, no-store",
+          vary: `Cookie, ${config.authProxyHeader}`,
           "x-content-type-options": "nosniff",
           "cross-origin-resource-policy": "same-origin",
           "content-disposition": "attachment",

@@ -169,7 +169,11 @@ interface Limits {
 }
 export interface FetchOptions {
   /** Each hop's host must pass, the first included; redirects to another origin then follow too. */
-  readonly allowHost?: (host: string) => boolean
+  readonly allowHost?: (host: string) => boolean | Promise<boolean>
+  /** Charge every received chunk, even if sniffing or a later read refuses the file. */
+  readonly onBytes?: (bytes: number) => void
+  /** A revision may have less time left than the per-file deadline. */
+  readonly timeoutMs?: number
 }
 
 /** Fixed headers only: never cookies, authorization, referrers, ranges or upstream cache validators. */
@@ -187,7 +191,8 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
         .replace(/^\[(.*)\]$/, "$1")
         .replace(/\.$/, "")
         .toLowerCase()
-    const crossOrigin = allowHost && ((next: URL) => allowHost(hostOf(next)))
+    // The asynchronous validator below authorizes every hop before any connection.
+    const crossOrigin = allowHost && (() => true)
     const fetch = network.fetchFor(
       { mode: "inherit" },
       undefined,
@@ -199,7 +204,7 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
           (target.port !== "" && !["80", "443"].includes(target.port))
         if (bad || target.href.length > 8192)
           throw new ExternalMediaRefused("Only public HTTP and HTTPS media addresses without credentials are allowed")
-        if (allowHost && !allowHost(hostOf(target)))
+        if (allowHost && !(await allowHost(hostOf(target))))
           throw new ExternalMediaRefused("It moved to a site you haven't approved.")
         const hostname = target.hostname.replace(/^\[(.*)\]$/, "$1")
         const addresses = isIP(hostname) ? [hostname] : await resolve(hostname, controller.signal)
@@ -212,6 +217,9 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
           addresses.some((ip) => !isPublicMediaAddress(ip) || local.check(ip, isIP(ip) === 6 ? "ipv6" : "ipv4"))
         )
           throw new ExternalMediaRefused("This media address is not public")
+        // Approval can be removed while DNS is pending.
+        if (allowHost && !(await allowHost(hostOf(target))))
+          throw new ExternalMediaRefused("It moved to a site you haven't approved.")
         return addresses
       },
       crossOrigin
@@ -221,10 +229,13 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
     if (signal.aborted) abort()
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        abort()
-        reject(new ExternalMediaRefused("The media request took too long"))
-      }, timeoutMs)
+      timer = setTimeout(
+        () => {
+          abort()
+          reject(new ExternalMediaRefused("The media request took too long"))
+        },
+        Math.min(timeoutMs, options.timeoutMs ?? timeoutMs)
+      )
     })
     const read = async () => {
       const response = await fetch(url, {
@@ -270,6 +281,7 @@ export const makeExternalFetcher = (network: Pick<NetworkShape, "fetchFor">, lim
               ? await byob.read(new Uint8Array(64 * 1024))
               : await (reader as ReadableStreamDefaultReader<Uint8Array>).read()
             if (chunk.done) break
+            options.onBytes?.(chunk.value.byteLength)
             size += chunk.value.byteLength
             if (size > maxBytes) throw new ExternalMediaRefused("The media file is too large")
             // Await each bounded write before pulling upstream again: disk backpressure,

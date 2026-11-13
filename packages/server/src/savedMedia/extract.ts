@@ -13,7 +13,7 @@ export interface FoundMedia {
 }
 
 /** At most this many addresses per revision; more are reported as one refusal. */
-export const MAX_MEDIA_PER_REVISION = 200
+const MAX_MEDIA_PER_REVISION = 200
 /** Strings longer than this aren't read (a card is capped at 8 MiB as a whole). */
 const MAX_STRING = 2_000_000
 
@@ -31,7 +31,7 @@ const RAW_TEXT = new Map<string, Tokenizer["state"]>([
 ])
 
 /** CSS `url()` addresses, with fonts inside `@font-face`. */
-export function cssMedia(css: string, add: (raw: string, kind: MediaKind) => void) {
+function cssMedia(css: string, add: (raw: string, kind: MediaKind) => void) {
   let tokens: CSSToken[]
   try {
     tokens = tokenize({ css })
@@ -76,7 +76,7 @@ export function cssMedia(css: string, add: (raw: string, kind: MediaKind) => voi
 }
 
 /** HTML media attributes, `<style>` contents and `style` attributes. */
-export function htmlMedia(html: string, add: (raw: string, kind: MediaKind) => void) {
+function htmlMedia(html: string, add: (raw: string, kind: MediaKind) => void) {
   let foreign = 0
   let style: string[] | null = null
   const players: Array<"audio" | "video"> = []
@@ -153,7 +153,7 @@ export function htmlMedia(html: string, add: (raw: string, kind: MediaKind) => v
 const MARKDOWN_IMAGE = /!\[[^\]\n]*\]\(\s*(?:<([^<>\n]+)>|([^\s()<>]+))/g
 
 /** The media one text names. */
-export function textMedia(text: string, add: (raw: string, kind: MediaKind) => void) {
+function textMedia(text: string, add: (raw: string, kind: MediaKind) => void) {
   if (text.length > MAX_STRING || !/(?:https?:)?\/\//i.test(text)) return
   if (text.includes("<")) htmlMedia(text, add)
   if (text.includes("![")) for (const match of text.matchAll(MARKDOWN_IMAGE)) add(match[1] ?? match[2]!, "image")
