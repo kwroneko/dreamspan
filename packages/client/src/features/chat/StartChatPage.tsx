@@ -57,7 +57,7 @@ import { useTitle } from "../shell.tsx"
 import { CastContext, type CastView, castView } from "./cast.ts"
 import { ChatPortraitProvider } from "./ChatPortraitProvider.tsx"
 import { PendingChatHeader } from "./ChatHeader.tsx"
-import { ChatSidePanel, usePanel } from "./ChatPanels.tsx"
+import { carryPanelFocus, ChatSidePanel, usePanel } from "./ChatPanels.tsx"
 import { composerCarryCopy } from "./composerCarry.ts"
 import { ComposerBox, useCompactComposer } from "./Composer.tsx"
 import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
@@ -374,6 +374,10 @@ function Pending({
     destination.current = { chatId: result.value.chat.id, composer: result.value.composer }
     await keep(typed.current)
     await durable.commit(durable.text, async () => true)
+    // Restore tab-strip focus only if it is still there as this route is replaced; typing
+    // in the composer or clicking Send keeps the normal destination focus behaviour.
+    const panelFocused = Boolean(document.activeElement?.closest("[data-chat-panel-tabs]"))
+    carryPanelFocus(result.value.chat.id, panelFocused)
     // The saved chat opens in place: the same page, its panel at the same tab.
     void navigate({
       to: "/chats/$chatId",

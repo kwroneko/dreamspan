@@ -11,7 +11,8 @@ export function Sheet({
   onOpenChange,
   title,
   container,
-  children
+  children,
+  initialFocus
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -21,6 +22,8 @@ export function Sheet({
   container?: HTMLElement | null | undefined
   /** Fills the rest of the height; it scrolls itself. */
   children: ReactNode
+  /** Restore a focused control when this sheet replaces a pending chat's sheet. */
+  initialFocus?: (() => HTMLElement | null) | undefined
 }) {
   const closeRef = useRef<HTMLButtonElement>(null)
   const away = useAway()
@@ -29,7 +32,7 @@ export function Sheet({
       <BaseDialog.Portal container={container}>
         <BaseDialog.Popup
           data-layout-overlay="Modal sheet covers the page"
-          initialFocus={closeRef}
+          initialFocus={initialFocus ?? closeRef}
           className="fixed inset-0 z-40 flex h-dvh flex-col bg-surface text-text outline-none transition-[translate,opacity] duration-150 data-ending-style:translate-y-4 data-ending-style:opacity-0 data-starting-style:translate-y-4 data-starting-style:opacity-0 motion-reduce:transition-none"
         >
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">

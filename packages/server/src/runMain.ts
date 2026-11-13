@@ -26,7 +26,13 @@ const server =
   setup === "fake"
     ? Layer.unwrap(
         Effect.map(
-          Effect.promise(() => import("./dev/fakeCardSource.ts")),
+          Effect.tryPromise({
+            try: () => import("./dev/fakeCardSource.ts"),
+            catch: () =>
+              new Error(
+                "FAKE_CARD_SOURCE=fake needs the development files (src/dev), which this build doesn't include."
+              )
+          }),
           ({ fakeCardSources }) =>
             serverWith(ContextGenerator.layer, undefined, undefined, undefined, fakeCardSources(fakeCardSource))
         )
