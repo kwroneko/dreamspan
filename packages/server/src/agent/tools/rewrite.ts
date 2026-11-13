@@ -1,3 +1,4 @@
+import { storyWriteChat, type WriteChat } from "../storyWriteScope.ts"
 import { attachedStory, checkStoryReadScope } from "../storyReadScope.ts"
 import { storyTools } from "./history.ts"
 import { prepareHistory } from "../../historyPreparation.ts"
@@ -88,7 +89,7 @@ interface InstructionsArgs extends Base {
   }>
 }
 interface Prepared {
-  readonly chat: Chat
+  readonly chat: WriteChat
   readonly dependents?: ReadonlyArray<{ id: string; revision: string }>
   readonly expected: string
   readonly edits: ReadonlyArray<HistoryEdit>
@@ -112,7 +113,7 @@ const snapshot = (ctx: ToolContext, chat: Chat) =>
     : ctx.reader.AgentHistorySnapshot({ userId: ctx.userId, chatId: chat.id, forkId: chat.currentForkId })
 const replacing = (ctx: ToolContext, args: ReplaceArgs) =>
   Effect.gen(function* () {
-    const chat = yield* resolveChat(ctx, args.chat)
+    const chat = yield* storyWriteChat(ctx, yield* resolveChat(ctx, args.chat))
     const before = yield* snapshot(ctx, chat)
     const found = new Map<string, HistoryHit>()
     const candidates = new Map<string, HistoryHit["matches"]>()
@@ -143,6 +144,7 @@ const replacing = (ctx: ToolContext, args: ReplaceArgs) =>
           ...(cursor ? { cursor } : {})
         })
         for (const hit of page.hits) {
+          if (chat.upTo !== undefined && hit.toDepth >= chat.upTo) continue
           const id = `${hit.kind}:${hit.targetId}`
           const prior = found.get(id)
           const all = [...(candidates.get(id) ?? []), ...hit.matches]
@@ -193,8 +195,10 @@ const replacing = (ctx: ToolContext, args: ReplaceArgs) =>
   })
 const writing = (ctx: ToolContext, args: MessagesArgs) =>
   Effect.gen(function* () {
-    const chat = yield* resolveChat(ctx, args.chat)
+    const chat = yield* storyWriteChat(ctx, yield* resolveChat(ctx, args.chat))
     const before = yield* snapshot(ctx, chat)
+    if (chat.upTo !== undefined && args.messages.some((m) => m.message > chat.upTo!))
+      return yield* fail("Choose a message at or before the position shown in the story tab.")
     const wanted = new Set(args.messages.map((m) => m.message))
     if (wanted.size !== args.messages.length) return yield* fail("Name each message only once.")
     const targets = yield* ctx.reader.AgentRewriteTargets({
@@ -224,6 +228,8 @@ const writing = (ctx: ToolContext, args: MessagesArgs) =>
         forkId: chat.currentForkId,
         summaryId: summary.summary as never
       })
+      if (chat.upTo !== undefined && saved.to > chat.upTo)
+        return yield* fail("Choose a summary ending at or before the story tab’s position.")
       edits.push({
         kind: "summary_revision",
         targetId: saved.id,
@@ -244,7 +250,7 @@ const writing = (ctx: ToolContext, args: MessagesArgs) =>
   })
 const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
   Effect.gen(function* () {
-    const chat = yield* resolveChat(ctx, args.chat)
+    const chat = yield* storyWriteChat(ctx, yield* resolveChat(ctx, args.chat))
     const before = yield* snapshot(ctx, chat)
     const edits: HistoryEdit[] = []
     const previews: Array<{ field: string; before: string; after: string }> = []
@@ -253,7 +259,7 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
         userId: ctx.userId,
         chatId: chat.id,
         forkId: chat.currentForkId,
-        slotId: before.leaf,
+        slotId: chat.storyTarget ? chat.activeLeafSlotId : before.leaf,
         displayEnd: true
       })
     )
@@ -265,7 +271,7 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
           userId: ctx.userId,
           chatId: chat.id,
           forkId: chat.currentForkId,
-          slotId: before.leaf,
+          slotId: chat.storyTarget ? chat.activeLeafSlotId : before.leaf,
           cards: []
         })
         const matches = entries.filter(
@@ -317,7 +323,8 @@ const instructions = (ctx: ToolContext, args: InstructionsArgs) =>
           targetId: "",
           beforeId: "",
           before: "",
-          after: JSON.stringify({ scope: null, data })
+          after: JSON.stringify({ scope: null, data }),
+          ...(chat.storyTarget?.leafSlotId ? { atSlotId: chat.storyTarget.leafSlotId } : {})
         })
       }
     }
@@ -380,6 +387,7 @@ const rewrite = <A extends Base>(
         const p = yield* prepareChecked(ctx, args)
         ctx.cache.set(`rewrite:${ctx.toolCallId}`, p)
         return {
+          ...(p.chat.storyTarget ? { storyAt: p.chat.storyTarget } : {}),
           title: `Rewrite “${p.chat.title}”`,
           rows: [
             {
@@ -388,7 +396,9 @@ const rewrite = <A extends Base>(
             },
             {
               label: "Scope",
-              value: `Only this chat's current branch (${p.chat.currentForkId}). ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
+              value: p.chat.storyTarget
+                ? `Branch “${p.chat.branchLabel}” (${p.chat.currentForkId}); messages 1–${p.chat.upTo}. ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
+                : `Only this chat's current branch (${p.chat.currentForkId}). ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
             },
             {
               label: "Limit",
@@ -424,6 +434,8 @@ const rewrite = <A extends Base>(
           const valid = yield* validate(ctx, args)
           const p =
             (ctx.cache.get(`rewrite:${ctx.toolCallId}`) as Prepared | undefined) ?? (yield* prepareChecked(ctx, valid))
+          if (p.chat.storyTarget && JSON.stringify(p.chat.storyTarget) !== JSON.stringify(ctx.storyAt))
+            return yield* fail("The story tab moved. Send the request again.")
           if (!p.edits.length && !p.notes?.length) return { text: "No matching text changed." }
           const staged = yield* prepareHistory(ctx.writer, {
             userId: ctx.userId,
@@ -443,6 +455,7 @@ const rewrite = <A extends Base>(
             forkId: p.chat.currentForkId!,
             expected: p.expected,
             title: valid.title,
+            ...(p.chat.storyTarget ? { storyAt: p.chat.storyTarget } : {}),
             edits: p.edits,
             includeSwipes: p.includeSwipes,
             summariesIncluded: p.summariesIncluded,
@@ -654,7 +667,7 @@ export const historyRenameTool: RolloutTool<{
   ),
   describe: (ctx, args) =>
     Effect.gen(function* () {
-      const chat = yield* resolveChat(ctx, args.chatId)
+      const chat = yield* storyWriteChat(ctx, yield* resolveChat(ctx, args.chatId))
       if (args.scope !== "this" || chat.currentForkId !== args.forkId)
         return yield* fail("Rename only the current branch, using scope this.")
       return yield* rewriteChat.describe!(ctx, {
@@ -669,7 +682,7 @@ export const historyRenameTool: RolloutTool<{
         const prior = yield* ctx.reader.RolloutToolReceipt(key(ctx))
         if (prior) return prior.isError ? prior : { text: prior.text }
         if (args.scope === "none") return { text: "No history changed." }
-        const chat = yield* resolveChat(ctx, args.chatId)
+        const chat = yield* storyWriteChat(ctx, yield* resolveChat(ctx, args.chatId))
         if (args.scope !== "this" || chat.currentForkId !== args.forkId)
           return yield* fail("Rename only the current branch, using scope this.")
         return yield* rewriteChat.execute(ctx, {

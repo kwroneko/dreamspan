@@ -337,6 +337,15 @@ export interface PathRow extends VersionRow {
   /** Its index on the display path read (spec/MESSAGE-INSERT.md §2.3); absent outside a path window. */
   readonly position?: number | null
   readonly inserted?: number
+  /** Its copies in other threads, as [slot, fork] pairs in JSON (`PathEntry.copies`); absent on older reads. */
+  readonly send_copies?: string | null
+}
+
+const copiesOf = (json: string | null | undefined) => {
+  const pairs = json ? (JSON.parse(json) as Array<[string, string]>) : []
+  return pairs.length === 0
+    ? {}
+    : { copies: pairs.map(([slotId, forkId]) => ({ slotId: slotId as SlotId, forkId: forkId as ForkId })) }
 }
 
 export const toPathEntry = (row: PathRow) => {
@@ -362,6 +371,7 @@ export const toPathEntry = (row: PathRow) => {
     ...(row.shown_fork_id == null ? {} : { shownForkId: row.shown_fork_id as ForkId }),
     ...(row.position == null ? {} : { position: row.position }),
     ...(row.inserted === 1 ? { inserted: true } : {}),
+    ...copiesOf(row.send_copies),
     side: row.user_side === 1 ? "user" : "assistant",
     firstSpeakerEntityId: row.first_speaker as EntityId | null,
     inContext: versionInContext(version.status, version.content, contextExcluded, version.images?.length)

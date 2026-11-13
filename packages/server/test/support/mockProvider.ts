@@ -8,6 +8,8 @@ export interface Recorded {
   readonly path: string
   readonly headers: IncomingMessage["headers"]
   readonly body: Record<string, unknown> | null
+  /** Actual HTTP body for cache-sensitive replay assertions. */
+  readonly raw?: string
 }
 
 export type Handler = (request: Recorded, res: ServerResponse) => void | Promise<void>
@@ -77,7 +79,7 @@ export const startMockProvider = (handler: Handler) =>
         } catch {
           body = null
         }
-        const recorded = { method: req.method ?? "", path: req.url ?? "", headers: req.headers, body }
+        const recorded = { method: req.method ?? "", path: req.url ?? "", headers: req.headers, body, raw }
         requests.push(recorded)
         void Promise.resolve(current(recorded, res)).catch(() => res.destroy())
       })

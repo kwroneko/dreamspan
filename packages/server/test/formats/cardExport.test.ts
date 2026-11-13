@@ -419,3 +419,26 @@ describe("panel permissions", () => {
       expect(JSON.stringify(cardToJson(allowed, version))).not.toContain("html_")
   })
 })
+
+for (const format of ["card-v2-json", "card-v3-json"] as const) {
+  it(`${format} preserves card skills beside exported notes`, async () => {
+    const skills = [
+      { use: "cards" },
+      { name: "proofread", description: "Check spelling.", instructions: "List typos.", tools: ["read_card"] }
+    ]
+    const card = { ...imported(stCardV2()), extensions: { rp_harness: { skills } } }
+    const bytes = await Effect.runPromise(
+      exportFile({
+        format,
+        docJson: JSON.stringify(card),
+        noteDocJson: null,
+        notesDocJson: [JSON.stringify(cardNote({ title: "Synthetic note", content: "Kept." }))],
+        avatar: null,
+        assets: []
+      })
+    )
+    const back = await parsed(bytes)
+    expect((back.card.extensions.rp_harness as { skills: unknown }).skills).toEqual(skills)
+    expect(back.notes).toHaveLength(1)
+  })
+}

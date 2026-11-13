@@ -18,6 +18,7 @@ import {
   audienceIds,
   audienceScope,
   firstUnknownPosition,
+  stretchOnPath,
   inputsKnown,
   knownVersions,
   viewerAudience
@@ -265,8 +266,19 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
           WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' AND ${eventApplies(sql, yield* viewAt(sql, chatId, leafSlotId), "e")} ORDER BY seq DESC LIMIT 1`
         const enabled = settings?.enabled === 1
+        // Characters with summaries of their own in a shared context (spec/THREADS.md §7.3).
+        const stretchViews = (yield* stretchOnPath(sql, chatId, leafSlotId)) ? { stretchViews: true } : {}
         if (!enabled)
-          return new LcmState({ chatId, leafSlotId, enabled, layer: [], failed: [], jobs: [], cursorDepth: -1 })
+          return new LcmState({
+            chatId,
+            leafSlotId,
+            enabled,
+            layer: [],
+            failed: [],
+            jobs: [],
+            cursorDepth: -1,
+            ...stretchViews
+          })
         const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, false, identities && { identities })
         // In a fork that shows inserted slots, numbers are positions on its display path (spec/MESSAGE-INSERT.md §3.4).
         const shown = yield* pathView(sql, chatId, leafSlotId)
@@ -402,7 +414,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
               ? ((yield* sql<{ depth: number }>`SELECT depth FROM slots WHERE id = ${layer.cursor}`)[0]?.depth ?? -1)
               : layer.cursorDepth,
           cursorSlotId: layer.cursor as LcmState["leafSlotId"] | null,
-          cursorPosition: layer.cursorDepth
+          cursorPosition: layer.cursorDepth,
+          ...stretchViews
         })
       }).pipe(readingOnce, inFork(sql, chatId, forkId, leafSlotId), query("GetLcmState")),
 

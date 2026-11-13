@@ -2069,6 +2069,35 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  SendToThreads: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const to = (forkId: typeof owner.chat.forkId) => ({
+          forkId,
+          parentSlotId: null,
+          speakerEntityId: null,
+          reply: false,
+          replySpeakerEntityId: null
+        })
+        // Into their chat, and their branch named as a thread of the actor's own chat: both NotFound.
+        yield* refused(
+          actor.api.SendToThreads({
+            chatId: owner.chat.chatId,
+            content: "Hello",
+            targets: [to(owner.chat.forkId), to(owner.chat.forkId)]
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SendToThreads({
+            chatId: actor.chat.chatId,
+            content: "Hello",
+            targets: [to(actor.chat.forkId), to(owner.chat.forkId)]
+          }),
+          "NotFound"
+        )
+      })
+  },
   // Merging another chat in (spec/CHAT-MERGE.md): neither side may be someone else's chat.
   PreviewChatMerge: {
     probe: (actor, owner) =>
@@ -2100,6 +2129,26 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
               title: "planted",
               framing: null,
               digest: ""
+            }),
+            "NotFound"
+          )
+      })
+  },
+  JoinThreads: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Another user's branch is never joined into mine, nor mine into theirs.
+        for (const [into, source] of [
+          [actor.chat, owner.chat],
+          [owner.chat, actor.chat]
+        ] as const)
+          yield* refused(
+            actor.api.JoinThreads({
+              chatId: into.chatId,
+              forkId: into.forkId,
+              at: null,
+              includeLeftOut: false,
+              joins: [{ forkId: source.forkId, title: "planted", framing: null, digest: "" }]
             }),
             "NotFound"
           )

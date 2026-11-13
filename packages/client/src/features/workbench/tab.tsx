@@ -1,7 +1,7 @@
 // What a view inside a workbench tab asks about its tab: whether it's focused or shown, the
 // side panel's place, and how to name the tab. Outside a workbench (tests, a feature that
 // replaced it) every answer is the single-view one: focused, shown, the panel inline.
-import { createContext, type ReactNode, useContext, useEffect, useSyncExternalStore } from "react"
+import { createContext, type ReactNode, useContext, useEffect, useLayoutEffect, useSyncExternalStore } from "react"
 import { type DropTarget, dropTargetAt } from "./dropOpen.ts"
 import { itemKey } from "./kinds.ts"
 import { findTab, focusedFrame, focusedTab, frameOfTab, showsStrips } from "./model.ts"
@@ -85,7 +85,9 @@ export function useTabShown(wide: boolean) {
 export function useSidePanelPlace(wide: boolean): { show: boolean; host: HTMLElement | null } {
   const tab = useContext(TabContext)
   const workbench = useContext(WorkbenchContext)
-  useEffect(() => (tab ? tab.store.addPanelTab(tab.tabId) : undefined), [tab])
+  // A first send replaces the pending route. Register its saved surface before paint so
+  // the shared panel column never spends a frame without its owner (and focused tabs).
+  useLayoutEffect(() => (tab ? tab.store.addPanelTab(tab.tabId) : undefined), [tab])
   const owner = useSyncExternalStore(tab?.store.subscribe ?? noop, () =>
     tab ? tab.store.panelOwner(wide) === tab.tabId : true
   )

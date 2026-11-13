@@ -8,13 +8,12 @@ const RESUMABLE = new Set<Version["status"]>(["stopped", "failed", "interrupted"
 
 /**
  * Whether a version offers Resume: an agent reply that stopped, failed or was cut off by a
- * restart. One that stopped before writing anything (no step, no text, no thinking) offers it
- * disabled, with this reason.
+ * restart (spec/AGENTIC.md §12). One that stopped before writing anything, a first request
+ * the provider refused say, offers it too: the run starts over from its saved request.
  */
 export const resumeOffer = (version: Version): { readonly disabled: string | null } | null => {
   if (version.agent !== true || version.writer !== "model" || !RESUMABLE.has(version.status)) return null
-  const wrote = version.steps !== undefined || version.content.trim() !== "" || (version.reasoning ?? "").trim() !== ""
-  return { disabled: wrote ? null : "This reply stopped before its first step." }
+  return { disabled: null }
 }
 
 /** What a step of the inspector is: the part of the model's turn, or a tool's result. */

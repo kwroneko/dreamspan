@@ -39,6 +39,8 @@ export interface FixtureMessage {
 }
 
 export interface AssemblyFixture {
+  /** The reader's resolved separate-join ranges, on the fixture's single chain. */
+  readonly stretches?: NonNullable<ContextSnapshot["sources"]>["stretches"]
   readonly historyStart?: ContextSnapshot["historyStart"] | null
   readonly chatId?: string
   /** The path, root first; the message being generated comes after it. */
@@ -97,6 +99,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
   ]
   const n = fixture.messages.length
   return Layer.succeed(AssemblySources)({
+    ...(fixture.stretches ? { stretches: () => Effect.succeed(fixture.stretches!) } : {}),
     target: Effect.succeed({
       chatId: fixture.chatId ?? "chat-1",
       slotId: slot(n),
@@ -112,7 +115,13 @@ const fixtureSources = (fixture: AssemblyFixture) => {
       Effect.succeed(
         ids.map((versionId) => ({
           versionId,
-          knowers: fixture.messages[Number(versionId.replace("version-", ""))]?.knowers ?? null
+          knowers: fixture.messages[Number(versionId.replace("version-", ""))]?.knowers ?? null,
+          ...(fixture.stretches?.some((g) => {
+            const depth = Number(versionId.replace("version-", ""))
+            return depth >= g.lo && depth <= g.hi
+          })
+            ? { stretched: true }
+            : {})
         }))
       ),
     historyStart: () => Effect.succeed(fixture.historyStart ?? null),

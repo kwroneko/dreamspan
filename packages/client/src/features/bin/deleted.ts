@@ -33,8 +33,15 @@ export const useDeletedToast = () => {
   const registry = useContext(RegistryContext)
   const navigate = useNavigate()
   return useCallback(
-    /** `onRestored`: for a view that doesn't read the restored lists again by itself. */
-    (item: BinItem, onRestored?: () => void) =>
+    /**
+     * `onRestored`: for a view that doesn't read the restored lists again by itself. `more`: what
+     * else the toast offers, after Undo ("Delete the copy in … too", spec/THREADS.md §6.3).
+     */
+    (
+      item: BinItem,
+      onRestored?: () => void,
+      more: ReadonlyArray<{ readonly label: string; readonly hint?: string; readonly onClick: () => void }> = []
+    ) =>
       showToast({
         title: `${binTitle(item)} moved to the bin.`,
         // Long enough to reach Undo after reading it; hovering or focusing it holds it.
@@ -49,6 +56,7 @@ export const useDeletedToast = () => {
                 else onRestored?.()
               })
           },
+          ...more,
           { label: "Open the bin", onClick: () => void navigate({ to: "/bin" }) }
         ]
       }),

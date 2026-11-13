@@ -6,7 +6,7 @@ import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { providerRequest } from "../assembler/wire.ts"
 import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
 import { liveSuffix } from "../agent/messages.ts"
-import { rolloutRequest } from "../agent/wire.ts"
+import { forTarget, rolloutRequest } from "../agent/wire.ts"
 import type { Tool } from "@earendil-works/pi-ai"
 // Agent rollouts' reads (spec/AGENTIC.md §5): a version's steps, projected from its stored
 // transcript with the tools its snapshot froze, as the live display projects the running one;
@@ -21,6 +21,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { type PlacedStep, placedSteps, stepsOf } from "../agent/steps.ts"
 import type { FrozenTool } from "../agent/tools.ts"
+import { loadPoints } from "../agent/toolLoading.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { placedInsertions } from "./displayPath.ts"
 import { shownIn, slotDeletedIn } from "./forkState.ts"
@@ -310,12 +311,10 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const fork = forkId ?? (yield* forkThrough(sql, chatId, leafSlotId, chat.current_fork_id))?.id ?? null
         if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
         if ((yield* placedInsertions(sql, chatId, fork)).length > 0) return null
-        // FTS indexes the whole join. Match only after projecting its rows, before limits,
-        // so hidden text cannot starve visible matches or change excerpts.
-        if (viewers != null) {
-          const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`
-          if (merged!.n > 0) return null
-        }
+        // FTS indexes a join as one text: the tools read it row by row, each row as its viewer
+        // knew it (spec/THREADS.md §11), so a merged chat is searched over its path.
+        const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`
+        if (merged!.n > 0) return null
         // Each token as the start of a word, quoted so FTS syntax in it is only text.
         const match = tokens.length ? tokens.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" AND ") : null
         type Row = {
@@ -328,7 +327,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const shown = sql`(${before} IS NULL OR s.depth < ${before})
             AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
             AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
-            AND ${viewers == null ? sql`1` : knowsSql(sql, viewers, fork)}`
+            AND ${viewers == null ? sql`1` : yield* knowsSql(sql, viewers, fork)}`
         const onPath = sql`EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)`
         // Few matches in the whole chat (a rare word): start from them, each checked against the
         // path, with the path's template messages (matched once their names are filled in). Many
@@ -370,6 +369,55 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           content: r.content
         }))
       }).pipe(query("SearchChat")),
+
+    JoinRows: ({ userId, chatId, slotIds }) =>
+      Effect.gen(function* () {
+        const joins = yield* sql<{ id: string; slot_id: string; title: string; timelines: string }>`
+          SELECT m.id, m.slot_id, m.title, m.timelines FROM json_each(${JSON.stringify(slotIds)}) asked
+          CROSS JOIN chat_merges m ON m.slot_id = asked.value
+          JOIN chats c ON c.id = m.chat_id
+          WHERE m.chat_id = ${chatId} AND c.owner_user_id = ${userId}`
+        if (joins.length === 0) return []
+        const rows = yield* sql<{
+          merge_id: string
+          ordinal: number
+          kind: "message" | "summary"
+          speaker_name: string
+          side: "user" | "assistant"
+          speaker_entity_id: string | null
+          content: string
+          included: "verbatim" | "summarized" | "left_out"
+          knowers: string
+          source_from: number | null
+          source_to: number | null
+        }>`SELECT mm.merge_id, mm.ordinal, mm.kind, mm.speaker_name, mm.side, mm.speaker_entity_id, mm.content,
+            mm.included, mm.source_from, mm.source_to,
+            coalesce(mm.knowers_json, (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c
+              WHERE c.value ->> 'from' <> 'destination')) AS knowers
+          FROM json_each(${JSON.stringify(joins.map((j) => j.id))}) asked
+          CROSS JOIN chat_merges m ON m.id = asked.value
+          CROSS JOIN chat_merge_messages mm ON mm.merge_id = m.id
+          ORDER BY mm.merge_id, mm.ordinal`
+        return joins.map((join) => ({
+          slotId: join.slot_id,
+          title: join.title,
+          timelines: join.timelines,
+          rows: rows
+            .filter((row) => row.merge_id === join.id)
+            .map((row) => ({
+              ordinal: row.ordinal,
+              kind: row.kind,
+              name: row.speaker_name,
+              side: row.side,
+              speaker: row.speaker_entity_id,
+              content: row.content,
+              included: row.included,
+              knowers: JSON.parse(row.knowers) as Array<string>,
+              from: row.source_from,
+              to: row.source_to
+            }))
+        }))
+      }).pipe(query("JoinRows")),
 
     KnowersOf: ({ userId, chatId, forkId, versionIds, viewers }) =>
       Effect.gen(function* () {
@@ -477,7 +525,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return row.result === null ? null : (JSON.parse(row.result) as string)
       }).pipe(query("RolloutReceipt")),
 
-    CountRolloutContext: ({ model, request, transcript, tools }) =>
+    CountRolloutContext: ({ model, request, transcript, tools, continuation }) =>
       Effect.gen(function* () {
         const target = JSON.parse(model) as ModelInput
         const count = yield* prepareTextTokens(assembler.textCounters.list(), target)
@@ -492,7 +540,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const wire = rolloutRequest(
           providerRequest(assembled, target),
           target.api,
-          liveSuffix(history),
+          forTarget(liveSuffix(history), target),
           definitions as ReadonlyArray<Tool>,
           { replayReasoning: true, reasoningTarget: target }
         )
@@ -508,7 +556,8 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           imageTokens +
           count(JSON.stringify(messages)) +
           count(wire.context.systemPrompt ?? "") +
-          count(JSON.stringify(definitions))
+          count(JSON.stringify(definitions)) +
+          (continuation === undefined ? 0 : count(JSON.stringify({ role: "assistant", content: continuation })) + 3)
         )
       }).pipe(query("CountRolloutContext")),
     RolloutMaterial: ({ userId, versionId }) =>
@@ -550,9 +599,11 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly tools: string | null
           readonly turn_cap: number | null
           readonly rollout_id: string
+          readonly model: string | null
         }>`
           SELECT p.transcript_json AS transcript, json_extract(p.context_snapshot_json, '$.agent.tools') AS tools,
-            json_extract(p.context_snapshot_json, '$.agent.turnCap') AS turn_cap, r.id AS rollout_id
+            json_extract(p.context_snapshot_json, '$.agent.turnCap') AS turn_cap, r.id AS rollout_id,
+            json_extract(p.context_snapshot_json, '$.inputs.model') AS model
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
@@ -566,6 +617,16 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
               SELECT reason, fork_index, messages_json FROM rollout_branches
               WHERE rollout_id = ${row.rollout_id} ORDER BY branch_no`
           : []
+        // Each definition's size with the model's own tokenizer, where the app has one.
+        const count = yield* prepareTextTokens(
+          assembler.textCounters.list(),
+          row.model ? (JSON.parse(row.model) as ModelInput) : null
+        )
+        const loadedBy = new Map(
+          loadPoints(messages, new Set(tools.filter((t) => t.deferred).map((t) => t.name))).flatMap((p) =>
+            p.names.map((name) => [name, p.toolCallId] as const)
+          )
+        )
         return {
           tools: tools.map((t) => ({
             name: t.name,
@@ -574,7 +635,10 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             parameters: t.parameters,
             ...(t.capability ? { capability: t.capability } : {}),
             ...(t.titleField ? { titleField: t.titleField } : {}),
-            effect: t.effect
+            effect: t.effect,
+            tokens: count(JSON.stringify({ name: t.name, description: t.description, parameters: t.parameters })),
+            ...(t.deferred ? { deferred: true } : {}),
+            ...(loadedBy.has(t.name) ? { loadedBy: loadedBy.get(t.name)! } : {})
           })),
           entries: transcriptEntries(messages, tools.length, turnCap, placedSteps(messages, tools, true, versionId)),
           cut: cutSpans(messages, branches, tools.length, turnCap)

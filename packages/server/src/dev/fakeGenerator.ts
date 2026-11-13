@@ -38,6 +38,7 @@ export interface FakeGeneratorOptions {
 export const layer = (options: FakeGeneratorOptions) =>
   Layer.succeed(Generator)(
     Option.some({
+      kind: "fake",
       generate: (request) =>
         Stream.suspend(() => {
           const seed = options.seed ?? seedOf(request.versionId)

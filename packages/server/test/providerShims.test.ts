@@ -83,6 +83,39 @@ describe("payload shims", () => {
   })
 })
 
+describe("portable tool schemas", () => {
+  const parameters = {
+    type: "object",
+    properties: { label: { type: "string", allOf: [{ pattern: "^\\P{Cc}*$" }], maxLength: 200 } },
+    additionalProperties: false
+  }
+  const tools = [
+    { type: "function", function: { name: "create_preset", parameters } },
+    { type: "function", function: { name: "read_settings", parameters: { not: { type: "null" } } } }
+  ]
+  it("simplifies only OpenAI schemas through OpenRouter and leaves other requests byte-identical", () => {
+    const original = { tools, messages: [{ role: "user", content: "Synthetic request." }] }
+    const changed = shim("openrouter", "openai-completions", "openai/gpt-5.4-nano", original).payload
+    assert.notInclude(JSON.stringify(changed), "pattern")
+    assert.deepStrictEqual((changed.tools as Array<{ function: { parameters: unknown } }>)[1]!.function.parameters, {
+      type: "object",
+      properties: {},
+      additionalProperties: false
+    })
+    assert.deepStrictEqual(shim("openrouter", "openai-completions", "openai/gpt-5.4-nano", changed).payload, changed)
+    for (const [provider, api, model] of [
+      ["anthropic", "anthropic-messages", "claude-sonnet-4-5"],
+      ["openrouter", "openai-completions", "anthropic/claude-sonnet-4.5"],
+      ["openrouter", "openai-completions", "deepseek/deepseek-v4-flash"],
+      ["deepseek", "openai-completions", "deepseek-chat"],
+      ["google", "google-generative-ai", "gemini-3.5-pro"],
+      ["openai-compatible", "openai-completions", "synthetic-model"]
+    ])
+      assert.strictEqual(JSON.stringify(shim(provider!, api!, model!, original).payload), JSON.stringify(original))
+    assert.include(JSON.stringify(original), "pattern")
+  })
+})
+
 describe("capability shims", () => {
   it.live("Argon stays usable when model settings override the off thinking level", () => {
     const config = testConfig()

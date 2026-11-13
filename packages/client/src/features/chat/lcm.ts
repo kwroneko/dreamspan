@@ -73,6 +73,7 @@ const failureClasses: Record<string, string> = {
   refusal: "The model refused",
   bad_request: "The provider refused the request",
   network: "The provider couldn't be reached",
+  no_response: "The provider sent nothing back",
   aborted: "Stopped"
 }
 

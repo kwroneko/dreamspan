@@ -95,6 +95,14 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     explanation: "Turns a plugin on, so its code runs in the app. It always asks first.",
     example: "Turns on the dice plugin it wrote.",
     modes: ["off", "ask"]
+  },
+  {
+    // spec/TOOL-LOADING.md §6: a card's skills are its author's words, so they're shown first.
+    id: "skills.card",
+    order: 95,
+    label: "Use skills from cards",
+    explanation: "Follows instructions written in the workshop's card. They only choose among the tools allowed here.",
+    example: "A card's “proofreading” skill tells the assistant how to check a card's spelling."
   }
 ])
 
@@ -113,7 +121,8 @@ export const capabilityDefaults = makeRegistry<{ readonly id: string; readonly m
   { id: "chats.read", mode: "ask" },
   { id: "generate", mode: "ask" },
   { id: "network", mode: "ask" },
-  { id: "plugins.apply", mode: "ask" }
+  { id: "plugins.apply", mode: "ask" },
+  { id: "skills.card", mode: "ask" }
 ])
 
 export interface CapabilityRegistries {

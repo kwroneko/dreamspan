@@ -3,13 +3,26 @@
 // in-app agent starts threads the same way. Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound.
 import { CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
-import { StaleWrite } from "@rp/shared/errors.ts"
+import type { ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
+import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
+import { LeafMoved, StaleWrite } from "@rp/shared/errors.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { ThreadsRefused } from "@rp/shared/threads.ts"
-import { type StartThreadsInput, StartThreadsInput as StartInput, ThreadsStarted } from "@rp/shared/threadsApi.ts"
-import { Effect } from "effect"
+import {
+  type SendToThreadsInput,
+  SendToThreadsInput as SendInput,
+  SentToThreads,
+  type StartThreadsInput,
+  StartThreadsInput as StartInput,
+  type ThreadCopy,
+  ThreadsStarted
+} from "@rp/shared/threadsApi.ts"
+import { Effect, Option } from "effect"
+import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
+import { Generations } from "../chat/Generations.ts"
+import { Generator } from "../chat/Generator.ts"
+import { rewriteText } from "../chat/rewrites.ts"
 import { Commands, makeCommand, runCommand } from "../commands.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
@@ -19,6 +32,9 @@ export const makeThreadHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const hub = yield* ChatHub
   const commands = yield* Commands
+  const generations = yield* Generations
+  const generator = yield* Generator
+  const warmth = yield* CacheWarmth
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   /** The chat's tabs read its branches, cast and summaries again. */
@@ -40,6 +56,87 @@ export const makeThreadHandlers = Effect.gen(function* () {
       return result
     }).pipe(Effect.uninterruptible, internal("StartThreads"))
 
+  /**
+   * One message to several threads (spec/THREADS.md §6.2): each copy through its own thread's
+   * scripts, written together, then each reply's generation started in its own fork, which
+   * assembles from that thread's path alone and sends through the chat's connection there.
+   */
+  const send = (input: SendToThreadsInput) =>
+    Effect.gen(function* () {
+      const id = yield* userId
+      if (Option.isNone(generator) && input.targets.some((target) => target.reply))
+        return yield* new GenerationUnavailable({ message: "This server has nothing to generate with." })
+      const targets = yield* Effect.forEach(input.targets, (target) =>
+        Effect.gen(function* () {
+          const written = yield* rewriteText(reader, {
+            userId: id,
+            chatId: input.chatId,
+            forkId: target.forkId,
+            at: { leafSlotId: target.parentSlotId, speakerEntityId: target.speakerEntityId },
+            edit: false,
+            content: input.content
+          })
+          return { ...target, content: written.content, ...(written.rewrite ? { rewrite: written.rewrite } : {}) }
+        })
+      )
+      const result = yield* writer.SendToThreads({
+        userId: id,
+        chatId: input.chatId,
+        ...(input.images === undefined ? {} : { images: input.images }),
+        ...(input.imageDraftIds === undefined ? {} : { imageDraftIds: input.imageDraftIds }),
+        commitDraft: input.composer === undefined ? null : input.composer,
+        targets
+      })
+      const entryOf = (slotId: PathEntry["slotId"], forkId: ForkId) =>
+        Effect.map(reader.GetSlot({ userId: id, slotId, forkId }), ({ entry }) => {
+          hub.publish(input.chatId, { _tag: "Slot", entry })
+          return entry
+        })
+      const copies: Array<ThreadCopy> = []
+      for (const copy of result.copies) {
+        if (copy._tag === "Queued") {
+          copies.push(copy)
+          continue
+        }
+        if (copy.reply !== null)
+          yield* generations.start({
+            userId: id,
+            chatId: input.chatId,
+            slotId: copy.reply.slotId,
+            versionId: copy.reply.versionId,
+            forkId: copy.forkId
+          })
+        copies.push({
+          _tag: "Posted",
+          forkId: copy.forkId,
+          entry: yield* entryOf(copy.slotId, copy.forkId),
+          reply: copy.reply === null ? null : yield* entryOf(copy.reply.slotId, copy.forkId)
+        })
+      }
+      if (input.targets.some((target) => target.reply)) warmth.expectReply(input.chatId)
+      hub.publish(input.chatId, { _tag: "Chat", chat: result.chat })
+      hub.publish(input.chatId, { _tag: "Queue", queue: result.queue })
+      return {
+        groupId: result.groupId,
+        copies,
+        chat: result.chat,
+        queue: result.queue,
+        draft: result.draft,
+        recovered: result.recovered
+      }
+    }).pipe(Effect.uninterruptible, internal("SendToThreads"))
+
+  yield* commands.register(
+    makeCommand({
+      id: "thread.send",
+      description:
+        "Send one message to several threads of a chat: a copy in each, as the card given for it there, each followed by the reply its thread's Next asks for, generated from that thread alone.",
+      input: SendInput,
+      output: SentToThreads,
+      execute: send
+    })
+  )
+
   yield* commands.register(
     makeCommand({
       id: "thread.start",
@@ -52,6 +149,8 @@ export const makeThreadHandlers = Effect.gen(function* () {
   )
 
   return {
+    SendToThreads: (payload: SendToThreadsInput) =>
+      runCommand(commands, "thread.send", payload, SentToThreads, [LeafMoved, ThreadsRefused, GenerationUnavailable]),
     StartThreads: (payload: StartThreadsInput) =>
       runCommand(commands, "thread.start", payload, ThreadsStarted, [StaleWrite, ThreadsRefused]),
     ThreadsOf: (payload: { chatId: ChatId; forkId: ForkId }) =>

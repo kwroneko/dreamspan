@@ -102,6 +102,12 @@ export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("Ge
 }) {}
 
 export interface GeneratorShape {
+  /** Provider-backed generation needs a model; local or plugin generators may not. */
+  readonly requiresModel?: boolean
+
+  /** Non-sensitive runtime identity for the production image smoke check. */
+  readonly kind?: "provider" | "fake"
+
   /** The text as it's produced. Interrupting the stream stops the generation. */
   readonly generate: (request: GenerationRequest) => Stream.Stream<GenerationChunk, GenerationFailed>
 }

@@ -5,6 +5,7 @@ import { Type } from "@earendil-works/pi-ai"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { isDeepStrictEqual } from "node:util"
 import type { PathEntry, SlotId, StoryAt } from "@rp/shared/chat.ts"
+import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Effect } from "effect"
 import { storyReadStamp } from "../continuity.ts"
 import { placedSteps } from "../steps.ts"
@@ -116,8 +117,15 @@ const readRun: RolloutTool<{
         const entry = (yield* pathEntries(context)).get(message)
         if (!entry || entry.contextExcluded)
           return { text: `Message ${message} isn't one of the earlier messages.`, isError: true }
-        // A separate context's character reads only its own runs (spec/CHARACTER-CONTEXT.md §9.2).
-        if (context.viewers !== null && !context.viewers.includes(entry.version.speakerEntityId ?? ""))
+        // A separate context's character reads only its own runs (spec/CHARACTER-CONTEXT.md §9.2). A
+        // stretch view (spec/THREADS.md §7.3: the whole path with a character speaking) isn't one:
+        // it filters only a separate join's stretch, and the workshops this tool is offered in have
+        // no joins, as the history tools read a stretch view whole where no separate join is on it.
+        if (
+          context.viewers !== null &&
+          !context.viewers.includes(STRETCH_VIEW) &&
+          !context.viewers.includes(entry.version.speakerEntityId ?? "")
+        )
           return { text: `Message ${message}'s steps aren't yours to read.`, isError: true }
         const run = yield* messageSteps(context, entry)
         if (run === null || run.steps.length === 0)

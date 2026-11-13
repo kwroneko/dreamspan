@@ -39,6 +39,8 @@ const DEFAULTS = {
   "message.insert-below": false,
   "message.duplicate": false,
   "message.merge": false,
+  "message.threads": false,
+  "message.join-thread": false,
   "message.visibility": false,
   "message.context": false,
   "message.delete-all": false

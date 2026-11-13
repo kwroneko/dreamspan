@@ -58,12 +58,19 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
   const q = query.trim()
   const matchesBuiltin = q === "" || BUILTIN_PRESET_LABEL.toLowerCase().includes(q.toLowerCase())
   // The preset in use stays shown though archived: marked so, at the top of the other views.
-  const pinned = view !== "archived" && current !== null && isArchived(current) ? current : null
+  // From the click on, not from when the lists are read again: the row doesn't wait to move.
+  const [holding, setHolding] = useState<LibraryRef | null>(null)
+  const confirmed = current !== null && isArchived(current)
+  if (holding !== null && (confirmed || current?.id !== holding.id)) setHolding(null)
+  const held = holding !== null && current?.id === holding.id ? holding : null
+  const pinned = view !== "archived" ? (confirmed ? current : held) : null
 
   const archive = async (ref: LibraryRef, next: boolean) => {
     setPending(ref.id)
+    if (next && ref.id === value) setHolding({ ...ref, archivedAt: ref.archivedAt ?? ref.updatedAt ?? 0 })
     const saved = await selection.setArchived(ref, next)
     setPending(null)
+    if (!saved) setHolding(null)
     if (saved) setLast({ ref: saved, archived: next })
   }
   const row = (ref: LibraryRef): PickerItem => {

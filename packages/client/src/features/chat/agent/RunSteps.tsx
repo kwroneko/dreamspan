@@ -71,21 +71,93 @@ function Verbatim({ text }: { text: string }) {
   )
 }
 
-function Tools({ tools }: { tools: ReadonlyArray<OfferedTool> }) {
+const tokens = (n: number) => `${n.toLocaleString()} ${n === 1 ? "token" : "tokens"}`
+
+function ToolBox({ tool, note }: { tool: OfferedTool; note: string }) {
   return (
-    <section aria-label="Tools offered" className="flex flex-col gap-2">
-      <h2 className="text-base font-semibold">Tools offered</h2>
-      <p className="text-sm text-muted">Available to this run, as defined when it started.</p>
+    <Box title={tool.name} note={note}>
+      <div className="flex flex-col gap-1">
+        <Verbatim text={tool.description} />
+        <Disclosure title="Parameters" hint={`Click to show or hide the parameters of ${tool.name}`}>
+          <Verbatim text={json(tool.parameters)} />
+        </Disclosure>
+      </div>
+    </Box>
+  )
+}
+
+/** One group of the offer, with its total size. */
+function ToolGroup({
+  title,
+  about,
+  tools,
+  note
+}: {
+  title: string
+  about: string
+  tools: ReadonlyArray<OfferedTool>
+  note: (tool: OfferedTool) => string
+}) {
+  if (tools.length === 0) return null
+  const total = tools.reduce((n, t) => n + (t.tokens ?? 0), 0)
+  const counted = tools.every((t) => t.tokens !== undefined)
+  return (
+    <section aria-label={title} className="flex flex-col gap-2">
+      <h3 className="text-sm font-semibold">
+        {title}{" "}
+        <span className="font-normal text-muted">
+          · {tools.length === 1 ? "1 tool" : `${tools.length} tools`}
+          {counted ? `, ${tokens(total)}` : ""}
+        </span>
+      </h3>
+      <p className="text-sm text-muted">{about}</p>
       {tools.map((tool) => (
-        <Box key={tool.name} title={tool.name} note={tool.label}>
-          <div className="flex flex-col gap-1">
-            <Verbatim text={tool.description} />
-            <Disclosure title="Parameters" hint={`Click to show or hide the parameters of ${tool.name}`}>
-              <Verbatim text={json(tool.parameters)} />
-            </Disclosure>
-          </div>
-        </Box>
+        <ToolBox key={tool.name} tool={tool} note={note(tool)} />
       ))}
+    </section>
+  )
+}
+
+/**
+ * The run's tools as frozen when it started (spec/TOOL-LOADING.md): those sent from the start,
+ * then those the assistant loaded as it went (and the tool that loaded them), then those it
+ * never needed. A run that loads nothing shows one list, as before.
+ */
+function Tools({ tools, entries }: { tools: ReadonlyArray<OfferedTool>; entries: ReadonlyArray<TranscriptEntry> }) {
+  const loaderOf = new Map(entries.flatMap((e) => (e.role === "toolResult" ? [[e.toolCallId, e.tool] as const] : [])))
+  const size = (tool: OfferedTool) => (tool.tokens === undefined ? "" : ` · ${tokens(tool.tokens)}`)
+  const immediate = tools.filter((t) => !t.deferred)
+  const loaded = tools.filter((t) => t.deferred && t.loadedBy !== undefined)
+  const unused = tools.filter((t) => t.deferred && t.loadedBy === undefined)
+  const deferring = loaded.length + unused.length > 0
+  return (
+    <section aria-label="Tools offered" className="flex flex-col gap-3">
+      <h2 className="text-base font-semibold">Tools offered</h2>
+      <ToolGroup
+        title={deferring ? "Sent from the start" : "Available to this run"}
+        about={
+          deferring
+            ? "In every request of this run, as defined when it started."
+            : "Available to this run, as defined when it started."
+        }
+        tools={immediate}
+        note={(tool) => `${tool.label}${size(tool)}`}
+      />
+      <ToolGroup
+        title="Loaded during the run"
+        about="Their definitions were sent only after the assistant loaded them."
+        tools={loaded}
+        note={(tool) => {
+          const loader = loaderOf.get(tool.loadedBy!)
+          return `${tool.label}${size(tool)} · loaded ${loader === undefined ? "during the run" : `by ${loader}`}`
+        }}
+      />
+      <ToolGroup
+        title="Never loaded"
+        about="Available to load, but this run didn't need them, so their definitions were never sent."
+        tools={unused}
+        note={(tool) => `${tool.label}${size(tool)}`}
+      />
     </section>
   )
 }
@@ -490,7 +562,7 @@ function Transcript({
   const outside = editing.open === null && editing.error !== null
   return (
     <>
-      {tools.length > 0 && <Tools tools={tools} />}
+      {tools.length > 0 && <Tools tools={tools} entries={entries} />}
       {outside && (
         <p role="alert" className="text-sm text-danger">
           {editing.error}

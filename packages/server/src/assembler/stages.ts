@@ -2811,7 +2811,12 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
   // (spec/CHARACTER-CONTEXT.md §2.3, unit C7): another character's history differs after the
   // first message one of them missed. The whole path's (a shared context, a narrator) stays
   // `cacheHistory`; both are carried forward through every request.
-  const viewer = assembly.knowledge?.viewer ?? null
+  // Read whole, a separate join's stretch makes a character's history its own from there.
+  const viewer =
+    assembly.knowledge?.viewer ??
+    (assembly.knowledge?.stretch?.ranges?.length || assembly.parallelStretches?.length
+      ? (assembly.knowledge?.stretch?.viewer ?? null)
+      : null)
   const byView = previous?.state?.cacheHistoryByView
   const previousHistory = viewer === null ? previous?.state?.cacheHistory : byView?.[viewer]
   assembly.breakpoints = placeBreakpoints(

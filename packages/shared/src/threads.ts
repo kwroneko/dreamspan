@@ -23,7 +23,13 @@ const ThreadInfo = Schema.Struct({
   forks: Schema.Int,
   /** Its characters at S (not away there), narrators and the user's own cards left out: what an unnamed thread is called by. */
   cast: Schema.Array(EntityId),
-  rowVersion: Schema.Int
+  rowVersion: Schema.Int,
+  /**
+   * Another thread joined into the fork asked about (§7.1): its latest join on that fork's path,
+   * that join's number there, and whether nothing new has come since (the thread's fork joined
+   * still ends where the join pinned it).
+   */
+  joined: Schema.optionalKey(Schema.Struct({ slotId: SlotId, number: Schema.Int, upToDate: Schema.Boolean }))
 })
 export type ThreadInfo = typeof ThreadInfo.Type
 

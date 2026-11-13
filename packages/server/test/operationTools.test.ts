@@ -1,10 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
+import { AppApi } from "@rp/shared/api.ts"
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
+import { portableParameters } from "../src/providers/toolSchemas.ts"
 import { client, serverLayer, testConfig, outcome } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { eventually } from "./support/generation.ts"
@@ -716,4 +718,55 @@ it.live("revision restores cannot remove a user's agent-edit field permissions",
     assert.include(result.text, "permissions")
     assert.deepStrictEqual((yield* f.api.OpenEditor({ refId: ref.id })).doc.agent_editable_fields, ["description"])
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+describe("provider-specific tool schemas", () => {
+  it("drops Unicode property patterns and makes an empty payload an object", () => {
+    const label = { type: "string", maxLength: 200, allOf: [{ pattern: "^\\P{Cc}*$" }] }
+    assert.deepStrictEqual(
+      portableParameters({ type: "object", properties: { label, plain: { type: "string", pattern: "^a$" } } }),
+      {
+        type: "object",
+        properties: { label: { type: "string", maxLength: 200 }, plain: { type: "string", pattern: "^a$" } }
+      }
+    )
+    assert.deepStrictEqual(portableParameters({ not: { type: "null" }, $defs: {}, additionalProperties: false }), {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+      $defs: {}
+    })
+  })
+
+  it.effect("keeps the full original operation schema until provider serialization", () =>
+    Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      const entry = registry.operationTools.get("create_preset")!
+      const schema = entry.parameters ?? AppApi.requests.get("CreatePreset")!.payloadSchema
+      const document = Schema.toJsonSchemaDocument(schema)
+      const original = { ...document.schema, $defs: document.definitions, additionalProperties: false }
+      const parameters = toolForKind(registry, "workshop", entry.id)!.parameters
+      assert.strictEqual(JSON.stringify(parameters), JSON.stringify(original))
+    }).pipe(Effect.provide(ExecutionRegistry.layer))
+  )
+
+  it.live("still refuses a control character the model's copy no longer describes", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* fixture(config.dataDir)
+      let adapted = false
+      const exposure = f.registry.operationTools.get("create_preset")!
+      yield* f.registry.operationTools.register({
+        ...exposure,
+        adapt: () => {
+          adapted = true
+          return Effect.succeed({ label: "Must not run" })
+        }
+      })
+      const result = yield* f.run("create_preset", { label: "Tide\u0007" })
+      assert.isTrue(result.isError, result.text)
+      assert.isFalse(adapted, "invalid arguments must be refused before adaptation or invocation")
+      assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 })

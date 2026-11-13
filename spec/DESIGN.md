@@ -1043,7 +1043,9 @@ Tools that “change a card” during RP create notes replacing its fields, incl
   - **[P]** (phase4ui, 2026-11-05) Activity reads the usage ledger, one row per rollout and purpose, so a refusal judgment (a `decision` request riding on a reply's rollout) is listed beside summaries and condensations. A summary row links to its request; a judgment's to the reply.
 
 ### 7.5 Resuming
-- **[D]** Resume a stopped or broken rollout mid-way **without sending another turn and without the model being able to tell**. reference-harness does this; most coding harnesses don't.
+
+- **[P]** (review-resume1, 2026-11-13) **Built; obsolete as an implementation proposal:** removing a model binding resolves the current default before Resume, Continue or a new version; a model switch checks the kept run against the new context budget; a removed tool's committed receipt still supplies its result; provider identity controls replayed thinking; stopped plain replies have visible Resume. See AGENTIC §12.8 and ARCHITECTURE §16. Decision statuses above and below are unchanged.
+- **[D]** Resume a stopped or broken rollout mid-way **without sending another turn and without the model being able to tell**. reference-harness does this; most coding harnesses don't. **Built** (resumeui, 2026-11-12; ARCHITECTURE §16 "Agent rollouts", "In the client"): Resume among the message's actions on an agent reply that stopped or failed.
 - **[P]** As in reference-harness (`src/agent/recovery.ts`): **Built; obsolete as a proposal** (2026-11-05; ARCHITECTURE §16, "Agent rollouts": `ResumeVersion`, `agent/resume.ts`).
   - a frozen context snapshot is taken when the rollout starts
   - the transcript is flushed as each turn completes
@@ -1052,7 +1054,13 @@ Tools that “change a card” during RP create notes replacing its fields, incl
   - after a tool call but before its result: re-run the tool
   - midway through a tool call: discard it and resample
   - midway through text: continue it through prefill where supported, otherwise discard it
-- **[P]** Any step of a rollout can be edited before resuming. **Server built** (2026-11-05; `ResumeFromStep`, ARCHITECTURE §16); the inspector's controls are AGENTIC U8.
+- **[P]** Any step of a rollout can be edited before resuming. **Built** (server 2026-11-05, `ResumeFromStep`; the inspector's Edit and Resume from here, resumeui 2026-11-12; ARCHITECTURE §16).
+- **[D]** Anything stopped midway can be resumed without a new message: a crash mid-rollout, a model error. The request that failed is sent when the user resumes, to a new model if the user chose one (owner, 2026-11-12). Design and audit: AGENTIC §12. **Built** (resume1, 2026-11-12; ARCHITECTURE §16).
+- **[P]** (resume1) The turn being written is saved while it streams, so a crash loses at most its last 2 s; a restart sends nothing until the user resumes.
+- **[P]** (resume1) Resume, Continue and a new version use the model the composer shows with the reply last. With the same model the frozen request is sent byte for byte; with another, the messages and transcript are kept, the new model's settings and cache layout apply, and other models' thinking and signatures are left out.
+- **[P]** (resume1) Resume offers the tools the chat has now; a removed tool isn't offered, finished calls keep their results. When the request can't be built from the chat now, Resume says why and offers to send the saved request unchanged, never silently.
+- **[P]** (resume1) A provider that sends nothing for 300 s fails the request ("no_response", not retried); each connection can change the wait. Any byte, keep-alives included, restarts the clock.
+- **[P]** (resume1) Failed and interrupted replies show Resume beside their status: an agent run goes on; a plain reply is continued, or written again when it has no text.
 
 ### 7.6 Decision models
 - **[D]** Jev and similar decision models are integrated as in reference-harness (`spec/DECISION-MODEL.md`), but are **never mandatory**. Each decision point has a heuristic fallback. Phase 4 design: AGENTIC §7 (points `presence` and `lore`, opt-in per connection). **Built** (phase4decide, 2026-11-05; ARCHITECTURE §16 "Decision models").

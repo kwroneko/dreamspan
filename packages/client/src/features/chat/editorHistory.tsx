@@ -1,7 +1,9 @@
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { editorKey } from "./messageDraft.ts"
-import { useEffect, useState, useSyncExternalStore } from "react"
-import type { MessageImages } from "@rp/shared/chat.ts"
+import { type ComponentType, useEffect, useState, useSyncExternalStore } from "react"
+import { makeRegistry } from "../../registry.ts"
+import type { ChatSession } from "./session.ts"
+import type { MessageImages, PathEntry } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
 import type { VersionAmendment } from "@rp/shared/chatApi.ts"
 import { CodeEditor, type CodeEditorProps } from "../../ui/CodeEditor.tsx"
@@ -23,6 +25,39 @@ export const messageEditorTools = defineSlot<{
   images: MessageImages
 }>("message.editor.tools")
 export const summaryEditorTools = defineSlot<{ draft: SummaryDraft; base: string }>("summary.editor.tools")
+
+/**
+ * More ways to save an edit of a message, beside its Save (spec/PLUGINS.md §8): threads' "Save in
+ * both" for a message sent to several (spec/THREADS.md §6.3). While one is offered, Save reads as
+ * its `here` label ("Save here"). `save` saves as Save does, then runs `after` with the text saved.
+ */
+export interface MessageSaveOption {
+  readonly id: string
+  readonly order: number
+  readonly offers: (entry: PathEntry) => { readonly here: string } | null
+  readonly component: ComponentType<{
+    readonly entry: PathEntry
+    readonly session: ChatSession
+    readonly disabled: boolean
+    readonly save: (after: (text: string) => Promise<void>) => void
+  }>
+}
+export const messageSaveOptions = makeRegistry<MessageSaveOption>()
+
+/** The save options offered for an edit of `entry`, in order. */
+export const useMessageSaveOptions = (entry: PathEntry) => {
+  const { entries } = useSyncExternalStore(
+    messageSaveOptions.subscribe,
+    messageSaveOptions.snapshot,
+    messageSaveOptions.snapshot
+  )
+  return [...entries]
+    .sort((a, b) => a.order - b.order)
+    .flatMap((option) => {
+      const offered = option.offers(entry)
+      return offered === null ? [] : [{ option, here: offered.here }]
+    })
+}
 
 export const messageTextEditor = defineSlot<CodeEditorProps>("message.text-editor")
 export const summaryTextEditor = defineSlot<CodeEditorProps>("summary.text-editor")

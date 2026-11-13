@@ -50,6 +50,14 @@ export const awayAt = (state: Pick<ChatState, "away" | "roles">): ReadonlyArray<
  */
 export const AWAY_ACTS_AS_MUTED = true
 
+/**
+ * The pseudo-identity of a view of one shared context at a separate join (spec/THREADS.md §7.3,
+ * TH7). Beside a character's identities in a summary audience, it scopes what the character
+ * didn't know to the separate joins' parallel stretches: outside them a chat with one shared
+ * context reads everything whole. Never an entity id (`~` sorts after them).
+ */
+export const STRETCH_VIEW = "~stretch"
+
 /** What a version records about who was there, as read back from its row. */
 export interface KnowledgeRecord {
   /** `cast_json`'s ids; null when the version has none recorded (known to everyone). */

@@ -382,14 +382,18 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           for (const row of rows) {
             row.sort((a, b) => rect(a).left - rect(b).left)
             const autoMargin = row.some((c) => /(?:^|\s|:)(?:m[lrsexy]?|m[lrse])-auto(?:\s|$)/.test(c.className))
-            // A transparent hover toolbar still reserves its flex space and both gaps.
-            // Its controls aren't painted children; don't compare across that space.
             const spacer = [...el.children].some((c) => {
-              const childStyle = css(c as HTMLElement)
+              const element = c as HTMLElement
+              const style = css(element)
+              if (style.display === "none" || ["absolute", "fixed"].includes(style.position)) return false
+              // A transparent hover toolbar still reserves its flex space and both gaps, and a
+              // collapsing action toolbar still separates the groups on either side: it can
+              // retain hidden controls while its own box has zero width or height. Their controls
+              // aren't painted children; don't compare across that space.
+              const r = rect(element)
               return (
-                childStyle.display !== "none" &&
-                num(childStyle.flexGrow) > 0 &&
-                (num(childStyle.opacity) === 0 || (!c.textContent?.trim() && !c.children.length))
+                num(style.flexGrow) > 0 &&
+                (num(style.opacity) === 0 || !r.width || !r.height || (!c.textContent?.trim() && !c.children.length))
               )
             })
             const gaps = row.slice(1).map((c, i) => rect(c).left - rect(row[i]!).right)

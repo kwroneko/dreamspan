@@ -118,7 +118,11 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
     const schema = entry.parameters ?? rpc?.payloadSchema ?? runtime.schema?.(entry.operation)
     if (!schema) throw new Error(`Tool ${entry.id} needs a parameter schema.`)
     const document = Schema.toJsonSchemaDocument(schema)
-    const parameters = { ...document.schema, $defs: document.definitions, additionalProperties: false } as TSchema
+    const parameters = {
+      ...document.schema,
+      $defs: document.definitions,
+      additionalProperties: false
+    } as TSchema
     const validate = (ctx: ToolContext, args: Record<string, unknown>) =>
       Effect.gen(function* () {
         if (!boundedArguments(args)) return yield* Effect.fail(new Error("Arguments exceed this tool's size limits."))
@@ -152,6 +156,9 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
                     model: import("@rp/shared/providers.ts").ModelId
                   }
                 }
+                storyAt?: import("@rp/shared/chat.ts").StoryAt
+                upTo?: number
+                branchLabel?: string
                 chats?: ReadonlyArray<{ id: string; title: string }>
               }
             | undefined
@@ -161,7 +168,13 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
           }))
           for (const chat of proof?.chats ?? [])
             rows.unshift({ label: "affected chat", value: `${chat.title} (${chat.id})` })
+          if (proof?.storyAt)
+            rows.unshift({
+              label: "Story position",
+              value: `Branch “${proof.branchLabel ?? "Unnamed branch"}” (${proof.storyAt.forkId}); through message ${proof.upTo ?? 0}`
+            })
           if (proof?.chat) rows.unshift({ label: "chat", value: proof.chat.title })
+          const position = proof?.storyAt ? { storyAt: proof.storyAt } : {}
           if (entry.capability === "generate" && proof?.chat?.model) {
             const connection = yield* ctx.reader.GetConnection({
               userId: ctx.userId,
@@ -171,8 +184,8 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
             rows.unshift({ label: "provider", value: `${connection.name} · ${model.key}` })
           }
           return entry.describe
-            ? yield* entry.describe(payload as Record<string, unknown>, ctx)
-            : { title: entry.explanation, rows }
+            ? { ...(yield* entry.describe(payload as Record<string, unknown>, ctx)), ...position }
+            : { title: entry.explanation, rows, ...position }
         }).pipe(Effect.mapError((error) => new ToolInputRefused(failure(error).text))),
       execute: (ctx, args) =>
         Effect.gen(function* () {

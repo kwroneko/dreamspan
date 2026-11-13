@@ -84,3 +84,29 @@ it.effect("a shared context records the repeat as before, with no per-view entry
     assert.notProperty(next.historyStart?.state ?? {}, "cacheHistoryByView")
   })
 )
+
+it.effect("resolved join stretches keep each character's exact cache position", () =>
+  Effect.gen(function* () {
+    const path = [
+      ...Array.from({ length: 10 }, (_, n) => both(n)),
+      ...Array.from({ length: 4 }, (_, n) => miraOnly(n + 10)),
+      ...Array.from({ length: 6 }, (_, n) => both(n + 14))
+    ]
+    const build = (
+      messages: ReadonlyArray<FixtureMessage>,
+      speaker: string,
+      historyStart: ContextSnapshot["historyStart"] | null
+    ) =>
+      assembleFixture({
+        ...fixture(messages, speaker, historyStart, "shared"),
+        stretches: [{ chain: "fixture", lo: 10, hi: 13 }]
+      })
+    const first = yield* build(path, "wren", null)
+    const digest = first.historyStart?.state?.cacheHistoryByView?.["wren"]
+    assert.isString(digest)
+    const mira = yield* build([...path, both(20)], "mira", first.historyStart)
+    assert.strictEqual(mira.historyStart?.state?.cacheHistoryByView?.["wren"], digest)
+    const next = yield* build([...path, both(20), both(21)], "wren", mira.historyStart)
+    assert.include(marked(next), digest)
+  })
+)

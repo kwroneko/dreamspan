@@ -14,6 +14,13 @@ import { cardexAdapter, cardSourceSetup } from "./sources/cardex.ts"
 const teardown: Runtime.Teardown = (exit, onExit) =>
   Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? onExit(0) : Runtime.defaultTeardown(exit, onExit)
 
+/** Expected operator-facing startup refusals must not print loader or source locations. */
+const startupRefusal = (message: string) => {
+  const error = new Error(message)
+  error.stack = `Error: ${message}`
+  return error
+}
+
 /**
  * The development instance and previews ask for the fake card archive in place of cardex by
  * setting `FAKE_CARD_SOURCE` (as the development server reads it), so their content stays
@@ -26,7 +33,13 @@ const server =
   setup === "fake"
     ? Layer.unwrap(
         Effect.map(
-          Effect.promise(() => import("./dev/fakeCardSource.ts")),
+          Effect.tryPromise({
+            try: () => import("./dev/fakeCardSource.ts"),
+            catch: () =>
+              startupRefusal(
+                "FAKE_CARD_SOURCE=fake needs the development files (src/dev), which this build doesn't include."
+              )
+          }),
           ({ fakeCardSources }) =>
             serverWith(ContextGenerator.layer, undefined, undefined, undefined, fakeCardSources(fakeCardSource))
         )
@@ -51,7 +64,9 @@ const withMedia =
           Effect.tryPromise({
             try: () => import("./dev/fakeSavedMedia.ts"),
             catch: () =>
-              new Error("FAKE_SAVED_MEDIA=on needs the development files (src/dev), which this build doesn't include.")
+              startupRefusal(
+                "FAKE_SAVED_MEDIA=on needs the development files (src/dev), which this build doesn't include."
+              )
           }),
           ({ fakeSavedMedia }) => fakeSavedMedia.pipe(Layer.provideMerge(server))
         )

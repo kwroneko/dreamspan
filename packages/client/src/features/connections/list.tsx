@@ -228,6 +228,7 @@ function NewConnectionForm({
     maxConcurrent: concurrency.problem,
     maxMarkers: parsed.problems.maxMarkers,
     minTokens: parsed.problems.minTokens,
+    idleTimeoutS: parsed.problems.idleTimeoutS,
     cacheTtlS: ttl.problem
   }
 
@@ -415,7 +416,8 @@ function NewConnectionForm({
               region: null,
               project: null,
               maxMarkers: shown(problems.maxMarkers),
-              minTokens: shown(problems.minTokens)
+              minTokens: shown(problems.minTokens),
+              idleTimeoutS: shown(problems.idleTimeoutS)
             }}
             cacheTtl={{
               value: values.cacheTtlS,

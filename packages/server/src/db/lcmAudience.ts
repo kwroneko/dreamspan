@@ -5,15 +5,18 @@
 // triggers). Such a summary's inputs are the messages that character knew; one it didn't know is
 // an input with no version, as an absent message is. A view reads the shared summaries up to its
 // first message it didn't know, then its own: the context's cached prefix is the shared one up to
-// where it diverged.
+// where it diverged. In a chat with one shared context, a separate join (spec/THREADS.md §7.3,
+// TH7) makes such views too, scoped to its parallel stretch (`STRETCH_VIEW`, db/knowers.ts).
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { type ForkRef, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import { displaySlots } from "./displayPath.ts"
 import { pathView } from "./lcmDisplay.ts"
-import { knowsSql } from "./knowers.ts"
-import type { ChatState, FoldableEvent } from "@rp/shared/state.ts"
+import { isStretchView, knowsSql } from "./knowers.ts"
+import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
+import { stretchesAt } from "./threadStretches.ts"
+import { type ChatState, type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { identitiesOf } from "../assembler/knowledge.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
@@ -27,17 +30,38 @@ export const audienceIds = (key: string) => JSON.parse(key) as ReadonlyArray<str
 /**
  * The rows of `summaries` or `summarization_jobs` (alias `alias`) a view reads: the shared ones,
  * and those whose audience is among its identities (a summary written before a card replacement
- * stays its successor's). No identities: the shared rows only.
+ * stays its successor's). No identities: the shared rows only. A stretch view reads only its
+ * kind's own rows, never a separate context's, which left out more.
  */
 export const audienceScope = (sql: SqlClient.SqlClient, alias: string, identities?: ReadonlyArray<string>) =>
   identities === undefined
     ? sql`${sql.literal(alias)}.audience_json IS NULL`
-    : sql`(${sql.literal(alias)}.audience_json IS NULL OR NOT EXISTS (SELECT 1 FROM json_each(${sql.literal(alias)}.audience_json) a
+    : isStretchView(identities)
+      ? sql`(${sql.literal(alias)}.audience_json IS NULL OR (NOT EXISTS (SELECT 1 FROM json_each(${sql.literal(alias)}.audience_json) a
+        WHERE a.value NOT IN (SELECT value FROM json_each(${JSON.stringify([...identities])})))
+          AND EXISTS (SELECT 1 FROM json_each(${sql.literal(alias)}.audience_json) a WHERE a.value = ${STRETCH_VIEW})))`
+      : sql`(${sql.literal(alias)}.audience_json IS NULL OR NOT EXISTS (SELECT 1 FROM json_each(${sql.literal(alias)}.audience_json) a
         WHERE a.value NOT IN (SELECT value FROM json_each(${JSON.stringify([...identities])}))))`
 
 /**
+ * Whether a live separate join (resolved from its predecessor, `threadStretches`) is on the path to
+ * `leaf`: only there does a chat with one shared context keep views (spec/THREADS.md §7.3). One
+ * indexed read of the chat's merges, then a path probe per such join (few).
+ */
+export const stretchOnPath = (sql: SqlClient.SqlClient, chatId: string, leaf: string | null) =>
+  Effect.map(stretchesAt(sql, chatId, leaf), (ranges) => ranges.length > 0)
+
+/** A stretch view's identities: the character's, with `STRETCH_VIEW`. */
+const stretchView = (identities: ReadonlyArray<string>) => [...new Set([...identities, STRETCH_VIEW])]
+
+/** Whether the chat state reads one shared context (the default). */
+const sharedContext = (state: ChatState) => state.contextPerSpeaker === null || state.contextPerSpeaker === "shared"
+
+/**
  * A character's view at `leaf`, as the summary UI names it: its identities (its card and those
- * it replaced on the path, `card.swap`) and their audience key.
+ * it replaced on the path, `card.swap`) and their audience key; in a chat with one shared
+ * context, its stretch view where a separate join is on the path (a narrator's or persona's
+ * view there is the shared one, its identities alone).
  */
 export const viewerAudience = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
@@ -49,7 +73,15 @@ export const viewerAudience = Effect.fnUntraced(function* (
   const events = rows.map((e) => ({ scope: e.scope, data: { key: e.key, value: JSON.parse(e.value_json) } }))
   // Any of the character's identities names it: its card now, or one it replaced.
   const replaced = identitiesOf(events as Array<FoldableEvent>)
-  const identities = replaced.get(viewer) ?? [...replaced.values()].find((ids) => ids.includes(viewer)) ?? [viewer]
+  const own = replaced.get(viewer) ?? [...replaced.values()].find((ids) => ids.includes(viewer)) ?? [viewer]
+  const state = foldState(events as Array<FoldableEvent>)
+  const identities =
+    sharedContext(state) &&
+    state.roles[viewer] !== "narrator" &&
+    !state.playedByMe.includes(viewer) &&
+    (yield* stretchOnPath(sql, chatId, leaf))
+      ? stretchView(own)
+      : own
   return { identities, audience: audienceKey(identities) }
 })
 
@@ -63,14 +95,13 @@ export const knownVersions = (
   identities: ReadonlyArray<string>,
   fork?: ForkRef
 ) =>
-  versionIds.length === 0
-    ? Effect.succeed(new Set<string>())
-    : Effect.map(
-        sql<{ id: string }>`SELECT v.id FROM json_each(${JSON.stringify([...new Set(versionIds)])}) r
-          CROSS JOIN version_records v ON v.id = r.value CROSS JOIN slots s ON s.id = v.slot_id
-          WHERE ${knowsSql(sql, identities, fork, true)}`,
-        (rows) => new Set(rows.map((row) => row.id))
-      )
+  Effect.gen(function* () {
+    if (versionIds.length === 0) return new Set<string>()
+    const rule = yield* knowsSql(sql, identities, fork, true)
+    const rows = yield* sql<{ id: string }>`SELECT v.id FROM json_each(${JSON.stringify([...new Set(versionIds)])}) r
+      CROSS JOIN version_records v ON v.id = r.value CROSS JOIN slots s ON s.id = v.slot_id WHERE ${rule}`
+    return new Set(rows.map((row) => row.id))
+  })
 
 /**
  * Whether the identities knew every message a summary was written from: its inputs' recorded
@@ -83,15 +114,15 @@ export const inputsKnown = (
   identities: ReadonlyArray<string>,
   fork?: ForkRef
 ) =>
-  Effect.map(
-    sql<{ unknown: number }>`WITH RECURSIVE parts(id) AS (
+  Effect.gen(function* () {
+    const rows = yield* sql<{ unknown: number }>`WITH RECURSIVE parts(id) AS (
         SELECT ${summaryId} UNION SELECT p.parent_id FROM summary_parents p JOIN parts ON p.summary_id = parts.id
       ) SELECT EXISTS (SELECT 1 FROM parts JOIN summary_inputs i ON i.summary_id = parts.id
         JOIN version_records v ON v.id = i.version_id JOIN slots s ON s.id = v.slot_id
         WHERE NOT CASE WHEN (SELECT audience_json FROM summaries WHERE id=${summaryId}) IS NOT NULL
-          THEN ${knowsSql(sql, identities, fork, true)} ELSE ${knowsSql(sql, identities, fork)} END) AS unknown`,
-    ([row]) => (row?.unknown ?? 0) === 0
-  )
+          THEN ${yield* knowsSql(sql, identities, fork, true)} ELSE ${yield* knowsSql(sql, identities, fork)} END) AS unknown`
+    return (rows[0]?.unknown ?? 0) === 0
+  })
 
 /**
  * The display position of the first message on the path to `leaf` the identities didn't know, as its fork
@@ -104,6 +135,8 @@ export const firstUnknownPosition = (
   identities: ReadonlyArray<string>
 ) =>
   Effect.gen(function* () {
+    // A stretch view knew everything off a separate join's stretch: none on the path, nothing missed.
+    if (isStretchView(identities) && !(yield* stretchOnPath(sql, chatId, leaf))) return null
     const fork = yield* viewAt(sql, chatId, leaf)
     const shown = yield* pathView(sql, chatId, leaf)
     const path = shown
@@ -118,7 +151,7 @@ export const firstUnknownPosition = (
         WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
           AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
           AND (v.content_length > 0 OR EXISTS (SELECT 1 FROM version_attachments a WHERE a.version_id=v.id))
-          AND NOT ${knowsSql(sql, identities, fork)}`
+          AND NOT ${yield* knowsSql(sql, identities, fork)}`
     return row?.position ?? null
   })
 
@@ -135,7 +168,9 @@ interface SummaryView {
  * The views with summaries of their own at `leaf`: in a chat set to separate contexts (any view
  * but `shared`), each character of the cast, not a narrator nor a persona (they read the whole
  * path, §6 [D]), that missed a message on the path. A character that knew everything reads the
- * shared summaries, so a chat makes one summary pass per character that missed something.
+ * shared summaries, so a chat makes one summary pass per character that missed something. In a
+ * chat with one shared context, the same for what each missed in the stretch of a separate join
+ * on the path (spec/THREADS.md §7.3, TH7): stretch views; with no such join, none.
  */
 export const activeViews = (
   sql: SqlClient.SqlClient,
@@ -145,12 +180,14 @@ export const activeViews = (
   events: ReadonlyArray<FoldableEvent>
 ) =>
   Effect.gen(function* () {
-    if (state.contextPerSpeaker === null || state.contextPerSpeaker === "shared") return []
+    const shared = sharedContext(state)
+    if (shared && !(yield* stretchOnPath(sql, chatId, leaf))) return []
     const replaced = identitiesOf(events)
     const views: Array<SummaryView> = []
     for (const entity of state.participants) {
       if (state.playedByMe.includes(entity) || state.roles[entity] === "narrator") continue
-      const identities = replaced.get(entity) ?? [entity]
+      const own = replaced.get(entity) ?? [entity]
+      const identities = shared ? stretchView(own) : own
       const unknownFrom = yield* firstUnknownPosition(sql, chatId, leaf, identities)
       if (unknownFrom !== null) views.push({ entity, identities, audience: audienceKey(identities), unknownFrom })
     }

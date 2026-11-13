@@ -71,7 +71,13 @@ export class AgentApi extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       expectedRowVersion: Schema.Int,
       /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
-      storyAt: StoryAtField
+      storyAt: StoryAtField,
+      /**
+       * Sends the stopped run's stored request unchanged, with its model and tools, instead of
+       * building it on the chat's settings now: only when the user chose it after a
+       * `NotResumable` with `savedRequest` (spec/AGENTIC.md §12.4).
+       */
+      saved: Schema.optionalKey(Schema.Boolean)
     },
     success: PathEntry,
     error: Schema.Union([...ResumeErrors])
