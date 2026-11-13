@@ -160,6 +160,11 @@ describe("the split", () => {
         ["anthropic/claude-haiku-4.5", route(["google-vertex"]), true],
         ["anthropic/claude-opus-5.5", route(["google-vertex/us-east5"]), true],
         ["anthropic/claude-sonnet-4.5", undefined, false],
+        ["anthropic/claude-sonnet-4.5", { routing: { order: ["anthropic"] } }, false],
+        ["anthropic/claude-sonnet-4.5", { routing: { order: ["anthropic"], allow_fallbacks: true } }, false],
+        ["anthropic/claude-sonnet-4.5", { routing: { order: ["anthropic"], allow_fallbacks: false } }, true],
+        ["anthropic/claude-sonnet-4.5", { routing: { only: ["anthropic"], allow_fallbacks: true } }, true],
+        ["anthropic/claude-sonnet-4.5", { routing: { only: ["anthropic"], ignore: ["anthropic"] } }, false],
         ["anthropic/claude-sonnet-4.5", route(["anthropic", "amazon-bedrock"]), false],
         // Bedrock rewrites the whole cache at the first call of each loaded tool (measured).
         ["anthropic/claude-sonnet-4.5", route(["amazon-bedrock"]), false],

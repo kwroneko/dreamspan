@@ -1,11 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
+import { AppApi } from "@rp/shared/api.ts"
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
-import { portableParameters } from "../src/agent/operations.ts"
+import { portableParameters } from "../src/providers/toolSchemas.ts"
 import { client, serverLayer, testConfig, outcome } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { eventually } from "./support/generation.ts"
@@ -685,7 +686,7 @@ it.live("revision restores cannot remove a user's agent-edit field permissions",
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })
 
-describe("tool schemas every provider accepts", () => {
+describe("provider-specific tool schemas", () => {
   it("drops Unicode property patterns and makes an empty payload an object", () => {
     const label = { type: "string", maxLength: 200, allOf: [{ pattern: "^\\P{Cc}*$" }] }
     assert.deepStrictEqual(
@@ -703,14 +704,15 @@ describe("tool schemas every provider accepts", () => {
     })
   })
 
-  it.effect("every workshop tool sends an object schema with no Unicode property escapes", () =>
+  it.effect("keeps the full original operation schema until provider serialization", () =>
     Effect.gen(function* () {
       const registry = yield* ExecutionRegistry
-      for (const entry of registry.operationTools.list()) {
-        const parameters = toolForKind(registry, "workshop", entry.id)!.parameters as Record<string, unknown>
-        assert.strictEqual(parameters.type, "object", entry.id)
-        assert.notMatch(JSON.stringify(parameters), /\\\\[pP]\{/, entry.id)
-      }
+      const entry = registry.operationTools.get("create_preset")!
+      const schema = entry.parameters ?? AppApi.requests.get("CreatePreset")!.payloadSchema
+      const document = Schema.toJsonSchemaDocument(schema)
+      const original = { ...document.schema, $defs: document.definitions, additionalProperties: false }
+      const parameters = toolForKind(registry, "workshop", entry.id)!.parameters
+      assert.strictEqual(JSON.stringify(parameters), JSON.stringify(original))
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
@@ -718,8 +720,19 @@ describe("tool schemas every provider accepts", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const f = yield* fixture(config.dataDir)
+      let adapted = false
+      const exposure = f.registry.operationTools.get("create_preset")!
+      yield* f.registry.operationTools.register({
+        ...exposure,
+        adapt: () => {
+          adapted = true
+          return Effect.succeed({ label: "Must not run" })
+        }
+      })
       const result = yield* f.run("create_preset", { label: "Tide\u0007" })
       assert.isTrue(result.isError, result.text)
+      assert.isFalse(adapted, "invalid arguments must be refused before adaptation or invocation")
+      assert.isEmpty(yield* f.api.ListRolloutEffects({ chatId: f.chat.id }))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
