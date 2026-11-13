@@ -204,13 +204,12 @@ export const planStepResume = (
         return new StepNotResumable("The arguments don't fit this tool's parameters.")
       }
       // The call runs again with the new arguments, under a new id; later calls of the turn go.
-      const content = turn.content
-        .slice(0, placed.part + 1)
-        .map((p, i) =>
-          i === placed.part && p.type === "toolCall"
-            ? { ...p, id: newCallId, arguments: edit.arguments as ToolCall["arguments"] }
-            : p
-        )
+      const content = turn.content.slice(0, placed.part + 1).map((p, i) => {
+        if (i !== placed.part || p.type !== "toolCall") return p
+        const edited = { ...p, id: newCallId, arguments: edit.arguments as ToolCall["arguments"] }
+        delete (edited as ToolCall & { dispatchRefusal?: string }).dispatchRefusal
+        return edited
+      })
       kept = [...messages.slice(0, at), { ...turn, content }, ...resultsAfter((id) => before.has(id))]
     } else if (edit === undefined || edit.kind === "result") {
       const results = resultsAfter((id) => before.has(id) || id === part.id).map((m) =>

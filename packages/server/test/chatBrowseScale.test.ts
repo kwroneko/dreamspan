@@ -56,7 +56,14 @@ it.live(
         assert.strictEqual(result.sections[0]!.total, 1000)
         assert.lengthOf(result.sections[0]!.rows, 20)
         assert.isTrue(result.sections[0]!.rows.every((f) => f.branches === 100 && f.current))
-        assert.deepStrictEqual(result.filterCounts, { all: 1000, pinned: 100, groups: 0, solo: 0, branches: 1000 })
+        assert.deepStrictEqual(result.filterCounts, {
+          all: 1000,
+          pinned: 100,
+          groups: 0,
+          solo: 0,
+          branches: 1000,
+          workshops: 0
+        })
         assert.isBelow(JSON.stringify(result).length, 25_000)
         // Cold includes the existing shell materialization; warm sorts reuse it.
         assert.isBelow(elapsed, sort === "recent" ? 15_000 : 3000)

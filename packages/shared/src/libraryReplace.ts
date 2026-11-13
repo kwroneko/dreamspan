@@ -1,7 +1,7 @@
 // Search and replace across the library (ARCHITECTURE §14.6 "Across the library"): the text of
 // every card, lorebook, preset and note at once, as each one's editor shows it (its unsaved
 // changes included), with a preview of every entry and field a replace would change and one
-// undoable replace over the ones left ticked. What a field is, and its label, are
+// undoable replace over the ones left ticked. An entry with unsaved changes is skipped. What a field is, and its label, are
 // libraryText.ts's, which the editors' own Search and replace reads too.
 import { Schema } from "effect"
 import { EntityKind, RefId } from "./library.ts"
@@ -25,6 +25,13 @@ export const LibrarySearch = Schema.Struct({
   kinds: Schema.Array(LibraryReplaceKind).check(Schema.isMinLength(1), Schema.isMaxLength(32))
 })
 export type LibrarySearch = typeof LibrarySearch.Type
+
+/**
+ * What a replace says of an entry that has unsaved changes (an active draft, in this tab or
+ * another): it leaves it as it is (owner, 2026-11-13: "skip and tell").
+ */
+export const LIBRARY_UNSAVED_REASON =
+  "It has unsaved changes, so it was skipped. Open it to save or revert them, then find again."
 
 /** Characters shown either side of a field's first match. */
 export const AROUND = 48
@@ -57,7 +64,7 @@ export const LibraryEntryHit = Schema.Struct({
   subtitle: Schema.String,
   /** The entry as it was read: a replace refuses an entry changed since. */
   stamp: Schema.String,
-  /** It has unsaved changes, which a replace saves first as their own revision. */
+  /** It has unsaved changes: its matches are listed, and a replace skips it. */
   unsaved: Schema.Boolean,
   /** Why it can't be replaced in now; null when it can. */
   blocked: Schema.NullOr(Schema.String),
@@ -86,6 +93,8 @@ export type LibraryPreview = typeof LibraryPreview.Type
 export const LibraryChoice = Schema.Struct({
   refId: RefId,
   stamp: Schema.String,
+  /** This browser still has text that has not reached a server draft. */
+  unsaved: Schema.optionalKey(Schema.Boolean),
   fields: Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(20000))
 })
 export type LibraryChoice = typeof LibraryChoice.Type
@@ -99,7 +108,9 @@ export const LibraryReplaceResult = Schema.Struct({
   editId: Schema.NullOr(Schema.String),
   entries: Schema.Int,
   matches: Schema.Int,
-  skipped: Schema.Array(LibrarySkipped)
+  skipped: Schema.Array(LibrarySkipped),
+  /** Scripts changed by this user replace whose existing approval was retained. */
+  approvedScripts: Schema.Array(Schema.Struct({ refId: RefId, label: Schema.String, name: Schema.String }))
 })
 export type LibraryReplaceResult = typeof LibraryReplaceResult.Type
 

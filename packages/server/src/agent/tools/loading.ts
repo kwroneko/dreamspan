@@ -34,6 +34,7 @@ export const toolSearch: RolloutTool<{ readonly query: string; readonly max_resu
   label: "Looked for tools",
   explanation: "Find and load tools the assistant doesn't have yet.",
   effect: "read",
+  storyRead: "conversation",
   description: "Finds tools that aren't loaded yet and loads them.",
   parameters: Type.Object({
     query: Type.String({ description: 'Either "select:<name>[,<name>…]" for exact names, or keywords.' }),
@@ -82,6 +83,7 @@ export const makeLoadSkill = (): RolloutTool<{ readonly name: string }> => ({
   label: "Loaded a skill",
   explanation: "Load a group of tools with instructions for using them.",
   effect: "read",
+  storyRead: "conversation",
   description: "Loads a skill: its instructions and tools.",
   parameters: Type.Object({
     name: Type.String({ description: "The skill's name exactly as the list above gives it." })

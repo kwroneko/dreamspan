@@ -36,7 +36,7 @@ import {
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
-import { EditRefused, LibraryLabel } from "@rp/shared/editorApi.ts"
+import { MoveToOwnTurnNoteFields, EditRefused, LibraryLabel } from "@rp/shared/editorApi.ts"
 import { AssetChange, CardGallery } from "@rp/shared/gallery.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
@@ -594,18 +594,18 @@ export const StartChatResult = Schema.Struct({ ...AppendResult.fields, composer:
 
 /**
  * An entry a library-wide replace changes, as the reader worked it out (libraryReplace.ts): the
- * head and drafts it was read at, its unsaved changes applied (`checkpoint`, null without any)
- * and the document with the replacements in it.
+ * head it was read at and the document with the replacements in it. An entry with unsaved
+ * changes is never one.
  */
 export const LibraryReplaceEntry = Schema.Struct({
   refId: RefId,
   label: Schema.String,
   head: Schema.String,
   rowVersion: Schema.Int,
-  drafts: Schema.Array(Schema.Struct({ id: Schema.String, field: Schema.String, rowVersion: Schema.Int })),
-  checkpoint: Schema.NullOr(Doc),
   doc: Doc,
-  matches: Schema.Int
+  matches: Schema.Int,
+  /** Computed by the reader; only returned after this exact planned head commits. */
+  approvedScripts: Schema.Array(Schema.String)
 })
 export type LibraryReplaceEntry = typeof LibraryReplaceEntry.Type
 
@@ -2902,10 +2902,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
   }),
   /** A new revision on the head with an earlier revision's content. */
   /**
-   * A library-wide replace (libraryReplace.ts) as planned: per entry, its unsaved changes saved
-   * first as a revision of their own, then a `changeset` revision with the replacements, all
-   * under one changeset group (`editId`). An entry whose head, row version or drafts moved since
-   * the plan is left as it is, in `skipped` with the plan's own.
+   * A library-wide replace (libraryReplace.ts) as planned: one `changeset` revision per clean
+   * entry, under one changeset group (`editId`). Entries with unsaved changes or whose head or
+   * row version moved since the plan are skipped, alongside the plan's own skipped entries.
    */
   Rpc.make("ApplyLibraryReplace", {
     payload: {
@@ -3061,6 +3060,11 @@ export class WriteOpsLibrary extends RpcGroup.make(
     payload: { userId: UserId, refId: RefId, expectedRowVersion: Schema.Int, crop: Schema.NullOr(AvatarCrop) },
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  Rpc.make("MoveToOwnTurnNote", {
+    payload: { userId: UserId, ...MoveToOwnTurnNoteFields },
+    success: Schema.Struct({ notes: Schema.Array(LibraryRef), editId: Schema.String }),
+    error: Schema.Union([NotFound, StorageError, RefOperationRefused])
   }),
   /** A new note on the card; with `link`, a slot showing that shared note of the user's. */
   Rpc.make("CreateCardNote", {
@@ -3331,10 +3335,10 @@ export class WriteOpsLibrary extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * Undo of an away mark the scene check set (spec/CHARACTER-CONTEXT.md §5, unit C9), in one
-   * transaction: the user's presence event replaces the decision's, and every version written
-   * since that recorded the character away for it is corrected to count it present
-   * (`db/decisions.ts`). Null when the event isn't a live away mark of the scene check.
+   * Undo of a departure or return the scene check set, in this fork only (C9 [D]). One
+   * transaction replaces the event and overlays recorded presence through the next presence
+   * mark or the displayed tip. Existing peers retain their rows, knowledge and summaries;
+   * children made later inherit the correction. Null unless this fork shows a live scene check.
    */
   Rpc.make("CorrectPresence", {
     payload: { userId: UserId, chatId: ChatId, forkId: ForkId, eventId: Schema.String },
@@ -3342,7 +3346,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
       Schema.Struct({
         /** The user's event that replaced the decision's. */
         eventId: Schema.String,
-        /** The versions whose presence record was corrected. */
+        /** The existing versions covered by this branch's correction. */
         corrected: Schema.Array(VersionId)
       })
     ),
@@ -4127,7 +4131,9 @@ export class ReadOps extends RpcGroup.make(
             Schema.Struct({
               forkId: Schema.NullOr(ForkId),
               slotId: Schema.NullOr(SlotId),
-              active: Schema.Array(EntityId)
+              active: Schema.Array(EntityId),
+              /** Restrict historical membership to slotId, including inserted display positions. */
+              through: Schema.optionalKey(Schema.Boolean)
             })
           )
         })
@@ -4458,6 +4464,19 @@ export class ReadOps extends RpcGroup.make(
     success: MessageSearchPage,
     error: StorageError
   }),
+  /** Cheap preflight for the registered history tools: a join on this causal display path
+   * has a row this character can read. Metadata only, never materializes the path's prose. */
+  Rpc.make("HistoryProjectionNeeded", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: SlotId,
+      viewers: Schema.Array(Schema.String)
+    },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /**
    * The agent's `search_chat` over full-text search (agentReads.ts, spec/AGENTIC.md §4.5): the
    * messages on the path to `leafSlotId` in the fork, as the fork shows them, whose text has a
@@ -4466,6 +4485,8 @@ export class ReadOps extends RpcGroup.make(
    * (greetings) always, for the caller to fill in and match. Null when the fork places inserted
    * messages, whose numbering the display path gives, or the chat has a merge, whose join the
    * caller reads row by row (spec/THREADS.md §11, TH8): the caller reads the path instead.
+   * ordinaryOnly excludes all join slots and retains indexed matching after the caller
+   * verifies that none of its projected rows came from joins.
    */
   Rpc.make("SearchChat", {
     payload: {
@@ -4476,6 +4497,9 @@ export class ReadOps extends RpcGroup.make(
       tokens: Schema.Array(Schema.String),
       before: Schema.NullOr(Schema.Int),
       limit: Schema.Int,
+      /** The caller verified that its path exposes no joined rows. Search ordinary rows only,
+       * preserving indexed matching even when another unseen thread was joined. */
+      ordinaryOnly: Schema.optionalKey(Schema.Boolean),
       /**
        * A separate context's viewer, as its identities through card replacements: only messages
        * it knew (spec/CHARACTER-CONTEXT.md §3, C5).
@@ -4506,6 +4530,8 @@ export class ReadOps extends RpcGroup.make(
       userId: UserId,
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      /** Bound stretch joins by the original reply's causal horizon, including on Resume. */
+      leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId)),
       versionIds: Schema.Array(Schema.String),
       viewers: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
     },
@@ -4538,6 +4564,8 @@ export class ReadOps extends RpcGroup.make(
         rows: Schema.Array(
           Schema.Struct({
             ordinal: Schema.Int,
+            sourceVersionId: Schema.NullOr(Schema.String),
+            sourceJoin: Schema.NullOr(Schema.Boolean),
             kind: Schema.Literals(["message", "summary"]),
             name: Schema.String,
             side: Schema.Literals(["user", "assistant"]),
@@ -4681,10 +4709,24 @@ export class ReadOps extends RpcGroup.make(
       request: Schema.String,
       transcript: Schema.String,
       tools: Schema.String,
-      continuation: Schema.optionalKey(Schema.String)
+      continuation: Schema.optionalKey(Schema.String),
+      text: Schema.optionalKey(Schema.String)
     },
     success: Schema.Int,
     error: StorageError
+  }),
+  /** Resolve the owned workshop's enabled summary connection without reading other chats. */
+  Rpc.make("WorkshopSummaryContext", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      leafSlotId: Schema.NullOr(SlotId),
+      rolloutId: Schema.optionalKey(Schema.String),
+      transcript: Schema.optionalKey(Schema.String)
+    },
+    success: Schema.NullOr(Schema.String),
+    error: Schema.Union([NotFound, StorageError, AssemblyFailed])
   }),
   Rpc.make("RolloutMaterial", {
     payload: { userId: UserId, versionId: VersionId },

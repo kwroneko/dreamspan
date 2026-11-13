@@ -227,7 +227,11 @@ it.effect("read_card cannot reveal a card's skill body through extensions", () =
       extensions: { keep: "ordinary metadata", rp_harness: { keep: "kept", skills: [own] } }
     }
     const context = {
-      reader: { ListLibrary: () => Effect.succeed([ref]), OpenEditor: () => Effect.succeed({ ref, doc }) },
+      reader: {
+        ListLibrary: () => Effect.succeed([ref]),
+        OpenEditor: () => Effect.succeed({ ref, doc }),
+        ListCardNotes: () => Effect.succeed([])
+      },
       userId: "u"
     } as unknown as ToolContext
     for (const fields of [undefined, ["extensions"]]) {

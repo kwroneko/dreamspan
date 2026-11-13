@@ -14,6 +14,11 @@ import { toLlmRequest, type LlmRequestRow } from "./providers.ts"
 import { readingOnce, readSummary } from "./lcmReads.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
+import { lcmPath } from "./lcmPath.ts"
+import { activeRunSummaries } from "../agent/compaction.ts"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
+import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { shownIn } from "./forkState.ts"
 import {
   audienceIds,
   audienceScope,
@@ -392,11 +397,27 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
               !resolved(r.first_depth + 1, r.last_depth + 1, fresh, { time: r.updated_at, id: r.id }))
         )
         const reruns = new Set((yield* rerunRequests(sql, chatId)).map((r) => r.job_id))
+        const [kind] = yield* sql<{ kind: string }>`SELECT kind FROM chats WHERE id=${chatId}`
+        let runSummaries: Array<{ id: string; from: number; through: number; content: string }> | undefined
+        if (identities === undefined && chatKinds.get(kind?.kind ?? "")?.summaryTranscript) {
+          const path = yield* lcmPath(sql, userId, chatId, leafSlotId)
+          const fork = yield* viewAt(sql, chatId, leafSlotId)
+          const [latest] = yield* sql<{ transcript: string | null }>`SELECT p.transcript_json AS transcript
+            FROM json_each(${JSON.stringify(path.map((s) => s.id))}) requested CROSS JOIN slots s ON s.id=requested.value
+            JOIN versions v ON v.id=${shownIn(sql, fork, "s")} JOIN rollout_payloads p ON p.rollout_id=v.rollout_id
+            ORDER BY CAST(requested.key AS INTEGER) DESC LIMIT 1`
+          runSummaries = latest?.transcript
+            ? activeRunSummaries(JSON.parse(latest.transcript) as Array<AgentMessage>).map(
+                ({ id, from, through, content }) => ({ id, from, through, content })
+              )
+            : []
+        }
         return new LcmState({
           chatId,
           leafSlotId,
           enabled,
           layer: yield* toRows(layer.summaries, true),
+          ...(runSummaries ? { runSummaries } : {}),
           failed: yield* toRows(failed, true),
           jobs: jobIds.map((j): LcmJob => ({
             id: j.id,

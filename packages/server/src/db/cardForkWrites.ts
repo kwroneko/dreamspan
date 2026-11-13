@@ -29,7 +29,8 @@ const NAME_FIELDS = ["name", "nickname", "character_version"].flatMap((key) => [
 const forkCondition = (noteDoc: Doc, card: string, fork: EntityId) => {
   if (noteDoc["condition"] === undefined) return {}
   const condition = readNoteCondition(noteDoc["condition"])
-  if (condition.when === "always" || !condition.cards.includes(card as EntityId)) return {}
+  if (condition.when === "always" || condition.when === "own_turn" || !condition.cards.includes(card as EntityId))
+    return {}
   return {
     condition: { ...condition, cards: [...new Set(condition.cards.map((c) => (c === card ? fork : c)))] }
   }

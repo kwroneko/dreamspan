@@ -137,7 +137,13 @@ export class CacheWarmth extends Context.Service<
         schedule(chatId)
       }
 
-      yield* hub.listen(schedule)
+      yield* hub.listen((chatId, event) => {
+        // A tab-local correction refreshes its own next context. A chat-wide estimate would
+        // tell unrelated tabs to read again even though their cached requests did not change.
+        if (event && ["State", "Reload", "Lcm"].includes(event._tag) && "forkId" in event && event.forkId !== undefined)
+          return
+        schedule(chatId)
+      })
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           for (const entry of watched.values()) clearTimeout(entry.timer)

@@ -12,7 +12,7 @@ import { AppApi } from "@rp/shared/api.ts"
 import { Schema, Effect } from "effect"
 import { CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { EntityKind, LibraryRef } from "@rp/shared/library.ts"
-import type { ToolContext } from "../tools.ts"
+import type { ToolContext, WorkshopStoryRead } from "../tools.ts"
 import type { OperationExposure } from "../operations.ts"
 import { resolveLibrary } from "../tools/library.ts"
 
@@ -68,10 +68,36 @@ const chatPayload = (ctx: ToolContext, args: Record<string, unknown>) =>
     })
     ctx.cache.set(`operation:proof:${ctx.toolCallId}`, {
       chat: info.proof,
-      ...(chat.storyTarget ? { storyAt: chat.storyTarget, upTo: chat.upTo, branchLabel: chat.branchLabel } : {})
+      ...(chat.storyTarget
+        ? { storyAt: chat.storyTarget, upTo: chat.upTo, branchLabel: chat.branchLabel, branchNaming: chat.branchNaming }
+        : {})
     })
     return { chatId: chat.id, forkId: chat.currentForkId, slotId: chat.activeLeafSlotId }
   })
+const storyReads: Readonly<Record<string, WorkshopStoryRead>> = {
+  rename_chat: "positioned",
+  change_chat: "positioned",
+  set_chat_pin: "positioned",
+  get_cast: "positioned",
+  generate_reply: "positioned",
+  history_rename: "positioned",
+  history_search: "refused",
+  list_chats: "refused",
+  create_preset: "library",
+  create_lorebook: "library",
+  fork_variant: "library",
+  rename_ref: "library",
+  set_ref_archived: "library",
+  restore_revision: "library",
+  set_card_favourite: "library",
+  list_library: "library",
+  list_revisions: "library",
+  // A saved card's text into its own-turn note: library only (ownturn1, merge-batch10).
+  move_card_text: "library",
+  change_generation_defaults: "account",
+  read_settings: "account",
+  change_setting: "account"
+}
 const exposure = (
   id: string,
   rpc: string,
@@ -81,6 +107,7 @@ const exposure = (
   extra: Partial<OperationExposure> = {}
 ): OperationExposure => ({
   id,
+  ...(storyReads[id] ? { storyRead: storyReads[id] } : {}),
   operation: { rpc },
   capability,
   effect,
@@ -165,6 +192,67 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
         }
       })
   }),
+  exposure(
+    "move_card_text",
+    "MoveToOwnTurnNote",
+    "library.write",
+    "library",
+    "Move a saved card passage to an own-turn note",
+    {
+      parameters: Schema.Struct({
+        card: name,
+        field: Schema.Literals([
+          "description",
+          "personality",
+          "scenario",
+          "mes_example",
+          "system_prompt",
+          "post_history_instructions"
+        ]),
+        find: Schema.String.check(Schema.isMinLength(1)),
+        framing: optional(Schema.String)
+      }),
+      describe: (payload) => {
+        const before = String(payload.text),
+          at = Number(payload.at),
+          end = at + Number(payload.length)
+        return Effect.succeed({
+          title: "Move card text to an own-turn note",
+          rows: [
+            { label: "Own-turn note", value: before.slice(at, end) },
+            {
+              label: "When and where",
+              value: "Only on its card’s turns, at the preset’s Own-turn notes. The original card field stays saved."
+            }
+          ],
+          changes: [{ field: String(payload.field), before, after: before.slice(0, at) + before.slice(end) }]
+        })
+      },
+      adapt: (args, ctx) =>
+        Effect.gen(function* () {
+          const ref = yield* library(ctx, "card", args.card)
+          const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id })
+          const notes = yield* ctx.reader.ListCardNotes({ userId: ctx.userId, cardRefId: ref.id })
+          const previous = notes.find(
+            (note) => (note.doc.replaces as { field?: string } | undefined)?.field === args.field
+          )
+          const text = String(previous?.doc.content ?? saved.doc[String(args.field)] ?? "")
+          const find = String(args.find),
+            at = text.indexOf(find)
+          if (at < 0 || text.indexOf(find, at + 1) >= 0)
+            return yield* fail("Find must occur exactly once in the current shared text. Read the card again.")
+          return {
+            cardRefId: ref.id,
+            expectedRevisionId: saved.ref.headRevisionId,
+            field: args.field,
+            text,
+            at,
+            length: find.length,
+            ...(args.framing === undefined ? {} : { framing: args.framing })
+          }
+        })
+    }
+  ),
   exposure("create_preset", "CreatePreset", "library.write", "library", "Create a preset", {
     describe: (payload) =>
       Effect.succeed({

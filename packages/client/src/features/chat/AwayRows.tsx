@@ -1,14 +1,14 @@
 // The thin rows in the message list where a character left the scene or came back (spec/
 // CHARACTER-CONTEXT.md §5, §9.2 unit CU3; awayMarks.ts): under the message the mark is at, as
 // the split-chat divider is, with the character's face, who set it, and Undo for the scene
-// check's departure. A `messageStream` entry, so a plugin can replace or remove it.
+// check's mark, left or back. A `messageStream` entry, so a plugin can replace or remove it.
 import type { PathEntry } from "@rp/shared/chat.ts"
 import { useState, useSyncExternalStore } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { nameOf, useCast } from "./cast.ts"
-import { type AwayRow, awayExplanation, awayLabel, awayRowsOf } from "./awayMarks.ts"
+import { type AwayRow, awayExplanation, awayLabel, awayRowsOf, undoExplanation } from "./awayMarks.ts"
 import type { ChatSession } from "./session.ts"
 
 function Row({ row, session }: { row: AwayRow; session: ChatSession }) {
@@ -59,7 +59,7 @@ function Row({ row, session }: { row: AwayRow; session: ChatSession }) {
             variant="ghost"
             className="h-7 px-2 text-xs"
             pending={undoing}
-            hint={`${who} was there after all: counted present from here, so ${who}'s replies see the messages written since.`}
+            hint={undoExplanation(row, name)}
             onClick={() => void undo()}
           >
             Undo

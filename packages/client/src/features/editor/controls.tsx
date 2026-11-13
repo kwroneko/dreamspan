@@ -133,7 +133,9 @@ export function TextField({
   autoFocus,
   flash,
   labelEnd,
-  replaced = false
+  replaced = false,
+  tools: fieldTools,
+  onSelectionRangeChange
 }: {
   store: EditorStore
   path: FieldPath
@@ -141,6 +143,8 @@ export function TextField({
   /** At the end of its label's row: the tabs of a field a note replaces (`fieldViews`). */
   labelEnd?: ReactNode
   /** The text a note sends in place of a prompt (DESIGN §4.2): its box glows. */
+  tools?: ReactNode
+  onSelectionRangeChange?: ((range: { readonly at: number; readonly length: number }) => void) | undefined
   replaced?: boolean
   rows?: number
   about?: ReactNode
@@ -201,6 +205,7 @@ export function TextField({
     const end = extra.labelEnd ?? labelEnd
     const tools = (
       <>
+        {fieldTools}
         {extra.tools}
         <FieldEditHistory store={store} field={field} label={label} />
         {/* Open large (owner, 2026-11-02): every multi-line prose field. The code editor's box
@@ -266,6 +271,7 @@ export function TextField({
                 status={status}
                 autoFocus={autoFocus}
                 flash={flash}
+                onSelectionRangeChange={extra.onSelectionRangeChange ?? onSelectionRangeChange}
                 onChange={(value) => store.setText(path, value)}
                 onBlur={props.onBlur}
               />
@@ -310,8 +316,11 @@ export function TextField({
         path={path}
         label={label}
         rows={rows}
+        original={outer.original}
         render={(more = {}) =>
           inner({
+            original: more.original ?? outer.original,
+            onSelectionRangeChange: more.onSelectionRangeChange ?? outer.onSelectionRangeChange,
             tools: (
               <>
                 {outer.tools}

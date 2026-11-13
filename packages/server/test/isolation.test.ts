@@ -499,7 +499,14 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         (data) => {
           for (const section of data.sections) assert.strictEqual(section.total, 0)
           assert.deepStrictEqual(data.people, [])
-          assert.deepStrictEqual(data.filterCounts, { all: 0, pinned: 0, groups: 0, solo: 0, branches: 0 })
+          assert.deepStrictEqual(data.filterCounts, {
+            all: 0,
+            pinned: 0,
+            groups: 0,
+            solo: 0,
+            branches: 0,
+            workshops: 0
+          })
         }
       )
   },
@@ -3380,6 +3387,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   ListCardNotes: {
     probe: (actor, owner) => refused(actor.api.ListCardNotes({ cardRefId: owner.editor.cardRefId }), "NotFound")
   },
+  MoveToOwnTurnNote: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const opened = yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })
+        yield* refused(
+          actor.api.MoveToOwnTurnNote({
+            cardRefId: owner.editor.cardRefId,
+            expectedRevisionId: opened.ref.headRevisionId,
+            field: "description",
+            text: "A",
+            at: 0,
+            length: 1
+          }),
+          "NotFound"
+        )
+      })
+  },
   CreateCardNote: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -4741,6 +4765,37 @@ const storage: Record<
     ),
   ListRolloutEffects: (reader, actor, owner) =>
     refused(reader.ListRolloutEffects({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
+  HistoryProjectionNeeded: (reader, actor, owner) =>
+    Effect.gen(function* () {
+      const input = {
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        forkId: owner.chat.forkId,
+        leafSlotId: owner.chat.slotId,
+        viewers: [owner.cardId]
+      }
+      yield* refused(reader.HistoryProjectionNeeded(input), "NotFound")
+      yield* refused(reader.HistoryProjectionNeeded({ ...input, chatId: actor.chat.chatId }), "NotFound")
+      yield* refused(
+        reader.HistoryProjectionNeeded({ ...input, chatId: actor.chat.chatId, forkId: actor.chat.forkId }),
+        "NotFound"
+      )
+    }),
+  SearchChatOrdinaryOnly: (reader, actor, owner) =>
+    refused(
+      reader.SearchChat({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        forkId: owner.chat.forkId,
+        leafSlotId: owner.chat.slotId,
+        tokens: [],
+        before: null,
+        limit: 20,
+        viewers: [owner.cardId],
+        ordinaryOnly: true
+      }),
+      "NotFound"
+    ),
   WorkshopGrants: (reader, actor, owner) =>
     refused(reader.WorkshopGrants({ userId: actor.user.id, chatId: owner.chat.chatId, now: 0 }), "NotFound"),
   ToolApprovalFor: (reader, actor, owner) =>

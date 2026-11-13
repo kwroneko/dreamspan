@@ -1,3 +1,4 @@
+import { REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "./cardArchive.ts"
 import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "./forkMerge.ts"
 // The editor RPCs (ARCHITECTURE.md "Editing the library"; DESIGN §4, §6.2), merged into
@@ -13,6 +14,17 @@ import { BinItem } from "./bin.ts"
 import { EditingOrigin, ObservedDeletion, Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { CardFamily, Doc, LibraryRef, MergeOutcome, MergePreview, RefId, Revision, RevisionId } from "./library.ts"
+
+/** A selection in a saved original or its existing moved replacement. */
+export const MoveToOwnTurnNoteFields = {
+  cardRefId: RefId,
+  expectedRevisionId: RevisionId,
+  field: Schema.Literals(REPLACEABLE_CARD_FIELDS),
+  text: Schema.String,
+  at: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  length: Schema.Int.check(Schema.isGreaterThan(0)),
+  framing: Schema.optionalKey(Schema.String)
+}
 
 /** The document wouldn't be valid with these changes; nothing was saved. */
 export class InvalidDocument extends Schema.TaggedError<InvalidDocument>()("InvalidDocument", {
@@ -583,4 +595,13 @@ export class CardArchiveApi extends RpcGroup.make(
     error: ServerError
   }),
   Rpc.make("UndoCardArchive", { payload: CardArchiveReceipt.fields, success: Schema.Int, error: ServerError })
+) {}
+
+/** Kept outside the core handler group’s type-size bound. */
+export class OwnTurnNoteApi extends RpcGroup.make(
+  Rpc.make("MoveToOwnTurnNote", {
+    payload: MoveToOwnTurnNoteFields,
+    success: Schema.Struct({ notes: Schema.Array(LibraryRef), editId: Schema.String }),
+    error: Schema.Union([...Errors, EditRefused])
+  })
 ) {}

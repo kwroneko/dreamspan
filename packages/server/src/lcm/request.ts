@@ -114,10 +114,36 @@ const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
 }
 
 /** The request a summary job sends: with the chat's preset and its pinned prefix, or without the preset. */
-const summaryRequest = (snapshot: ContextSnapshot): ContextSnapshot =>
-  snapshot.summaryJob?.withPreset === false
+const summaryRequest = (snapshot: ContextSnapshot): ContextSnapshot => {
+  const material = snapshot.summaryJob?.workshopTranscript
+  if (material)
+    return {
+      ...snapshot,
+      pieces: [
+        {
+          id: "workshop-summary:instruction",
+          source: { kind: "assembler", what: "Workshop summary instruction" },
+          text: snapshot.summaryJob!.tail,
+          messages: [0]
+        },
+        ...material.map((m, n) => ({
+          id: `workshop-transcript:${n}`,
+          source: { kind: "assembler" as const, what: `Workshop transcript ${n + 1}` },
+          text: m.content,
+          messages: [n + 1]
+        }))
+      ],
+      request: {
+        ...snapshot.request,
+        prefill: null,
+        breakpoints: [],
+        messages: [{ role: "system", content: snapshot.summaryJob!.tail }, ...material]
+      }
+    }
+  return snapshot.summaryJob?.withPreset === false
     ? rawSummary(snapshot)
     : summaryTail(applySummaryPrefix(snapshot, snapshot.summaryJob?.prefix))
+}
 
 /** The registered default owns instruction rendering, prefix reuse and raw/full shaping. */
 export const makeSummaryRequestTransform = (instructions: Registry<SummaryInstruction>): AssemblyTransform => ({
@@ -128,7 +154,7 @@ export const makeSummaryRequestTransform = (instructions: Registry<SummaryInstru
       const job = snapshot.summaryJob
       const instruction = request.summaryInstruction
       if (instruction) {
-        const id = job.children?.length ? "condensation" : "leaf"
+        const id = job.workshopTranscript ? "workshop" : job.children?.length ? "condensation" : "leaf"
         const policy = instructions.get(id)
         if (!policy && instruction.base === undefined)
           return yield* new AssemblyFailed({

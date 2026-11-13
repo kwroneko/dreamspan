@@ -325,6 +325,8 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
  * up to its last cache breakpoint. An estimate: the provider decides.
  */
 export const CacheWarmth = Schema.Struct({
+  /** Conditional re-read cost when own-turn notes make the speakers’ starts differ. */
+  speakerChange: Schema.optionalKey(Schema.String),
   lastRequestAt: Schema.Number,
   ttlS: Schema.NullOr(Schema.Int),
   /** Historical expiry, independent of the next model's eligibility and TTL. */

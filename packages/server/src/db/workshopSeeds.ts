@@ -47,11 +47,13 @@ const preset = (): PresetDoc => {
     // The added pieces stay off until something fills them (§4.2): the seeded order sends what
     // it sent before they existed.
     order: [
-      ...["main", "charDefinitions", "chatHistory", "newestMessage"].map((identifier) => ({
+      ...["main", "charDefinitions", "summaries", "chatHistory", "newestMessage"].map((identifier) => ({
         identifier,
         enabled: true
       })),
-      ...pieces.map((p) => ({ identifier: p.prompt.identifier, enabled: false }))
+      ...pieces
+        .filter((p) => p.prompt.identifier !== "summaries")
+        .map((p) => ({ identifier: p.prompt.identifier, enabled: false }))
     ],
     utility_prompts: { ...builtinPreset.utility_prompts, new_chat_prompt: "", new_group_chat_prompt: "" },
     prefill: { assistant: "", impersonation: "", continue: false, continue_postfix: "" }
@@ -78,7 +80,7 @@ export const workshopSeeds = makeRegistry<WorkshopSeed>([
     kind: "preset",
     order: 10,
     label: "Workshop",
-    originRef: "builtin:workshop-preset@2",
+    originRef: "builtin:workshop-preset@3",
     default: true,
     doc: preset
   }

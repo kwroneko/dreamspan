@@ -196,6 +196,28 @@ const threadSchema: ReadonlyArray<string> = [
     WHEN NEW.kind = 'presence_away' AND (NEW.flag IS NULL OR NEW.value_id IS NULL
       OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object')
     BEGIN ${raise("a presence correction names a message of its chat and a card")}; END`,
+  // A compact branch-local correction of recorded presence. Its frozen chain spans and
+  // version cutoff describe existing history; flags enable/disable it through fork lineage.
+  ...["INSERT", "UPDATE OF value_id, flag"].map(
+    (event, i) =>
+      `CREATE TRIGGER fork_overrides_presence_range_${i} BEFORE ${event} ON fork_overrides
+      WHEN NEW.kind = 'presence_range' AND (
+        NEW.flag IS NULL OR NEW.flag NOT IN (0,1) OR NEW.slot_id IS NULL OR NEW.value_id IS NULL
+        OR NOT json_valid(NEW.value_id)
+        OR json_type(NEW.value_id, '$.away') NOT IN ('true','false')
+        OR json_type(NEW.value_id, '$.away') IS NULL
+        OR json_type(NEW.value_id, '$.cutoff') IS NOT 'integer' OR NEW.value_id ->> '$.cutoff' < 0
+        OR json_type(NEW.value_id, '$.identities') IS NOT 'array' OR json_array_length(NEW.value_id, '$.identities') = 0
+        OR json_type(NEW.value_id, '$.spans') IS NOT 'array'
+        OR EXISTS (SELECT 1 FROM json_each(NEW.value_id, '$.identities') c WHERE NOT EXISTS (
+          SELECT 1 FROM entities e JOIN chats chat ON chat.owner_user_id=e.owner_user_id
+          WHERE e.id=c.value AND e.kind='card' AND chat.id=NEW.chat_id))
+        OR EXISTS (SELECT 1 FROM json_each(NEW.value_id, '$.spans') span
+          WHERE json_type(span.value, '$.lo') IS NOT 'integer' OR json_type(span.value, '$.hi') IS NOT 'integer'
+            OR span.value ->> '$.lo' < 0 OR span.value ->> '$.hi' < span.value ->> '$.lo'
+            OR NOT EXISTS (SELECT 1 FROM slots s WHERE s.chat_id=NEW.chat_id AND s.chain_id=span.value ->> '$.chain')))
+      BEGIN ${raise("a presence range names its chat's cards and chain intervals")}; END`
+  ),
   // Starting threads changes what the branch it was started in is (db/forkSummaries.ts).
   `CREATE TRIGGER shell_thread_splits_insert AFTER INSERT ON thread_splits BEGIN ${bumpChat("NEW.chat_id")} END`
 ]

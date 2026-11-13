@@ -15,7 +15,7 @@ export interface ChatKindLook {
    * The chat page makes it the accent of everything inside it.
    */
   readonly accent?: string
-  /** Registered chat controls (composer controls, side-panel tabs, This chat sections) it doesn't use, by id. */
+  /** Registered chat controls (composer controls, side-panel tabs, This chat sections, menu commands) it doesn't use, by id. */
   readonly hides: ReadonlyArray<string>
   /** Controls that exist only in kinds that ask for them, by id (the workshop's capability chip). */
   readonly shows?: ReadonlyArray<string>
@@ -46,18 +46,30 @@ export const kindShows = (kind: string | undefined, id: string, snapshot = chatK
 export const kindRootProps = (
   look: ChatKindLook | undefined
 ): { "data-chat-kind"?: string; "data-chat-accent"?: string; style?: CSSProperties } =>
-  look === undefined
+  look === undefined ? {} : { "data-chat-kind": look.id, ...kindAccentProps(look) }
+
+/** Just the accent, for a badge or a row inside a list: it isn't the chat's root, so it has no kind attribute. */
+export const kindAccentProps = (
+  look: ChatKindLook | undefined
+): { "data-chat-accent"?: string; style?: CSSProperties } =>
+  look?.accent === undefined
     ? {}
-    : look.accent === undefined
-      ? { "data-chat-kind": look.id }
-      : {
-          "data-chat-kind": look.id,
-          "data-chat-accent": "",
-          style: {
-            "--chat-accent": `var(${look.accent})`,
-            "--chat-accent-contrast": `var(${look.accent}-contrast)`
-          } as CSSProperties
-        }
+    : {
+        "data-chat-accent": "",
+        style: {
+          "--chat-accent": `var(${look.accent})`,
+          "--chat-accent-contrast": `var(${look.accent}-contrast)`
+        } as CSSProperties
+      }
+
+/**
+ * A list row of a chat whose kind has an accent: its kind and accent on the row, which styles.css
+ * draws as a tinted row with an accent edge, so the kind shows without the badge. Nothing for a story.
+ */
+export const kindRowProps = (look: ChatKindLook | undefined) => {
+  const accent = kindAccentProps(look)
+  return accent["data-chat-accent"] === undefined ? {} : { ...accent, "data-kind-row": "" }
+}
 
 export function useChatKindLook(kind: string | undefined) {
   const snapshot = useSyncExternalStore(chatKindLooks.subscribe, chatKindLooks.snapshot, chatKindLooks.snapshot)

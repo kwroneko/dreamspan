@@ -18,7 +18,7 @@ import {
 } from "@rp/shared/docs/preset.ts"
 import { type ImportReport, ReportBuilder, shownList, shownText } from "@rp/shared/importReport.ts"
 import { Schema } from "effect"
-import { newestMessage, presetOrder, sentOutsideTheOrder } from "@rp/shared/presetOrder.ts"
+import { newestMessage, ownTurnNotes, presetOrder, sentOutsideTheOrder } from "@rp/shared/presetOrder.ts"
 import {
   conditionOf,
   fromSpeaker,
@@ -465,6 +465,12 @@ const readPreset = (file: Json, r: ReportBuilder): PresetDoc => {
       ["prompts"]
     )
   const order = presetOrder(prompts, importedOrder)
+  if (!prompts.some((p) => p.identifier === ownTurnNotes.identifier)) {
+    prompts.push(ownTurnNotes)
+    const history = order.findIndex((e) => e.identifier === "chatHistory")
+    const tail = history < 0 ? order.length : history + (order[history + 1]?.identifier === "newestMessage" ? 2 : 1)
+    order.splice(tail, 0, { identifier: ownTurnNotes.identifier, enabled: true })
+  }
   const extensions: Json = isObject(src.extensions) ? { ...src.extensions } : {}
   consumed.add("extensions")
   const regex = readRegex(extensions.regex_scripts, r)

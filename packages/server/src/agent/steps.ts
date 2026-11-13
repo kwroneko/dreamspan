@@ -158,7 +158,7 @@ export const callsFrom = (messages: ReadonlyArray<AgentMessage>, versionId?: str
 
 /** Successful posts mark the version they completed. The unposted tail belongs to the working
  * version, or (when there is no final message) the last posted message. */
-const messageBounds = (messages: ReadonlyArray<AgentMessage>, versionId: string, final: boolean) => {
+export const messageBounds = (messages: ReadonlyArray<AgentMessage>, versionId: string, final: boolean) => {
   const posts = messages.flatMap((m, index) => {
     const id =
       m.role === "toolResult" && m.toolName === SEND_MESSAGE && !m.isError

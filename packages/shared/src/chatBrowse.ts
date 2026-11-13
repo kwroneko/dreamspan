@@ -1,7 +1,7 @@
 /** The Chats tab's browse choices, applied in the reader before paging. */
 import { Schema } from "effect"
 
-export const CHAT_FILTERS = ["all", "pinned", "groups", "solo", "branches"] as const
+export const CHAT_FILTERS = ["all", "pinned", "groups", "solo", "branches", "workshops"] as const
 export const CHAT_SORTS = ["recent", "started", "name", "messages", "branches"] as const
 export const ChatBrowse = Schema.Struct({
   filter: Schema.Literals(CHAT_FILTERS),
@@ -14,6 +14,7 @@ export const ChatFilterCounts = Schema.Struct({
   pinned: Schema.Int,
   groups: Schema.Int,
   solo: Schema.Int,
-  branches: Schema.Int
+  branches: Schema.Int,
+  workshops: Schema.Int
 })
 export type ChatFilterCounts = typeof ChatFilterCounts.Type

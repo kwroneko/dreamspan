@@ -1200,7 +1200,7 @@ describe("summaries kept per view (unit C7)", () => {
   )
 
   lcmTest(
-    "undoing a scene check's away makes stale exactly the view summaries it changes, on every branch",
+    "Undo changes only its branch's view summaries; the peer's requests, rows and storage stay identical",
     (server) =>
       Effect.gen(function* () {
         const { h, wren, rows } = yield* chat(server, "separate")
@@ -1235,11 +1235,11 @@ describe("summaries kept per view (unit C7)", () => {
             params: [JSON.stringify([wren, mira]), h.chat.id]
           },
           ...h.rows.flatMap((row, n) =>
-            n >= 60 && n < 80
+            (n >= 60 && n < 80) || (n >= 25 && n < 30)
               ? [
                   {
                     sql: "UPDATE version_records SET presence_json = ? WHERE id = ?",
-                    params: [JSON.stringify({ away: [mira] }), row.version.id]
+                    params: [JSON.stringify({ away: [mira, ...(missed(n) ? [wren] : [])] }), row.version.id]
                   }
                 ]
               : []
@@ -1297,6 +1297,60 @@ describe("summaries kept per view (unit C7)", () => {
           [forkId, h.rows.at(-1)!.slotId],
           [branch.fork.id, aside.slotId]
         ] as const
+        const peerReply = yield* h.writer.AppendMessage({
+          userId: h.userId,
+          chatId: h.chat.id,
+          forkId: branch.fork.id,
+          parentSlotId: aside.slotId,
+          branch: false,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: wren,
+            writer: "model",
+            content: "",
+            status: "generating",
+            macroMode: "verbatim",
+            origin: "generated"
+          })
+        })
+        const peerRequest = () =>
+          Effect.map(
+            h.reader.AssembleContext({
+              userId: h.userId,
+              chatId: h.chat.id,
+              forkId: branch.fork.id,
+              slotId: peerReply.slotId,
+              versionId: peerReply.version.id,
+              now: 1,
+              timeZone: "UTC",
+              frozen: null
+            }),
+            (built) => JSON.stringify((JSON.parse(built.snapshot) as ContextSnapshot).request)
+          )
+        const peerMarks = () =>
+          h.reader.AwayMarks({ userId: h.userId, chatId: h.chat.id, forkId: branch.fork.id, slotId: aside.slotId })
+        const peerHistory = () =>
+          h.reader.ListHistoryEdits({ userId: h.userId, chatId: h.chat.id, forkId: branch.fork.id })
+        const stored = () =>
+          fixtureSql(
+            h.dataDir,
+            [
+              { sql: "SELECT * FROM summaries WHERE chat_id=? ORDER BY id", params: [h.chat.id] },
+              {
+                sql: "SELECT r.* FROM summary_revisions r JOIN summaries s ON s.id=r.summary_id WHERE s.chat_id=? ORDER BY r.id",
+                params: [h.chat.id]
+              },
+              {
+                sql: "SELECT v.id, t.presence_json FROM versions v JOIN version_texts t ON t.version_seq=v.seq JOIN slots s ON s.id=v.slot_id WHERE s.chat_id=? ORDER BY v.id",
+                params: [h.chat.id]
+              }
+            ],
+            { readOnly: true }
+          )
+        const peerBytesBefore = yield* peerRequest()
+        const peerMarksBefore = yield* peerMarks()
+        const peerHistoryBefore = yield* peerHistory()
+        const storedBefore = yield* stored()
         const before = yield* Effect.forEach(paths, ([f, l]) => freshness(f, l))
         assert.isTrue([...before[0]!.values()].every((s) => s.fresh))
         const audiences = new Set([...before[0]!.values()].map((s) => s.audience))
@@ -1312,6 +1366,18 @@ describe("summaries kept per view (unit C7)", () => {
           eventId: mark.id
         })
         assert.isAbove(corrected!.corrected.length, 0)
+        assert.strictEqual(
+          yield* peerRequest(),
+          peerBytesBefore,
+          "untouched branch's complete request and cache prefix"
+        )
+        assert.deepStrictEqual(yield* peerMarks(), peerMarksBefore, "untouched timeline rows")
+        assert.deepStrictEqual(yield* peerHistory(), peerHistoryBefore, "no correction in the peer's History")
+        assert.deepStrictEqual(
+          yield* stored(),
+          storedBefore,
+          "summaries, revisions and original presence are immutable"
+        )
         const after = yield* Effect.forEach(paths, ([f, l]) => freshness(f, l))
         for (const [n, path] of after.entries()) {
           const changed = [...path].filter(([id, s]) => before[n]!.get(id)?.fresh !== s.fresh).map(([id]) => id)
@@ -1320,7 +1386,7 @@ describe("summaries kept per view (unit C7)", () => {
             .filter(([, s]) => s.audience === JSON.stringify([wren]) && s.from <= 40 && s.to >= 21)
             .map(([id]) => id)
           assert.isAbove(expected.length, 0)
-          assert.sameMembers(changed, expected, n === 0 ? "main" : "the branch")
+          assert.sameMembers(changed, n === 0 ? expected : [], n === 0 ? "main" : "the untouched branch")
         }
         const [superseded] = yield* rows(
           "SELECT count(*) AS n FROM summaries WHERE chat_id = ? AND audience_json IS NULL AND status = 'superseded'",

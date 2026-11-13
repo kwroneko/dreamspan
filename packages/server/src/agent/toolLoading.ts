@@ -131,6 +131,7 @@ export const runSkills = (
 
 /** The model the run is sent to, as far as the decision needs it. */
 export interface WireTarget {
+  readonly toolLoading?: "auto" | "every" | "dispatcher"
   readonly kind: string
   readonly api: string
   readonly key: string
@@ -150,6 +151,7 @@ export interface WireTarget {
 export interface ToolLoadingWire {
   readonly id: string
   readonly supports: (target: WireTarget) => boolean
+  readonly dispatcher?: boolean
   readonly declaresDeferred: boolean
 }
 
@@ -183,6 +185,23 @@ export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
       measuredRouterClaude.test(t.key) &&
       measuredRouterUpstreams.has(pinnedRoute(t.settings?.routing) ?? ""),
     declaresDeferred: true
+  },
+  {
+    id: "dispatcher",
+    dispatcher: true,
+    declaresDeferred: false,
+    supports: (t) => {
+      if (t.toolLoading === "every") return false
+      if (t.toolLoading === "dispatcher") return true
+      // TOOL-LOADING §11.1: exact measured targets only. No inference from a model family.
+      if (t.kind === "deepseek" && t.api === "openai-completions" && t.key === "deepseek-flash") return true
+      if (t.kind !== "openrouter" || t.api !== "openai-completions") return false
+      const route = pinnedRoute(t.settings?.routing)
+      return (
+        (t.key === "deepseek/deepseek-v4-flash" && route === "deepseek") ||
+        (t.key === "anthropic/claude-haiku-4.5" && route === "amazon-bedrock")
+      )
+    }
   }
   // Responses serialization remains covered by golden tests, but no live cache measurement
   // succeeded. It and every other unmeasured wire send the entire catalog from the start.

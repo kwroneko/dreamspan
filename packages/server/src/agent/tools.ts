@@ -7,7 +7,7 @@ import type { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { Type, type TSchema } from "@earendil-works/pi-ai"
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import type { Effect } from "effect"
+import { Effect } from "effect"
 import type { Reader, Writer } from "../db/Database.ts"
 
 /**
@@ -25,6 +25,8 @@ export interface ToolContext {
   readonly versionId: VersionId
   readonly rolloutId: string
   readonly toolCallId: string
+  /** The current run only, for recovering compacted steps. */
+  readonly transcript?: () => ReadonlyArray<import("@earendil-works/pi-agent-core").AgentMessage>
   /** The message before the one being generated: nothing after it is visible. */
   readonly leafSlotId: SlotId | null
   /**
@@ -33,6 +35,8 @@ export interface ToolContext {
    * present for; null: nothing left out.
    */
   readonly viewers: ReadonlyArray<string> | null
+  /** Own-turn notes follow the speaker even in shared history. */
+  readonly speaker?: string | null
   readonly reader: Reader["Service"]
   /** The writer, without what only the user may do: grants and approvals (`toolWriter`). */
   readonly writer: ToolWriter
@@ -45,6 +49,8 @@ export interface ToolContext {
    * A side chat's request: where its story tools read the story (spec/WORKSHOP.md §4), as the
    * browser tab the request came from showed it. Absent: nothing says where, so they don't read.
    */
+  /** Workshop replay consults the live catalog without freezing metadata into model definitions. */
+  readonly storyReadOf?: (id: string) => WorkshopStoryRead | undefined
   readonly storyAt?: import("@rp/shared/chat.ts").StoryAt
   /**
    * The run's frozen offer and what of it is loaded at this call (spec/TOOL-LOADING.md), for the
@@ -69,7 +75,11 @@ export interface ToolOutput {
   readonly loaded?: ReadonlyArray<string>
 }
 
+export type WorkshopStoryRead = "positioned" | "conversation" | "library" | "account" | "refused"
+
 export interface RolloutTool<A = never> {
+  /** Declares how a workshop tool reads story facts; deliberately not sent to the model. */
+  readonly storyRead?: WorkshopStoryRead
   /** Kinds that must resolve this name through kindTools, including a disabled variant. */
   readonly kindOverrides?: ReadonlyArray<string>
   /** The name the model sees. */
@@ -94,6 +104,16 @@ export interface RolloutTool<A = never> {
   readonly parameters: TSchema
   /** The step's one-line title from its arguments: “lighthouse”. */
   readonly summarize?: (args: A) => string
+  /** Optional state frozen before a result is returned; shared keys prepare once per run.
+   * The generator persists it in the existing snapshot and the session restores it on Resume/step edit.
+   * undefined means this tool needs no frozen state for this view. */
+  readonly snapshot?: {
+    readonly key: string
+    /** The state, or (Resume, step edit, replay) what `freeze` kept of it, made ready for this run. */
+    readonly prepare: (context: ToolContext, frozen: unknown) => Effect.Effect<unknown, unknown>
+    /** What the snapshot stores of a prepared state (absent: the state itself). */
+    readonly freeze?: (state: unknown) => unknown
+  }
   /**
    * What the call will do, for its approval (spec/WORKSHOP.md §3.4), worked out by the server from
    * the real arguments and the items they name: the target's own name, an edit's fields before
@@ -103,9 +123,31 @@ export interface RolloutTool<A = never> {
   readonly describe?: (
     context: ToolContext,
     args: A
-  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt">, unknown>
+  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope">, unknown>
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
+
+/**
+ * Prepare registered projections before StartRollout freezes its snapshot: `state` for this
+ * run, `frozen` (each hook's `freeze` of it) for the snapshot.
+ */
+export const prepareToolSnapshots = (tools: ReadonlyArray<RolloutTool<never>>, context: ToolContext) =>
+  Effect.gen(function* () {
+    const state: Record<string, unknown> = {}
+    const frozen: Record<string, unknown> = {}
+    const seen = new Set<string>()
+    for (const tool of tools) {
+      const hook = tool.snapshot
+      if (!hook || seen.has(hook.key)) continue
+      seen.add(hook.key)
+      const value = yield* hook.prepare(context, undefined)
+      if (value === undefined) continue
+      state[hook.key] = value
+      const kept = hook.freeze ? hook.freeze(value) : value
+      if (kept !== undefined) frozen[hook.key] = kept
+    }
+    return { state, frozen }
+  })
 
 /**
  * Operations only the user may run (spec/WORKSHOP.md §3.2: the agent can't give itself

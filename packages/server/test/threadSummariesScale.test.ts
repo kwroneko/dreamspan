@@ -6,10 +6,13 @@
 // request through the real workers. Synthetic data only.
 // Run: env VITEST_MAX_WORKERS=1
 //   npx vitest run --project server-slow packages/server/test/threadSummariesScale.test.ts
+import { Worker } from "node:worker_threads"
+import { databaseFile } from "../src/db/connection.ts"
 import { assert, it } from "@effect/vitest"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
+import { ExecutionRegistry } from "../src/execution.ts"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
 import { historyTools } from "../src/agent/tools/history.ts"
@@ -17,6 +20,8 @@ import { testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmServer } from "./support/lcmHarness.ts"
+import { eventually } from "./support/generation.ts"
+import { completionChunks, sse } from "./support/mockProvider.ts"
 
 const median = (ns: ReadonlyArray<number>) => [...ns].sort((a, b) => a - b)[Math.floor(ns.length / 2)]!
 
@@ -97,7 +102,7 @@ it.live(
           sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999)
             INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,
               cast_json,presence_json,created_at,updated_at,authoring_fork_id)
-            SELECT '${prefix}-v'||x, '${prefix}-s'||x, 0, 'complete', CASE WHEN x % 2 = 0 THEN NULL ELSE ? END,
+            SELECT '${prefix}-v'||printf('%0${34 - prefix.length}d',x), '${prefix}-s'||x, 0, 'complete', CASE WHEN x % 2 = 0 THEN NULL ELSE ? END,
               CASE WHEN x % 2 = 0 THEN 'human' ELSE 'model' END, '${text}, line '||x||'.', 'verbatim',
               CASE WHEN x % 2 = 0 THEN 'user_written' ELSE 'generated' END, ?, ?, x, x, '${fork}' FROM n`,
           params: [speaker, cast, JSON.stringify({ away: [away] })]
@@ -106,7 +111,7 @@ it.live(
           sql: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 2999)
             INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id,chain_id)
             SELECT '${prefix}-s'||x, ?, CASE WHEN x = 1 THEN ? ELSE '${prefix}-s'||(x-1) END,
-              (SELECT depth FROM slots WHERE id = ?) + x, '${prefix}-v'||x, x, ?, (SELECT chain_id FROM slots WHERE id = ?) FROM n`,
+              (SELECT depth FROM slots WHERE id = ?) + x, '${prefix}-v'||printf('%0${34 - prefix.length}d',x), x, ?, (SELECT chain_id FROM slots WHERE id = ?) FROM n`,
           params: [chatId, head, head, fork, head]
         },
         { sql: `UPDATE forks SET tip_slot_id = '${prefix}-s2999' WHERE id = ?`, params: [fork] }
@@ -119,7 +124,7 @@ it.live(
               k(j) AS (SELECT 1 UNION ALL SELECT j+1 FROM k WHERE j < 49)
             INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,
               cast_json,presence_json,created_at,updated_at,authoring_fork_id)
-            SELECT 'docks-v'||x||'-'||j, 'docks-s'||x, j, 'complete', ?, 'model', 'Another telling of line '||x||', take '||j||'.',
+            SELECT 'docks-v'||printf('%029d',x)||'-'||j, 'docks-s'||x, j, 'complete', ?, 'model', 'Another telling of line '||x||', take '||j||'.',
               'verbatim', 'generated', ?, ?, x, x, '${docks}' FROM n JOIN k ON j < 20 + (x % 31)`,
           params: [wren, cast, JSON.stringify({ away: [mira] })]
         }
@@ -236,33 +241,275 @@ it.live(
       assert.notInclude(built.snapshot, "The Lantern at night, line 2999.")
       // The agent's search as Wren's reply runs it (TH8): the path, the join's 3,000 rows, her knowledge.
       const snapshot = JSON.parse(built.snapshot) as ContextSnapshot
-      const search = (query: string) =>
-        Effect.suspend(() =>
-          historyTools
-            .find((tool) => tool.id === "search_chat")!
-            .execute(
+      const spent = new Map<string, number>()
+      const profiled = new Proxy(h.reader, {
+        get: (target, key) => {
+          const op = (target as unknown as Record<string, unknown>)[key as string]
+          if (typeof op !== "function") return op
+          return (input: unknown) => {
+            const started = performance.now()
+            return (op as (i: unknown) => Effect.Effect<unknown>)(input).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  spent.set(key as string, (spent.get(key as string) ?? 0) + performance.now() - started)
+                  spent.set(`${key as string}#`, (spent.get(`${key as string}#`) ?? 0) + 1)
+                })
+              )
+            )
+          }
+        }
+      })
+      const context = (): ToolContext => ({
+        userId: h.userId,
+        chatId,
+        forkId: placeholder.forkId as ForkId,
+        slotId: placeholder.slotId,
+        versionId: placeholder.version.id,
+        leafSlotId,
+        viewers: generationOf(snapshot).viewers,
+        rolloutId: "test",
+        toolCallId: "test",
+        cache: new Map(),
+        reader: profiled,
+        writer: h.writer
+      })
+      const prepareHook = historyTools.find((tool) => tool.id === "read_messages")!.snapshot!
+      for (const [operation, forkId, leaf, viewer] of [
+        ["prepare, no join on path", docks, "docks-s2999", wren],
+        ["prepare, unknown join on path", main, leafSlotId, mira]
+      ] as const) {
+        const paths = spent.get("ReadPath#") ?? 0
+        yield* time(
+          operation,
+          Effect.suspend(() =>
+            prepareHook.prepare(
               {
+                ...context(),
+                forkId,
+                leafSlotId: leaf as SlotId,
+                viewers: [viewer]
+              },
+              undefined
+            )
+          )
+        )
+        assert.strictEqual(spent.get("ReadPath#") ?? 0, paths, "unaffected preflight reads no message windows")
+      }
+      const searchTool = historyTools.find((tool) => tool.id === "search_chat")!
+      const readTool = historyTools.find((tool) => tool.id === "read_messages")!
+      const search = (query: string) => Effect.suspend(() => searchTool.execute(context(), { query } as never))
+      const found = yield* time("search_chat for Wren", search("docks night 2999"))
+      assert.include(found.text, "The docks at night, line 2999.")
+      assert.notMatch(found.text, /At the docks #|Message [0-9]/)
+      assert.strictEqual((yield* search("Lantern night 2999")).text, "No earlier messages match.")
+
+      const address = /Message (v[a-f0-9]{24})/.exec(found.text)![1]!
+      const read = yield* time(
+        "read_messages for Wren, cold",
+        Effect.suspend(() => readTool.execute(context(), { from: address, count: 20 } as never))
+      )
+      assert.include(read.text, "The docks at night, line 2999.")
+      assert.notInclude(read.text, "The Lantern at night")
+      const warm = context()
+      // What a reply's generation prepares (one path read), and what its snapshot keeps of it.
+      const state = yield* time(
+        "prepare private history snapshot, cold",
+        Effect.suspend(() => searchTool.snapshot!.prepare(context(), undefined)),
+        1
+      )
+      const view = (state as { prepared: ReadonlyMap<string, unknown> }).prepared.get("history.private") as {
+        messages: ReadonlyArray<{ content: string }>
+      }
+      const frozen = JSON.stringify(searchTool.snapshot!.freeze!(state))
+      assert.notInclude(frozen, "The docks at night")
+      process.stdout.write(
+        `THREAD_TOOLS_SNAPSHOT ${JSON.stringify({ frozenBytes: Buffer.byteLength(frozen), projectedTextBytes: Buffer.byteLength(JSON.stringify(view)), messages: view.messages.length, textBytes: view.messages.reduce((n, m) => n + Buffer.byteLength(m.content), 0) })}\n`
+      )
+      assert.strictEqual(Buffer.byteLength(frozen), 77)
+      // Reconstruct the preceding implementation from the same in-memory view. Both forms go
+      // through the real StartRollout handler in the helper worker, alternating five times.
+      const rows = view.messages as ReadonlyArray<{ key: string; n: number; content: string }>
+      const oldFrozen = {
+        seed: (view as { seed?: string }).seed,
+        keys: rows.map((r) => r.key),
+        numbers: rows.flatMap((r, i) => (r.n === (rows[i - 1]?.n ?? 0) + 1 ? [] : [[i, r.n]]))
+      }
+      const withState = (kept: unknown) => JSON.stringify({ ...snapshot, agentToolState: { "history.private": kept } })
+      const holds = yield* Effect.promise(
+        () =>
+          new Promise<Array<{ label: string; bytes: number; ms: number }>>((resolve, reject) => {
+            const worker = new Worker(new URL("./support/historySnapshotWorker.ts", import.meta.url), {
+              workerData: {
+                dbPath: databaseFile(config.dataDir),
+                input: {
+                  userId: h.userId,
+                  chatId,
+                  forkId: placeholder.forkId,
+                  slotId: placeholder.slotId,
+                  versionId: placeholder.version.id,
+                  leafSlotId,
+                  rolloutId: "unused",
+                  snapshot: "unused",
+                  connectionId: snapshot.inputs.model!.connectionId,
+                  modelId: snapshot.inputs.model!.modelId,
+                  issues: [],
+                  variables: [],
+                  frozenMessages: []
+                },
+                snapshots: [
+                  { label: "before", snapshot: withState(oldFrozen) },
+                  { label: "after", snapshot: withState(JSON.parse(frozen)) }
+                ]
+              }
+            })
+            let result: Array<{ label: string; bytes: number; ms: number }> | undefined
+            worker.once("message", (message: { samples: typeof result }) => {
+              result = message.samples
+            })
+            worker.once("error", reject)
+            worker.once("exit", (code) =>
+              code === 0 && result !== undefined ? resolve(result) : reject(new Error(`history worker exited ${code}`))
+            )
+          })
+      )
+      process.stdout.write(
+        `THREAD_HISTORY_WRITER ${JSON.stringify({
+          messages: rows.length,
+          idBytes: rows.map((r) => r.key.length).sort((a, b) => a - b)[Math.floor(rows.length / 2)],
+          beforeFrozenBytes: Buffer.byteLength(JSON.stringify(oldFrozen)),
+          afterFrozenBytes: Buffer.byteLength(frozen),
+          samples: holds,
+          medians: ["before", "after"].map((label) => ({
+            label,
+            ms: median(holds.filter((r) => r.label === label).map((r) => r.ms))
+          }))
+        })}\n`
+      )
+      assert.isBelow(median(holds.filter((r) => r.label === "after").map((r) => r.ms)), 100)
+      // The run reads what was prepared; a Resume, step edit or replay thaws the frozen form.
+      yield* searchTool.snapshot!.prepare(warm, state)
+      yield* time("read_messages for Wren, cached", readTool.execute(warm, { from: address, count: 20 } as never))
+      yield* time("search_chat for Wren, cached", searchTool.execute(warm, { query: "docks night 2999" } as never))
+      const thawed = yield* time(
+        "read_messages for Wren, thawed on Resume",
+        Effect.suspend(() => {
+          const resumed = context()
+          return searchTool
+            .snapshot!.prepare(resumed, JSON.parse(frozen))
+            .pipe(Effect.andThen(readTool.execute(resumed, { from: address, count: 20 } as never)))
+        })
+      )
+      assert.strictEqual(thawed.text, read.text)
+
+      // Actual Generate -> first received text delta, with an immediate loopback provider.
+      // Paired control forces the preceding eager path preparation; all other work is the
+      // same. This measures the preflight's contribution without a real provider's latency.
+      const registry = yield* ExecutionRegistry
+      const firstTokens = new Map<string, number>()
+      const completed = new Set<string>()
+      let subscribed = false
+      yield* h.api.SubscribeChat({ chatId }).pipe(
+        Stream.runForEach((batch) =>
+          Effect.sync(() => {
+            subscribed = true
+            for (const e of batch) {
+              if (e._tag === "Delta" && e.text.length && !firstTokens.has(e.versionId))
+                firstTokens.set(e.versionId, performance.now())
+              if (e._tag === "Version" && e.version.status !== "generating") completed.add(e.version.id)
+            }
+          })
+        ),
+        Effect.forkScoped
+      )
+      yield* eventually(() => subscribed)
+      h.mock.setHandler((_request, res) =>
+        sse(
+          res,
+          completionChunks(["Morning light."], {
+            prompt_tokens: 10,
+            completion_tokens: 3
+          })
+        )
+      )
+      const tokenSamples: Array<{ shape: string; preflight: string; ms: number }> = []
+      for (const [shape, source, leaf, speaker] of [
+        ["no join on path", docks, "docks-s2999", wren],
+        ["unknown join", main, leafSlotId, mira],
+        ["known join", main, leafSlotId, wren]
+      ] as const) {
+        for (let n = 0; n < 3; n++)
+          for (const preflight of ["eager control", "probe"] as const)
+            yield* Effect.gen(function* () {
+              if (preflight === "eager control")
+                yield* registry.rolloutTools.register({
+                  ...readTool,
+                  snapshot: {
+                    ...prepareHook,
+                    prepare: (ctx, frozen) =>
+                      prepareHook.prepare(
+                        {
+                          ...ctx,
+                          reader: {
+                            ...ctx.reader,
+                            HistoryProjectionNeeded: (() =>
+                              Effect.succeed(true)) as ToolContext["reader"]["HistoryProjectionNeeded"]
+                          }
+                        },
+                        frozen
+                      )
+                  }
+                })
+              const forkId = (yield* h.writer.CreateFork({
                 userId: h.userId,
                 chatId,
-                forkId: placeholder.forkId as ForkId,
-                slotId: placeholder.slotId,
-                versionId: placeholder.version.id,
-                leafSlotId,
-                viewers: generationOf(snapshot).viewers,
-                rolloutId: "test",
-                toolCallId: "test",
-                cache: new Map(),
-                reader: h.reader,
-                writer: h.writer
-              } satisfies ToolContext,
-              { query } as never
-            )
-        )
-      const found = yield* time("search_chat for Wren", search("docks night 2999"))
-      assert.isTrue(found.isError)
-      assert.include(found.text, "History tools are unavailable")
-      assert.strictEqual((yield* search("Lantern night 2999")).text, found.text)
+                fromForkId: source,
+                atSlotId: leaf as SlotId
+              })).fork.id as ForkId
+              for (const data of [
+                { key: "agent.enabled", value: { on: true } },
+                { key: "agent.tools", value: { tools: ["read_messages"] } },
+                { key: "context.per_speaker", value: "separate" },
+                { key: "lcm.settings", value: { enabled: false } }
+              ] as const)
+                yield* h.writer.AddStateEvent({
+                  userId: h.userId,
+                  chatId,
+                  forkId,
+                  slotId: data.key === "lcm.settings" ? null : (leaf as SlotId),
+                  versionId: null,
+                  scope: null,
+                  data
+                })
+              const start = performance.now()
+              const generated = yield* h.api.Generate({
+                chatId,
+                forkId,
+                parentSlotId: leaf as SlotId,
+                branch: false,
+                speakerEntityId: speaker
+              })
+              assert.strictEqual(generated._tag, "Posted")
+              if (generated._tag !== "Posted") return
+              const id = generated.entry.version.id
+              yield* eventually(() => completed.has(id), 30_000)
+              assert.isTrue(firstTokens.has(id), "the subscription received a first text delta")
+              tokenSamples.push({ shape, preflight, ms: firstTokens.get(id)! - start })
+            }).pipe(Effect.scoped)
+      }
+      process.stdout.write(
+        `THREAD_FIRST_TOKEN ${JSON.stringify({
+          samples: tokenSamples,
+          medians: [...new Set(tokenSamples.map((s) => s.shape))].flatMap((shape) =>
+            ["eager control", "probe"].map((preflight) => ({
+              shape,
+              preflight,
+              ms: median(tokenSamples.filter((s) => s.shape === shape && s.preflight === preflight).map((s) => s.ms))
+            }))
+          )
+        })}\n`
+      )
 
+      process.stdout.write(`THREAD_TOOLS_PROFILE ${JSON.stringify(Object.fromEntries(spent))}\n`)
       process.stdout.write(`THREAD_SUMMARIES_SCALE ${JSON.stringify(samples)}\n`)
       const ms = (operation: string) => samples.find((s) => s.operation === operation)!.ms
       assert.isBelow(ms("JoinThreads, separately"), 1_500)
@@ -270,6 +517,11 @@ it.live(
       assert.isBelow(ms("GetLcmState for Wren"), 500)
       assert.isBelow(ms("AssembleContext for Wren"), 3_000)
       assert.isBelow(ms("search_chat for Wren"), 3_000)
+      assert.isBelow(ms("prepare, no join on path"), 100)
+      assert.isBelow(ms("prepare, unknown join on path"), 100)
+      assert.isBelow(ms("read_messages for Wren, cold"), 3_000)
+      assert.isBelow(ms("read_messages for Wren, cached"), 100)
+      assert.isBelow(ms("read_messages for Wren, thawed on Resume"), 3_000)
     }).pipe(Effect.scoped, Effect.provide(server.layer))
   },
   600_000

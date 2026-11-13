@@ -14,7 +14,15 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     description: "Read, create, edit and copy character cards, and mark favourites.",
     instructions:
       "Find a card with list_library first and use its id when names repeat. Read a card before editing it, and change only the fields asked for. To keep the original, copy it with clone_card and edit the copy.",
-    tools: ["read_card", "create_card", "edit_card", "clone_card", "set_card_favourite"]
+    tools: [
+      "read_card",
+      "create_card",
+      "edit_card",
+      "move_card_text",
+      "edit_card_note",
+      "clone_card",
+      "set_card_favourite"
+    ]
   },
   {
     id: "presets-lorebooks",

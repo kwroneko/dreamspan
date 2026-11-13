@@ -233,11 +233,22 @@ function sideWriteTests() {
             await side.getByLabel("Message", { exact: true }).fill("Change the first message here.")
             await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
             const approval = side.locator("[data-approval]")
-            await expect(approval).toContainText(fixture.original)
+            await expect(approval).toContainText("Branch “Original”")
+            await expect(approval).not.toContainText(fixture.original)
             await expect(approval).toContainText("messages 1–1")
             await expect(approval).toContainText("OLDER sentinel")
             await expect(approval).not.toContainText("NEWER sentinel")
             await expectLayout(page, info, `side-write-approval-${width}-${theme}`, { scope: "[data-approval]" })
+            await admin((api) => api.NameFork({ forkId: fixture.original, name: "Renamed original" }))
+            await page.reload()
+            await expect(approval).toContainText("Branch “Renamed original”")
+            // Renaming changes the saved story proof. Decline that old description and
+            // ask again, rather than weakening the writer's stale-target refusal.
+            await approval.getByRole("button", { name: "Decline", exact: true }).click()
+            await expect(approval).toHaveCount(0)
+            await side.getByLabel("Message", { exact: true }).fill("Change the first message on the renamed branch.")
+            await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+            await expect(approval).toContainText("Branch “Renamed original”")
             await page.goto(url(fixture.newer))
             await expect(approval).toBeVisible()
             await approval.getByRole("button", { name: "Allow", exact: true }).click()
@@ -249,7 +260,9 @@ function sideWriteTests() {
             await page.goto(`${server().url}/chats/${workshop.id}`)
             await openPanel(page, "Changes")
             const effect = page.locator('[data-effect-kind="changeset.apply"]')
-            await expect(effect).toContainText(fixture.original)
+            await expect(effect).toContainText("Branch “Renamed original”")
+            await expect(effect).toContainText("messages 1–1")
+            await expect(effect).not.toContainText(fixture.original)
             await expectLayout(page, info, `side-write-effect-${width}-${theme}`)
             const read = (forkId: typeof fixture.original) =>
               admin((api) =>
@@ -267,6 +280,12 @@ function sideWriteTests() {
             await expect(effect).toContainText("Undone")
             expect((await read(fixture.original)).entries[0]!.version.content).toBe("OLDER sentinel")
             expect((await read(fixture.newer)).entries[0]!.version.content).toBe("NEWER sentinel")
+            await admin((api) => api.DeleteFork({ forkId: fixture.original }))
+            await page.reload()
+            await expect(effect).toContainText("Renamed original")
+            await expect(effect).toContainText("(deleted)")
+            await expect(effect).not.toContainText(fixture.original)
+            await expectLayout(page, info, `side-write-deleted-${width}-${theme}`)
           } finally {
             await provider.stop()
           }
