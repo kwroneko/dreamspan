@@ -35,6 +35,7 @@ import {
   type ConnectionSettings,
   type Credential,
   type CredentialId,
+  DEFAULT_IDLE_TIMEOUT_S,
   endpointsStale,
   modelPrice,
   pinnedRoute,
@@ -1113,6 +1114,8 @@ export const layer = (options: ProvidersOptions = {}) =>
           firstTokenAt: null as number | null,
           partial: null as AssistantMessage | null,
           refused: null as string | null,
+          /** The idle limit in seconds when the provider sent nothing that long (spec/AGENTIC.md §12.5). */
+          silentFor: null as number | null,
           gate: undefined as ReturnType<typeof stagger.join> | undefined,
           release: undefined as "first-chunk" | "complete" | "timeout" | "leader-ended" | undefined,
           /** The images the final payload sent, for image token calibration. */
@@ -1368,6 +1371,24 @@ export const layer = (options: ProvidersOptions = {}) =>
               let recordSent: (() => Promise<void>) | undefined
               // The sent context's write, under way beside the request (awaited before it ends).
               let recording: Promise<void> | undefined
+              // A request with no byte from the provider for the connection's idle limit fails
+              // as "no response" (spec/AGENTIC.md §12.5). The clock runs from when the request
+              // is sent, not while it waits its turn for the cache; any byte counts, keep-alive
+              // comments included.
+              const idleS = prepared.settings.idleTimeoutS ?? DEFAULT_IDLE_TIMEOUT_S
+              const idle = new AbortController()
+              let heardAt: number | null = prepared.kind.acceptsFetch ? null : Date.now()
+              const heard = () => {
+                if (heardAt !== null) heardAt = Date.now()
+              }
+              const watch = setInterval(
+                () => {
+                  if (heardAt === null || Date.now() - heardAt < idleS * 1000) return
+                  state.silentFor = idleS
+                  idle.abort()
+                },
+                Math.min(1000, idleS * 250)
+              )
               const observed: typeof fetch = async (input, init) => {
                 if (state.pendingIdentity) {
                   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
@@ -1411,6 +1432,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 // writes, but not awaited: the request needn't wait on the writer.
                 recording = recordSent?.()
                 recordSent = undefined
+                heardAt = Date.now()
                 // SDK-created affinity headers are now available, before any HTTP is sent.
                 // Preserve refused redirects instead of retrying the SDK's generic network error.
                 const response = await routed(input, init).catch((error: unknown) => {
@@ -1420,7 +1442,21 @@ export const layer = (options: ProvidersOptions = {}) =>
                 captureUsageHeaders(response.headers, state.capture)
                 state.status = response.status
                 state.retryAfterMs = parseRetryAfter(response.headers.get("retry-after") ?? undefined)
-                return response
+                heard()
+                if (!response.body) return response
+                const body = response.body.pipeThrough(
+                  new TransformStream<Uint8Array, Uint8Array>({
+                    transform: (chunk, controller) => {
+                      heard()
+                      controller.enqueue(chunk)
+                    }
+                  })
+                )
+                return new Response(body, {
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: response.headers
+                })
               }
               const cacheMode = resolveModel(
                 model.key,
@@ -1450,7 +1486,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 apiKey: prepared.kind.transport ? TRANSPORT_AUTH : (prepared.apiKey ?? "no-key"),
                 env: {},
                 maxRetries: 0,
-                signal,
+                signal: AbortSignal.any([signal, idle.signal]),
                 headers: prepared.headers,
                 ...(prepared.kind.acceptsFetch
                   ? {
@@ -1600,6 +1636,7 @@ export const layer = (options: ProvidersOptions = {}) =>
               })
               try {
                 for await (const event of events) {
+                  heard()
                   if ("partial" in event) state.partial = event.partial
                   // Plugins may expose only normalized events, without a raw-event callback.
                   if (
@@ -1628,6 +1665,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 if (result.stopReason !== "error" && result.stopReason !== "aborted") state.gate?.release("complete")
                 return result
               } finally {
+                clearInterval(watch)
                 await recording
               }
             },
@@ -1641,15 +1679,19 @@ export const layer = (options: ProvidersOptions = {}) =>
           )
           const classified = state.held
             ? providerError("budget_held", "The backfill is held at its approved limit.")
-            : state.refused !== null
-              ? providerError("unusable", state.refused)
-              : classify(
-                  message,
-                  { status: state.status, retryAfterMs: state.retryAfterMs, category: state.capture.refusalCategory },
-                  knownContext,
-                  state.firstTokenAt !== null,
-                  attribution.purpose !== "generation"
-                )
+            : state.silentFor !== null
+              ? providerError("no_response", `The provider sent nothing for ${state.silentFor} s.`, {
+                  afterTokens: state.firstTokenAt !== null
+                })
+              : state.refused !== null
+                ? providerError("unusable", state.refused)
+                : classify(
+                    message,
+                    { status: state.status, retryAfterMs: state.retryAfterMs, category: state.capture.refusalCategory },
+                    knownContext,
+                    state.firstTokenAt !== null,
+                    attribution.purpose !== "generation"
+                  )
           const error = classified === null ? null : scrubbed(prepared, withStatedLimit(classified))
           return { message, error }
         })

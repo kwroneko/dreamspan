@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
-import { chmodSync, writeFileSync } from "node:fs"
+import { cpSync, symlinkSync, chmodSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { assert, it } from "@effect/vitest"
+import { assert, expect, it } from "@effect/vitest"
 import { tempDir } from "./support/tempDir.ts"
 
 for (const secretKey of [undefined, "synthetic-server-secret"]) {
@@ -110,6 +110,54 @@ for (const entry of ["src/main.ts", "src/dev/main.ts"]) {
     try {
       assert.equal(await exited, 0, output)
       assert.include(output, 'scrub-result:{"removed":true,"server":true}')
+    } finally {
+      clearTimeout(timer)
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL")
+      await exited
+    }
+  })
+}
+
+for (const setting of ["FAKE_CARD_SOURCE", "FAKE_SAVED_MEDIA"] as const) {
+  it(`refuses ${setting} plainly when development files are absent`, async () => {
+    const fixture = tempDir("production-imports")
+    const root = resolve(import.meta.dirname, "../../..")
+    cpSync(join(root, "packages/server/src"), join(fixture, "src"), {
+      recursive: true,
+      filter: (source) => source !== join(root, "packages/server/src/dev")
+    })
+    writeFileSync(join(fixture, "package.json"), JSON.stringify({ type: "module" }))
+    symlinkSync(join(root, "node_modules"), join(fixture, "node_modules"))
+    const child = spawn(process.execPath, ["--no-wasm-code-gc", "src/main.ts"], {
+      cwd: fixture,
+      env: {
+        ...process.env,
+        FAKE_CARD_SOURCE: "off",
+        FAKE_SAVED_MEDIA: "off",
+        [setting]: setting === "FAKE_CARD_SOURCE" ? "synthetic-secret-/private/fixture" : "on",
+        DATA_DIR: join(fixture, "data"),
+        PORT: "0",
+        HOST: "127.0.0.1"
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    })
+    let output = ""
+    child.stdout.on("data", (chunk) => (output += chunk))
+    child.stderr.on("data", (chunk) => (output += chunk))
+    const exited = new Promise<number | null>((done, fail) => {
+      child.once("exit", done)
+      child.once("error", fail)
+    })
+    const timer = setTimeout(() => child.kill("SIGKILL"), 15_000)
+    try {
+      expect(await exited).not.toBe(0)
+      expect(output).toContain(`${setting}=`)
+      expect(output).toContain("needs the development files")
+      expect(output).not.toContain("ERR_MODULE_NOT_FOUND")
+      expect(output).not.toMatch(/file:\/\/|^\s*at\s/m)
+      expect(output).not.toContain("synthetic-secret-/private/fixture")
+      expect(output).not.toContain(join(fixture, "src/dev"))
+      expect(output).not.toContain("Listening on")
     } finally {
       clearTimeout(timer)
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL")

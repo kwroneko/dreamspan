@@ -88,13 +88,28 @@ async function fetchNewerFile(origin: CardOrigin): Promise<Fetched> {
   }
 }
 
-/** The notice's entry in `editorNotices`: only for a card with a revision of its own. */
+/**
+ * The notice's entry in `editorNotices`: for a card with a revision of its own, and for a
+ * standalone lorebook added from a source (§3.9), in the full editor and the side panel alike.
+ */
 export function SourceUpdateNotice({ store }: { store: EditorStore }) {
   const snapshot = useEditorState(store).snapshot
   const ref = snapshot?.ref
+  if (ref?.kind === "lorebook" && ref.entityId)
+    return <LorebookUpdateNotice key={ref.entityId} entityId={ref.entityId} refId={ref.id} label={ref.label} />
   return ref && ref.kind === "card" && snapshot.revisionNumber > 0 ? (
     <UpdateNotice key={ref.entityId} entityId={ref.entityId} refId={ref.id} label={ref.label} />
   ) : null
+}
+
+/** Lorebook updates use the same explicit review as cards, in either editor. */
+function LorebookUpdateNotice(props: { entityId: string; refId: RefId; label: string }) {
+  return (
+    <>
+      <UpdateNotice {...props} what="lorebook" />
+      <CheckForNewer entityId={props.entityId} name={props.label} what="lorebook" />
+    </>
+  )
 }
 
 type Open =
@@ -107,7 +122,17 @@ type Open =
       readonly receipt: string
     }
 
-function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: RefId; label: string }) {
+function UpdateNotice({
+  entityId,
+  refId,
+  label,
+  what = "card"
+}: {
+  entityId: string
+  refId: RefId
+  label: string
+  what?: "card" | "lorebook"
+}) {
   const origin = useOrigin(entityId)
   const [open, setOpen] = useState<Open | null>(null)
   const [busy, setBusy] = useState<"merge" | "choices" | null>(null)
@@ -135,7 +160,11 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
   const review = async () => {
     const file = await fetched("merge")
     if (!file) return
-    const staged = await stageVersion(file.file, refId, file.link)
+    const staged = await stageVersion(
+      what === "lorebook" ? new File([file.file], `${label}.json`) : file.file,
+      refId,
+      file.link
+    )
     const revisionId = staged._tag === "Done" ? staged.result.library?.stagedRevisionId : undefined
     if (!revisionId) {
       setBusy(null)
@@ -175,25 +204,27 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
           actions={
             <>
               <Button
-                hint={`Gets the newer version from ${sourceName} and shows its changes to pick which to take into this card.`}
+                hint={`Gets the newer version from ${sourceName} and shows its changes to pick which to take into this ${what}.`}
                 pending={busy === "merge"}
                 disabled={busy !== null}
                 onClick={() => void review()}
               >
                 Review and merge
               </Button>
-              <Button
-                hint="Compares the newer version with this card, then replaces it, merges it or adds it as a separate card."
-                pending={busy === "choices"}
-                disabled={busy !== null}
-                onClick={() => void choices()}
-              >
-                More choices…
-              </Button>
+              {what === "card" && (
+                <Button
+                  hint="Compares the newer version with this card, then replaces it, merges it or adds it as a separate card."
+                  pending={busy === "choices"}
+                  disabled={busy !== null}
+                  onClick={() => void choices()}
+                >
+                  More choices…
+                </Button>
+              )}
             </>
           }
         >
-          <p>Its changes aren't in this card until you take them.</p>
+          <p>Its changes aren't in this {what} until you take them.</p>
           {problem && <p className="text-danger">{problem}</p>}
           {action.error && <p className="text-danger">{action.error.message}</p>}
         </Alert>
@@ -229,7 +260,15 @@ function UpdateNotice({ entityId, refId, label }: { entityId: string; refId: Ref
 }
 
 /** Check for a newer version, in the card's Sources (§3.8): only for a card added from a source that's on. */
-export function CheckForNewer({ entityId, name }: { entityId: string; name: string }) {
+export function CheckForNewer({
+  entityId,
+  name,
+  what = "card"
+}: {
+  entityId: string
+  name: string
+  what?: "card" | "lorebook"
+}) {
   const origin = useOrigin(entityId)
   const call = useSourceCall()
   const registry = useContext(RegistryContext)
@@ -254,7 +293,7 @@ export function CheckForNewer({ entityId, name }: { entityId: string; name: stri
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 pt-2" data-card-source-check>
       <Button
-        hint={`Asks ${origin.sourceName} whether ${name || "this card"} has changed since you added it.`}
+        hint={`Asks ${origin.sourceName} whether ${name || `this ${what}`} has changed since you added it.`}
         pending={pending}
         onClick={() => void check()}
       >

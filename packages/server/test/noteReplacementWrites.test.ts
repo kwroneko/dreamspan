@@ -127,6 +127,25 @@ layer(serverLayer(testConfig()))("replacement writes", (it) => {
       assert.isUndefined(there.find((n) => n.ref.id === second.id)?.doc["replaces"])
     })
   )
+  it.effect("copying a note refuses a replacement target already claimed in the destination", () =>
+    Effect.gen(function* () {
+      const { create, draft, api, at } = yield* setup
+      const target = { kind: "preset_prompt", identifier: "main" } as const
+      const note = yield* create("Original", target)
+      const second = yield* create("Other note")
+      const sibling = (yield* api.CreateFork({ chatId: at.chatId, fromForkId: at.forkId ?? null, atSlotId: null })).fork
+      yield* (yield* draft(note, undefined))()
+      yield* (yield* draft(second, target))()
+      const before = yield* api.ListChatNotes(at)
+      assert.strictEqual(
+        yield* outcome(
+          api.CopyNoteToBranch({ chatId: at.chatId, noteRefId: note.id, fromForkId: sibling.id, toForkId: at.forkId! })
+        ),
+        "EditRefused"
+      )
+      assert.deepStrictEqual(yield* api.ListChatNotes(at), before)
+    })
+  )
   it.effect("serializes off card-note claims and checks them when creating a chat replacement", () =>
     Effect.gen(function* () {
       const { api, card, create, draft } = yield* setup

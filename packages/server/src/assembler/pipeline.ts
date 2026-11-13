@@ -148,10 +148,18 @@ export class AssemblySources extends Context.Service<
      * everyone (nothing recorded). A merge's join is known to its source's cast. Fixtures
      * without it: everyone knew everything.
      */
-    readonly knowers?: (
-      versionIds: ReadonlyArray<string>
-    ) => Effect.Effect<
-      ReadonlyArray<{ readonly versionId: string; readonly knowers: ReadonlyArray<string> | null }>,
+    readonly stretches?: (
+      leaf?: string | null
+    ) => Effect.Effect<ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>, SourceError>
+    readonly knowers?: (versionIds: ReadonlyArray<string>) => Effect.Effect<
+      ReadonlyArray<{
+        readonly versionId: string
+        readonly knowers: ReadonlyArray<string> | null
+        /** Those the fork read counts not present for it (spec/THREADS.md §5.2), its speaker apart. */
+        readonly away?: ReadonlyArray<string>
+        /** In a separate join's parallel stretch (spec/THREADS.md §7.3): what a stretch view filters. */
+        readonly stretched?: boolean
+      }>,
       SourceError
     >
     /**
@@ -273,6 +281,13 @@ export interface Assembly {
   contextBudget?: ContextSnapshot["contextBudget"]
   /** The chat's context view and whose knowledge filters the history (`knowledge` stage). */
   knowledge?: Knowledge
+  /**
+   * The parallel stretches of the separate joins read so far (spec/THREADS.md §7.3), newest
+   * first: from the destination message the span starts at (its position once read; null
+   * until then) to the join. The history is read newest window first, so a join opens its
+   * stretch before the messages in it are read.
+   */
+  parallelStretches?: Array<{ readonly start: string | null; from: number | null; readonly to: number }>
   lcm?: SummaryLayer
   lcmPieces?: ReadonlyArray<number>
   lcmFailurePieces?: ReadonlyArray<{ readonly from: number; readonly to: number; readonly piece: number }>
@@ -489,13 +504,15 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
         preset: { ref: preset.ref, revision: preset.revision, scope: preset.scope },
         cards,
         ...(presence ? { presence } : {}),
-        // A separate context's viewer, for the tools to read as the history did (C5).
+        // Keep the character identity even when the request's history ends before a join.
         ...(assembly.knowledge?.viewer
           ? {
               viewer: assembly.knowledge.viewer,
               ...(assembly.knowledge.aliases ? { viewerAliases: assembly.knowledge.aliases } : {})
             }
-          : {}),
+          : assembly.knowledge?.stretch && !assembly.knowledge.stretch.stored
+            ? { stretchViewers: assembly.knowledge.stretch.aliases ?? [assembly.knowledge.stretch.viewer] }
+            : {}),
         model: assembly.model ?? null
       },
       ...(request.summaryJob

@@ -1,4 +1,4 @@
-import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc, type LorebookEntry } from "@rp/shared/docs/lorebook.ts"
+import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 
 export const emptyBook = (): LorebookDoc => ({
   schema_version: LOREBOOK_SCHEMA_VERSION,
@@ -11,47 +11,4 @@ export const emptyBook = (): LorebookDoc => ({
   entries: []
 })
 
-export const emptyEntry = (uid: number): LorebookEntry => ({
-  uid,
-  keys: [],
-  secondary_keys: [],
-  comment: "",
-  content: "",
-  constant: false,
-  selective: false,
-  selective_logic: "and_any",
-  enabled: true,
-  order: 100,
-  position: "after_char",
-  depth: 4,
-  role: "system",
-  outlet_name: "",
-  probability: 100,
-  use_probability: true,
-  group: "",
-  group_override: false,
-  group_weight: 100,
-  use_group_scoring: null,
-  scan_depth: null,
-  case_sensitive: null,
-  match_whole_words: null,
-  sticky: null,
-  cooldown: null,
-  delay: null,
-  exclude_recursion: false,
-  prevent_recursion: false,
-  delay_until_recursion: false,
-  ignore_budget: false,
-  vectorized: false,
-  automation_id: "",
-  triggers: [],
-  match_persona_description: false,
-  match_character_description: false,
-  match_character_personality: false,
-  match_character_depth_prompt: false,
-  match_scenario: false,
-  match_creator_notes: false,
-  add_memo: false,
-  use_regex: false,
-  extensions: {}
-})
+export { newLorebookEntry as emptyEntry } from "@rp/shared/docs/lorebook.ts"

@@ -4,6 +4,7 @@ import { resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { AssemblySources, need, type AssemblerStage } from "./pipeline.ts"
 import { historyLeafOf } from "./types.ts"
 import { layerKnown } from "./knowledge.ts"
+import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 
 /** One summary as its own message's text (DESIGN §8: separate blocks placed like the history). */
 export const summaryBlock = (s: Pick<Summary, "level" | "from" | "to" | "content">) =>
@@ -21,9 +22,17 @@ export const lcmStage: AssemblerStage = {
         sources.lcmDefaults ? yield* sources.lcmDefaults() : null
       )
       const leaf = historyLeafOf(need(assembly, "target"))
-      // A separate context reads its own view's layer (spec/CHARACTER-CONTEXT.md §2.3, unit C7).
+      // A separate context reads its own view's layer (spec/CHARACTER-CONTEXT.md §2.3, unit C7);
+      // a character's reply in one shared context its stretch view's (spec/THREADS.md §7.3, TH7),
+      // the shared layer where no separate join is on the path.
       const viewer = assembly.knowledge?.viewer ?? null
-      const identities = viewer === null ? undefined : (assembly.knowledge?.aliases ?? [viewer])
+      const stretch = assembly.knowledge?.stretch
+      const identities =
+        viewer !== null
+          ? (assembly.knowledge?.aliases ?? [viewer])
+          : stretch
+            ? [...new Set([...(stretch.aliases ?? [stretch.viewer]), STRETCH_VIEW])]
+            : undefined
       const layer = yield* sources.summaryLayer(leaf, identities)
       // A source without views (a fixture) gives the shared layer: withheld where it covers what
       // the speaker missed.

@@ -29,7 +29,7 @@ export const RETRYABLE: ReadonlySet<ProviderErrorReason> = new Set(["rate_limite
 const REFUSAL_STOPS = new Set(["refusal", "content_filter", "safety", "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST"])
 
 const NETWORK_PATTERN =
-  /ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EPIPE|socket hang up|fetch failed|network|terminated|other side closed/i
+  /ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|EPIPE|socket hang up|fetch failed|network|terminated|other side closed|connection error/i
 
 /** Parses Retry-After: seconds, or an HTTP date. */
 export const parseRetryAfter = (value: string | undefined, now = Date.now()): number | null => {

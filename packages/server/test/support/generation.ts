@@ -75,6 +75,8 @@ export const generateReply = (
     readonly auto?: { readonly speaker: string; readonly round?: ReadonlyArray<string> }
     /** Called once the chat is set up, before anything is sent, with the `characters`' ids in order. */
     readonly before?: (chat: Chat, characters: ReadonlyArray<EntityId>) => Effect.Effect<void, unknown, Writer>
+    /** Where the chat's events go as they come, for a test that acts before the reply ends. */
+    readonly events?: Array<ChatEvent>
   }
 ) =>
   Effect.gen(function* () {
@@ -176,7 +178,7 @@ export const generateReply = (
       })
       yield* state({ key: "lorebook.attach", value: { ref: book.ref.id as never } })
     }
-    const events: Array<ChatEvent> = []
+    const events: Array<ChatEvent> = options.events ?? []
     yield* api.SubscribeChat({ chatId: chat.id }).pipe(
       Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
       Effect.forkScoped

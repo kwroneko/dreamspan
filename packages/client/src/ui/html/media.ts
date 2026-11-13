@@ -1,6 +1,14 @@
-// URLs in message media always name the authenticated proxy. A scope exists only after
-// consent was read for this message's card/chat. Relative app paths are never accepted.
+import { PENDING_MEDIA } from "./mediaQueue.ts"
+import { savedMedia } from "./savedMedia.ts"
+
+// URLs in message media name this account's saved copy (savedMedia.ts) or the authenticated
+// proxy. A scope exists only after consent was read for this message's card/chat. An address
+// not looked up yet shows a blank placeholder: it never reaches the other site before the
+// lookup says it isn't saved. Relative app paths are never accepted.
 export const proxyMediaUrl = (raw: string, scope: string | null | undefined): string | null => {
+  const saved = savedMedia.answer(raw)
+  if (saved.kind === "saved") return saved.path
+  if (saved.kind === "pending") return PENDING_MEDIA
   if (!scope) return null
   const value = raw.trim()
   if (!/^(?:https?:\/\/|\/\/)/i.test(value)) return null

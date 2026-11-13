@@ -53,7 +53,7 @@ A call to a deferred tool before it's loaded returns, as an error result: “rea
 - `tool_search { query, max_results? }`: `select:a,b` loads exact names; other words search names (weight 3) and descriptions (1), up to 5. Its description lists the deferred tools no skill covers.
 - `load_skill { name }`: returns `<skill name="…">instructions</skill>` and loads the skill's tools. Its description is the skill index, frozen with the run's tools.
 - Both are `read` tools. Search and registered skills need no extra capability; a card-carried skill requires `skills.card` approval. Loading grants nothing: a loaded tool still goes through the offered-tools check, capability standing, approvals and receipts. Only tools in the run's frozen offer can be loaded, and an Off capability's tools aren't in it.
-- Skills are registry entries (`ExecutionRegistry.skills`, `agent/skills.ts`): `{ id, label, description, instructions, tools: patterns, kinds?, always? }`. Built in: `cards`, `presets-lorebooks`, `library`, `chat-setup`, `stories`, `settings`; together they cover every workshop tool (tested). A skill is listed in a run only when it loads a deferred tool there, or has instructions only.
+- Skills are registry entries (`ExecutionRegistry.skills`, `agent/skills.ts`): `{ id, label, description, instructions, tools: patterns, kinds?, always? }`. Built in: `cards`, `presets-lorebooks`, `this-workshop`, `library`, `chat-setup`, `stories`, `settings`; together they cover every workshop tool (tested). A side chat's story tools are immediate rather than in a skill (merge-batch9). A skill is listed in a run only when it loads a deferred tool there, or has instructions only.
 
 ## 6. Card skills
 

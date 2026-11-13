@@ -197,7 +197,7 @@ export const binItemBranches = (sql: SqlClient.SqlClient, userId: UserId, itemId
         for (const fork of forks) branches.push(yield* entry(fork, "chatInBin", false, nowhere))
         continue
       }
-      if (item.kind === "branch") {
+      if (item.kind === "branch" || item.kind === "threads") {
         for (const fork of forks.filter((f) => (f as ForkRow & { bin_item_id: string | null }).bin_item_id === item.id))
           branches.push(yield* entry(fork, "branchInBin", false, nowhere))
         continue

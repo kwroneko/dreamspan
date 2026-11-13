@@ -7,6 +7,8 @@ import { providerDefinitionHandlers } from "../providers/definitions.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeInsertWriteHandlers } from "./insertWrites.ts"
 import { makeMergeWriteHandlers } from "./merges.ts"
+import { makeThreadWriteHandlers } from "./threadWrites.ts"
+import { makeNoteCopyWriteHandlers } from "./noteCopyWrites.ts"
 import { makeLcmQueueHandlers } from "./lcmQueue.ts"
 import { makeLcmEnableWriteHandlers } from "./lcmEnableWrites.ts"
 import { makeLcmUiWriteHandlers } from "./lcmUiWrites.ts"
@@ -47,81 +49,85 @@ const {
   readonly binLimits?: BinLimits
 }
 
-RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
-  Layer.provide(
-    WriteOps.toLayer(
-      Effect.gen(function* () {
-        // After the migrations, which make the tables it watches.
-        yield* installStorageKindValidation
-        yield* trackSummaryTouches(yield* SqlClient.SqlClient)
-        // One bin (and draft store) for every handler group.
-        const bin = makeBin(
-          yield* SqlClient.SqlClient,
-          binLimits,
-          draftClock === null ? Date.now : () => Number(Atomics.load(new BigInt64Array(draftClock), 0))
-        )
-        const [graph, library, binOps, providers, accounts, chatSetup, generation] = yield* Effect.all([
-          makeWriteHandlers(bin),
-          makeLibraryWriteHandlers(bin),
-          makeBinWriteHandlers(bin, binLimits),
-          makeProviderWriteHandlers,
-          makeAccountWriteHandlers,
-          makeChatSetupWriteHandlers(bin),
-          makeGenerationWriteHandlers
-        ])
-        // --- ST data folder import (ARCHITECTURE.md §13)
-        const prefix = makeStImportPrefix()
-        const stImport = yield* makeStImportWriteHandlers(prefix)
-        return WriteOps.of(
-          providerDefinitionHandlers(
-            stateModuleHandlers(
-              stImportPrefixHandlers(
+const handlers = WriteOps.toLayer(
+  Effect.gen(function* () {
+    // After the migrations, which make the tables it watches.
+    yield* installStorageKindValidation
+    yield* trackSummaryTouches(yield* SqlClient.SqlClient)
+    // One bin (and draft store) for every handler group.
+    const bin = makeBin(
+      yield* SqlClient.SqlClient,
+      binLimits,
+      draftClock === null ? Date.now : () => Number(Atomics.load(new BigInt64Array(draftClock), 0))
+    )
+    const [graph, library, binOps, providers, accounts, chatSetup, generation] = yield* Effect.all([
+      makeWriteHandlers(bin),
+      makeLibraryWriteHandlers(bin),
+      makeBinWriteHandlers(bin, binLimits),
+      makeProviderWriteHandlers,
+      makeAccountWriteHandlers,
+      makeChatSetupWriteHandlers(bin),
+      makeGenerationWriteHandlers
+    ])
+    // --- ST data folder import (ARCHITECTURE.md §13)
+    const prefix = makeStImportPrefix()
+    const stImport = yield* makeStImportWriteHandlers(prefix)
+    return WriteOps.of(
+      providerDefinitionHandlers(
+        stateModuleHandlers(
+          stImportPrefixHandlers(
+            {
+              ...(yield* makeHistoryWriteHandlers),
+              ...(yield* makeInsertWriteHandlers(bin)),
+              ...(yield* makeMergeWriteHandlers(bin)),
+              // --- Parallel threads (spec/THREADS.md §5)
+              ...(yield* makeThreadWriteHandlers(bin)),
+              ...(yield* makeNoteCopyWriteHandlers(bin)),
+
+              ...graph,
+              ...library,
+              ...binOps,
+              ...providers,
+              ...accounts,
+              ...chatSetup,
+              ...(yield* makeWorkshopEffectHandlers(
                 {
-                  ...(yield* makeHistoryWriteHandlers),
-                  ...(yield* makeInsertWriteHandlers(bin)),
-                  ...(yield* makeMergeWriteHandlers(bin)),
-                  ...graph,
                   ...library,
-                  ...binOps,
-                  ...providers,
-                  ...accounts,
                   ...chatSetup,
-                  ...(yield* makeWorkshopEffectHandlers(
-                    {
-                      ...library,
-                      ...chatSetup,
-                      ...graph,
-                      ...binOps,
-                      ...generation,
-                      ...(yield* makeHistoryWriteHandlers)
-                    },
-                    bin
-                  )),
-                  ...(yield* makeWorkshopGrantWriteHandlers),
-                  ...stImport,
-                  ...(yield* makeStImportJobWriteHandlers),
+                  ...graph,
+                  ...binOps,
                   ...generation,
-                  ...(yield* makeLcmWriteHandlers(bin)),
-                  ...(yield* makeLcmQueueHandlers),
-                  ...(yield* makeLcmUiWriteHandlers),
-                  ...(yield* makeLcmEnableWriteHandlers(bin)),
-                  ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
-                  ...(yield* makeAdoptWriteHandlers(
-                    library.ImportFile,
-                    chatSetup.StartChat,
-                    library.CommitEditorDrafts,
-                    bin.drafts
-                  )),
-                  ...(yield* makeDecisionWriteHandlers(bin))
+                  ...(yield* makeHistoryWriteHandlers)
                 },
-                prefix
-              )
-            )
+                bin
+              )),
+              ...(yield* makeWorkshopGrantWriteHandlers),
+              ...stImport,
+              ...(yield* makeStImportJobWriteHandlers),
+              ...generation,
+              ...(yield* makeLcmWriteHandlers(bin)),
+              ...(yield* makeLcmQueueHandlers),
+              ...(yield* makeLcmUiWriteHandlers),
+              ...(yield* makeLcmEnableWriteHandlers(bin)),
+              ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
+              ...(yield* makeAdoptWriteHandlers(
+                library.ImportFile,
+                chatSetup.StartChat,
+                library.CommitEditorDrafts,
+                bin.drafts
+              )),
+              ...(yield* makeDecisionWriteHandlers(bin))
+            },
+            prefix
           )
         )
-      })
+      )
     )
-  ),
+  })
+)
+
+RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
+  Layer.provide(handlers),
   Layer.provide(Migrations),
   Layer.provide(writerConnection(dbPath)),
   Layer.provide(RpcServer.layerProtocolWorkerRunner),

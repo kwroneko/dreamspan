@@ -16,7 +16,7 @@ import {
   versionDeletedIn,
   viewAt
 } from "./forkState.ts"
-import { selectSummaryLayer, selectFailedRanges } from "./lcmLayer.ts"
+import { selectSummaryLayer, selectFailedRanges, type LayerView } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
@@ -34,8 +34,9 @@ import { withEndOfRequest } from "@rp/shared/presetConditions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
-import { knowsSql, readKnowers, readMergeRows } from "./knowers.ts"
-import { audienceKey } from "./lcmAudience.ts"
+import { isStretchView, knowsSql, readKnowers, readMergeRows } from "./knowers.ts"
+import { threadStretches } from "./threadStretches.ts"
+import { audienceKey, firstUnknownPosition, stretchOnPath } from "./lcmAudience.ts"
 import { resolveModel } from "@rp/shared/providers.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Schema } from "effect"
@@ -72,6 +73,7 @@ import { displayHistoryRevision, historyRevision } from "./historyChanges.ts"
 import { previousStartIn } from "./historyStart.ts"
 import {
   displayEnd,
+  displayEndOf,
   displayEvents,
   displayLength,
   displaySlots,
@@ -135,6 +137,12 @@ const decoded = <A>(
 /** A history message's leading tagged sections, for the preset to send back. */
 const sectionsOf = (json: string | null): { replySections?: ReplySections } =>
   json === null ? {} : { replySections: JSON.parse(json) as ReplySections }
+
+/** A join as the history reads it: its view only when separate, so a together join reads as before. */
+const historyMerge = (json: string): HistoryMerge => {
+  const { timelines, ...merge } = JSON.parse(json) as HistoryMerge & { readonly timelines: string }
+  return timelines === "separate" ? { ...merge, timelines: "separate" } : merge
+}
 
 interface HistoryRow {
   readonly images_json: string
@@ -357,6 +365,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
       return { ref: row.ref, revision: row.revision, scope, doc: withEndOfRequest(doc).doc } satisfies PresetInput
     })
 
+  let stretchPins: SourcePins["stretches"]
   let layerPins: SourcePins["lcm"]
   // Read only by a separate context, so pinned only when read: a shared one's snapshot is unchanged.
   const knowerPins: Array<NonNullable<SourcePins["knowers"]>[number]> = []
@@ -475,54 +484,74 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   const history = noteHistory(sql, userId, chatId)
   const live = AssemblySources.of({
     viewLayers: true,
-    summaryLayer: (leaf, identities) =>
-      selectSummaryLayer(
-        sql,
-        userId,
-        chatId,
-        settings.summaryBefore ? settings.summaryBefore.slot : leaf,
-        settings.partialBatch,
-        identities ? { identities } : undefined
-      ).pipe(
-        Effect.map((layer) =>
-          settings.condense
-            ? {
-                summaries: [...layer.summaries, ...settings.condense.children],
-                cursor: settings.condense.cursor,
-                cursorDepth: settings.condense.cursorDepth
+    summaryLayer: (leaf, asked) =>
+      // A stretch view (db/knowers.ts) only where a separate join is on the path; elsewhere the shared layer.
+      Effect.gen(function* () {
+        // A private summary's continuity belongs to the planning fork, including when its
+        // material and preceding layer end before J. The prefix must never fall back to the
+        // shared chain of the destination's missed messages.
+        const privateChunk = isStretchView(asked) && settings.summaryBefore !== undefined
+        const applies = privateChunk || !isStretchView(asked) || (yield* stretchOnPath(sql, chatId, leaf))
+        const identities = applies ? asked : undefined
+        let view: LayerView | undefined = identities ? { identities } : undefined
+        if (privateChunk && identities) {
+          const forkId = yield* viewAt(sql, chatId, leaf)
+          const [fork] = yield* sql<{ id: string; tip_slot_id: string | null }>`
+            SELECT id, tip_slot_id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
+          const end = fork ? yield* displayEndOf(sql, chatId, fork) : null
+          view = {
+            identities,
+            unknownFrom: end === null ? null : yield* firstUnknownPosition(sql, chatId, end, identities)
+          }
+        }
+        return yield* selectSummaryLayer(
+          sql,
+          userId,
+          chatId,
+          settings.summaryBefore ? settings.summaryBefore.slot : leaf,
+          settings.partialBatch,
+          view
+        ).pipe(
+          Effect.map((layer) =>
+            settings.condense
+              ? {
+                  summaries: [...layer.summaries, ...settings.condense.children],
+                  cursor: settings.condense.cursor,
+                  cursorDepth: settings.condense.cursorDepth
+                }
+              : settings.summaryBefore
+                ? { ...layer, cursor: settings.summaryBefore.slot, cursorDepth: settings.summaryBefore.depth }
+                : layer
+          ),
+          Effect.flatMap((layer) =>
+            selectFailedRanges(
+              sql,
+              userId,
+              chatId,
+              settings.summaryBefore ? settings.summaryBefore.slot : leaf,
+              layer.cursorDepth,
+              identities ? audienceKey(identities) : null
+            ).pipe(Effect.map((failures) => ({ ...layer, failures })))
+          ),
+          // The layer's cursor is a display position already (selectSummaryLayer in a fork that
+          // shows insertions, spec/MESSAGE-INSERT.md §3.4), which the history's positions compare with.
+          Effect.tap((layer) =>
+            Effect.sync(() => {
+              layerPins = {
+                failures: layer.failures,
+                cursor: layer.cursor,
+                cursorDepth: layer.cursorDepth,
+                summaries: layer.summaries.map((s) => ({
+                  id: s.id,
+                  revision: s.revisionId,
+                  fresh: s.fresh,
+                  status: s.status
+                }))
               }
-            : settings.summaryBefore
-              ? { ...layer, cursor: settings.summaryBefore.slot, cursorDepth: settings.summaryBefore.depth }
-              : layer
-        ),
-        Effect.flatMap((layer) =>
-          selectFailedRanges(
-            sql,
-            userId,
-            chatId,
-            settings.summaryBefore ? settings.summaryBefore.slot : leaf,
-            layer.cursorDepth,
-            identities ? audienceKey(identities) : null
-          ).pipe(Effect.map((failures) => ({ ...layer, failures })))
-        ),
-        // The layer's cursor is a display position already (selectSummaryLayer in a fork that
-        // shows insertions, spec/MESSAGE-INSERT.md §3.4), which the history's positions compare with.
-        Effect.tap((layer) =>
-          Effect.sync(() => {
-            layerPins = {
-              failures: layer.failures,
-              cursor: layer.cursor,
-              cursorDepth: layer.cursorDepth,
-              summaries: layer.summaries.map((s) => ({
-                id: s.id,
-                revision: s.revisionId,
-                fresh: s.fresh,
-                status: s.status
-              }))
-            }
-          })
+            })
+          )
         )
-      ),
+      }),
     target: "next" in settings ? nextTarget : versionTarget(settings.slotId, settings.versionId),
 
     historyStart: (leaf) =>
@@ -626,6 +655,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             v.macro_mode = 'template' AND EXISTS (SELECT 1 FROM state_events w WHERE w.version_id = v.id
               AND w.key = 'var.set' AND w.origin = 'rollout') AS written,
             (SELECT json_object('id', m.id, 'title', m.title, 'framing', m.framing, 'start', m.start_slot_id,
+                'timelines', m.timelines,
                 'cast', (SELECT json_group_array(c.value ->> 'name') FROM json_each(m.cast_json) c
                   WHERE c.value ->> 'from' <> 'destination'))
               FROM chat_merges m WHERE m.slot_id = s.id) AS merge_json`
@@ -675,7 +705,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             versions: row.version_count,
             selectedOrdinal: row.ordinal,
             versionNumber: row.version_number,
-            ...(row.merge_json ? { merge: JSON.parse(row.merge_json) as HistoryMerge } : {}),
+            ...(row.merge_json ? { merge: historyMerge(row.merge_json) } : {}),
             amends: row.amend_count
           }))
         const older =
@@ -883,9 +913,25 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return count
       }),
 
+    stretches: (leaf) =>
+      Effect.gen(function* () {
+        const ranges = yield* threadStretches(sql, yield* viewAt(sql, chatId, leaf ?? null), leaf)
+        if (ranges.length) stretchPins = ranges
+        return ranges
+      }),
+
     knowers: (versionIds) =>
       Effect.gen(function* () {
-        const found = yield* readKnowers(sql, chatId, owned, versionIds)
+        // In the fork read: what it counts each card not present for (spec/THREADS.md §5.2).
+        const found = yield* readKnowers(
+          sql,
+          chatId,
+          owned,
+          versionIds,
+          null,
+          yield* viewAt(sql, chatId, null),
+          stretchPins ?? []
+        )
         knowerPins.push({ key: keyOf(versionIds), found })
         return found
       }),
@@ -903,7 +949,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const unknown = sql`EXISTS (SELECT 1 FROM path JOIN slots s ON s.id = path.id
           JOIN version_records v ON v.id = ${selected}
           WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0 AND v.status <> 'failed'
-            AND NOT ${knowsSql(sql, aliases ?? [viewer])}) AS unknown`
+            AND NOT ${yield* knowsSql(sql, aliases ?? [viewer], fork)}) AS unknown`
         const [row] =
           onDisplay === null
             ? yield* sql<{ unknown: number }>`
@@ -1058,12 +1104,15 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     : live
   return {
     layer: Layer.succeed(AssemblySources)(sources),
+    /** The sources themselves, for a source that stands in for some of them (`draftSources.ts`). */
+    service: sources,
     /** What the sources read; a replay's are the pins it was given. */
     pins: (): SourcePins =>
       replay?.pins ?? {
         ...pins,
         target: pins.target!,
         ...(layerPins ? { lcm: layerPins } : {}),
+        ...(stretchPins ? { stretches: stretchPins } : {}),
         ...(knowerPins.length ? { knowers: knowerPins } : {}),
         ...(knewPins.length ? { knewThrough: knewPins } : {})
       },
@@ -1100,6 +1149,7 @@ const replaySources = (
   }
   return {
     viewLayers: true,
+    ...(pins.stretches ? { stretches: () => Effect.succeed(pins.stretches!) } : {}),
     summaryLayer: () =>
       Effect.gen(function* () {
         const layer = pins.lcm

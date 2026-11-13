@@ -1,3 +1,6 @@
+import { safeAgentDocument } from "./agentDocuments.ts"
+import { makeAgentHistoryWriteHandlers } from "./agentHistoryWrites.ts"
+import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeWorkshopWriteHandlers } from "./workshopWrites.ts"
 import { archiveCandidates } from "./cardArchive.ts"
 import { newestLiveFork } from "./cardOrigins.ts"
@@ -697,8 +700,13 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             doc = yield* withoutGrants(ref, doc)
             const valid = validateDoc(ref.kind, doc)
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
-            doc = valid.doc
+            doc = safeAgentDocument(ref.kind, yield* lib.loadDoc(ref.head_revision_id), valid.doc)
             yield* checkReferences(userId, doc)
+            if (ref.kind === "preset")
+              for (const book of (doc.lorebooks ?? []) as ReadonlyArray<{ id: string }>) {
+                const owned = yield* lib.ownedRef(userId, book.id)
+                if (owned.kind !== "lorebook") return yield* new NotFound({ entity: "lorebook", id: book.id })
+              }
           }
           yield* drafts.commit(userId, commitDraft, {
             targetKind: "entity_field",
@@ -995,6 +1003,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       ...makeWorkshopWriteHandlers(steps, bin),
 
       ...makeLibraryReplaceWrites(steps),
+      ...makeAgentHistoryWriteHandlers(steps, yield* makeHistoryWriteHandlers),
       ...makeCardForkWriteHandlers(steps),
       ...makeForkMergeWriteHandlers(steps),
       ...makeRolloutEffectHandlers(steps)

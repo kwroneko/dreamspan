@@ -38,6 +38,37 @@ describe("chat contributions", () => {
     for (const close of dispose.reverse()) close()
   })
 
+  it("applies savedOnly to plugin tabs and URL resolution, including tab families", () => {
+    const pending = { ...view, chat: null } as ChatView
+    const saved = { ...view, chat: { kind: "rp" } } as ChatView
+    for (const family of [false, true]) {
+      const value = family ? "synthetic.saved:one" : "synthetic.saved"
+      const close = chatPanels.register({
+        id: "synthetic.saved",
+        label: "Saved plugin",
+        order: 99,
+        icon: "note",
+        savedOnly: true,
+        component: () => null,
+        ...(family
+          ? {
+              matches: (value: string) => value.startsWith("synthetic.saved:"),
+              tabs: () => [{ value, label: "Saved plugin" }]
+            }
+          : {})
+      })
+      try {
+        expect(panelTabs(pending, value).some((tab) => tab.value === value)).toBe(false)
+        expect(isPanelTab(value, pending)).toBe(false)
+        expect(panelHere(pending, value)).toBe("chat")
+        expect(isPanelTab(value, saved)).toBe(true)
+        expect(panelHere(saved, value)).toBe(value)
+      } finally {
+        close()
+      }
+    }
+  })
+
   it("renders a plugin replacement of a built-in panel within a scope and restores it on close", async () => {
     const original = resolvePanel("notes")!
     const listener = vi.fn()

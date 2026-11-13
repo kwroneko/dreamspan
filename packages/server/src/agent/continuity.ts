@@ -1,14 +1,15 @@
 // Workshop turn continuity is a delta from reference-harness's loadCompletedSessionMaterial:
 // retain the frozen request and the WHOLE transcript; verify the shown path before reuse.
 import { isDeepStrictEqual } from "node:util"
+import type { UserId } from "@rp/shared/domain.ts"
 import type { PathWindow } from "@rp/shared/chatApi.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry, StoryAt } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { ASSEMBLER_VERSION, type ContextSnapshot } from "../assembler/types.ts"
 import type { Reader } from "../db/Database.ts"
 import type { GenerationRequest } from "../chat/Generator.ts"
-import { stepsOf } from "./steps.ts"
+import { placedSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
 import type { Skill } from "./toolLoading.ts"
 import type { FrozenTool } from "./tools.ts"
 
@@ -24,11 +25,21 @@ export interface ContinuityRecord {
   readonly reason?: string
   readonly historical?: number
   readonly breakpoints?: ReadonlyArray<number>
+  /** Older tool results the carried transcript left out to make room (WORKSHOP-CONTEXT §2.2). */
+  readonly elided?: number
 }
 export type ContinuousSnapshot = ContextSnapshot & {
   readonly continuity?: ContinuityRecord
+  readonly storyAt?: StoryAt
+  readonly storyStamp?: string | null
   readonly agent?: { readonly tools: ReadonlyArray<FrozenTool>; readonly cardSkills?: ReadonlyArray<Skill> }
 }
+
+/** A gone or unowned story has no reusable read material. */
+export const storyReadStamp = (reader: Reader["Service"], userId: UserId, at: StoryAt | undefined) =>
+  at === undefined
+    ? Effect.succeed(undefined)
+    : reader.StoryReadStamp({ userId, chatId: at.chatId }).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
 
 export const pathStamp = (entry: PathEntry) =>
   JSON.stringify([
@@ -78,6 +89,12 @@ export const previousRun = Effect.fnUntraced(function* (
   if (material._tag === "None") return { reason: "The previous run is no longer available." } as const
   const stored = material.value
   const snapshot = JSON.parse(stored.snapshot) as ContinuousSnapshot
+  if (!isDeepStrictEqual(snapshot.storyAt, request.storyAt))
+    return {
+      reason: "The story position changed, so this request was put together again without earlier story reads."
+    } as const
+  if (snapshot.storyStamp !== fresh.storyStamp)
+    return { reason: "The story changed, so this request was put together again without earlier story reads." } as const
   if (snapshot.assemblerVersion !== ASSEMBLER_VERSION)
     return {
       reason: "The previous request used an earlier assembler, so this request was put together again."
@@ -178,7 +195,127 @@ export const summarizeMessageSteps = Effect.fnUntraced(function* (
     const words = steps
       .filter((s) => s.kind === "tool")
       .map((s) => `${s.label}${s.title ? `: ${s.title}` : ""}${s.status === "error" ? " (failed)" : ""}`)
-    if (words.length) summaries[entry.version.id] = `[Steps: ${words.join("; ").replaceAll(/\s+/g, " ")}]`
+    // The number lets read_run read them back (spec/WORKSHOP-CONTEXT.md §3.2).
+    if (words.length)
+      summaries[entry.version.id] =
+        `[Message ${(entry.position ?? entry.depth) + 1} steps: ${words.join("; ").replaceAll(/\s+/g, " ")}]`
   }
   return summaries
 })
+
+/**
+ * When a carried request passes ELIDE_TRIGGER of the room (the context maximum less the reply
+ * reserve), older tool results are left out until it is at most ELIDE_TARGET of it
+ * (spec/WORKSHOP-CONTEXT.md §2.2, §7 question 3: LCM's trigger and keep).
+ */
+export const ELIDE_TRIGGER = 3 / 4
+const ELIDE_TARGET = 1 / 2
+
+const ELIDED = "[Result left out to save room."
+const elisionMarker = (message: number | null, call: string) =>
+  message === null
+    ? `${ELIDED} search_chat and read_run can find it again.]`
+    : `${ELIDED} read_run with message ${message} and call "${call}" shows it again.]`
+
+const textOf = (content: ReadonlyArray<{ readonly type: string; readonly text?: string }>) =>
+  content.flatMap((p) => (p.type === "text" && p.text !== undefined ? [p.text] : [])).join("")
+
+/**
+ * The message number each tool result of a carried transcript belongs to: the path's newest
+ * assistant messages' own steps, read from their runs, aligned with the transcript from its end.
+ */
+const numberResults = Effect.fnUntraced(function* (
+  reader: Reader["Service"],
+  request: GenerationRequest,
+  path: ReadonlyArray<PathEntry>,
+  results: ReadonlyArray<{ readonly index: number; readonly call: string }>
+) {
+  const steps: Array<{ readonly n: number; readonly call: string }> = []
+  const parsed = new Map<
+    string,
+    { readonly tools: ReadonlyArray<FrozenTool>; readonly transcript: Array<AgentMessage> }
+  >()
+  let walked = 0
+  for (let at = path.length - 1; at >= 0 && steps.length < results.length && walked < 400; at--) {
+    const entry = path[at]!
+    if (entry.side !== "assistant" || entry.version.context === null) continue
+    walked++
+    const found = yield* reader
+      .RolloutMaterial({ userId: request.userId, versionId: entry.version.id })
+      .pipe(Effect.option)
+    if (found._tag === "None" || !found.value.transcript) break
+    const material = found.value
+    const run =
+      parsed.get(material.rolloutId) ??
+      (() => {
+        const frozen = JSON.parse(material.snapshot) as { agent?: { tools: ReadonlyArray<FrozenTool> } }
+        const value = {
+          tools: frozen.agent?.tools ?? [],
+          transcript: JSON.parse(material.transcript!) as Array<AgentMessage>
+        }
+        parsed.set(material.rolloutId, value)
+        return value
+      })()
+    const n = (entry.position ?? entry.depth) + 1
+    steps.unshift(
+      ...placedSteps(run.transcript, run.tools, true, entry.version.id).flatMap(({ step }) =>
+        step.kind === "tool" ? [{ n, call: step.id }] : []
+      )
+    )
+  }
+  const numbers = new Map<number, number>()
+  for (let i = results.length - 1, j = steps.length - 1; i >= 0 && j >= 0; i--, j--) {
+    if (results[i]!.call !== steps[j]!.call) break
+    numbers.set(results[i]!.index, steps[j]!.n)
+  }
+  return numbers
+})
+
+/**
+ * Leaves out a carried transcript's older tool results, oldest first, never the last turn's or
+ * a post's, until the model's tokenizer reaches the target. Null: the protected material
+ * cannot fit the target, so build fresh. Counting batches keeps long transcripts bounded.
+ */
+export const elideCarried = <E>(input: {
+  readonly reader: Reader["Service"]
+  readonly request: GenerationRequest
+  readonly path: ReadonlyArray<PathEntry>
+  readonly transcript: ReadonlyArray<AgentMessage>
+  readonly count: number
+  readonly room: number
+  readonly recount: (transcript: ReadonlyArray<AgentMessage>) => Effect.Effect<number, E>
+}) =>
+  Effect.gen(function* () {
+    const { transcript, count, room } = input
+    const lastTurn = transcript.findLastIndex((m) => m.role === "rpUser" || m.role === "rpRequest" || m.role === "user")
+    const results = transcript.flatMap((m, index) =>
+      m.role === "toolResult" && m.toolName !== SEND_MESSAGE ? [{ index, call: m.toolCallId }] : []
+    )
+    const candidates = results.filter((r) => {
+      const message = transcript[r.index] as AgentMessage & { role: "toolResult" }
+      return r.index < lastTurn && !textOf(message.content).startsWith(ELIDED)
+    })
+    if (candidates.length === 0) return null
+    const numbers = yield* numberResults(input.reader, input.request, input.path, results)
+    const next = transcript.slice()
+    let measured = count
+    let elided = 0
+    let pending = 0
+    let batch = 1
+    for (const { index, call } of candidates) {
+      const message = next[index] as AgentMessage & { role: "toolResult" }
+      const marker = elisionMarker(numbers.get(index) ?? null, call)
+      if (textOf(message.content).length <= marker.length) continue
+      next[index] = { ...message, content: [{ type: "text", text: marker }] }
+      elided++
+      pending++
+      if (pending >= batch) {
+        measured = yield* input.recount(next)
+        if (measured <= room * ELIDE_TARGET) return { transcript: next, count: measured, elided }
+        pending = 0
+        batch *= 2
+      }
+    }
+    if (pending > 0) measured = yield* input.recount(next)
+    return elided > 0 && measured <= room * ELIDE_TARGET ? { transcript: next, count: measured, elided } : null
+  })

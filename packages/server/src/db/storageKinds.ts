@@ -27,7 +27,10 @@ export const storageKinds = makeRegistry<StorageKind>([
     ]
   },
   { id: "changeset_groups.origin", values: ["user", "agent"] },
-  { id: "bin_items.kind", values: ["chat", "message", "branch", "version", "entity", "connection", "card_asset"] },
+  {
+    id: "bin_items.kind",
+    values: ["chat", "message", "branch", "version", "entity", "connection", "card_asset", "threads"]
+  },
   {
     id: "drafts.target_kind",
     values: [
@@ -118,12 +121,23 @@ export const storageKinds = makeRegistry<StorageKind>([
       "summary_superseded",
       "suppress_event",
       "insert",
-      "image_exclude"
+      "image_exclude",
+      // The per-branch correction of who was present (spec/THREADS.md §3.4, §16.2).
+      "presence_away"
     ]
   },
   {
     id: "fork_overrides.origin",
     values: ["user", "import"]
+  },
+  // Parallel threads (spec/THREADS.md §4.1): who started threads, and how a join's line is read.
+  {
+    id: "thread_splits.origin",
+    values: ["user", "rollout", "import"]
+  },
+  {
+    id: "chat_merges.timelines",
+    values: ["together", "separate"]
   }
 ])
 

@@ -157,6 +157,27 @@ export const UserDraftSave = Schema.Struct({
   expectedSession: Schema.NullOr(Schema.Int)
 })
 
+/** Workshop conversion has its own handler group to keep the core group's types bounded. */
+export class WorkshopPresetApi extends RpcGroup.make(
+  /** Makes a new preset from the saved source; the original never changes. */
+  Rpc.make("ConvertPresetToWorkshop", {
+    payload: {
+      refId: RefId,
+      label: LibraryLabel,
+      choices: Schema.Array(
+        Schema.Struct({
+          identifier: Schema.String,
+          keep: Schema.Boolean,
+          content: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200_000)))
+        })
+      ),
+      instructions: Schema.String.check(Schema.isMaxLength(200_000))
+    },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, InvalidDocument, ServerError])
+  })
+) {}
+
 export class EditorApi extends RpcGroup.make(
   Rpc.make("GetUserDraft", {
     payload: { ownerId: UserId, targetId: Schema.String, field: Schema.String },

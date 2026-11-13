@@ -6,7 +6,7 @@ import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { providerRequest } from "../assembler/wire.ts"
 import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
 import { liveSuffix } from "../agent/messages.ts"
-import { rolloutRequest } from "../agent/wire.ts"
+import { forTarget, rolloutRequest } from "../agent/wire.ts"
 import type { Tool } from "@earendil-works/pi-ai"
 // Agent rollouts' reads (spec/AGENTIC.md §5): a version's steps, projected from its stored
 // transcript with the tools its snapshot froze, as the live display projects the running one;
@@ -31,6 +31,7 @@ import { pathSegments } from "./pathSegments.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { query } from "./tx.ts"
+import { workshopDefaultsOf } from "./workshopDefaults.ts"
 import { knowsSql, readKnowers } from "./knowers.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
@@ -204,8 +205,30 @@ const listActivity = (
         (SELECT r.slot_id FROM rollouts r WHERE r.id = last.rollout_id)
       ) END AS slot_id
     FROM last JOIN llm_requests q ON q.id = last.last_id LEFT JOIN connections c ON c.id = q.connection_id
-    ORDER BY last.started DESC, last.gid DESC, last.kind DESC`,
-    [chatId, userId, before.startedAt, before.id, before.kind, limit]
+    UNION ALL
+    SELECT r.id AS gid,'edit' AS kind,coalesce(r.started_at,r.created_at) AS started,r.completed_at AS ended,
+      0 AS requests,0 AS running,0 AS input,0 AS cache_read,0 AS cache_write,0 AS output,0 AS cost,
+      NULL AS currency,0 AS estimated,CASE WHEN r.status='completed' THEN 'complete' ELSE r.status END AS status,
+      NULL AS model,NULL AS connection,NULL AS summary_id,NULL AS summary_revision_id,NULL AS slot_id
+    FROM rollouts r JOIN chats c ON c.id=r.chat_id
+    WHERE r.chat_id=? AND c.owner_user_id=? AND c.deleted_at IS NULL AND r.kind='edit'
+      AND NOT EXISTS(SELECT 1 FROM llm_requests q WHERE q.rollout_id=r.id)
+      AND (coalesce(r.started_at,r.created_at),r.id,'edit') < (?,?,?)
+    ORDER BY started DESC,gid DESC,kind DESC LIMIT ?`,
+    [
+      chatId,
+      userId,
+      before.startedAt,
+      before.id,
+      before.kind,
+      limit,
+      chatId,
+      userId,
+      before.startedAt,
+      before.id,
+      before.kind,
+      limit
+    ]
   )
 
 const activityRow = (row: ActivitySqlRow): ActivityRow => ({
@@ -288,12 +311,10 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const fork = forkId ?? (yield* forkThrough(sql, chatId, leafSlotId, chat.current_fork_id))?.id ?? null
         if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
         if ((yield* placedInsertions(sql, chatId, fork)).length > 0) return null
-        // FTS indexes the whole join. Match only after projecting its rows, before limits,
-        // so hidden text cannot starve visible matches or change excerpts.
-        if (viewers != null) {
-          const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`
-          if (merged!.n > 0) return null
-        }
+        // FTS indexes a join as one text: the tools read it row by row, each row as its viewer
+        // knew it (spec/THREADS.md §11), so a merged chat is searched over its path.
+        const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`
+        if (merged!.n > 0) return null
         // Each token as the start of a word, quoted so FTS syntax in it is only text.
         const match = tokens.length ? tokens.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" AND ") : null
         type Row = {
@@ -306,7 +327,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const shown = sql`(${before} IS NULL OR s.depth < ${before})
             AND v.status NOT IN ('generating', 'failed') AND v.id = ${shownIn(sql, fork, "s")}
             AND NOT ${slotDeletedIn(sql, fork, "s")} AND NOT ${contextExcludedIn(sql, fork, "s")}
-            AND ${viewers == null ? sql`1` : knowsSql(sql, viewers)}`
+            AND ${viewers == null ? sql`1` : yield* knowsSql(sql, viewers, fork)}`
         const onPath = sql`EXISTS (SELECT 1 FROM segments g WHERE g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi)`
         // Few matches in the whole chat (a rare word): start from them, each checked against the
         // path, with the path's template messages (matched once their names are filled in). Many
@@ -349,14 +370,67 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }))
       }).pipe(query("SearchChat")),
 
-    KnowersOf: ({ userId, chatId, versionIds, viewers }) =>
-      readKnowers(
-        sql,
-        chatId,
-        sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`,
-        versionIds,
-        viewers
-      ).pipe(query("KnowersOf")),
+    JoinRows: ({ userId, chatId, slotIds }) =>
+      Effect.gen(function* () {
+        const joins = yield* sql<{ id: string; slot_id: string; title: string; timelines: string }>`
+          SELECT m.id, m.slot_id, m.title, m.timelines FROM json_each(${JSON.stringify(slotIds)}) asked
+          CROSS JOIN chat_merges m ON m.slot_id = asked.value
+          JOIN chats c ON c.id = m.chat_id
+          WHERE m.chat_id = ${chatId} AND c.owner_user_id = ${userId}`
+        if (joins.length === 0) return []
+        const rows = yield* sql<{
+          merge_id: string
+          ordinal: number
+          kind: "message" | "summary"
+          speaker_name: string
+          side: "user" | "assistant"
+          speaker_entity_id: string | null
+          content: string
+          included: "verbatim" | "summarized" | "left_out"
+          knowers: string
+          source_from: number | null
+          source_to: number | null
+        }>`SELECT mm.merge_id, mm.ordinal, mm.kind, mm.speaker_name, mm.side, mm.speaker_entity_id, mm.content,
+            mm.included, mm.source_from, mm.source_to,
+            coalesce(mm.knowers_json, (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c
+              WHERE c.value ->> 'from' <> 'destination')) AS knowers
+          FROM json_each(${JSON.stringify(joins.map((j) => j.id))}) asked
+          CROSS JOIN chat_merges m ON m.id = asked.value
+          CROSS JOIN chat_merge_messages mm ON mm.merge_id = m.id
+          ORDER BY mm.merge_id, mm.ordinal`
+        return joins.map((join) => ({
+          slotId: join.slot_id,
+          title: join.title,
+          timelines: join.timelines,
+          rows: rows
+            .filter((row) => row.merge_id === join.id)
+            .map((row) => ({
+              ordinal: row.ordinal,
+              kind: row.kind,
+              name: row.speaker_name,
+              side: row.side,
+              speaker: row.speaker_entity_id,
+              content: row.content,
+              included: row.included,
+              knowers: JSON.parse(row.knowers) as Array<string>,
+              from: row.source_from,
+              to: row.source_to
+            }))
+        }))
+      }).pipe(query("JoinRows")),
+
+    KnowersOf: ({ userId, chatId, forkId, versionIds, viewers }) =>
+      Effect.gen(function* () {
+        // A fork of another chat is none of this one's: its corrections don't apply.
+        return yield* readKnowers(
+          sql,
+          chatId,
+          sql`EXISTS (SELECT 1 FROM chats o WHERE o.id = ${chatId} AND o.owner_user_id = ${userId})`,
+          versionIds,
+          viewers,
+          forkId == null ? null : sql`(SELECT id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId})`
+        )
+      }).pipe(query("KnowersOf")),
 
     LookupLore: ({ userId, rolloutId, query: text, entry, limit }) =>
       Effect.gen(function* () {
@@ -414,6 +488,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("LookupLore")),
 
+    WorkshopDefaults: ({ userId }) => workshopDefaultsOf(sql, userId).pipe(query("WorkshopDefaults")),
     ListRolloutEffects: ({ userId, chatId, before, limit }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{
@@ -450,7 +525,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return row.result === null ? null : (JSON.parse(row.result) as string)
       }).pipe(query("RolloutReceipt")),
 
-    CountRolloutContext: ({ model, request, transcript, tools }) =>
+    CountRolloutContext: ({ model, request, transcript, tools, continuation }) =>
       Effect.gen(function* () {
         const target = JSON.parse(model) as ModelInput
         const count = yield* prepareTextTokens(assembler.textCounters.list(), target)
@@ -465,7 +540,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const wire = rolloutRequest(
           providerRequest(assembled, target),
           target.api,
-          liveSuffix(history),
+          forTarget(liveSuffix(history), target),
           definitions as ReadonlyArray<Tool>,
           { replayReasoning: true, reasoningTarget: target }
         )
@@ -481,7 +556,8 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           imageTokens +
           count(JSON.stringify(messages)) +
           count(wire.context.systemPrompt ?? "") +
-          count(JSON.stringify(definitions))
+          count(JSON.stringify(definitions)) +
+          (continuation === undefined ? 0 : count(JSON.stringify({ role: "assistant", content: continuation })) + 3)
         )
       }).pipe(query("CountRolloutContext")),
     RolloutMaterial: ({ userId, versionId }) =>

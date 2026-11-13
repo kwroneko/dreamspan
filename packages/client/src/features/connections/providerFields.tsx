@@ -3,7 +3,7 @@
 // provider's default until the user changes it, and how it counts tokens. A connection stores
 // only the changes.
 import { awsRegionOf, providerChanges } from "@rp/shared/providerDefinitions.ts"
-import type { ProviderInfo, ProviderSettings } from "@rp/shared/providers.ts"
+import { DEFAULT_IDLE_TIMEOUT_S, type ProviderInfo, type ProviderSettings } from "@rp/shared/providers.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, formText, Input, SecretInput } from "../../ui/Field.tsx"
@@ -23,13 +23,20 @@ export interface ProviderDraft {
   readonly maxMarkers?: string
   readonly minTokens?: string
   readonly promptCacheKey?: boolean
+  readonly idleTimeoutS?: string
 }
 
 /** A connection's stored changes as a draft. */
-export const providerDraftOf = ({ maxMarkers, minTokens, ...settings }: ProviderSettings): ProviderDraft => ({
+export const providerDraftOf = ({
+  maxMarkers,
+  minTokens,
+  idleTimeoutS,
+  ...settings
+}: ProviderSettings): ProviderDraft => ({
   ...settings,
   ...(maxMarkers !== undefined ? { maxMarkers: String(maxMarkers) } : {}),
-  ...(minTokens !== undefined ? { minTokens: String(minTokens) } : {})
+  ...(minTokens !== undefined ? { minTokens: String(minTokens) } : {}),
+  ...(idleTimeoutS !== undefined ? { idleTimeoutS: String(idleTimeoutS) } : {})
 })
 
 /** AWS's Region codes, for a provider that doesn't say how its regions are written. */
@@ -45,6 +52,8 @@ export const parseProviderDraft = (provider: ProviderInfo | undefined, draft: Pr
     text === undefined ? { value: null, problem: null } : parseOptionalInt(text, 1)
   const maxMarkers = number(draft.maxMarkers)
   const minTokens = number(draft.minTokens)
+  const idleTimeoutS =
+    draft.idleTimeoutS === undefined ? { value: null, problem: null } : parseOptionalInt(draft.idleTimeoutS, 10)
   const region = draft.region?.trim() ?? ""
   const regions = provider?.regionFormat ?? awsRegions
   const project = draft.project?.trim() ?? ""
@@ -58,7 +67,8 @@ export const parseProviderDraft = (provider: ProviderInfo | undefined, draft: Pr
     ...(draft.lookback !== undefined ? { lookback: draft.lookback } : {}),
     ...(maxMarkers.value !== null ? { maxMarkers: maxMarkers.value } : {}),
     ...(minTokens.value !== null ? { minTokens: minTokens.value } : {}),
-    ...(draft.promptCacheKey !== undefined ? { promptCacheKey: draft.promptCacheKey } : {})
+    ...(draft.promptCacheKey !== undefined ? { promptCacheKey: draft.promptCacheKey } : {}),
+    ...(idleTimeoutS.value !== null ? { idleTimeoutS: idleTimeoutS.value } : {})
   }
   return {
     settings,
@@ -70,7 +80,8 @@ export const parseProviderDraft = (provider: ProviderInfo | undefined, draft: Pr
           : null,
       project: project !== "" && !PROJECT.test(project) ? "Enter a project ID, such as my-project-123456." : null,
       maxMarkers: maxMarkers.problem,
-      minTokens: minTokens.problem
+      minTokens: minTokens.problem,
+      idleTimeoutS: idleTimeoutS.problem
     }
   }
 }
@@ -309,12 +320,10 @@ export function ProviderAdvanced({
   // The Region, project and key type have fields of their own, outside this section.
   const own = ["auth", "region", "project"]
   const changed = Object.keys(draft).some((key) => !own.includes(key))
-  const shown = provider.settings.filter((name) => !own.includes(name))
-  if (shown.length === 0 && provider.accounting.length === 0 && provider.rules.length === 0) return null
   return (
     <Disclosure
       title="Advanced"
-      hint={`Click to show what ${provider.label} sets up: caching and how tokens are counted.`}
+      hint={`Click to show what ${provider.label} sets up: caching, how long to wait for a response, and how tokens are counted.`}
     >
       <Field
         label="Tool loading"
@@ -412,6 +421,19 @@ export function ProviderAdvanced({
           <Input value={cacheTtl.value} onValueChange={cacheTtl.onChange} inputMode="numeric" className="sm:max-w-32" />
         </Field>
       )}
+      <Field
+        label="Wait for a response (seconds)"
+        about="How long a request may go without hearing from the provider before it fails as no response. Resume sends it again. Thinking models can be silent for minutes."
+        error={problems.idleTimeoutS}
+      >
+        <Input
+          value={draft.idleTimeoutS ?? settings.idleTimeoutS?.toString() ?? ""}
+          onValueChange={(idleTimeoutS) => onChange({ ...draft, idleTimeoutS })}
+          inputMode="numeric"
+          placeholder={String(DEFAULT_IDLE_TIMEOUT_S)}
+          className="sm:max-w-32"
+        />
+      </Field>
       {provider.accounting.length > 0 && <Facts title="How tokens are counted" items={provider.accounting} />}
       {provider.rules.length > 0 && <Facts title="Fixes for some models" items={provider.rules} />}
       {changed && (

@@ -1,4 +1,5 @@
 import { makeExternalMediaReadHandlers } from "./externalMedia.ts"
+import { makeSavedMediaReadHandlers } from "./savedMedia.ts"
 import type { ContinuousSnapshot } from "../agent/continuity.ts"
 import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { tokensOf } from "../assembler/st.ts"
@@ -21,7 +22,13 @@ import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth
 import { bestEffortCache, documentedCacheMinimum } from "../providers/cachePolicy.ts"
 import { nextImages, estimateImage } from "../assembler/imageTokens.ts"
 import { budgetOrigins } from "../assembler/budget.ts"
-import { describer, inspectionInputs } from "./inspectorReads.ts"
+import { contextMessages, describer, inspectionInputs } from "./inspectorReads.ts"
+import { draftSources } from "./draftSources.ts"
+import { inspectWire } from "../assembler/inspection.ts"
+import { wireImages } from "../assembler/imageTokens.ts"
+import type { Assembler } from "../assembler/assembler.ts"
+import type { ContextSource } from "@rp/shared/inspectorApi.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import {
   ASSEMBLER_VERSION,
@@ -52,6 +59,94 @@ import { readingOnce } from "./lcmReads.ts"
 const LIVE_MAX = 32
 const LIVE_IDLE_MS = 10 * 60_000
 
+/**
+ * What the next request's estimate says of it, for a saved chat's next reply and a chat not sent
+ * yet alike: why it can't be built, the model and preset it uses, and its budget with the
+ * request counted by the model's local tokenizer (an approximation where it has none).
+ */
+const estimateOf = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  assembler: Assembler,
+  next: ContextSnapshot | AssemblyFailed,
+  sources: Pick<ReturnType<typeof sqlSources>, "chosenModel" | "resolvedModel">
+) =>
+  Effect.gen(function* () {
+    const displayTokens =
+      next instanceof AssemblyFailed
+        ? null
+        : yield* textDisplay(
+            sql,
+            userId,
+            next.inputs.model,
+            assembler,
+            next.request.messages.map((m) => m.content + (m.name ?? ""))
+          )
+    const budget = next.contextBudget
+    const preset = next instanceof AssemblyFailed ? next.preset : next.inputs.preset
+    const [presetRef] = preset?.ref
+      ? yield* sql<{ label: string }>`SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+          WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
+      : []
+    const presetName = presetRef?.label ?? (preset?.scope === "builtin" ? BUILTIN_PRESET_LABEL : "Unnamed")
+    // The model by name, as the panel shows it: also a hidden one, which is still used.
+    const chosen = sources.chosenModel()
+    const resolved = sources.resolvedModel()
+    const [named] = chosen
+      ? yield* sql<{ connection_name: string; model_key: string | null; hidden: number | null }>`
+          SELECT c.name AS connection_name, m.model_key, m.hidden
+          FROM connections c LEFT JOIN models m ON m.id = ${chosen.model} AND m.connection_id = c.id
+          WHERE c.id = ${chosen.connection} AND c.owner_user_id = ${userId}
+            AND c.deleted_at IS NULL AND c.purged_at IS NULL`
+      : []
+    return {
+      assemblyError: next instanceof AssemblyFailed ? next.message : null,
+      assemblyErrorReason: next instanceof AssemblyFailed ? next.reason : null,
+      presetContext: next instanceof AssemblyFailed ? null : yield* presetContext(sql, userId, next),
+      ...(chosen === undefined
+        ? {}
+        : {
+            model: chosen && {
+              connection: chosen.connection,
+              model: chosen.model,
+              connectionName: named?.connection_name ?? null,
+              modelKey: named?.model_key ?? null,
+              hidden: named?.hidden === 1,
+              scope: chosen.scope,
+              // Whether Continue can use it (a prefill), as the next request would read it.
+              ...(resolved
+                ? {
+                    prefill: resolved.prefill,
+                    vision: resolved.vision,
+                    maxImages: resolved.maxImages,
+                    ...(resolved.continueUnavailable ? { continueUnavailable: resolved.continueUnavailable } : {})
+                  }
+                : {})
+            }
+          }),
+      preset: preset ? { ref: preset.ref, name: presetName, scope: preset.scope as EffectivePreset["scope"] } : null,
+      budget:
+        budget && preset
+          ? {
+              ...budget,
+              ...(displayTokens && !(next instanceof AssemblyFailed)
+                ? {
+                    countedInput:
+                      displayTokens.counts.reduce(
+                        (n, c) => n + c,
+                        next.request.messages.filter((m) => m.content).length * 3
+                      ) + next.request.messages.reduce((n, m) => n + tokensOf({ content: "", images: m.images }), 0),
+                    tokenizer: displayTokens.tokenizer
+                  }
+                : {}),
+              presetName,
+              builtinPreset: preset.scope === "builtin",
+              origins: budgetOrigins(resolved ?? null)
+            }
+          : null
+    }
+  })
+
 export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const assembler = yield* WorkerAssembler
@@ -60,6 +155,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
     ...(yield* makeExternalMediaReadHandlers),
+    ...(yield* makeSavedMediaReadHandlers),
     ...(yield* makeSourcePrefsReadHandlers),
     ...(yield* makeCardOriginReadHandlers),
     ...(yield* makeTokenCountingReadHandlers),
@@ -231,33 +327,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           ? { slotId: recorded.slot_id, depth: recorded.depth }
           : (sources.pins().historyStart ?? null)
         const start = next instanceof AssemblyFailed ? fallback : (next.historyStart ?? fallback)
-        const displayTokens =
-          next instanceof AssemblyFailed
-            ? null
-            : yield* textDisplay(
-                sql,
-                userId,
-                next.inputs.model,
-                assembler,
-                next.request.messages.map((m) => m.content + (m.name ?? ""))
-              )
-        const budget = next.contextBudget
-        const preset = next instanceof AssemblyFailed ? next.preset : next.inputs.preset
-        const [presetRef] = preset?.ref
-          ? yield* sql<{ label: string }>`SELECT r.label FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-              WHERE r.id = ${preset.ref} AND e.owner_user_id = ${userId}`
-          : []
-        const presetName = presetRef?.label ?? (preset?.scope === "builtin" ? BUILTIN_PRESET_LABEL : "Unnamed")
-        // The model by name, as the panel shows it: also a hidden one, which is still used.
-        const chosen = sources.chosenModel()
         const resolved = sources.resolvedModel()
-        const [named] = chosen
-          ? yield* sql<{ connection_name: string; model_key: string | null; hidden: number | null }>`
-              SELECT c.name AS connection_name, m.model_key, m.hidden
-              FROM connections c LEFT JOIN models m ON m.id = ${chosen.model} AND m.connection_id = c.id
-              WHERE c.id = ${chosen.connection} AND c.owner_user_id = ${userId}
-                AND c.deleted_at IS NULL AND c.purged_at IS NULL`
-          : []
+        const estimate = yield* estimateOf(sql, userId, assembler, next, sources)
         const nextFork = (yield* viewAt(sql, chatId, sources.pins().target.parentSlotId)) as ForkId | null
         // Composer uploads already belong to a server-backed, owner/fork-scoped draft.
         // Estimate them before Send with the same registered rules and stored facts as history.
@@ -308,54 +379,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           imagePreview = nextImages({ request: { messages }, inputs: { model: resolved } })
         }
         const boundary = {
-          assemblyError: next instanceof AssemblyFailed ? next.message : null,
-          assemblyErrorReason: next instanceof AssemblyFailed ? next.reason : null,
+          ...estimate,
           forkId: nextFork,
-          presetContext: next instanceof AssemblyFailed ? null : yield* presetContext(sql, userId, next),
-          ...(chosen === undefined
-            ? {}
-            : {
-                model: chosen && {
-                  connection: chosen.connection,
-                  model: chosen.model,
-                  connectionName: named?.connection_name ?? null,
-                  modelKey: named?.model_key ?? null,
-                  hidden: named?.hidden === 1,
-                  scope: chosen.scope,
-                  // Whether Continue can use it (a prefill), as the next request would read it.
-                  ...(resolved
-                    ? {
-                        prefill: resolved.prefill,
-                        vision: resolved.vision,
-                        maxImages: resolved.maxImages,
-                        ...(resolved.continueUnavailable ? { continueUnavailable: resolved.continueUnavailable } : {})
-                      }
-                    : {})
-                }
-              }),
-          preset: preset
-            ? { ref: preset.ref, name: presetName, scope: preset.scope as EffectivePreset["scope"] }
-            : null,
-          budget:
-            budget && preset
-              ? {
-                  ...budget,
-                  ...(displayTokens && !(next instanceof AssemblyFailed)
-                    ? {
-                        countedInput:
-                          displayTokens.counts.reduce(
-                            (n, c) => n + c,
-                            next.request.messages.filter((m) => m.content).length * 3
-                          ) +
-                          next.request.messages.reduce((n, m) => n + tokensOf({ content: "", images: m.images }), 0),
-                        tokenizer: displayTokens.tokenizer
-                      }
-                    : {}),
-                  presetName,
-                  builtinPreset: preset.scope === "builtin",
-                  origins: budgetOrigins(resolved ?? null)
-                }
-              : null,
           leafSlotId: sources.pins().target.parentSlotId,
           historyStart: start ? { slotId: start.slotId, depth: start.depth } : null,
           summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth,
@@ -464,6 +489,87 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           if (!fork) return yield* new NotFound({ entity: "fork", id: forkId })
         }
       }).pipe(query("NextContextAccess")),
+
+    // A chat not made yet: the request its first send would make (DESIGN §2.1), from the same
+    // pipeline over sources standing in for what StartChat would write. Nothing is written, and
+    // this worker has no network: counts are the local tokenizers' (`textDisplay` refuses any).
+    AssembleDraftChat: ({ userId, cards, persona, greeters, first, replier, remote, now }) =>
+      Effect.gen(function* () {
+        const sources = yield* draftSources(sql, {
+          userId,
+          cards,
+          persona,
+          greeters,
+          first,
+          replier,
+          remote,
+          now
+        })
+        // No model, no request: nothing is built (the first send would refuse before building).
+        // A model that's gone says so, as the send would.
+        const chosen = yield* sources.model().pipe(Effect.catchTag("AssemblyFailed", (error) => Effect.succeed(error)))
+        if (chosen instanceof AssemblyFailed)
+          return {
+            ...(yield* estimateOf(sql, userId, assembler, chosen, sources)),
+            warmth: null,
+            leafSlotId: null,
+            historyStart: null,
+            summarizedThrough: null,
+            request: null
+          }
+        if (chosen === null)
+          return {
+            model: null,
+            warmth: null,
+            leafSlotId: null,
+            historyStart: null,
+            summarizedThrough: null,
+            request: null
+          }
+        const built = yield* assembler.assemble({ now, timeZone: "UTC", frozen: {}, random: Math.random }).pipe(
+          Effect.provide(sources.layer),
+          Effect.map((snapshot): ContextSnapshot => snapshot),
+          Effect.catchTag("AssemblyFailed", (error) => Effect.succeed(error))
+        )
+        const estimate = yield* estimateOf(sql, userId, assembler, built, sources)
+        const base = {
+          ...estimate,
+          warmth: null,
+          leafSlotId: null,
+          historyStart: null,
+          summarizedThrough: null,
+          ...(built instanceof AssemblyFailed ? {} : nextImages(built)),
+          ...(built instanceof AssemblyFailed || !built.imagesLeftOut ? {} : { images: built.imagesLeftOut })
+        }
+        const model = built instanceof AssemblyFailed ? null : built.inputs.model
+        if (built instanceof AssemblyFailed || model === null) return { ...base, request: null }
+        // The request mapped for the model's API, as the inspector shows a sent one; message
+        // sources lead nowhere, since the chat's messages don't exist yet.
+        const inspection = yield* inspectionInputs(sql, userId, built, assembler)
+        const wire = inspectWire(wireContext(built.request, model), built.request, inspection, (text) => text)
+        const counts = yield* textDisplay(
+          sql,
+          userId,
+          model,
+          assembler,
+          wire.messages.map((m) => m.content + (m.name ?? "")),
+          now
+        )
+        const unlinked = (source: ContextSource): ContextSource => ({ ...source, slotId: null })
+        return {
+          ...base,
+          request: {
+            builtAt: now,
+            type: built.inputs.type,
+            mode: built.inputs.mode,
+            tokenizer: counts.tokenizer,
+            messages: contextMessages(wire, wireImages(wire.messages, built.request), counts.counts, unlinked),
+            samplers: { ...wire.samplers },
+            ...wire.display!,
+            ...(wire.display?.notSent ? { notSent: wire.display.notSent.map(unlinked) } : {})
+          }
+        }
+      }).pipe(query("AssembleDraftChat"), (effect) => withAssemblyModules(assembler, effect)),
 
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),
     LorebookPresets: ({ userId, ref }) => readLorebookPresets(sql, userId, ref).pipe(query("LorebookPresets")),

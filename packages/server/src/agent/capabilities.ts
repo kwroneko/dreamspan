@@ -19,6 +19,9 @@ export interface CapabilityEntry {
 
 const ALL_MODES: ReadonlyArray<CapabilityMode> = ["off", "ask", "allow"]
 
+/** Owner question: should opening a side chat allow reading its story, or ask first? */
+export const SIDE_STORY_READ_MODE: CapabilityMode = "allow"
+
 export const workshopCapabilities = makeRegistry<CapabilityEntry>([
   {
     id: "library.read",
@@ -39,7 +42,8 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     id: "library.write",
     order: 20,
     label: "Create and edit library items",
-    explanation: "Creates, edits and copies cards in your library. Each change can be undone.",
+    explanation:
+      "Creates, edits, copies, archives and restores cards, presets and lorebooks in your library. Each change can be undone.",
     example: "Makes a new card for a lighthouse keeper, or rewrites a card's description."
   },
   {

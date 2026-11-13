@@ -37,10 +37,19 @@ const assembly = (input: {
   }).pipe(Effect.scoped)
 
 describe("knowledge stage", () => {
-  it.effect("a shared context, or none set, filters for nobody", () =>
+  it.effect("a shared context, or none set, filters for nobody: only a separate join's stretch, for the speaker", () =>
     Effect.gen(function* () {
-      assert.deepStrictEqual((yield* assembly({})).knowledge, { view: "shared", viewer: null })
-      assert.deepStrictEqual((yield* assembly({ setting: "shared" })).knowledge, { view: "shared", viewer: null })
+      const whole = { view: "shared", viewer: null, stretch: { viewer: "wren" } }
+      assert.deepStrictEqual((yield* assembly({})).knowledge, whole)
+      assert.deepStrictEqual((yield* assembly({ setting: "shared" })).knowledge, whole)
+      // A narrator, a persona's turn and a summary read every stretch whole too (spec/THREADS.md §7.3).
+      const narrator = { view: "shared", viewer: null }
+      assert.deepStrictEqual((yield* assembly({ setting: "shared", roles: { wren: "narrator" } })).knowledge, narrator)
+      assert.deepStrictEqual(
+        (yield* assembly({ setting: "shared", speaker: "tobin", personas: ["tobin"] })).knowledge,
+        narrator
+      )
+      assert.deepStrictEqual((yield* assembly({ setting: "shared", summary: true })).knowledge, narrator)
     })
   )
 

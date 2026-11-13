@@ -19,9 +19,10 @@ test.beforeAll(async () => {
   await Effect.runPromise(
     fixtureSql(server().dataDir, [
       {
-        sql: `${n} INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at)
-      SELECT ?||'-v'||x,?||'-s'||x,0,'complete','human',CASE WHEN x=750 THEN 'The abyssal lantern shines.' ELSE 'A long voyage '||x END,'verbatim','user_written',1,1 FROM n`,
-        params: [chat.id, chat.id]
+        // Every message is written on the chat's main fork, which also owns its slots.
+        sql: `${n} INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,authoring_fork_id)
+      SELECT ?||'-v'||x,?||'-s'||x,0,'complete','human',CASE WHEN x=750 THEN 'The abyssal lantern shines.' ELSE 'A long voyage '||x END,'verbatim','user_written',1,1,? FROM n`,
+        params: [chat.id, chat.id, chat.currentForkId]
       },
       {
         sql: `${n} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)

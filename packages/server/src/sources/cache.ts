@@ -281,6 +281,8 @@ export const makeSourceCache = (options: SourceCacheOptions) => {
 
   return {
     get,
+    // Preview reads must not refresh timestamps, evict, or write anything, even on a miss.
+    peek: (key: CacheKey) => Effect.sync(() => index.get(keyString(key)) ?? null),
     put,
     readBlob,
     remove: (key: CacheKey) => Effect.promise(() => drop(keyString(key))),

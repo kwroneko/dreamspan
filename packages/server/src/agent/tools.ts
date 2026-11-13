@@ -40,6 +40,12 @@ export interface ToolContext {
   readonly cache: Map<string, unknown>
   /** A one-call approval, checked again in the change's transaction. */
   readonly approvalDigest?: string
+  readonly onChanged?: (chatId: ChatId) => void
+  /**
+   * A side chat's request: where its story tools read the story (spec/WORKSHOP.md §4), as the
+   * browser tab the request came from showed it. Absent: nothing says where, so they don't read.
+   */
+  readonly storyAt?: import("@rp/shared/chat.ts").StoryAt
   /**
    * The run's frozen offer and what of it is loaded at this call (spec/TOOL-LOADING.md), for the
    * loading tools. Absent outside an agent run.
@@ -81,6 +87,8 @@ export interface RolloutTool<A = never> {
   /** Argument used as the plain step title, frozen with setup-tool metadata. */
   readonly titleField?: string
   readonly effect: EffectClass
+  /** False: never one of a story's reply tools (This chat's Tools list leaves it out), only a planner's. */
+  readonly replyTool?: false
   /** Model-facing, with its usage guidance: when to call it and when not to. */
   readonly description: string
   readonly parameters: TSchema
@@ -89,12 +97,13 @@ export interface RolloutTool<A = never> {
   /**
    * What the call will do, for its approval (spec/WORKSHOP.md §3.4), worked out by the server from
    * the real arguments and the items they name: the target's own name, an edit's fields before
-   * and after. Absent: the arguments as they are.
+   * and after. Absent: the arguments as they are. `storyAt`: the call reads or changes the story
+   * at the request's position, so only a tab still showing it may allow it.
    */
   readonly describe?: (
     context: ToolContext,
     args: A
-  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes">, unknown>
+  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt">, unknown>
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
 

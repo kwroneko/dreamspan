@@ -89,8 +89,43 @@ function loadingViolations(values: ReadonlyArray<ComponentValue>, consent: boole
 /** Grouping rules a style rule may nest: relative to the rule, so scoped with it. */
 const NESTED_AT = new Set(["media", "supports", "container", "starting-style"])
 
+/** A second implementation of the generated-text policy, operating on emitted declarations. */
+function textAttributesOnly(declaration: ComponentValue[]): boolean {
+  const tokens = declaration.filter((node) => !blank(node))
+  const property = tokenOf(tokens.shift())
+  if (
+    property?.[0] !== TokenType.Ident ||
+    property[4].value !== "content" ||
+    tokenOf(tokens.shift())?.[0] !== TokenType.Colon
+  )
+    return false
+  if (text(tokens.slice(-2)) === "!important") tokens.splice(-2)
+  return (
+    tokens.length > 0 &&
+    tokens.every((node) => {
+      if (tokenOf(node)?.[0] === TokenType.String) return true
+      if (!isFunctionNode(node) || node.getName() !== "attr") return false
+      const args = node.value.filter((inner) => !blank(inner))
+      const argument = tokenOf(args[0])
+      return (
+        args.length === 1 &&
+        argument?.[0] === TokenType.Ident &&
+        /^(title|alt|data-label|data-value|data-text|data-tooltip)$/.test(argument[4].value)
+      )
+    })
+  )
+}
+const generatedSelector = (values: ReadonlyArray<ComponentValue>) => {
+  const selectors: ComponentValue[][] = [[]]
+  for (const value of values) {
+    if (tokenOf(value)?.[0] === TokenType.Comma) selectors.push([])
+    else selectors[selectors.length - 1]!.push(value)
+  }
+  return selectors.every((selector) => /::(?:before|after)$/i.test(text(selector)))
+}
+
 /** A style rule's contents: declarations, nested rules and nested grouping rules, nothing loading. */
-function styleBlockViolations(values: ReadonlyArray<ComponentValue>, consent: boolean): string[] {
+function styleBlockViolations(values: ReadonlyArray<ComponentValue>, consent: boolean, generated = false): string[] {
   const found: string[] = []
   const rest: ComponentValue[] = []
   let prelude: ComponentValue[] = []
@@ -113,7 +148,16 @@ function styleBlockViolations(values: ReadonlyArray<ComponentValue>, consent: bo
         if (count > 0 && !(count === 1 && first?.[0] === TokenType.Delim && first[4].value === "&"))
           found.push(`nested selector can escape its parent: ${text(prelude)}`)
       }
-      found.push(...styleBlockViolations(value.value, consent))
+      const nonKeywords = prelude.filter((node) => tokenOf(node)?.[0] !== TokenType.AtKeyword)
+      found.push(...loadingViolations(nonKeywords, false))
+      rest.splice(rest.length - nonKeywords.length)
+      found.push(
+        ...styleBlockViolations(
+          value.value,
+          consent,
+          first?.[0] === TokenType.AtKeyword ? generated : generatedSelector(prelude)
+        )
+      )
       prelude = []
     } else {
       if (token?.[0] === TokenType.AtKeyword) {
@@ -124,7 +168,19 @@ function styleBlockViolations(values: ReadonlyArray<ComponentValue>, consent: bo
       else prelude.push(value)
     }
   }
-  return [...found, ...loadingViolations(rest, consent)]
+  const declarations: ComponentValue[][] = [[]]
+  for (const value of rest) {
+    if (tokenOf(value)?.[0] === TokenType.Semicolon) declarations.push([])
+    else declarations[declarations.length - 1]!.push(value)
+  }
+  for (const declaration of declarations) {
+    const checked =
+      generated && textAttributesOnly(declaration)
+        ? declaration.filter((node) => !(isFunctionNode(node) && node.getName() === "attr"))
+        : declaration
+    found.push(...loadingViolations(checked, consent))
+  }
+  return found
 }
 
 function parseOrViolation(css: string): { values: ComponentValue[] } | { violation: string } {
@@ -164,10 +220,15 @@ export function stylesheetViolations(css: string, consent: boolean): string[] {
             if (tokenOf(part)?.[0] === TokenType.Comma) selectors.push([])
             else selectors[selectors.length - 1]!.push(part)
           for (const selector of selectors.map(text)) {
-            const ok = scoped ? /^:scope\s/.test(selector) : /^\.message-html\s+(?![+~|])/.test(selector)
+            const ok = scoped
+              ? /^:scope(?:\.rpfont-[0-9a-f-]+)?\s/.test(selector)
+              : /^\.message-html(?:\.rpfont-[0-9a-f-]+)?\s+(?![+~|])/.test(selector)
             if (!ok) found.push(`selector outside the scope: ${selector}`)
           }
-          found.push(...loadingViolations(prelude, false), ...styleBlockViolations(value.value, consent))
+          found.push(
+            ...loadingViolations(prelude, false),
+            ...styleBlockViolations(value.value, consent, generatedSelector(prelude))
+          )
         }
         prelude = []
       } else if (tokenOf(value)?.[0] === TokenType.Semicolon && tokenOf(prelude[0])?.[0] === TokenType.AtKeyword) {

@@ -45,7 +45,7 @@ import { Reader, Writer } from "../db/Database.ts"
 import { Formats } from "../importer/Formats.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { storeMedia } from "../importer/mediaFiles.ts"
-import { withSourceLink } from "../importer/sourceLink.ts"
+import { withSourceLink, withSourceName } from "../importer/sourceLink.ts"
 import { prepareAvatarThumbnails } from "../importer/prepareThumbnails.ts"
 import { describeImage } from "../importer/images.ts"
 import { Network } from "../net/Network.ts"
@@ -137,7 +137,8 @@ export interface CardSourcesShape {
   /**
    * Adds a remote card to the user's cards (§4.5, Add to my cards): its cached file, fetched
    * again if evicted, stored as an import of it is, with its origin; a card the user already
-   * has from there is answered instead, with `existing`.
+   * has from there is answered instead, with `existing`. A standalone lorebook joins the
+   * user's lorebooks the same way (§3.9).
    */
   readonly adopt: (
     user: User,
@@ -156,6 +157,12 @@ export interface CardSourcesShape {
     sourceId: string,
     remoteId: string
   ) => Effect.Effect<{ card: CardForChat; summary: RemoteSummary }, SourceFailed | NotFound | ServerError>
+  /** Read only the page's cached file: never fetch a card or its portrait, or touch the cache. */
+  readonly preparePreview: (
+    user: User,
+    sourceId: string,
+    remoteId: string
+  ) => Effect.Effect<PreparedAdoption, SourceFailed | NotFound | ServerError>
   /** A remote card's file made ready to add (§4.5): parsed, its page on the source in its `source`. */
   readonly prepareAdoption: (
     user: User,
@@ -500,6 +507,87 @@ const make = (options: CardSourcesOptions = {}) =>
           }
         }
         return { ...file, parsed }
+      })
+    type CardFile = Effect.Success<ReturnType<typeof cardFile>>
+
+    /** A remote card's file made ready to add (§4.5): parsed, its page on the source in its `source`. */
+    const preparedOf = (
+      user: User,
+      sourceId: string,
+      remoteId: string,
+      { summary, fileName, parsed, locator }: CardFile
+    ): Effect.Effect<PreparedAdoption, SourceFailed> => {
+      const card = parsed.library?.kind === "card" ? parsed.library : null
+      if (card === null)
+        return Effect.fail(
+          new SourceFailed({
+            sourceId,
+            reason: "bad_response",
+            message: `This card couldn't be read, so it can't be added.`
+          })
+        )
+      // The card's page on the source joins its `source` list, as its link back (§4.5).
+      const stored = withSourceLink(card, linkOf(sourceId, remoteId, summary))
+      return Effect.succeed({
+        name: summary.name,
+        media: parsed.media,
+        payload: {
+          userId: user.id,
+          sourceId,
+          remoteId,
+          remoteVersion: summary.version.id,
+          ...(locator ? { locator } : {}),
+          file: {
+            label: card.label,
+            docJson: stored.docJson,
+            docHash: stored.docHash,
+            searchText: stored.searchText,
+            schemaVersion: card.schemaVersion,
+            sourceName: fileName,
+            sourceHash: parsed.sha256,
+            media: parsed.media.map(({ bytes: _, ...file }) => file),
+            noteDocJson: card.noteDocJson,
+            ...(card.notesDocJson ? { notesDocJson: card.notesDocJson } : {})
+          }
+        }
+      })
+    }
+
+    /**
+     * A standalone lorebook from a source (§3.9), added to the user's lorebooks as an import of
+     * its file is, with its origin row as its link back (a lorebook has no Sources list). The
+     * writer tells it from a card by its document (`adoptedKind`); one the user has from there
+     * already is answered instead, with `existing`.
+     */
+    const adoptLorebook = (
+      user: User,
+      sourceId: string,
+      remoteId: string,
+      { summary, fileName, parsed, locator }: CardFile
+    ) =>
+      Effect.gen(function* () {
+        const book = withSourceName(parsed.library!, summary.name, fileName.replace(/\.[^.]*$/, ""))
+        const added = yield* writer
+          .AdoptRemoteCard({
+            userId: user.id,
+            sourceId,
+            remoteId,
+            remoteVersion: summary.version.id,
+            ...(locator ? { locator } : {}),
+            file: {
+              label: book.label,
+              docJson: book.docJson,
+              docHash: book.docHash,
+              searchText: book.searchText,
+              schemaVersion: book.schemaVersion,
+              sourceName: fileName,
+              sourceHash: parsed.sha256,
+              media: [],
+              noteDocJson: null
+            }
+          })
+          .pipe(Effect.catch(storage("adding the lorebook")))
+        return { entityId: added.entityId, refId: added.refId, name: summary.name, existing: added.existing }
       })
 
     /** Versions the source just reported for cards the user added from it (§3.8). */
@@ -886,6 +974,7 @@ const make = (options: CardSourcesOptions = {}) =>
                 sourceId,
                 remoteId,
                 name: summary.name,
+                ...(summary.kind ? { kind: summary.kind } : {}),
                 ...(summary.creator ? { creator: summary.creator } : {}),
                 ...(shown!.thumb ? { thumb: shown!.thumb } : {}),
                 at: Date.now()
@@ -924,42 +1013,33 @@ const make = (options: CardSourcesOptions = {}) =>
             })
           }
         }),
-      prepareAdoption: (user, sourceId, remoteId) =>
+      preparePreview: (user, sourceId, remoteId) =>
         Effect.gen(function* () {
-          const { summary, fileName, parsed, locator } = yield* cardFile(user, sourceId, remoteId)
-          const card = parsed.library?.kind === "card" ? parsed.library : null
-          if (card === null)
+          yield* usable(user, sourceId)
+          const entry = yield* cache.peek(cacheKey(user, sourceId, "card", remoteId))
+          if (!entry?.blob)
             return yield* new SourceFailed({
               sourceId,
               reason: "bad_response",
-              message: `This card couldn't be read, so it can't be added.`
+              message: "Open this card again to preview its first request."
             })
-          // The card's page on the source joins its `source` list, as its link back (§4.5).
-          const stored = withSourceLink(card, linkOf(sourceId, remoteId, summary))
-          return {
-            name: summary.name,
-            media: parsed.media,
-            payload: {
-              userId: user.id,
-              sourceId,
-              remoteId,
-              remoteVersion: summary.version.id,
-              ...(locator ? { locator } : {}),
-              file: {
-                label: card.label,
-                docJson: stored.docJson,
-                docHash: stored.docHash,
-                searchText: stored.searchText,
-                schemaVersion: card.schemaVersion,
-                sourceName: fileName,
-                sourceHash: parsed.sha256,
-                media: parsed.media.map(({ bytes: _, ...file }) => file),
-                noteDocJson: card.noteDocJson,
-                ...(card.notesDocJson ? { notesDocJson: card.notesDocJson } : {})
-              }
-            }
+          const { summary, fileName, locator } = entry.value as {
+            summary: AdapterSummary
+            fileName: string
+            locator?: string | null
           }
+          const bytes = new Uint8Array(yield* cache.readBlob(entry.blob))
+          const parsed = yield* formats.parse(bytes, fileName).pipe(Effect.catch(storage("reading the card")))
+          return yield* preparedOf(user, sourceId, remoteId, {
+            summary,
+            fileName,
+            locator: locator ?? null,
+            parsed,
+            fetched: false
+          })
         }),
+      prepareAdoption: (user, sourceId, remoteId) =>
+        Effect.flatMap(cardFile(user, sourceId, remoteId), (file) => preparedOf(user, sourceId, remoteId, file)),
       storingAdoptions: (prepared, write, added) =>
         Effect.gen(function* () {
           const media = prepared.flatMap((card) => card.media)
@@ -982,7 +1062,10 @@ const make = (options: CardSourcesOptions = {}) =>
         }),
       adopt: (user, sourceId, remoteId) =>
         Effect.gen(function* () {
-          const prepared = yield* service.prepareAdoption(user, sourceId, remoteId)
+          const file = yield* cardFile(user, sourceId, remoteId)
+          // A standalone lorebook joins the user's lorebooks (§3.9): opening one adds it.
+          if (file.parsed.library?.kind === "lorebook") return yield* adoptLorebook(user, sourceId, remoteId, file)
+          const prepared = yield* preparedOf(user, sourceId, remoteId, file)
           const added = yield* service.storingAdoptions(
             [prepared],
             writer.AdoptRemoteCard(prepared.payload).pipe(Effect.catch(storage("adding the card"))),

@@ -4,7 +4,7 @@ import { gapLinesStage } from "./gapLines.ts"
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
-import { withModelSettings } from "@rp/shared/modelSettings.ts"
+import { DEFAULT_RESPONSE, withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
 import { charDefinitions, newestMessage, presetOrder, withMain } from "@rp/shared/presetOrder.ts"
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
@@ -263,6 +263,26 @@ const presetStage: AssemblerStage = {
           ...assembly.preset,
           doc: withModelSettings(assembly.preset.doc, model.settings, model.context, model.maxOutput)
         }
+      // A planner that sizes its turns' replies from the model (spec/WORKSHOP-CONTEXT.md §1.2):
+      // the model's max output within a quarter of the context size; its own setting still wins.
+      if (
+        assembly.request.agent?.response === "model" &&
+        model &&
+        model.settings?.samplers?.openai_max_tokens === undefined
+      ) {
+        const samplers = assembly.preset.doc.samplers
+        const size = Math.min(samplers.openai_max_context, model.context ?? Number.POSITIVE_INFINITY)
+        assembly.preset = {
+          ...assembly.preset,
+          doc: {
+            ...assembly.preset.doc,
+            samplers: {
+              ...samplers,
+              openai_max_tokens: Math.max(1, Math.min(model.maxOutput ?? DEFAULT_RESPONSE, Math.floor(size / 4)))
+            }
+          }
+        }
+      }
       return assembly
     })
 }
@@ -2732,7 +2752,12 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
   // (spec/CHARACTER-CONTEXT.md §2.3, unit C7): another character's history differs after the
   // first message one of them missed. The whole path's (a shared context, a narrator) stays
   // `cacheHistory`; both are carried forward through every request.
-  const viewer = assembly.knowledge?.viewer ?? null
+  // Read whole, a separate join's stretch makes a character's history its own from there.
+  const viewer =
+    assembly.knowledge?.viewer ??
+    (assembly.knowledge?.stretch?.ranges?.length || assembly.parallelStretches?.length
+      ? (assembly.knowledge?.stretch?.viewer ?? null)
+      : null)
   const byView = previous?.state?.cacheHistoryByView
   const previousHistory = viewer === null ? previous?.state?.cacheHistory : byView?.[viewer]
   assembly.breakpoints = placeBreakpoints(

@@ -1,3 +1,4 @@
+import { historyRenameTool, historySearchTool, rewriteTools } from "./agent/tools/rewrite.ts"
 import { makeOperationTools, type OperationRuntime } from "./agent/operations.ts"
 import { builtinOperationExposures } from "./agent/exposures/builtins.ts"
 import { rolloutEffectClasses } from "./agent/effects.ts"
@@ -9,7 +10,8 @@ import { workshopMode } from "./agent/workshop.ts"
 import { libraryTools } from "./agent/tools/library.ts"
 import { defaultReplyStrategy, type ReplyStrategy } from "./chat/replyStrategy.ts"
 import { agentReplyStrategy } from "./agent/strategy.ts"
-import { historyTools } from "./agent/tools/history.ts"
+import { historyTools, storyTools } from "./agent/tools/history.ts"
+import { runTools, workshopHistoryVariants } from "./agent/tools/runs.ts"
 import { editCard } from "./agent/tools/cardEdit.ts"
 import { editNote, listNotes, switchNote, writeNote } from "./agent/tools/notes.ts"
 import { lookupLore } from "./agent/tools/lore.ts"
@@ -95,7 +97,12 @@ export class ExecutionRegistry extends Context.Service<
         ...workshopMode,
         plan: (input) => {
           const plan = workshopMode.plan(input)
-          return { ...plan, tools: [...new Set([...plan.tools, ...operationTools.list().map((e) => e.id)])] }
+          return {
+            ...plan,
+            tools: [
+              ...new Set([...plan.tools, ...rewriteTools.map((e) => e.id), ...operationTools.list().map((e) => e.id)])
+            ]
+          }
         }
       })
       const validate = (tool: RolloutTool<never>) => {
@@ -113,6 +120,10 @@ export class ExecutionRegistry extends Context.Service<
           Effect.sync(() => validate(entry.tool)).pipe(Effect.andThen(variants.register(entry)))
       }
       yield* kindTools.register({ id: "workshop:edit_card", tool: libraryEditCard })
+      yield* kindTools.register({ id: "workshop:history_rename", tool: historyRenameTool as RolloutTool<never> })
+      yield* kindTools.register({ id: "workshop:history_search", tool: historySearchTool as RolloutTool<never> })
+      for (const tool of rewriteTools) yield* kindTools.register({ id: `workshop:${tool.id}`, tool })
+      for (const variant of workshopHistoryVariants) yield* kindTools.register(variant)
       const catalog = makeRegistry<RolloutTool<never>>()
       const rolloutTools = {
         ...catalog,
@@ -121,6 +132,8 @@ export class ExecutionRegistry extends Context.Service<
       }
       for (const tool of [
         ...historyTools,
+        ...storyTools,
+        ...runTools,
         ...libraryTools,
         ...setupTools,
         lookupLore,
@@ -194,6 +207,7 @@ export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string
   const common = exposure ? registry.operationTool(exposure) : registry.rolloutTools.get(name)
   const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
   const tool = common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)
+  if (tool?.replyTool === false && registry.chatKinds.get(kind)?.allowsOutside !== true) return undefined
   if (!tool || registry.chatKinds.get(kind)?.allowsOutside || !tool.capability) return tool
   // Capability grants are workshop metadata. Preserve the frozen story definition shape.
   const storyTool = { ...tool }

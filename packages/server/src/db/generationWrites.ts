@@ -1,4 +1,5 @@
 import { makeExternalMediaWriteHandlers } from "./externalMedia.ts"
+import { makeSavedMediaWriteHandlers } from "./savedMedia.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { putUserSetting, writeSetting } from "./settings.ts"
 import { nextSeq, eventApplies } from "./forkState.ts"
@@ -92,6 +93,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
   const handlers = {
     ...(yield* makeDisplayPrefsWriteHandlers),
     ...(yield* makeExternalMediaWriteHandlers),
+    ...(yield* makeSavedMediaWriteHandlers),
     ...(yield* makeSourcePrefsWriteHandlers),
     ...(yield* makeTokenCountingWriteHandlers),
     StartRollout: ({

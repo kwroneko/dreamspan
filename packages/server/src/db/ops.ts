@@ -1,4 +1,13 @@
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
+import {
+  MediaApprovalHost,
+  MediaChoice,
+  MediaHost,
+  MediaHosts,
+  MediaKind,
+  SavedMediaLookup,
+  SavedMediaStatus
+} from "@rp/shared/savedMedia.ts"
 import { MessageCursor, MessageQuery, MessageSearchPage } from "@rp/shared/messageSearch.ts"
 import {
   LibraryChoice,
@@ -18,7 +27,10 @@ import {
   EffectList,
   RolloutEffect,
   RolloutEffectRecord,
-  EffectUndoRefused
+  EffectUndoRefused,
+  ReplyEffects,
+  UndoAllReport,
+  WorkshopDefaults
 } from "@rp/shared/workshopApi.ts"
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
@@ -31,9 +43,10 @@ import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from "@rp/shared/snippetsApi.ts"
-import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
+import { historyReadRpcs, historyWriteRpcs, HistoryRejected, HistoryEdit } from "@rp/shared/historyApi.ts"
 import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
 import {
+  JoinThreadsInput,
   MergeChanged,
   MergeChatInput,
   MergedMessage,
@@ -44,6 +57,7 @@ import {
 } from "@rp/shared/mergeApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { AwayMark } from "@rp/shared/contextsApi.ts"
+import { StartedThreads, ThreadName, ThreadSet, ThreadStarts, ThreadsRefused } from "@rp/shared/threads.ts"
 import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
@@ -86,7 +100,7 @@ import {
   Version,
   VersionId
 } from "@rp/shared/chat.ts"
-import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
+import { ContextIssue, StoryAtField, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import { RecentRemote, SourcePrefs } from "@rp/shared/cardSources.ts"
 import {
   ForkNote,
@@ -160,7 +174,7 @@ import {
   ProxyMode
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
-import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
 import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
@@ -397,8 +411,34 @@ export const ImportedMedia = Schema.Struct({
 /** A stored file, at `path` under the data directory. */
 const StoredFile = Schema.Struct({ path: Schema.String, mime: Schema.String, byteSize: Schema.Int })
 
+/** A queued revision and the media its document names (savedMedia/extract.ts). */
+export const SavedMediaScan = Schema.Struct({
+  revisionId: Schema.String,
+  ownerUserId: UserId,
+  media: Schema.Array(Schema.Struct({ url: Schema.String, kind: MediaKind }))
+})
+export type SavedMediaScan = typeof SavedMediaScan.Type
+/** One address to download, and what the fetcher checks it against. */
+export const SavedMediaDownload = Schema.Struct({
+  id: Schema.Int,
+  ownerUserId: UserId,
+  url: Schema.String,
+  host: Schema.String,
+  kind: MediaKind,
+  once: Schema.Boolean,
+  revisionId: Schema.NullOr(Schema.String),
+  hosts: MediaHosts
+})
+export type SavedMediaDownload = typeof SavedMediaDownload.Type
+
 /** A reply the send queue posted, generating, for the caller to start in its fork. */
-const QueuedReply = Schema.Struct({ slotId: SlotId, versionId: VersionId, forkId: Schema.optionalKey(ForkId) })
+const QueuedReply = Schema.Struct({
+  slotId: SlotId,
+  versionId: VersionId,
+  forkId: Schema.optionalKey(ForkId),
+  /** A side chat's story position, as the queued entry was sent with it. */
+  storyAt: StoryAtField
+})
 
 /** What the send queue did behind a slot (chatSetupWrites.ts). */
 export const QueueOutcome = Schema.Struct({
@@ -573,6 +613,58 @@ const LibraryReplacePlan = Schema.Struct({
   skipped: Schema.Array(LibrarySkipped)
 })
 
+/**
+ * Saved card media's writes (spec/SAVED-MEDIA.md; db/savedMedia.ts), a group of their own
+ * merged into WriteOpsLibrary. No network in any of these: the main thread downloads between them.
+ */
+const SavedMediaWriteOps = RpcGroup.make(
+  /** Records what queued revisions name: one row per address per account, linked to the revision. */
+  Rpc.make("RecordSavedMediaScans", {
+    payload: { scans: Schema.Array(SavedMediaScan), at: Schema.Int },
+    success: Schema.Int,
+    error: StorageError
+  }),
+  /** A download's result, recorded only while the address is still to be downloaded. */
+  Rpc.make("RecordSavedMediaResult", {
+    payload: {
+      id: Schema.Int,
+      at: Schema.Int,
+      saved: Schema.NullOr(Schema.Struct({ sha256: Sha256, mime: Schema.String, byteSize: Schema.Int })),
+      failure: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
+  /** The entry's failed addresses on approved sites downloaded again. */
+  Rpc.make("RetrySavedMedia", {
+    payload: { userId: UserId, refId: RefId, at: Schema.Int },
+    success: SavedMediaStatus,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("DecideMediaApproval", {
+    payload: {
+      userId: UserId,
+      refIds: Schema.NullOr(Schema.Array(RefId)),
+      decisions: Schema.Array(Schema.Struct({ host: Schema.String, choice: MediaChoice })),
+      at: Schema.Int
+    },
+    success: MediaHosts,
+    error: StorageError
+  }),
+  Rpc.make("ChangeMediaHosts", {
+    payload: {
+      userId: UserId,
+      add: Schema.optionalKey(MediaHost),
+      remove: Schema.optionalKey(Schema.String),
+      at: Schema.Int
+    },
+    success: MediaHosts,
+    error: StorageError
+  }),
+  /** Addresses no revision names any more, and files nothing else uses; the sweep removes their bytes. */
+  Rpc.make("PruneSavedMedia", { success: Schema.Int, error: StorageError })
+)
+
 export class WriteOpsChat extends RpcGroup.make(
   /**
    * Merges another chat's fork into `forkId` below `at` (spec/CHAT-MERGE.md §8): recomputes the
@@ -583,6 +675,17 @@ export class WriteOpsChat extends RpcGroup.make(
   Rpc.make("MergeChat", {
     payload: { userId: UserId, ...MergeChatInput.fields },
     success: MergeResult,
+    error: Schema.Union([NotFound, StaleWrite, MergeRefused, MergeChanged, StorageError])
+  }),
+  /**
+   * "Join threads" (spec/THREADS.md §7.1): merges each of `joins`, every one another thread of
+   * this branch, as `MergeChat` would, each planned at `at` as previewed and written directly
+   * below the one before, so the joins are consecutive; plus the joined threads' characters back
+   * at each J. One transaction; the results in order.
+   */
+  Rpc.make("JoinThreads", {
+    payload: { userId: UserId, ...JoinThreadsInput.fields },
+    success: Schema.Array(MergeResult),
     error: Schema.Union([NotFound, StaleWrite, MergeRefused, MergeChanged, StorageError])
   }),
   Rpc.make("DeleteChatGroup", {
@@ -622,8 +725,29 @@ export class WriteOpsChat extends RpcGroup.make(
     success: Snippet,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
+  Rpc.make("PrepareHistoryEdits", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      groupId: Schema.optionalKey(Schema.String),
+      token: Schema.optionalKey(Schema.String),
+      total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(10000)),
+      summariesIncluded: Schema.Boolean,
+      summaryIds: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(10000))),
+      edits: Schema.Array(HistoryEdit).check(Schema.isMaxLength(500))
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, HistoryRejected, StorageError])
+  }),
   historyWriteRpcs[0]
-    .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
+    .setPayload(
+      Schema.Struct({
+        ...historyWriteRpcs[0].payloadSchema.fields,
+        userId: UserId,
+        prepared: Schema.optionalKey(Schema.String)
+      })
+    )
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   historyWriteRpcs[1]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[1].payloadSchema.fields, userId: UserId }))
@@ -1081,6 +1205,104 @@ export class WriteOpsChat extends RpcGroup.make(
     payload: { userId: UserId, forkId: ForkId },
     success: BinItem,
     error: Schema.Union([NotFound, CannotDeleteLastFork, StorageError])
+  }),
+  // --- Parallel threads (spec/THREADS.md §5; db/threadWrites.ts)
+  /**
+   * Starts threads at message `slotId` of fork `forkId` (S on its display path, not deleted
+   * there, at row version `expectedRowVersion`, else StaleWrite): the fork continues as the
+   * first of `threads`, each other gets a fork of its own at S. Its cast's away marks at S,
+   * each new thread's composer, and at an earlier message the played stretch's correction.
+   */
+  Rpc.make("StartThreads", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      slotId: SlotId,
+      expectedRowVersion: Schema.Int,
+      threads: ThreadStarts
+    },
+    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat }),
+    error: Schema.Union([NotFound, StaleWrite, ThreadsRefused, StorageError])
+  }),
+  /** Names a thread (empty: unnamed) in all its branches, if it's at `rowVersion`; its new row version. */
+  Rpc.make("RenameThread", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      splitId: Schema.String,
+      ordinal: Schema.Int,
+      name: ThreadName,
+      rowVersion: Schema.Int
+    },
+    success: Schema.Int,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /**
+   * One message to several threads (spec/THREADS.md §6.2; db/chatSetupWrites.ts): in each
+   * target's fork exactly SendOrQueue's append (the first target under `parentSlotId`, LeafMoved
+   * if that moved; the others under their tips now), then the reply asked for, posted or queued
+   * there; one `thread_sends` group for the copies posted, `send_group` on those queued. Only
+   * forks that are threads of one another (ThreadsRefused otherwise). Each reply's generation
+   * starts after the commit.
+   */
+  Rpc.make("SendToThreads", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      images: Schema.optionalKey(MessageImages),
+      imageDraftIds: Schema.optionalKey(ComposerImageIds),
+      commitDraft: CommitDraft,
+      targets: Schema.Array(
+        Schema.Struct({
+          forkId: ForkId,
+          parentSlotId: Schema.NullOr(SlotId),
+          /** The text as the thread's scripts left it, and what they did. */
+          content: Schema.String,
+          rewrite: Schema.optionalKey(StoredRewrite),
+          speakerEntityId: Schema.NullOr(EntityId),
+          reply: Schema.Boolean,
+          replySpeakerEntityId: Schema.NullOr(EntityId),
+          round: Schema.optionalKey(Schema.Array(EntityId)),
+          autoPick: Schema.optionalKey(Schema.Boolean)
+        })
+      ).check(Schema.isMinLength(2), Schema.isMaxLength(32))
+    },
+    success: Schema.Struct({
+      groupId: Schema.String,
+      /** In the targets' order. */
+      copies: Schema.Array(
+        Schema.Union([
+          Schema.TaggedStruct("Posted", {
+            forkId: ForkId,
+            slotId: SlotId,
+            reply: Schema.NullOr(Schema.Struct({ slotId: SlotId, versionId: VersionId }))
+          }),
+          Schema.TaggedStruct("Queued", { forkId: ForkId, queued: QueuedMessage })
+        ])
+      ),
+      chat: Chat,
+      queue: Schema.Array(QueuedMessage),
+      draft: Schema.NullOr(Draft),
+      recovered: Schema.Int
+    }),
+    error: Schema.Union([NotFound, LeafMoved, ThreadsRefused, StorageError])
+  }),
+  /** Undo of starting threads: a bin item of kind `threads` (db/bin.ts `removeThreads`). */
+
+  Rpc.make("UndoThreads", {
+    payload: { userId: UserId, chatId: ChatId, splitId: Schema.String },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * "Also change it in …" (db/noteCopyWrites.ts): a chat's own note as branch `fromForkId` has it
+   * at its latest message, bound in `toForkId` at its latest message; false when it's the same there.
+   */
+  Rpc.make("CopyNoteToBranch", {
+    payload: { userId: UserId, chatId: ChatId, noteRefId: RefId, fromForkId: ForkId, toForkId: ForkId },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError, EditRefused])
   }),
   /**
    * Deletes one swipe: the normal delete (owner, 2026-10-10). If it was showing, the
@@ -1681,7 +1903,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
    * transaction: what `ImportFile` stores for a new card file, then its `card_origins` row.
    * A card the user already has from there (a live card, archived or not) is answered
    * instead, with `existing`, so it's never added twice; an origin whose card is in the bin
-   * or purged is let go, and the card is added again.
+   * or purged is let go, and the card is added again. A standalone lorebook's file (§3.9) is
+   * added the same way, as a lorebook: its document says which (`adoptedKind`).
    */
   Rpc.make("AdoptRemoteCard", {
     payload: AdoptFields,
@@ -1904,13 +2127,66 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Unknown,
     error: Schema.Union([NotFound, EffectUndoRefused, InvalidDocument, StaleWrite, StorageError])
   }),
+  Rpc.make("StartEditRollout", {
+    payload: {
+      storyAt: StoryAtField,
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      chatId: ChatId,
+      forkId: ForkId
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, HistoryRejected, EffectUndoRefused, StorageError])
+  }),
+  Rpc.make("ApplyAgentChangeset", {
+    payload: {
+      storyAt: StoryAtField,
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      chatId: ChatId,
+      forkId: ForkId,
+      expected: Schema.String,
+      prepared: Schema.optionalKey(Schema.String),
+      title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+      edits: Schema.Array(HistoryEdit).check(Schema.isMaxLength(10000)),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int })).check(Schema.isMaxLength(32))
+      ),
+      summariesIncluded: Schema.Boolean,
+      includeSwipes: Schema.Boolean,
+      notes: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            expectedRowVersion: Schema.Int,
+            parent: RevisionId,
+            text: Schema.String.check(Schema.isMaxLength(65536))
+          })
+        )
+      )
+    },
+    success: Schema.String,
+    error: Schema.Union([NotFound, HistoryRejected, EffectUndoRefused, StorageError])
+  }),
   Rpc.make("AgentCreateEntity", {
     payload: {
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
-      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            rowVersion: Schema.Int,
+            archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+          })
+        )
+      ),
       kind: EntityKind,
       label: LibraryLabel,
       doc: Doc,
@@ -1925,7 +2201,15 @@ export class WriteOpsLibrary extends RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
-      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            rowVersion: Schema.Int,
+            archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+          })
+        )
+      ),
       refId: RefId,
       expectedRowVersion: Schema.Int,
       doc: Doc
@@ -1939,7 +2223,15 @@ export class WriteOpsLibrary extends RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
-      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            rowVersion: Schema.Int,
+            archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+          })
+        )
+      ),
       refId: RefId,
       name: Schema.String.check(Schema.isMinLength(1)),
       nickname: Schema.String,
@@ -1965,7 +2257,15 @@ export class WriteOpsLibrary extends RpcGroup.make(
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       approvalDigest: Schema.optionalKey(Schema.String),
-      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
+      expectedRefs: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            refId: RefId,
+            rowVersion: Schema.Int,
+            archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+          })
+        )
+      ),
       cards: StartChatFields.cards,
       persona: StartChatFields.persona,
       greeters: StartChatFields.greeters,
@@ -1980,6 +2280,12 @@ export class WriteOpsLibrary extends RpcGroup.make(
     payload: { userId: UserId, ...EffectKey },
     success: RolloutEffect,
     error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  /** Every change of one reply not yet undone, newest first, in one transaction (workshopEffects.ts). */
+  Rpc.make("UndoRolloutEffects", {
+    payload: { userId: UserId, ...ReplyEffects },
+    success: UndoAllReport,
+    error: Schema.Union([NotFound, StorageError])
   }),
   // --- Workshop grants and approvals (workshopGrants.ts; spec/WORKSHOP.md §3.4). Never reached
   // by a tool: the session gives tools a writer without these (agent/tools.ts).
@@ -2008,6 +2314,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
    */
   Rpc.make("AnswerToolApproval", {
     payload: {
+      storyAt: StoryAtField,
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
@@ -2029,9 +2336,24 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * A workshop, with its seeds when missing. `attachTo` makes it a side chat of that story
+   * (spec/WORKSHOP.md §4): its `workshop.attached` event and its reading of the story allowed.
+   */
   Rpc.make("CreateWorkshop", {
-    payload: { userId: UserId, title: Schema.optionalKey(Schema.String) },
+    payload: {
+      userId: UserId,
+      title: Schema.optionalKey(Schema.String),
+      attachTo: Schema.optionalKey(ChatId),
+      card: Schema.optionalKey(Schema.String),
+      persona: Schema.optionalKey(Schema.NullOr(Schema.String))
+    },
     success: Chat,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SetWorkshopPersona", {
+    payload: { userId: UserId, persona: Schema.NullOr(Schema.String) },
+    success: WorkshopDefaults,
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("StartChat", {
@@ -2118,7 +2440,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
        */
       round: Schema.optionalKey(Schema.Array(EntityId)),
       /** The reply's speaker and the round's are Auto's picks: the decision model may change each (DESIGN §2.3). */
-      autoPick: Schema.optionalKey(Schema.Boolean)
+      autoPick: Schema.optionalKey(Schema.Boolean),
+      /** A side chat's story position (spec/WORKSHOP.md §4): kept with a queued entry for its reply. */
+      storyAt: StoryAtField
     },
     success: Schema.Union([
       /** `queue`: the chat's queue, when the post queued the rest of a round behind it. */
@@ -3099,7 +3423,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Struct({ slotId: SlotId, fork: Fork, chat: Chat }),
     error: Schema.Union([NotFound, StorageError])
   })
-) {}
+).merge(SavedMediaWriteOps) {}
 
 /** Every write operation. Database.ts types the writer's client from the two halves. */
 export class WriteOps extends WriteOpsChat.merge(WriteOpsLibrary) {}
@@ -3386,6 +3710,63 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A chat's composer draft's restorable states, by the draft's id. */
+  Rpc.make("AgentHistorySnapshot", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      versions: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(10000))),
+      summaries: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(10000)))
+    },
+    success: Schema.Struct({
+      stamp: Schema.String,
+      name: Schema.String,
+      leaf: Schema.NullOr(SlotId),
+      dependents: Schema.Array(Schema.Struct({ id: Schema.String, revision: Schema.String }))
+    }),
+    error: Schema.Union([NotFound, HistoryRejected, StorageError])
+  }),
+  Rpc.make("AgentRewriteTargets", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      messages: Schema.Array(Schema.Int).check(Schema.isMaxLength(10000))
+    },
+    success: Schema.Array(
+      Schema.Struct({ message: Schema.Int, targetId: Schema.String, beforeId: Schema.String, before: Schema.String })
+    ),
+    error: Schema.Union([NotFound, HistoryRejected, StorageError])
+  }),
+  Rpc.make("ReadWorkshopChat", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      chatId: ChatId,
+      forkId: ForkId,
+      from: Schema.Int,
+      offset: Schema.optionalKey(Schema.Int),
+      count: Schema.Int,
+      query: Schema.optionalKey(Schema.String)
+    },
+    success: Schema.Struct({
+      messages: Schema.Array(
+        Schema.Struct({
+          message: Schema.Int,
+          slotId: Schema.String,
+          version: Schema.String,
+          speaker: Schema.String,
+          offset: Schema.Int,
+          text: Schema.String
+        })
+      ),
+      next: Schema.NullOr(Schema.Int),
+      nextOffset: Schema.NullOr(Schema.Int)
+    }),
+    error: Schema.Union([NotFound, HistoryRejected, EffectUndoRefused, StorageError])
+  }),
   Rpc.make("ComposerHistory", {
     payload: {
       userId: UserId,
@@ -3637,10 +4018,21 @@ export class ReadOps extends RpcGroup.make(
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** One live slot with its selected version, as a path shows it, and its chat. */
-  /** A slot as a fork shows it (absent or null: the fork through it, forkAt). */
+  /** Invalidates carried story tool results after edits, swipes, summary or speaker changes. */
+  Rpc.make("StoryReadStamp", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.String,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** One live slot as a fork shows it (absent/null: forkAt), and its chat. */
   Rpc.make("GetSlot", {
-    payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      /** Refuse a slot outside the named fork's display path, rather than reading its own path. */
+      onForkOnly: Schema.optionalKey(Schema.Boolean)
+    },
     success: Schema.Struct({ chatId: ChatId, entry: PathEntry }),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -3926,7 +4318,8 @@ export class ReadOps extends RpcGroup.make(
           instructions: Schema.String,
           speakerCardOnly: Schema.Boolean,
           workshop: Schema.optionalKey(Schema.Boolean),
-          stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
+          stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+          response: Schema.optionalKey(Schema.Literals(["model"]))
         })
       ),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
@@ -4023,7 +4416,8 @@ export class ReadOps extends RpcGroup.make(
    * word starting with each of `tokens` (all of them; none: any), newest first, before display
    * position `before` when given; hidden and unfinished ones left out, template messages
    * (greetings) always, for the caller to fill in and match. Null when the fork places inserted
-   * messages, whose numbering the display path gives: the caller reads the path instead.
+   * messages, whose numbering the display path gives, or the chat has a merge, whose join the
+   * caller reads row by row (spec/THREADS.md §11, TH8): the caller reads the path instead.
    */
   Rpc.make("SearchChat", {
     payload: {
@@ -4056,11 +4450,14 @@ export class ReadOps extends RpcGroup.make(
   /**
    * Who knew each of these versions of the chat (`db/knowers.ts`): card ids, or null for
    * everyone. The agent's read tools leave out what a separate context's viewer didn't know.
+   * In fork `forkId`, those it counts not present for a message aren't among its knowers, and
+   * are listed as `away` (a join's too, who might have known part of it).
    */
   Rpc.make("KnowersOf", {
     payload: {
       userId: UserId,
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       versionIds: Schema.Array(Schema.String),
       viewers: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
     },
@@ -4068,14 +4465,50 @@ export class ReadOps extends RpcGroup.make(
       Schema.Struct({
         versionId: Schema.String,
         knowers: Schema.NullOr(Schema.Array(Schema.String)),
+        away: Schema.optionalKey(Schema.Array(Schema.String)),
         content: Schema.optionalKey(Schema.String),
-        readable: Schema.optionalKey(Schema.Boolean)
+        readable: Schema.optionalKey(Schema.Boolean),
+        /** In a separate join's parallel stretch (the viewed display path), where a stretch view applies. */
+        stretched: Schema.optionalKey(Schema.Boolean)
       })
     ),
     error: StorageError
   }),
   /**
-   * The agent's `lookup_lore` (agentReads.ts, spec/AGENTIC.md §4.5): the enabled entries of the
+   * The joins among these slots of the chat (`chat_merges`, agentReads.ts): each one's title, how
+   * the characters read it (`timelines`) and its frozen rows in order, with where each was in the
+   * source and who knew it there (the source's cast where none was kept). The agent's read tools
+   * read a join row by row (spec/THREADS.md §11, TH8). Point lookups by slot.
+   */
+  Rpc.make("JoinRows", {
+    payload: { userId: UserId, chatId: ChatId, slotIds: Schema.Array(Schema.String) },
+    success: Schema.Array(
+      Schema.Struct({
+        slotId: Schema.String,
+        title: Schema.String,
+        timelines: Schema.String,
+        rows: Schema.Array(
+          Schema.Struct({
+            ordinal: Schema.Int,
+            kind: Schema.Literals(["message", "summary"]),
+            name: Schema.String,
+            side: Schema.Literals(["user", "assistant"]),
+            speaker: Schema.NullOr(Schema.String),
+            content: Schema.String,
+            included: Schema.Literals(["verbatim", "summarized", "left_out"]),
+            knowers: Schema.Array(Schema.String),
+            /** Where it was in the source, as zero-based display positions; null: not recorded. */
+            from: Schema.NullOr(Schema.Int),
+            to: Schema.NullOr(Schema.Int)
+          })
+        )
+      })
+    ),
+    error: StorageError
+  }),
+  /**
+   * The agent's `lookup_lore`
+ (agentReads.ts, spec/AGENTIC.md §4.5): the enabled entries of the
    * lorebooks the rollout's context was assembled with (its snapshot's `agentLore`), named by
    * `entry` (a title or uid), or holding every word of `query` (case aside) in their keys, title or
    * text, those matching by key first. Reads only: what's admitted to the context is the assembler's.
@@ -4124,10 +4557,22 @@ export class ReadOps extends RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** What new workshops start with (db/workshopDefaults.ts). */
+  Rpc.make("WorkshopDefaults", {
+    payload: { userId: UserId },
+    success: WorkshopDefaults,
+    error: StorageError
+  }),
   /** A saved chat-state call result, checked before a resume revalidates already-applied state. */
   Rpc.make("ListRolloutEffects", {
     payload: { userId: UserId, ...EffectList },
     success: Schema.Array(RolloutEffect),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The live workshops attached to a story of the user's, newest first (db/workshopAttach.ts). */
+  Rpc.make("AttachedWorkshops", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Array(Chat),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A workshop's grants (workshopGrants.ts): capability → mode, expired ones left out. */
@@ -4158,7 +4603,7 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("WorkshopOperationInfo", {
-    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId) },
+    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId), storyAt: StoryAtField },
     success: Schema.Struct({
       user: User,
       settings: Schema.Array(
@@ -4183,7 +4628,13 @@ export class ReadOps extends RpcGroup.make(
    * mode, the frozen snapshot and the transcript as last saved, and the version's own status.
    */
   Rpc.make("CountRolloutContext", {
-    payload: { model: Schema.String, request: Schema.String, transcript: Schema.String, tools: Schema.String },
+    payload: {
+      model: Schema.String,
+      request: Schema.String,
+      transcript: Schema.String,
+      tools: Schema.String,
+      continuation: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Int,
     error: StorageError
   }),
@@ -4278,6 +4729,26 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * The first request of a chat not made yet (DESIGN §2.1), assembled over `draftSources.ts`
+   * from what `StartChat` would write: nothing is written, and nothing leaves the worker.
+   */
+  Rpc.make("AssembleDraftChat", {
+    payload: {
+      userId: UserId,
+      cards: StartChatFields.cards,
+      persona: StartChatFields.persona,
+      greeters: StartChatFields.greeters,
+      first: FirstTurn,
+      replier: Schema.NullOr(EntityId),
+      remote: Schema.Array(
+        Schema.Struct({ entity: Schema.String, docJson: Schema.String, notes: Schema.Array(Schema.String) })
+      ),
+      now: Schema.Number
+    },
+    success: DraftChatPreview,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The user's generation defaults; one naming something gone reads as none. */
   Rpc.make("GetGenerationDefaults", {
     payload: { userId: UserId },
@@ -4359,6 +4830,51 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** What the preset the user's chats use does with a card's own prompts (DESIGN §5.0). */
   Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
+  // --- Saved card media (spec/SAVED-MEDIA.md; db/savedMedia.ts).
+  /**
+   * Queued revisions with the media their documents name, read here so no main thread parses
+   * a document: those of `refIds`' heads (the user's), else the user's queue, else everyone's.
+   */
+  Rpc.make("ReadSavedMediaScans", {
+    payload: {
+      userId: Schema.NullOr(UserId),
+      refIds: Schema.NullOr(Schema.Array(RefId)),
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 2000 }))
+    },
+    success: Schema.Array(SavedMediaScan),
+    error: StorageError
+  }),
+  /** Addresses to download, oldest first, with their account's approved sites and a revision naming them. */
+  Rpc.make("NextSavedMediaDownloads", {
+    payload: {
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 })),
+      skip: Schema.Array(Schema.Int)
+    },
+    success: Schema.Array(SavedMediaDownload),
+    error: StorageError
+  }),
+  Rpc.make("LookupSavedMedia", {
+    payload: { userId: UserId, urls: Schema.Array(Schema.String) },
+    success: Schema.Array(SavedMediaLookup),
+    error: StorageError
+  }),
+  Rpc.make("GetSavedMediaStatus", {
+    payload: { userId: UserId, refId: RefId },
+    success: SavedMediaStatus,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ListMediaApproval", {
+    payload: { userId: UserId, refIds: Schema.NullOr(Schema.Array(RefId)) },
+    success: Schema.Array(MediaApprovalHost),
+    error: StorageError
+  }),
+  Rpc.make("GetMediaHosts", { payload: { userId: UserId }, success: MediaHosts, error: StorageError }),
+  /** A saved file the user's own saved addresses name. */
+  Rpc.make("GetSavedMediaFile", {
+    payload: { userId: UserId, mediaId: Schema.String },
+    success: Schema.NullOr(StoredFile),
+    error: StorageError
+  }),
   /** The user's display choices; the defaults where none are stored. */
   Rpc.make("GetExternalMediaPrefs", { payload: { userId: UserId }, success: ExternalMediaPrefs, error: StorageError }),
   Rpc.make("CheckExternalMedia", {
@@ -4443,6 +4959,15 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListBranches", {
     payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Array(Branch),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The thread sets a live fork of the user's is in, innermost first, of those still shown
+   * (spec/THREADS.md §4.3, db/threadReads.ts): each set's threads with names and the fork each opens.
+   */
+  Rpc.make("ThreadsOf", {
+    payload: { userId: UserId, chatId: ChatId, forkId: ForkId },
+    success: Schema.Array(ThreadSet),
     error: Schema.Union([NotFound, StorageError])
   })
 ) {}

@@ -39,6 +39,8 @@ const DEFAULTS = {
   "message.insert-below": false,
   "message.duplicate": false,
   "message.merge": false,
+  "message.threads": false,
+  "message.join-thread": false,
   "message.visibility": false,
   "message.context": false,
   "message.delete-all": false
@@ -91,6 +93,7 @@ const EVERY_REPLY_ACTION = [
   "Write your own version",
   "New version with guidance…",
   "Branch from here",
+  "Start parallel threads here…",
   "Insert message below",
   "Duplicate",
   "Merge a chat here…",
@@ -199,7 +202,12 @@ test("many pins at a phone's width stay on one line, the rest in More actions", 
   await newChat(page, "Breakwater")
   await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     api.SetDisplayPrefs({
-      prefs: { messageToolbar: Object.fromEntries(Object.keys(DEFAULTS).map((id) => [id, true])) }
+      prefs: {
+        messageToolbar: {
+          ...Object.fromEntries(Object.keys(DEFAULTS).map((id) => [id, true])),
+          "message.threads": true
+        }
+      }
     })
   )
   await page.reload()

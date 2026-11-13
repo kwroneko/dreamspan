@@ -23,6 +23,9 @@ export const importPromptPreset = (input: string | Uint8Array) => {
   }
 }
 
+/** SillyTavern's default `openai_max_context`: a file with exactly this size kept the default. */
+const ST_DEFAULT_CONTEXT = 4095
+
 const sources: Readonly<Record<string, string>> = {
   openai: "openai-chat",
   custom: "openai-chat",
@@ -56,8 +59,19 @@ export const importStSettings = (input: string, surface: "model" | "connection")
     const legacy = importStPreset(input)
     if (!legacy.document) return { report: legacy.report, model: null, connection: null }
     const samplers = Object.fromEntries(
-      Object.entries(legacy.document.samplers).filter(([key]) => {
+      Object.entries(legacy.document.samplers).filter(([key, value]) => {
         if (!Object.hasOwn(file, key)) return false
+        // ST's own default context size (4,095) is a value nobody chose: the model's window
+        // applies instead. Any other size is the user's choice and is kept (WORKSHOP-CONTEXT §1.4).
+        if (key === "openai_max_context" && value === ST_DEFAULT_CONTEXT) {
+          used.add(key)
+          r.add(
+            "info",
+            "settings.default_context",
+            "The preset's context size was SillyTavern's default (4,095 tokens), so the model's own window is used."
+          )
+          return false
+        }
         used.add(key)
         return true
       })

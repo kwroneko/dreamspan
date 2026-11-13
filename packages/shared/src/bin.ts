@@ -54,9 +54,18 @@ export class BinBranch extends Schema.Class<BinBranch>("BinBranch")({
   link: Schema.NullOr(Schema.Struct({ slotId: Schema.String, position: Schema.Int }))
 }) {}
 
-const BinItemKind = Schema.Literals(["chat", "message", "branch", "version", "entity", "connection", "card_asset"])
+const BinItemKind = Schema.Literals([
+  "chat",
+  "message",
+  "branch",
+  "threads",
+  "version",
+  "entity",
+  "connection",
+  "card_asset"
+])
 
-/** Something explicitly deleted: a chat, a message, a swipe, a branch, a library entity, a connection. */
+/** Something explicitly deleted: a chat, a message, a swipe, a branch, threads started together (their Undo), a library entity, a connection. */
 export class BinItem extends Schema.Class<BinItem>("BinItem")({
   id: Schema.String,
   kind: BinItemKind,

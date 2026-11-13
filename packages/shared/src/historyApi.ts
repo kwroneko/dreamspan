@@ -27,12 +27,15 @@ export const HistoryEdit = Schema.Struct({
   targetId: Schema.String,
   beforeId: Schema.String,
   before: boundedText,
-  after: boundedText
+  after: boundedText,
+  /** New state events can begin at the current message. */
+  atSlotId: Schema.optionalKey(Schema.String)
 })
 export type HistoryEdit = typeof HistoryEdit.Type
 const HistoryMatch = Schema.Struct({ start: Schema.Int, end: Schema.Int, replacement: Schema.String })
 export const HistoryHit = Schema.Struct({
   ...HistoryEdit.fields,
+  seq: Schema.optionalKey(Schema.Int),
   slotId: Schema.String,
   depth: Schema.Int,
   toDepth: Schema.Int,
@@ -63,6 +66,7 @@ const HistoryApplication = Schema.Struct({
 const HistoryItem = Schema.Struct({
   id: Schema.Int,
   ...HistoryEdit.fields,
+  seq: Schema.optionalKey(Schema.Int),
   slotId: Schema.NullOr(Schema.String),
   applied: Schema.Boolean
 })
@@ -75,7 +79,16 @@ export const HistoryRecord = Schema.Struct({
   madeInName: Schema.String,
   inherited: Schema.Boolean,
   status: Schema.Literals(["applied", "partly undone", "undone"]),
-  items: Schema.Array(HistoryItem)
+  items: Schema.Array(HistoryItem),
+  workshop: Schema.optionalKey(
+    Schema.Struct({
+      chatId: ChatId,
+      name: Schema.String,
+      versionId: Schema.NullOr(Schema.String),
+      slotId: Schema.NullOr(Schema.String),
+      toolCallId: Schema.String
+    })
+  )
 })
 const HistoryTarget = Schema.Struct({ chatId: ChatId, forkId: ForkId })
 export const historyReadRpcs = [

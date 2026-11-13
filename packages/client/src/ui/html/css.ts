@@ -52,6 +52,64 @@ export const MESSAGE_SCOPE = "message-html"
 const MAX_MESSAGE_CSS = 200_000
 /** At most this many nested blocks and functions. */
 const MAX_DEPTH = 64
+// Proposed resource limits, measured with synthetic fonts (ARCHITECTURE §12).
+const MAX_FONT_BYTES = 96 * 1024
+const MAX_MESSAGE_FONT_BYTES = 192 * 1024
+const MAX_FONT_EXPANDED = 2 * 1024 * 1024
+const MAX_MESSAGE_FONT_EXPANDED = 4 * 1024 * 1024
+
+/** A reserved class: markup classes are renamed, so they cannot impersonate this root. */
+export const messageFontClass = (key: string) =>
+  `rpfont-${Array.from(key, (char) => char.codePointAt(0)!.toString(16)).join("-")}`
+const fontName = (name: string, policy: Policy) =>
+  policy.messageClass ? `${policy.messageClass}-${name.toLowerCase()}` : renameClass(name)
+
+/** MIME and decoded signature must agree. This is a bounded envelope check, not OTS. */
+function dataFont(address: string, policy: Policy): string | null {
+  if (!policy.messageClass) return null
+  const match = /^data:(font\/(?:woff2?|ttf|otf));base64,([a-zA-Z0-9+/]*={0,2})$/i.exec(address)
+  if (!match || match[2]!.length > Math.ceil(MAX_FONT_BYTES / 3) * 4 || match[2]!.length % 4) return null
+  let bytes: string
+  try {
+    bytes = atob(match[2]!)
+  } catch {
+    return null
+  }
+  if (bytes.length > MAX_FONT_BYTES || bytes.length < 12) return null
+  const signature = bytes.slice(0, 4)
+  const type =
+    signature === "wOF2"
+      ? "woff2"
+      : signature === "wOFF"
+        ? "woff"
+        : signature === "OTTO"
+          ? "otf"
+          : signature === "\x00\x01\x00\x00"
+            ? "ttf"
+            : null
+  if (!type || match[1]!.toLowerCase() !== `font/${type}`) return null
+  let expanded = bytes.length
+  if (type === "woff" || type === "woff2") {
+    if (bytes.length < (type === "woff" ? 44 : 48)) return null
+    const uint32 = (at: number) =>
+      bytes.charCodeAt(at) * 0x1000000 +
+      bytes.charCodeAt(at + 1) * 0x10000 +
+      bytes.charCodeAt(at + 2) * 0x100 +
+      bytes.charCodeAt(at + 3)
+    if (uint32(8) !== bytes.length) return null
+    expanded = uint32(16)
+    if (expanded < 12) return null
+  }
+  if (
+    expanded > MAX_FONT_EXPANDED ||
+    policy.fontBytes + bytes.length > MAX_MESSAGE_FONT_BYTES ||
+    policy.fontExpanded + expanded > MAX_MESSAGE_FONT_EXPANDED
+  )
+    return null
+  policy.fontBytes += bytes.length
+  policy.fontExpanded += expanded
+  return `data:font/${type};base64,${match[2]}`
+}
 
 /** Font Awesome's, ST's note and monospace classes keep their names, as in ST. */
 export const renameClass = (name: string) =>
@@ -440,11 +498,15 @@ interface Policy {
   remote: boolean
   readonly keyframes: ReadonlySet<string>
   readonly fonts: ReadonlySet<string>
+  readonly messageClass?: string
+  fontBytes: number
+  fontExpanded: number
 }
 interface ValueOptions {
   readonly functions: ReadonlySet<string>
   /** url() is written at all (never in conditions). */
   readonly urls: boolean
+  readonly fontSource?: boolean
   /** In-document `#` addresses only (SVG presentation attributes). */
   readonly fragmentsOnly?: boolean
   /** Names this stylesheet defines, renamed where they're used. */
@@ -473,10 +535,13 @@ function writeUrl(address: string, writer: Writer, policy: Policy, options: Valu
   const value = address.trim()
   let target: string | null = null
   if (value.startsWith("#") && value.length > 1) target = `#${renameId(value.slice(1))}`
-  else if (!options.fragmentsOnly && /^data:/i.test(value)) target = value
+  else if (!options.fragmentsOnly && /^data:/i.test(value))
+    target = options.fontSource ? dataFont(value, policy) : value
   else if (!options.fragmentsOnly) {
     target = proxyMediaUrl(value, policy.mediaScope)
-    if (target) policy.media.push(target)
+    // Only proxied addresses go through the download queue (mediaQueue.ts): a saved copy is
+    // this app's own file, and a placeholder makes no request.
+    if (target?.startsWith("/media/external?")) policy.media.push(target)
   }
   if (target === null) {
     policy.remote ||= REMOTE.test(value)
@@ -519,12 +584,15 @@ function writeValue(
       switch (token[0]) {
         case TokenType.Ident: {
           const name = (token as TokenIdent)[4].value
+          if (name.toLowerCase().startsWith("rpfont-")) return false
           writer.ident(renamed(name, policy, options) ?? name)
           break
         }
         case TokenType.String: {
           const text = (token as TokenString)[4].value
-          const name = options.rename === "fonts" && policy.fonts.has(text) ? renameClass(text) : text
+          if (text.toLowerCase().includes("rpfont-")) return false
+          const name =
+            options.rename === "fonts" && policy.fonts.has(text.toLowerCase()) ? fontName(text, policy) : text
           writer.string(name)
           break
         }
@@ -560,10 +628,11 @@ function writeValue(
   return true
 }
 const renamed = (name: string, policy: Policy, options: ValueOptions) =>
-  (options.rename === "keyframes" && policy.keyframes.has(name)) ||
-  (options.rename === "fonts" && policy.fonts.has(name))
+  options.rename === "keyframes" && policy.keyframes.has(name)
     ? renameClass(name)
-    : null
+    : options.rename === "fonts" && policy.fonts.has(name.toLowerCase())
+      ? fontName(name, policy)
+      : null
 /** A number written plainly: digits, a sign, a point, an exponent and an unescaped unit. */
 function plainNumber(token: CSSToken): boolean {
   let numeric = token[1]
@@ -576,8 +645,50 @@ function plainNumber(token: CSSToken): boolean {
   return /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(numeric)
 }
 
+const TEXT_ATTRIBUTES = new Set(["title", "alt", "data-label", "data-value", "data-text", "data-tooltip"])
+
+/** No substitutions, URLs or nesting: every non-string must be precisely attr(one safe ident). */
+function writeGeneratedText(values: ReadonlyArray<ComponentValue>, writer: Writer): boolean {
+  for (const value of values) {
+    const token = tokenOf(value)
+    if (isBlank(value)) {
+      if (isWhitespaceNode(value)) writer.space()
+    } else if (token?.[0] === TokenType.String) writer.string((token as TokenString)[4].value)
+    else if (isFunctionNode(value) && value.getName().toLowerCase() === "attr") {
+      const args = trim(value.value)
+      const name = tokenOf(args[0])
+      if (args.length !== 1 || name?.[0] !== TokenType.Ident || !TEXT_ATTRIBUTES.has((name as TokenIdent)[4].value))
+        return false
+      writer.fn("attr")
+      writer.ident((name as TokenIdent)[4].value)
+      writer.punct(")")
+    } else return false
+  }
+  return true
+}
+
+/** All selector branches must end at the generated pseudo-element itself. */
+function textPseudo(prelude: ReadonlyArray<ComponentValue>): boolean {
+  return selectorList(prelude).every((selector) => {
+    const tail = selector.filter((value) => !isCommentNode(value)).slice(-3)
+    const name = tokenOf(tail[2])
+    return (
+      isToken(tail[0], TokenType.Colon) &&
+      isToken(tail[1], TokenType.Colon) &&
+      name?.[0] === TokenType.Ident &&
+      /^(before|after)$/i.test((name as TokenIdent)[4].value)
+    )
+  })
+}
+
 /** One declaration (`prop: value[ !important];`), or nothing when its name or value is refused. */
-function writeDeclaration(item: Extract<Item, { kind: "decl" }>, writer: Writer, policy: Policy): boolean {
+function writeDeclaration(
+  item: Extract<Item, { kind: "decl" }>,
+  writer: Writer,
+  policy: Policy,
+  generatedText = false,
+  fontSource = false
+): boolean {
   const name = item.name.startsWith("--") ? item.name : item.name.toLowerCase()
   if (item.raw !== item.name || !PROPERTY.test(item.name) || REFUSED_PROPERTIES.has(name)) return false
   const mark = writer.mark()
@@ -591,7 +702,16 @@ function writeDeclaration(item: Extract<Item, { kind: "decl" }>, writer: Writer,
         ? "fonts"
         : undefined
   if (
-    !writeValue(item.value, writer, policy, { functions: VALUE_FUNCTIONS, urls: true, ...(rename ? { rename } : {}) })
+    !(generatedText &&
+    name === "content" &&
+    item.value.some((value) => isFunctionNode(value) && value.getName().toLowerCase() === "attr")
+      ? writeGeneratedText(item.value, writer)
+      : writeValue(item.value, writer, policy, {
+          functions: fontSource ? new Set(["local", "format", "tech"]) : VALUE_FUNCTIONS,
+          urls: true,
+          fontSource,
+          ...(rename ? { rename } : {})
+        }))
   ) {
     policy.remote ||= mentionsRemote(item.value)
     writer.reset(mark)
@@ -729,7 +849,8 @@ function writeSelectors(
   prelude: ReadonlyArray<ComponentValue>,
   writer: Writer,
   nested: boolean,
-  mode: ScopeMode
+  mode: ScopeMode,
+  ownClass?: string
 ): boolean {
   let written = 0
   for (const selector of selectorList(prelude)) {
@@ -748,6 +869,10 @@ function writeSelectors(
       } else {
         writer.delim(".")
         writer.ident(MESSAGE_SCOPE)
+      }
+      if (ownClass) {
+        writer.delim(".")
+        writer.ident(ownClass)
       }
       writer.space()
     }
@@ -768,21 +893,37 @@ const SIMPLE_NAME = /^-?[_a-zA-Z][-\w]*$/
 interface Context {
   readonly policy: Policy
   readonly mode: ScopeMode
+  readonly declarations?: "shared" | "fonts"
+  readonly generatedText?: boolean
 }
 
 function writeRule(item: Extract<Item, { kind: "rule" }>, writer: Writer, context: Context, nested: boolean) {
   const mark = writer.mark()
-  if (!writeSelectors(item.prelude, writer, nested, context.mode)) return writer.reset(mark)
+  if (
+    !writeSelectors(
+      item.prelude,
+      writer,
+      nested,
+      context.mode,
+      context.declarations === "fonts" ? context.policy.messageClass : undefined
+    )
+  )
+    return writer.reset(mark)
   writer.punct("{")
-  writeBlock(blockItems(item.body), writer, context)
+  const bodyFrom = writer.mark()
+  writeBlock(blockItems(item.body), writer, { ...context, generatedText: textPseudo(item.prelude) })
+  if (context.declarations === "fonts" && writer.mark() === bodyFrom) return writer.reset(mark)
   writer.punct("}")
 }
 
 /** A style rule's contents: declarations, nested rules, nested grouping rules. */
 function writeBlock(items: ReadonlyArray<Item>, writer: Writer, context: Context) {
   for (const item of items) {
-    if (item.kind === "decl") writeDeclaration(item, writer, context.policy)
-    else if (item.kind === "rule") writeRule(item, writer, context, true)
+    if (item.kind === "decl") {
+      const font = /^(font|font-family)$/i.test(item.name)
+      if (!context.declarations || (context.declarations === "fonts" ? font : !font))
+        writeDeclaration(item, writer, context.policy, context.generatedText)
+    } else if (item.kind === "rule") writeRule(item, writer, context, true)
     else writeAtRule(item, writer, context, true)
   }
 }
@@ -852,7 +993,11 @@ function writeKeyframes(item: Extract<Item, { kind: "at" }>, writer: Writer, con
     }
     writer.punct("{")
     for (const declaration of blockItems(frame.body))
-      if (declaration.kind === "decl") writeDeclaration(declaration, writer, context.policy)
+      if (
+        declaration.kind === "decl" &&
+        !(context.policy.messageClass && /^(font|font-family)$/i.test(declaration.name))
+      )
+        writeDeclaration(declaration, writer, context.policy)
     writer.punct("}")
   }
   writer.punct("}")
@@ -887,10 +1032,15 @@ function writeFontFace(item: Extract<Item, { kind: "at" }>, writer: Writer, cont
       writer.ident("font-family")
       writer.punct(":")
       writer.space()
-      if (family.quoted) writer.string(renameClass(family.name))
-      else writer.ident(renameClass(family.name))
+      if (family.quoted) writer.string(fontName(family.name, context.policy))
+      else writer.ident(fontName(family.name, context.policy))
       writer.punct(";")
-    } else if (name !== "unicode-range" && writeDeclaration(entry, writer, context.policy) && name === "src") sources++
+    } else if (
+      name !== "unicode-range" &&
+      writeDeclaration(entry, writer, context.policy, false, name === "src") &&
+      name === "src"
+    )
+      sources++
   }
   writer.punct("}")
   if (sources === 0) writer.reset(mark)
@@ -915,7 +1065,7 @@ function definedNames(items: ReadonlyArray<Item>) {
       for (const entry of blockItems(item.body))
         if (entry.kind === "decl" && entry.name.toLowerCase() === "font-family") {
           const family = fontFamily(entry)
-          if (family) fonts.add(family.name)
+          if (family) fonts.add(family.name.toLowerCase())
         }
   }
   return { keyframes, fonts }
@@ -935,26 +1085,46 @@ export interface ScopedCss {
 export function scopeStyles(
   styles: ReadonlyArray<string>,
   mediaScope?: string | null,
-  mode: ScopeMode = defaultScopeMode()
+  mode: ScopeMode = defaultScopeMode(),
+  messageKey?: string
 ): ScopedCss {
-  const scoped = styles.map((css) => scopeCss(css, mediaScope, mode))
+  const parsed = styles.map((css) => {
+    const values = parse(css)
+    return values ? ruleItems(values) : null
+  })
+  const policy: Policy = {
+    mediaScope,
+    media: [],
+    remote: false,
+    fontBytes: 0,
+    fontExpanded: 0,
+    ...(messageKey === undefined ? {} : { messageClass: messageFontClass(messageKey) }),
+    ...definedNames(parsed.flatMap((items) => items ?? []))
+  }
+  const scoped = parsed.map((items, index) =>
+    items === null ? { css: "", blocked: styles[index]!.length > MAX_MESSAGE_CSS } : scopeItems(items, policy, mode)
+  )
   return {
     css: scoped
       .map((one) => one.css)
       .filter((css) => css !== "")
       .join("\n"),
-    media: scoped.flatMap((one) => one.media ?? []),
+    media: policy.media,
     blocked: scoped.some((one) => one.blocked)
   }
 }
 
 /** A message's CSS inside message bodies; CSS that doesn't parse is left out whole. */
 export function scopeCss(css: string, mediaScope?: string | null, mode: ScopeMode = defaultScopeMode()): ScopedCss {
-  const values = parse(css)
-  if (values === null) return { css: "", blocked: css.length > MAX_MESSAGE_CSS }
-  const items = ruleItems(values)
-  const policy: Policy = { mediaScope, media: [], remote: false, ...definedNames(items) }
-  const context: Context = { policy, mode }
+  return scopeStyles([css], mediaScope, mode)
+}
+
+function scopeItems(items: ReadonlyArray<Item>, policy: Policy, mode: ScopeMode): ScopedCss {
+  const context: Context = {
+    policy,
+    mode,
+    ...(policy.messageClass && policy.fonts.size ? { declarations: "shared" as const } : {})
+  }
   const writer = new Writer()
   // Keyframes and fonts are global names (renamed); everything else is scoped.
   for (const item of items)
@@ -976,6 +1146,12 @@ export function scopeCss(css: string, mediaScope?: string | null, mode: ScopeMod
     writer,
     context
   )
+  if (policy.messageClass && policy.fonts.size)
+    writeRules(
+      items.filter((item) => item.kind !== "at" || (!KEYFRAMES.has(item.name) && item.name !== "font-face")),
+      writer,
+      { policy, mode, declarations: "fonts" }
+    )
   if (mode === "scope") {
     if (writer.mark() === rulesFrom) writer.reset(scopedFrom)
     else writer.punct("}")
@@ -1009,7 +1185,15 @@ export function cleanStyle(
 ): { readonly style: Readonly<Record<string, string>> | null; readonly blocked: boolean } {
   const values = parse(style)
   if (values === null) return { style: null, blocked: false }
-  const policy: Policy = { mediaScope, media: [], remote: false, keyframes: new Set(), fonts: new Set() }
+  const policy: Policy = {
+    mediaScope,
+    media: [],
+    remote: false,
+    fontBytes: 0,
+    fontExpanded: 0,
+    keyframes: new Set(),
+    fonts: new Set()
+  }
   const kept: Record<string, string> = {}
   for (const item of blockItems(values)) {
     if (item.kind !== "decl") continue
@@ -1029,6 +1213,14 @@ export function cleanStyle(
 export function cleanPresentation(value: string): string | null {
   const values = parse(value)
   if (values === null) return null
-  const policy: Policy = { mediaScope: null, media: [], remote: false, keyframes: new Set(), fonts: new Set() }
+  const policy: Policy = {
+    mediaScope: null,
+    media: [],
+    remote: false,
+    fontBytes: 0,
+    fontExpanded: 0,
+    keyframes: new Set(),
+    fonts: new Set()
+  }
   return valueText(values, policy, { functions: VALUE_FUNCTIONS, urls: true, fragmentsOnly: true })
 }

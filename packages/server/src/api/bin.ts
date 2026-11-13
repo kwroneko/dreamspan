@@ -49,7 +49,7 @@ export const makeBinHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const item = yield* writer.RestoreBinItem({ userId: id, itemId })
-        if (item.kind === "message" || item.kind === "branch" || item.kind === "version") {
+        if (item.kind === "message" || item.kind === "branch" || item.kind === "threads" || item.kind === "version") {
           const chatId = item.origin.chatId as ChatId
           // Messages and their state are back, and the leaf may have moved back down.
           hub.publish(chatId, { _tag: "Reload" })

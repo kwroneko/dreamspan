@@ -36,7 +36,7 @@ export function SectionLine({
         cache
           ? "min-h-8 border-t border-dashed border-accent/50 pt-2 text-muted"
           : reuse
-            ? "min-h-10 border-t-2 border-dashed border-accent pt-1 text-accent"
+            ? "min-h-10 border-t-2 border-dashed border-accent pt-2 text-accent"
             : "min-h-10 border-t-2 border-text/70 pt-2 text-text"
       }`}
     >

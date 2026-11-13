@@ -19,6 +19,7 @@ import {
 } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { usePlaceNotice, usePlaceParam } from "../../usePlaceParam.ts"
+import { useChatPlaceKey } from "./chatPlace.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
@@ -102,6 +103,31 @@ export const viewOf = (view: (props: MessageActionProps) => MessageActionView) =
   }
 
 export const messageActions = makeRegistry<MessageAction>()
+
+/**
+ * What a message's delete toast offers after Undo (spec/PLUGINS.md §8): threads offer to delete a
+ * copy of the message sent to another thread too (spec/THREADS.md §6.3).
+ */
+export interface MessageDeleteOffer {
+  readonly id: string
+  readonly order: number
+  readonly actions: (
+    context: DeleteOfferContext,
+    item: BinItem
+  ) => ReadonlyArray<{ readonly label: string; readonly hint?: string; readonly onClick: () => void }>
+}
+export const messageDeleteOffers = makeRegistry<MessageDeleteOffer>()
+
+/** The message deleted, and the host's toast for anything an offer deletes in turn. */
+export interface DeleteOfferContext extends Pick<MessageActionContext, "entry" | "session"> {
+  readonly deleted: (item: BinItem) => void
+}
+
+/** Everything the registered offers add to the toast of `item`, deleted from `entry`. */
+export const deleteOffersFor = (context: DeleteOfferContext, item: BinItem) =>
+  [...messageDeleteOffers.snapshot().entries]
+    .sort((a, b) => a.order - b.order)
+    .flatMap((offer) => offer.actions(context, item))
 export const availableMessageActions = (context: MessageActionContext, snapshot = messageActions.snapshot()) =>
   [...snapshot.entries]
     .sort((a, b) => a.order - b.order)
@@ -249,7 +275,7 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
   const pinned = actions.filter((action) => isPinned(action, pins.choices))
   const { root, fit } = useFit(pinned.map((action) => action.id).join(" "))
   const [dialog, setDialog] = useState<MessageAction | null>(null)
-  const [, setPlace] = usePlaceParam("messageDialog", "")
+  const [, setPlace] = usePlaceParam(useChatPlaceKey("messageDialog"), "")
   const versionId = context.entry.version.id
   const activeDialog = dialog !== null && actions.includes(dialog) ? dialog : null
   if (dialog !== null && activeDialog === null) setDialog(null)
@@ -338,7 +364,7 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
 /** One host outside the virtualized rows: the URL selects its action and exact version. */
 export function MessageActionDialog({ session, view }: { session: ChatSession; view: ChatView }) {
   const snapshot = useSyncExternalStore(messageActions.subscribe, messageActions.snapshot, messageActions.snapshot)
-  const [place, setPlace] = usePlaceParam("messageDialog", "")
+  const [place, setPlace] = usePlaceParam(useChatPlaceKey("messageDialog"), "")
   const split = place.lastIndexOf(":")
   const id = split > 0 ? place.slice(0, split) : ""
   const versionId = split > 0 ? place.slice(split + 1) : ""
@@ -400,7 +426,12 @@ function LoadedMessageDialog({
           hidden: entry.contextExcluded,
           report,
           toast: (outcome) => {
-            if (outcome.ok) deleted(outcome.value)
+            if (outcome.ok)
+              deleted(
+                outcome.value,
+                undefined,
+                deleteOffersFor({ entry, session, deleted: (item) => deleted(item) }, outcome.value)
+              )
             else report(outcome)
           }
         }

@@ -2,11 +2,22 @@
 // cast less those away, and its speaker; a merge's join, those who knew all of it; nothing
 // recorded, everyone. Shared by assembly (`assemblySources.ts`) and the agent's read tools
 // (`agentReads.ts`), so both leave out the same messages. The pure rule is `@rp/shared/knowledge.ts`.
-import { knowersOf, parsePresence } from "@rp/shared/knowledge.ts"
+import { knowersOf, parsePresence, STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Effect } from "effect"
 import { viewedJoin } from "../assembler/mergeKnowledge.ts"
 import type { SqlClient } from "effect/sql"
 import type { Fragment } from "effect/sql/Statement"
+import { effectiveOverride, type ForkRef } from "./forkState.ts"
+import { threadStretches, stretchedSql } from "./threadStretches.ts"
+
+/**
+ * SQL: whether fork `fork` counts card expression `card` not present for slot `slot`'s message
+ * (a `presence_away` override with flag 1: the played stretch of threads started at an earlier
+ * message, spec/THREADS.md §5.2 step 5, [D] 2026-11-12). One probe of the fork's steps.
+ */
+const correctedAwaySql = (sql: SqlClient.SqlClient, fork: ForkRef, slot: string, card: string) =>
+  sql`coalesce((SELECT flag FROM fork_overrides
+    WHERE id = ${effectiveOverride(sql, "presence_away", fork, `${slot} || ':' || ${card}`)}), 0) = 1`
 
 /**
  * Who knew a merge's join at slot expression `slot`, as a JSON array: until C6 renders individual
@@ -22,13 +33,32 @@ const mergeKnowersSql = (slot: string) => `(SELECT json_group_array(candidate.en
   WHERE m.slot_id = ${slot} AND mm.included = 'verbatim' AND mm.knowers_json IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM json_each(mm.knowers_json) k WHERE k.value = candidate.entity)))`
 
+/** Whether these identities are a stretch view's (`STRETCH_VIEW`, resolved by `threadStretches`). */
+export const isStretchView = (identities: ReadonlyArray<string> | undefined) =>
+  identities !== undefined && identities.includes(STRETCH_VIEW)
+
 /**
  * Whether the viewer knew the version `v` of slot `s` (SQL, both aliases in scope). `viewers` is
- * the viewer's identities: itself and the cards it replaced on this fork (`card.swap`).
+ * the viewer's identities: itself and the cards it replaced on this fork (`card.swap`). In fork
+ * `fork` (when given), a card the fork counts not present for the message (`correctedAwaySql`)
+ * didn't know it, unless it's the message's speaker. No recorded cast means everyone except
+ * those explicitly absent in this fork. A merge's join: known when the viewer's identities together knew every
+ * row of it, or (`partialMerges`) any row. A stretch view (`STRETCH_VIEW`) applies this only in
+ * a separate join's parallel stretch (`inStretchSql`) and knew everything else.
  */
-export const knowsSql = (sql: SqlClient.SqlClient, viewers: ReadonlyArray<string>, partialMerges = false) => {
-  const ids = JSON.stringify(viewers)
-  return sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
+export const knowsSql = (
+  sql: SqlClient.SqlClient,
+  viewers: ReadonlyArray<string>,
+  fork?: ForkRef,
+  partialMerges = false
+) =>
+  Effect.gen(function* () {
+    const ids = JSON.stringify(viewers)
+    const kept =
+      fork === undefined || fork === null
+        ? sql`1`
+        : sql`NOT EXISTS (SELECT 1 FROM json_each(${ids}) cv WHERE ${correctedAwaySql(sql, fork, "s.id", "cv.value")})`
+    const rule = sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
     THEN ${
       partialMerges
         ? sql`EXISTS (
@@ -41,27 +71,38 @@ export const knowsSql = (sql: SqlClient.SqlClient, viewers: ReadonlyArray<string
       WHERE m.slot_id=s.id AND mm.included IN ('verbatim','left_out') AND NOT EXISTS (
         SELECT 1 FROM json_each(coalesce(mm.knowers_json, (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c WHERE c.value ->> 'from' <> 'destination'))) k
         WHERE k.value IN (SELECT value FROM json_each(${ids}))))`
-    }
-    ELSE v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(${ids}) viewer WHERE viewer.value = v.speaker_entity_id)
-      OR EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${ids}))
+    } AND ${kept}
+    ELSE EXISTS (SELECT 1 FROM json_each(${ids}) viewer WHERE viewer.value = v.speaker_entity_id)
+      OR ((v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${ids}))
         AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
-          WHERE a.value = c.value)) END`
-}
+          WHERE a.value = c.value))) AND ${kept}) END`
+    return viewers.includes(STRETCH_VIEW)
+      ? sql`(NOT ${stretchedSql(sql, yield* threadStretches(sql, fork ?? null))} OR ${rule})`
+      : rule
+  })
 
 /**
- * Each version's knowers, in the order asked; null: known to everyone (or not found). Point
- * lookups by version id: the requested ids drive the query, never a scan of the chat.
+ * Each version's knowers, in the order asked; null: known to everyone (or not found); and
+ * `stretched` for a message in a separate join's parallel stretch (`inStretchSql`). Point
+ * lookups by version id: the requested ids drive the query, never a scan of the chat. In fork
+ * `fork` (when given), the cards it counts not present for a message are left out of its
+ * knowers, its speaker apart (`knowsSql`'s rule). The existing query projects corrected cards
+ * by slot, skipping the projection when the chat has no corrections.
  */
 export const readKnowers = (
   sql: SqlClient.SqlClient,
   chatId: string,
   owned: Fragment,
   versionIds: ReadonlyArray<string>,
-  viewers?: ReadonlyArray<string> | null
+  viewers?: ReadonlyArray<string> | null,
+  fork?: ForkRef,
+  ranges?: ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>
 ) =>
   Effect.gen(function* () {
+    const stretches = ranges ?? (viewers?.includes(STRETCH_VIEW) ? yield* threadStretches(sql, fork ?? null) : [])
     const rows = yield* sql<{
       id: string
+      slot_id: string
       cast_json: string | null
       presence_json: string | null
       speaker_entity_id: string | null
@@ -69,7 +110,19 @@ export const readKnowers = (
       merge_id: string | null
       merge_title: string | null
       content: string
-    }>`SELECT metadata.id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
+      away_json: string | null
+      stretched: number
+    }>`SELECT metadata.id, ${stretchedSql(sql, stretches)} AS stretched, metadata.slot_id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
+        ${
+          fork == null
+            ? sql`NULL`
+            : sql`CASE WHEN EXISTS (SELECT 1 FROM fork_overrides WHERE chat_id = ${chatId} AND kind = 'presence_away') THEN
+          (SELECT json_group_array(c.card) FROM (
+            SELECT DISTINCT substr(o.target_id, length(o.slot_id) + 2) AS card
+            FROM fork_overrides o WHERE o.slot_id = metadata.slot_id AND o.kind = 'presence_away'
+          ) c WHERE c.card IS NOT metadata.speaker_entity_id
+            AND ${correctedAwaySql(sql, fork, "metadata.slot_id", "c.card")}) END`
+        } AS away_json,
         (SELECT m.id FROM chat_merges m WHERE m.slot_id = metadata.slot_id) AS merge_id,
         (SELECT m.title FROM chat_merges m WHERE m.slot_id = metadata.slot_id) AS merge_title, payload.cast_json, payload.presence_json, metadata.speaker_entity_id,
         CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = metadata.slot_id) THEN ${sql.literal(mergeKnowersSql("metadata.slot_id"))} END AS merge_cast
@@ -83,18 +136,24 @@ export const readKnowers = (
       merges.length ? (yield* readMergeRows(sql, chatId, owned, merges)).map((m) => [m.mergeId, m.rows]) : []
     )
     const byId = new Map(rows.map((row) => [row.id, row]))
+    const recorded = new Map(
+      rows.map((row) => [
+        row.id,
+        row.merge_cast !== null
+          ? (JSON.parse(row.merge_cast) as Array<string>)
+          : knowersOf({
+              cast: row.cast_json === null ? null : (JSON.parse(row.cast_json) as Array<string>),
+              speaker: row.speaker_entity_id,
+              presence: parsePresence(row.presence_json)
+            })
+      ])
+    )
     return versionIds.map((versionId) => {
       const row = byId.get(versionId)
-      const knowers =
-        row === undefined
-          ? null
-          : row.merge_cast !== null
-            ? (JSON.parse(row.merge_cast) as Array<string>)
-            : knowersOf({
-                cast: row.cast_json === null ? null : (JSON.parse(row.cast_json) as Array<string>),
-                speaker: row.speaker_entity_id,
-                presence: parsePresence(row.presence_json)
-              })
+      const all = row === undefined ? null : recorded.get(versionId)!
+      const absent = row?.away_json ? (JSON.parse(row.away_json) as Array<string>) : []
+      const away = absent.length > 0 ? absent : undefined
+      const knowers = all === null || away === undefined ? all : [...all].filter((id) => !away.includes(id))
       const merge = row?.merge_id ? merged.get(row.merge_id) : undefined
       const view =
         merge && viewers
@@ -103,6 +162,8 @@ export const readKnowers = (
       return {
         versionId,
         knowers: knowers === null ? null : [...knowers],
+        ...(away === undefined ? {} : { away }),
+        ...(row?.stretched ? { stretched: true } : {}),
         ...(view ? { content: view.content, readable: view.rows.length > 0 || !view.partial } : {})
       }
     })
@@ -110,7 +171,8 @@ export const readKnowers = (
 
 /**
  * The rows of these merges' joins a separate context lays out per viewer (unit C6), each
- * merge's in order, summarized rows left out. A row with no knowers recorded was known to the
+ * merge's
+ in order, summarized rows left out. A row with no knowers recorded was known to the
  * source's cast. Point lookups by merge id.
  */
 export const readMergeRows = (

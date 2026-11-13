@@ -49,7 +49,7 @@ function Row({ row, session, onJump }: { row: ActivityRow; session: ChatSession;
         {row.requests > 1 && <span className="text-xs text-muted">{row.requests} requests</span>}
       </div>
       <p className="text-xs text-muted [overflow-wrap:anywhere]">
-        {row.model ?? "Unknown model"}
+        {row.requests === 0 ? "No model request" : (row.model ?? "Unknown model")}
         {row.connection && ` on ${row.connection}`} · {new Date(row.startedAt).toLocaleString()}
         {row.endedAt !== null && ` · ${durationText(row.endedAt - row.startedAt)}`}
       </p>

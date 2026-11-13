@@ -96,15 +96,25 @@ describe("chat kind looks", () => {
   it("leaves the Summaries tab out of a kind whose profile has none, and keeps the rest", () => {
     const tabs = (kind: string) => panelTabs(viewOf(kind), null).map((tab) => tab.value)
     expect(tabs("rp")).toContain("summaries")
-    expect(tabs("workshop")).not.toContain("summaries")
-    // It adds its Changes tab, which a story chat doesn't have.
+    // Workshops summarize too (spec/WORKSHOP-CONTEXT.md §2.4), and add their Changes tab.
     expect(tabs("rp")).not.toContain("workshop.changes")
+    // A story chat has the Workshop tab beside it (W9); a workshop doesn't.
     expect(tabs("workshop").filter((tab) => tab !== "workshop.changes")).toEqual(
-      tabs("rp").filter((tab) => tab !== "summaries")
+      tabs("rp").filter((tab) => tab !== "workshop")
     )
     expect(tabs("workshop")).toContain("workshop.changes")
-    expect(summarizes(chatOf("workshop"))).toBe(false)
+    expect(summarizes(chatOf("workshop"))).toBe(true)
     expect(summarizes(null)).toBe(true)
+    Effect.runSync(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* chatKinds.register({ ...chatKinds.get("rp")!, id: "synthetic/plain", allowsSummaries: false })
+          expect(tabs("synthetic/plain")).not.toContain("summaries")
+          expect(tabs("synthetic/plain")).toEqual(tabs("rp").filter((tab) => tab !== "summaries"))
+          expect(summarizes(chatOf("synthetic/plain"))).toBe(false)
+        })
+      )
+    )
     expect(mergesInto(chatOf("workshop"))).toBe(false)
     expect(mergesInto(chatOf("rp"))).toBe(true)
     // Cast stays editable, and card rotation still affects assembly in a workshop.

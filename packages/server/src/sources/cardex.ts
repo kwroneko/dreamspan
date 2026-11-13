@@ -47,6 +47,8 @@ const BATCH_MAX = 100
 const nullableText = Schema.optionalKey(Schema.NullOr(Schema.String))
 const SummaryShape = Schema.Struct({
   slug: Schema.String.check(Schema.isMaxLength(500)),
+  /** `character` or `lorebook` (a standalone book, §3.9). */
+  kind: nullableText,
   url: nullableText,
   name: nullableText,
   tagline: nullableText,
@@ -87,6 +89,15 @@ interface Capabilities {
   readonly modes?: ReadonlyArray<{ readonly name: string }> | null
 }
 
+/** v1's result kinds, in the order the Kind choice offers them (§3.9). */
+const KIND_ORDER = ["both", "character", "character_lorebook", "lorebook"] as const
+const KIND_LABELS: Readonly<Record<string, string>> = {
+  both: "Characters and lorebooks",
+  character: "Characters",
+  character_lorebook: "Characters with a lorebook",
+  lorebook: "Lorebooks"
+}
+
 const ID = "cardex"
 const bad = (message = "cardex sent something this app can't read") =>
   new SourceFailed({ sourceId: ID, reason: "bad_response", message })
@@ -116,6 +127,7 @@ export const summaryOf = (item: unknown, origin = CARDEX_ORIGIN): AdapterSummary
   const popularity = item.stats?.popularity
   return {
     remoteId: item.slug,
+    ...(item.kind === "lorebook" ? { kind: "lorebook" as const } : {}),
     name: item.name?.trim() || item.slug,
     ...(item.creator?.name ? { creator: item.creator.name } : {}),
     ...(author ? { creatorQuery: author } : {}),
@@ -381,8 +393,8 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
     })
   }
   // Reuse the generic panel's choices, text fields and switches for the remaining v1
-  // criteria. Standalone lorebooks need their own browsing/opening flow; never put one
-  // in a character's draft chat.
+  // criteria. Standalone lorebooks come back beside characters (§3.9) and open in the
+  // lorebook editor, never in a character's draft chat.
   const handled = new Set([
     "q",
     "tags",
@@ -403,16 +415,14 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       ...(description ? { about: description } : {})
     }
     if (name === "kind") {
-      const options = allowed(name).filter((v) => v === "character" || v === "character_lorebook")
+      const options = KIND_ORDER.filter((value) => allowed(name).includes(value))
       if (options.length > 1)
         filters.push({
           ...common,
           kind: "choice",
           multi: false,
-          options: options.map((value) => ({
-            value,
-            label: value === "character" ? "All characters" : "With a lorebook"
-          }))
+          about: "Characters, lorebooks, or both. Unchosen: both.",
+          options: options.map((value) => ({ value, label: KIND_LABELS[value]! }))
         })
     } else if (name === "has_cover") {
       filters.push({
@@ -540,7 +550,8 @@ export const searchParams = (query: SourceQuery, token: string | null) => {
   if (text) params.set("q", text)
   if (query.tags.length) params.set("tags", [...new Set(query.tags)].slice(0, 20).join(","))
   if (query.excludeTags.length) params.set("not_tags", [...new Set(query.excludeTags)].slice(0, 20).join(","))
-  params.set("kind", "character")
+  // Unchosen, characters and standalone lorebooks both (§3.9: "returned with characters").
+  params.set("kind", "both")
   for (const [id, value] of Object.entries(query.filters)) {
     if (id === "tokens") {
       if (typeof value === "object" && value !== null && !Array.isArray(value)) {
@@ -553,7 +564,7 @@ export const searchParams = (query: SourceQuery, token: string | null) => {
     } else if (id === "nsfw" || id === "author") {
       if (typeof value === "string" && value.trim()) params.set(id, value.trim())
     } else if (id === "kind") {
-      if (value === "character" || value === "character_lorebook") params.set(id, value)
+      if (typeof value === "string" && (KIND_ORDER as ReadonlyArray<string>).includes(value)) params.set(id, value)
     } else if (id === "has_cover") {
       if (value === "true" || value === "false" || typeof value === "boolean") params.set(id, String(value))
     } else if (EXTRA_TEXT.has(id)) {
@@ -1068,14 +1079,20 @@ export const cardexAdapter = (options: CardexOptions = {}): CardSourceAdapter =>
         if (listed === null) return yield* bad("cardex offers this card in no form this app reads")
         // The mirrored PNG holds the card and its portrait; a CHARX original has none, but every
         // card has its JSON.
-        const file = yield* listed
-          ? download(listed)
-          : download("mirrored").pipe(
-              Effect.catchIf(
-                (failure) => failure.reason === "not_found",
-                () => download("json")
+        // A standalone lorebook's every mode is JSON; its original is the creator's file as
+        // published, which its version names (§3.9).
+        const original =
+          item.kind === "lorebook" && Array.isArray(item.download_modes) && item.download_modes.includes("original")
+        const file = yield* original
+          ? download("original")
+          : listed
+            ? download(listed)
+            : download("mirrored").pipe(
+                Effect.catchIf(
+                  (failure) => failure.reason === "not_found",
+                  () => download("json")
+                )
               )
-            )
         const detail = yield* getJson(http, api(`/cards/${encodeURIComponent(remoteId)}`))
         return {
           bytes: file.bytes,

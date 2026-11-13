@@ -11,7 +11,7 @@ import {
   RunTranscript,
   StepEdit
 } from "./agent.ts"
-import { ChatId, EntityId, ForkId, PathEntry, SlotId, VersionId } from "./chat.ts"
+import { ChatId, EntityId, ForkId, PathEntry, SlotId, StoryAtField, VersionId } from "./chat.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 import { REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
@@ -69,7 +69,15 @@ export class AgentApi extends RpcGroup.make(
       versionId: VersionId,
       /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
-      expectedRowVersion: Schema.Int
+      expectedRowVersion: Schema.Int,
+      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
+      storyAt: StoryAtField,
+      /**
+       * Sends the stopped run's stored request unchanged, with its model and tools, instead of
+       * building it on the chat's settings now: only when the user chose it after a
+       * `NotResumable` with `savedRequest` (spec/AGENTIC.md §12.4).
+       */
+      saved: Schema.optionalKey(Schema.Boolean)
     },
     success: PathEntry,
     error: Schema.Union([...ResumeErrors])
@@ -85,7 +93,9 @@ export class AgentApi extends RpcGroup.make(
       step: Schema.Int,
       edit: Schema.optionalKey(StepEdit),
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
-      expectedRowVersion: Schema.Int
+      expectedRowVersion: Schema.Int,
+      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
+      storyAt: StoryAtField
     },
     success: PathEntry,
     error: Schema.Union([...ResumeErrors])

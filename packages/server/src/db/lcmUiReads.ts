@@ -18,6 +18,7 @@ import {
   audienceIds,
   audienceScope,
   firstUnknownPosition,
+  stretchOnPath,
   inputsKnown,
   knownVersions,
   viewerAudience
@@ -46,10 +47,11 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
   ) {
     if (identities === undefined) return summaries
     const firstMissed = yield* firstUnknownPosition(sql, chatId, leaf, identities)
+    const fork = yield* viewAt(sql, chatId, leaf)
     const kept: Array<Summary> = []
     for (const summary of summaries) {
       if (!summary.audience && firstMissed !== null && summary.to - 1 >= firstMissed) continue
-      if (!summary.fresh && !(yield* inputsKnown(sql, summary.id, identities))) continue
+      if (!summary.fresh && !(yield* inputsKnown(sql, summary.id, identities, fork))) continue
       kept.push(summary)
     }
     return kept
@@ -264,8 +266,19 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
           WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' AND ${eventApplies(sql, yield* viewAt(sql, chatId, leafSlotId), "e")} ORDER BY seq DESC LIMIT 1`
         const enabled = settings?.enabled === 1
+        // Characters with summaries of their own in a shared context (spec/THREADS.md §7.3).
+        const stretchViews = (yield* stretchOnPath(sql, chatId, leafSlotId)) ? { stretchViews: true } : {}
         if (!enabled)
-          return new LcmState({ chatId, leafSlotId, enabled, layer: [], failed: [], jobs: [], cursorDepth: -1 })
+          return new LcmState({
+            chatId,
+            leafSlotId,
+            enabled,
+            layer: [],
+            failed: [],
+            jobs: [],
+            cursorDepth: -1,
+            ...stretchViews
+          })
         const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, false, identities && { identities })
         // In a fork that shows inserted slots, numbers are positions on its display path (spec/MESSAGE-INSERT.md §3.4).
         const shown = yield* pathView(sql, chatId, leafSlotId)
@@ -344,7 +357,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         for (const job of jobRows) {
           if (job.audience_json === null && firstMissed !== null && job.last_depth >= firstMissed) continue
           if (identities !== undefined) {
-            if (job.result_summary_id && !(yield* inputsKnown(sql, job.result_summary_id, identities))) continue
+            if (job.result_summary_id && !(yield* inputsKnown(sql, job.result_summary_id, identities, fork))) continue
             if (job.rollout_id) {
               const [payload] = yield* sql<{
                 context_snapshot_json: string | null
@@ -354,11 +367,12 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
                 : undefined
               const ids =
                 snapshot?.summaryJob?.inputs.flatMap((input) => (input.versionId ? [input.versionId] : [])) ?? []
-              const known = yield* knownVersions(sql, ids, identities)
+              const known = yield* knownVersions(sql, ids, identities, fork)
               if (ids.some((id) => !known.has(id))) continue
               let childrenKnown = true
               for (const child of snapshot?.summaryJob?.children ?? [])
-                if (!(yield* inputsKnown(sql, child.summaryId, identities))) childrenKnown = false
+                if (!(yield* inputsKnown(sql, child.summaryId, identities, fork))) childrenKnown = false
+
               if (!childrenKnown) continue
             }
           }
@@ -400,7 +414,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
               ? ((yield* sql<{ depth: number }>`SELECT depth FROM slots WHERE id = ${layer.cursor}`)[0]?.depth ?? -1)
               : layer.cursorDepth,
           cursorSlotId: layer.cursor as LcmState["leafSlotId"] | null,
-          cursorPosition: layer.cursorDepth
+          cursorPosition: layer.cursorDepth,
+          ...stretchViews
         })
       }).pipe(readingOnce, inFork(sql, chatId, forkId, leafSlotId), query("GetLcmState")),
 

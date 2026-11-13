@@ -1,3 +1,4 @@
+import { segmentedTokenCount } from "../importer/tokenizer.ts"
 import { calibrateText } from "./textCalibration.ts"
 // Token counts for what the editors show (ARCHITECTURE §6 "Text tokens"): with the tokenizer of
 // the model the user's chats generate with (their generation default; a chat binds no other),
@@ -139,6 +140,8 @@ export class TextTokens extends Context.Service<
               lastCounter.set(model, { id: counted.result.id, label: counted.result.label })
             }
             const counter = lastCounter.get(model)
+            const segmented =
+              ["openai-encodings", "open-model-encodings"].includes(counter?.id ?? "") && segmentedTokenCount(texts)
             const calibration = via === null ? yield* calibrationFor(counter?.id ?? "model") : null
             return calibrateText(
               {
@@ -146,7 +149,10 @@ export class TextTokens extends Context.Service<
                 tokenizer: new TokenizerInfo({
                   id: counter?.id ?? "model",
                   label: counter?.label ?? `${modelKey}'s own tokenizer`,
-                  exact: true
+                  exact: !segmented,
+                  ...(segmented
+                    ? { note: "Very long runs are counted in smaller pieces; the count is approximate." }
+                    : {})
                 })
               },
               via !== null ? null : calibration

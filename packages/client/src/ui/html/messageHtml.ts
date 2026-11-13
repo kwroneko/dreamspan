@@ -9,9 +9,9 @@ import type { FrameSlots } from "./frames.ts"
  * Scopes a text's CSS (css.ts). The renderer's lazy chunk sets it, so its CSS parser stays out
  * of the app's first load; stored texts wait for it, as no message has rendered before it.
  */
-let scoper: ((styles: ReadonlyArray<string>) => string) | null = null
+let scoper: ((styles: ReadonlyArray<string>, key: string) => string) | null = null
 const sheets = new Set<MessageStyles>()
-export function setStyleScoper(scope: (styles: ReadonlyArray<string>) => string) {
+export function setStyleScoper(scope: (styles: ReadonlyArray<string>, key: string) => string) {
   if (scoper) return
   scoper = scope
   for (const styles of sheets) styles.refresh()
@@ -219,7 +219,7 @@ export class MessageStyles {
         const cached = this.stored.get(entry.key)
         if (cached?.text === entry.text) return cached.css
         if (!scoper) return ""
-        const css = scoper(extractStyles(entry.text))
+        const css = scoper(extractStyles(entry.text), entry.key)
         this.stored.set(entry.key, { text: entry.text, css })
         return css
       })

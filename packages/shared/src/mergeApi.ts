@@ -29,10 +29,19 @@ const castList = (names: ReadonlyArray<string>) =>
       : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`
 
 /**
+ * How the characters read a joined line (spec/THREADS.md §7.3): `together`, every reply reads
+ * it; `separate`, each character reads only what it was present for (a narrator reads it all).
+ */
+export const MergeTimelines = Schema.Literals(["together", "separate"])
+export type MergeTimelines = typeof MergeTimelines.Type
+
+/**
  * What to merge: the source fork, the destination message to merge below (`at`, null: the
  * fork's newest), and for chats that share nothing, the destination message the parallel span
  * starts at (`start`; absent: the merge position). `includeLeftOut` brings the older source
- * messages that have no summary as written instead of leaving them out.
+ * messages that have no summary as written instead of leaving them out. `timelines` chooses
+ * how the characters read it in a chat with one shared context (absent: together); a chat with
+ * separate contexts always reads it separately.
  */
 export const MergeRequest = Schema.Struct({
   chatId: ChatId,
@@ -40,9 +49,19 @@ export const MergeRequest = Schema.Struct({
   at: Schema.NullOr(SlotId),
   source: Schema.Struct({ chatId: ChatId, forkId: ForkId }),
   start: Schema.optionalKey(Schema.NullOr(SlotId)),
-  includeLeftOut: Schema.Boolean
+  includeLeftOut: Schema.Boolean,
+  timelines: Schema.optionalKey(MergeTimelines)
 })
 export type MergeRequest = typeof MergeRequest.Type
+
+/** What one speaker reads of a join (the preview's "For"): `section`, or nothing when `readable` is false. */
+export const MergeView = Schema.Struct({
+  entity: EntityId,
+  name: Schema.String,
+  section: Schema.String,
+  readable: Schema.Boolean
+})
+export type MergeView = typeof MergeView.Type
 
 const MergeCastMember = Schema.Struct({
   entity: EntityId,
@@ -90,6 +109,16 @@ export class ChatMergePreview extends Schema.Class<ChatMergePreview>("ChatMergeP
   join: Schema.String,
   /** A summary covering the merge position, written again with the next reply (numbers, one-based). */
   rewrites: Schema.NullOr(Schema.Struct({ from: Schema.Int, to: Schema.Int, tokens: Schema.Int })),
+  /** How the characters read it: as asked in a shared-context chat; `separate` with separate contexts. */
+  timelines: Schema.optionalKey(MergeTimelines),
+  /** Whether the chat lets this merge choose (one shared context): the dialog's choice is offered. */
+  choosesTimelines: Schema.optionalKey(Schema.Boolean),
+  /** The source is another thread of this branch (spec/THREADS.md §7): a join. */
+  thread: Schema.optionalKey(Schema.Boolean),
+  /** A join's characters away here that it brings back (they're present from the join on). */
+  back: Schema.optionalKey(Schema.Array(EntityId)),
+  /** With `separate`: what each character reads of it, before it's made. */
+  views: Schema.optionalKey(Schema.Array(MergeView)),
   /** Changes when anything the merge reads changes; the write compares it. */
   digest: Schema.String
 }) {}
@@ -132,7 +161,9 @@ export class MergeInfo extends Schema.Class<MergeInfo>("MergeInfo")({
   summarized: Schema.Int,
   leftOut: Schema.Int,
   cast: Schema.Array(Schema.String),
-  createdAt: Schema.Number
+  createdAt: Schema.Number,
+  /** It joined another thread of this chat (spec/THREADS.md §7): the timeline says "Joined". */
+  thread: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 export const MergedMessage = Schema.Struct({
@@ -148,6 +179,34 @@ export const MergedMessage = Schema.Struct({
 })
 export type MergedMessage = typeof MergedMessage.Type
 
+/**
+ * "Join threads" (spec/THREADS.md §7.1): other threads of this branch joined below `at` (null:
+ * the newest message), each as previewed (`digest`), in the order given: consecutive joins in one
+ * transaction, the first below `at`, each next one below the one before.
+ */
+export const JoinThreadsInput = Schema.Struct({
+  chatId: ChatId,
+  forkId: ForkId,
+  at: Schema.NullOr(SlotId),
+  includeLeftOut: Schema.Boolean,
+  /** How the characters read every join (`MergeRequest.timelines`). */
+  timelines: Schema.optionalKey(MergeTimelines),
+  joins: Schema.Array(
+    Schema.Struct({
+      forkId: ForkId,
+      title: Schema.String,
+      framing: Schema.NullOr(Schema.String),
+      digest: Schema.String
+    })
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(16))
+})
+export type JoinThreadsInput = typeof JoinThreadsInput.Type
+
+export class JoinedThreads extends Schema.Class<JoinedThreads>("JoinedThreads")({
+  entries: Schema.Array(PathEntry),
+  chat: Chat
+}) {}
+
 export class ChatMergeApi extends RpcGroup.make(
   /** What merging `source` into the fork below `at` would bring; nothing is written or sent. */
   Rpc.make("PreviewChatMerge", {
@@ -162,6 +221,12 @@ export class ChatMergeApi extends RpcGroup.make(
   Rpc.make("MergeChat", {
     payload: MergeChatInput,
     success: MergedChat,
+    error: Schema.Union([NotFound, MergeRefused, MergeChanged, StaleWrite, HistoryRejected, ServerError])
+  }),
+  /** Joins other threads of this branch, as previewed; the registered command `thread.join`. */
+  Rpc.make("JoinThreads", {
+    payload: JoinThreadsInput,
+    success: JoinedThreads,
     error: Schema.Union([NotFound, MergeRefused, MergeChanged, StaleWrite, HistoryRejected, ServerError])
   }),
   Rpc.make("GetMerge", {

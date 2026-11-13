@@ -12,6 +12,7 @@ import { Socket } from "effect/socket"
 import { PasswordCost } from "../../src/auth/passwords.ts"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
 import { serverWith } from "../../src/server.ts"
+import { SavedMedia } from "../../src/api/savedMedia.ts"
 import { testBundles, testWorkerMode } from "./bundles.ts"
 import { tempDir } from "./tempDir.ts"
 
@@ -64,7 +65,10 @@ export const serverLayer = (
   /** The card sources: the fake archive's adapter for cardSources.test.ts. */
   sources?: Parameters<typeof serverWith>[4]
 ) =>
-  serverWith(generator ?? ContextGenerator.layer, summaries, undefined, undefined, sources).pipe(
+  // Saved card media never reaches the internet from a test: its transport is off unless a
+  // test registers its own (savedMedia.test.ts).
+  Layer.effectDiscard(Effect.flatMap(SavedMedia, (saved) => saved.fetchers.disable("media.saved"))).pipe(
+    Layer.provideMerge(serverWith(generator ?? ContextGenerator.layer, summaries, undefined, undefined, sources)),
     Layer.provide([Layer.succeed(AppConfig)(config), testPasswordCost, testBundles])
   )
 
@@ -84,8 +88,11 @@ export const serverPort = Effect.map(HttpServer.HttpServer, ({ address }) => {
  */
 const testApi: RpcGroup.RpcGroup<AppRpcs> = AppApi
 export const client = (headers: Record<string, string> = {}, address = "127.0.0.1") =>
+  Effect.flatMap(serverPort, (port) => clientAt(port, headers, address))
+
+/** The same client to a server on `port`: one a test started as its own process, say. */
+export const clientAt = (port: number, headers: Record<string, string> = {}, address = "127.0.0.1") =>
   Effect.gen(function* () {
-    const port = yield* serverPort
     const protocol = yield* Layer.build(
       RpcClient.layerProtocolSocket().pipe(
         Layer.provide(Socket.layerWebSocket(`ws://${address}:${port}/rpc`)),

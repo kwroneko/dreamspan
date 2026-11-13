@@ -1,4 +1,5 @@
 import { ExternalMediaPrefs } from "@rp/shared/externalMedia.ts"
+import { MediaHosts } from "@rp/shared/savedMedia.ts"
 // All settings use this registry and writer; feature handlers keep their ownership checks.
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -32,6 +33,7 @@ const definitions: ReadonlyArray<SettingDefinition> = [
     })
   },
   { id: "media.external", scope: "user", schema: ExternalMediaPrefs },
+  { id: "media.saved.hosts", scope: "user", schema: MediaHosts },
   { id: "display", scope: "user", schema: DisplayPrefs, agent: { description: "How chats are displayed." } },
   { id: "notices", scope: "user", schema: Schema.Record(Schema.String, Schema.Array(Schema.String)) },
   {
@@ -41,7 +43,16 @@ const definitions: ReadonlyArray<SettingDefinition> = [
     agent: { description: "Collapse pinned chats." }
   },
   { id: "cost", scope: "user", schema: CostRules },
-  { id: "workshop.defaults", scope: "user", schema: Schema.Struct({ card: Schema.String, preset: Schema.String }) },
+  {
+    id: "workshop.defaults",
+    scope: "user",
+    // The workshop persona is its own default, never the story one (owner, 2026-11-12).
+    schema: Schema.Struct({
+      card: Schema.String,
+      preset: Schema.String,
+      persona: Schema.optionalKey(Schema.NullOr(Schema.String))
+    })
+  },
   { id: "chat.persona", scope: "user", schema: Schema.NullOr(Schema.String) },
   { id: "generation.model", scope: "user", schema: Schema.NullOr(ModelChoice) },
   { id: "generation.preset", scope: "user", schema: Schema.NullOr(Schema.String) },

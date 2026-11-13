@@ -14,6 +14,8 @@ import { makeRegistry } from "../../registry.ts"
 import { AppClient } from "../../rpc.ts"
 import type { ReactNode } from "react"
 import type { RemoteSummary } from "@rp/shared/cardSources.ts"
+import type { RefId } from "@rp/shared/library.ts"
+import { askMediaApproval } from "../savedMedia/approval.ts"
 
 /** The reactivity key of everything card sources show from the server. */
 export const SOURCES_KEY = "cardSources"
@@ -125,9 +127,64 @@ export function useAdoptRemote() {
     const added = out.value
     invalidateKeys(registry, ["library", "chats"])
     showAdopted(navigate, added)
+    // Its media on sites the user hasn't approved (spec/SAVED-MEDIA.md §3.2).
+    if (!added.existing) askMediaApproval([added.refId as RefId])
     return added
   }
 }
+
+/** The page that adds a source's standalone lorebook and opens it in the lorebook editor (§3.9). */
+export const lorebookPath = (sourceId: string, remoteId: string) =>
+  `/sources/${encodeURIComponent(sourceId)}/lorebooks/${encodeURIComponent(remoteId)}`
+
+/**
+ * Add to my lorebooks (§3.9): a standalone lorebook joins the user's lorebooks, and a notice
+ * says so with a link to it; one they have from there already is answered as theirs. `quiet`
+ * leaves the notice out, for opening one, which shows it at once.
+ */
+export function useAdoptRemoteLorebook() {
+  const call = useSourceCall()
+  const registry = useContext(RegistryContext)
+  const navigate = useNavigate()
+  return async (
+    sourceId: string,
+    sourceName: string,
+    remoteId: string,
+    quiet = false
+  ): Promise<SourceOutcome<Adopted> | null> => {
+    const out = await call((client) => client("AdoptRemoteCard", { sourceId, remoteId }))
+    if (out === null) return null
+    if (!out.ok) {
+      if (!quiet)
+        showToast({ title: "The lorebook wasn't added", description: lorebookProblem(sourceName, out.problem) })
+      return out
+    }
+    const added = out.value
+    invalidateKeys(registry, ["library", SOURCES_KEY])
+    if (!quiet)
+      showToast({
+        title: added.existing ? `You have ${added.name} already.` : `Added ${added.name} to your lorebooks.`,
+        actions: [
+          {
+            label: "Show it",
+            hint: `Opens ${added.name} in the lorebook editor.`,
+            onClick: () => void navigate({ to: "/library/$refId", params: { refId: added.refId } })
+          }
+        ]
+      })
+    return out
+  }
+}
+
+/** A failed call for a lorebook, worded for a lorebook. */
+export const lorebookProblem = (name: string, problem: SourceProblem) =>
+  problem.reason === "not_found"
+    ? `This lorebook is no longer on ${name}.`
+    : problem.reason === "refused"
+      ? `${name} doesn't allow downloading this lorebook.`
+      : problem.reason === "region_unavailable"
+        ? "This lorebook is not available in your region."
+        : problemText(name, problem)
 
 /** The notice for a card that joined the user's cards (§4.4), or that they had already, with a link to it. */
 export const showAdopted = (

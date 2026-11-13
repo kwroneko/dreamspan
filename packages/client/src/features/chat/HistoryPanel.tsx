@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { HistoryDiff, HistoryPreviewContext } from "./historyPreview.tsx"
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useId, type RefObject } from "react"
@@ -186,6 +187,21 @@ export function HistoryPanel({
               {record.inherited ? `Made in ${record.madeInName} · ` : ""}
               {record.status}
             </p>
+            {record.workshop && (
+              <p className="text-muted">
+                Made in the workshop{" "}
+                <Tooltip label="Opens the workshop message that made this edit.">
+                  <Link
+                    to="/chats/$chatId"
+                    params={{ chatId: record.workshop.chatId }}
+                    search={{ ...(record.workshop.slotId ? { slot: record.workshop.slotId } : {}) }}
+                    className="text-accent underline"
+                  >
+                    {record.workshop.name}
+                  </Link>
+                </Tooltip>
+              </p>
+            )}
             <Button
               disabled={pending || record.status === "undone"}
               hint="Puts back everything this edit changed in this branch. Text changed again since is kept."
@@ -279,7 +295,7 @@ function HistorySearchPair({
   const searchKey = JSON.stringify([search, refresh, viewer])
   // A replacement that covered the summaries keeps them in use, but with separate contexts one search
   // reaches one reader's summaries: the others over the same messages must be written again.
-  const separate = summaryViewers(view.cast).length > 0
+  const separate = summaryViewers(view.cast, view.lcm).length > 0
   const idle = search.pairs.some((p) => !p.find)
   useEffect(() => {
     const request = ++revision.current

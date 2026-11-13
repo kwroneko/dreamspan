@@ -9,17 +9,16 @@ import { HtmlDepth } from "./state.ts"
 import { REPLACEABLE_CARD_FIELDS, ReplaceTarget } from "./docs/note.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import {
-  MessageImages,
   CastCard,
   Chat,
   ChatId,
   EntityId,
   ForkId,
   ForkSplit,
-  FrozenMacros,
   PathEntry,
   QueuedMessage,
-  SlotId
+  SlotId,
+  ThreadPlace
 } from "./chat.ts"
 import { ChatNameInput, GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
@@ -178,8 +177,16 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   recentAt: Schema.Number,
   /** Its chat's Recent: the latest `recentAt` of the chat's live forks. */
   chatRecentAt: Schema.Number,
-  /** How many live forks (branches) its chat has. */
+  /** How many live forks (branches) its chat has, not counting the forks of parallel threads started from a branch. */
   branches: Schema.Int,
+  /** The thread sets it's in that are shown (spec/THREADS.md §4.3), innermost first; absent when none. */
+  threads: Schema.optionalKey(Schema.Array(ThreadPlace)),
+  /**
+   * The thread of its innermost shown set, in every section: its name (null:
+   * unnamed) and its characters at the message the threads start from, what an unnamed one is
+   * called by.
+   */
+  thread: Schema.optionalKey(Schema.Struct({ name: Schema.NullOr(Schema.String), cast: Schema.Array(EntityId) })),
   /** Present characters the model writes, by id; `ShellLibrary.people` describes each once. */
   cast: Schema.Array(EntityId),
   /** Characters with participation after the split, absent from its inherited cast. */
@@ -219,8 +226,10 @@ export class ShellCards extends Schema.Class<ShellCards>("ShellCards")({
  * - `chats`: each chat once, by its current fork, the most recent chat first (All chats);
  * - `just`, `with`, `was`: the scope card's chats, once each, by how it is in them, its latest turn first;
  * - `current`: a chat's current fork;
- * - `pinnedBranches`, `peers`, `other`: pinned branches, unpinned named branches, the rest;
- *   each by its last message, newest first;
+ * - `threads`: the forks in a shown set of parallel threads (spec/THREADS.md §13.6), by their
+ *   last message, newest first;
+ * - `pinnedBranches`, `peers`, `other`: pinned branches, unpinned named branches, the rest,
+ *   each by its last message, newest first, leaving out the forks `threads` lists;
  * - `groups`: chats of two or more characters, once each, by `sort`;
  * - `card`: each chat the scope card joined, once, its latest turn first, then newest;
  * - `all`: every fork in scope, newest first.
@@ -234,6 +243,7 @@ export const ShellSection = Schema.Literals([
   "with",
   "was",
   "current",
+  "threads",
   "pinnedBranches",
   "peers",
   "other",
@@ -361,16 +371,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   cards: Schema.Array(CastCard)
 }) {}
 
-/** The first turn of a new chat: what turns a card's greeting into a chat. */
-export const FirstTurn = Schema.Union([
-  Schema.TaggedStruct("Send", {
-    images: Schema.optionalKey(MessageImages),
-    content: Schema.String,
-    speakerEntityId: Schema.NullOr(EntityId)
-  }),
-  Schema.TaggedStruct("Generate", { speakerEntityId: Schema.NullOr(EntityId), direction: Schema.String })
-])
-export type FirstTurn = typeof FirstTurn.Type
+import { FirstTurn, StartChatInput } from "./chatStart.ts"
+export { FirstTurn }
 
 /** A change to who's in a chat, or to its settings, from a position on. */
 export const CastChange = Schema.Union([
@@ -419,9 +421,9 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("CardsRotation", { on: Schema.Boolean }),
   /** Tools and agent instructions from here on (`agent.enabled`). */
   Schema.TaggedStruct("AgentEnabled", { on: Schema.Boolean }),
-  /** The tools agent replies offer from here on (`agent.tools`), by id. */
+  /** The tools agent replies offer from here on (`agent.tools`), by id; null follows the app default again. */
   Schema.TaggedStruct("AgentTools", {
-    tools: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100))
+    tools: Schema.NullOr(Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100)))
   }),
   /**
    * Whether agent replies may change a note, or a card's field, in this chat from here on
@@ -586,41 +588,7 @@ export class ChatSetupApi extends RpcGroup.make(
    * the user's message (the client asks for the reply, as after any send), or a reply.
    */
   Rpc.make("StartChat", {
-    payload: {
-      guidance: Schema.optionalKey(Schema.Boolean),
-      cards: Schema.Array(EntityId).check(Schema.isMinLength(1)),
-      persona: Schema.NullOr(EntityId),
-      greeting: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-      first: FirstTurn,
-      /**
-       * What the picked greeting's random and time macros showed, kept so the chat shows it as
-       * it was seen (DESIGN §5.6). The server freezes every greeting either way: it checks
-       * these and draws whatever is missing.
-       */
-      frozen: Schema.optionalKey(FrozenMacros),
-      /**
-       * Who greets, in order, each greeting as its own message with all its card's greetings
-       * as versions (the one picked selected) and its preview's frozen values, as ST starts a
-       * group chat with each member's greeting in turn. Each must be one of `cards`; a card
-       * without greetings is skipped. Absent: every card greets in cards order, randomly
-       * for a group as in ST (an explicit `greeting` still chooses the first card's);
-       * a single card uses `greeting` and `frozen`.
-       */
-      greeters: Schema.optionalKey(
-        Schema.Array(
-          Schema.Struct({
-            entityId: EntityId,
-            greeting: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-            frozen: Schema.optionalKey(FrozenMacros)
-          })
-        ).check(Schema.isMaxLength(100))
-      ),
-      /**
-       * The chat's title; absent or blank, its cast's names. A new chat of a group takes the
-       * group's name, so it's one of the group's chats (`ChatGroup`).
-       */
-      title: Schema.optionalKey(Schema.String)
-    },
+    payload: StartChatInput,
     success: Schema.Struct({
       entry: PathEntry,
       chat: Chat,

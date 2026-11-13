@@ -39,11 +39,33 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       const grants = new Map<string, CapabilityMode>(
         (yield* reader.WorkshopGrants({ userId, chatId, now: Date.now() })).map((g) => [g.capability, g.mode])
       )
+      const story =
+        state.workshopAttached === undefined
+          ? null
+          : yield* reader
+              .GetChat({
+                userId,
+                chatId: state.workshopAttached as ChatId
+              })
+              .pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
       return execution.workshopCapabilities
         .list()
         .filter((capability) => offered.has(capability.id))
         .sort((a, b) => a.order - b.order)
-        .map((capability) => capabilityView(execution, grants, capability))
+        .map((capability) =>
+          capabilityView(
+            execution,
+            grants,
+            capability.id === "chats.read" && state.workshopAttached !== undefined
+              ? {
+                  ...capability,
+                  label: "Read this story",
+                  explanation: `Reads only “${story?.title?.trim() || "Unavailable story"}” in this workshop. Its messages go to this workshop's model.`,
+                  example: "Reads the story's last ten messages to sum it up."
+                }
+              : capability
+          )
+        )
     })
   return {
     ListWorkshopCapabilities: ({ chatId }) =>
@@ -63,7 +85,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         if (mode === "off") cancelCapability(chatId, capability)
         return yield* capabilitiesOf(userId, chatId)
       }).pipe(internal("SetWorkshopGrant")),
-    AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note }) =>
+    AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note, storyAt }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
         const text = note?.trim() ?? ""
@@ -72,6 +94,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           rolloutId,
           toolCallId,
           digest,
+          ...(storyAt ? { storyAt } : {}),
           answer,
           note: text === "" ? null : text
         })
@@ -89,6 +112,22 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
     UndoRolloutEffect: (input) =>
       Effect.flatMap(CurrentUser, (user) => writer.UndoRolloutEffect({ ...input, userId: user.id })).pipe(
         internal("UndoRolloutEffect")
+      ),
+    UndoRolloutEffects: (input) =>
+      Effect.flatMap(CurrentUser, (user) => writer.UndoRolloutEffects({ ...input, userId: user.id })).pipe(
+        internal("UndoRolloutEffects")
+      ),
+    ListAttachedWorkshops: ({ chatId }) =>
+      Effect.flatMap(CurrentUser, (user) => reader.AttachedWorkshops({ userId: user.id, chatId })).pipe(
+        internal("ListAttachedWorkshops")
+      ),
+    GetWorkshopDefaults: () =>
+      Effect.flatMap(CurrentUser, (user) => reader.WorkshopDefaults({ userId: user.id })).pipe(
+        internal("GetWorkshopDefaults")
+      ),
+    SetWorkshopPersona: ({ persona }) =>
+      Effect.flatMap(CurrentUser, (user) => writer.SetWorkshopPersona({ userId: user.id, persona })).pipe(
+        internal("SetWorkshopPersona")
       ),
     CreateWorkshop: (input) =>
       Effect.flatMap(CurrentUser, (user) => writer.CreateWorkshop({ ...input, userId: user.id })).pipe(

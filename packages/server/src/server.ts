@@ -1,5 +1,6 @@
 import { ExternalMedia, externalMediaRoute, makeExternalMediaHandlers } from "./api/externalMedia.ts"
-import { AuthenticatedExternalMediaApi } from "@rp/shared/api.ts"
+import { AuthenticatedExternalMediaApi, AuthenticatedSavedMediaApi } from "@rp/shared/api.ts"
+import { makeSavedMediaHandlers, SavedMedia, savedMediaRoute } from "./api/savedMedia.ts"
 import { operationWriter, installOperationRuntime } from "./agent/operations.ts"
 import { makeWorkshopHandlers } from "./api/workshop.ts"
 import {
@@ -11,12 +12,14 @@ import {
   AuthenticatedDecisionApi,
   AuthenticatedProviderListApi,
   AuthenticatedSplitChatApi,
-  AuthenticatedChatContextsApi
+  AuthenticatedChatContextsApi,
+  AuthenticatedChatThreadsApi
 } from "@rp/shared/api.ts"
 import { makeAgentHandlers } from "./api/agent.ts"
 import { makeMergeHandlers } from "./api/merges.ts"
 import { makeSplitChatHandlers } from "./api/splitChats.ts"
 import { makeChatContextsHandlers } from "./api/contexts.ts"
+import { makeThreadHandlers } from "./api/threads.ts"
 import { Commands } from "./commands.ts"
 import { makeHistoryHandlers } from "./api/history.ts"
 import { makeMessageHandlers } from "./api/messages.ts"
@@ -44,9 +47,11 @@ import {
   AuthenticatedPanelApprovalApi,
   AuthenticatedCardArchiveApi,
   AuthenticatedTextSearchApi,
+  AuthenticatedDraftPreviewApi,
   AuthenticatedCardSourcesApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
+  AuthenticatedWorkshopPresetApi,
   AuthenticatedShellUpdatesApi,
   CurrentUser,
   Health
@@ -64,9 +69,10 @@ import { RpcSerialization, RpcServer, type RpcGroup } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatEventHandlers, makeChatHandlers, makeMessageVersionHandlers } from "./api/chats.ts"
-import { makeChatSetupHandlers } from "./api/chatSetup.ts"
+import { makeChatSetupHandlers, makeDraftPreviewHandlers } from "./api/chatSetup.ts"
 import {
   makeEditorHandlers,
+  makeWorkshopPresetHandlers,
   makeGalleryHandlers,
   makePanelApprovalHandlers,
   makeForkMergeHandlers,
@@ -93,7 +99,7 @@ import { CacheWarmth } from "./chat/CacheWarmth.ts"
 import { ChatHub } from "./chat/ChatHub.ts"
 import { Generations } from "./chat/Generations.ts"
 import * as ContextGenerator from "./chat/ContextGenerator.ts"
-import type { Generator } from "./chat/Generator.ts"
+import { Generator } from "./chat/Generator.ts"
 import { AppConfig } from "./config.ts"
 import * as Database from "./db/Database.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
@@ -173,6 +179,7 @@ const CoreHandlers = AppCoreApi.toLayer(
 
 const HandlerLayers = Layer.mergeAll(
   CoreHandlers,
+  AuthenticatedWorkshopPresetApi.toLayer(makeWorkshopPresetHandlers),
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
   AuthenticatedShellUpdatesApi.toLayer(
     Effect.map(makeChatSetupHandlers, ({ WatchShellCards, WatchShellForks }) => ({
@@ -183,6 +190,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedSummaryRequestApi.toLayer(makeSummaryRequestHandlers),
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
   AuthenticatedChatContextsApi.toLayer(makeChatContextsHandlers),
+  AuthenticatedChatThreadsApi.toLayer(makeThreadHandlers),
   AuthenticatedChatMergeApi.toLayer(makeMergeHandlers),
   AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),
@@ -194,8 +202,10 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),
   AuthenticatedExternalMediaApi.toLayer(makeExternalMediaHandlers),
+  AuthenticatedSavedMediaApi.toLayer(makeSavedMediaHandlers),
 
   AuthenticatedTextSearchApi.toLayer(makeTextSearchHandlers),
+  AuthenticatedDraftPreviewApi.toLayer(makeDraftPreviewHandlers),
   AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
 )
 
@@ -279,6 +289,7 @@ const contentSecurityPolicy = (host: string | undefined) => {
     "style-src 'self'",
     "img-src 'self' blob: data:",
     "media-src 'self' blob: data:",
+    "font-src 'self' blob: data:",
     `connect-src 'self'${socket}`,
     "object-src 'none'",
     "base-uri 'none'",
@@ -435,7 +446,7 @@ const RequestGuard = HttpRouter.middleware(
               })
           : (response: HttpServerResponse.HttpServerResponse) =>
               // The frame page sets its own, with its nonce.
-              (path === FRAME_PANEL || path === "/media/external") &&
+              (path === FRAME_PANEL || path === "/media/external" || path.startsWith("/media/saved/")) &&
               response.headers["content-security-policy"] !== undefined
                 ? response
                 : HttpServerResponse.setHeader(response, "content-security-policy", policy)
@@ -460,6 +471,8 @@ const HealthRoute = HttpRouter.add(
   "/healthz",
   Effect.gen(function* () {
     const config = yield* AppConfig
+    const generator = yield* Generator
+    const generatorKind = Option.isSome(generator) ? (generator.value.kind ?? "custom") : "none"
     const buildId = yield* Effect.promise(async () => {
       try {
         const stamp: unknown = JSON.parse(await readFile(join(config.clientDist, "build-id.json"), "utf8"))
@@ -471,7 +484,11 @@ const HealthRoute = HttpRouter.add(
       }
     })
     return HttpServerResponse.text("ok", {
-      headers: { "cache-control": "no-store", ...(buildId ? { "x-client-build": buildId } : {}) }
+      headers: {
+        "cache-control": "no-store",
+        "x-generator-kind": generatorKind,
+        ...(buildId ? { "x-client-build": buildId } : {})
+      }
     })
   })
 )
@@ -684,6 +701,7 @@ export const serverWith = <E>(
       ImportRoutes.layer,
       SourceImageRoute,
       externalMediaRoute,
+      savedMediaRoute,
       SourceNewerFileRoute,
       StaticRoutes,
       InterruptedRequests,
@@ -719,6 +737,8 @@ export const serverWith = <E>(
     Layer.provideMerge(Notices.layer),
     Layer.provideMerge(sources),
     Layer.provideMerge(ExternalMedia.layer),
+    // Saved card media (spec/SAVED-MEDIA.md): its task downloads between writer transactions.
+    Layer.provideMerge(SavedMedia.layer),
     // One set of held files for uploads, the ST folder import and adopting a source's cards.
     Layer.provideMerge(MediaHolds.layer),
     Layer.provide(ProvidersLive),

@@ -107,6 +107,11 @@ export interface ChatSurfaceProps {
   readonly onOpenPanel: (tab: string | null) => void
   readonly wide: boolean
   readonly children: ReactNode
+  /**
+   * Providers left out: a chat shown inside another's panel (the workshop beside a story) skips
+   * those that belong to the page, such as the portrait column and the editor tabs' workspace.
+   */
+  readonly except?: ReadonlySet<string>
 }
 export const chatSurfaceProviders = makeRegistry<{
   readonly id: string
@@ -120,6 +125,7 @@ export function ChatSurfaceProviders(props: ChatSurfaceProps) {
     chatSurfaceProviders.snapshot
   )
   return [...snapshot.entries]
+    .filter((entry) => !props.except?.has(entry.id))
     .sort((a, b) => b.order - a.order)
     .reduce<ReactNode>(
       (children, entry) => (

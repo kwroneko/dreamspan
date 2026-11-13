@@ -25,12 +25,14 @@ import * as network from "./network.tsx"
 import * as noteOverrides from "./noteOverrides/index.tsx"
 import * as pickers from "./pickers/index.tsx"
 import * as regex from "./regex/index.tsx"
+import * as savedMedia from "./savedMedia/index.tsx"
 import * as notices from "./notices.tsx"
 import * as completionSound from "./completionSoundFeature.tsx"
 import * as settings from "./settings/index.tsx"
 import * as shell from "./shell.tsx"
 import * as status from "./status.tsx"
 import * as workbench from "./workbench/index.tsx"
+import * as threads from "./threads/index.tsx"
 import * as workshop from "./workshop/index.tsx"
 
 export const registerFeatures = () => {
@@ -55,6 +57,8 @@ export const registerFeatures = () => {
   noteOverrides.register()
   pickers.register()
   insertMessage.register()
+  threads.register()
+
   snippets.register()
   bin.register()
   connections.register()
@@ -64,6 +68,7 @@ export const registerFeatures = () => {
   credentials.register()
   network.register()
   regex.register()
+  savedMedia.register()
   accounts.register()
   notices.register()
   completionSound.register()

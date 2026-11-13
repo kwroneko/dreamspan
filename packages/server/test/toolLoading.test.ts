@@ -89,6 +89,29 @@ describe("built-in skills come with every workshop, whatever its card", () => {
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
+  it.effect("beside a story, the story tools are callable from the start and the rest are in skills", () =>
+    Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      const plan = registry.orchestrationModes
+        .get("workshop")!
+        .plan({ state: { ...foldState([]), workshopAttached: "story-chat" }, kind: "workshop" })
+      const tools = plan.tools.map((name) => toolForKind(registry, "workshop", name)!)
+      const offer = split(registry, tools, "workshop", claude)
+      for (const name of ["search_story", "read_story", "open_story_summary", "search_story_summaries"]) {
+        assert.include(
+          offer.tools.map((t) => t.id),
+          name
+        )
+        assert.isFalse(offer.deferred.has(name), `${name} is sent from the start`)
+      }
+      const deferred = [...offer.deferred]
+      assert.deepStrictEqual(
+        orphansOf(deferred, skillsFor(runSkills(registry.skills.list(), "workshop", []), deferred)),
+        []
+      )
+    }).pipe(Effect.provide(ExecutionRegistry.layer))
+  )
+
   it.effect("a card's own skills come on top of the built-in ones", () =>
     Effect.gen(function* () {
       const { registry } = yield* workshopTools

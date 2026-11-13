@@ -6,6 +6,8 @@
 
 **Built 2026-11-12 (cardex2):** long choice lists use the existing picker and date criteria are date fields (ARCHITECTURE §11.5, "Long choices and dates"); creator pages (ARCHITECTURE §11.5, "Creators"); §3.7's recognition by a card's Sources, the newest live fork holding a binned card's origin, and each card's versions and forks on the source (ARCHITECTURE §11.5, "Families and recognition"). Built deltas: the creator view is the browsing view with the creator filter set and their profile above it, not a page of its own, so every filter and sort still applies (the archive's own list of a creator's cards is not used); a recognized card has no version recorded, so it offers no update check; cards imported before this change are recognized only when imported again. §4.1's pinning is built for edits (ARCHITECTURE §11.5, "Edited cards stay cached"); a card is not yet pinned while only an open tab shows it, and §4.2's context estimate and inspector before the first send are not built (no pending chat has them yet).
 
+**Built 2026-11-12 (cardex3):** §3.9's standalone lorebooks, as written (ARCHITECTURE §11.5, "Standalone lorebooks"); this spec is obsolete for them. Review follow-up (review-cardex3, 2026-11-13): the direct Update delta is superseded by Review and merge, staging the file on the import line without changing the active book until the user approves its changes. This section remains obsolete as an implementation proposal; ARCHITECTURE §11.5 records the result.
+
 **cardex** is a public card archive run by a third party. We use only its public API, as any client would ([D] owner, 2026-10-26). Its public API documentation wasn't found (§10), so our side is designed against an adapter interface (§2.2), and §10 lists exactly what we need from any archive's API.
 
 ## 0. The owner's decisions this builds on
@@ -166,6 +168,20 @@ The existing model for imported cards applies unchanged. An adopted card has an 
 - **Offering it:** the existing notice under the editor's actions ("A newer imported version is waiting" → here "A newer version is on cardex") with **Review and merge**, which stages the archive's new file on the import line (`mode=merge` staging) and opens the existing merge review. The card's import dialog's **Replace** works on it too, and a third choice, **Add as a separate card**, adopts the new version as a card of its own ([D] owner, 2026-11-06; §9).
 - **Nothing is applied without that review.** Forks of the card aren't touched. They see only their parent's later revisions, as now, once the user has merged into the parent.
 
+### 3.9 Standalone lorebooks (cardex3, 2026-11-12)
+
+The archive also lists standalone lorebooks (cardex v1 `kind=lorebook`: a summary with `kind: "lorebook"`, the card URL shape `/c/<slug>`, often no picture; its file is ST World Info JSON in every download mode; `/versions` and `/origins` answer for its listing as for a card). Checked live, shapes only, 2026-11-12.
+
+- **[D]** (owner, 2026-11-12, asked where an archive lorebook opens and whether lorebooks show beside characters or separately) "In the lorebook editor, I guess. They can be returned with characters. You can filter them."
+- **[D]** (same) Lorebooks come back in the same result list as characters, and a type filter chooses characters, lorebooks or both.
+- **[D]** (same) A lorebook opens in the existing lorebook editor (the side panel's has full parity and is the phone's editor); no second form is built.
+- **[P]** The type filter is the existing **Kind** choice in the Filters panel, with four options: Characters, Characters with a lorebook, Lorebooks, Characters and lorebooks. Unchosen, it's **Characters and lorebooks** (cardex's own default, and the owner's "returned with characters"); a chip shows any other choice. The chip and the filter count follow the panel's existing rules.
+- **[P]** A lorebook result is the same tile, with a **Lorebook** badge on its picture's corner (hover: "A lorebook, not a character. Opening it adds it to your lorebooks."), the initials fallback when it has no picture, and "by <creator>" as for a card. No rating badge rule changes.
+- **[P]** **Opening is adding.** A lorebook has no draft state: there's no chat to try it in, and the editor works on library entries. A click (or Open, or Open in a new browser tab) adds it to the user's lorebooks and opens it in the editor; **Add to my lorebooks** in the tile's menu adds it without opening. Its route `/sources/<id>/lorebooks/<remoteId>` adds it (or finds the user's copy) and then replaces itself with the editor's URL, so a reload or a second tab never adds a second copy. A held lorebook's tile links straight to the user's lorebook and carries the "You have this lorebook" badge.
+- **[P]** **What adding stores**: what importing the downloaded World Info file stores (`ImportFile`: entity `kind = lorebook`, upstream ref, revision 1 `origin = import`, `source_hash`), plus the same `card_origins` row a card gets (the table names no kind, so lorebooks share it; no baseline change). Twice is refused by the origin row as for cards.
+- **[P]** **Updates** (built; direct-update wording below superseded by review-cardex3’s explicit merge review in ARCHITECTURE §11.5) work as for cards, through the same origin row: results record a newer version, and the lorebook editor's header area shows **A newer version is on cardex** with **Update** (hover: "Merges the newer file from cardex into this lorebook, as Update from file… does.") and **Check for a newer version**. Update fetches the newer file (successor slugs included, through the origin's stable listing) and imports it into the lorebook as Update from file… does (a merge on its import line); the version is then recorded as taken. Replace and Add as a separate card aren't offered for lorebooks, since a lorebook has neither today.
+- **[P]** Inspect, Start a chat and the draft-chat panel are character flows and aren't offered on a lorebook tile.
+
 ## 4. The "not yet yours" state
 
 ### 4.1 What's stored when a remote card is opened
@@ -192,7 +208,7 @@ The existing model for imported cards applies unchanged. An adopted card has an 
   - choosing the persona, preset and model
   - adding local characters to the pending cast (it becomes a pending group)
   - reading and editing every field (§4.3)
-  - the context inspector and the cost estimate, assembled from the cached document. The assembler's card read is a registered source, and a pending remote card gives it the cached document instead of a ref.
+  - the context inspector and the cost estimate, assembled from the cached document. The assembler's card read is a registered source, and a pending remote card gives it the cached document instead of a ref. **[D]** (owner, 2026-11-12, asked whether every new chat should show these before its first send) "Yes. Make sure this doesn't cause anything to be sent to inference providers." It applies to every pending chat, local cards too (DESIGN §2.1).
 - **What needs the card added**, as for any pending chat: Fork for this chat and Use another version (they need a saved chat anyway). Also, specific to remote cards:
   - **Export…** stays in place, disabled, with "Add <name> to your cards to export it."
   - **Use as persona** adds the card first, saying so in its hover ("Adds <name> to your cards and uses it as your persona.")

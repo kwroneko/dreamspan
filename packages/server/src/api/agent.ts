@@ -1,36 +1,65 @@
 import { CALL_TOOL, dispatcherDefinition } from "../agent/dispatcher.ts"
+import { storyReadStamp } from "../agent/continuity.ts"
 import { loadingWireFor } from "../agent/loadingPlan.ts"
-import type { ContinuousSnapshot } from "../agent/continuity.ts"
+import { loadedSet } from "../agent/toolLoading.ts"
+import { isDeepStrictEqual } from "node:util"
 import { outsideEffect } from "../agent/effects.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 type RetryModel = { readonly connection: ConnectionId; readonly model: ModelId }
-import type { Generation } from "../assembler/types.ts"
+import type { AssembledRequest, ContextSnapshot, ModelInput } from "../assembler/types.ts"
+import type { ContextBudget } from "@rp/shared/inspectorApi.ts"
 // The agent RPCs (@rp/shared/agentApi.ts). Storage checks the version or chat is the caller's.
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
-import { foldState, permissionKey } from "@rp/shared/state.ts"
+import { type ChatState, foldState, permissionKey } from "@rp/shared/state.ts"
 import { ACTIVITY_PAGE, NotResumable, type StepEdit } from "@rp/shared/agent.ts"
 import { type AgentApi } from "@rp/shared/agentApi.ts"
 import { CurrentUser } from "@rp/shared/api.ts"
-import type { EntityId, ForkId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, StoryAt, VersionId } from "@rp/shared/chat.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect, Option } from "effect"
 import { planResume, planStepResume, planMessageResume, type ResumePlan, StepNotResumable } from "../agent/resume.ts"
 import { countSteps } from "../agent/steps.ts"
 import { notesAt } from "../agent/tools/notes.ts"
-import type { FrozenTool } from "../agent/tools.ts"
+import { type FrozenTool, frozenTool, sendMessageDefinition, severalMessageDefinition } from "../agent/tools.ts"
+import { offeredByGrants } from "../agent/approvals.ts"
+import { planTurn } from "../agent/modes.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
+import { shownModel } from "../chat/shownModel.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
-import { ExecutionRegistry } from "../execution.ts"
+import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { internal } from "./internal.ts"
 
 /** What a resume needs of the stopped run's frozen snapshot. */
 interface Frozen {
+  readonly storyAt?: StoryAt
+  readonly storyStamp?: string | null
   readonly inputs?: { readonly model?: { readonly prefill?: string } | null }
   readonly continuity?: { readonly historical?: number }
   readonly agent?: { readonly tools?: ReadonlyArray<FrozenTool>; readonly contract?: string }
+}
+
+/**
+ * The stopped run's frozen request, rebuilt for the model the chat uses now (spec/AGENTIC.md
+ * §12.3): the same messages and transcript, so the model is still sent what the run had
+ * written, with the new model's own parameters and cache layout. The previous turn's carried
+ * cache checkpoints index the old model's wire, so they go.
+ */
+const forModel = (
+  snapshot: ContextSnapshot,
+  now: { readonly model: ModelInput; readonly samplers: AssembledRequest["samplers"]; readonly budget?: ContextBudget }
+): ContextSnapshot => {
+  const continuity = (snapshot as { readonly continuity?: Record<string, unknown> }).continuity
+  return {
+    ...snapshot,
+    inputs: { ...snapshot.inputs, model: now.model },
+    request: { ...snapshot.request, samplers: now.samplers },
+    ...(now.budget ? { contextBudget: now.budget } : {}),
+    ...(continuity ? { continuity: { ...continuity, breakpoints: [] } } : {})
+  } as ContextSnapshot
 }
 
 const agentVersionResumer = Effect.gen(function* () {
@@ -41,6 +70,51 @@ const agentVersionResumer = Effect.gen(function* () {
   const generator = yield* Generator
   const execution = yield* ExecutionRegistry
   /**
+   * The tools the chat offers now (spec/AGENTIC.md §12.4), or undefined when that's what the run
+   * froze. Only a change of the chat's settings since the run counts: the planner sees the state
+   * before the reply (as the run did) and the state now, and what it adds or removes between the
+   * two is added to or removed from the frozen offer. A planner or tool replaced since then
+   * (code, not the user's settings) leaves the run's offer as it was. A tool kept keeps its frozen
+   * definition; the output contract's tool stays.
+   */
+  const toolsNow = (at: {
+    readonly userId: UserId
+    readonly chatId: ChatId
+    readonly then: ChatState
+    readonly now: ChatState
+    readonly frozen: ReadonlyArray<FrozenTool>
+  }) =>
+    Effect.gen(function* () {
+      const chat = yield* reader.GetChat({ userId: at.userId, chatId: at.chatId })
+      const profile = execution.chatKinds.get(chat.kind)
+      if (!profile) return undefined
+      const before = planTurn(execution.orchestrationModes, at.then, chat.kind, profile.planner)
+      const after = planTurn(execution.orchestrationModes, at.now, chat.kind, profile.planner)
+      if ("unavailable" in before || "unavailable" in after) return undefined
+      const removed = new Set(before.plan.tools.filter((id) => !after.plan.tools.includes(id)))
+      const candidates = after.plan.tools.flatMap((id) => {
+        if (before.plan.tools.includes(id) || at.frozen.some((t) => t.name === id)) return []
+        const tool = toolForKind(execution, chat.kind, id)
+        return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
+      })
+      // A tool new to the run is offered only as a new run would offer it; one the run was offered
+      // stays even if its capability was turned off, and is refused when called, as it is mid-run
+      // (spec/WORKSHOP.md §3.4), so the model is told why.
+      const { tools: added } = yield* offeredByGrants(
+        { registries: execution, reader, userId: at.userId, chatId: at.chatId },
+        candidates
+      )
+      const contract = new Set([sendMessageDefinition.name, severalMessageDefinition.name])
+      const kept = at.frozen.filter((t) => !contract.has(t.name) && !removed.has(t.name))
+      const now = [...kept, ...added.map(frozenTool), ...at.frozen.filter((t) => contract.has(t.name))]
+      return isDeepStrictEqual(
+        now.map((t) => t.name),
+        at.frozen.map((t) => t.name)
+      )
+        ? undefined
+        : now
+    })
+  /**
    * A new version that carries on `versionId`'s run as `plan` keeps it (spec/AGENTIC.md §4.2):
    * written with its rollout in one transaction, then generated from the kept transcript.
    */
@@ -50,10 +124,17 @@ const agentVersionResumer = Effect.gen(function* () {
     expectedRowVersion: number,
     plan: (
       material: { readonly status: string; readonly transcript: string | null },
-      frozen: Frozen
+      frozen: Frozen,
+      /** The model the run goes on with: the chat's now (spec/AGENTIC.md §12.3). */
+      model: ModelInput
     ) => ResumePlan | StepNotResumable,
     reason: "resume" | "edit",
-    options?: { readonly model?: RetryModel; readonly direction?: string }
+    options?: {
+      readonly model?: RetryModel
+      readonly direction?: string
+      readonly storyAt?: StoryAt
+      readonly saved?: boolean
+    }
   ) =>
     Effect.gen(function* () {
       if (Option.isNone(generator))
@@ -61,72 +142,124 @@ const agentVersionResumer = Effect.gen(function* () {
       const userId = (yield* CurrentUser).id
       const refuse = (message: string) => Effect.fail(new NotResumable({ versionId, message }))
       const material = yield* reader.RolloutMaterial({ userId, versionId })
+      if (!isDeepStrictEqual((JSON.parse(material.snapshot) as Frozen).storyAt, options?.storyAt))
+        return yield* refuse(
+          "The story position changed. Return to the branch and message this reply read before resuming, or regenerate it to use the position shown now."
+        )
+      if (
+        (JSON.parse(material.snapshot) as Frozen).storyStamp !==
+        (yield* storyReadStamp(reader, userId, options?.storyAt))
+      )
+        return yield* refuse(
+          "The story changed since this reply read it. Regenerate it to read the story as it is now."
+        )
       if (material.mode === null) return yield* refuse("It wasn't written with tools.")
       if (material.versionStatus === "generating" || material.status === "running")
         return yield* refuse("It's still being written.")
-      let planned = plan(material, JSON.parse(material.snapshot) as Frozen)
-      if (planned instanceof StepNotResumable) return yield* refuse(planned.message)
       const source = yield* reader.GetVersion({ userId, versionId })
+      const sourceSlot = yield* reader.GetSlot({ userId, slotId: source.slotId, forkId })
+      const chatId = sourceSlot.chatId
+      const frozen = JSON.parse(material.snapshot) as ContextSnapshot
+      const frozenAgent = (frozen as Frozen).agent
+      let planned: ResumePlan | StepNotResumable
       let snapshot = material.snapshot
-      let chosen:
-        | {
-            connection: import("@rp/shared/providers.ts").ConnectionId
-            model: import("@rp/shared/providers.ts").ModelId
-          }
-        | undefined
-      if (options?.model) {
-        const assembled = yield* reader
+      let chosen: RetryModel | undefined
+      let checkBudget = false
+      if (options?.saved) {
+        // The stored request as it was, with its model and tools: only on the user's word.
+        const model = frozen.inputs.model
+        if (!model) return yield* refuse("Its saved request names no model.")
+        planned = plan(material, frozen as Frozen, model)
+      } else {
+        // The chat's settings as they are now decide the model and the tools: the model "Retry
+        // with…" names, or the one the composer shows under this reply, which takes a choice
+        // made after it stopped (spec/AGENTIC.md §12.3). The assembly alone reads the state
+        // before the reply.
+        const events = yield* reader.StateEventsAt({ userId, chatId, slotId: source.slotId, forkId, displayEnd: true })
+        const state = foldState(events)
+        const shown = options?.model ?? (yield* shownModel(reader, { userId, chatId, slotId: source.slotId, forkId }))
+        if (!shown) return yield* refuse("No model is chosen for this chat. Choose one, then resume.")
+        const failed = yield* reader
           .AssembleContext({
             userId,
-            chatId: (yield* reader.GetSlot({ userId, slotId: source.slotId, forkId })).chatId,
+            chatId,
             slotId: source.slotId,
             versionId: source.id,
             forkId,
             now: Date.now(),
             timeZone: "UTC",
             frozen: null,
-            model: options.model
+            ...(shown ? { model: shown } : {})
           })
           .pipe(
-            Effect.catchTag("AssemblyFailed", (error) =>
-              Effect.fail(new GenerationUnavailable({ message: error.message }))
-            )
+            Effect.map((assembled) => ({ assembled })),
+            Effect.catchTag("AssemblyFailed", (error) => Effect.succeed({ failure: error.message }))
           )
-        const model = (JSON.parse(assembled.generation) as Generation).model
-        if (!model) return yield* new GenerationUnavailable({ message: "The chosen model is unavailable." })
-        const frozen = JSON.parse(snapshot) as ContinuousSnapshot
-        const dispatcher = loadingWireFor(execution, model)?.dispatcher && frozen.agent?.tools.some((t) => t.deferred)
-        const transport = frozen.agent?.tools.find((t) => t.name === CALL_TOOL)
-        const tools = frozen.agent?.tools.filter((t) => t.name !== CALL_TOOL)
-        snapshot = JSON.stringify({
-          ...frozen,
-          inputs: { ...frozen.inputs, model },
-          ...(tools
-            ? {
-                agent: {
-                  ...frozen.agent,
-                  tools: [
-                    ...tools,
-                    ...(dispatcher
-                      ? [transport ?? { ...dispatcherDefinition, label: "Called a loaded tool", effect: "read" }]
-                      : [])
-                  ]
-                }
-              }
-            : {}),
-          ...(frozen.continuity
-            ? {
-                continuity: {
-                  ...frozen.continuity,
-                  parent: undefined,
-                  reason:
-                    "The model changed. If its tool list changes, the next request reads the chat again once at full input cost."
-                }
-              }
-            : {})
-        })
-        chosen = { connection: model.connectionId as never, model: model.modelId as never }
+        // Never sent silently: the user is told, and may send the saved request instead.
+        if ("failure" in failed)
+          return yield* new NotResumable({
+            versionId,
+            message: `Its request can't be built from the chat as it is now: ${failed.failure}`,
+            savedRequest: true
+          })
+        const fresh = JSON.parse(failed.assembled.snapshot) as ContextSnapshot
+        const model = fresh.inputs.model
+        if (!model)
+          return yield* refuse(
+            options?.model
+              ? "The chosen model is unavailable."
+              : "No model is chosen for this chat. Choose one, then resume."
+          )
+        planned = plan(material, frozen as Frozen, model)
+        // The same model (connection and model, the connection unedited) sends the frozen request
+        // byte for byte, so the provider's cache still holds, the model's settings edited since
+        // included: its samplers and its provider route, which the run's tool loading froze with
+        // it (spec/TOOL-LOADING.md §10). Another model takes its own settings (spec/AGENTIC.md §12.3).
+        const modelChanged =
+          frozen.inputs.model?.connectionId !== model.connectionId ||
+          frozen.inputs.model?.modelId !== model.modelId ||
+          frozen.inputs.model?.connectionRevision !== model.connectionRevision
+        checkBudget = modelChanged
+        let rebuilt: ContextSnapshot = modelChanged
+          ? forModel(frozen, {
+              model,
+              samplers: fresh.request.samplers,
+              ...(fresh.contextBudget ? { budget: fresh.contextBudget } : {})
+            })
+          : frozen
+        const tools = frozenAgent?.tools
+          ? yield* toolsNow({
+              userId,
+              chatId,
+              then: foldState(
+                yield* reader.StateEventsAt({ userId, chatId, slotId: sourceSlot.entry.parentSlotId, forkId })
+              ),
+              now: state,
+              frozen: frozenAgent.tools
+            })
+          : undefined
+        if (tools) rebuilt = { ...rebuilt, agent: { ...frozenAgent, tools } } as ContextSnapshot
+        if (modelChanged && frozenAgent?.tools) {
+          const real = ((rebuilt as Frozen).agent?.tools ?? []).filter((t) => t.name !== CALL_TOOL)
+          const dispatcher = loadingWireFor(execution, model)?.dispatcher && real.some((t) => t.deferred)
+          const transport = frozenAgent.tools.find((t) => t.name === CALL_TOOL)
+          rebuilt = {
+            ...rebuilt,
+            agent: {
+              ...(rebuilt as Frozen).agent,
+              tools: [
+                ...real,
+                ...(dispatcher
+                  ? [transport ?? { ...dispatcherDefinition, label: "Called a loaded tool", effect: "read" }]
+                  : [])
+              ]
+            }
+          } as ContextSnapshot
+        }
+        if (modelChanged || tools) snapshot = JSON.stringify(rebuilt)
+        if (modelChanged) chosen = { connection: model.connectionId as ConnectionId, model: model.modelId as ModelId }
       }
+      if (planned instanceof StepNotResumable) return yield* refuse(planned.message)
       if (options?.direction !== undefined)
         planned = {
           ...planned,
@@ -139,6 +272,32 @@ const agentVersionResumer = Effect.gen(function* () {
             }
           ]
         }
+      // Assembly sizes today's chat, not the frozen prefix and kept tool results. Check the
+      // actual carried run before creating a version or executing any dangling effect.
+      const resumedSnapshot = JSON.parse(snapshot) as ContextSnapshot & Frozen
+      const budget = resumedSnapshot.contextBudget
+      if (checkBudget && budget && resumedSnapshot.inputs.model) {
+        // The tools as the resumed request sends them (agent/session.ts): on a model whose wire
+        // API defers tools, one not loaded in the kept transcript takes no room yet.
+        const offered = resumedSnapshot.agent?.tools ?? []
+        const deferred = new Set(
+          loadingWireFor(execution, resumedSnapshot.inputs.model)
+            ? offered.filter((t) => t.deferred === true).map((t) => t.name)
+            : []
+        )
+        const loaded = loadedSet(planned.transcript, deferred)
+        const count = yield* reader.CountRolloutContext({
+          model: JSON.stringify(resumedSnapshot.inputs.model),
+          request: JSON.stringify(resumedSnapshot.request),
+          transcript: JSON.stringify(planned.transcript),
+          tools: JSON.stringify(offered.filter((t) => !deferred.has(t.name) || loaded.has(t.name))),
+          ...(planned.continuation === undefined ? {} : { continuation: planned.continuation })
+        })
+        if (count > budget.maximum - budget.responseReserve)
+          return yield* refuse(
+            "The saved run is too large for this model's context window. Choose a model with more room, then resume."
+          )
+      }
       const rolloutId = uuidv7()
       const added = yield* writer.StartResumedVersion({
         userId,
@@ -146,7 +305,8 @@ const agentVersionResumer = Effect.gen(function* () {
         forkId,
         expectedRowVersion,
         rolloutId,
-        ...(chosen ? { model: chosen, snapshot } : {}),
+        ...(chosen ? { model: chosen } : {}),
+        ...(snapshot === material.snapshot ? {} : { snapshot }),
         version: {
           speakerEntityId: source.speakerEntityId,
           writer: "model",
@@ -162,7 +322,7 @@ const agentVersionResumer = Effect.gen(function* () {
         keptCalls: planned.keptCalls,
         branch: planned.cut.length > 0 ? { reason, messages: JSON.stringify(planned.cut) } : null
       })
-      const { chatId, entry } = yield* reader.GetSlot({ userId, slotId: source.slotId, forkId: added.forkId })
+      const { entry } = yield* reader.GetSlot({ userId, slotId: source.slotId, forkId: added.forkId })
       hub.publish(chatId, { _tag: "Slot", entry })
       yield* generations.start({
         userId,
@@ -171,6 +331,8 @@ const agentVersionResumer = Effect.gen(function* () {
         versionId: added.version.id,
         forkId: added.forkId,
         ...(planned.continuation === undefined ? {} : { initial: { text: planned.continuation, reasoning: "" } }),
+        // A side chat's story is read where the tab asking for this showed it (spec/WORKSHOP.md §4).
+        ...(options?.storyAt ? { storyAt: options.storyAt } : {}),
         resume: {
           rolloutId,
           snapshot,
@@ -194,22 +356,24 @@ export const makeAgentHandlers = Effect.gen(function* () {
         internal("GetRolloutSteps")
       ),
 
-    ResumeVersion: ({ versionId, forkId, expectedRowVersion }) =>
+    ResumeVersion: ({ versionId, forkId, expectedRowVersion, storyAt, saved }) =>
       resume(
         versionId,
         forkId ?? null,
         expectedRowVersion,
-        (material, frozen) =>
+        (material, frozen, model) =>
           material.status === "completed"
             ? new StepNotResumable("It finished. Carry on from one of its steps instead.")
             : planResume(material.transcript, {
-                prefill: frozen.inputs?.model?.prefill === "assistant",
+                // Text cut off goes on only where the model it goes on with takes a prefill.
+                prefill: model.prefill === "assistant",
                 historical: frozen.continuity?.historical ?? 0
               }),
-        "resume"
+        "resume",
+        storyAt || saved ? { ...(storyAt ? { storyAt } : {}), ...(saved ? { saved: true } : {}) } : undefined
       ).pipe(internal("ResumeVersion")),
 
-    ResumeFromStep: ({ versionId, step, edit, forkId, expectedRowVersion }) =>
+    ResumeFromStep: ({ versionId, step, edit, forkId, expectedRowVersion, storyAt }) =>
       resume(
         versionId,
         forkId ?? null,
@@ -224,7 +388,8 @@ export const makeAgentHandlers = Effect.gen(function* () {
             versionId,
             frozen.continuity?.historical ?? 0
           ),
-        "edit"
+        "edit",
+        storyAt ? { storyAt } : undefined
       ).pipe(internal("ResumeFromStep")),
     GetRunTranscript: ({ versionId }) =>
       Effect.flatMap(CurrentUser, (user) => reader.RolloutTranscript({ userId: user.id, versionId })).pipe(
@@ -282,7 +447,9 @@ export const makeAgentHandlers = Effect.gen(function* () {
     // External tools are never offered in an RP reply.
     ListReplyTools: () =>
       Effect.sync(() => {
-        const tools = registry.rolloutTools.list().filter((tool) => !outsideEffect(tool.effect))
+        const tools = registry.rolloutTools
+          .list()
+          .filter((tool) => !outsideEffect(tool.effect) && tool.replyTool !== false)
         const registered = new Set(tools.map((tool) => tool.id))
         const plan = registry.orchestrationModes.get("default")?.plan({
           state: foldState([{ scope: null, data: { key: "agent.enabled", value: { on: true } } }]),
@@ -317,11 +484,20 @@ export const regenerateSeveral = Effect.fnUntraced(function* (input: {
   readonly expectedRowVersion: number
   readonly model?: RetryModel
   readonly direction?: string
+  readonly storyAt?: StoryAt
 }) {
   const userId = (yield* CurrentUser).id
   const reader = yield* Reader
   const material = yield* reader.RolloutMaterial({ userId, versionId: input.versionId }).pipe(Effect.option)
   if (material._tag === "None" || (JSON.parse(material.value.snapshot) as Frozen).agent?.contract !== "several")
+    return null
+  // A new version can assemble afresh at the current position; a retained transcript
+  // cannot, because its old tool results may contain another branch or later messages.
+  if (!isDeepStrictEqual((JSON.parse(material.value.snapshot) as Frozen).storyAt, input.storyAt)) return null
+  if (
+    (JSON.parse(material.value.snapshot) as Frozen).storyStamp !==
+    (yield* storyReadStamp(reader, userId, input.storyAt))
+  )
     return null
   const resume = yield* agentVersionResumer
   return yield* resume(

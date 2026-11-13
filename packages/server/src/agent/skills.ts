@@ -20,10 +20,20 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "presets-lorebooks",
     label: "Presets and lorebooks",
     kinds: workshop,
-    description: "Read and create presets and lorebooks.",
+    description: "Read, create and edit presets and lorebooks.",
     instructions:
-      "Read a preset or lorebook before suggesting changes to it. New presets and lorebooks start empty unless you say what goes in them.",
-    tools: ["read_preset", "read_lorebook", "create_preset", "create_lorebook"]
+      "Read a preset or lorebook before suggesting changes to it, and change only what was asked. New presets and lorebooks start empty unless you say what goes in them.",
+    tools: ["read_preset", "read_lorebook", "create_preset", "create_lorebook", "edit_preset", "edit_lorebook"]
+  },
+  {
+    id: "this-workshop",
+    label: "This conversation",
+    kinds: workshop,
+    description:
+      "Look back through this conversation: earlier messages, their summaries and the steps of earlier replies.",
+    instructions:
+      "Search or read this conversation's earlier messages when they've left your view. To check what an earlier reply of yours looked up, read its steps with read_run instead of looking it up again.",
+    tools: ["search_chat", "read_messages", "expand_summary", "search_summaries", "read_run"]
   },
   {
     id: "library",
@@ -48,10 +58,19 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "stories",
     label: "Reading stories",
     kinds: workshop,
-    description: "Search a chat's history, and rename a word or name throughout it.",
+    description: "Read and search a chat's history, rename a word or name throughout it, and rewrite its text.",
     instructions:
-      "Search before renaming, so you know how many places change. A rename changes the chat's history and can be undone.",
-    tools: ["history_search", "history_rename", "list_chats"]
+      "Read or search before changing anything, so you know how many places change. A rename or rewrite changes the chat's history and can be undone.",
+    tools: [
+      "history_search",
+      "history_rename",
+      "list_chats",
+      "read_chat",
+      "search_chats",
+      "rewrite_chat",
+      "rewrite_messages",
+      "rewrite_instructions"
+    ]
   },
   {
     id: "settings",

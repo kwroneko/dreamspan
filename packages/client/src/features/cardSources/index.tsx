@@ -6,6 +6,7 @@ import { editorNotices } from "../editor/editorSlots.ts"
 import { settingsGroups } from "../settings/groups.ts"
 import { tabKinds } from "../workbench/kinds.ts"
 import { RemoteCardPage } from "./RemoteCardPage.tsx"
+import { RemoteLorebookPage } from "./RemoteLorebookPage.tsx"
 import { SourcesSettingsPage } from "./SourcesSettings.tsx"
 import { builtinRecognizers, sourceRecognizers } from "./sources.ts"
 import { SourceUpdateNotice } from "./updates.tsx"
@@ -29,6 +30,20 @@ export const register = () => [
     parent: "app",
     path: "/sources/$sourceId/cards/$remoteId",
     component: RemoteCardPage
+  }),
+  // A standalone lorebook on a source: opening it adds it, then shows it in the lorebook editor (§3.9).
+  routes.register({
+    id: "cardSources.lorebook",
+    parent: "app",
+    path: "/sources/$sourceId/lorebooks/$remoteId",
+    component: RemoteLorebookPage
+  }),
+  tabKinds.register({
+    id: "remote-lorebook",
+    order: 201,
+    match: (url) => /^\/sources\/([^/]+\/lorebooks\/[^/]+)$/.exec(url.pathname)?.[1] ?? null,
+    title: () => "Lorebook",
+    icon: "book"
   }),
   tabKinds.register({
     id: "remote-card",

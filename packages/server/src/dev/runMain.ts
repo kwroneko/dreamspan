@@ -12,6 +12,7 @@ import { DecisionEngine } from "../decision/engine.ts"
 import { serverWith } from "../server.ts"
 import * as FakeGenerator from "./fakeGenerator.ts"
 import { fakeCardSources } from "./fakeCardSource.ts"
+import { fakeSavedMedia, fakeSavedMediaWanted } from "./fakeSavedMedia.ts"
 
 class FakeGeneratorInProduction extends Schema.TaggedError<FakeGeneratorInProduction>()(
   "FakeGeneratorInProduction",
@@ -90,5 +91,8 @@ Effect.gen(function* () {
         sources
       )
   })
-  return yield* Layer.launch(server.pipe(Layer.provide(AppConfig.layer)))
+  const withMedia = fakeSavedMediaWanted(process.env[serverEnvironment.FAKE_SAVED_MEDIA])
+    ? fakeSavedMedia.pipe(Layer.provideMerge(server))
+    : server
+  return yield* Layer.launch(withMedia.pipe(Layer.provide(AppConfig.layer)))
 }).pipe(NodeRuntime.runMain({ teardown }))

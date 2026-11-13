@@ -1,6 +1,6 @@
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { useSummariesOfUrl } from "./SummaryViewer.tsx"
-import { messageRows, useTimelineTransforms } from "./timelineContributions.tsx"
+import { messageRows, useTimelineInputs, useTimelineTransforms } from "./timelineContributions.tsx"
 import { lcmCursor, positionOf } from "./position.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import {
@@ -70,7 +70,7 @@ declare module "@tanstack/react-router" {
 }
 
 /** What MessageList flashed last, kept across its remounts (a timeline layout switch). */
-interface Flashes {
+export interface Flashes {
   opened: number
   again: boolean
 }
@@ -85,7 +85,11 @@ const SUMMARIZED: ContextMark = {
   reason: "Summarized: a summary stands in for this message in the context."
 }
 
-function MessageList({
+/**
+ * The messages, virtualized. `embedded`: a chat shown inside another's panel (the workshop beside
+ * a story), which keeps no reading position in the page's history: that's the page's chat's.
+ */
+export function MessageList({
   session,
   view,
   anchor,
@@ -94,10 +98,12 @@ function MessageList({
   rail,
   onBranch,
   onOpenSummaries,
-  restore
+  restore,
+  embedded = false
 }: {
   session: ChatSession
   view: ChatView
+  embedded?: boolean
   anchor: SlotId | null
   /** The message jumped to, which flashes when the window opens at it (jumpFlash.ts); null: none. */
   jump: SlotId | null
@@ -187,6 +193,8 @@ function MessageList({
         ? 0
         : (boundaryIndex(view) ?? -1)
   const transforms = useTimelineTransforms()
+  // A transform's own inputs (the threads' sets) changed: the rows are made again.
+  const inputs = useTimelineInputs()
   const rows = useMemo(
     () =>
       [...transforms.entries]
@@ -195,7 +203,8 @@ function MessageList({
           (rows, entry) => entry.transform(rows, { view, lcm, summaries, divider, historyDivider }),
           messageRows(entries)
         ),
-    [transforms, view, lcm, summaries, divider, historyDivider, entries]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `inputs` stands for what the transforms read themselves
+    [transforms, view, lcm, summaries, divider, historyDivider, entries, inputs]
   )
   const rowCount = rows.length
   /** The row an entry is shown at. */
@@ -481,7 +490,7 @@ function MessageList({
   }, [restore, view.opened, hold, virtualizer])
   useEffect(() => {
     const list = parent.current
-    if (!list) return
+    if (!list || embedded) return
     let timer: ReturnType<typeof setTimeout> | undefined
     const save = () => {
       if (!settled.current || !view.forkId) return
@@ -515,7 +524,7 @@ function MessageList({
       list.removeEventListener("scroll", scroll)
       window.removeEventListener("pagehide", save)
     }
-  }, [navigate, session, userId, view.forkId, view.newer])
+  }, [navigate, session, userId, view.forkId, view.newer, embedded])
 
   const items = virtualizer.getVirtualItems()
   const first = items[0]?.index
@@ -568,7 +577,7 @@ function MessageList({
     <TooltipProvider>
       <div
         ref={parent}
-        data-testid="messages"
+        data-testid={embedded ? "side-chat-messages" : "messages"}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
         <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>

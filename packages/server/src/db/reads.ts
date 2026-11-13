@@ -21,6 +21,8 @@ import {
   type VersionId
 } from "@rp/shared/chat.ts"
 import { chatForkSummaries } from "./forkSummaries.ts"
+import { shownSplits } from "./threads.ts"
+import { makeThreadReadHandlers } from "./threadReads.ts"
 import { Branch, type PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, type RefId, Revision, type RevisionId } from "@rp/shared/library.ts"
@@ -123,7 +125,17 @@ const pathColumns = (fork: string) => `${shownVersionColumns}, s.parent_slot_id,
   (SELECT f.writer = 'human' AND f.origin <> 'greeting' FROM versions f WHERE f.slot_id = s.id AND f.fork_id IS NULL
     ORDER BY f.ordinal LIMIT 1) AS user_side,
   (SELECT f.speaker_entity_id FROM versions f WHERE f.slot_id = s.id AND f.fork_id IS NULL ORDER BY f.ordinal LIMIT 1)
-    AS first_speaker`
+    AS first_speaker,
+  ${sendCopies("s")} AS send_copies`
+
+/**
+ * Slot `s`'s copies in other threads (spec/THREADS.md §6.3), as a JSON array of [slot, fork]:
+ * one primary-key probe for a message sent to one thread, which is nearly every one.
+ */
+const sendCopies = (s: string) => `(SELECT json_group_array(json_array(o.slot_id, os.fork_id))
+  FROM thread_sends t JOIN thread_sends o ON o.group_id = t.group_id AND o.slot_id <> t.slot_id
+    JOIN slots os ON os.id = o.slot_id JOIN forks of ON of.id = os.fork_id
+  WHERE t.slot_id = ${s}.id AND os.deleted_at IS NULL AND of.deleted_at IS NULL)`
 
 /**
  * Joins slot `s` to the version fork `fork` selects (`o`) and the override that chose it
@@ -437,6 +449,8 @@ export const makeReadHandlers = Effect.gen(function* () {
 
   const handlers = {
     WorkshopOperationInfo: (input) => operationInfo(sql, input).pipe(query("WorkshopOperationInfo")),
+    // --- Parallel threads (spec/THREADS.md §4.3)
+    ...(yield* makeThreadReadHandlers),
     GetBinLimits: ({ userId }) => readBinLimits(sql, userId, binLimits).pipe(query("GetBinLimits")),
     FindUserByHandle: ({ handle }) =>
       sql<UserRow>`SELECT * FROM users WHERE handle = ${handle}`.pipe(
@@ -915,15 +929,19 @@ export const makeReadHandlers = Effect.gen(function* () {
           ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
         // Where each parts from its parent and its last message's time, as the shell lists them.
         const summaries = yield* chatForkSummaries(sql, userId, chatId, rows)
+        // The thread sets each is in, of those still shown (two threads with a live fork).
+        const shown = shownSplits(rows.map((row) => summaries.get(row.id)?.threads ?? []))
         return yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             const s = summaries.get(row.id)
+            const threads = (s?.threads ?? []).filter((place) => shown.has(place.splitId))
             return new Fork({
               ...toFork(row),
               startSlotId: (yield* branchStart(sql, row)) as SlotId | null,
               tipExcerpt: s?.preview ?? "",
               split: s?.split ?? null,
-              endAt: s?.endAt ?? null
+              endAt: s?.endAt ?? null,
+              ...(threads.length > 0 ? { threads } : {})
             })
           })
         )
@@ -966,7 +984,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         )
       }).pipe(query("ListBranches")),
 
-    GetSlot: ({ userId, slotId, forkId }) =>
+    GetSlot: ({ userId, slotId, forkId, onForkOnly }) =>
       Effect.gen(function* () {
         const [owned] = yield* sql<{ chat_id: ChatId }>`
           SELECT s.chat_id FROM slots s JOIN chats c ON c.id = s.chat_id
@@ -975,11 +993,19 @@ export const makeReadHandlers = Effect.gen(function* () {
         const fork = forkId
           ? (yield* liveFork(yield* ownedChat(userId, owned.chat_id), forkId)).id
           : yield* forkAt(sql, owned.chat_id, slotId)
+        let position: number | null = null
+        if (onForkOnly) {
+          const shown = yield* liveFork(yield* ownedChat(userId, owned.chat_id), fork as ForkId | null)
+          const place = yield* slotPlace(sql, owned.chat_id, slotId)
+          const pieces = yield* pathPieces(sql, owned.chat_id, shown.id, shown.tip_slot_id)
+          position = place === null ? null : positionOf(pieces, place)
+          if (position === null) return yield* new NotFound({ entity: "slot on branch", id: slotId })
+        }
         const [row] = yield* sql<PathRow>`
           SELECT ${withFork(sql, fork, pathColumns)}, ${fork} AS shown_fork_id FROM slots s ${viewJoin(sql, fork)}
           WHERE s.id = ${slotId}`
         if (row!.slot_deleted !== 0) return yield* new NotFound({ entity: "slot", id: slotId })
-        return { chatId: owned.chat_id, entry: toPathEntry(row!) }
+        return { chatId: owned.chat_id, entry: toPathEntry({ ...row!, ...(position === null ? {} : { position }) }) }
       }).pipe(query("GetSlot")),
 
     VersionAmendments: ({ userId, versionId }) =>

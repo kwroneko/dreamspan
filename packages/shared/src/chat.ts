@@ -1,3 +1,5 @@
+import { ChatId, SlotId, ForkId } from "./chatPosition.ts"
+export { ChatId, SlotId, ForkId, StoryAt, StoryAtField } from "./chatPosition.ts"
 // The message graph as the rest of the app sees it (DATA-MODEL.md §4).
 import { Schema } from "effect"
 import { StepsSummary } from "./agent.ts"
@@ -6,14 +8,8 @@ import { idSchema } from "./id.ts"
 import { StoredRewrite, VersionRewrite } from "./regexScripts.ts"
 import { ReplySections } from "./replySections.ts"
 
-export const ChatId = idSchema("ChatId", "chat")
-export type ChatId = typeof ChatId.Type
-export const SlotId = idSchema("SlotId", "slot")
-export type SlotId = typeof SlotId.Type
 export const VersionId = idSchema("VersionId", "version")
 export type VersionId = typeof VersionId.Type
-export const ForkId = idSchema("ForkId", "fork")
-export type ForkId = typeof ForkId.Type
 export const EntityId = idSchema("EntityId", "entity")
 export type EntityId = typeof EntityId.Type
 
@@ -53,6 +49,13 @@ export const ForkSplit = Schema.Struct({ at: Schema.Number, after: Schema.Int })
 export type ForkSplit = typeof ForkSplit.Type
 
 /**
+ * A fork's place in one set of parallel threads (spec/THREADS.md §4.3): the split, and which
+ * of its threads it's in (0: the branch they were started in, continuing). See threads.ts.
+ */
+export const ThreadPlace = Schema.Struct({ splitId: Schema.String, ordinal: Schema.Int })
+export type ThreadPlace = typeof ThreadPlace.Type
+
+/**
  * One line of a chat as the user sees it: history from the first message to its tip
  * (spec/FORK-INDEPENDENCE-DELTA.md §2.1). Forks share their history's messages; a fork made
  * at a message has that message as its base and, until something is sent in it, its tip.
@@ -80,7 +83,9 @@ export class Fork extends Schema.Class<Fork>("Fork")({
   /** Where it parts from its parent (ListForks); null for the chat's first fork. */
   split: Schema.optionalKey(Schema.NullOr(ForkSplit)),
   /** Its last shown message's time (ListForks); null without one. */
-  endAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
+  endAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  /** The thread sets it's in, innermost first (ListForks; spec/THREADS.md §4.3); absent when none. */
+  threads: Schema.optionalKey(Schema.Array(ThreadPlace))
 }) {}
 
 /**
@@ -313,6 +318,11 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
    * not inserted.
    */
   inserted: Schema.optionalKey(Schema.Literal(true)),
+  /**
+   * Its copies in other threads when it was sent to several (spec/THREADS.md §6.3): each copy's
+   * message and the fork that posted it, while both are live. Absent: none.
+   */
+  copies: Schema.optionalKey(Schema.Array(Schema.Struct({ slotId: SlotId, forkId: ForkId }))),
   /**
    * The side the message is on when its speaker isn't one of the cast, as the context reads
    * it (assemblySources.ts): its first version's, deleted or not, so which versions are

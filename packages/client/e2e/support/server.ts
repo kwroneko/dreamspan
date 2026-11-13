@@ -57,6 +57,8 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
         CLIENT_DIST: join(root, "packages/client/dist"),
         // Never the real cardex: main.ts registers it when this is unset.
         ...(entry === "packages/server/src/main.ts" ? { FAKE_CARD_SOURCE: "off" } : {}),
+        // Saved card media is synthetic: no browser test downloads from another site.
+        FAKE_SAVED_MEDIA: "on",
         ...env
       },
       stdio: ["ignore", "pipe", "pipe", "ipc"]

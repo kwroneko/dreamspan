@@ -12,7 +12,17 @@ import { recordHistoryReduction } from "./historyChanges.ts"
 // first entry posts after it, in the same transaction (FinishGeneration): a message, then
 // a reply to it, or the reply asked for. The rest wait for that reply. One rule covers
 // Send and Generate: whatever is aimed at a reply still being written waits for it.
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import {
+  type ChatId,
+  type EntityId,
+  type ForkId,
+  NewVersion,
+  type QueuedMessage,
+  type SlotId,
+  type StoryAt,
+  type VersionId
+} from "@rp/shared/chat.ts"
+import { ThreadsRefused } from "@rp/shared/threads.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
@@ -24,7 +34,8 @@ import { selectedIn, slotDeletedIn, nextSeq } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts"
-import { rewriteColumns, toVersion, toChat } from "./rows.ts"
+import { type ChatRow, rewriteColumns, toVersion, toChat } from "./rows.ts"
+import { separateThreads } from "./threads.ts"
 import type { StoredRewrite } from "@rp/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
@@ -93,6 +104,14 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         : sql<{ n: number }>`SELECT count(*) AS n FROM entities WHERE id = ${speaker} AND owner_user_id = ${owner}
             AND kind = 'card' AND deleted_at IS NULL`.pipe(
             Effect.map(([row]) => (row?.n === 1 ? (speaker as EntityId) : null))
+          )
+
+    /** A message sent to several threads that queued keeps its group when it posts (spec/THREADS.md §6.2). */
+    const keepGroup = (entry: QueuedRow, chatId: string, slotId: string) =>
+      entry.send_group === null
+        ? Effect.void
+        : sql`INSERT INTO thread_sends (slot_id, chat_id, group_id) VALUES (${slotId}, ${chatId}, ${entry.send_group})`.pipe(
+            Effect.asVoid
           )
 
     const nothing = { posted: [] as Array<SlotId>, next: null, withdrawn: 0, queueChanged: false, queue: [] }
@@ -225,6 +244,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 )
               )
               posted.push(message.slotId)
+              yield* keepGroup(entry, chatId, message.slotId)
               parent = message.slotId
             }
           }
@@ -248,6 +268,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             )
           )
           posted.push(message.slotId)
+          yield* keepGroup(entry, chatId, message.slotId)
           replyParent = message.slotId
           waiting = waiting.slice(1)
         }
@@ -265,6 +286,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             userMessage(first!.content, speaker, JSON.parse(first!.images_json), queuedRewrite(first!))
           )
           posted.push(message.slotId)
+          yield* keepGroup(first!, chatId, message.slotId)
           replyParent = message.slotId
         }
         const next = yield* append(
@@ -291,7 +313,15 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             yield* sql`UPDATE queued_messages SET round_start_slot_id = coalesce(round_start_slot_id, ${next.slotId})
               WHERE id IN ${sql.in(starting)}`
         }
-        return { posted, next: { slotId: next.slotId, versionId: next.version.id as VersionId, forkId: next.forkId } }
+        return {
+          posted,
+          next: {
+            slotId: next.slotId,
+            versionId: next.version.id as VersionId,
+            forkId: next.forkId,
+            ...(first!.story_at_json === null ? {} : { storyAt: JSON.parse(first!.story_at_json) as StoryAt })
+          }
+        }
       })
 
     /**
@@ -419,6 +449,156 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         return { chatId, root }
       })
 
+    type SendInput = Parameters<WriteHandlers["SendOrQueue"]>[0]
+
+    /** SendOrQueue's write, which SendToThreads makes once per thread inside its own transaction. */
+    const sendOrQueue = ({
+      userId,
+      chatId,
+      forkId,
+      parentSlotId,
+      branch,
+      kind,
+      content,
+      speakerEntityId,
+      replySpeakerEntityId,
+      noReply,
+      images,
+      imageDraftIds,
+      direction,
+      commitDraft,
+      rewrite,
+      round,
+      autoPick,
+      storyAt
+    }: SendInput) =>
+      Effect.gen(function* () {
+        yield* graph.ownedChat(userId, chatId)
+        let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
+        const draftForkId = fork.id
+        // A turn added at the fork's tip is a new user action: the round already there, waiting
+        // or stopped, ends (DESIGN §2.3). A branch elsewhere leaves it be.
+        const endedRound =
+          parentSlotId === fork.tip_slot_id
+            ? yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 RETURNING id`
+            : []
+        for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
+        yield* graph.checkImages(userId, images ?? [])
+        yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
+        yield* graph.checkSpeaker(userId, speakerEntityId)
+        if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
+        if (parentSlotId !== null) {
+          const [parent] = yield* sql<{ status: string; deleted: number }>`
+              SELECT v.status, ${slotDeletedIn(sql, fork.id, "s")} AS deleted
+              FROM slots s JOIN versions v ON v.id = ${selectedIn(sql, fork.id, "s")}
+              WHERE s.id = ${parentSlotId} AND s.chat_id = ${chatId}
+                AND (s.deleted_at IS NULL OR s.id = ${fork.tip_slot_id})`
+          if (!parent) return yield* new NotFound({ entity: "slot", id: parentSlotId })
+          // A tab that missed a newer message hears about it, queued or not.
+          if (!branch && parentSlotId !== fork.tip_slot_id) {
+            return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
+          }
+          // A deleted anchor can remain the tip to retain its gap. Nothing waits on its
+          // hidden generation: afterReply withdraws entries whose reply was deleted.
+          if (parent.status === "generating" && !parent.deleted) {
+            const at = Date.now()
+            // A branch queued onto a reply still being written waits in a fork of its own.
+            if (branch && parentSlotId !== fork.tip_slot_id) {
+              const through = (yield* onForkPath(sql, chatId, fork, parentSlotId))
+                ? fork
+                : ((yield* forkThrough(sql, chatId, parentSlotId)) ?? fork)
+              if (through.tip_slot_id === parentSlotId) fork = through
+              else {
+                fork = yield* graph.createFork(chatId, through, parentSlotId, at, true)
+                yield* graph.carryChatNoteDrafts(userId, chatId, through, fork)
+              }
+            }
+            const [next] = yield* sql<{ n: number }>`
+                SELECT coalesce(max(seq), -1) + 1 AS n FROM queued_messages WHERE chat_id = ${chatId}`
+            // Sent now, posted later: the fork is chatted in now.
+            yield* graph.chatIn(fork.id, at)
+            const [row] = yield* sql<QueuedRow>`INSERT INTO queued_messages ${sql.insert({
+              id: uuidv7(),
+              chat_id: chatId,
+              reply_slot_id: parentSlotId,
+              fork_id: fork.id,
+              seq: next!.n,
+              kind,
+              content: kind === "message" ? content : "",
+              ...(kind === "message"
+                ? {
+                    raw_content: rewriteColumns(rewrite).raw_content,
+                    rewrite_json: rewriteColumns(rewrite).rewrite_json
+                  }
+                : {}),
+              images_json: JSON.stringify(images ?? []),
+              speaker_entity_id: speakerEntityId,
+              reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
+              no_reply: kind === "message" && noReply === true ? 1 : 0,
+              direction: kind === "generate" && direction !== null && direction.trim() !== "" ? direction : null,
+              auto_pick: autoPick === true && (kind === "generate" || noReply !== true) ? 1 : 0,
+              // A side chat's reply reads its story where the sending tab showed it (spec/WORKSHOP.md §4).
+              story_at_json: storyAt === undefined ? null : JSON.stringify(storyAt),
+              created_at: at,
+              updated_at: at
+            })} RETURNING *`
+            // The rest of the round waits behind it: postQueued moves each on to the reply before.
+            if (kind === "generate" || noReply !== true)
+              yield* queueRound(chatId, parentSlotId, fork.id, round ?? [], next!.n + 1, at, autoPick === true, null)
+            // The text waits in the queue now, and comes back to the composer if withdrawn.
+            const { draft, recovered } = yield* bin.drafts.commit(userId, commitDraft, {
+              // The composer's, or the insertion editor's below the tip, whose insertion is an append
+              // (spec/MESSAGE-INSERT.md §4.2).
+              targetKind: ["composer", "insert"],
+              targetId: chatId,
+              matchesField: (kind, field) =>
+                field === (kind === "insert" ? `${draftForkId}:${parentSlotId ?? ""}` : draftForkId),
+              content: row!.kind === "generate" ? (row!.direction ?? "") : (rewrite?.raw ?? row!.content)
+            })
+            return {
+              _tag: "Queued" as const,
+              queued: toQueued(row!),
+              queue: yield* chatQueue(sql, chatId),
+              draft,
+              recovered
+            }
+          }
+        }
+        const result = yield* graph.appendMessage({
+          userId,
+          chatId,
+          forkId: fork.id as ForkId,
+          parentSlotId,
+          branch,
+          version:
+            kind === "message"
+              ? userMessage(content, speakerEntityId, images, rewrite)
+              : reply(speakerEntityId, direction, autoPick === true),
+          commitDraft
+        })
+        // A reply posted now: the rest of its round waits for it.
+        if (kind === "generate" && (round ?? []).length > 0) {
+          const [next] = yield* sql<{ n: number }>`
+              SELECT coalesce(max(seq), -1) + 1 AS n FROM queued_messages WHERE chat_id = ${chatId}`
+          yield* queueRound(
+            chatId,
+            result.slotId,
+            result.forkId,
+            round ?? [],
+            next!.n,
+            Date.now(),
+            autoPick === true,
+            result.slotId
+          )
+          return { _tag: "Posted" as const, result, queue: yield* chatQueue(sql, chatId) }
+        }
+        return {
+          _tag: "Posted" as const,
+          result,
+          ...(endedRound.length > 0 ? { queue: yield* chatQueue(sql, chatId) } : {})
+        }
+      })
+
     const handlers = {
       ...(yield* makeShellWriteHandlers),
       StartGreetingChat: (input) =>
@@ -448,149 +628,92 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           return { ...added, composer: new Draft({ ...composer, guidance: guidance ?? false }) }
         }).pipe(transaction("StartChat")),
 
-      SendOrQueue: ({
-        userId,
-        chatId,
-        forkId,
-        parentSlotId,
-        branch,
-        kind,
-        content,
-        speakerEntityId,
-        replySpeakerEntityId,
-        noReply,
-        images,
-        imageDraftIds,
-        direction,
-        commitDraft,
-        rewrite,
-        round,
-        autoPick
-      }) =>
+      SendOrQueue: (input) => sendOrQueue(input).pipe(transaction("SendOrQueue")),
+
+      // One message to several threads (spec/THREADS.md §6.2): per thread, exactly SendOrQueue's
+      // append in that thread's fork, then the reply its Next asked for, all in one transaction
+      // and one send group. The thread the user is in goes last, so it stays the current fork.
+      SendToThreads: ({ userId, chatId, images, imageDraftIds, commitDraft, targets }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
-          let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
-          const draftForkId = fork.id
-          // A turn added at the fork's tip is a new user action: the round already there, waiting
-          // or stopped, ends (DESIGN §2.3). A branch elsewhere leaves it be.
-          const endedRound =
-            parentSlotId === fork.tip_slot_id
-              ? yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 RETURNING id`
-              : []
-          for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
-          yield* graph.checkImages(userId, images ?? [])
-          yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
-          yield* graph.checkSpeaker(userId, speakerEntityId)
-          if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
-          if (parentSlotId !== null) {
-            const [parent] = yield* sql<{ status: string; deleted: number }>`
-              SELECT v.status, ${slotDeletedIn(sql, fork.id, "s")} AS deleted
-              FROM slots s JOIN versions v ON v.id = ${selectedIn(sql, fork.id, "s")}
-              WHERE s.id = ${parentSlotId} AND s.chat_id = ${chatId}
-                AND (s.deleted_at IS NULL OR s.id = ${fork.tip_slot_id})`
-            if (!parent) return yield* new NotFound({ entity: "slot", id: parentSlotId })
-            // A tab that missed a newer message hears about it, queued or not.
-            if (!branch && parentSlotId !== fork.tip_slot_id) {
-              return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
-            }
-            // A deleted anchor can remain the tip to retain its gap. Nothing waits on its
-            // hidden generation: afterReply withdraws entries whose reply was deleted.
-            if (parent.status === "generating" && !parent.deleted) {
-              const at = Date.now()
-              // A branch queued onto a reply still being written waits in a fork of its own.
-              if (branch && parentSlotId !== fork.tip_slot_id) {
-                const through = (yield* onForkPath(sql, chatId, fork, parentSlotId))
-                  ? fork
-                  : ((yield* forkThrough(sql, chatId, parentSlotId)) ?? fork)
-                if (through.tip_slot_id === parentSlotId) fork = through
-                else {
-                  fork = yield* graph.createFork(chatId, through, parentSlotId, at, true)
-                  yield* graph.carryChatNoteDrafts(userId, chatId, through, fork)
-                }
+          const forks = yield* Effect.forEach(targets, (target) => graph.ownedFork(userId, chatId, target.forkId))
+          if (
+            new Set(forks.map((fork) => fork.id)).size !== forks.length ||
+            !(yield* separateThreads(sql, chatId, forks))
+          )
+            return yield* new ThreadsRefused({ message: "Each copy goes to another thread of the same threads." })
+          const groupId = uuidv7()
+          const copies: Array<
+            | {
+                readonly _tag: "Posted"
+                readonly forkId: ForkId
+                readonly slotId: SlotId
+                readonly reply: { slotId: SlotId; versionId: VersionId } | null
               }
-              const [next] = yield* sql<{ n: number }>`
-                SELECT coalesce(max(seq), -1) + 1 AS n FROM queued_messages WHERE chat_id = ${chatId}`
-              // Sent now, posted later: the fork is chatted in now.
-              yield* graph.chatIn(fork.id, at)
-              const [row] = yield* sql<QueuedRow>`INSERT INTO queued_messages ${sql.insert({
-                id: uuidv7(),
-                chat_id: chatId,
-                reply_slot_id: parentSlotId,
-                fork_id: fork.id,
-                seq: next!.n,
-                kind,
-                content: kind === "message" ? content : "",
-                ...(kind === "message"
-                  ? {
-                      raw_content: rewriteColumns(rewrite).raw_content,
-                      rewrite_json: rewriteColumns(rewrite).rewrite_json
-                    }
-                  : {}),
-                images_json: JSON.stringify(images ?? []),
-                speaker_entity_id: speakerEntityId,
-                reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
-                no_reply: kind === "message" && noReply === true ? 1 : 0,
-                direction: kind === "generate" && direction !== null && direction.trim() !== "" ? direction : null,
-                auto_pick: autoPick === true && (kind === "generate" || noReply !== true) ? 1 : 0,
-                created_at: at,
-                updated_at: at
-              })} RETURNING *`
-              // The rest of the round waits behind it: postQueued moves each on to the reply before.
-              if (kind === "generate" || noReply !== true)
-                yield* queueRound(chatId, parentSlotId, fork.id, round ?? [], next!.n + 1, at, autoPick === true, null)
-              // The text waits in the queue now, and comes back to the composer if withdrawn.
-              const { draft, recovered } = yield* bin.drafts.commit(userId, commitDraft, {
-                // The composer's, or the insertion editor's below the tip, whose insertion is an append
-                // (spec/MESSAGE-INSERT.md §4.2).
-                targetKind: ["composer", "insert"],
-                targetId: chatId,
-                matchesField: (kind, field) =>
-                  field === (kind === "insert" ? `${draftForkId}:${parentSlotId ?? ""}` : draftForkId),
-                content: row!.kind === "generate" ? (row!.direction ?? "") : (rewrite?.raw ?? row!.content)
-              })
-              return {
-                _tag: "Queued" as const,
-                queued: toQueued(row!),
-                queue: yield* chatQueue(sql, chatId),
-                draft,
-                recovered
-              }
-            }
-          }
-          const result = yield* graph.appendMessage({
-            userId,
-            chatId,
-            forkId: fork.id as ForkId,
-            parentSlotId,
-            branch,
-            version:
-              kind === "message"
-                ? userMessage(content, speakerEntityId, images, rewrite)
-                : reply(speakerEntityId, direction, autoPick === true),
-            commitDraft
-          })
-          // A reply posted now: the rest of its round waits for it.
-          if (kind === "generate" && (round ?? []).length > 0) {
-            const [next] = yield* sql<{ n: number }>`
-              SELECT coalesce(max(seq), -1) + 1 AS n FROM queued_messages WHERE chat_id = ${chatId}`
-            yield* queueRound(
+            | { readonly _tag: "Queued"; readonly forkId: ForkId; readonly queued: QueuedMessage }
+          > = []
+          let committed: { draft: Draft | null; recovered: number } = { draft: null, recovered: 0 }
+          const order = [...targets.keys()].slice(1).concat([0])
+          for (const index of order) {
+            const target = targets[index]!
+            const fork = forks[index]!
+            const first = index === 0
+            const sent = yield* sendOrQueue({
+              userId,
               chatId,
-              result.slotId,
-              result.forkId,
-              round ?? [],
-              next!.n,
-              Date.now(),
-              autoPick === true,
-              result.slotId
-            )
-            return { _tag: "Posted" as const, result, queue: yield* chatQueue(sql, chatId) }
+              forkId: fork.id as ForkId,
+              // The first thread's tip is the one its tab saw; the others' copies go under theirs now.
+              parentSlotId: first ? target.parentSlotId : (fork.tip_slot_id as SlotId | null),
+              branch: false,
+              kind: "message",
+              content: target.content,
+              ...(target.rewrite === undefined ? {} : { rewrite: target.rewrite }),
+              speakerEntityId: target.speakerEntityId,
+              replySpeakerEntityId: target.replySpeakerEntityId,
+              ...(target.reply ? {} : { noReply: true }),
+              ...(images === undefined ? {} : { images }),
+              ...(first && imageDraftIds !== undefined ? { imageDraftIds } : {}),
+              direction: null,
+              commitDraft: first ? commitDraft : null,
+              ...(target.round === undefined ? {} : { round: target.round }),
+              ...(target.autoPick === true ? { autoPick: true } : {})
+            })
+            if (sent._tag === "Queued") {
+              // It keeps its group, and joins it when it posts (keepGroup).
+              yield* sql`UPDATE queued_messages SET send_group = ${groupId} WHERE id = ${sent.queued.id}`
+              copies[index] = { _tag: "Queued", forkId: fork.id as ForkId, queued: sent.queued }
+              if (first) committed = { draft: sent.draft, recovered: sent.recovered }
+              continue
+            }
+            const { result } = sent
+            if (first) committed = { draft: result.draft, recovered: result.recovered }
+            yield* sql`INSERT INTO thread_sends (slot_id, chat_id, group_id) VALUES (${result.slotId}, ${chatId}, ${groupId})`
+            let reply: { slotId: SlotId; versionId: VersionId } | null = null
+            if (target.reply) {
+              // The reply the client would ask for after an immediate send, as Generate does.
+              const asked = yield* sendOrQueue({
+                userId,
+                chatId,
+                forkId: result.forkId,
+                parentSlotId: result.slotId,
+                branch: false,
+                kind: "generate",
+                content: "",
+                speakerEntityId: target.replySpeakerEntityId,
+                replySpeakerEntityId: null,
+                direction: null,
+                commitDraft: null,
+                ...(target.round === undefined ? {} : { round: target.round }),
+                ...(target.autoPick === true ? { autoPick: true } : {})
+              })
+              // Its parent was just written, so it posts.
+              if (asked._tag === "Posted") reply = { slotId: asked.result.slotId, versionId: asked.result.version.id }
+            }
+            copies[index] = { _tag: "Posted", forkId: result.forkId, slotId: result.slotId, reply }
           }
-          return {
-            _tag: "Posted" as const,
-            result,
-            ...(endedRound.length > 0 ? { queue: yield* chatQueue(sql, chatId) } : {})
-          }
-        }).pipe(transaction("SendOrQueue")),
+          const [chat] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
+          return { groupId, copies, chat: toChat(chat!), queue: yield* chatQueue(sql, chatId), ...committed }
+        }).pipe(transaction("SendToThreads")),
 
       EditQueued: ({ userId, queuedId, content, speakerEntityId, expectedRowVersion, draft, rewrite }) =>
         Effect.gen(function* () {

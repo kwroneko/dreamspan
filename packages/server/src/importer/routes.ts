@@ -228,7 +228,8 @@ export const layer = Layer.unwrap(
       if (target !== null && target.kind !== "card" && target.parentEntityId !== null) {
         return jsonError(409, "a variant takes new versions by merging from its original")
       }
-      if (mode !== null && target?.kind !== "card") return jsonError(409, "only a card takes a new version in place")
+      if (mode !== null && target?.kind !== "card" && !(mode === "merge" && target?.kind === "lorebook"))
+        return jsonError(409, "only a card takes a new version in place")
 
       const message = NodeHttpServerRequest.toIncomingMessage(request)
       const limits = {
@@ -450,6 +451,11 @@ export const layer = Layer.unwrap(
 
     // At startup and every hour: media files no row names, which a failed import can leave.
     const sweep = Effect.gen(function* () {
+      // Saved card media no revision names any more goes first, so its files are swept now.
+      const pruned = yield* writer
+        .PruneSavedMedia()
+        .pipe(Effect.catch((error) => Effect.logWarning("pruning saved media failed", error).pipe(Effect.as(0))))
+      if (pruned > 0) yield* Effect.logInfo(`removed ${pruned} saved media addresses no library entry names`)
       const recorded = new Set(yield* reader.ListMediaHashes())
       const deleted = yield* sweepMedia(config.dataDir, recorded, {
         graceMs: MEDIA_GRACE_MS,

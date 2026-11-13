@@ -17,7 +17,9 @@ import { useAtomValue } from "@effect/atom-react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { Fragment, type ReactNode, useMemo, useState } from "react"
+import { Fragment, type ReactNode, useContext, useMemo, useState } from "react"
+import { ReplyExtrasContext } from "../replyExtras.ts"
+import { ChatPlaceScope, chatPlaceKey } from "../chatPlace.ts"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../../editor/userDraft.tsx"
 import { useAction } from "../../../actions.tsx"
 import { AppClient } from "../../../rpc.ts"
@@ -173,9 +175,13 @@ interface StepEditing {
   readonly error: string | null
 }
 
+/** A side chat's story text arrives quoted (spec/WORKSHOP.md §4): the inspector says so plainly. */
+const quotesStory = (target: StepTarget) =>
+  target.kind === "result" && !target.entry.isError && target.entry.text.startsWith("<story_excerpt ")
+
 const titleOf = (target: StepTarget) =>
   target.kind === "result"
-    ? `Result of ${target.entry.tool}${target.entry.isError ? " (an error)" : ""}`
+    ? `Result of ${target.entry.tool}${target.entry.isError ? " (an error)" : quotesStory(target) ? ": story text, quoted for the assistant to discuss" : ""}`
     : target.part.type === "toolCall"
       ? `Tool call: ${target.part.name}`
       : target.part.type === "thinking"
@@ -459,17 +465,24 @@ function Steps({
 function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): StepEditing {
   const action = useAction()
   const navigate = useNavigate()
-  const search = useSearch({ strict: false }) as { fork?: unknown; stepEdit?: unknown }
-  const open = typeof search.stepEdit === "string" ? search.stepEdit : null
+  // A chat beside another (the workshop in a story's panel) keeps its choices under its own keys.
+  const scope = useContext(ChatPlaceScope)
+  const stepEditKey = chatPlaceKey(scope, "stepEdit")
+  const forkKey = chatPlaceKey(scope, "fork")
+  const search = useSearch({ strict: false }) as Record<string, unknown>
+  const open = typeof search[stepEditKey] === "string" ? (search[stepEditKey] as string) : null
   const setOpen = (key: string | null) => {
     void navigate({
       to: ".",
-      search: (previous: Record<string, unknown>) => ({ ...previous, stepEdit: key ?? undefined }),
+      search: (previous: Record<string, unknown>) => ({ ...previous, [stepEditKey]: key ?? undefined }),
       resetScroll: false
     })
   }
-  const fork = typeof search.fork === "string" && search.fork !== "" ? (search.fork as ForkId) : null
+  const shownFork = search[forkKey]
+  const fork = typeof shownFork === "string" && shownFork !== "" ? (shownFork as ForkId) : null
   const [missing, setMissing] = useState<string | null>(null)
+  // A side chat's steps carry on reading the story where its tab shows it (spec/WORKSHOP.md §4).
+  const replyExtras = useContext(ReplyExtrasContext)
   const resume = async (step: number, edit: StepEdit | undefined) => {
     setMissing(null)
     // A guard may hold it back (a reply that changed things outside the chat warns first).
@@ -498,7 +511,8 @@ function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): Ste
           step,
           ...(edit === undefined ? {} : { edit }),
           forkId: fork,
-          expectedRowVersion: entry.rowVersion
+          expectedRowVersion: entry.rowVersion,
+          ...replyExtras()
         })
       })
     )
@@ -507,12 +521,13 @@ function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): Ste
       setMissing("This message isn't on this branch any more.")
       return false
     }
-    // The chat shows the new version being written, as any reply.
-    void navigate({
-      to: "/chats/$chatId",
-      params: { chatId: run.chatId },
-      search: { ...(fork === null ? {} : { fork }), slot: run.slotId }
-    })
+    // The chat shows the new version being written, as any reply; one beside another already shows it.
+    if (scope === "")
+      void navigate({
+        to: "/chats/$chatId",
+        params: { chatId: run.chatId },
+        search: { ...(fork === null ? {} : { fork }), slot: run.slotId }
+      })
     return true
   }
   return {

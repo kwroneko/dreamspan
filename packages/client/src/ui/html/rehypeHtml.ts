@@ -1,4 +1,6 @@
 import { proxyMediaUrl } from "./media.ts"
+import { PENDING_MEDIA } from "./mediaQueue.ts"
+import { savedMedia } from "./savedMedia.ts"
 // The inline-HTML pipeline around rehype-raw (spec/HTML-MESSAGES.md §3.2), as rehype plugins for
 // StMarkdown: mark Markdown's own elements, parse the raw HTML, prepare it, sanitize it with the
 // registered schema, then finish what the five fixes need on the parsed elements only. Media
@@ -209,7 +211,8 @@ const MEDIA = new Set(["audio", "video", "source", "track"])
  * calls a document becomes a frame; parsed elements get the custom- class prefix, the ids' prefix
  * and links to them, DOMPurify's value checks, and lose whatever would load from elsewhere.
  */
-export function htmlFinish(options: { parts: number; block: number; mediaScope?: string | null }) {
+/** `saved` is the saved-media revision (savedMedia.ts): it re-keys the processor cache when a lookup answers. */
+export function htmlFinish(options: { parts: number; block: number; mediaScope?: string | null; saved?: number }) {
   return (tree: Node) => {
     const classifier = effectiveClassifier()
     const frames = classifier && effectiveDocumentRenderer() ? classifier : undefined
@@ -244,7 +247,15 @@ export function htmlFinish(options: { parts: number; block: number; mediaScope?:
           }
         } else {
           const name = child.tagName!.toLowerCase()
-          if (MEDIA.has(name) && !((name === "audio" || name === "source") && options.mediaScope)) {
+          // Audio plays with consent, or when every file it names is saved (savedMedia.ts).
+          const player = name === "audio" || name === "source"
+          const saved =
+            player &&
+            [child, ...elements(child)].every((inner) => {
+              const src = String(inner.properties?.src ?? "")
+              return !src || savedMedia.answer(src).kind !== "missing"
+            })
+          if (MEDIA.has(name) && !(player && (options.mediaScope || saved))) {
             blocked ||= ["src", "srcSet", "poster"].some((key) => REMOTE.test(String(properties[key] ?? "")))
             blocked ||= elements(child).some((inner) => REMOTE.test(String(inner.properties?.src ?? "")))
             continue
@@ -329,7 +340,12 @@ function finishParsed(node: Node, name: string, mediaScope?: string | null): boo
         const proxy = match ? proxyMediaUrl(match[1]!, mediaScope) : null
         return proxy ? `${proxy}${match?.[2] ?? ""}` : null
       })
-      if (rewritten.length && rewritten.every((entry) => entry !== null)) {
+      // A placeholder (a saved-media lookup not answered yet) is a data URI, whose comma a
+      // srcset can't hold: the image waits as a placeholder until every candidate is known.
+      if (rewritten.some((entry) => entry?.startsWith(PENDING_MEDIA))) {
+        delete properties.srcSet
+        properties.src = PENDING_MEDIA
+      } else if (rewritten.length && rewritten.every((entry) => entry !== null)) {
         properties.srcSet = rewritten.join(", ")
         if (!properties.src) properties.src = rewritten[0]!.split(/\s/)[0]
       } else {

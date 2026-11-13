@@ -46,7 +46,8 @@ export function agentResumeTests() {
   /** Chooses Resume on `reply`: a button when it fits beside the others, else in More actions. */
   const resume = async (reply: Locator) => {
     await reveal(reply)
-    const button = reply.getByRole("button", { name: "Resume", exact: true })
+    // A failed reply has one beside its error as well; either carries it on.
+    const button = reply.getByRole("button", { name: "Resume", exact: true }).first()
     if (await button.isVisible()) await button.click()
     else await messageMenu(reply, /^Resume/)
   }

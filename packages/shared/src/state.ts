@@ -3,7 +3,7 @@ import { LcmSettings } from "./lcmSettings.ts"
 // an event at a position; the state at a slot is the fold of the events on the path
 // to it. The fold is a pure function so the server and the client agree on it.
 import { Data, Effect, Schema, type SchemaAST, Scope } from "effect"
-import { EntityId } from "./chat.ts"
+import { ChatId, EntityId } from "./chat.ts"
 import { REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
 import { ID_TABLE } from "./id.ts"
 import { type EntityKind, RefId, RevisionId } from "./library.ts"
@@ -95,7 +95,8 @@ export const StateEventData = Schema.Union([
    */
   event("cards.rotation", Schema.Struct({ on: Schema.Boolean })),
   /** The tools an agent reply offers, by id, in place of the default list (spec/AGENTIC.md §6). */
-  event("agent.tools", Schema.Struct({ tools: Schema.Array(Schema.String) })),
+  /** `tools` null: this chat follows the app default list again. */
+  event("agent.tools", Schema.Struct({ tools: Schema.NullOr(Schema.Array(Schema.String)) })),
   /**
    * Whether agent replies may change a note, or a card's field (as a note replacing it), in this
    * chat (spec/AGENTIC.md §4.3): over the note's `agent_editable` or the card's
@@ -124,7 +125,12 @@ export const StateEventData = Schema.Union([
   event("lorebook.below_history", Schema.Struct({ on: Schema.Boolean })),
   /** HTML in older messages sent to the model; absent is as written. */
   event("context.html_depth", HtmlDepth),
-  event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown }))
+  event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown })),
+  /**
+   * A workshop beside a story (spec/WORKSHOP.md §4): chat-wide in the workshop, naming the story
+   * it talks about. Only `CreateWorkshop { attachTo }` writes it; nothing is written in the story.
+   */
+  event("workshop.attached", Schema.Struct({ chat: ChatId }))
 ])
 export type StateEventData = typeof StateEventData.Type
 
@@ -145,6 +151,8 @@ type IdField<F extends string> =
   | { readonly table: "revision"; readonly kind: EntityKind; readonly entity?: F; readonly ref?: F }
   | { readonly table: "connection" }
   | { readonly table: "model"; readonly connection: F }
+  /** Another live chat of the acting user's (not in the bin), never the chat itself. */
+  | { readonly table: "chat" }
 
 /** The fields of a value that can hold ids: strings and arrays of strings. */
 type IdFieldName<V> = {
@@ -222,7 +230,8 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.embedded": { ids: { entity: { table: "entity", kind: "card" } } },
   "lorebook.below_history": { ids: {} },
   "context.html_depth": { ids: {} },
-  "var.set": { ids: {} }
+  "var.set": { ids: {} },
+  "workshop.attached": { ids: { chat: { table: "chat" } } }
 }
 
 /**
@@ -453,6 +462,8 @@ export interface ChatState {
   /** HTML in older messages sent to the model; null (no event) is as written. */
   readonly htmlDepth: HtmlDepth | null
   readonly vars: Readonly<Record<string, unknown>>
+  /** `workshop.attached`: the story a side chat talks about; absent in every other chat. */
+  readonly workshopAttached?: string
   /** Plugin keys' values by key id (`<plugin>/<key>`); absent until a registered key has an event. */
   readonly plugin?: Readonly<Record<string, unknown>>
 }
@@ -662,6 +673,8 @@ const applyCore = (
       return { ...state, htmlDepth: data.value }
     case "var.set":
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
+    case "workshop.attached":
+      return { ...state, workshopAttached: data.value.chat }
   }
 }
 

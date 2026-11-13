@@ -1193,6 +1193,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  UndoRolloutEffects: {
+    probe: (actor, owner) =>
+      refused(actor.api.UndoRolloutEffects({ chatId: owner.chat.chatId, rolloutId: owner.chat.rolloutId }), "NotFound")
+  },
   SetWorkshopGrant: {
     probe: (actor, owner) =>
       refused(
@@ -1215,7 +1219,38 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   ListVersionEffects: {
     probe: (actor, owner) => refused(actor.api.ListVersionEffects({ versionId: owner.chat.versionId }), "NotFound")
   },
-  CreateWorkshop: { createOnly: "creates a workshop and its private defaults for the caller" },
+  CreateWorkshop: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // A side chat only ever beside one's own story.
+        yield* refused(actor.api.CreateWorkshop({ attachTo: owner.chat.chatId }), "NotFound")
+        // Another user's card as the assistant or as the persona.
+        yield* refused(actor.api.CreateWorkshop({ card: owner.cardId }), "NotFound")
+        yield* refused(actor.api.CreateWorkshop({ persona: owner.cardId }), "NotFound")
+      })
+  },
+  ListAttachedWorkshops: {
+    probe: (actor, owner) => refused(actor.api.ListAttachedWorkshops({ chatId: owner.chat.chatId }), "NotFound")
+  },
+  GetWorkshopDefaults: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetWorkshopPersona({ persona: owner.cardId })
+        const mine = yield* actor.api.GetWorkshopDefaults({})
+        assert.notStrictEqual(mine.persona, owner.cardId)
+        yield* owner.api.SetWorkshopPersona({ persona: null })
+      })
+  },
+  SetWorkshopPersona: {
+    probe: (actor, owner) => refused(actor.api.SetWorkshopPersona({ persona: owner.cardId }), "NotFound")
+  },
+  ConvertPresetToWorkshop: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.ConvertPresetToWorkshop({ refId: owner.refId, label: "Taken", choices: [], instructions: "" }),
+        "NotFound"
+      )
+  },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
   GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },
   ReadPath: {
@@ -1404,6 +1439,52 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           "NotFound"
         )
       ])
+  },
+  // Saved card media: each account's saved files, sites and waiting files are its own.
+  LookupSavedMedia: {
+    probe: (actor) =>
+      Effect.map(actor.api.LookupSavedMedia({ urls: ["https://cardex.zip/i/none.png"] }), (found) =>
+        assert.deepStrictEqual(found, [])
+      )
+  },
+  GetSavedMediaStatus: {
+    probe: (actor, owner) => refused(actor.api.GetSavedMediaStatus({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  RetrySavedMedia: {
+    probe: (actor, owner) => refused(actor.api.RetrySavedMedia({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  ListMediaApproval: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.ListMediaApproval({ refIds: [owner.editor.cardRefId, owner.refId] }), (hosts) =>
+        assert.deepStrictEqual(hosts, [])
+      )
+  },
+  DecideMediaApproval: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* owner.api.GetMediaHosts()
+        yield* actor.api.DecideMediaApproval({
+          refIds: [owner.editor.cardRefId],
+          decisions: [{ host: "isolation.test", choice: "approve" }]
+        })
+        assert.deepStrictEqual(yield* owner.api.GetMediaHosts(), theirs)
+      })
+  },
+  GetMediaHosts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetMediaHosts()
+        yield* owner.api.ChangeMediaHosts({ add: { host: "owner-only.test", subdomains: false } })
+        assert.deepStrictEqual(yield* actor.api.GetMediaHosts(), before)
+      })
+  },
+  ChangeMediaHosts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* owner.api.GetMediaHosts()
+        yield* actor.api.ChangeMediaHosts({ remove: "cardex.zip" })
+        assert.deepStrictEqual(yield* owner.api.GetMediaHosts(), theirs)
+      })
   },
   GetDisplayPrefs: {
     probe: (actor, owner) =>
@@ -1909,6 +1990,114 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  // Parallel threads (spec/THREADS.md): another user's chat, branch or split is NotFound.
+  StartThreads: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.StartThreads({
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId,
+          slotId: owner.chat.slotId,
+          expectedRowVersion: 1,
+          threads: [
+            { name: null, cast: [], writesAs: null },
+            { name: null, cast: [], writesAs: null }
+          ]
+        }),
+        "NotFound"
+      )
+  },
+  ThreadsOf: {
+    probe: (actor, owner) =>
+      refused(actor.api.ThreadsOf({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
+  },
+  RenameThread: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RenameThread({ chatId: owner.chat.chatId, splitId: "a-split", ordinal: 0, name: "x", rowVersion: 1 }),
+        "NotFound"
+      )
+  },
+  UndoThreads: {
+    probe: (actor, owner) =>
+      refused(actor.api.UndoThreads({ chatId: owner.chat.chatId, splitId: "a-split" }), "NotFound")
+  },
+  CopyNoteToBranch: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Every independently supplied scope is checked, including foreign target/source forks.
+        for (const direction of [
+          { fromForkId: actor.chat.forkId, toForkId: owner.chat.forkId },
+          { fromForkId: owner.chat.forkId, toForkId: actor.chat.forkId }
+        ])
+          yield* refused(
+            actor.api.CopyNoteToBranch({
+              chatId: actor.chat.chatId,
+              noteRefId: actor.chat.noteRefId,
+              ...direction
+            }),
+            "NotFound"
+          )
+        const other = yield* actor.api.CreateChat({ title: "Synthetic other chat" })
+        yield* refused(
+          actor.api.CopyNoteToBranch({
+            chatId: actor.chat.chatId,
+            noteRefId: actor.chat.noteRefId,
+            fromForkId: actor.chat.forkId,
+            toForkId: other.currentForkId!
+          }),
+          "NotFound"
+        )
+        // Their note in their chat, and their note into the actor's own branch: both NotFound.
+        yield* refused(
+          actor.api.CopyNoteToBranch({
+            chatId: owner.chat.chatId,
+            noteRefId: owner.chat.noteRefId,
+            fromForkId: owner.chat.forkId,
+            toForkId: owner.chat.forkId
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.CopyNoteToBranch({
+            chatId: actor.chat.chatId,
+            noteRefId: owner.chat.noteRefId,
+            fromForkId: actor.chat.forkId,
+            toForkId: actor.chat.forkId
+          }),
+          "NotFound"
+        )
+      })
+  },
+  SendToThreads: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const to = (forkId: typeof owner.chat.forkId) => ({
+          forkId,
+          parentSlotId: null,
+          speakerEntityId: null,
+          reply: false,
+          replySpeakerEntityId: null
+        })
+        // Into their chat, and their branch named as a thread of the actor's own chat: both NotFound.
+        yield* refused(
+          actor.api.SendToThreads({
+            chatId: owner.chat.chatId,
+            content: "Hello",
+            targets: [to(owner.chat.forkId), to(owner.chat.forkId)]
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SendToThreads({
+            chatId: actor.chat.chatId,
+            content: "Hello",
+            targets: [to(actor.chat.forkId), to(owner.chat.forkId)]
+          }),
+          "NotFound"
+        )
+      })
+  },
   // Merging another chat in (spec/CHAT-MERGE.md): neither side may be someone else's chat.
   PreviewChatMerge: {
     probe: (actor, owner) =>
@@ -1940,6 +2129,26 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
               title: "planted",
               framing: null,
               digest: ""
+            }),
+            "NotFound"
+          )
+      })
+  },
+  JoinThreads: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Another user's branch is never joined into mine, nor mine into theirs.
+        for (const [into, source] of [
+          [actor.chat, owner.chat],
+          [owner.chat, actor.chat]
+        ] as const)
+          yield* refused(
+            actor.api.JoinThreads({
+              chatId: into.chatId,
+              forkId: into.forkId,
+              at: null,
+              includeLeftOut: false,
+              joins: [{ forkId: source.forkId, title: "planted", framing: null, digest: "" }]
             }),
             "NotFound"
           )
@@ -2224,6 +2433,29 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           }),
           "NotFound"
         )
+      })
+  },
+  PreviewChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const send = (speakerEntityId: EntityId | null) => ({ _tag: "Send" as const, content: "hi", speakerEntityId })
+        const base = { persona: null, greeting: null, first: send(null) }
+        // Their card as the chat's card, the persona, the speaker, the replier, or a greeter.
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [owner.cardId] }), "NotFound")
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [actor.cardId], persona: owner.cardId }), "NotFound")
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [actor.cardId], first: send(owner.cardId) }), "NotFound")
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [actor.cardId], replier: owner.cardId }), "NotFound")
+        yield* refused(
+          actor.api.PreviewChat({
+            ...base,
+            cards: [actor.cardId],
+            greeters: [{ entityId: owner.cardId, greeting: 0 }]
+          }),
+          "NotFound"
+        )
+        // Their own card previews.
+        const own = yield* actor.api.PreviewChat({ ...base, cards: [actor.cardId], replier: actor.cardId })
+        assert.isNotNull(own.budget)
       })
   },
   GetCast: {

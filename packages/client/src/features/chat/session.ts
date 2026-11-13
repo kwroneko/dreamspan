@@ -1,5 +1,6 @@
 import { refreshTokenCounts } from "../editor/tokenCounts.ts"
 import type { ForkNoteSelection } from "@rp/shared/chatApi.ts"
+import type { SendToThreadsInput } from "@rp/shared/threadsApi.ts"
 // One open chat (CLIENT-FRAMEWORK §5): the loaded window of its path, kept current by its
 // subscription, and the text of versions still generating. The server is the source of
 // truth: the window is what reads and events said, and writes apply the server's reply.
@@ -50,6 +51,7 @@ import { type Copy, copiesOf, pendingOf } from "../editor/backup.ts"
 import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf } from "./messageDraft.ts"
 import { beforeReply, chatStateChanged } from "./replyHooks.ts"
 import { guardReply } from "./replyGuards.ts"
+import { noReplyExtras, type ReplyExtrasSource } from "./replyExtras.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -227,6 +229,12 @@ export class ChatSession {
 
   /** Queries completed since this session began already cover its initial snapshot. */
   readonly startedAt = Date.now()
+
+  /** What its surface adds to each request that starts a reply (a side chat's story position). */
+  private replyExtras: ReplyExtrasSource = noReplyExtras
+  setReplyExtras(source: ReplyExtrasSource) {
+    this.replyExtras = source
+  }
 
   constructor(
     chatId: ChatId,
@@ -1509,7 +1517,8 @@ export class ChatSession {
           ...(reply ? {} : { reply: false }),
           ...(reply && round.length > 0 ? { round } : {}),
           ...(reply && autoPick ? { autoPick } : {}),
-          ...(composer === undefined ? {} : { composer: commitOf(composer) })
+          ...(composer === undefined ? {} : { composer: commitOf(composer) }),
+          ...this.replyExtras()
         })
       ),
       (value) => (value._tag === "Queued" ? value.queue : null)
@@ -1528,6 +1537,44 @@ export class ChatSession {
       draft,
       recovered
     }
+  }
+
+  /**
+   * One message to this thread and others at once (spec/THREADS.md §6.2; `SendToThreads`), the
+   * first target being the fork shown, under its leaf. Every copy's reply starts on the server;
+   * this fork's message and reply show at once, the other threads' reach their tabs as events.
+   */
+  async sendToThreads(
+    input: Omit<SendToThreadsInput, "chatId" | "composer">,
+    /** The composer draft the text came from, which the send commits. */
+    composer?: ComposerSource
+  ): Promise<{
+    readonly sent: boolean
+    readonly outcome: Outcome<unknown>
+    readonly draft: SendResult["draft"]
+    readonly recovered: number
+  }> {
+    if (input.targets.some((target) => target.reply)) await beforeReply()
+    const result = await this.queueSnapshot(
+      this.call((client) =>
+        client("SendToThreads", {
+          ...input,
+          chatId: this.chatId,
+          ...(composer === undefined ? {} : { composer: commitOf(composer) })
+        })
+      ),
+      (value) => value.queue
+    )
+    if (!result.ok) {
+      if (result.error.tag === "LeafMoved") this.reload()
+      return { sent: false, outcome: result, draft: null, recovered: 0 }
+    }
+    const own = result.value.copies[0]
+    if (own?._tag === "Posted") {
+      this.appended(own.entry, result.value.chat)
+      if (own.reply !== null) this.appended(own.reply, result.value.chat)
+    }
+    return { sent: true, outcome: result, draft: result.value.draft, recovered: result.value.recovered }
   }
 
   /**
@@ -1556,7 +1603,8 @@ export class ChatSession {
           ...(direction.trim() === "" ? {} : { direction }),
           ...(round.length > 0 ? { round } : {}),
           ...(autoPick ? { autoPick } : {}),
-          ...(composer === undefined ? {} : { composer: commitOf(composer) })
+          ...(composer === undefined ? {} : { composer: commitOf(composer) }),
+          ...this.replyExtras()
         })
       ),
       (value) => (value._tag === "Queued" ? value.queue : null)
@@ -1678,7 +1726,8 @@ export class ChatSession {
         slotId: entry.slotId,
         forkId: this.view.forkId,
         expectedRowVersion: entry.rowVersion,
-        ...(direction === undefined ? {} : { direction })
+        ...(direction === undefined ? {} : { direction }),
+        ...this.replyExtras()
       })
     )
   }
@@ -1697,7 +1746,8 @@ export class ChatSession {
         versionId: entry.version.id,
         forkId: this.view.forkId,
         expectedRowVersion: entry.rowVersion,
-        ...(direction ? { direction } : {})
+        ...(direction ? { direction } : {}),
+        ...this.replyExtras()
       })
     )
   }
@@ -1708,14 +1758,26 @@ export class ChatSession {
    * sent nothing new: the run goes on from its frozen request, so no guidance goes with it and
    * nothing waits for live edits (`beforeReply`).
    */
-  resumeVersion(entry: PathEntry): Promise<Outcome<PathEntry>> {
+  resumeVersion(entry: PathEntry, options: { readonly saved?: boolean } = {}): Promise<Outcome<PathEntry>> {
     return this.slotWrite(entry.slotId, (client) =>
       client("ResumeVersion", {
         versionId: entry.version.id,
         forkId: this.view.forkId,
-        expectedRowVersion: entry.rowVersion
+        expectedRowVersion: entry.rowVersion,
+        ...this.replyExtras(),
+        ...(options.saved ? { saved: true } : {})
       })
     )
+  }
+
+  /**
+   * Resume beside a failed or interrupted reply (spec/AGENTIC.md §12.6): an agent reply's run
+   * goes on; a plain reply is continued from its text (as Continue, without the composer's
+   * guidance), or, with no text yet, written again as a new version.
+   */
+  resumeReply(entry: PathEntry): Promise<Outcome<unknown>> {
+    if (entry.version.agent === true) return this.resumeVersion(entry)
+    return entry.version.content.trim() !== "" ? this.continueVersion(entry, false) : this.regenerate(entry)
   }
 
   /** "Show as reply text": the reply's leading sections back in its text, as a new version (spec/REPLY-SECTIONS.md). */

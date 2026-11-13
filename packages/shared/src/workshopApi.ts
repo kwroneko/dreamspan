@@ -1,3 +1,4 @@
+import { StoryAtField } from "./chat.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Chat } from "./chat.ts"
@@ -62,6 +63,17 @@ export const RolloutEffect = Schema.Struct({
   createdAt: Schema.Number
 })
 export type RolloutEffect = typeof RolloutEffect.Type
+/**
+ * What "Undo all of this reply" did: the changes it undid, newest first; the one it couldn't undo
+ * and why; and the older ones it left untried because of it.
+ */
+export const UndoAllReport = Schema.Struct({
+  undone: Schema.Array(RolloutEffect),
+  refused: Schema.NullOr(Schema.Struct({ effect: RolloutEffect, reason: Schema.String })),
+  left: Schema.Array(RolloutEffect)
+})
+export type UndoAllReport = typeof UndoAllReport.Type
+export const ReplyEffects = { chatId: Chat.fields.id, rolloutId: Schema.String }
 export const EffectKey = { rolloutId: Schema.String, toolCallId: Schema.String, seq: Schema.Int }
 export const EffectList = {
   chatId: Chat.fields.id,
@@ -71,15 +83,52 @@ export const EffectList = {
   limit: Schema.optionalKey(Schema.Int)
 }
 
+/** What new workshops start with; null where none is set yet or it is gone. */
+export const WorkshopDefaults = Schema.Struct({
+  card: Schema.NullOr(Schema.String),
+  preset: Schema.NullOr(Schema.String),
+  persona: Schema.NullOr(Schema.String)
+})
+export type WorkshopDefaults = typeof WorkshopDefaults.Type
+
 export class WorkshopApi extends RpcGroup.make(
   Rpc.make("ListWorkshopCapabilities", {
     payload: { chatId: Chat.fields.id },
     success: Schema.Array(WorkshopCapability),
     error: Schema.Union([NotFound, ServerError])
   }),
+  /**
+   * A new workshop. `card`: the card to talk to (any of the user's cards; default the workshop's
+   * default assistant). `persona`: who the user is there (default the workshop persona, never
+   * the story one; null for none). `attachTo`: a side chat beside that story, reading it through
+   * its tools (spec/WORKSHOP.md §4); it never plays the story's persona or one of its cards.
+   */
   Rpc.make("CreateWorkshop", {
-    payload: { title: Schema.optionalKey(Schema.String) },
+    payload: {
+      title: Schema.optionalKey(Schema.String),
+      attachTo: Schema.optionalKey(Chat.fields.id),
+      card: Schema.optionalKey(Schema.String),
+      persona: Schema.optionalKey(Schema.NullOr(Schema.String))
+    },
     success: Chat,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** The workshops beside a story, newest first. */
+  Rpc.make("ListAttachedWorkshops", {
+    payload: { chatId: Chat.fields.id },
+    success: Schema.Array(Chat),
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** The workshop defaults: the assistant card, the preset and the persona new workshops start with. */
+  Rpc.make("GetWorkshopDefaults", {
+    payload: {},
+    success: WorkshopDefaults,
+    error: Schema.Union([ServerError])
+  }),
+  /** Sets the workshop persona new workshops start with; the story default persona never changes. */
+  Rpc.make("SetWorkshopPersona", {
+    payload: { persona: Schema.NullOr(Schema.String) },
+    success: WorkshopDefaults,
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("ListRolloutEffects", {
@@ -91,6 +140,12 @@ export class WorkshopApi extends RpcGroup.make(
     payload: EffectKey,
     success: RolloutEffect,
     error: Schema.Union([NotFound, EffectUndoRefused, ServerError])
+  }),
+  /** Undoes every change one reply made, newest first, stopping at the first that can't be undone. */
+  Rpc.make("UndoRolloutEffects", {
+    payload: ReplyEffects,
+    success: UndoAllReport,
+    error: Schema.Union([NotFound, ServerError])
   }),
   /** Sets what the assistant may do with a capability in this workshop; null goes back to the default. */
   Rpc.make("SetWorkshopGrant", {
@@ -104,6 +159,7 @@ export class WorkshopApi extends RpcGroup.make(
    */
   Rpc.make("AnswerToolApproval", {
     payload: {
+      storyAt: StoryAtField,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       digest: Schema.String,

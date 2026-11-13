@@ -386,11 +386,14 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
               const element = c as HTMLElement
               const style = css(element)
               if (style.display === "none" || ["absolute", "fixed"].includes(style.position)) return false
-              // A collapsing action toolbar still separates the groups on either side. It
-              // can retain hidden controls while its own box has zero width or height.
+              // A transparent hover toolbar still reserves its flex space and both gaps, and a
+              // collapsing action toolbar still separates the groups on either side: it can
+              // retain hidden controls while its own box has zero width or height. Their controls
+              // aren't painted children; don't compare across that space.
               const r = rect(element)
               return (
-                num(style.flexGrow) > 0 && (!r.width || !r.height || (!c.textContent?.trim() && !c.children.length))
+                num(style.flexGrow) > 0 &&
+                (num(style.opacity) === 0 || !r.width || !r.height || (!c.textContent?.trim() && !c.children.length))
               )
             })
             const gaps = row.slice(1).map((c, i) => rect(c).left - rect(row[i]!).right)

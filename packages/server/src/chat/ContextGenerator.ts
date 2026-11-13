@@ -6,10 +6,13 @@ import { liveSuffix } from "../agent/messages.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import {
   previousRun,
+  storyReadStamp,
   readContinuityPath,
   pathStamp,
   summarizeMessageSteps,
   WORKSHOP_OVERFLOW_STEP_SUMMARIES,
+  ELIDE_TRIGGER,
+  elideCarried,
   type ContinuousSnapshot,
   type ContinuityRecord
 } from "../agent/continuity.ts"
@@ -208,6 +211,10 @@ export const layer = Layer.effect(
               chatId: request.chatId,
               rolloutId
             }),
+            onChanged: (target) => {
+              hub.publish(target, { _tag: "Reload" })
+              hub.publish(target, { _tag: "Lcm" })
+            },
             onState: () => hub.publish(request.chatId, { _tag: "State" }),
             resume: {
               transcript: resume.transcript,
@@ -340,6 +347,7 @@ export const layer = Layer.effect(
                           ) ?? "",
                         speakerCardOnly: plan.assembly?.speakerCardOnly ?? false,
                         ...(plan.assembly?.workshop ? { workshop: true } : {}),
+                        ...(plan.assembly?.response ? { response: plan.assembly.response } : {}),
                         ...(stepSummaries ? { stepSummaries } : {})
                       }
                     }
@@ -400,6 +408,14 @@ export const layer = Layer.effect(
           }
           let generation = JSON.parse(assembled.generation) as Generation
           let snapshot = JSON.parse(assembled.snapshot) as ContinuousSnapshot
+          if (request.storyAt)
+            snapshot = {
+              ...snapshot,
+              storyStamp:
+                (yield* storyReadStamp(reader, request.userId, request.storyAt).pipe(
+                  Effect.catch(serverFailure("StoryReadStamp"))
+                )) ?? null
+            }
           // Dynamic tool loading (spec/TOOL-LOADING.md): what's sent from the start, what's loaded later.
           const { offer, cardSkills } = agentic
             ? yield* planToolLoading(
@@ -466,21 +482,45 @@ export const layer = Layer.effect(
               })
               seed = [...prior.transcript, ...additions]
               const budget = snapshot.contextBudget
-              const count = yield* reader
-                .CountRolloutContext({
-                  model: JSON.stringify(snapshot.inputs.model),
-                  request: JSON.stringify(prior.snapshot.request),
-                  transcript: JSON.stringify(seed),
-                  // A deferred tool takes context only once it's loaded.
-                  tools: JSON.stringify(
-                    frozenTools.filter(
-                      (t) =>
-                        (t as { readonly deferred?: true }).deferred !== true ||
-                        loadedSet(seed!, offer.deferred).has(t.name)
+              const countSeed = (transcript: ReadonlyArray<AgentMessage>) =>
+                reader
+                  .CountRolloutContext({
+                    model: JSON.stringify(snapshot.inputs.model),
+                    request: JSON.stringify(prior.snapshot.request),
+                    transcript: JSON.stringify(transcript),
+                    // A deferred tool takes context only once it's loaded.
+                    tools: JSON.stringify(
+                      frozenTools.filter(
+                        (t) =>
+                          (t as { readonly deferred?: true }).deferred !== true ||
+                          loadedSet(transcript, offer.deferred).has(t.name)
+                      )
                     )
-                  )
-                })
-                .pipe(Effect.catch(serverFailure("CountRolloutContext")))
+                  })
+                  .pipe(Effect.catch(serverFailure("CountRolloutContext")))
+              let count = yield* countSeed(seed)
+              // Past the trigger, older tool results are left out before anything is rebuilt
+              // (spec/WORKSHOP-CONTEXT.md §2.2): the prefix and everything before them stay cached.
+              let elided = 0
+              const room = budget ? budget.maximum - budget.responseReserve : Number.POSITIVE_INFINITY
+              let needsRebuild = count > room * ELIDE_TRIGGER
+              if (needsRebuild) {
+                const compacted = yield* elideCarried({
+                  reader,
+                  request,
+                  path,
+                  transcript: prior.transcript,
+                  count,
+                  room,
+                  recount: (transcript) => countSeed([...transcript, ...additions])
+                }).pipe(Effect.catch(serverFailure("ElideCarried")))
+                if (compacted && compacted.count <= room) {
+                  seed = [...compacted.transcript, ...additions]
+                  count = compacted.count
+                  elided = compacted.elided
+                  needsRebuild = false
+                }
+              }
               // Provider image limits apply to the entire request. Hydrating the prefix
               // and each carried user message separately must not evict a cached image.
               const imageCount = [
@@ -491,7 +531,7 @@ export const layer = Layer.effect(
                 snapshot.inputs.model?.vision !== false &&
                 additions.some((message) => message.role === "rpUser" && (message.message.images?.length ?? 0) > 0) &&
                 imageCount > (snapshot.inputs.model?.maxImages ?? DEFAULT_MAX_IMAGES)
-              if (imageOverflow || (budget && count > budget.maximum - budget.responseReserve)) {
+              if (imageOverflow || needsRebuild || (budget && count > budget.maximum - budget.responseReserve)) {
                 seed = undefined
                 continuity = {
                   path: baseline,
@@ -514,6 +554,7 @@ export const layer = Layer.effect(
                   path: baseline,
                   parent: { rolloutId: prior.material.rolloutId, versionId: prior.versionId },
                   historical: prior.transcript.length,
+                  ...(elided > 0 ? { elided } : {}),
                   prefix:
                     prior.snapshot.continuity?.prefix ??
                     (() => {
@@ -561,7 +602,7 @@ export const layer = Layer.effect(
               modelId: model.modelId as ModelId,
               // An agent turn's tools and contract are frozen with its context (spec/AGENTIC.md §3.3).
               snapshot: agentic
-                ? `${JSON.stringify({ ...snapshot, ...(continuity ? { continuity } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
+                ? `${JSON.stringify({ ...snapshot, ...(request.storyAt ? { storyAt: request.storyAt } : {}), ...(continuity ? { continuity } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
                     {
                       mode: planned.mode,
                       contract: plan.contract,
@@ -624,6 +665,10 @@ export const layer = Layer.effect(
                     reader,
                     writer,
                     permit: makePermit({ registries: execution, reader, writer, userId, chatId, rolloutId }),
+                    onChanged: (target) => {
+                      hub.publish(target, { _tag: "Reload" })
+                      hub.publish(target, { _tag: "Lcm" })
+                    },
                     onState: () => hub.publish(chatId, { _tag: "State" })
                   }
                 }
@@ -635,6 +680,6 @@ export const layer = Layer.effect(
         })
       )
 
-    return Option.some({ generate })
+    return Option.some({ kind: "provider" as const, generate, requiresModel: true })
   })
 )

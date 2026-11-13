@@ -37,6 +37,22 @@ export function modelsInOrder(
 export const modelDetail = (at: number | undefined, now = Date.now()) =>
   at === undefined ? "never used" : `used ${ago(at, now)}`
 
+type Windowed = { readonly window?: { readonly tokens: number; readonly assumed: boolean } }
+
+/** "200k context", "128k context (assumed)": the row's window, from the model (WORKSHOP-CONTEXT §1.3). */
+export const modelWindow = ({ window }: Windowed) =>
+  window
+    ? `${window.tokens >= 1000 ? `${Math.round(window.tokens / 1000)}k` : window.tokens} context${window.assumed ? " (assumed)" : ""}`
+    : null
+
+/** The window in the row's hover explanation. */
+export const modelWindowHint = ({ window }: Windowed) =>
+  !window
+    ? ""
+    : window.assumed
+      ? ` Context window: ${window.tokens.toLocaleString("en-US")} tokens, assumed: nothing reports this model's window. Set it in Settings → Connections.`
+      : ` Context window: ${window.tokens.toLocaleString("en-US")} tokens.`
+
 export const modelTime = (at: number | undefined) =>
   at === undefined ? "Not used for a reply yet" : `Last used ${exactTime(at)}`
 

@@ -1,12 +1,18 @@
 import { dispatcherConnectionTests } from "./support/dispatcherConnections.ts"
+import { workshopDocumentTests } from "./support/workshopDocuments.ts"
+import { workshopRewriteTests } from "./support/workshopRewrite.ts"
+import { draftRequestTests } from "./support/draftRequest.ts"
 import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
 import { workshopChatTests } from "./support/workshopChat.ts"
 import { workshopApprovalTests } from "./support/workshopApprovals.ts"
+import { workshopChangesTests } from "./support/workshopChanges.ts"
 import { cardSourceUpdateTests } from "./support/cardSourceUpdates.ts"
+import { workshopSideChatTests, workshopSideChatEffectsTests } from "./support/workshopSideChat.ts"
 import { googleConnectionTests } from "./support/googleConnection.ts"
 import { agentResumeTests } from "./support/agentResumeFlows.ts"
 import { cardexCriteriaTests } from "./support/cardexCriteria.ts"
 import { cardexCreatorTests } from "./support/cardexCreators.ts"
+import { cardexLorebookTests } from "./support/cardexLorebooks.ts"
 import { exercisePhoneFooters } from "./support/phoneFooters.ts"
 import { newflowTests } from "./support/newflows.ts"
 import { seedSplitChats } from "./support/splitChats.ts"
@@ -42,9 +48,12 @@ import { expectTextBox } from "./support/textbox.ts"
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
+if (process.env.LAYOUT_AUDIT_WORKSHOP_DOCUMENTS_ONLY === "1") workshopDocumentTests()
+if (process.env.LAYOUT_AUDIT_DRAFT_ONLY === "1") draftRequestTests()
 if (process.env.LAYOUT_AUDIT_CARDEX_ONLY === "1") {
   cardexCriteriaTests()
   cardexCreatorTests()
+  cardexLorebookTests()
 }
 if (process.env.LAYOUT_AUDIT_CARDEX_UPDATES_ONLY === "1") cardSourceUpdateTests()
 if (process.env.LAYOUT_AUDIT_NEWFLOWS_ONLY === "1") newflowTests()
@@ -52,9 +61,14 @@ if (process.env.LAYOUT_AUDIT_WORKSHOP_ONLY === "1") {
   workshopBoundaryTests()
   workshopChatTests()
   workshopApprovalTests()
+  workshopChangesTests()
+  workshopSideChatTests()
+  workshopSideChatEffectsTests()
 }
 if (process.env.LAYOUT_AUDIT_DISPATCHER_ONLY === "1") dispatcherConnectionTests()
 if (process.env.LAYOUT_AUDIT_RESUME_ONLY === "1") agentResumeTests()
+
+if (process.env.LAYOUT_AUDIT_WORKSHOP_REWRITE_ONLY === "1") workshopRewriteTests()
 
 test.describe("model picker catalog layout", () => {
   let server: TestServer

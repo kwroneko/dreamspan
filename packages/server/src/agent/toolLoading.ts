@@ -211,7 +211,12 @@ export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
 export const builtinToolLoadingProfiles: ReadonlyArray<ToolLoadingProfile> = [
   // RP toolsets are small and chosen by the user: everything immediate (AGENTIC §1.2).
   { id: "rp", immediate: ["*"] },
-  { id: "workshop", immediate: ["list_library"] }
+  // A side chat's instructions send it to the story tools (spec/WORKSHOP.md §4), so they're
+  // callable from the start; only a side chat is offered them.
+  {
+    id: "workshop",
+    immediate: ["list_library", "search_story", "read_story", "open_story_summary", "search_story_summaries"]
+  }
 ]
 
 export interface ToolOffer<T extends { readonly id: string }> {

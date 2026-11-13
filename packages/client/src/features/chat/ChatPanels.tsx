@@ -2,7 +2,7 @@ import { createPortal } from "react-dom"
 import { kindRootProps, kindTitle, useChatKindLook } from "./kindLooks.ts"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The chat panel host: descriptors own its tabs and bodies; the host owns layout and retention.
-import type { EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router"
 import { Button } from "../../ui/Button.tsx"
@@ -32,6 +32,14 @@ declare module "@tanstack/react-router" {
   interface HistoryState {
     chatPanel?: boolean
   }
+}
+
+// First-send navigation replaces the pending route (and its tab strip). Keep this transient
+// handover by chat id, independent of the workbench's nested histories.
+const panelFocusHandovers = new Set<ChatId>()
+export const carryPanelFocus = (chatId: ChatId, wanted: boolean) => {
+  if (wanted) panelFocusHandovers.add(chatId)
+  else panelFocusHandovers.delete(chatId)
 }
 
 // --- Whether the panel is open and at which tab: each user's choice in this browser, kept in
@@ -199,6 +207,13 @@ export function ChatSidePanel({
   // Shown apart from the chat (beside the frames, or as a sheet), it takes the chat kind's accent itself.
   const kindRoot = kindRootProps(useChatKindLook(content.view.chat?.kind))
   const editorChanges = useWorkspaceChanges()
+  const savedId = "session" in content ? content.session.id : null
+  const [focusTab] = useState(() => (savedId !== null && panelFocusHandovers.has(savedId) ? tab : null))
+  const restoreFocus = focusTab !== null
+  useLayoutEffect(() => {
+    if (savedId !== null) panelFocusHandovers.delete(savedId)
+  }, [savedId])
+  const navRef = useRef<HTMLDivElement>(null)
   const userId = useSession().user.id
   const { width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, wide)
   const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
@@ -229,7 +244,7 @@ export function ChatSidePanel({
   const tools = all.filter((t) => (t.descriptor.placement ?? "tools") === "tools")
   const cast = all.filter((t) => t.descriptor.placement === "cast")
   const nav = (
-    <div className="flex shrink-0 flex-col">
+    <div ref={navRef} data-chat-panel-tabs className="flex shrink-0 flex-col">
       <div className="flex h-shell-header shrink-0 items-center border-b border-border px-2 py-2 *:min-w-0 *:flex-1">
         <ToolTabs
           tabs={tools.map((t) => ({
@@ -237,6 +252,7 @@ export function ChatSidePanel({
             dirty: dirty.has(t.value) || editorChanges.some((ref) => t.descriptor.holdsEditor?.(ref, t.value)),
             label: t.label,
             icon: t.descriptor.icon,
+            savedOnly: t.descriptor.savedOnly,
             // A tab with nothing to show before the first send says so where it's described.
             description:
               "pending" in content && !t.descriptor.pending
@@ -246,6 +262,7 @@ export function ChatSidePanel({
           value={tab}
           onValueChange={onTab}
           label="Chat panel"
+          focusOnMount={restoreFocus && tools.some((tab) => tab.value === focusTab)}
           moreLabel="More tools"
         />
       </div>
@@ -261,6 +278,7 @@ export function ChatSidePanel({
           }))}
           value={tab}
           onValueChange={onTab}
+          focusOnMount={restoreFocus && cast.some((tab) => tab.value === focusTab)}
           label="Characters"
         />
         {cast.length === 0 && <div className="h-0.5" />}
@@ -276,10 +294,23 @@ export function ChatSidePanel({
           role="tabpanel"
           aria-label={t.label}
           hidden={t.value !== tab}
-          className="@container min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none"
+          className={
+            t.descriptor.fill
+              ? "@container flex min-h-0 flex-1 flex-col outline-none"
+              : "@container min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none"
+          }
         >
           {/* The panel's whole width, its text at a readable measure (styles.css), unless the tab asks for less. */}
-          <div data-measure className={t.descriptor.width === "readable" ? "max-w-[52rem]" : ""}>
+          <div
+            data-measure
+            className={
+              t.descriptor.fill
+                ? "flex min-h-0 flex-1 flex-col"
+                : t.descriptor.width === "readable"
+                  ? "max-w-[52rem]"
+                  : ""
+            }
+          >
             <UnsavedScope tracker={tracker} tab={t.value}>
               {"pending" in content ? (
                 <PendingPanelContent
@@ -314,6 +345,11 @@ export function ChatSidePanel({
         onOpenChange={(open) => !open && onClose()}
         title={kindTitle(title, content.view.chat?.kind)}
         container={document.getElementById("content")}
+        initialFocus={
+          restoreFocus
+            ? () => navRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? null
+            : undefined
+        }
       >
         <div {...kindRoot} className="flex min-h-0 flex-1 flex-col">
           {nav}

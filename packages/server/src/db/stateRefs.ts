@@ -37,6 +37,7 @@ type Reference =
     }
   | { readonly table: "connection"; readonly id: string }
   | { readonly table: "model"; readonly id: string; readonly connection: string | undefined }
+  | { readonly table: "chat"; readonly id: string }
 
 type Declared = StateKeyDeclaration
 
@@ -83,6 +84,8 @@ const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference>
           return { table: "connection", id }
         case "model":
           return { table: "model", id, connection: field(declaration.connection) }
+        case "chat":
+          return { table: "chat", id }
       }
     })
   })
@@ -144,6 +147,9 @@ export const checkStateReferences = (
           case "model":
             return sql<{ n: number }>`SELECT count(*) AS n FROM models m JOIN connections c ON c.id = m.connection_id
               WHERE m.id = ${reference.id} AND m.connection_id = ${reference.connection ?? null} AND c.owner_user_id = ${userId}`
+          case "chat":
+            return sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${reference.id}
+              AND id <> ${chatId} AND owner_user_id = ${userId} AND (${live} = 0 OR deleted_at IS NULL)`
         }
       })()
       return Effect.gen(function* () {
