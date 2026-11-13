@@ -529,6 +529,8 @@ const prepareCardNote = (ctx: ToolContext, args: CardNoteEdit) =>
   })
 const editCardNote: RolloutTool<CardNoteEdit> = {
   id: "edit_card_note",
+  // A saved card note in the library, like edit_card: no story position (merge-batch10).
+  storyRead: "library",
   label: "Edited a card note",
   explanation: "Edit a saved card note’s text with Undo.",
   effect: "library",

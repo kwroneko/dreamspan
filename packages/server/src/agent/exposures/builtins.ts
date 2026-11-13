@@ -92,6 +92,8 @@ const storyReads: Readonly<Record<string, WorkshopStoryRead>> = {
   set_card_favourite: "library",
   list_library: "library",
   list_revisions: "library",
+  // A saved card's text into its own-turn note: library only (ownturn1, merge-batch10).
+  move_card_text: "library",
   change_generation_defaults: "account",
   read_settings: "account",
   change_setting: "account"
