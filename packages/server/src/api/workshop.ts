@@ -91,12 +91,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         internal("UndoRolloutEffect")
       ),
     CreateWorkshop: (input) =>
-      Effect.flatMap(CurrentUser, (user) =>
-        writer.CreateWorkshop({
-          ...input,
-          userId: user.id,
-          assistantSkills: execution.workshopCardSkills.list().map((s) => s.id)
-        })
-      ).pipe(internal("CreateWorkshop"))
+      Effect.flatMap(CurrentUser, (user) => writer.CreateWorkshop({ ...input, userId: user.id })).pipe(
+        internal("CreateWorkshop")
+      )
   } satisfies Parameters<typeof WorkshopApi.of>[0]
 })

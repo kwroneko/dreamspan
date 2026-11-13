@@ -2030,12 +2030,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("CreateWorkshop", {
-    payload: {
-      userId: UserId,
-      title: Schema.optionalKey(Schema.String),
-      /** Skills a newly seeded Assistant card names (`{ "use": id }`; spec/TOOL-LOADING.md §6). */
-      assistantSkills: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(16)))
-    },
+    payload: { userId: UserId, title: Schema.optionalKey(Schema.String) },
     success: Chat,
     error: Schema.Union([NotFound, StorageError])
   }),

@@ -64,7 +64,8 @@ A card carries skills in `extensions.rp_harness.skills` (format **[P]**), which 
 ] } } }
 ```
 
-- `{ "use": id }` names a registered skill: one registered with `always: false` is offered only when the workshop's card names it. The built-in skills are `always: false` **[P]**: the seeded Assistant card names them all (`ExecutionRegistry.workshopCardSkills`, passed to `CreateWorkshop` as `assistantSkills`), so a user's own workshop card chooses its skills. A card that names none still reaches every deferred tool through `tool_search`, whose description then lists them all. Assistant cards seeded before this have no references (re-import expected).
+- **[D]** The built-in skills are offered in every workshop, whatever card it uses; a card's own skills come on top. The owner, on tying them to the seeded Assistant card: "This is backwards it breaks the user's ability to swap characters for the workshop bot entirely, unless he manually moves the skills." Nothing is written onto the seeded card.
+- `{ "use": id }` names a registered skill registered with `always: false` (a plugin's opt-in skill): it is offered only when the workshop's card names it. Naming an always-offered skill changes nothing.
 - A card's own skill: name `^[a-z0-9][a-z0-9_-]{0,47}$`, description and instructions required; at most 16 entries; anything else is ignored.
 - Which cards: those the assistant speaks as at the revisions the request was assembled with; cards played by the user (persona) are left out. Read once per fresh run. All offered skills, including registered skills, are frozen in the existing snapshot field `agent.cardSkills`; loading never reads the current registry. Unlisted skills cannot be loaded.
 - Registered skill names are reserved even when not selected. Duplicate card-carried names are omitted from the offer, independent of card order; their tools remain searchable.
@@ -107,7 +108,7 @@ Found by measuring: Anthropic rejects a `tool_result` holding both `tool_referen
 
 ## 10. Built, and not yet
 
-Built: §2–§6 server side, the Assistant card's skill references, §7 (fields and the inspector's groups), the transforms, tests (`toolLoading.test.ts`, `toolLoadingWorkshop.test.ts`, live `live/toolLoading.test.ts`, e2e `toolLoading.spec.ts`).
+Built: §2–§6 server side, §7 (fields and the inspector's groups), the transforms, tests (`toolLoading.test.ts`, `toolLoadingWorkshop.test.ts`, live `live/toolLoading.test.ts`, e2e `toolLoading.spec.ts`).
 
 Not yet: a client view of a card's skills in the card editor; wires for Bedrock, Vertex, OpenRouter and DeepSeek, and either option of §11.1 for them.
 
@@ -127,8 +128,6 @@ Not yet: a client view of a card's skills in the card editor; wires for Bedrock,
    | OpenRouter → anthropic/claude-haiku-4.5 | 57,928 tokens | read 57,925 | write 59,788, read 0 | read 58,039, write 1,752 |
 
    So (a) costs the whole transcript once per load (≈50k tokens at 50k); (b) costs only the loaded definitions. Switching a running chat to (b) costs one full rewrite itself, since adding `call_tool` changes `tools` (measured: DeepSeek read 1,536, OpenRouter wrote everything). DeepSeek also needs `reasoning_content` on a replayed assistant tool call (400 otherwise).
-2. **Built-in skills only with the Assistant card** (§6) is now built as Proposed: confirm or revert.
-
 ## 12. Review verification (2026-11-13)
 
 The active loading profile is limited to the five measured Anthropic model versions in §8. Responses and all other unmeasured profiles send every tool from the start. No provider calls were made during review; §8 records the builder's measurements, not new live verification.

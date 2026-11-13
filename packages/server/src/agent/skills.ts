@@ -1,6 +1,7 @@
 // The built-in skills (spec/TOOL-LOADING.md §5): the workshop's tools in groups the assistant loads
 // as it needs them, each with a short instruction. Registered through `ExecutionRegistry.skills`
-// exactly as a plugin's would be; a plugin can replace, disable or add to them.
+// exactly as a plugin's would be; a plugin can replace, disable or add to them. They're offered in
+// every workshop whatever card it uses (**[D]**): a card's own skills come on top.
 import type { Skill } from "./toolLoading.ts"
 
 const workshop = ["workshop"]
@@ -10,8 +11,6 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "cards",
     label: "Cards",
     kinds: workshop,
-    // Offered when the workshop's card names it; the seeded Assistant card names them all.
-    always: false,
     description: "Read, create, edit and copy character cards, and mark favourites.",
     instructions:
       "Find a card with list_library first and use its id when names repeat. Read a card before editing it, and change only the fields asked for. To keep the original, copy it with clone_card and edit the copy.",
@@ -21,8 +20,6 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "presets-lorebooks",
     label: "Presets and lorebooks",
     kinds: workshop,
-    // Offered when the workshop's card names it; the seeded Assistant card names them all.
-    always: false,
     description: "Read and create presets and lorebooks.",
     instructions:
       "Read a preset or lorebook before suggesting changes to it. New presets and lorebooks start empty unless you say what goes in them.",
@@ -32,8 +29,6 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "library",
     label: "Library upkeep",
     kinds: workshop,
-    // Offered when the workshop's card names it; the seeded Assistant card names them all.
-    always: false,
     description: "Copy, rename, archive or restore library entries, and go back to an earlier revision.",
     instructions:
       "List an entry's revisions before restoring one, and say which revision you restored. Archiving hides an entry without deleting it.",
@@ -43,8 +38,6 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "chat-setup",
     label: "Chat setup",
     kinds: workshop,
-    // Offered when the workshop's card names it; the seeded Assistant card names them all.
-    always: false,
     description:
       "Start story chats, change a chat's cast, model or preset, rename or pin chats, and write a reply in another chat.",
     instructions:
@@ -55,8 +48,6 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "stories",
     label: "Reading stories",
     kinds: workshop,
-    // Offered when the workshop's card names it; the seeded Assistant card names them all.
-    always: false,
     description: "Search a chat's history, and rename a word or name throughout it.",
     instructions:
       "Search before renaming, so you know how many places change. A rename changes the chat's history and can be undone.",
@@ -66,8 +57,6 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "settings",
     label: "Settings",
     kinds: workshop,
-    // Offered when the workshop's card names it; the seeded Assistant card names them all.
-    always: false,
     description: "Read and change app settings and generation defaults.",
     instructions: "Read the current settings before changing one, and change only what was asked.",
     tools: ["read_settings", "change_setting", "change_generation_defaults"]

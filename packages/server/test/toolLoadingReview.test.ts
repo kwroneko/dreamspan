@@ -113,11 +113,35 @@ describe("tool loading review regressions", () => {
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
-  it.effect("cannot load a registered skill that the card did not offer", () =>
+  it.effect("cannot load a registered opt-in skill that the card did not name", () =>
     Effect.gen(function* () {
-      const { execution, context } = yield* plan
-      const output = yield* execution.toolLoaders.get("load_skill")!.execute(context, { name: "settings" } as never)
+      const execution = yield* ExecutionRegistry
+      yield* execution.skills.register({
+        id: "opt-in",
+        label: "Opt in",
+        description: "A plugin's skill that only cards naming it get.",
+        instructions: "Opt-in instructions.",
+        tools: ["read_card"],
+        always: false
+      })
+      const { result, context } = yield* plan
+      assert.isFalse(result.cardSkills.some((s) => s.id === "opt-in"))
+      const output = yield* execution.toolLoaders.get("load_skill")!.execute(context, { name: "opt-in" } as never)
       assert.isTrue(output.isError)
+    }).pipe(Effect.provide(ExecutionRegistry.layer))
+  )
+
+  it.effect("offers the built-in skills whatever the card names", () =>
+    Effect.gen(function* () {
+      const { execution, result } = yield* plan
+      const builtins = execution.skills
+        .list()
+        .filter((s) => s.tools.includes("read_card"))
+        .map((s) => s.id)
+      assert.includeMembers(
+        result.cardSkills.map((s) => s.id),
+        builtins
+      )
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 

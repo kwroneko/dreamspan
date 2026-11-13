@@ -45,7 +45,7 @@ const split = (
     // As loadingPlan.ts builds them: the skill index and the uncovered tools in the descriptions.
     loaders: (deferred) => {
       const names = deferred.map((t) => t.id)
-      const skills = skillsFor(runSkills(registry.skills.list(), kind, [assistantCard(registry)]), names)
+      const skills = skillsFor(runSkills(registry.skills.list(), kind, []), names)
       return [
         { ...registry.toolLoaders.get("tool_search")!, description: toolSearchDescription(orphansOf(names, skills)) },
         { ...registry.toolLoaders.get("load_skill")!, description: loadSkillDescription(skills) }
@@ -55,34 +55,57 @@ const split = (
 
 const claude = { kind: "anthropic", api: "anthropic-messages", key: "claude-sonnet-4-5" }
 
-/** The seeded Assistant card's skills, as `CreateWorkshop` writes them from the registered defaults. */
-const assistantCard = (registry: ExecutionRegistry["Service"]) =>
-  cardSkills(
-    { extensions: { rp_harness: { skills: registry.workshopCardSkills.list().map((s) => ({ use: s.id })) } } },
-    { entity: "assistant", name: "Assistant" }
-  )
-
-describe("built-in skills come with the Assistant card", () => {
-  it.effect("its skills cover every deferred workshop tool", () =>
+describe("built-in skills come with every workshop, whatever its card", () => {
+  it.effect("with no card, a plain card or a card of its own, they cover every deferred workshop tool", () =>
     Effect.gen(function* () {
       const { registry, tools } = yield* workshopTools
       const offer = split(registry, tools, "workshop", claude)
-      const skills = skillsFor(runSkills(registry.skills.list(), "workshop", [assistantCard(registry)]), [
-        ...offer.deferred
-      ])
-      assert.strictEqual(skills.length, registry.skills.list().length)
-      assert.deepStrictEqual(orphansOf([...offer.deferred], skills), [])
+      const deferred = [...offer.deferred]
+      const plain = cardSkills({}, { entity: "mine", name: "My card" })
+      const own = cardSkills(
+        {
+          extensions: {
+            rp_harness: {
+              skills: [{ name: "proofread", description: "Checks spelling.", instructions: "List typos.", tools: [] }]
+            }
+          }
+        },
+        { entity: "other", name: "Proofreader" }
+      )
+      for (const cards of [[], [plain], [own]]) {
+        const skills = skillsFor(runSkills(registry.skills.list(), "workshop", cards), deferred)
+        const builtins = skills.filter((s) => !s.source).map((s) => s.id)
+        assert.deepStrictEqual(
+          builtins,
+          registry.skills.list().map((s) => s.id)
+        )
+        assert.deepStrictEqual(orphansOf(deferred, skills), [])
+      }
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
-  it.effect("a card without skills lists every deferred tool for tool_search", () =>
+  it.effect("a card's own skills come on top of the built-in ones", () =>
     Effect.gen(function* () {
-      const { registry, tools } = yield* workshopTools
-      const offer = split(registry, tools, "workshop", claude)
-      const plain = cardSkills({}, { entity: "mine", name: "My card" })
-      const skills = skillsFor(runSkills(registry.skills.list(), "workshop", [plain]), [...offer.deferred])
-      assert.deepStrictEqual(skills, [])
-      assert.deepStrictEqual(orphansOf([...offer.deferred], skills), [...offer.deferred])
+      const { registry } = yield* workshopTools
+      const own = cardSkills(
+        {
+          extensions: {
+            rp_harness: {
+              skills: [
+                {
+                  name: "proofread",
+                  description: "Checks spelling.",
+                  instructions: "List typos.",
+                  tools: ["read_card"]
+                }
+              ]
+            }
+          }
+        },
+        { entity: "other", name: "Proofreader" }
+      )
+      const ids = runSkills(registry.skills.list(), "workshop", [own]).map((s) => s.id)
+      assert.deepStrictEqual(ids, [...registry.skills.list().map((s) => s.id), "proofread"])
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 })

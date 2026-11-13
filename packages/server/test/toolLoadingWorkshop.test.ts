@@ -116,7 +116,7 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
       ["list_library", "tool_search", "load_skill", "send_message"]
     )
     assert.isTrue(tools.find((t) => t.name === "read_card")?.defer_loading)
-    // The seeded Assistant card names the built-in skills: they are its index.
+    // The built-in skills are the index in every workshop, whatever its card.
     assert.include(tools.find((t) => t.name === "load_skill")?.description ?? "", "- cards:")
     assert.deepStrictEqual(
       tools.filter((t) => t.cache_control !== undefined).map((t) => t.name),

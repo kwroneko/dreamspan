@@ -75,8 +75,6 @@ export class ExecutionRegistry extends Context.Service<
     readonly skills: Registry<Skill>
     /** `tool_search` and `load_skill`: offered only in runs that defer a tool. */
     readonly toolLoaders: Registry<RolloutTool<never>>
-    /** The skills a newly seeded workshop Assistant card names (spec/TOOL-LOADING.md §6). */
-    readonly workshopCardSkills: Registry<{ readonly id: string }>
   }
 >()("rp/ExecutionRegistry") {
   static readonly layer = Layer.effect(
@@ -139,8 +137,6 @@ export class ExecutionRegistry extends Context.Service<
       for (const wire of builtinToolLoadingWires) yield* toolLoadingWires.register(wire)
       const skills = makeRegistry<Skill>()
       for (const skill of builtinSkills) yield* skills.register(skill)
-      const workshopCardSkills = makeRegistry<{ readonly id: string }>()
-      for (const skill of builtinSkills) yield* workshopCardSkills.register({ id: skill.id })
       const toolLoaders = makeRegistry<RolloutTool<never>>()
       yield* toolLoaders.register(toolSearch as RolloutTool<never>)
       yield* toolLoaders.register(makeLoadSkill() as RolloutTool<never>)
@@ -176,8 +172,7 @@ export class ExecutionRegistry extends Context.Service<
         toolLoadingProfiles,
         toolLoadingWires,
         skills,
-        toolLoaders,
-        workshopCardSkills
+        toolLoaders
       }
     })
   )
