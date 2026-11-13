@@ -208,15 +208,24 @@ describe("workshop setup effects", () => {
       const capabilities = yield* api.ListWorkshopCapabilities({ chatId: f.chat.id })
       assert.deepStrictEqual(
         capabilities.map((c) => c.id),
-        ["library.read", "chats.read", "library.write", "chats.setup", "chats.rewrite", "settings", "generate"]
+        [
+          "library.read",
+          "chats.read",
+          "library.write",
+          "chats.setup",
+          "chats.rewrite",
+          "settings",
+          "generate",
+          "skills.card"
+        ]
       )
       assert.deepStrictEqual(
         capabilities.map((c) => c.mode),
-        ["allow", "ask", "allow", "allow", "allow", "allow", "ask"]
+        ["allow", "ask", "allow", "allow", "allow", "allow", "ask", "ask"]
       )
       assert.deepStrictEqual(
         capabilities.map((c) => c.modes),
-        [["allow"], ...Array.from({ length: 6 }, () => ["off", "ask", "allow"] as const)]
+        [["allow"], ...Array.from({ length: 7 }, () => ["off", "ask", "allow"] as const)]
       )
       const registry = yield* ExecutionRegistry
       yield* registry.workshopCapabilities.register({

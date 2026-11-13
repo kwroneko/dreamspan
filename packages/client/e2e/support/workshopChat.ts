@@ -201,7 +201,7 @@ export function workshopChatTests() {
             await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"))
           }
           const chip = nextReply(page).getByRole("button", { name: /^What the assistant may do: / })
-          await expect(chip).toHaveText(/Can: 5 · Asks: 2/)
+          await expect(chip).toHaveText(/Can: 5 · Asks: 3/)
           await expect(
             nextReply(page).getByRole("button", { name: /replies now$|^Reply now$|^No one to reply$/ })
           ).toHaveCount(0)
@@ -229,12 +229,12 @@ export function workshopChatTests() {
             )
             await expect(row.getByRole("button", { name: "Off", exact: true })).toBeVisible()
           }
-          for (const id of ["chats.read", "generate"]) {
+          for (const id of ["chats.read", "generate", "skills.card"]) {
             await expect(
               popover.locator(`[data-capability="${id}"]`).getByRole("button", { name: "Ask first", exact: true })
             ).toHaveAttribute("aria-pressed", "true")
           }
-          await expect(popover.locator("[data-capability]")).toHaveCount(7)
+          await expect(popover.locator("[data-capability]")).toHaveCount(8)
           await expect(popover.getByText("These hold for this workshop only.")).toBeVisible()
           await shot("capabilities")
           await expectLayout(page, info, `workshop-capabilities-${width}-${theme}`, { scope: '[role="dialog"]' })

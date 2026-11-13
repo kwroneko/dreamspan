@@ -118,7 +118,11 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
     const schema = entry.parameters ?? rpc?.payloadSchema ?? runtime.schema?.(entry.operation)
     if (!schema) throw new Error(`Tool ${entry.id} needs a parameter schema.`)
     const document = Schema.toJsonSchemaDocument(schema)
-    const parameters = { ...document.schema, $defs: document.definitions, additionalProperties: false } as TSchema
+    const parameters = {
+      ...document.schema,
+      $defs: document.definitions,
+      additionalProperties: false
+    } as TSchema
     const validate = (ctx: ToolContext, args: Record<string, unknown>) =>
       Effect.gen(function* () {
         if (!boundedArguments(args)) return yield* Effect.fail(new Error("Arguments exceed this tool's size limits."))

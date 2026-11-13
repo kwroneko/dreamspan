@@ -18,6 +18,15 @@ import { lookupLore } from "./agent/tools/lore.ts"
 import { setPresence } from "./agent/tools/presence.ts"
 import { defaultMode, type OrchestrationMode } from "./agent/modes.ts"
 import type { RolloutTool } from "./agent/tools.ts"
+import {
+  builtinToolLoadingProfiles,
+  builtinToolLoadingWires,
+  type Skill,
+  type ToolLoadingProfile,
+  type ToolLoadingWire
+} from "./agent/toolLoading.ts"
+import { builtinSkills } from "./agent/skills.ts"
+import { makeLoadSkill, toolSearch } from "./agent/tools/loading.ts"
 import { Context, Effect, Layer, Option } from "effect"
 import { makeRegistry, type Registry } from "./registry.ts"
 import { defaultReplyOutput, type ReplyOutputStrategy } from "./chat/replyOutput.ts"
@@ -60,6 +69,14 @@ export class ExecutionRegistry extends Context.Service<
     readonly operationTool: ReturnType<typeof makeOperationTools>["operationTool"]
     readonly operationRuntime: OperationRuntime
     readonly kindTools: Registry<{ readonly id: string; readonly tool: RolloutTool<never> }>
+    /** Dynamic tool loading (spec/TOOL-LOADING.md): each kind's immediate allowlist. */
+    readonly toolLoadingProfiles: Registry<ToolLoadingProfile>
+    /** Which wire APIs and models carry deferred tools without changing the cached prefix. */
+    readonly toolLoadingWires: Registry<ToolLoadingWire>
+    /** Library-level groups of tools with instructions, loaded with `load_skill`. */
+    readonly skills: Registry<Skill>
+    /** `tool_search` and `load_skill`: offered only in runs that defer a tool. */
+    readonly toolLoaders: Registry<RolloutTool<never>>
   }
 >()("rp/ExecutionRegistry") {
   static readonly layer = Layer.effect(
@@ -127,6 +144,15 @@ export class ExecutionRegistry extends Context.Service<
         { ...editCard, kindOverrides: ["workshop"] }
       ] as ReadonlyArray<RolloutTool<never>>)
         yield* rolloutTools.register(tool)
+      const toolLoadingProfiles = makeRegistry<ToolLoadingProfile>()
+      for (const profile of builtinToolLoadingProfiles) yield* toolLoadingProfiles.register(profile)
+      const toolLoadingWires = makeRegistry<ToolLoadingWire>()
+      for (const wire of builtinToolLoadingWires) yield* toolLoadingWires.register(wire)
+      const skills = makeRegistry<Skill>()
+      for (const skill of builtinSkills) yield* skills.register(skill)
+      const toolLoaders = makeRegistry<RolloutTool<never>>()
+      yield* toolLoaders.register(toolSearch as RolloutTool<never>)
+      yield* toolLoaders.register(makeLoadSkill() as RolloutTool<never>)
       const replies = makeRegistry<ReplyOutputStrategy>()
       const summaries = makeRegistry<SummaryStrategy>()
       const summaryTools = makeRegistry<SummaryToolFactory>()
@@ -155,7 +181,11 @@ export class ExecutionRegistry extends Context.Service<
         kindTools,
         operationTools,
         operationTool,
-        operationRuntime
+        operationRuntime,
+        toolLoadingProfiles,
+        toolLoadingWires,
+        skills,
+        toolLoaders
       }
     })
   )

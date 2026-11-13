@@ -137,6 +137,8 @@ export interface RequestTransform {
       readonly sessionId?: string
       /** The connection's provider settings in effect: its defaults with the user's changes. */
       readonly settings?: ProviderSettings
+      /** An agent run's deferred tools and where they were loaded (spec/TOOL-LOADING.md §4). */
+      readonly toolLoading?: import("./toolLoading.ts").ToolLoadingRequest
     }
   ) => Record<string, unknown>
 }

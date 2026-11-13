@@ -1,11 +1,12 @@
 import { storyReadStamp } from "../agent/continuity.ts"
+import { loadingWireFor } from "../agent/loadingPlan.ts"
+import { loadedSet } from "../agent/toolLoading.ts"
 import { isDeepStrictEqual } from "node:util"
 import { outsideEffect } from "../agent/effects.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 type RetryModel = { readonly connection: ConnectionId; readonly model: ModelId }
 import type { AssembledRequest, ContextSnapshot, ModelInput } from "../assembler/types.ts"
 import type { ContextBudget } from "@rp/shared/inspectorApi.ts"
-import { isDeepStrictEqual } from "node:util"
 // The agent RPCs (@rp/shared/agentApi.ts). Storage checks the version or chat is the caller's.
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { type ChatState, foldState, permissionKey } from "@rp/shared/state.ts"
@@ -209,8 +210,14 @@ const agentVersionResumer = Effect.gen(function* () {
               : "No model is chosen for this chat. Choose one, then resume."
           )
         planned = plan(material, frozen as Frozen, model)
-        // Unchanged, the frozen request is sent byte for byte, so the provider's cache still holds.
-        const modelChanged = !isDeepStrictEqual(frozen.inputs.model, model)
+        // The same model (connection and model, the connection unedited) sends the frozen request
+        // byte for byte, so the provider's cache still holds, the model's settings edited since
+        // included: its samplers and its provider route, which the run's tool loading froze with
+        // it (spec/TOOL-LOADING.md §10). Another model takes its own settings (spec/AGENTIC.md §12.3).
+        const modelChanged =
+          frozen.inputs.model?.connectionId !== model.connectionId ||
+          frozen.inputs.model?.modelId !== model.modelId ||
+          frozen.inputs.model?.connectionRevision !== model.connectionRevision
         checkBudget = modelChanged
         let rebuilt: ContextSnapshot = modelChanged
           ? forModel(frozen, {
@@ -252,11 +259,20 @@ const agentVersionResumer = Effect.gen(function* () {
       const resumedSnapshot = JSON.parse(snapshot) as ContextSnapshot & Frozen
       const budget = resumedSnapshot.contextBudget
       if (checkBudget && budget && resumedSnapshot.inputs.model) {
+        // The tools as the resumed request sends them (agent/session.ts): on a model whose wire
+        // API defers tools, one not loaded in the kept transcript takes no room yet.
+        const offered = resumedSnapshot.agent?.tools ?? []
+        const deferred = new Set(
+          loadingWireFor(execution, resumedSnapshot.inputs.model)
+            ? offered.filter((t) => t.deferred === true).map((t) => t.name)
+            : []
+        )
+        const loaded = loadedSet(planned.transcript, deferred)
         const count = yield* reader.CountRolloutContext({
           model: JSON.stringify(resumedSnapshot.inputs.model),
           request: JSON.stringify(resumedSnapshot.request),
           transcript: JSON.stringify(planned.transcript),
-          tools: JSON.stringify(resumedSnapshot.agent?.tools ?? []),
+          tools: JSON.stringify(offered.filter((t) => !deferred.has(t.name) || loaded.has(t.name))),
           ...(planned.continuation === undefined ? {} : { continuation: planned.continuation })
         })
         if (count > budget.maximum - budget.responseReserve)

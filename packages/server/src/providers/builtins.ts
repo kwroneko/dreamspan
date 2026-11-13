@@ -27,6 +27,7 @@ import { bedrockOpenAIChatKind, bedrockOpenAIResponsesKind } from "./bedrockOpen
 import { vertexKind } from "./vertex.ts"
 import { builtinProviders } from "@rp/shared/providerDefinitions.ts"
 import { builtinShims } from "./shims.ts"
+import { applyAnthropicToolLoading, applyResponsesToolLoading, applyRouterToolLoading } from "./toolLoading.ts"
 
 const completions = openAICompletionsApi()
 
@@ -128,6 +129,31 @@ export const layer = Layer.effectDiscard(
     for (const provider of builtinProviders) yield* registry.providers.register(provider)
     for (const entry of builtinKinds) yield* registry.kinds.register(entry)
     for (const shim of builtinShims) yield* registry.shims.register(shim)
+    // Deferred tools (spec/TOOL-LOADING.md §4), first: the breakpoint transforms see the final tools.
+    yield* registry.transforms.register({
+      id: "anthropic-tool-loading",
+      appliesTo: (target) => target.api === "anthropic-messages",
+      transform: (payload, request) =>
+        request.toolLoading?.api === "anthropic-messages"
+          ? applyAnthropicToolLoading(payload, request.toolLoading)
+          : payload
+    })
+    yield* registry.transforms.register({
+      id: "openai-responses-tool-loading",
+      appliesTo: (target) => target.api === "openai-responses",
+      transform: (payload, request) =>
+        request.toolLoading?.api === "openai-responses"
+          ? applyResponsesToolLoading(payload, request.toolLoading)
+          : payload
+    })
+    yield* registry.transforms.register({
+      id: "openrouter-tool-loading",
+      appliesTo: (target) => target.kind === "openrouter" && target.api === "openai-completions",
+      transform: (payload, request) =>
+        request.toolLoading?.api === "openai-completions"
+          ? applyRouterToolLoading(payload, request.toolLoading)
+          : payload
+    })
     // Explicit cache breakpoints (PROVIDERS §8), for Anthropic Messages so far.
     yield* registry.transforms.register({
       id: "anthropic-explicit-breakpoints",

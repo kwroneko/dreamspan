@@ -118,6 +118,8 @@ export interface StreamRequest {
     readonly preserveBreakpoints?: boolean
     /** The automatic layout's reusable endpoint, for transforms that place markers there. */
     readonly stable?: StableEndpoint
+    /** An agent run's deferred tools and their load points, for the tool loading transforms. */
+    readonly toolLoading?: import("./toolLoading.ts").ToolLoadingRequest
     /**
      * Fields set over the body pi-ai built, before the registered transforms run: what the
      * caller decides that pi-ai doesn't model, such as the context assembler's exact Chat
@@ -1553,6 +1555,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                         ...(options.stable && options.cacheRetention !== "none" ? { stable: options.stable } : {}),
                         ...(options.cacheRetention !== undefined ? { cacheRetention: options.cacheRetention } : {}),
                         ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+                        ...(options.toolLoading ? { toolLoading: options.toolLoading } : {}),
                         settings: prepared.settings
                       }),
                     initial

@@ -14,6 +14,7 @@
 // model page shows it). Its payload rewrite applies when the request's own routing pins one.
 import { type FixedCapability, type ModelUpstream, pinnedRoute, type RouteRule } from "@rp/shared/providers.ts"
 import type { RequestTarget } from "./registry.ts"
+import { portableParameters } from "./toolSchemas.ts"
 
 interface ShimRequest {
   readonly target: RequestTarget
@@ -174,6 +175,23 @@ const withoutBreakpoints = (payload: Record<string, unknown>) => {
 
 /** The built-in shims, for what the live provider suite found (liveapi, 2026-11-07), and documented limits. */
 export const builtinShims: ReadonlyArray<CompatShim> = [
+  {
+    id: "openrouter-openai-tool-schemas",
+    label: "Tool schemas use the form this provider accepts; the app still checks every argument.",
+    models: "OpenAI models",
+    providers: ["openrouter"],
+    apis: ["openai-completions"],
+    model: /^openai\//,
+    payload: (payload) => {
+      if (!Array.isArray(payload.tools)) return payload
+      for (const tool of payload.tools) {
+        const fn = object(object(tool)?.function)
+        const parameters = object(fn?.parameters)
+        if (fn && parameters) fn.parameters = portableParameters(parameters)
+      }
+      return payload
+    }
+  },
   {
     // https://ai.google.dev/gemini-api/docs/thinking?generate-content=true
     id: "google-gemini-2.5-pro-thinking-on",

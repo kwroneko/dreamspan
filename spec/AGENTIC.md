@@ -50,7 +50,7 @@
 | Decision models: System-One `{model, state, questions}`, points routing/records/checks/audit/late_addition/implicit_reply/memory, `DecisionEngine.evaluate(point, input, ctx)`, a heuristic fallback per point, every billed attempt accounted | The same engine shape and the same wire body, with RP points `presence` and `lore` (§7) and the existing refusal judge kept as it is. Every call is opt-in per connection | Provider-send consent (owner rule) |
 | Console: `LiveRollout`/`Rollout` views, SSE `rollout_seed`, tentative deltas | Steps inline in the version (§7.4 [D]), live over the chat's existing subscription, with a `Steps` seed on subscribe | |
 
-reference-harness mechanisms not taken, and why: dynamic tool loading (`load_skill`, `tool_search`), since RP toolsets are small and stable, which keeps the cache intact; session records, follow-up folding and session claims, which are chat-platform concerns; image cap, since the provider boundary already caps images (ARCHITECTURE §16 "Images").
+reference-harness mechanisms not taken, and why: dynamic tool loading (`load_skill`, `tool_search`) for RP, since RP toolsets are small and stable, which keeps the cache intact (workshops take it: [TOOL-LOADING.md](TOOL-LOADING.md)); session records, follow-up folding and session claims, which are chat-platform concerns; image cap, since the provider boundary already caps images (ARCHITECTURE §16 "Images").
 
 ## 2. Timeline and rollouts; the commit pipeline
 
@@ -374,7 +374,7 @@ Each case was reproduced against a scripted provider (`test/resumeAudit.test.ts`
 ### 12.3 Resume on the model chosen now
 
 - **[P]** Resume, Continue and a new version use the model the composer shows with the reply last: a model chosen while the stopped reply is the last message applies to it. Resume reads the chat's binding at the reply (`StateEventsAt` with `displayEnd`), because a generation's own assembly reads the state before the reply. "Retry with…" (a named model) still wins.
-- **[P]** With the same model, the frozen request is sent byte for byte, so the provider's cache still holds. With another model, the run keeps its messages and transcript, and takes the new model's settings: samplers, context budget and cache layout. The old request's cache checkpoints are dropped, since they index the old model's wire.
+- **[P]** With the same model, the frozen request is sent byte for byte, so the provider's cache still holds. The same model is the same connection (unedited) and model; settings edited on it since the run, a provider route included, don't make it another (merge-batch9, so a run's tool loading keeps its route). With another model, the run keeps its messages and transcript, and takes the new model's settings: samplers, context budget and cache layout. The old request's cache checkpoints are dropped, since they index the old model's wire.
 - **[P]** Thinking another model wrote, and its signatures (Anthropic's signed thinking, Gemini's thought signatures, OpenRouter's reasoning details), are left out of the new model's request. Text, tool calls and tool results are converted into the new API's own form. The transcript records which model wrote each turn.
 - **[P]** DeepSeek in thinking mode refuses a replayed assistant turn with tool calls but no `reasoning_content` (400, "must be passed back"). When the target is DeepSeek, such a turn (another model's, whose thinking was left out) is sent with `reasoning_content: ""`. Tried against the live API on 2026-11-12: missing gives 400, empty gives 200; with thinking off, all forms give 200.
 
