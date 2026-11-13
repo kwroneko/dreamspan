@@ -1073,6 +1073,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 - **[P]** (phase4decide) `lore` asks only about entries that carry a question for the decision model (the entry's `decision_hint`, set in its Matching settings), at most 32 per reply, over the last six messages; a yes includes the entry as if its keys had matched.
 
 ### 7.7 Agent use ("workshop")
+- **[D]** Long workshop sessions require LCM summaries. Owner, 2026-11-13: “the agent NEEDS LCM summaries. It was INVENTED FOR CODING AGENTS.” This closes WORKSHOP §10 question 4 and its Later item. Summaries cover messages and tool steps; originals remain recoverable. **Built worklcm1 (2026-11-13)**; this requirement is obsolete as an implementation plan. See ARCHITECTURE §16, “Workshop transcript summaries”.
+
 - **Design (proposed, 2026-11-12):** [WORKSHOP.md](WORKSHOP.md) designs everything in this section, the Phase 6 parts of §7.3 and §10.3, and the plugin loader, as deltas from the build and reference-harness, with build units in its §9 and open questions in its §10. It promotes nothing here. [WORKSHOP-CONTEXT.md](WORKSHOP-CONTEXT.md) (proposed, 2026-11-12) designs the workshop's context window, long runs, history tools, preset structure, card and persona; built parts are in ARCHITECTURE §16, "Workshop context". It promotes nothing here either.
 - **[D]** Agentic work outside the RP itself: creating cards with tools, editing and cloning them, changing settings, setting up chat modes, eventually writing plugins.
 - **[D]** It needs a **clear UX distinction** within one shared UI, and it must be hard to slip into "Claude Code mode" from RP by accident. It ships preconfigured with an agent preset and a default assistant card the user can swap for any of their own.

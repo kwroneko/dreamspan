@@ -54,8 +54,9 @@ describe("workshop preset conversion", () => {
       "style",
       "chatHistory"
     ])
-    // Added pieces start off: nothing new is sent until the user turns them on or they are filled.
-    expect(converted.order.filter((e) => WORKSHOP_PIECE_IDS.has(e.identifier)).every((e) => !e.enabled)).toBe(true)
+    expect(
+      converted.order.filter((e) => WORKSHOP_PIECE_IDS.has(e.identifier) && e.enabled).map((e) => e.identifier)
+    ).toEqual(["summaries"])
     expect(converted.prompts.map((p) => p.identifier)).not.toContain("scenario")
     // The original is untouched.
     expect(story.order).toHaveLength(7)

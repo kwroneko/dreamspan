@@ -25,6 +25,8 @@ export interface ToolContext {
   readonly versionId: VersionId
   readonly rolloutId: string
   readonly toolCallId: string
+  /** The current run only, for recovering compacted steps. */
+  readonly transcript?: () => ReadonlyArray<import("@earendil-works/pi-agent-core").AgentMessage>
   /** The message before the one being generated: nothing after it is visible. */
   readonly leafSlotId: SlotId | null
   /**

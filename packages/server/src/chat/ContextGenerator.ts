@@ -504,7 +504,7 @@ export const layer = Layer.effect(
               let elided = 0
               const room = budget ? budget.maximum - budget.responseReserve : Number.POSITIVE_INFINITY
               let needsRebuild = count > room * ELIDE_TRIGGER
-              if (needsRebuild) {
+              if (needsRebuild && !state.lcm?.enabled) {
                 const compacted = yield* elideCarried({
                   reader,
                   request,
@@ -521,6 +521,7 @@ export const layer = Layer.effect(
                   needsRebuild = false
                 }
               }
+              if (state.lcm?.enabled) needsRebuild = false
               // Provider image limits apply to the entire request. Hydrating the prefix
               // and each carried user message separately must not evict a cached image.
               const imageCount = [
@@ -531,7 +532,11 @@ export const layer = Layer.effect(
                 snapshot.inputs.model?.vision !== false &&
                 additions.some((message) => message.role === "rpUser" && (message.message.images?.length ?? 0) > 0) &&
                 imageCount > (snapshot.inputs.model?.maxImages ?? DEFAULT_MAX_IMAGES)
-              if (imageOverflow || needsRebuild || (budget && count > budget.maximum - budget.responseReserve)) {
+              if (
+                imageOverflow ||
+                needsRebuild ||
+                (!state.lcm?.enabled && budget && count > budget.maximum - budget.responseReserve)
+              ) {
                 seed = undefined
                 continuity = {
                   path: baseline,

@@ -40,6 +40,7 @@ import {
 import { forTarget, rolloutRequest } from "./wire.ts"
 import { liveSuffix } from "./messages.ts"
 import { loadedSet, loadPoints, type Skill, type ToolLoadingWire } from "./toolLoading.ts"
+import { executionRegistry } from "../execution.ts"
 
 /** What an agent turn needs beyond a plain reply's. */
 export interface AgentRun {
@@ -145,6 +146,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
     Effect.gen(function* () {
       const { request, generation, rolloutId, output, providers } = input
       const { plan, tools, writer } = run
+      const execution = yield* executionRegistry
       const model = generation.model!
       const registry = yield* Effect.serviceOption(ProviderRegistry)
       const target = {
@@ -239,6 +241,19 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       /** The typed failure behind an `error` turn, for the version's failure class. */
       let failure: GenerationFailed | undefined
       const seed = run.resume?.transcript as ReadonlyArray<AgentMessage> | undefined
+      const room = (model.context ?? 128_000) - generation.request.samplers.max_tokens
+      let resultTurn = -1
+      let resultTokens = 0
+      const textTokens = (text: string) =>
+        runPromise(
+          run.reader.CountRolloutContext({
+            model: JSON.stringify(model),
+            request: JSON.stringify(generation.request),
+            transcript: "[]",
+            tools: "[]",
+            text
+          })
+        )
       // A resumed run counts the requests it made before, so its turn cap still holds.
       let requests = seed?.slice(historical).filter((m) => m.role === "assistant").length ?? 0
       /** Text a stop cut off: the first request sends it as the reply's start, and its output goes on from it. */
@@ -441,6 +456,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         versionId: working.versionId,
         rolloutId,
         toolCallId,
+        transcript: () => agent.state.messages,
         leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
         viewers: generation.viewers,
         ...(request.storyAt === undefined ? {} : { storyAt: request.storyAt }),
@@ -562,10 +578,39 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             )
           }
           if (tool.effect === "chat_state" && !result.isError) run.onState?.()
+          const fullText = budgetResult(result.text)
+          let sentText = fullText
+          if (execution.chatKinds.get(run.kind ?? "")?.summaryTranscript) {
+            const turn = agent.state.messages.findLastIndex((m) => m.role === "assistant")
+            if (turn !== resultTurn) {
+              resultTurn = turn
+              resultTokens = 0
+            }
+            const quota = Math.max(128, Math.floor(room / 4))
+            const remaining = Math.max(0, quota - resultTokens)
+            if ((await textTokens(fullText)) > remaining) {
+              let marker = `\n[Result shortened for this turn. read_run with message 0 and call "${toolCallId}" recovers it.]`
+              if ((await textTokens(marker)) > remaining) marker = ""
+              let lo = 0,
+                hi = fullText.length
+              while (lo < hi) {
+                const mid = Math.ceil((lo + hi) / 2)
+                if ((await textTokens(fullText.slice(0, mid) + marker)) <= remaining) lo = mid
+                else hi = mid - 1
+              }
+              sentText = fullText.slice(0, lo) + marker
+            }
+            resultTokens += await textTokens(sentText)
+          }
           return {
-            content: [{ type: "text", text: budgetResult(result.text) }],
+            content: [{ type: "text", text: fullText }],
             // What a loading call loaded is part of the transcript: replay derives the loaded set from it.
-            details: result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : null,
+            details:
+              sentText !== fullText
+                ? { sentText, ...(result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : {}) }
+                : result.loaded?.length && !result.isError
+                  ? { loaded: [...result.loaded] }
+                  : null,
             ...(result.isError ? { isError: true } : {})
           }
         }
@@ -598,6 +643,45 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                   ? [{ role: "rpHarness" as const, content: WRITE_NOW, timestamp: Date.now() }]
                   : [])
               ]
+        },
+        prepareRequest: async ({ context }, signal) => {
+          if (!execution.chatKinds.get(run.kind ?? "")?.summaryTranscript) return
+          const compactor = execution.runCompactors.get("workshop")
+          if (!compactor) throw new Error("Workshop summaries are unavailable.")
+          try {
+            const compacted = await runPromise(
+              compactor.compact({
+                reader: run.reader,
+                providers,
+                request,
+                rolloutId,
+                model,
+                prefix: generation.request,
+                messages: context.messages,
+                tools: frozen
+                  .filter((t) => !deferred.has(t.name) || loadedSet(context.messages, deferred).has(t.name))
+                  .concat(sends ? [sendTool as unknown as FrozenTool] : []),
+                reserve: generation.request.samplers.max_tokens,
+                leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null
+              }),
+              { signal }
+            )
+            if (JSON.stringify(compacted) !== JSON.stringify(context.messages)) {
+              agent.state.messages = [...compacted]
+              if (!(await flush())) throw new Error("The summary could not be saved.")
+              run.onState?.()
+              return { context: { ...context, messages: [...compacted] } }
+            }
+          } catch (error) {
+            failure =
+              error instanceof GenerationFailed
+                ? error
+                : new GenerationFailed({
+                    class: "server",
+                    message: "The workshop couldn't save its summary. Resume to try again."
+                  })
+            throw error
+          }
         },
         convertToLlm: async (messages) => {
           if (!messages.some((m) => m.role === "rpUser")) return liveSuffix(messages)

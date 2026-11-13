@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from "node:util"
 import type { PathEntry, SlotId, StoryAt } from "@rp/shared/chat.ts"
 import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Effect } from "effect"
+import { activeRunSummaries } from "../compaction.ts"
 import { storyReadStamp } from "../continuity.ts"
 import { placedSteps } from "../steps.ts"
 import { attachedStory } from "../storyReadScope.ts"
@@ -103,7 +104,10 @@ const readRun: RolloutTool<{
   description:
     "Reads the tool calls an earlier message of yours made, with their arguments and results, from the run that wrote it. Use it when a result was left out to save room, or to check what an earlier lookup returned, instead of looking it up again. Give the message's number; a call id or words narrow it.",
   parameters: Type.Object({
-    message: Type.Integer({ minimum: 1, description: "The number of the earlier message whose steps to read." }),
+    message: Type.Integer({
+      minimum: 0,
+      description: "The earlier message number, or 0 for steps of this run (including summarized results)."
+    }),
     call: Type.Optional(Type.String({ description: "Only the step with this tool call id." })),
     query: Type.Optional(Type.String({ description: "Only steps whose arguments or result contain all these words." })),
     from_step: Type.Optional(Type.Integer({ minimum: 1, description: "Start at this step number." })),
@@ -114,20 +118,34 @@ const readRun: RolloutTool<{
     safely(
       "read_run",
       Effect.gen(function* () {
-        const entry = (yield* pathEntries(context)).get(message)
-        if (!entry || entry.contextExcluded)
+        const entry = message === 0 ? undefined : (yield* pathEntries(context)).get(message)
+        if (message !== 0 && (!entry || entry.contextExcluded))
           return { text: `Message ${message} isn't one of the earlier messages.`, isError: true }
         // A separate context's character reads only its own runs (spec/CHARACTER-CONTEXT.md §9.2). A
         // stretch view (spec/THREADS.md §7.3: the whole path with a character speaking) isn't one:
         // it filters only a separate join's stretch, and the workshops this tool is offered in have
         // no joins, as the history tools read a stretch view whole where no separate join is on it.
         if (
+          entry &&
           context.viewers !== null &&
           !context.viewers.includes(STRETCH_VIEW) &&
           !context.viewers.includes(entry.version.speakerEntityId ?? "")
         )
           return { text: `Message ${message}'s steps aren't yours to read.`, isError: true }
-        const run = yield* messageSteps(context, entry)
+        const run =
+          message === 0 && context.transcript
+            ? {
+                storyAt: context.storyAt,
+                storyStamp: context.storyAt
+                  ? yield* storyReadStamp(context.reader, context.userId, context.storyAt)
+                  : undefined,
+                steps: placedSteps(context.transcript(), context.offer?.tools ?? [], false)
+                  .flatMap(({ step }) => (step.kind === "tool" ? [step] : []))
+                  .map((step, at) => ({ ...step, n: at + 1 }))
+              }
+            : entry
+              ? yield* messageSteps(context, entry)
+              : null
         if (run === null || run.steps.length === 0)
           return { text: `Message ${message} was written without tool calls.` }
         const stands = run.steps.some((s) => STORY_READS.includes(s.tool)) ? yield* storyReadsStand(context, run) : true
@@ -198,5 +216,77 @@ const WORKSHOP_WORDING: Readonly<Record<string, { readonly description: string; 
 /** `workshop:<id>` variants (`kindTools`): same execution, workshop wording. */
 export const workshopHistoryVariants = historyTools.flatMap((tool) => {
   const wording = WORKSHOP_WORDING[tool.id]
-  return wording ? [{ id: `workshop:${tool.id}`, tool: { ...tool, ...wording } }] : []
+  return wording
+    ? [
+        {
+          id: `workshop:${tool.id}`,
+          tool: {
+            ...tool,
+            ...wording,
+            ...(tool.id === "expand_summary"
+              ? {
+                  execute: (context: ToolContext, args: never) =>
+                    Effect.gen(function* () {
+                      const asked = args as { messages: string; max_tokens?: number }
+                      if (asked.messages.startsWith("run:")) {
+                        const transcript = context.transcript?.() ?? []
+                        const summary = activeRunSummaries(transcript).find((s) => `run:${s.id}` === asked.messages)
+                        if (!summary) return { text: "That summary isn't in this run.", isError: true }
+                        const before = placedSteps(
+                          transcript.slice(0, summary.from),
+                          context.offer?.tools ?? [],
+                          false
+                        ).filter(({ step }) => step.kind === "tool").length
+                        return yield* readRun.execute(
+                          { ...context, transcript: () => transcript.slice(0, summary.through) },
+                          {
+                            message: 0,
+                            from_step: before + 1,
+                            ...(asked.max_tokens === undefined ? {} : { max_tokens: asked.max_tokens })
+                          }
+                        )
+                      }
+                      const result = yield* tool.execute(context, args)
+                      const numbers = asked.messages.match(/^\s*(\d+)\s*[–-]\s*(\d+)\s*$/)
+                      if (!numbers || result.isError || result.text.includes("<summary")) return result
+                      const parts: Array<string> = [result.text]
+                      let used = tokensOf(result.text)
+                      const cap = asked.max_tokens ?? 2000
+                      for (let n = Number(numbers[1]); n <= Number(numbers[2]) && used < cap; n++) {
+                        const steps = yield* readRun.execute(context, {
+                          message: n,
+                          max_tokens: Math.max(200, cap - used)
+                        })
+                        if (!steps.isError && steps.text.includes("<step")) {
+                          parts.push(steps.text)
+                          used += tokensOf(steps.text)
+                        }
+                      }
+                      return { text: parts.join("\n\n") }
+                    })
+                }
+              : {}),
+            ...(tool.id === "search_summaries"
+              ? {
+                  execute: (context: ToolContext, args: never) =>
+                    Effect.gen(function* () {
+                      const result = yield* tool.execute(context, args)
+                      const words = (args as { query: string }).query.toLowerCase().split(/\s+/).filter(Boolean)
+                      const found = activeRunSummaries(context.transcript?.() ?? []).filter((s) =>
+                        words.every((w) => s.content.toLowerCase().includes(w))
+                      )
+                      return {
+                        ...result,
+                        text: [
+                          result.text,
+                          ...found.map((s) => `<summary messages="run:${s.id}">\n${s.content}\n</summary>`)
+                        ].join("\n")
+                      }
+                    })
+                }
+              : {})
+          }
+        }
+      ]
+    : []
 })

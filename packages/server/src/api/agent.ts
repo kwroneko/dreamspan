@@ -158,6 +158,7 @@ const agentVersionResumer = Effect.gen(function* () {
       const source = yield* reader.GetVersion({ userId, versionId })
       const sourceSlot = yield* reader.GetSlot({ userId, slotId: source.slotId, forkId })
       const chatId = sourceSlot.chatId
+      const chat = yield* reader.GetChat({ userId, chatId })
       const frozen = JSON.parse(material.snapshot) as ContextSnapshot
       const frozenAgent = (frozen as Frozen).agent
       let planned: ResumePlan | StepNotResumable
@@ -275,7 +276,7 @@ const agentVersionResumer = Effect.gen(function* () {
           tools: JSON.stringify(offered.filter((t) => !deferred.has(t.name) || loaded.has(t.name))),
           ...(planned.continuation === undefined ? {} : { continuation: planned.continuation })
         })
-        if (count > budget.maximum - budget.responseReserve)
+        if (count > budget.maximum - budget.responseReserve && !execution.chatKinds.get(chat.kind)?.summaryTranscript)
           return yield* refuse(
             "The saved run is too large for this model's context window. Choose a model with more room, then resume."
           )

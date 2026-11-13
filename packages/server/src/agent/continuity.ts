@@ -13,8 +13,7 @@ import { placedSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
 import type { Skill } from "./toolLoading.ts"
 import type { FrozenTool } from "./tools.ts"
 
-/** WORKSHOP §10 question 4: the authorized initial policy; change this one constant to
- * retain only timeline text instead. Summaries for workshops remain a separate proposal. */
+/** Legacy step labels for a fresh build when Summaries is explicitly off. */
 export const WORKSHOP_OVERFLOW_STEP_SUMMARIES = true
 
 export interface ContinuityRecord {
@@ -114,6 +113,8 @@ export const previousRun = Effect.fnUntraced(function* (
     return { reason: "The model changed, so this request was put together again." } as const
   if (!isDeepStrictEqual(snapshot.inputs.model, fresh.inputs.model))
     return { reason: "The model or connection settings changed, so this request was put together again." } as const
+  if ((snapshot.lcm === undefined) !== (fresh.lcm === undefined))
+    return { reason: "The Summaries setting changed, so this request was put together again." } as const
   if (!isDeepStrictEqual(snapshot.inputs.preset, fresh.inputs.preset))
     return { reason: "The preset changed, so this request was put together again." } as const
   // A capability turned on or off changes what the instructions say the assistant may do.
