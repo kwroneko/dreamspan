@@ -624,6 +624,8 @@ const overStory = <A>(
   // The approval names the story by its title, as the user knows it.
   describe: (context, args) =>
     Effect.map(storyContext(context), (story) => ({
+      // Allow holds only from a tab still showing this position (AnswerToolApproval).
+      ...("error" in story || context.storyAt === undefined ? {} : { storyAt: context.storyAt }),
       title: "error" in story ? definition.ask : `${definition.ask} “${story.title ?? "Untitled"}”`,
       rows: [
         // The approval names the branch and the message it reads up to, as the tab showed them.

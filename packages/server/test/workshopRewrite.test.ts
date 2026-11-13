@@ -1497,3 +1497,213 @@ it.live("a side-chat reading grant never authorizes the general readers for anot
     )
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })
+
+// Independent review (review-sidewrite1): adversarial checks of the side tab's write position.
+describe("side-chat write positions under review", () => {
+  const ask = (f: Effect.Success<ReturnType<typeof beside>>, name: string, args: unknown, ctx: ToolContext) =>
+    Effect.gen(function* () {
+      let waiting: ApprovalPrompt | null = null
+      const permission = yield* makePermit({
+        registries: f.registry,
+        reader: f.reader,
+        writer: f.writer,
+        userId: f.userId,
+        chatId: f.side.id,
+        rolloutId: ctx.rolloutId
+      })({
+        tool: f.tool(name),
+        context: ctx,
+        args,
+        dangling: false,
+        onWaiting: (p) => {
+          if (p) waiting = p
+        }
+      }).pipe(Effect.forkScoped)
+      yield* eventually(() => waiting !== null)
+      return { prompt: waiting! as ApprovalPrompt, permission }
+    })
+  const count = (dataDir: string, chatId: string) =>
+    fixtureSql(
+      dataDir,
+      [{ sql: "SELECT count(*) AS n FROM state_events WHERE chat_id=? AND key='agent.enabled'", params: [chatId] }],
+      { readOnly: true }
+    ).pipe(Effect.map(([rows]) => Number((rows![0] as { n: number }).n)))
+
+  it.live("binds only story writes to the asking tab's position; library approvals survive a moved tab", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir)
+      yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "library.write", mode: "ask" })
+      yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "chats.setup", mode: "ask" })
+      const moved = { ...f.context.storyAt, forkId: f.sibling.id, leafSlotId: f.entries.at(-1)!.slotId }
+      // A library item does not depend on where the story is shown.
+      const library = yield* ask(f, "create_preset", { label: "Review preset" }, { ...f.context, toolCallId: "lib" })
+      assert.isUndefined(library.prompt.storyAt)
+      yield* f.api.AnswerToolApproval({ ...library.prompt, storyAt: moved, answer: "allow" })
+      assert.isTrue((yield* Fiber.join(library.permission)).run)
+      // A story change keeps the asking tab's position, and names it once, without a doubled word.
+      const setup = yield* ask(
+        f,
+        "change_chat",
+        { chat: f.chat.id, change: { _tag: "AgentEnabled", on: true } },
+        { ...f.context, toolCallId: "setup" }
+      )
+      assert.deepStrictEqual(setup.prompt.storyAt, f.context.storyAt)
+      assert.notInclude(JSON.stringify(setup.prompt.rows), "Branch Unnamed")
+      assert.notInclude(JSON.stringify(setup.prompt.rows), "Branch Original")
+      assert.strictEqual(
+        yield* outcome(f.api.AnswerToolApproval({ ...setup.prompt, storyAt: moved, answer: "allow" })),
+        "ApprovalRefused"
+      )
+      const { storyAt: _asked, ...unpositioned } = setup.prompt
+      assert.strictEqual(
+        yield* outcome(f.api.AnswerToolApproval({ ...unpositioned, answer: "allow" })),
+        "ApprovalRefused"
+      )
+      yield* f.api.AnswerToolApproval({ ...setup.prompt, answer: "deny" })
+      assert.isFalse((yield* Fiber.join(setup.permission)).run)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("refuses a run whose request position differs from its saved one, on every write tool", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir)
+      for (const capability of ["chats.rewrite", "chats.setup"])
+        yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability, mode: "allow" })
+      // Owned, live, on the sibling's path: valid for reads, but not where this run was asked.
+      const forged = { ...f.context.storyAt, forkId: f.sibling.id, leafSlotId: f.entries[4]!.slotId }
+      const ctx = (id: string) => ({ ...f.context, toolCallId: id, cache: new Map<string, unknown>(), storyAt: forged })
+      const calls: Array<[string, unknown]> = [
+        ["rewrite_messages", { chat: f.chat.id, title: "Forged", messages: [{ message: 1, text: "FORGED" }] }],
+        [
+          "rewrite_chat",
+          { chat: f.chat.id, title: "Forged", pairs: [{ find: "Aria", replace: "FORGED", in: ["messages"] }] }
+        ],
+        ["rewrite_instructions", { chat: f.chat.id, title: "Forged", changes: [{ preset: null }] }],
+        ["change_chat", { chat: f.chat.id, change: { _tag: "AgentEnabled", on: true } }],
+        ["set_chat_pin", { chat: f.chat.id, pinned: true }]
+      ]
+      for (const [name, args] of calls) {
+        const result = yield* f.tool(name).execute(ctx(name), args as never)
+        assert.isTrue(result.isError, `${name}: ${result.text}`)
+      }
+      for (const forkId of [f.forkId, f.sibling.id]) {
+        const path = yield* f.reader.GetPath({
+          userId: f.userId,
+          chatId: f.chat.id,
+          forkId,
+          leafSlotId: null,
+          limit: 100
+        })
+        assert.notInclude(JSON.stringify(path.entries.map((e) => e.version.content)), "FORGED")
+      }
+      assert.strictEqual(yield* count(config.dataDir, f.chat.id), 0)
+      assert.lengthOf(yield* f.api.ListRolloutEffects({ chatId: f.side.id }), 0)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("refuses another account's story named as the position, by tool and by worker", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir)
+      yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "chats.setup", mode: "allow" })
+      const other = yield* f.writer.CreateUser({
+        handle: "sidewrite-other",
+        displayName: "Other",
+        role: "user",
+        passwordHash: "synthetic"
+      })
+      const theirs = yield* f.writer.CreateChat({
+        userId: other.id,
+        kind: "rp",
+        status: "active",
+        title: "Their story",
+        participants: [],
+        greeting: null
+      })
+      const foreign = { chatId: theirs.id, forkId: theirs.currentForkId!, leafSlotId: null }
+      for (const chat of [f.chat.id, theirs.id]) {
+        const result = yield* f
+          .tool("change_chat")
+          .execute({ ...f.context, toolCallId: `foreign-${chat}`, storyAt: foreign }, {
+            chat,
+            change: { _tag: "AgentEnabled", on: true }
+          } as never)
+        assert.isTrue(result.isError, result.text)
+      }
+      assert.strictEqual(
+        yield* outcome(
+          f.writer.RunWorkshopOperation({
+            userId: f.userId,
+            rolloutId: f.context.rolloutId,
+            toolCallId: "foreign-worker",
+            capability: "chats.setup",
+            expected: { proof: { storyAt: foreign } },
+            operation: "AddStateEvents",
+            payload: {
+              userId: f.userId,
+              chatId: theirs.id,
+              forkId: theirs.currentForkId,
+              slotId: null,
+              data: [{ key: "agent.enabled", value: { on: true } }]
+            }
+          })
+        ),
+        "EffectUndoRefused"
+      )
+      assert.strictEqual(yield* count(config.dataDir, theirs.id), 0)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("refuses a setup change approved after its branch was deleted, never redirecting", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir, true)
+      yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "chats.setup", mode: "ask" })
+      const ctx = { ...f.context, toolCallId: "deleted-setup" }
+      const args = { chat: f.chat.id, change: { _tag: "AgentEnabled", on: true } }
+      const asked = yield* ask(f, "change_chat", args, ctx)
+      yield* f.api.DeleteFork({ forkId: f.forkId })
+      const answered = yield* outcome(f.api.AnswerToolApproval({ ...asked.prompt, answer: "allow" }))
+      if (answered === "ok") {
+        const permit = yield* Fiber.join(asked.permission)
+        if (permit.run) {
+          const result = yield* f
+            .tool("change_chat")
+            .execute(
+              { ...ctx, ...(permit.approvalDigest ? { approvalDigest: permit.approvalDigest } : {}) },
+              args as never
+            )
+          assert.isTrue(result.isError, result.text)
+        }
+      }
+      assert.strictEqual(yield* count(config.dataDir, f.chat.id), 0)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("undoes a setup change on the tab's branch after the story switched branches", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir)
+      yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "chats.setup", mode: "allow" })
+      const enabled = (forkId: typeof f.forkId) =>
+        f.reader
+          .StateEventsAt({ userId: f.userId, chatId: f.chat.id, forkId, slotId: f.entries[4]!.slotId })
+          .pipe(Effect.map((events) => events.filter((e) => e.data.key === "agent.enabled").map((e) => e.data.value)))
+      const result = yield* f.run("change_chat", { chat: f.chat.id, change: { _tag: "AgentEnabled", on: true } })
+      assert.isUndefined(result.isError, result.text)
+      assert.deepStrictEqual(yield* enabled(f.forkId), [{ on: true }])
+      assert.deepStrictEqual(yield* enabled(f.sibling.id), [])
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "UPDATE chats SET current_fork_id=?, active_leaf_slot_id=? WHERE id=?",
+          params: [f.sibling.id, f.entries.at(-1)!.slotId, f.chat.id]
+        }
+      ])
+      yield* f.api.UndoRolloutEffect((yield* f.api.ListRolloutEffects({ chatId: f.side.id }))[0]!)
+      assert.deepStrictEqual((yield* enabled(f.forkId)).at(-1), { on: false })
+      assert.deepStrictEqual(yield* enabled(f.sibling.id), [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})

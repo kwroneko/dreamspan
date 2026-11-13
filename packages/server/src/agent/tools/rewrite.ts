@@ -387,6 +387,7 @@ const rewrite = <A extends Base>(
         const p = yield* prepareChecked(ctx, args)
         ctx.cache.set(`rewrite:${ctx.toolCallId}`, p)
         return {
+          ...(p.chat.storyTarget ? { storyAt: p.chat.storyTarget } : {}),
           title: `Rewrite “${p.chat.title}”`,
           rows: [
             {
@@ -396,7 +397,7 @@ const rewrite = <A extends Base>(
             {
               label: "Scope",
               value: p.chat.storyTarget
-                ? `Branch ${p.chat.branchLabel} (${p.chat.currentForkId}); messages 1–${p.chat.upTo}. ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
+                ? `Branch “${p.chat.branchLabel}” (${p.chat.currentForkId}); messages 1–${p.chat.upTo}. ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
                 : `Only this chat's current branch (${p.chat.currentForkId}). ${p.includeSwipes ? "Includes unshown swipes." : "Only shown versions; other swipes are unchanged."}`
             },
             {
