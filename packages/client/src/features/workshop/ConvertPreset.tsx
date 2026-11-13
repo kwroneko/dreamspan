@@ -27,7 +27,8 @@ export function ConvertPresetButton({ store, compact }: { store: EditorStore; co
     <>
       <Button className="h-8! px-2!" aria-label="Convert to workshop" hint={HINT} onClick={() => setPlace(target)}>
         <Icon name="tool" />
-        <span className={compact ? "@max-[30rem]:hidden" : ""}>Convert to workshop</span>
+        {/* The toolbar's longest label goes first: with it, the row needs 59rem (presetMarkers.spec.ts). */}
+        <span className="@max-[60rem]:hidden">Convert to workshop</span>
       </Button>
       {place === target && (
         <ConvertDialog
