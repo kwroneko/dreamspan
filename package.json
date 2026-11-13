@@ -30,7 +30,8 @@
     "measure:cache-stagger": "node packages/server/scripts/measure-cache-stagger.ts",
     "test:st": "node packages/server/test/st/run.ts",
     "test:perf": "VITE_PERF=1 npm run build && playwright test -c packages/client/perf/playwright.config.ts",
-    "measure:images": "node packages/client/perf/measure-images.mjs"
+    "measure:images": "node packages/client/perf/measure-images.mjs",
+    "smoke:image": "node scripts/image-smoke.ts"
   },
   "devDependencies": {
     "@effect/language-service": "0.87.3",

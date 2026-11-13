@@ -608,6 +608,6 @@ export const layer = Layer.effect(
         })
       )
 
-    return Option.some({ generate })
+    return Option.some({ kind: "provider" as const, generate })
   })
 )

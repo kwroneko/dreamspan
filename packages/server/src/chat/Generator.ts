@@ -97,6 +97,9 @@ export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("Ge
 }) {}
 
 export interface GeneratorShape {
+  /** Non-sensitive runtime identity for the production image smoke check. */
+  readonly kind?: "provider" | "fake"
+
   /** The text as it's produced. Interrupting the stream stops the generation. */
   readonly generate: (request: GenerationRequest) => Stream.Stream<GenerationChunk, GenerationFailed>
 }

@@ -96,7 +96,7 @@ import { CacheWarmth } from "./chat/CacheWarmth.ts"
 import { ChatHub } from "./chat/ChatHub.ts"
 import { Generations } from "./chat/Generations.ts"
 import * as ContextGenerator from "./chat/ContextGenerator.ts"
-import type { Generator } from "./chat/Generator.ts"
+import { Generator } from "./chat/Generator.ts"
 import { AppConfig } from "./config.ts"
 import * as Database from "./db/Database.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
@@ -466,6 +466,8 @@ const HealthRoute = HttpRouter.add(
   "/healthz",
   Effect.gen(function* () {
     const config = yield* AppConfig
+    const generator = yield* Generator
+    const generatorKind = Option.isSome(generator) ? (generator.value.kind ?? "custom") : "none"
     const buildId = yield* Effect.promise(async () => {
       try {
         const stamp: unknown = JSON.parse(await readFile(join(config.clientDist, "build-id.json"), "utf8"))
@@ -477,7 +479,11 @@ const HealthRoute = HttpRouter.add(
       }
     })
     return HttpServerResponse.text("ok", {
-      headers: { "cache-control": "no-store", ...(buildId ? { "x-client-build": buildId } : {}) }
+      headers: {
+        "cache-control": "no-store",
+        "x-generator-kind": generatorKind,
+        ...(buildId ? { "x-client-build": buildId } : {})
+      }
     })
   })
 )

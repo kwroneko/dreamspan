@@ -154,6 +154,7 @@ for (const setting of ["FAKE_CARD_SOURCE", "FAKE_SAVED_MEDIA"] as const) {
       expect(output).toContain(`${setting}=`)
       expect(output).toContain("needs the development files")
       expect(output).not.toContain("ERR_MODULE_NOT_FOUND")
+      expect(output).not.toMatch(/file:\/\/|^\s*at\s/m)
       expect(output).not.toContain("synthetic-secret-/private/fixture")
       expect(output).not.toContain(join(fixture, "src/dev"))
       expect(output).not.toContain("Listening on")
