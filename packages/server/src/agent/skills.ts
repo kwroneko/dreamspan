@@ -29,7 +29,8 @@ export const builtinSkills: ReadonlyArray<Skill> = [
     id: "this-workshop",
     label: "This conversation",
     kinds: workshop,
-    description: "Look back through this conversation: earlier messages, their summaries and the steps of earlier replies.",
+    description:
+      "Look back through this conversation: earlier messages, their summaries and the steps of earlier replies.",
     instructions:
       "Search or read this conversation's earlier messages when they've left your view. To check what an earlier reply of yours looked up, read its steps with read_run instead of looking it up again.",
     tools: ["search_chat", "read_messages", "expand_summary", "search_summaries", "read_run"]

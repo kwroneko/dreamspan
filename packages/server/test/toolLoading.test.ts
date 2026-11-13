@@ -105,7 +105,10 @@ describe("built-in skills come with every workshop, whatever its card", () => {
         assert.isFalse(offer.deferred.has(name), `${name} is sent from the start`)
       }
       const deferred = [...offer.deferred]
-      assert.deepStrictEqual(orphansOf(deferred, skillsFor(runSkills(registry.skills.list(), "workshop", []), deferred)), [])
+      assert.deepStrictEqual(
+        orphansOf(deferred, skillsFor(runSkills(registry.skills.list(), "workshop", []), deferred)),
+        []
+      )
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 

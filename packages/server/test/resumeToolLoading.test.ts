@@ -201,7 +201,10 @@ it.live("resumes on a smaller model when the tools it sends fit, deferred ones n
     const me = yield* api.Whoami()
     const material = yield* reader.RolloutMaterial({ userId: me.id, versionId: failed.id })
     const frozen = JSON.parse(material.snapshot) as Frozen
-    assert.isTrue(frozen.agent.tools.some((t) => t.deferred === true), "the run defers tools")
+    assert.isTrue(
+      frozen.agent.tools.some((t) => t.deferred === true),
+      "the run defers tools"
+    )
     const count = (tools: Frozen["agent"]["tools"]) =>
       reader.CountRolloutContext({
         model: JSON.stringify(frozen.inputs.model),
