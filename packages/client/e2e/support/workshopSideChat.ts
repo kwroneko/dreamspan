@@ -290,13 +290,18 @@ export function workshopSideChatTests() {
           const answer = side.getByRole("article").filter({ hasText: SIDE_ANSWER })
           await expect(answer).toHaveCount(1, { timeout: 60_000 })
           // Its steps, opened if they're folded.
-          await expect(answer.locator("[data-steps-badge]")).toHaveText(/^1 step/)
-          const fold = answer.locator("[data-steps-panel] button[aria-expanded]").first()
-          await expect(fold).toBeVisible()
-          if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click()
-          await expect(answer.locator('[data-step="tool"]').first()).toContainText("Read the story", {
-            timeout: 10_000
-          })
+          const badge = answer.locator("[data-steps-badge]")
+          await expect(badge).toHaveText(/^1 step/)
+          // The panel can close as the run settles just after the answer shows: open it again then.
+          await expect(async () => {
+            const fold = answer.locator("[data-steps-panel] button[aria-expanded]").first()
+            if ((await fold.count()) === 0 && (await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+            await expect(fold).toBeVisible({ timeout: 2_000 })
+            if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click()
+            await expect(answer.locator('[data-step="tool"]').first()).toContainText("Read the story", {
+              timeout: 2_000
+            })
+          }).toPass({ timeout: 20_000 })
           const sent = provider().bodies.slice(before)
           expect(sent.some((body) => body.tools?.some((tool) => tool.function.name === "read_story"))).toBe(true)
           expect(JSON.stringify(sent.at(-1)!.messages)).toContain(STORY_LINE)
