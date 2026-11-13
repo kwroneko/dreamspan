@@ -34,8 +34,8 @@ import { withEndOfRequest } from "@rp/shared/presetConditions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
-import { knowsSql, readKnowers, readMergeRows } from "./knowers.ts"
-import { audienceKey } from "./lcmAudience.ts"
+import { isStretchView, knowsSql, readKnowers, readMergeRows } from "./knowers.ts"
+import { audienceKey, stretchOnPath } from "./lcmAudience.ts"
 import { resolveModel } from "@rp/shared/providers.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Layer, Schema } from "effect"
@@ -481,54 +481,58 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   const history = noteHistory(sql, userId, chatId)
   const live = AssemblySources.of({
     viewLayers: true,
-    summaryLayer: (leaf, identities) =>
-      selectSummaryLayer(
-        sql,
-        userId,
-        chatId,
-        settings.summaryBefore ? settings.summaryBefore.slot : leaf,
-        settings.partialBatch,
-        identities ? { identities } : undefined
-      ).pipe(
-        Effect.map((layer) =>
-          settings.condense
-            ? {
-                summaries: [...layer.summaries, ...settings.condense.children],
-                cursor: settings.condense.cursor,
-                cursorDepth: settings.condense.cursorDepth
+    summaryLayer: (leaf, asked) =>
+      // A stretch view (db/knowers.ts) only where a separate join is on the path; elsewhere the shared layer.
+      Effect.flatMap(isStretchView(asked) ? stretchOnPath(sql, chatId, leaf) : Effect.succeed(true), (applies) => {
+        const identities = applies ? asked : undefined
+        return selectSummaryLayer(
+          sql,
+          userId,
+          chatId,
+          settings.summaryBefore ? settings.summaryBefore.slot : leaf,
+          settings.partialBatch,
+          identities ? { identities } : undefined
+        ).pipe(
+          Effect.map((layer) =>
+            settings.condense
+              ? {
+                  summaries: [...layer.summaries, ...settings.condense.children],
+                  cursor: settings.condense.cursor,
+                  cursorDepth: settings.condense.cursorDepth
+                }
+              : settings.summaryBefore
+                ? { ...layer, cursor: settings.summaryBefore.slot, cursorDepth: settings.summaryBefore.depth }
+                : layer
+          ),
+          Effect.flatMap((layer) =>
+            selectFailedRanges(
+              sql,
+              userId,
+              chatId,
+              settings.summaryBefore ? settings.summaryBefore.slot : leaf,
+              layer.cursorDepth,
+              identities ? audienceKey(identities) : null
+            ).pipe(Effect.map((failures) => ({ ...layer, failures })))
+          ),
+          // The layer's cursor is a display position already (selectSummaryLayer in a fork that
+          // shows insertions, spec/MESSAGE-INSERT.md §3.4), which the history's positions compare with.
+          Effect.tap((layer) =>
+            Effect.sync(() => {
+              layerPins = {
+                failures: layer.failures,
+                cursor: layer.cursor,
+                cursorDepth: layer.cursorDepth,
+                summaries: layer.summaries.map((s) => ({
+                  id: s.id,
+                  revision: s.revisionId,
+                  fresh: s.fresh,
+                  status: s.status
+                }))
               }
-            : settings.summaryBefore
-              ? { ...layer, cursor: settings.summaryBefore.slot, cursorDepth: settings.summaryBefore.depth }
-              : layer
-        ),
-        Effect.flatMap((layer) =>
-          selectFailedRanges(
-            sql,
-            userId,
-            chatId,
-            settings.summaryBefore ? settings.summaryBefore.slot : leaf,
-            layer.cursorDepth,
-            identities ? audienceKey(identities) : null
-          ).pipe(Effect.map((failures) => ({ ...layer, failures })))
-        ),
-        // The layer's cursor is a display position already (selectSummaryLayer in a fork that
-        // shows insertions, spec/MESSAGE-INSERT.md §3.4), which the history's positions compare with.
-        Effect.tap((layer) =>
-          Effect.sync(() => {
-            layerPins = {
-              failures: layer.failures,
-              cursor: layer.cursor,
-              cursorDepth: layer.cursorDepth,
-              summaries: layer.summaries.map((s) => ({
-                id: s.id,
-                revision: s.revisionId,
-                fresh: s.fresh,
-                status: s.status
-              }))
-            }
-          })
+            })
+          )
         )
-      ),
+      }),
     target: "next" in settings ? nextTarget : versionTarget(settings.slotId, settings.versionId),
 
     historyStart: (leaf) =>

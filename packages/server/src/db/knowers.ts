@@ -2,7 +2,7 @@
 // cast less those away, and its speaker; a merge's join, those who knew all of it; nothing
 // recorded, everyone. Shared by assembly (`assemblySources.ts`) and the agent's read tools
 // (`agentReads.ts`), so both leave out the same messages. The pure rule is `@rp/shared/knowledge.ts`.
-import { knowersOf, parsePresence } from "@rp/shared/knowledge.ts"
+import { knowersOf, parsePresence, STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Effect } from "effect"
 import { viewedJoin } from "../assembler/mergeKnowledge.ts"
 import type { SqlClient } from "effect/sql"
@@ -32,13 +32,27 @@ const mergeKnowersSql = (slot: string) => `(SELECT json_group_array(candidate.en
   WHERE m.slot_id = ${slot} AND mm.included = 'verbatim' AND mm.knowers_json IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM json_each(mm.knowers_json) k WHERE k.value = candidate.entity)))`
 
+/** Whether these identities are a stretch view's (`STRETCH_VIEW`, kept in `chat_merges.stretch_json`). */
+export const isStretchView = (identities: ReadonlyArray<string> | undefined) =>
+  identities !== undefined && identities.includes(STRETCH_VIEW)
+
+/**
+ * SQL: whether slot `s` is in a live separate join's parallel stretch (the join and the
+ * destination's messages from its span's start, on the join's path), by chain and depth.
+ */
+const inStretchSql = (sql: SqlClient.SqlClient) =>
+  sql`EXISTS (SELECT 1 FROM chat_merges sm JOIN slots js ON js.id = sm.slot_id, json_each(sm.stretch_json) g
+    WHERE sm.chat_id = s.chat_id AND sm.stretch_json IS NOT NULL AND js.deleted_at IS NULL
+      AND g.value ->> 'chain' = s.chain_id AND s.depth BETWEEN g.value ->> 'lo' AND g.value ->> 'hi')`
+
 /**
  * Whether the viewer knew the version `v` of slot `s` (SQL, both aliases in scope). `viewers` is
  * the viewer's identities: itself and the cards it replaced on this fork (`card.swap`). In fork
  * `fork` (when given), a card the fork counts not present for the message (`correctedAwaySql`)
  * didn't know it, unless it's the message's speaker. No recorded cast means everyone except
  * those explicitly absent in this fork. A merge's join: known when the viewer's identities together knew every
- * row of it, or (`partialMerges`) any row.
+ * row of it, or (`partialMerges`) any row. A stretch view (`STRETCH_VIEW`) applies this only in
+ * a separate join's parallel stretch (`inStretchSql`) and knew everything else.
  */
 export const knowsSql = (
   sql: SqlClient.SqlClient,
@@ -51,7 +65,7 @@ export const knowsSql = (
     fork === undefined || fork === null
       ? sql`1`
       : sql`NOT EXISTS (SELECT 1 FROM json_each(${ids}) cv WHERE ${correctedAwaySql(sql, fork, "s.id", "cv.value")})`
-  return sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
+  const rule = sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
     THEN ${
       partialMerges
         ? sql`EXISTS (
@@ -69,10 +83,12 @@ export const knowsSql = (
       OR ((v.cast_json IS NULL OR EXISTS (SELECT 1 FROM json_each(v.cast_json) c WHERE c.value IN (SELECT value FROM json_each(${ids}))
         AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
           WHERE a.value = c.value))) AND ${kept}) END`
+  return viewers.includes(STRETCH_VIEW) ? sql`(NOT ${inStretchSql(sql)} OR ${rule})` : rule
 }
 
 /**
- * Each version's knowers, in the order asked; null: known to everyone (or not found). Point
+ * Each version's knowers, in the order asked; null: known to everyone (or not found); and
+ * `stretched` for a message in a separate join's parallel stretch (`inStretchSql`). Point
  * lookups by version id: the requested ids drive the query, never a scan of the chat. In fork
  * `fork` (when given), the cards it counts not present for a message are left out of its
  * knowers, its speaker apart (`knowsSql`'s rule). The existing query projects corrected cards
@@ -98,7 +114,8 @@ export const readKnowers = (
       merge_title: string | null
       content: string
       away_json: string | null
-    }>`SELECT metadata.id, metadata.slot_id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
+      stretched: number
+    }>`SELECT metadata.id, ${inStretchSql(sql)} AS stretched, metadata.slot_id, ${viewers == null ? sql`''` : sql`payload.content`} AS content,
         ${
           fork == null
             ? sql`NULL`
@@ -149,6 +166,7 @@ export const readKnowers = (
         versionId,
         knowers: knowers === null ? null : [...knowers],
         ...(away === undefined ? {} : { away }),
+        ...(row?.stretched ? { stretched: true } : {}),
         ...(view ? { content: view.content, readable: view.rows.length > 0 || !view.partial } : {})
       }
     })

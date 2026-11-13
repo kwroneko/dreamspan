@@ -9,6 +9,7 @@
 // registered and replaceable.
 import { Effect } from "effect"
 import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
+import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { viewedJoin } from "./mergeKnowledge.ts"
 import { AssemblySources, need, type Assembly, type AssemblerStage, type Cast } from "./pipeline.ts"
@@ -102,8 +103,14 @@ export interface Knowledge {
   /**
    * With the whole path (`viewer` null) but a character speaking: whom a separate join's
    * parallel stretch is filtered for (spec/THREADS.md §7.3). The rest of the history stays whole.
+   * `stored`: the stretches as each join recorded them (`chat_merges.stretch_json`), for a stretch
+   * view's own summary, whose chunk may end before the join (TH7); else those of the joins read.
    */
-  readonly stretch?: { readonly viewer: string; readonly aliases?: ReadonlyArray<string> }
+  readonly stretch?: {
+    readonly viewer: string
+    readonly aliases?: ReadonlyArray<string>
+    readonly stored?: boolean
+  }
 }
 
 /**
@@ -117,6 +124,12 @@ export const knowledgeStage: AssemblerStage = {
     Effect.sync(() => {
       // A view's own summary is written from what its character knew (unit C7).
       const audience = assembly.request.summaryJob?.audience
+      // A stretch view's (spec/THREADS.md §7.3, TH7): only the separate joins' stretches.
+      const own = audience?.filter((id) => id !== STRETCH_VIEW) ?? []
+      if (audience?.length && own.length && own.length < audience.length) {
+        assembly.knowledge = { view: "shared", viewer: null, stretch: { viewer: own[0]!, aliases: own, stored: true } }
+        return assembly
+      }
       if (audience?.length) {
         assembly.knowledge = { view: "separate", viewer: audience[0]!, aliases: audience }
         return assembly
@@ -192,6 +205,15 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
       return yield* filterKnown(assembly, entries, assembly.knowledge?.aliases ?? [viewer], () => true)
     const stretch = assembly.knowledge?.stretch
     if (!stretch) return entries
+    if (stretch.stored) {
+      // As the joins recorded their stretches: the same messages its summary's inputs leave out.
+      const ids = entries.filter((e) => e.inContext).map((e) => e.versionId)
+      const found = ids.length ? yield* sources.knowers(ids) : []
+      const stretched = new Set(found.flatMap((k) => (k.stretched ? [k.versionId] : [])))
+      return yield* filterKnown(assembly, entries, stretch.aliases ?? [stretch.viewer], (e) =>
+        stretched.has(e.versionId)
+      )
+    }
     const open = (assembly.parallelStretches ??= [])
     for (const entry of [...entries].reverse())
       if (entry.inContext && entry.merge?.timelines === "separate")

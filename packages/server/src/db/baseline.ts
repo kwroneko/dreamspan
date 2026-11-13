@@ -2207,7 +2207,10 @@ export const baseline: ReadonlyArray<string> = [
     -- for everyone) or 'separate'; a registered storage kind, frozen with the row.
     timelines TEXT NOT NULL DEFAULT 'together',
     -- Soft: the thread split whose thread this joins, when the source is one (§4.1).
-    split_id TEXT
+    split_id TEXT,
+    -- A separate join's parallel stretch (§7.3, TH7): the join and the destination's messages
+    -- from its span's start, as segments of the join's path, [{chain, lo, hi}]; NULL otherwise.
+    stretch_json TEXT CHECK (stretch_json IS NULL OR (json_valid(stretch_json) AND json_type(stretch_json) = 'array'))
   ) STRICT`,
   `CREATE INDEX chat_merges_chat ON chat_merges(chat_id)`,
   `CREATE INDEX chat_merges_source_fork ON chat_merges(chat_id, source_fork_id)`,

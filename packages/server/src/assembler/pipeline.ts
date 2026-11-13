@@ -154,6 +154,8 @@ export class AssemblySources extends Context.Service<
         readonly knowers: ReadonlyArray<string> | null
         /** Those the fork read counts not present for it (spec/THREADS.md §5.2), its speaker apart. */
         readonly away?: ReadonlyArray<string>
+        /** In a separate join's parallel stretch (spec/THREADS.md §7.3): what a stretch view filters. */
+        readonly stretched?: boolean
       }>,
       SourceError
     >
