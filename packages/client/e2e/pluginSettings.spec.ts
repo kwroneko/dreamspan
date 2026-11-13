@@ -14,12 +14,14 @@ let cookie = ""
 const admin = async <A>(use: Parameters<typeof withCookie<A>>[2]) =>
   withCookie(server(), cookie || (cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)), use)
 const shot = async (page: Page, info: TestInfo, name: string) => {
+  await expect(page.getByText("Reading plugin status…", { exact: true })).toHaveCount(0, { timeout: 60_000 })
   await expectLayout(page, info, name)
   if (process.env.SCREENSHOT_DIR) {
     await mkdir(process.env.SCREENSHOT_DIR, { recursive: true })
     await page.screenshot({
       path: join(process.env.SCREENSHOT_DIR, `${info.title.replace(/[^a-zA-Z0-9-]/g, "-")}-${name}.png`),
-      fullPage: true
+      fullPage: true,
+      animations: "disabled"
     })
   }
 }
@@ -69,6 +71,8 @@ for (const width of [1440, 390])
       await expect(page.getByRole("dialog")).toBeVisible()
       await confirm(page)
       await expect(page.getByText("Checks passed", { exact: true })).toBeVisible()
+      await expect(page.getByText("Every account · On", { exact: true })).toBeVisible()
+      await expect(page.getByText("Enabled", { exact: true })).toBeVisible()
       await shot(page, info, "detail-on")
       const updated = {
         ...plain(id),
@@ -99,6 +103,20 @@ for (const width of [1440, 390])
         })
         .toBe(first)
       await expect(page.getByRole("dialog")).toHaveCount(0)
+      // Wait for the detail to show the returned version before reviewing another change.
+      await expect(
+        page
+          .locator("li")
+          .filter({ hasText: first.slice(0, 8) })
+          .getByText("Enabled", { exact: true })
+      ).toBeVisible()
+      // Returning to a previously enabled version asks again if it adds access.
+      await page.getByRole("button", { name: "Go back", exact: true }).click()
+      await expect(page.getByRole("dialog")).toContainText("Runs on the server with full access")
+      await expect(page.getByRole("dialog")).toContainText(`Version ${second.slice(0, 8)}`)
+      expect((await admin((api) => api.GetPlugin({ scope: "instance", id }))).pin?.commit).toBe(first)
+      await shot(page, info, "consent-go-back")
+      await page.getByRole("button", { name: "Not now", exact: true }).click()
       await page.getByRole("button", { name: "Delete its data", exact: true }).click()
       await page.goto(`${details(id)}&deleteData=1`)
       await expect(page.getByRole("alertdialog")).toContainText("The plugin stays on and may save new data.")
@@ -158,6 +176,8 @@ test("bad versions show their check report and stale tabs cannot apply a second 
   await turnOn(page)
   await page.getByRole("dialog").getByRole("button", { name: "Turn on", exact: true }).dblclick()
   await expect(page.getByRole("dialog")).toContainText("Checks failed")
+  await expect(page.getByRole("dialog")).not.toContainText(/API v1|vendored dependencies|manifest|bundle/)
+  await expect(page.getByRole("dialog")).toContainText("This version's code doesn't work with this app.")
   expect((await admin((api) => api.GetPlugin({ scope: "instance", id }))).pin).toBeNull()
   await page.getByRole("button", { name: "Not now", exact: true }).click()
   const renamed = plain(id)
@@ -179,7 +199,7 @@ test("bad versions show their check report and stale tabs cannot apply a second 
   await page.getByRole("button", { name: "Not now", exact: true }).click()
 })
 
-test("non-admin views and own data controls at both widths and themes", async ({ page }, info) => {
+test("non-admin views and own data controls at both widths and themes", async ({ page, context }, info) => {
   const serverFiles = plain("admin-server")
   serverFiles["rp-plugin.json"] = JSON.stringify({
     ...JSON.parse(serverFiles["rp-plugin.json"]),
@@ -240,9 +260,14 @@ test("non-admin views and own data controls at both widths and themes", async ({
       await expect(page.getByText("preferences · 11 B", { exact: true })).toBeVisible()
       await shot(page, info, `non-admin-own-${width}-${theme}`)
     }
+  const other = await context.newPage()
+  await other.goto(details(id, "user"))
+  await expect(other.getByText("preferences · 11 B", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Delete its data", exact: true }).click()
   await page.getByRole("button", { name: "Delete data", exact: true }).click()
   await expect(page.getByRole("alertdialog")).toHaveCount(0)
+  await expect(other.getByText("0 saved entries · 0 B", { exact: true })).toBeVisible()
+  await other.close()
   await page.getByRole("button", { name: "Turn off", exact: true }).click()
   await expect(page.getByText("Your account · Off", { exact: true })).toBeVisible()
 })
@@ -277,6 +302,13 @@ test("fifty plugins and long names and descriptions fit without clipping", async
       await shot(page, info, `long-list-${width}-${theme}`)
       await page.goto(details("layout-0"))
       await shot(page, info, `long-detail-${width}-${theme}`)
+      await turnOn(page)
+      await shot(page, info, `long-consent-${width}-${theme}`)
+      await page.getByRole("button", { name: "Not now", exact: true }).click()
+      await page.getByRole("button", { name: "Delete its data", exact: true }).click()
+      await expect(page.getByRole("alertdialog")).toBeVisible()
+      await shot(page, info, `long-delete-${width}-${theme}`)
+      await page.getByRole("button", { name: "Cancel", exact: true }).click()
     }
 })
 
@@ -309,4 +341,71 @@ test("local enable syncs routes, explains reload and retains the composer draft"
   await page.getByRole("button", { name: "Reload", exact: true }).click()
   await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Keep this composer draft")
+})
+
+test("detail URLs reject extra separators and encoded invalid ids", async ({ page }) => {
+  const id = "url-fixture"
+  await admin((api) => api.CreatePlugin({ scope: "instance", id, files: plain(id) }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  for (const suffix of ["~other", "%7Eother", "%2Fother", ".other", "%25", "%20", "%C3%A9"]) {
+    const response = await page.goto(`${server().url}/settings/plugins/instance~${id}${suffix}?plugins=off`)
+    if (response?.status() !== 404)
+      await expect(page.getByText("This plugin doesn't exist", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Turn on", exact: true })).toHaveCount(0)
+  }
+  await page.goto(details(id))
+  await turnOn(page)
+  const consentUrl = page.url()
+  await page.goBack()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await page.goForward()
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await expect(page).toHaveURL(consentUrl)
+  await page.reload()
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await expect(page).toHaveURL(consentUrl)
+  const unusual = `a${"9-".repeat(31)}9`
+  for (const scope of ["instance", "user"] as const) {
+    await admin((api) => api.CreatePlugin({ scope, id: unusual, files: plain(unusual) }))
+    await page.goto(details(unusual, scope))
+    await expect(
+      page.getByText(`${scope === "instance" ? "Every" : "Your"} account · Off`, { exact: true })
+    ).toBeVisible()
+    await page.reload()
+    await expect(page.getByRole("button", { name: "Turn on", exact: true })).toBeVisible()
+  }
+})
+
+test("a changed working version after opening consent is refused", async ({ page }) => {
+  const id = "consent-disk-race",
+    files = plain(id)
+  const commit = await admin((api) => api.CreatePlugin({ scope: "instance", id, files }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(details(id))
+  await turnOn(page)
+  await expect(page.getByRole("dialog")).toContainText(`Version ${commit.slice(0, 8)}`)
+  await writeFile(
+    join(server().dataDir, "plugins/instance", id, "rp-plugin.json"),
+    JSON.stringify({
+      ...JSON.parse(files["rp-plugin.json"]),
+      server: "server.ts",
+      network: true
+    })
+  )
+  await page.getByRole("dialog").getByRole("button", { name: "Turn on", exact: true }).click()
+  await expect(page.getByRole("dialog")).toContainText("Plugin files are unavailable or invalid")
+  expect((await admin((api) => api.GetPlugin({ scope: "instance", id }))).pin).toBeNull()
+})
+
+test("deletion hover explains the permanent loss", async ({ page }) => {
+  const id = "delete-hint"
+  await admin((api) => api.CreatePlugin({ scope: "instance", id, files: plain(id) }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${details(id)}&deleteData=1`)
+  await expect(page.getByRole("alertdialog")).toBeVisible()
+  const button = page.getByRole("button", { name: "Delete data", exact: true })
+  const hint = "Permanently deletes this plugin's private saved entries."
+  await expect(button).toHaveAccessibleDescription(hint)
+  await button.hover()
+  await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(hint)
 })

@@ -1,4 +1,5 @@
-import { rm } from "node:fs/promises"
+import { rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { expect, it } from "vitest"
 import { Effect } from "effect"
 import { client, login, serverLayer, testConfig } from "./support/config.ts"
@@ -207,6 +208,109 @@ it("enforces every management RPC directly and permits only a regular account's 
         yield* userApi.DeletePluginData({ scope: "user", id: "owned-client" })
         expect((yield* userApi.GetPlugin({ scope: "user", id: "owned-client" })).data).toEqual([])
         expect((yield* adminApi.GetPlugin({ scope: "user", id: "private-admin" })).commit).toBe(privateCommit)
+      })
+    ).pipe(Effect.provide(serverLayer(config)))
+  )
+}, 60_000)
+
+it("describes the active committed version when the working manifest changes", async () => {
+  const config = testConfig()
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const api = yield* client()
+        const target = { scope: "instance" as const, id: "active-metadata" }
+        const committed = files(target.id)
+        const commit = yield* api.CreatePlugin({ ...target, files: committed })
+        expect((yield* api.EnablePlugin({ ...target, commit, consent: true })).ok).toBe(true)
+        yield* Effect.promise(() =>
+          writeFile(
+            join(pluginFolder(config.dataDir, "", target.id), "rp-plugin.json"),
+            JSON.stringify({ ...JSON.parse(committed["rp-plugin.json"]), name: "Uncommitted", server: "server.ts" })
+          )
+        )
+        const detail = yield* api.GetPlugin(target)
+        expect(detail.manifest?.name).toBe("Synthetic")
+        expect(detail.manifest?.server).toBeNull()
+        expect((yield* api.ListPlugins()).find((p) => p.id === target.id)?.manifest?.name).toBe("Synthetic")
+      })
+    ).pipe(Effect.provide(serverLayer(config)))
+  )
+}, 60_000)
+
+it("does not grant regular-account server recovery through an edited or missing working manifest", async () => {
+  const config = testConfig()
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const api = yield* client(),
+          admin = yield* api.Whoami(),
+          writer = yield* Writer
+        yield* api.SetPassword({ userId: admin.id, currentPassword: null, newPassword: "synthetic-admin-password" })
+        const adminApi = yield* client({ cookie: (yield* login(admin.handle, "synthetic-admin-password")).cookie })
+        const user = yield* adminApi.CreateUser({
+          handle: "recovery-user",
+          displayName: "Recovery user",
+          role: "user",
+          password: "synthetic-user-password"
+        })
+        const id = "private-server"
+        const commit = yield* Effect.promise(() =>
+          saveFiles(
+            config.dataDir,
+            user.id,
+            id,
+            files(id, "export const activate = () => {}", true),
+            true,
+            "Server version"
+          )
+        )
+        yield* writer.SetPluginPins({
+          userId: admin.id,
+          owner: user.id,
+          revision: 0,
+          value: { [id]: { commit, enabledAt: 1, enabledBy: admin.id } }
+        })
+        const userApi = yield* client({ cookie: (yield* login(user.handle, "synthetic-user-password")).cookie })
+        const path = join(pluginFolder(config.dataDir, user.id, id), "rp-plugin.json")
+        yield* Effect.promise(() => writeFile(path, files(id)["rp-plugin.json"]))
+        const target = { scope: "user" as const, id }
+        expect((yield* userApi.DisablePlugin(target).pipe(Effect.exit))._tag).toBe("Failure")
+        expect((yield* userApi.DeletePluginData(target).pipe(Effect.exit))._tag).toBe("Failure")
+        yield* Effect.promise(() => rm(path))
+        expect((yield* userApi.DisablePlugin(target).pipe(Effect.exit))._tag).toBe("Failure")
+        expect((yield* userApi.DeletePluginData(target).pipe(Effect.exit))._tag).toBe("Failure")
+      })
+    ).pipe(Effect.provide(serverLayer(config)))
+  )
+}, 60_000)
+
+it("refuses immediate Go back when the previous enabled version adds server or network access", async () => {
+  const config = testConfig()
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const api = yield* client(),
+          target = { scope: "instance" as const, id: "rollback-access" }
+        const serverFiles = files(
+          target.id,
+          'import {Effect} from "@rp/plugin-api/server"; export const activate = () => Effect.void',
+          true
+        )
+        serverFiles["rp-plugin.json"] = JSON.stringify({ ...JSON.parse(serverFiles["rp-plugin.json"]), network: true })
+        const first = yield* api.CreatePlugin({ ...target, files: serverFiles })
+        expect((yield* api.EnablePlugin({ ...target, commit: first, consent: true })).ok).toBe(true)
+        const second = yield* api.CommitPlugin({ ...target, files: files(target.id), message: "Browser version" })
+        expect((yield* api.EnablePlugin({ ...target, commit: second, consent: true })).ok).toBe(true)
+        const detail = yield* api.GetPlugin(target)
+        expect((yield* api.GoBackPlugin({ ...target, expectedRevision: detail.revision }).pipe(Effect.exit))._tag).toBe(
+          "Failure"
+        )
+        expect((yield* api.GetPlugin(target)).pin?.commit).toBe(second)
+        expect(
+          (yield* api.PinPluginCommit({ ...target, commit: first, consent: true, expectedRevision: detail.revision }))
+            .ok
+        ).toBe(true)
       })
     ).pipe(Effect.provide(serverLayer(config)))
   )

@@ -487,8 +487,13 @@ it("isolates every user-scoped read and data RPC in both directions, including a
               .PluginDiff({ scope: "user", id: other.id, before: commits[other.id]!, after: commits[other.id]! })
               .pipe(Effect.exit))._tag
           ).toBe("Failure")
-          yield* party.api.DisablePlugin({ scope: "user", id: other.id })
-          yield* party.api.DeletePluginData({ scope: "user", id: other.id })
+          // Admins may perform an empty own-namespace cleanup. A regular account must
+          // verify committed browser authority first, so a missing own repo is refused.
+          const outcome = party.user.role === "admin" ? "Success" : "Failure"
+          expect((yield* party.api.DisablePlugin({ scope: "user", id: other.id }).pipe(Effect.exit))._tag).toBe(outcome)
+          expect((yield* party.api.DeletePluginData({ scope: "user", id: other.id }).pipe(Effect.exit))._tag).toBe(
+            outcome
+          )
           expect((yield* other.api.GetPlugin({ scope: "user", id: other.id })).pin?.suspended).toBeUndefined()
           expect(
             (yield* reader.GetPluginData({

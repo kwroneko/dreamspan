@@ -277,3 +277,13 @@ export const repoVersions = async (folder: string, extra: ReadonlyArray<string>)
     })
   )
 }
+
+/** Display/authority metadata comes from Git objects, even when the working tree is dirty. */
+export const repoInfo = async (folder: string, selected?: string) => {
+  const log = await repoLog(folder)
+  const commit = log[0]?.commit ?? null
+  const version = selected ?? commit
+  const raw = version ? (await commitFiles(folder, version)).get("rp-plugin.json") : null
+  const manifest = raw ? Schema.decodeUnknownSync(PluginManifest)(JSON.parse(Buffer.from(raw).toString("utf8"))) : null
+  return { commit, manifest }
+}

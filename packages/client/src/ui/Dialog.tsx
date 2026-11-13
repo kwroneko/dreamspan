@@ -108,6 +108,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  confirmHint,
   confirmDisabled,
   pending,
   onConfirm,
@@ -118,6 +119,7 @@ export function ConfirmDialog({
   title: ReactNode
   description: ReactNode
   confirmLabel: string
+  confirmHint?: string
   confirmDisabled?: boolean
   pending?: boolean | undefined
   onConfirm: () => void
@@ -140,7 +142,7 @@ export function ConfirmDialog({
               Cancel
             </BaseAlertDialog.Close>
             <Button
-              hint={confirmLabel}
+              hint={confirmHint ?? confirmLabel}
               variant="danger"
               disabled={confirmDisabled}
               pending={pending}

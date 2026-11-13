@@ -11,7 +11,7 @@ import {
   type PluginDetails
 } from "@rp/shared/plugins.ts"
 import type { User, UserId } from "@rp/shared/domain.ts"
-import { pluginAccessGrows } from "@rp/shared/pluginConsent.ts"
+import { hasServerCode, pluginAccessGrows } from "@rp/shared/pluginConsent.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { AppConfig } from "../config.ts"
 import { ExecutionRegistry } from "../execution.ts"
@@ -24,7 +24,6 @@ import { Notices } from "../chat/Notices.ts"
 import { Network } from "../net/Network.ts"
 import { checkPlugin, readBuild, readClientBuild } from "./check.ts"
 import { declaredHandles, type RegistrationRegistry } from "./handles.ts"
-import { pluginFolder, readManifest } from "./repo.ts"
 import { repoTask } from "./repoTask.ts"
 import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
 
@@ -289,18 +288,14 @@ export class PluginHost extends Context.Service<
           const owner = target.scope === "instance" ? "" : actor.id
           const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
           const pin: PluginPin | null = pins.value[target.id] ?? null
-          const folder = pluginFolder(config.dataDir, owner, target.id)
-          const log = yield* attempt(() =>
-            repoTask<ReadonlyArray<{ commit: string; message: string }>>(config.dataDir, {
-              op: "log",
+          const { commit, manifest } = yield* attempt(() =>
+            repoTask<Pick<typeof PluginView.Type, "commit" | "manifest">>(config.dataDir, {
+              op: "info",
               owner,
-              id: target.id
+              id: target.id,
+              ...(pin && !pin.suspended ? { selected: pin.commit } : {})
             })
-          ).pipe(Effect.catch(() => Effect.succeed([])))
-          const commit = log[0]?.commit ?? pin?.commit ?? null
-          const manifest = yield* attempt(() => readManifest(config.dataDir, folder)).pipe(
-            Effect.catch(() => Effect.succeed(null))
-          )
+          ).pipe(Effect.catch(() => Effect.succeed({ commit: pin?.commit ?? null, manifest: null })))
           const report =
             reports.get(keyOf(owner, target.id)) ??
             (pin?.suspended
@@ -341,10 +336,16 @@ export class PluginHost extends Context.Service<
         Effect.gen(function* () {
           const owner = yield* authorize(actor, target)
           if (actor.role !== "admin") {
-            const manifest = yield* attempt(() =>
-              readManifest(config.dataDir, pluginFolder(config.dataDir, owner, target.id))
-            ).pipe(Effect.catch(() => Effect.succeed(null)))
-            if (manifest && (manifest.server || manifest.worker || manifest.overrides.length))
+            const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+            const info = yield* attempt(() =>
+              repoTask<Pick<typeof PluginView.Type, "commit" | "manifest">>(config.dataDir, {
+                op: "info",
+                owner,
+                id: target.id,
+                ...(pins.value[target.id] ? { selected: pins.value[target.id]!.commit } : {})
+              })
+            )
+            if (!info.manifest || hasServerCode(info.manifest))
               return yield* new PluginRejected({ message: "Only an admin can manage server plugins" })
           }
           return owner
@@ -548,6 +549,8 @@ export class PluginHost extends Context.Service<
             Effect.gen(function* () {
               const owner = yield* authorizeLocal(actor, target)
               yield* writer.DeletePluginData({ userId: actor.id, pluginId: target.id, owner, key: null, revision: 0 })
+              if (owner) notify(owner as UserId, target.id, "Plugins changed")
+              else for (const user of yield* reader.ListUsers()) notify(user.id, target.id, "Plugins changed")
             })
           )
       })

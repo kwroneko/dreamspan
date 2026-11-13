@@ -96,7 +96,22 @@ function CheckReport({ report }: { report: PluginReport | null }) {
           tone={turnedOff ? "neutral" : report.ok ? "success" : "danger"}
           title={turnedOff ? "Turned off" : report.ok ? "Checks passed" : "Checks failed"}
         >
-          <p>{report.message}</p>
+          <p>
+            {turnedOff
+              ? "This plugin is turned off."
+              : report.ok
+                ? "This version passed every check."
+                : {
+                    snapshot: "The saved files are missing or have changed. Save a new version before turning it on.",
+                    manifest: "This version's information or requested additions aren't supported.",
+                    types: "This version's code doesn't work with this app.",
+                    bundle: "This version couldn't be prepared to run.",
+                    probe: "This version couldn't start or tried to change an undeclared part of the app.",
+                    tests: "This version failed its own tests.",
+                    activate: "This version couldn't keep running.",
+                    ready: "This version couldn't run."
+                  }[report.step]}
+          </p>
           <p className="text-xs text-muted">Version {report.commit.slice(0, 8)}</p>
         </Alert>
       ) : (
@@ -128,7 +143,7 @@ function CheckReport({ report }: { report: PluginReport | null }) {
 function PluginPage() {
   const { pluginId = "" }: { pluginId?: string } = useParams({ strict: false })
   const [scope, id = ""] = pluginId.split("~")
-  if ((scope !== "instance" && scope !== "user") || !/^[a-z][a-z0-9-]{0,63}$/.test(id))
+  if (pluginId !== `${scope}~${id}` || (scope !== "instance" && scope !== "user") || !/^[a-z][a-z0-9-]{0,63}$/.test(id))
     return <EmptyState title="This plugin doesn't exist" />
   const atom = AppClient.query("GetPlugin", { scope, id }, { reactivityKeys: [KEY] })
   return (
@@ -397,8 +412,13 @@ function PluginDetail({ plugin }: { plugin: Detail }) {
           if (!open) closeDialog()
         }}
         title="Delete its data?"
-        description={`Permanently deletes ${plugin.data?.length ?? 0} private saved entries for ${label(plugin)}${plugin.scope === "instance" ? ", shared by every account" : ", in your account"}. Chats, library items, plugin files and versions stay. ${status(plugin) === "On" ? "The plugin stays on and may save new data." : "The plugin stays off."}`}
+        description={
+          <span className="[overflow-wrap:anywhere]">
+            {`Permanently deletes all private saved entries for ${label(plugin)}${plugin.scope === "instance" ? ", shared by every account" : ", in your account"} (${plugin.data?.length ?? 0} shown). Chats, library items, plugin files and versions stay. ${status(plugin) === "On" ? "The plugin stays on and may save new data." : "The plugin stays off."}`}
+          </span>
+        }
         confirmLabel="Delete data"
+        confirmHint="Permanently deletes this plugin's private saved entries."
         pending={action.pending}
         onConfirm={() => void run("delete")}
       >
