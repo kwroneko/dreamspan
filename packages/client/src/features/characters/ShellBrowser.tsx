@@ -47,7 +47,7 @@ import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { WindowedList } from "../../ui/WindowedList.tsx"
 import { listNames } from "../chat/cast.ts"
 import { KindBadge } from "../chat/KindBadge.tsx"
-import { useChatKindLook } from "../chat/kindLooks.ts"
+import { kindRowProps, useChatKindLook } from "../chat/kindLooks.ts"
 import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
 import {
   CharacterGrid,
@@ -456,7 +456,8 @@ export function ForkRow({
   const besideHref = useRouter().buildLocation(forkLink(fork)).href
   const canBeside = useCanOpenBeside()
   const [menu, setMenu] = useState(false)
-  const kindBadge = useChatKindLook(fork.chat.kind)?.badge
+  const kindLook = useChatKindLook(fork.chat.kind)
+  const kindBadge = kindLook?.badge
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = fork.thread ? `Thread: ${shellThreadLabel(fork.thread)}` : shellBranchLabel(fork)
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
@@ -474,6 +475,7 @@ export function ForkRow({
   return (
     <div
       data-fork-row
+      {...(perFork ? {} : kindRowProps(kindLook))}
       className={`fork-row @container/fork-row relative flex w-full shrink-0 max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <ContextMenu

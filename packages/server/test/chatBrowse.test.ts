@@ -116,11 +116,25 @@ describe("Chats tab server browse", () => {
             ids(want.slice(0, 1))
           )
         }
-      const filters = { all: [a, b, c, d], pinned: [a], groups: [a], solo: [b, c], branches: [a] } as const
+      const filters = {
+        all: [a, b, c, d],
+        pinned: [a],
+        groups: [a],
+        solo: [b, c],
+        branches: [a],
+        workshops: []
+      } as const
       for (const filter of Object.keys(filters) as Array<ChatBrowse["filter"]>) {
         const result = yield* list({ filter, sort: "recent", reversed: false })
         assert.deepStrictEqual(result.sections[0]!.rows.map((f) => f.chat.id).sort(), ids(filters[filter]).sort())
-        assert.deepStrictEqual(result.filterCounts, { all: 4, pinned: 1, groups: 1, solo: 2, branches: 1 })
+        assert.deepStrictEqual(result.filterCounts, {
+          all: 4,
+          pinned: 1,
+          groups: 1,
+          solo: 2,
+          branches: 1,
+          workshops: 0
+        })
       }
       const row = (yield* list({ filter: "branches", sort: "messages", reversed: false })).sections[0]!.rows[0]!
       assert.strictEqual(row.messages, 1)
@@ -158,6 +172,54 @@ describe("Chats tab server browse", () => {
       assert.strictEqual(recent[0]!.forkId, newest.fork.id)
       const oldest = (yield* list({ filter: "all", sort: "recent", reversed: true })).sections[0]!.rows
       assert.strictEqual(oldest.at(-1)!.chat.id, b.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("keeps workshops to All and Workshops, and out of the other choices and their counts", () => {
+    const config = testConfig({ dbWorkers: "bundle" })
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const aria = yield* api.CreateCard({ label: "Aria", name: "Aria" })
+      const story = yield* api.CreateChat({ title: "Story" })
+      yield* api.ChangeCast({ chatId: story.id, slotId: null, change: { _tag: "Join", entityId: aria.entityId } })
+      const workshop = yield* api.CreateWorkshop({})
+      // A workshop that is pinned and has one character in its cast is still not a pinned or one-on-one chat.
+      yield* api.ChangeCast({ chatId: workshop.id, slotId: null, change: { _tag: "Join", entityId: aria.entityId } })
+      yield* api.SetChatPin({
+        chatId: workshop.id,
+        forkId: workshop.currentForkId!,
+        leaf: workshop.activeLeafSlotId,
+        pinned: true
+      })
+      const view = {
+        entity: null,
+        chat: null,
+        search: "",
+        sort: "recent" as const,
+        sections: [{ id: "chats" as const, limit: 10 }]
+      }
+      const list = (filter: ChatBrowse["filter"]) =>
+        api.GetShellForks({ ...view, browse: { filter, sort: "recent", reversed: false } })
+      const want: Record<ChatBrowse["filter"], ReadonlyArray<string>> = {
+        all: [story.id, workshop.id],
+        workshops: [workshop.id],
+        pinned: [],
+        groups: [],
+        solo: [story.id],
+        branches: []
+      }
+      for (const filter of Object.keys(want) as Array<ChatBrowse["filter"]>) {
+        const result = yield* list(filter)
+        assert.deepStrictEqual(result.sections[0]!.rows.map((f) => f.chat.id).sort(), [...want[filter]].sort(), filter)
+        assert.deepStrictEqual(result.filterCounts, {
+          all: 2,
+          workshops: 1,
+          pinned: 0,
+          groups: 0,
+          solo: 1,
+          branches: 0
+        })
+      }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 })

@@ -4,26 +4,17 @@
 // changes (active drafts) on it, through the fields the editors search (libraryText.ts), with the
 // matcher the chat's Search and replace uses (historyScan.ts, in a VM with a deadline). A chat's
 // own note (its text is per branch) and a note an agent reply wrote are left out, as the
-// library's list leaves the latter out. The preview gives each entry a stamp (its head, row
-// version and drafts); the plan for a replace reads the chosen entries again, refuses one whose
-// stamp moved, and works out the documents the writer stores (libraryReplaceWrites.ts), so the
-// writer's transaction does no matching.
+// library's list leaves the latter out. An entry with unsaved changes is listed but never
+// replaced in: it is skipped, with why (owner, 2026-11-13). The preview gives each entry a stamp
+// (its head, row version and drafts); the plan for a replace reads the chosen entries again,
+// refuses one whose stamp moved, and works out the documents the writer stores
+// (libraryReplaceWrites.ts), so the writer's transaction does no matching.
 import type { UserId } from "@rp/shared/domain.ts"
-import {
-  applyDrafts,
-  canonicalJson,
-  getAt,
-  parseField,
-  droppedDrafts,
-  type FieldPath,
-  isHeldField,
-  keepsRegexApproval,
-  textField,
-  withValues
-} from "@rp/shared/editing.ts"
+import { applyDrafts, type FieldPath, isHeldField, textField, withValues } from "@rp/shared/editing.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import {
   AROUND,
+  LIBRARY_UNSAVED_REASON,
   type FieldExcerpt,
   type LibraryChoice,
   type LibraryEdit,
@@ -40,7 +31,6 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { scanHistory } from "./historyScan.ts"
 import type { LibraryReplaceEntry } from "./ops.ts"
-import { makeLibraryQueries } from "./library.ts"
 import { query } from "./tx.ts"
 
 /** Documents read per statement. */
@@ -63,7 +53,6 @@ interface Candidate {
 interface DraftRow {
   readonly id: string
   readonly field: string
-  readonly base_revision: string | null
   readonly content: string
   readonly row_version: number
 }
@@ -71,10 +60,9 @@ interface DraftRow {
 /** An entry as its editor shows it. */
 interface Working {
   readonly candidate: Candidate
+  /** The head, with its unsaved changes on it where they apply, so the search finds what the editor shows. */
   readonly doc: Doc
-  readonly drafts: ReadonlyArray<DraftRow>
-  /** The head with the unsaved changes on it, valid; null without any. */
-  readonly checkpoint: Doc | null
+  /** Why a replace skips it; null when it can be replaced in. */
   readonly blocked: string | null
   readonly stamp: string
 }
@@ -90,11 +78,6 @@ interface Scanned {
   readonly matches: ReadonlyArray<Match>
   readonly after: string
 }
-
-const UNSAVED_HELD =
-  "It has prompts added or moved that aren't saved yet. Save or revert them in its editor, then find again."
-const UNSAVED_INVALID =
-  "Its unsaved changes can't be saved as they are. Open it to save or revert them, then find again."
 
 const escapeLike = (text: string) => text.replace(/[\\%_]/g, (c) => `\\${c}`)
 const ascii = /^[\x00-\x7f]*$/
@@ -125,7 +108,6 @@ const rejected = (message: string) =>
 
 export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const lib = makeLibraryQueries(sql)
 
   /** The entries a search goes through, in the library's order; `refIds` narrows them. */
   const candidates = (
@@ -168,52 +150,25 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
           )
           .pipe(Effect.map((rows) => new Map(rows.map((row) => [row.id, JSON.parse(row.doc_json) as Doc]))))
 
-  /** An entry as its editor shows it: the head, its unsaved changes on it where they're valid. */
+  /** An entry as its editor shows it: the head, its unsaved changes on it where they apply. */
   const working = (userId: UserId, candidate: Candidate, head: Doc) =>
     Effect.gen(function* () {
       const base = editedDoc(candidate.kind, head)
       const rows =
         candidate.drafted === 1
-          ? yield* sql<DraftRow>`SELECT id, field, content, row_version, base_revision FROM drafts WHERE user_id = ${userId}
+          ? yield* sql<DraftRow>`SELECT id, field, content, row_version FROM drafts WHERE user_id = ${userId}
               AND target_kind = 'entity_field' AND target_id = ${candidate.ref_id} AND status = 'active'
               ORDER BY field, id`
           : []
       const stamp = [candidate.head, candidate.row_version, ...rows.map((row) => `${row.id}@${row.row_version}`)].join(
         ":"
       )
-      const result = (doc: Doc, checkpoint: Doc | null, blocked: string | null): Working => ({
-        candidate,
-        doc,
-        drafts: rows,
-        checkpoint,
-        blocked,
-        stamp
-      })
-      if (rows.length === 0) return result(base, null, null)
-      if (rows.some((row) => isHeldField(row.field))) return result(base, null, UNSAVED_HELD)
-      // The same conflict rule as CommitEditorDrafts: a later saved edit must not be
-      // silently replaced by a draft started from an older value.
-      for (const row of rows) {
-        if (row.base_revision === null || row.base_revision === candidate.head) continue
-        const field = parseField(row.field)
-        if (field === null) return result(base, null, UNSAVED_INVALID)
-        const revision = yield* lib.draftBase(candidate.entity_id, row.base_revision)
-        const before = revision === null ? {} : editedDoc(candidate.kind, JSON.parse(revision.doc_json) as Doc)
-        const applied = applyDrafts(candidate.kind, base, [row])
-        const saved = canonicalJson(getAt(base, field.path))
-        if (
-          saved !== canonicalJson(getAt(before, field.path)) &&
-          saved !== canonicalJson(getAt(applied.doc, field.path))
-        )
-          return result(base, null, UNSAVED_INVALID)
-      }
-      const applied = applyDrafts(candidate.kind, base, rows)
-      if (applied.problems.length > 0) return result(base, null, UNSAVED_INVALID)
-      const valid = libraryReplaceKinds.get(candidate.kind)!.validate(applied.doc)
-      if (!valid.ok || droppedDrafts(candidate.kind, applied.doc, valid.doc, rows).length > 0)
-        return result(base, null, UNSAVED_INVALID)
-      const doc = editedDoc(candidate.kind, valid.doc)
-      return result(doc, doc, null)
+      if (rows.length === 0) return { candidate, doc: base, blocked: null, stamp } satisfies Working
+      // Searched with the unsaved text where it applies, so the list shows what the editor shows,
+      // but never replaced in.
+      const applied = rows.some((row) => isHeldField(row.field)) ? null : applyDrafts(candidate.kind, base, rows)
+      const doc = applied !== null && applied.problems.length === 0 ? editedDoc(candidate.kind, applied.doc) : base
+      return { candidate, doc, blocked: LIBRARY_UNSAVED_REASON, stamp } satisfies Working
     })
 
   /** The entries, as their editors show them, a batch of documents at a time. */
@@ -298,7 +253,7 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
             label: entry.candidate.label,
             subtitle: entry.candidate.subtitle,
             stamp: entry.stamp,
-            unsaved: entry.checkpoint !== null,
+            unsaved: entry.candidate.drafted === 1,
             blocked: entry.blocked,
             count: found.reduce((n, f) => n + f.matches.length, 0),
             fields: found.map((f) => ({
@@ -356,19 +311,14 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
           const valid = replaced === null ? null : libraryReplaceKinds.get(candidate.kind)!.validate(replaced)
           if (valid === null || !valid.ok)
             return skip(candidate.ref_id, candidate.label, "The replacement wouldn't make a valid document.")
-          // Approved regex scripts the replace changed wait for approval again, as an imported change would.
-          const doc =
-            valid.doc.regex_approved === true && !keepsRegexApproval(entry.doc, valid.doc)
-              ? { ...valid.doc, regex_approved: false }
-              : valid.doc
+          // The user's own replace keeps an approved script approved, and an unapproved one is
+          // still unapproved (owner, 2026-11-13). Approval is only ever the document's own flag here.
           entries.push({
             refId: candidate.ref_id as LibraryReplaceEntry["refId"],
             label: candidate.label,
             head: candidate.head,
             rowVersion: candidate.row_version,
-            drafts: entry.drafts.map((row) => ({ id: row.id, field: row.field, rowVersion: row.row_version })),
-            checkpoint: entry.checkpoint,
-            doc,
+            doc: valid.doc,
             matches: picked.reduce((n, f) => n + f.matches.length, 0)
           })
         })

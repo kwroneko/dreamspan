@@ -333,6 +333,64 @@ for (const width of [1440, 390])
     })
   }
 
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`Undo of the scene check's "is back" row keeps the character away at ${width} ${theme}`, async ({
+      page
+    }, info) => {
+      await look(page, width, theme)
+      await sceneCheck(true)
+      leaving.clear()
+      leaving.add("Wren")
+      try {
+        const { chatId, forkId, slotId } = await threeCharacters()
+        const ids = await castIds()
+        await admin((api) => api.Generate({ chatId, parentSlotId: slotId, branch: false, speakerEntityId: ids.mira }))
+        const marksAt = async () => {
+          const path = await admin((api) =>
+            api.ReadPath({ chatId, forkId: forkId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 })
+          )
+          return admin((api) => api.GetAwayMarks({ chatId, forkId: forkId as never, slotId: path.leafSlotId }))
+        }
+        await expect
+          .poll(async () => (await marksAt()).map((mark) => [mark.entityId, mark.away, mark.by]), { timeout: 30_000 })
+          .toEqual([[ids.wren, true, "decision"]])
+        // The scene check now says Wren is back, at Mira's next reply.
+        leaving.clear()
+        await reply(chatId, forkId!, ids.mira)
+        await expect
+          .poll(async () => (await marksAt()).map((mark) => [mark.entityId, mark.away, mark.by]), { timeout: 30_000 })
+          .toEqual([
+            [ids.wren, true, "decision"],
+            [ids.wren, false, "decision"]
+          ])
+        await page.goto(`${server().url}/chats/${chatId}`)
+        const back = page.locator("[data-away-row]").filter({ hasText: "Wren is back · scene check" })
+        await expect(back).toBeVisible()
+        const undo = back.getByRole("button", { name: "Undo", exact: true })
+        await undo.hover()
+        await expect(page.getByText("Wren hadn't come back", { exact: false }).filter({ visible: true })).toBeVisible()
+        await page.mouse.move(0, 0)
+        await expectLayout(page, info, `contexts-back-row-${width}-${theme}`, { scope: "[data-away-row]" })
+        await undo.click()
+        await expect(back).toHaveCount(0)
+        // Wren stays away from the first mark on, now by the user's own mark.
+        await expect
+          .poll(async () => {
+            const path = await admin((api) =>
+              api.ReadPath({ chatId, forkId: forkId as never, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 })
+            )
+            return (await admin((api) => api.GetCast({ chatId, slotId: path.leafSlotId }))).away
+          })
+          .toEqual([ids.wren])
+        await expect(page.locator("[data-away-row]").filter({ hasText: "Wren left · scene check" })).toBeVisible()
+      } finally {
+        leaving.clear()
+        await sceneCheck(false)
+      }
+    })
+  }
+
 /** Asks for a reply by `speaker` after the branch's tip and waits until it's written; its version. */
 const reply = async (chatId: ChatId, forkId: string, speaker: EntityId) => {
   const before = await admin((api) =>

@@ -1368,6 +1368,93 @@ describe("Undo of a scene check's away mark (unit C9)", () => {
       })
     )
   )
+
+  it.live("undoing the scene check's 'back' keeps her away: what was written since leaves her context again", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* story("separate")
+        yield* t.event({ key: "away.set", value: { entity: t.wren, away: true, source: "decision" } })
+        yield* t.say(t.tobin, "WHILE-AWAY")
+        // The scene check judged that Wren came back here.
+        const back = yield* t.event({ key: "away.set", value: { entity: t.wren, away: false, source: "decision" } })
+        const first = yield* t.say(t.tobin, "AFTER-BACK-ONE")
+        const last = yield* t.say(t.mira, "AFTER-BACK-TWO")
+        const { fork: peer } = yield* t.api.CreateFork({
+          chatId: t.chatId,
+          fromForkId: t.fork(),
+          atSlotId: last.slotId
+        })
+        const wrens = Effect.map(t.contextFor(t.wren), sentText)
+        assert.include(yield* wrens, "AFTER-BACK-ONE")
+        assert.notInclude(yield* wrens, "WHILE-AWAY")
+        const awayIn = (forkId: ForkId) =>
+          Effect.map(
+            t.reader.StateEventsAt({ userId: t.userId, chatId: t.chatId, slotId: last.slotId, forkId }),
+            (events) => foldState(events).away
+          )
+        assert.notInclude((yield* awayIn(t.fork())) ?? [], t.wren)
+
+        // Only a scene check's mark can be undone: the user's own "back" is refused, both ways.
+        const user = yield* t.event({ key: "away.set", value: { entity: t.mira, away: false } })
+        assert.isNull(
+          yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: user.id })
+        )
+
+        const undone = yield* t.writer.CorrectPresence({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          eventId: back.id
+        })
+        assert.isNotNull(undone)
+        assert.includeMembers([...undone!.corrected], [first.version.id, last.version.id])
+        assert.notInclude(yield* wrens, "AFTER-BACK-ONE")
+        assert.notInclude(yield* wrens, "AFTER-BACK-TWO")
+        assert.notInclude(yield* wrens, "WHILE-AWAY")
+        assert.include(yield* awayIn(t.fork()), t.wren)
+        assert.include(yield* awayIn(peer.id), t.wren)
+        const events = yield* t.reader.StateEventsAt({
+          userId: t.userId,
+          chatId: t.chatId,
+          slotId: last.slotId,
+          forkId: t.fork()
+        })
+        assert.deepInclude(
+          events.map((e) => e.data),
+          { key: "away.set", value: { entity: t.wren, away: true } },
+          "the user's own event"
+        )
+        // Undone once: the mark no longer applies, and the compensating event is no scene check's.
+        assert.isNull(
+          yield* t.writer.CorrectPresence({ userId: t.userId, chatId: t.chatId, forkId: t.fork(), eventId: back.id })
+        )
+        assert.isNull(
+          yield* t.writer.CorrectPresence({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.fork(),
+            eventId: undone!.eventId
+          })
+        )
+        // History keeps both and can take the correction back: she is back, and sees them again.
+        const history = yield* t.reader.ListHistoryEdits({ userId: t.userId, chatId: t.chatId, forkId: t.fork() })
+        const correction = history.find((edit) => edit.title === "Correct scene check")!
+        assert.include(correction.items[0]!.before, '"away":false')
+        assert.include(correction.items[0]!.after, '"away":true')
+        const reverted = yield* t.writer.UndoHistoryEdit({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.fork(),
+          changesetId: correction.id
+        })
+        assert.strictEqual(reverted.undone, 1)
+        assert.include(yield* wrens, "AFTER-BACK-ONE")
+        assert.include(yield* wrens, "AFTER-BACK-TWO")
+        assert.notInclude(yield* wrens, "WHILE-AWAY")
+        assert.notInclude((yield* awayIn(peer.id)) ?? [], t.wren)
+      })
+    )
+  )
 })
 
 it.live("peer-authored handwritten swipes retain their later independent away mark", () =>

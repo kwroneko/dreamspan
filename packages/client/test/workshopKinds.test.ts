@@ -13,11 +13,14 @@ import {
   chatKindLooks,
   kindHides,
   kindRootProps,
+  kindRowProps,
   kindTitle,
   kindShows,
   mergesInto,
   summarizes
 } from "../src/features/chat/kindLooks.ts"
+import { availableCommands, type ChatCommandContext } from "../src/features/chat/commands.tsx"
+import { registerChatHeader } from "../src/features/chat/headerContributions.tsx"
 import { panelTabs } from "../src/features/chat/panels.tsx"
 import { registerComposerControls } from "../src/features/chat/registerComposerControls.tsx"
 import { registerPanels } from "../src/features/chat/registerPanels.tsx"
@@ -119,6 +122,39 @@ describe("chat kind looks", () => {
     expect(mergesInto(chatOf("rp"))).toBe(true)
     // Cast stays editable, and card rotation still affects assembly in a workshop.
     expect(kindHides("workshop", "settings.card-layout")).toBe(false)
+  })
+
+  it("offers New chat with this cast in a story's menu and not in a workshop's", () => {
+    const stop = registerChatHeader()
+    try {
+      const cast = {
+        participants: ["mira"],
+        playedByMe: [],
+        cards: [{ entityId: "mira", name: "Mira" }]
+      }
+      const commands = (kind: string) =>
+        availableCommands({
+          view: { cast, chat: chatOf(kind), entries: [] },
+          navigate: () => {},
+          session: { id: "chat" }
+        } as unknown as ChatCommandContext).map((entry) => entry.id)
+      expect(commands("rp")).toContain("chat.new-with-cast")
+      expect(commands("workshop")).not.toContain("chat.new-with-cast")
+      // The rest of a workshop's menu stays.
+      expect(commands("workshop")).toEqual(expect.arrayContaining(["chat.branches", "chat.export"]))
+    } finally {
+      for (const close of stop.reverse()) close()
+    }
+  })
+
+  it("gives a row of a chat with an accent its kind and accent, and a story's none", () => {
+    expect(kindRowProps(chatKindLooks.get("workshop"))).toEqual({
+      "data-chat-accent": "",
+      "data-kind-row": "",
+      style: { "--chat-accent": "var(--accent-workshop)", "--chat-accent-contrast": "var(--accent-workshop-contrast)" }
+    })
+    expect(kindRowProps(chatKindLooks.get("rp"))).toEqual({})
+    expect(kindRowProps(undefined)).toEqual({})
   })
 
   it("sets the accent through the kind's token, and nothing for a kind without a look", () => {

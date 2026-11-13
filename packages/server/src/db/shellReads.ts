@@ -110,17 +110,23 @@ const byTurn = (forks: ReadonlyArray<Fork>, entity: string) => {
 const categoryOf = (f: Fork, entity: string) =>
   f.activity.find((a) => a.entityId === entity)?.category ?? (f.departed.some((id) => id === entity) ? "was" : "with")
 
-/** Chat metrics come from the current path; chat pins are independent of branch pins. */
+/**
+ * Chat metrics come from the current path; chat pins are independent of branch pins. A workshop
+ * is listed under "All" and "Workshops" only, so the other choices read as story chats.
+ */
 const inChatFilter = (f: Fork, filter: ChatBrowse["filter"], pinned: ReadonlySet<string>) =>
-  filter === "pinned"
-    ? pinned.has(f.chat.id)
-    : filter === "groups"
-      ? f.cast.length >= 2
-      : filter === "solo"
-        ? f.cast.length === 1
-        : filter === "branches"
-          ? f.branches > 1
-          : true
+  filter === "all"
+    ? true
+    : filter === "workshops"
+      ? f.chat.kind === "workshop"
+      : f.chat.kind !== "workshop" &&
+        (filter === "pinned"
+          ? pinned.has(f.chat.id)
+          : filter === "groups"
+            ? f.cast.length >= 2
+            : filter === "solo"
+              ? f.cast.length === 1
+              : f.branches > 1)
 
 const browseChats = (rows: ReadonlyArray<Fork>, browse: ChatBrowse, state: ShellState) => {
   const metric = (f: Fork) => {
@@ -750,7 +756,14 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               (chatIds === null || chatIds.has(f.chat.id))
           )
         )
-        const filterCounts = { all: 0, pinned: 0, groups: 0, solo: 0, branches: 0 } satisfies ChatFilterCounts
+        const filterCounts = {
+          all: 0,
+          pinned: 0,
+          groups: 0,
+          solo: 0,
+          branches: 0,
+          workshops: 0
+        } satisfies ChatFilterCounts
         for (const row of scoped)
           for (const filter of CHAT_FILTERS)
             if (inChatFilter(state.chatIndex.get(row.chat.id)!, filter, state.pinnedChats)) filterCounts[filter]++
