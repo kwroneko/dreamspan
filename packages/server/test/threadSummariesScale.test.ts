@@ -10,6 +10,9 @@ import { assert, it } from "@effect/vitest"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
+import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
+import type { ToolContext } from "../src/agent/tools.ts"
+import { historyTools } from "../src/agent/tools/history.ts"
 import { testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -166,13 +169,6 @@ it.live(
       const J = joined.entries[0]!.slotId as SlotId
       const after = yield* say(main, J, "Morning comes to the harbor.")
       const leafSlotId = after.slotId as SlotId
-      const [[merge]] = (yield* fixtureSql(
-        config.dataDir,
-        [{ sql: "SELECT stretch_json FROM chat_merges WHERE slot_id = ?", params: [J] }],
-        { readOnly: true }
-      )) as unknown as [[{ stretch_json: string }]]
-      assert.lengthOf(JSON.parse(merge.stretch_json) as Array<unknown>, 1, "the Lantern's stretch, one segment")
-
       const sharedPlan = yield* time(
         "PlanSummaries shared read",
         h.reader.PlanSummaries({ userId: h.userId, chatId, leafSlotId, reason: "reply" }),
@@ -238,6 +234,34 @@ it.live(
         })
       )
       assert.notInclude(built.snapshot, "The Lantern at night, line 2999.")
+      // The agent's search as Wren's reply runs it (TH8): the path, the join's 3,000 rows, her knowledge.
+      const snapshot = JSON.parse(built.snapshot) as ContextSnapshot
+      const search = (query: string) =>
+        Effect.suspend(() =>
+          historyTools
+            .find((tool) => tool.id === "search_chat")!
+            .execute(
+              {
+                userId: h.userId,
+                chatId,
+                forkId: placeholder.forkId as ForkId,
+                slotId: placeholder.slotId,
+                versionId: placeholder.version.id,
+                leafSlotId,
+                viewers: generationOf(snapshot).viewers,
+                rolloutId: "test",
+                toolCallId: "test",
+                cache: new Map(),
+                reader: h.reader,
+                writer: h.writer
+              } satisfies ToolContext,
+              { query } as never
+            )
+        )
+      const found = yield* time("search_chat for Wren", search("docks night 2999"))
+      assert.isTrue(found.isError)
+      assert.include(found.text, "History tools are unavailable")
+      assert.strictEqual((yield* search("Lantern night 2999")).text, found.text)
 
       process.stdout.write(`THREAD_SUMMARIES_SCALE ${JSON.stringify(samples)}\n`)
       const ms = (operation: string) => samples.find((s) => s.operation === operation)!.ms
@@ -245,6 +269,7 @@ it.live(
       assert.isBelow(ms("PlanSummaries after a reply"), 6_000)
       assert.isBelow(ms("GetLcmState for Wren"), 500)
       assert.isBelow(ms("AssembleContext for Wren"), 3_000)
+      assert.isBelow(ms("search_chat for Wren"), 3_000)
     }).pipe(Effect.scoped, Effect.provide(server.layer))
   },
   600_000

@@ -6,6 +6,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -181,3 +182,40 @@ test("joining the docks into the Lantern: one Joined row, Joined at #5, not offe
   const stored = await admin((api) => api.ThreadsOf({ chatId, forkId: lantern }))
   expect(stored[0]!.threads[1]).toMatchObject({ openForkId: docks, joined: { number: 5, upToDate: true } })
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a join that keeps each character to its own thread offers each one's summaries at ${width} ${theme}`, async ({
+      page
+    }, info) => {
+      const { chatId } = await seed(`views ${width} ${theme}`)
+      await open(page, `/chats/${chatId}`, width, theme)
+      await (await chatMenu(page)).getByRole("menuitem", { name: "Join threads…", exact: true }).click()
+      const dialog = joinDialog(page)
+      await dialog
+        .getByRole("radiogroup", { name: "How the characters see it" })
+        .getByRole("radio", { name: /^Each character reads only its own thread/ })
+        .click()
+      await dialog.getByRole("button", { name: "Join", exact: true }).click()
+      await expect(page.getByText("Joined “At the docks”", { exact: true })).toBeVisible()
+      for (const name of ["History edits", "Summaries"]) {
+        const panel = await openPanel(page, name)
+        const picker = panel.getByRole("combobox", { name: /^Summaries of/ })
+        await picker.click()
+        await expect(page.getByRole("option", { name: /^Wren/ })).toBeVisible()
+        await expect(page.getByRole("option", { name: /^Mira/ })).toBeVisible()
+        await expect(page.getByRole("option", { name: /^Ash/ })).toHaveCount(0)
+        await expectLayout(page, info, `summary viewer options ${name} ${width} ${theme}`, {
+          scope: '[role="listbox"]'
+        })
+        await page.getByRole("option", { name: /^Wren/ }).click()
+        await expect(picker).toContainText("Wren")
+        await expectLayout(page, info, `summary viewer ${name} ${width} ${theme}`, {
+          scope: `[role="tabpanel"][aria-label="${name}"]`
+        })
+        await page.reload()
+        await expect(
+          page.getByRole("tabpanel", { name }).getByRole("combobox", { name: /^Summaries of/ })
+        ).toContainText("Wren")
+      }
+    })

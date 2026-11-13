@@ -19,8 +19,8 @@ export const threadStretches = (sql: SqlClient.SqlClient, fork: ForkRef, leaf?: 
       tip_slot_id: string | null
     }>`SELECT id, chat_id, tip_slot_id FROM forks WHERE id = ${fork}`
     if (!owner) return [] as Array<StretchRange>
-    const joins = yield* sql<{ id: string; chain_id: string; depth: number; start_slot_id: string | null }>`
-      SELECT j.id, j.chain_id, j.depth, m.start_slot_id FROM chat_merges m JOIN slots j ON j.id = m.slot_id
+    const joins = yield* sql<{ id: string; chain_id: string; depth: number; stretch_before_slot_id: string | null }>`
+      SELECT j.id, j.chain_id, j.depth, m.stretch_before_slot_id FROM chat_merges m JOIN slots j ON j.id = m.slot_id
       WHERE m.chat_id = ${owner.chat_id} AND m.timelines = 'separate' AND NOT ${slotDeletedIn(sql, owner.id, "j")}`
     if (joins.length === 0) return [] as Array<StretchRange>
     const pieces = yield* pathPieces(sql, owner.chat_id, owner.id, owner.tip_slot_id)
@@ -35,7 +35,7 @@ export const threadStretches = (sql: SqlClient.SqlClient, fork: ForkRef, leaf?: 
       if (!at) return [] as Array<StretchRange>
       end = positionOf(pieces, place(at)) ?? -1
     }
-    const starts = joins.flatMap((j) => (j.start_slot_id ? [j.start_slot_id] : []))
+    const starts = joins.flatMap((j) => (j.stretch_before_slot_id ? [j.stretch_before_slot_id] : []))
     const rows = starts.length
       ? yield* sql<{ id: string; chain_id: string; depth: number }>`
       SELECT s.id, s.chain_id, s.depth FROM json_each(${JSON.stringify(starts)}) r CROSS JOIN slots s ON s.id = r.value`
@@ -45,7 +45,7 @@ export const threadStretches = (sql: SqlClient.SqlClient, fork: ForkRef, leaf?: 
     for (const join of joins) {
       const to = positionOf(pieces, place(join))
       if (to === null || to > end) continue
-      const from = join.start_slot_id === null ? to : (positions.get(join.start_slot_id) ?? to)
+      const from = join.stretch_before_slot_id === null ? 0 : (positions.get(join.stretch_before_slot_id) ?? -1) + 1
       for (const piece of pieces) {
         const last = piece.start + (piece.kind === "run" ? piece.hi - piece.lo : 0)
         const lo = Math.max(from, piece.start),

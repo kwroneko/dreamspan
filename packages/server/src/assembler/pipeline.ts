@@ -1,4 +1,3 @@
-import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import type { LoreReceipt, LoreTimingState } from "./loreTiming.ts"
 // The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §15).
 import type { SourceActivation } from "@rp/shared/inspectorApi.ts"
@@ -505,22 +504,15 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
         preset: { ref: preset.ref, revision: preset.revision, scope: preset.scope },
         cards,
         ...(presence ? { presence } : {}),
-        // A separate context's viewer, for the tools to read as the history did (C5).
-        ...(assembly.knowledge?.viewer || assembly.knowledge?.stretch?.ranges?.length
+        // Keep the character identity even when the request's history ends before a join.
+        ...(assembly.knowledge?.viewer
           ? {
-              viewer: assembly.knowledge!.viewer ?? assembly.knowledge!.stretch!.viewer,
-              ...(assembly.knowledge!.viewer
-                ? assembly.knowledge!.aliases
-                  ? { viewerAliases: assembly.knowledge!.aliases }
-                  : {}
-                : {
-                    viewerAliases: [
-                      ...(assembly.knowledge!.stretch!.aliases ?? [assembly.knowledge!.stretch!.viewer]),
-                      STRETCH_VIEW
-                    ]
-                  })
+              viewer: assembly.knowledge.viewer,
+              ...(assembly.knowledge.aliases ? { viewerAliases: assembly.knowledge.aliases } : {})
             }
-          : {}),
+          : assembly.knowledge?.stretch && !assembly.knowledge.stretch.stored
+            ? { stretchViewers: assembly.knowledge.stretch.aliases ?? [assembly.knowledge.stretch.viewer] }
+            : {}),
         model: assembly.model ?? null
       },
       ...(request.summaryJob

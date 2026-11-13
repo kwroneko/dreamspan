@@ -15,14 +15,18 @@ import { client, serverLayer, testConfig } from "./config.ts"
 import { generateReply } from "./generation.ts"
 import { completionChunks, sse, startMockProvider } from "./mockProvider.ts"
 
-const mockProvider = Effect.acquireRelease(
-  Effect.promise(() =>
-    startMockProvider((_request, res) =>
-      sse(res, completionChunks(["The night goes on."], { prompt_tokens: 10, completion_tokens: 4 }))
-    )
-  ),
-  (m) => Effect.promise(() => m.close())
-)
+type Respond = Parameters<typeof startMockProvider>[0]
+const mockProvider = (respond?: Respond) =>
+  Effect.acquireRelease(
+    Effect.promise(() =>
+      startMockProvider(
+        respond ??
+          ((_request, res) =>
+            sse(res, completionChunks(["The night goes on."], { prompt_tokens: 10, completion_tokens: 4 })))
+      )
+    ),
+    (m) => Effect.promise(() => m.close())
+  )
 
 export const sentText = (snapshot: ContextSnapshot) =>
   snapshot.request.messages
@@ -33,9 +37,9 @@ export const sentText = (snapshot: ContextSnapshot) =>
     )
     .join("\n")
 
-const story = (dataDir: string, setting: "separate" | null, narrator: boolean) =>
+const story = (dataDir: string, setting: "separate" | null, narrator: boolean, respond?: Respond) =>
   Effect.gen(function* () {
-    const mock = yield* mockProvider
+    const mock = yield* mockProvider(respond)
     const api = yield* client()
     const reader = yield* Reader
     const writer = yield* Writer
@@ -117,7 +121,7 @@ const story = (dataDir: string, setting: "separate" | null, narrator: boolean) =
     const awayIn = (fork: ForkId, slotId: SlotId) =>
       Effect.map(reader.StateEventsAt({ userId, chatId, slotId, forkId: fork }), (events) => awayAt(foldState(events)))
     /** The request of a reply by `speaker` at the tip of `fork`: its own placeholder row (a branch there). */
-    const requestFor = (fork: ForkId, speaker: EntityId) =>
+    const requestFor = (fork: ForkId, speaker: EntityId, agent = false) =>
       Effect.gen(function* () {
         const tip = (yield* reader.ReadPath({
           userId,
@@ -152,6 +156,14 @@ const story = (dataDir: string, setting: "separate" | null, narrator: boolean) =
           now: 1,
           timeZone: "UTC",
           frozen: null,
+          ...(agent
+            ? {
+                agent: {
+                  instructions: "Use your history tools when needed, then write your reply.",
+                  speakerCardOnly: false
+                }
+              }
+            : {}),
           forkId: placeholder.forkId
         })
         return JSON.parse(built.snapshot) as ContextSnapshot
@@ -210,6 +222,9 @@ const story = (dataDir: string, setting: "separate" | null, narrator: boolean) =
         })
       })
     return {
+      dataDir,
+      mock,
+      events: made.events,
       api,
       reader,
       writer,
@@ -243,10 +258,10 @@ export type ThreadStory = Effect.Success<ReturnType<typeof story>>
 export const runStory = <A, E, R>(
   setting: "separate" | null,
   use: (t: ThreadStory) => Effect.Effect<A, E, R>,
-  options: { readonly narrator?: boolean } = {}
+  options: { readonly narrator?: boolean; readonly respond?: Respond } = {}
 ) => {
   const config = testConfig()
   return Effect.gen(function* () {
-    return yield* use(yield* story(config.dataDir, setting, options.narrator ?? false))
+    return yield* use(yield* story(config.dataDir, setting, options.narrator ?? false, options.respond))
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 }

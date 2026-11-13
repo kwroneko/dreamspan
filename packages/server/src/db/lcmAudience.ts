@@ -44,7 +44,7 @@ export const audienceScope = (sql: SqlClient.SqlClient, alias: string, identitie
         WHERE a.value NOT IN (SELECT value FROM json_each(${JSON.stringify([...identities])}))))`
 
 /**
- * Whether a live separate join (one with a stretch, `chat_merges.stretch_json`) is on the path to
+ * Whether a live separate join (resolved from its predecessor, `threadStretches`) is on the path to
  * `leaf`: only there does a chat with one shared context keep views (spec/THREADS.md §7.3). One
  * indexed read of the chat's merges, then a path probe per such join (few).
  */

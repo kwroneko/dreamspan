@@ -104,7 +104,7 @@ export interface Knowledge {
   /**
    * With the whole path (`viewer` null) but a character speaking: whom a separate join's
    * parallel stretch is filtered for (spec/THREADS.md §7.3). The rest of the history stays whole.
-   * `stored`: the stretches as each join recorded them (`chat_merges.stretch_json`), for a stretch
+   * `stored`: the planning fork's live stretches (`threadStretches`), for a stretch
    * view's own summary, whose chunk may end before the join (TH7); else those of the joins read.
    */
   readonly stretch?: {

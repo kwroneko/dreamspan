@@ -33,7 +33,7 @@ const mergeKnowersSql = (slot: string) => `(SELECT json_group_array(candidate.en
   WHERE m.slot_id = ${slot} AND mm.included = 'verbatim' AND mm.knowers_json IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM json_each(mm.knowers_json) k WHERE k.value = candidate.entity)))`
 
-/** Whether these identities are a stretch view's (`STRETCH_VIEW`, kept in `chat_merges.stretch_json`). */
+/** Whether these identities are a stretch view's (`STRETCH_VIEW`, resolved by `threadStretches`). */
 export const isStretchView = (identities: ReadonlyArray<string> | undefined) =>
   identities !== undefined && identities.includes(STRETCH_VIEW)
 

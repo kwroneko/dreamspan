@@ -65,10 +65,20 @@ describe("what each speaker reads at a join", () => {
       (t) =>
         Effect.gen(function* () {
           const { lanternSlot } = yield* play(t)
+          for (const forkId of [t.F, t.D])
+            yield* t.writer.AddStateEvent({
+              userId: t.userId,
+              chatId: t.chatId,
+              forkId,
+              slotId: null,
+              versionId: null,
+              scope: null,
+              data: { key: "agent.enabled", value: { on: true } }
+            })
           // Wren's last request at the docks, before the join.
-          const docksRequest = yield* t.requestFor(t.D, t.wren)
+          const docksRequest = yield* t.requestFor(t.D, t.wren, true)
           const atDocks = texts(docksRequest)
-          const beforeMira = yield* t.requestFor(t.F, t.mira)
+          const beforeMira = yield* t.requestFor(t.F, t.mira, true)
 
           // The dialog's choice: offered in a shared-context chat, with each character's view.
           const together = yield* t.preview(t.F, t.D)
@@ -86,7 +96,7 @@ describe("what each speaker reads at a join", () => {
           assert.strictEqual(t.stored(J).merge.timelines, "separate")
 
           // Wren: the docks as her own messages, nothing of the Lantern, no section.
-          const forWren = yield* t.requestFor(t.F, t.wren)
+          const forWren = yield* t.requestFor(t.F, t.wren, true)
           const wren = sentText(forWren)
           assert.include(wren, "Wren counts the crates on the pier.")
           assert.include(wren, "The tide turns under a thin moon.")
@@ -105,7 +115,7 @@ describe("what each speaker reads at a join", () => {
           )
 
           // Mira: the Lantern, nothing of the docks.
-          const miraRequest = yield* t.requestFor(t.F, t.mira)
+          const miraRequest = yield* t.requestFor(t.F, t.mira, true)
           assert.deepStrictEqual(
             miraRequest.request.messages,
             beforeMira.request.messages,
@@ -133,6 +143,43 @@ describe("what each speaker reads at a join", () => {
         }),
       { narrator: true }
     )
+  )
+
+  it.live(
+    "a message inserted into the stretch after a separate join is the stretch's too: never read by one who wasn't there",
+    () =>
+      runStory(
+        null,
+        (t) =>
+          Effect.gen(function* () {
+            const { lanternSlot } = yield* play(t)
+            yield* t.join(t.F, [t.D], null, "separate")
+            const insert = (anchor: SlotId, content: string) =>
+              Effect.gen(function* () {
+                const slot = yield* t.reader.GetSlot({ userId: t.userId, slotId: anchor, forkId: t.F })
+                return yield* t.writer.InsertMessage({
+                  userId: t.userId,
+                  chatId: t.chatId,
+                  forkId: t.F,
+                  anchorSlotId: anchor,
+                  expectedRowVersion: slot.entry.rowVersion,
+                  body: { _tag: "Write", speaker: t.mira, content }
+                })
+              })
+            // In the Lantern after the join: right after the split, and among its messages.
+            yield* insert(t.S, "A lamp is lit in the Lantern's window.")
+            yield* insert(lanternSlot, "Mira mends a torn sail by the hearth.")
+            const mira = yield* t.contextFor(t.F, t.mira)
+            assert.include(mira, "A lamp is lit in the Lantern's window.")
+            assert.include(mira, "Mira mends a torn sail by the hearth.")
+            const wren = yield* t.contextFor(t.F, t.wren)
+            assert.include(wren, "Wren counts the crates on the pier.")
+            assert.notInclude(wren, "A lamp is lit")
+            assert.notInclude(wren, "torn sail")
+            assert.notInclude(wren, "stokes the fire")
+          }),
+        { narrator: true }
+      )
   )
 
   it.live("a together join reads as merges do: everyone both threads, the docks as the section", () =>

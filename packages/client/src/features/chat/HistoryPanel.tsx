@@ -279,7 +279,7 @@ function HistorySearchPair({
   const searchKey = JSON.stringify([search, refresh, viewer])
   // A replacement that covered the summaries keeps them in use, but with separate contexts one search
   // reaches one reader's summaries: the others over the same messages must be written again.
-  const separate = summaryViewers(view.cast).length > 0
+  const separate = summaryViewers(view.cast, view.lcm).length > 0
   const idle = search.pairs.some((p) => !p.find)
   useEffect(() => {
     const request = ++revision.current

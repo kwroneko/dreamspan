@@ -4134,7 +4134,8 @@ export class ReadOps extends RpcGroup.make(
    * word starting with each of `tokens` (all of them; none: any), newest first, before display
    * position `before` when given; hidden and unfinished ones left out, template messages
    * (greetings) always, for the caller to fill in and match. Null when the fork places inserted
-   * messages, whose numbering the display path gives: the caller reads the path instead.
+   * messages, whose numbering the display path gives, or the chat has a merge, whose join the
+   * caller reads row by row (spec/THREADS.md §11, TH8): the caller reads the path instead.
    */
   Rpc.make("SearchChat", {
     payload: {
@@ -4184,8 +4185,41 @@ export class ReadOps extends RpcGroup.make(
         knowers: Schema.NullOr(Schema.Array(Schema.String)),
         away: Schema.optionalKey(Schema.Array(Schema.String)),
         content: Schema.optionalKey(Schema.String),
-        stretched: Schema.optionalKey(Schema.Boolean),
-        readable: Schema.optionalKey(Schema.Boolean)
+        readable: Schema.optionalKey(Schema.Boolean),
+        /** In a separate join's parallel stretch (the viewed display path), where a stretch view applies. */
+        stretched: Schema.optionalKey(Schema.Boolean)
+      })
+    ),
+    error: StorageError
+  }),
+  /**
+   * The joins among these slots of the chat (`chat_merges`, agentReads.ts): each one's title, how
+   * the characters read it (`timelines`) and its frozen rows in order, with where each was in the
+   * source and who knew it there (the source's cast where none was kept). The agent's read tools
+   * read a join row by row (spec/THREADS.md §11, TH8). Point lookups by slot.
+   */
+  Rpc.make("JoinRows", {
+    payload: { userId: UserId, chatId: ChatId, slotIds: Schema.Array(Schema.String) },
+    success: Schema.Array(
+      Schema.Struct({
+        slotId: Schema.String,
+        title: Schema.String,
+        timelines: Schema.String,
+        rows: Schema.Array(
+          Schema.Struct({
+            ordinal: Schema.Int,
+            kind: Schema.Literals(["message", "summary"]),
+            name: Schema.String,
+            side: Schema.Literals(["user", "assistant"]),
+            speaker: Schema.NullOr(Schema.String),
+            content: Schema.String,
+            included: Schema.Literals(["verbatim", "summarized", "left_out"]),
+            knowers: Schema.Array(Schema.String),
+            /** Where it was in the source, as zero-based display positions; null: not recorded. */
+            from: Schema.NullOr(Schema.Int),
+            to: Schema.NullOr(Schema.Int)
+          })
+        )
       })
     ),
     error: StorageError

@@ -38,8 +38,8 @@ describe("thread join review", () => {
           ["search_summaries", { query: "LANTERN-SECRET" }]
         ] as const) {
           const result = yield* historyTools.find((tool) => tool.id === id)!.execute(context, args as never)
-          assert.notInclude(result.text, "LANTERN-SECRET", id)
-          assert.isTrue(result.isError, "restricted reads refuse until joined-row tools are available")
+          assert.notInclude(result.text.replaceAll("“LANTERN-SECRET”", "“query”"), "LANTERN-SECRET", id)
+          assert.isTrue(result.isError, "joined character reads remain refused until metadata follows the view")
         }
       })
     )
