@@ -95,7 +95,12 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof NotAmendable)
     return make("NotAmendable", "Only a finished message you wrote can be changed in place.")
   if (error instanceof NotResumable)
-    return make("NotResumable", `This reply can't be carried on: ${lowerFirst(sentence(error.message))}`)
+    return make(
+      "NotResumable",
+      `This reply can't be carried on: ${lowerFirst(sentence(error.message))}`,
+      // Its stored request can still be sent unchanged, if the user chooses to (Message.tsx).
+      error.savedRequest ? "saved_request" : null
+    )
   if (error instanceof MergeRefused) return make("MergeRefused", sentence(error.message))
   if (error instanceof MergeChanged)
     return make("MergeChanged", "One of the chats changed while this was open. Check what merging brings now.")

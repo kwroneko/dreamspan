@@ -129,6 +129,7 @@ export function SettingsSection({ connection, kinds, providers }: ConnectionSect
     maxConcurrent: concurrency.problem,
     maxMarkers: parsed.problems.maxMarkers,
     minTokens: parsed.problems.minTokens,
+    idleTimeoutS: parsed.problems.idleTimeoutS,
     cacheTtlS: ttl.problem
   }
   const shown = (problem: string | null) => (submitted ? problem : null)
@@ -258,7 +259,8 @@ export function SettingsSection({ connection, kinds, providers }: ConnectionSect
               region: null,
               project: null,
               maxMarkers: shown(problems.maxMarkers),
-              minTokens: shown(problems.minTokens)
+              minTokens: shown(problems.minTokens),
+              idleTimeoutS: shown(problems.idleTimeoutS)
             }}
             cacheTtl={{
               value: values.cacheTtlS,

@@ -74,6 +74,8 @@ export const ProviderErrorReason = Schema.Literals([
   "refused",
   "bad_request",
   "network",
+  /** The provider sent nothing for the connection's idle limit (spec/AGENTIC.md §12.5). */
+  "no_response",
   "aborted",
   "unknown"
 ])

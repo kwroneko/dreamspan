@@ -16,8 +16,9 @@ describe("Resume on an agent reply", () => {
     expect(resumeOffer(version({ writer: "human", content: "Hi" }))).toBeNull()
   })
 
-  it("stays in place, disabled, when the reply stopped before writing anything", () => {
-    expect(resumeOffer(version({}))).toEqual({ disabled: "This reply stopped before its first step." })
+  it("is offered when the reply stopped before writing anything: it starts over from its saved request", () => {
+    expect(resumeOffer(version({}))).toEqual({ disabled: null })
+    expect(resumeOffer(version({ status: "failed" }))).toEqual({ disabled: null })
     expect(resumeOffer(version({ steps: { count: 1, ms: 30 } }))).toEqual({ disabled: null })
     expect(resumeOffer(version({ reasoning: "Hm." }))).toEqual({ disabled: null })
   })

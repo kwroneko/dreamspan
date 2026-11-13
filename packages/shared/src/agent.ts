@@ -68,7 +68,12 @@ export type StepsSummary = typeof StepsSummary.Type
  */
 export class NotResumable extends Schema.TaggedError<NotResumable>()("NotResumable", {
   versionId: Schema.String,
-  message: Schema.String
+  message: Schema.String,
+  /**
+   * The chat's context can't be built now (a deleted lorebook, say), but the stopped run's own
+   * request is still stored: the user may send it unchanged (`ResumeVersion`'s `saved`).
+   */
+  savedRequest: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 /**

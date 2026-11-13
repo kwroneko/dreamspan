@@ -11,6 +11,7 @@ import { query, transaction } from "./tx.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { callsFrom } from "../agent/steps.ts"
+import { recoveredOperationText } from "./operationReceipts.ts"
 import { capabilityDefaults, resolveMode, workshopCapabilities } from "../agent/capabilities.ts"
 
 type Sql = SqlClient.SqlClient
@@ -216,6 +217,18 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
           ORDER BY e.created_at DESC, e.rollout_id DESC, e.tool_call_id DESC, e.seq DESC`
         const earlier = [...new Set(rows.map((r) => r.rollout_id))].filter((id) => id !== version.rollout_id)
         const results = new Map<string, Map<string, string | null>>()
+        const receipts = new Map<string, Map<string, string>>()
+        // A crash may leave a committed effect and receipt before its transcript result.
+        // Only a matching receipt carried into this run can prove that missing result;
+        // an unrelated call reusing the same id must not inherit the effect.
+        if (earlier.length > 0)
+          for (const receipt of yield* sql<{ rollout_id: string; tool_call_id: string; result_json: string }>`
+            SELECT rollout_id, tool_call_id, result_json FROM rollout_receipts
+            WHERE rollout_id IN ${sql.in(runs.map((run) => run.id))}`) {
+            let calls = receipts.get(receipt.rollout_id)
+            if (!calls) receipts.set(receipt.rollout_id, (calls = new Map()))
+            calls.set(receipt.tool_call_id, receipt.result_json)
+          }
         if (earlier.length > 0)
           for (const run of yield* sql<{ rollout_id: string; transcript: string | null }>`SELECT rollout_id,
               transcript_json AS transcript FROM rollout_payloads WHERE rollout_id IN ${sql.in(earlier)}`)
@@ -228,7 +241,13 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
             if (!calls.has(row.tool_call_id)) return false
             if (row.rollout_id === version.rollout_id) return true
             const there = results.get(row.rollout_id)?.get(row.tool_call_id)
-            return there !== undefined && there !== null && there === calls.get(row.tool_call_id)
+            if (there !== undefined && there !== null && there === calls.get(row.tool_call_id)) return true
+            const kept = receipts.get(version.rollout_id!)?.get(row.tool_call_id)
+            return (
+              kept !== undefined &&
+              kept === receipts.get(row.rollout_id)?.get(row.tool_call_id) &&
+              recoveredOperationText(JSON.parse(kept) as string) === calls.get(row.tool_call_id)
+            )
           })
           .map(toRolloutEffect)
       }).pipe(query("VersionEffects"))
