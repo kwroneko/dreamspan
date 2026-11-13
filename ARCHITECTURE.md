@@ -3435,6 +3435,11 @@ Workshop compaction with the `call_tool` dispatcher (merge-batch10; assembler ve
 - **Tools array.** The tools array a run sends is fixed when the run starts; compaction never changes it.
 - **Refusals.** A dispatched call runs through the same `prepareTool` and `execute` path as a direct call, so threads6's uniform refusals read the same.
 
+Own-turn notes beside the batch's other summaries (merge-batch10; assembler version **73**, above ownturn1's 68 and the batch's 72).
+- **Summaries.** The note gate admits an own-turn note into a summary only when the summary's audience is exactly the note's card. A shared summary, another character's view, and a thread stretch view (whose audience adds `~stretch`) never take it. The card's own stretch view leaves it out too, which is the conservative choice (`ownTurnReview.test.ts`).
+- **Workshop summaries.** A workshop's transcript summaries read no notes at all.
+- **Who receives a note.** The request speaker decides, not branch-local presence.
+
 Workshop list presentation (decisions1113, reviewed 2026-11-13): shared `ForkRow` and Chats page rows use registered `kindRowProps` and semantic accent tokens for a tint and inset edge. `KindBadge` retains the word Workshop and the accessible link name retains Workshop, independently of colour. The registered workshop look hides `chat.new-with-cast`, enforced by command availability. `workshopChatList.spec.ts` checks lists, counts, URL-only state and actions at 1440/390 in light/dark. The per-branch shared row and its compact `BranchListRow` variant also apply the registered kind styling; compact rows retain the Workshop badge and include it in their accessible action names, hiding the badge only while the name editor occupies that line.
 
 **Workshop transcript summaries** (worklcm1, 2026-11-13; WORKSHOP §10 question 4 [D]). The owner's decision is: “the agent NEEDS LCM summaries. It was INVENTED FOR CODING AGENTS.” This supersedes workctx1's elision-first default and the earlier Later item. Explicitly switching Summaries off retains the existing between-turn elision behavior. RP defaults are unchanged. Assembler version **69** fences the changed request bytes (review-worklcm1 hardens summary material redaction).

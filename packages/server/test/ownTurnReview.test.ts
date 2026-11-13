@@ -173,8 +173,11 @@ describe("derived private text review", () => {
     )
     expect(JSON.stringify(built.request)).not.toContain(secret)
   })
-  for (const audience of ["Mira", "Tobin"])
-    it(`limits a private summary input to its audience (${audience})`, async () => {
+  // merge-batch10: thread stretch views (batch 9) add the "~stretch" marker to the audience. Another
+  // character's stretch view never takes Mira's own-turn text; her own stretch view leaves it out
+  // too, as the gate only admits an audience of exactly the note's card.
+  for (const audience of [["Mira"], ["Tobin"], ["Tobin", "~stretch"], ["Mira", "~stretch"]])
+    it(`limits a private summary input to its audience (${audience.join(", ")})`, async () => {
       const f = fixture("Mira")
       const built = await Effect.runPromise(
         assembleFixture(
@@ -195,11 +198,11 @@ describe("derived private text review", () => {
               inputs: [],
               tail: "Summarize.",
               style: "direct",
-              audience: [audience]
+              audience
             }
           }
         )
       )
-      expect(JSON.stringify(built.request).includes(secret)).toBe(audience === "Mira")
+      expect(JSON.stringify(built.request).includes(secret)).toBe(audience.join() === "Mira")
     })
 })
