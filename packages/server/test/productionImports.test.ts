@@ -278,6 +278,7 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       'readFile(join(root, "package-lock.json"))',
       'readFile(join(root, "packages/server/dist/workers/stamp.json"))',
       'readFile(join(staging, "check.json"), "utf8")',
+      'readFile(join(build, "check.json"))',
       'readFile(join(folder, "rp-plugin.json"), "utf8")'
     ]
   },
@@ -292,7 +293,7 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       "readFile(join(folder, file))"
     ]
   },
-  "packages/server/src/plugins/process.ts": {
+  "packages/server/src/plugins/processSupervisor.ts": {
     reason: "Only the checked child PID in /proc; sampled RSS limit, no process discovery.",
     expressions: ['readFile(`/proc/${child.pid}/status`, "utf8")']
   },

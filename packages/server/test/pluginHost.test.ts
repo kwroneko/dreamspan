@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { expect, it, describe } from "vitest"
 import { Effect } from "effect"
+import type { UserId } from "@rp/shared/domain.ts"
 import { checkPlugin } from "../src/plugins/check.ts"
 import { pluginFolder, saveFiles } from "../src/plugins/repo.ts"
 import { runPluginChild } from "../src/plugins/process.ts"
@@ -506,3 +507,203 @@ it("isolates every user-scoped read and data RPC in both directions, including a
     )
   )
 }, 60_000)
+
+it("does not accept a replaced bundle with a forged cache checksum", async () => {
+  const data = tempDir("plugin-forged-cache")
+  const commit = await saveFiles(data, "", "forged", fixture("forged", empty), true, "Initial")
+  expect(await checkPlugin(data, "", "forged", commit)).toMatchObject({ ok: true })
+  const folder = join(data, "plugins/.builds/instance/forged", commit)
+  const altered = "throw new Error('forged bundle');"
+  const { createHash } = await import("node:crypto")
+  const report = JSON.parse(await readFile(join(folder, "check.json"), "utf8"))
+  await writeFile(join(folder, "server.mjs"), altered)
+  report.artifacts["server.mjs"] = createHash("sha256").update(altered).digest("hex")
+  await writeFile(join(folder, "check.json"), JSON.stringify(report))
+  expect(await checkPlugin(data, "", "forged", commit)).toMatchObject({ ok: true, cached: false })
+  expect(await readFile(join(folder, "server.mjs"), "utf8")).not.toContain("forged bundle")
+}, 60000)
+
+it("reaps a busy check child when its server parent is killed", async () => {
+  const data = tempDir("plugin-parent-kill")
+  const busy = join(data, "busy.mjs"),
+    runner = join(data, "runner.mjs")
+  await writeFile(busy, "while(true) {}")
+  await writeFile(
+    runner,
+    `import {runPluginChild} from ${JSON.stringify(new URL("../src/plugins/process.ts", import.meta.url).href)}; await runPluginChild(new URL(${JSON.stringify(new URL(`file://${busy}`).href)}),[],{timeout:10000,memory:32});`
+  )
+  const parent = spawn(process.execPath, [runner], { env: {}, stdio: ["ignore", "ignore", "ignore", "ipc"] })
+  let pid = 0
+  try {
+    pid = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("No checked PID")), 5000)
+      parent.on("message", (message: unknown) => {
+        const child = message as { pluginChild?: number }
+        if (child.pluginChild) {
+          clearTimeout(timer)
+          resolve(child.pluginChild)
+        }
+      })
+      parent.once("error", reject)
+    })
+    parent.kill("SIGKILL")
+    await new Promise((resolve) => parent.once("close", resolve))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const status = await readFile(`/proc/${pid}/stat`, "utf8").catch(() => "")
+    expect(status === "" || status.split(" ")[2] === "Z").toBe(true)
+  } finally {
+    parent.kill("SIGKILL")
+    if (pid)
+      try {
+        process.kill(pid, "SIGKILL")
+      } catch {
+        /* already reaped */
+      }
+  }
+}, 15000)
+
+it("suspends the durable pin before a rollback can change files or fail", async () => {
+  const config = testConfig()
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const api = yield* client()
+        const commit = yield* api.CreatePlugin({
+          scope: "instance",
+          id: "rollback-fault",
+          files: fixture("rollback-fault", empty)
+        })
+        expect(
+          yield* api.EnablePlugin({ scope: "instance", id: "rollback-fault", commit, consent: true })
+        ).toMatchObject({ ok: true })
+        yield* api
+          .PinPluginCommit({ scope: "instance", id: "rollback-fault", commit: "0".repeat(40), consent: true })
+          .pipe(Effect.exit)
+        expect((yield* api.GetPlugin({ scope: "instance", id: "rollback-fault" })).pin?.suspended).toBeDefined()
+      }).pipe(Effect.provide(serverLayer(config)))
+    )
+  )
+}, 60000)
+
+it("states full runtime trust even when the manifest has no network handle", async () => {
+  const config = testConfig()
+  const syntheticKey = "RP_SYNTHETIC_PLUGIN_SECRET"
+  const previous = process.env[syntheticKey]
+  process.env[syntheticKey] = "synthetic-secret"
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const api = yield* client()
+          const { ExecutionRegistry } = yield* Effect.promise(() => import("../src/execution.ts"))
+          const source =
+            'import {Effect,type Activate} from "@rp/plugin-api/server"; export const activate:Activate = host => host.registries.rolloutTools!.register({id:"synthetic_trust",label:"Trust",description:"Synthetic trust proof",effect:"read",parameters:{},execute:()=>Effect.succeed({text:host.log.constructor("return process")().env.RP_SYNTHETIC_PLUGIN_SECRET})});'
+          const commit = yield* api.CreatePlugin({
+            scope: "instance",
+            id: "full-trust",
+            files: fixture("full-trust", source, { surfaces: ["server:rolloutTools"], network: false })
+          })
+          const report = yield* api.EnablePlugin({ scope: "instance", id: "full-trust", commit, consent: true })
+          expect(report.ok).toBe(true)
+          expect(report.message).toContain("full access, including stored keys and network")
+          const result = yield* (yield* ExecutionRegistry).rolloutTools
+            .get("synthetic_trust")!
+            .execute({} as never, {} as never)
+          expect(result.text).toBe("synthetic-secret")
+        }).pipe(Effect.provide(serverLayer(config)))
+      )
+    )
+  } finally {
+    if (previous === undefined) delete process.env[syntheticKey]
+    else process.env[syntheticKey] = previous
+  }
+}, 60000)
+
+it("ignores plugin build/package configuration and refuses WASM and native imports", async () => {
+  const data = tempDir("plugin-config")
+  const files = {
+    ...fixture("config-inert", empty),
+    "tsconfig.json": JSON.stringify({
+      extends: "./nonexistent-config",
+      compilerOptions: { plugins: [{ name: "./evil-plugin.mjs" }] }
+    }),
+    "rolldown.config.mjs": "throw new Error('must not execute config')",
+    ".npmrc": "script-shell=/nonexistent-synthetic-shell",
+    "package.json": JSON.stringify({ scripts: { install: "exit 1", prepare: "exit 1" } })
+  }
+  const commit = await saveFiles(data, "", "config-inert", files, true, "Synthetic configs")
+  const report = await checkPlugin(data, "", "config-inert", commit)
+  expect(report, JSON.stringify(report)).toMatchObject({ ok: true })
+  for (const extension of ["wasm", "node"]) {
+    const id = `import-${extension}`
+    const source = `// @ts-ignore synthetic unsupported import\nimport addon from "./addon.${extension}";\n${empty}\nconsole.log(addon);`
+    const commit = await saveFiles(
+      data,
+      "",
+      id,
+      { ...fixture(id, source), [`addon.${extension}`]: "synthetic" },
+      true,
+      "Synthetic unsupported import"
+    )
+    expect(await checkPlugin(data, "", id, commit)).toMatchObject({ ok: false, step: "bundle" })
+  }
+}, 60000)
+
+it("checks a JavaScript entry with the same API as TypeScript", async () => {
+  const data = tempDir("plugin-javascript")
+  const files = {
+    "rp-plugin.json": fixture("javascript", empty, { server: "index.js" })["rp-plugin.json"],
+    "index.js": 'import {Effect} from "@rp/plugin-api/server"; export const activate = () => Effect.void;'
+  }
+  const commit = await saveFiles(data, "", "javascript", files, true, "Synthetic JS")
+  const report = await checkPlugin(data, "", "javascript", commit)
+  expect(report, JSON.stringify(report)).toMatchObject({ ok: true })
+}, 60000)
+
+it("starts healthy and suspends a user pin whose enabling admin was disabled", async () => {
+  const config = testConfig()
+  let owner = "" as UserId,
+    handle = ""
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const local = yield* client(),
+          alice = yield* local.Whoami()
+        handle = alice.handle
+        yield* local.SetPassword({ userId: alice.id, currentPassword: null, newPassword: "synthetic-alice-password" })
+        const aliceApi = yield* client({ cookie: (yield* login(alice.handle, "synthetic-alice-password")).cookie })
+        yield* aliceApi.CreateUser({
+          handle: "synthetic-admin-bob",
+          displayName: "Synthetic admin",
+          role: "admin",
+          password: "synthetic-bob-password"
+        })
+        const bobApi = yield* client({ cookie: (yield* login("synthetic-admin-bob", "synthetic-bob-password")).cookie })
+        owner = (yield* bobApi.Whoami()).id
+        const commit = yield* bobApi.CreatePlugin({
+          scope: "user",
+          id: "disabled-owner",
+          files: {
+            ...fixture("disabled-owner", "export const unused = true", { server: null, client: "client.ts" }),
+            "client.ts": "export const activate = () => undefined"
+          }
+        })
+        expect(
+          yield* bobApi.EnablePlugin({ scope: "user", id: "disabled-owner", commit, consent: true })
+        ).toMatchObject({ ok: true })
+        yield* aliceApi.SetUserDisabled({ userId: owner, disabled: true })
+      }).pipe(Effect.provide(serverLayer(config)))
+    )
+  )
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const api = yield* client({ cookie: (yield* login(handle, "synthetic-alice-password")).cookie })
+        const alice = yield* api.Whoami()
+        const { Reader } = yield* Effect.promise(() => import("../src/db/Database.ts"))
+        const pins = yield* (yield* Reader).GetPluginPins({ userId: alice.id, owner })
+        expect(pins.value["disabled-owner"]?.suspended?.reason).toContain("no longer an active admin")
+      }).pipe(Effect.provide(serverLayer(config)))
+    )
+  )
+}, 60000)

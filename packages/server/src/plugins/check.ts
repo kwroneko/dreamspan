@@ -24,6 +24,8 @@ const pluginAppStamp = async () => {
   hash.update(await readFile(join(root, "packages/server/dist/workers/stamp.json")).catch(() => Buffer.from("source")))
   return hash.digest("hex")
 }
+// Only this process can attest a previous check report. Restarts recheck from source.
+const checkedReports = new Map<string, string>()
 const buildFolder = (dataDir: string, owner: string, id: string, commit: string) =>
   join(resolve(dataDir), "plugins", ".builds", owner || "instance", id, commit)
 export const checkPlugin = async (
@@ -49,11 +51,16 @@ export const checkPlugin = async (
     const parent = join(build, "..")
     await confined(dataDir, parent, true)
     staging = join(parent, `.check-${randomUUID()}`)
-    const child = await runPluginChild(
-      new URL("./checkChild.ts", import.meta.url),
-      [dataDir, owner, id, commit, staging, appStamp, build],
-      { trackChildren: true }
-    )
+    const child = await runPluginChild(new URL("./checkChild.ts", import.meta.url), [
+      dataDir,
+      owner,
+      id,
+      commit,
+      staging,
+      appStamp,
+      build,
+      checkedReports.get(build) ?? ""
+    ])
     if (!child.ok) return report
     const checked = JSON.parse(await readFile(join(staging, "check.json"), "utf8")) as PluginReport
     if (!checked.ok) return checked
@@ -61,6 +68,12 @@ export const checkPlugin = async (
     await rm(build, { recursive: true, force: true })
     await rename(staging, build)
     staging = undefined
+    checkedReports.set(
+      build,
+      createHash("sha256")
+        .update(await readFile(join(build, "check.json")))
+        .digest("hex")
+    )
     return checked
   } catch {
     return report

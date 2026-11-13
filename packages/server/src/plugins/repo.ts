@@ -14,6 +14,7 @@ export const validPath = (path: string) => {
     path.length > 240 ||
     path.includes("\\") ||
     path.includes("\0") ||
+    path !== path.normalize("NFC") ||
     path.startsWith("/") ||
     path.split("/").some((p) => !p || p === "." || p === ".." || p.toLowerCase() === ".git") ||
     /[:\x00-\x1f]/.test(path)
@@ -45,6 +46,7 @@ export const confined = async (base: string, path: string, create = false) => {
 
 export const diskFiles = async (folder: string): Promise<Map<string, Uint8Array>> => {
   const files = new Map<string, Uint8Array>()
+  const portable = new Set<string>()
   let total = 0,
     directories = 0
   const visit = async (dir: string, prefix: string) => {
@@ -55,13 +57,22 @@ export const diskFiles = async (folder: string): Promise<Map<string, Uint8Array>
         continue
       }
       const path = validPath(prefix + entry.name)
+      const folded = path.normalize("NFC").toUpperCase().toLowerCase().normalize("NFC")
+      if (portable.has(folded)) throw new Error("Plugin path collision")
+      portable.add(folded)
       if (entry.isSymbolicLink()) throw new Error("Plugin symbolic links are refused")
       if (entry.isDirectory()) {
         await visit(join(dir, entry.name), path + "/")
         continue
       }
       const stat = await lstat(join(dir, entry.name))
-      if (!stat.isFile() || stat.size > limits.file || total + stat.size > limits.bytes || files.size >= limits.files)
+      if (
+        !stat.isFile() ||
+        stat.nlink !== 1 ||
+        stat.size > limits.file ||
+        total + stat.size > limits.bytes ||
+        files.size >= limits.files
+      )
         throw new Error("Plugin size limit exceeded")
       total += stat.size
       files.set(path, await readFile(join(dir, entry.name)))
@@ -74,15 +85,21 @@ export const diskFiles = async (folder: string): Promise<Map<string, Uint8Array>
 const safeGit = async (folder: string) => {
   const metadata = await lstat(join(folder, ".git"))
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Git metadata links are refused")
-  let count = 0
+  let count = 0,
+    bytes = 0
   const visit = async (dir: string, depth: number) => {
     if (depth > 16 || ++count > 4096) throw new Error("Git metadata limit exceeded")
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name)
+      if (++count > 4096) throw new Error("Git metadata limit exceeded")
       if (entry.isSymbolicLink()) throw new Error("Git metadata links are refused")
       if (entry.isDirectory()) await visit(path, depth + 1)
-      else if (!entry.isFile() || (await lstat(path)).size > 32 * 1024 * 1024)
-        throw new Error("Git metadata size limit exceeded")
+      else {
+        const info = await lstat(path)
+        bytes += info.size
+        if (!info.isFile() || info.nlink !== 1 || info.size > 32 * 1024 * 1024 || bytes > 128 * 1024 * 1024)
+          throw new Error("Git metadata size limit exceeded")
+      }
     }
   }
   await visit(join(folder, ".git"), 0)
@@ -99,12 +116,19 @@ export const commitFiles = async (folder: string, commit: string) => {
   await verifyObject(folder, commit)
   const { commit: object } = await git.readCommit({ fs, dir: folder, oid: commit })
   const files = new Map<string, Uint8Array>()
-  let total = 0
+  let total = 0,
+    directories = 0
+  const portable = new Set<string>()
   const visit = async (oid: string, prefix: string) => {
+    if (++directories > 512 || prefix.split("/").length > 24) throw new Error("Plugin directory limit exceeded")
     await verifyObject(folder, oid)
     const { tree } = await git.readTree({ fs, dir: folder, oid })
     for (const item of tree) {
+      if (item.path.includes("/")) throw new Error("Invalid Git tree component")
       const path = validPath(prefix + item.path)
+      const folded = path.normalize("NFC").toUpperCase().toLowerCase().normalize("NFC")
+      if (portable.has(folded)) throw new Error("Plugin path collision")
+      portable.add(folded)
       if (item.type === "tree") {
         await visit(item.oid, path + "/")
         continue
@@ -175,7 +199,8 @@ export const saveFiles = async (
     await confined(dataDir, join(folder, path, ".."), true)
     const target = join(folder, path)
     const stat = await lstat(target).catch(() => null)
-    if (stat && (!stat.isFile() || stat.isSymbolicLink())) throw new Error("Plugin symbolic links are refused")
+    if (stat && (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1))
+      throw new Error("Plugin symbolic links are refused")
     await writeFile(target, content)
   }
   await safeGit(folder)

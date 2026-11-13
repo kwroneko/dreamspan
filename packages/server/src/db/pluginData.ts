@@ -18,7 +18,14 @@ export const PluginDataGrant = Context.Reference<{ readonly pluginId: string; re
   "rp/plugins/DataGrant",
   { defaultValue: () => null }
 )
-const authorize = (sql: SqlClient.SqlClient, userId: string, owner: string, pluginId?: string, readPins = false) =>
+const authorize = (
+  sql: SqlClient.SqlClient,
+  userId: string,
+  owner: string,
+  pluginId?: string,
+  readPins = false,
+  managePins = false
+) =>
   Effect.gen(function* () {
     const grant = yield* PluginDataGrant
     if (pluginId && grant?.pluginId === pluginId && grant.owner === owner) return
@@ -29,7 +36,9 @@ const authorize = (sql: SqlClient.SqlClient, userId: string, owner: string, plug
     if (
       !actor ||
       actor.disabled_at !== null ||
-      (owner !== userId && !(owner === "" && (actor.role === "admin" || readPins)))
+      (owner !== userId &&
+        !(owner === "" && (actor.role === "admin" || readPins)) &&
+        !(managePins && actor.role === "admin"))
     )
       return yield* new PluginRejected({ message: "Plugin data is unavailable" })
   })
@@ -51,7 +60,7 @@ export const makePluginReadHandlers = Effect.gen(function* () {
   return {
     GetPluginPins: ({ userId, owner }) =>
       Effect.gen(function* () {
-        yield* authorize(sql, userId, owner, undefined, true)
+        yield* authorize(sql, userId, owner, undefined, true, true)
         const stored = yield* readSetting(
           sql,
           owner ? "user" : "app",
@@ -90,7 +99,7 @@ export const makePluginWriteHandlers = Effect.gen(function* () {
   return {
     SetPluginPins: ({ userId, owner, value, revision }) =>
       Effect.gen(function* () {
-        yield* authorize(sql, userId, owner)
+        yield* authorize(sql, userId, owner, undefined, false, true)
         yield* writeSetting(
           sql,
           owner ? "user" : "app",
@@ -106,6 +115,11 @@ export const makePluginWriteHandlers = Effect.gen(function* () {
         const encoded = JSON.stringify(value)
         if (!checkKey(key) || encoded === undefined || Buffer.byteLength(encoded) > 524288)
           return yield* new PluginRejected({ message: "Invalid plugin data" })
+        const [usage] = yield* sql<{ count: number; bytes: number }>`SELECT count(*) AS count,
+          coalesce(sum(length(CAST(value_json AS BLOB))), 0) AS bytes FROM plugin_data
+          WHERE plugin_id = ${pluginId} AND owner_user_id = ${owner} AND key <> ${key}`
+        if (usage!.count >= 1000 || usage!.bytes + Buffer.byteLength(encoded) > 8 * 1024 * 1024)
+          return yield* new PluginRejected({ message: "Plugin storage quota exceeded" })
         const [previous] = yield* sql<{
           revision: number
         }>`SELECT revision FROM plugin_data WHERE plugin_id = ${pluginId} AND owner_user_id = ${owner} AND key = ${key}`

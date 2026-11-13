@@ -9,7 +9,8 @@ import { snapshot } from "./repo.ts"
 import { runPluginChild } from "./process.ts"
 import type { PluginReport } from "@rp/shared/plugins.ts"
 
-const [dataDir, owner, id, commit, folder, appStamp, previous] = process.argv.slice(2) as [
+const [dataDir, owner, id, commit, folder, appStamp, previous, expectedReport] = process.argv.slice(2) as [
+  string,
   string,
   string,
   string,
@@ -73,7 +74,10 @@ try {
   }
   await visit(folder)
   try {
-    const prior = JSON.parse(await readFile(join(previous, "check.json"), "utf8")) as PluginReport & {
+    const encoded = await readFile(join(previous, "check.json"), "utf8")
+    if (!expectedReport || createHash("sha256").update(encoded).digest("hex") !== expectedReport)
+      throw new Error("Unattested cache")
+    const prior = JSON.parse(encoded) as PluginReport & {
       artifacts: Record<string, string>
     }
     if (prior.ok && prior.appStamp === appStamp && prior.commit === commit && prior.artifacts) {
@@ -103,6 +107,8 @@ try {
       module: ts.ModuleKind.Preserve,
       moduleResolution: ts.ModuleResolutionKind.Bundler,
       noEmit: true,
+      allowJs: true,
+      checkJs: true,
       strict: true,
       skipLibCheck: true,
       allowImportingTsExtensions: true,
@@ -158,6 +164,7 @@ try {
       await build({
         input: join(folder, entry),
         platform: "node",
+        tsconfig: false,
         output: { file: join(folder, `${side}.mjs`), format: "esm" },
         plugins: [
           {
@@ -202,6 +209,7 @@ try {
       await build({
         input: test,
         platform: "node",
+        tsconfig: false,
         output: { file: output, format: "esm" },
         plugins: [
           {
@@ -237,7 +245,10 @@ export const assembly = installWorkerAssembly(manifest,activate);
 `
     )
   step = "ready"
-  message = "Plugin check passed"
+  message =
+    manifest.server || manifest.worker
+      ? "Plugin check passed. Server code has full access, including stored keys and network."
+      : "Plugin check passed"
 } catch {
   /* Deliberately fixed messages: plugin exceptions can contain credentials and paths. */
 }

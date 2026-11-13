@@ -145,12 +145,18 @@ export class PluginHost extends Context.Service<
           const scope = yield* Scope.make()
           const fail = () => {
             Effect.runFork(
-              suspend(actor, owner, id, {
-                ...report,
-                ok: false,
-                step: "activate",
-                message: "Plugin handler failed; plugin turned off"
-              }).pipe(Effect.catchCause(() => Effect.void))
+              Semaphore.withPermit(lock)(
+                Effect.suspend(() =>
+                  active.get(keyOf(owner, id)) === scope
+                    ? suspend(actor, owner, id, {
+                        ...report,
+                        ok: false,
+                        step: "activate",
+                        message: "Plugin handler failed; plugin turned off"
+                      })
+                    : Effect.void
+                )
+              ).pipe(Effect.catchCause(() => Effect.void))
             )
           }
           const effect = Effect.gen(function* () {
@@ -208,41 +214,39 @@ export class PluginHost extends Context.Service<
           return report
         })
       const enable = (actor: User, target: Version) =>
-        Semaphore.withPermit(lock)(
-          Effect.gen(function* () {
-            const owner = yield* authorize(actor, target, true)
-            if (!config.plugins) return yield* new PluginRejected({ message: "Plugins are disabled by the server" })
-            const report = yield* check(actor, target)
-            if (!report.ok) return report
-            // Files are durable before settings. A kill here leaves code present but unenabled.
-            yield* close(owner, target.id)
-            const loaded = yield* activate(actor, owner, target.id, target.commit, report).pipe(Effect.exit)
-            if (Exit.isFailure(loaded)) {
-              const failed: PluginReport = {
-                ...report,
-                ok: false,
-                step: "activate",
-                message: "Plugin activation failed; plugin turned off"
-              }
-              yield* suspend(actor, owner, target.id, failed)
-              return failed
+        Effect.gen(function* () {
+          const owner = yield* authorize(actor, target, true)
+          if (!config.plugins) return yield* new PluginRejected({ message: "Plugins are disabled by the server" })
+          const report = yield* check(actor, target)
+          if (!report.ok) return report
+          // Files are durable before settings. A kill here leaves code present but unenabled.
+          yield* close(owner, target.id)
+          const loaded = yield* activate(actor, owner, target.id, target.commit, report).pipe(Effect.exit)
+          if (Exit.isFailure(loaded)) {
+            const failed: PluginReport = {
+              ...report,
+              ok: false,
+              step: "activate",
+              message: "Plugin activation failed; plugin turned off"
             }
-            const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
-            yield* writer
-              .SetPluginPins({
-                userId: actor.id,
-                owner,
-                revision: pins.revision,
-                value: {
-                  ...pins.value,
-                  [target.id]: { commit: target.commit, enabledAt: Date.now(), enabledBy: actor.id }
-                }
-              })
-              .pipe(Effect.onError(() => close(owner, target.id)))
-            notify(actor.id, target.id, "Plugins changed")
-            return report
-          })
-        )
+            yield* suspend(actor, owner, target.id, failed)
+            return failed
+          }
+          const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+          yield* writer
+            .SetPluginPins({
+              userId: actor.id,
+              owner,
+              revision: pins.revision,
+              value: {
+                ...pins.value,
+                [target.id]: { commit: target.commit, enabledAt: Date.now(), enabledBy: actor.id }
+              }
+            })
+            .pipe(Effect.onError(() => close(owner, target.id)))
+          notify(actor.id, target.id, "Plugins changed")
+          return report
+        })
       const get = (actor: User, target: Target) =>
         Effect.gen(function* () {
           const owner = target.scope === "instance" ? "" : actor.id
@@ -276,20 +280,30 @@ export class PluginHost extends Context.Service<
         })
       const service = PluginHost.of({
         check: (actor, target) => Semaphore.withPermit(lock)(check(actor, target)),
-        enable,
+        enable: (actor, target) => Semaphore.withPermit(lock)(enable(actor, target)),
         pin: (actor, target) =>
-          Effect.gen(function* () {
-            const owner = yield* authorize(actor, target, true)
-            yield* Semaphore.withPermit(lock)(
-              Effect.gen(function* () {
-                yield* close(owner, target.id)
-                yield* attempt(() =>
-                  repoTask(config.dataDir, { op: "checkout", owner, id: target.id, commit: target.commit })
-                )
-              })
-            )
-            return yield* enable(actor, target)
-          }),
+          Semaphore.withPermit(lock)(
+            Effect.gen(function* () {
+              const owner = yield* authorize(actor, target, true)
+              const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+              const pin = pins.value[target.id]
+              // Suspend durably before changing HEAD or files, including a failed rollback.
+              if (pin)
+                yield* suspend(actor, owner, target.id, {
+                  commit: pin.commit,
+                  appStamp: "",
+                  ok: false,
+                  step: "snapshot",
+                  message: "Plugin revision changed; enable it to apply it",
+                  at: Date.now()
+                })
+              else yield* close(owner, target.id)
+              yield* attempt(() =>
+                repoTask(config.dataDir, { op: "checkout", owner, id: target.id, commit: target.commit })
+              )
+              return yield* enable(actor, target)
+            })
+          ),
         get,
         list: (actor) =>
           Effect.gen(function* () {
