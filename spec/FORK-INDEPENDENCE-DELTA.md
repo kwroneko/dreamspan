@@ -4,6 +4,8 @@
 
 **Review scope question [O] (review-branchundo1, 2026-11-13).** DESIGN §3.2 records the newer owner decision that an action on one branch never changes what another branch shows or its characters know. §6 Q1(b) below explicitly required a shared, unselected swipe catalog in 2026-10-26. The current implementation still shares that catalog; independent review probes observe a peer picker changing from one row to two. Whether the newer blanket rule supersedes this specific older exception needs an owner scope ruling. No new Decided exception is inferred. The same literal-display issue exists for THREADS §4’s shared thread names and §5.2’s group Undo, which changes other member forks’ availability. Presence corrections, choices, edits and knowledge remain branch-local as implemented in ARCHITECTURE §3.8.
 
+**Coordinator's scope ruling (merge-batch10, 2026-11-13; the owner is being told).** The owner's 2026-11-13 statement concerns an action on one branch changing another branch's *story state* (presence, knowledge). It does not overturn the explicit owner decision of 2026-10-26 that a message's swipe catalog is shared between forks with choices local (§6 Q1(b) below), and it does not apply to a thread's name or to the explicit thread-group Undo, which act on the thread object itself. All three stay as built. This is a coordinator ruling, not an owner decision: THREADS §4's shared thread names remain **[P]**, and nothing here is promoted to Decided.
+
 
 The decisions this implements:
 - **[D]** For the user, forks are separate chats that don't influence each other. They are connected by history, in the data model and as siblings when browsing; nothing done in one silently changes another (CHATS.md "Forks"; UX-REWORK §3 "Forks of chats", 2026-10-26).

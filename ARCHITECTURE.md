@@ -3376,4 +3376,16 @@ Scene-check return Undo (decisions1113 integration): both decision-set departure
 
 Branch correction review (review-branchundo1, 2026-11-13; assembler version **69**): a correction never marks recorded narrators away, including a narrator whose card replaced the corrected character inside the range. Both `readKnowers` and indexed `knowsSql` retain those records; SQL tests use the complete replacement identity set. Two directions, nested peers, post-correction children and repeated correction/History Undo are covered by `separateContexts.test.ts`. The accumulated-correction slow test retains 300 branches, 3,000 messages and 20–50 swipes, then records 301 effective correction ranges without copying versions. It measures read latency and range storage separately from writer caller time.
 
+What branch independence covers (coordinator's ruling, merge-batch10, 2026-11-13; spec/FORK-INDEPENDENCE-DELTA.md): an action on one branch never changes another branch's story state (presence, knowledge, choices, edits). Three shared things stay as built, because they act on shared objects rather than on a branch's story:
+- a message's swipe catalog, which every fork sharing the message sees, with the choice of swipe kept per fork (owner, 2026-10-26).
+- a thread's name, shown in all its branches (THREADS §4, Proposed).
+- the explicit thread-group Undo, which removes the group's member forks.
+
+Branch-local corrections with private views after a join (merge-batch10; assembler version **70**, above threads6's 67 and branchundo1's 69). A character's private view after a separate join reads presence through `knowsSql` and `readKnowers`, which apply the viewing fork's correction ranges. `HistoryProjectionNeeded`'s skip check does the same. Tests:
+- `branchPresenceThreads.test.ts`:
+  - a correction on branch B changes Wren's search and read results on B only, and the story's branch reads the same rows and addresses.
+  - an earlier reply's frozen private view thaws to the identical map on the other branch. On the corrected branch it resolves without reaching a newly known row: either the same map or the fail-closed empty answer.
+  - Wren's request includes the corrected stretch on B. On the other branch the request bytes are unchanged, and on both branches she reads the join's rows she was in and not the joined stretch she missed.
+- `threadsChatBrowse.test.ts`: a story chat's threads stay story rows, add no branches to the filters and stay out of Workshops.
+
 Workshop list presentation (decisions1113, reviewed 2026-11-13): shared `ForkRow` and Chats page rows use registered `kindRowProps` and semantic accent tokens for a tint and inset edge. `KindBadge` retains the word Workshop and the accessible link name retains Workshop, independently of colour. The registered workshop look hides `chat.new-with-cast`, enforced by command availability. `workshopChatList.spec.ts` checks lists, counts, URL-only state and actions at 1440/390 in light/dark. The per-branch shared row and its compact `BranchListRow` variant also apply the registered kind styling; compact rows retain the Workshop badge and include it in their accessible action names, hiding the badge only while the name editor occupies that line.
