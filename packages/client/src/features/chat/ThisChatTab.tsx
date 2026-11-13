@@ -276,6 +276,7 @@ export function SummarySettings({ session }: { session: ChatSession }) {
             slot={summarySettingFields}
             props={{
               scope: "chat",
+              transcriptOnly: chatKinds.get(view.chat?.kind ?? "")?.summaryTranscript === true,
               view: settings,
               fallback: resolveLcm(null, settings.account),
               write,

@@ -20,9 +20,12 @@ const scrubLiteral = (text: string): string =>
       /(^|\n)\s*(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)\s*:[^\r\n]+/gi,
       "$1[redacted headers]"
     )
-    .replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9+/_.=:-]+/gi, "[redacted authorization]")
     .replace(
-      /((?:["']?)(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|secret[_-]?key|password)(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,}\n]+)/gi,
+      /\b(?:authorization|proxy-authorization)\s*[:=]\s*(?:Bearer|Basic)\s+[A-Za-z0-9+/_.=:-]+/gi,
+      "[redacted authorization]"
+    )
+    .replace(
+      /((?:["']?)(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|password)(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,}\n]+)/gi,
       "$1[redacted]"
     )
     .replace(/\bsk-[A-Za-z0-9_-]{12,}/g, "[redacted key]")
@@ -30,29 +33,77 @@ const scrubLiteral = (text: string): string =>
 /** Tool results often contain JSON with quoted fields inside their text values. Scrub at
  * each decoded string boundary, before re-encoding adds another layer of escaping. */
 export const summarySafeText = (text: string): string => {
-  const walk = (value: unknown): unknown => {
-    if (typeof value === "string") return scrubLiteral(value)
-    if (Array.isArray(value)) return value.map(walk)
+  const walk = (value: unknown, depth = 0): unknown => {
+    if (typeof value === "string") {
+      // read_run and story readers wrap JSON in prose/XML. Scrub each balanced JSON
+      // fragment as data before re-encoding; regex cannot see escaped nested keys.
+      let start = -1,
+        quoted = false,
+        escaped = false,
+        copied = 0
+      const stack: Array<string> = []
+      const parts: Array<string> = []
+      for (let at = 0; at < value.length; at++) {
+        const c = value[at]!
+        if (start < 0) {
+          if (c !== "{" && c !== "[") continue
+          start = at
+          quoted = false
+          escaped = false
+        }
+        if (quoted) {
+          if (escaped) escaped = false
+          else if (c === "\\") escaped = true
+          else if (c === '"') quoted = false
+          continue
+        }
+        if (c === '"') quoted = true
+        else if (c === "{" || c === "[") stack.push(c)
+        else if (c === "}" || c === "]") {
+          if (stack.at(-1) !== (c === "}" ? "{" : "[")) {
+            stack.length = 0
+            start = -1
+            continue
+          }
+          stack.pop()
+          if (stack.length) continue
+          try {
+            const parsed: unknown = JSON.parse(value.slice(start, at + 1))
+            parts.push(
+              scrubLiteral(value.slice(copied, start)),
+              depth < 32 ? JSON.stringify(walk(parsed, depth + 1)) : "[redacted nested data]"
+            )
+            copied = at + 1
+          } catch {
+            /* Ordinary prose containing brackets. */
+          }
+          start = -1
+        }
+      }
+      parts.push(scrubLiteral(value.slice(copied)))
+      return parts.join("")
+    }
+    if (Array.isArray(value)) return value.map((part) => walk(part, depth + 1))
     if (value !== null && typeof value === "object")
       return Object.fromEntries(
         Object.entries(value).map(([key, value]) => [
           key,
-          /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|secret[_-]?key|password|headers|request[_-]?headers|response[_-]?headers)$/i.test(
+          /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|password|headers|request[_-]?headers|response[_-]?headers)$/i.test(
             key
           )
             ? "[redacted]"
-            : walk(value)
+            : walk(value, depth + 1)
         ])
       )
     return value
   }
   try {
     const value: unknown = JSON.parse(text)
-    if (value !== null && typeof value === "object") return scrubLiteral(JSON.stringify(walk(value)))
+    if (value !== null && typeof value === "object") return JSON.stringify(walk(value))
   } catch {
     /* Ordinary tool prose. */
   }
-  return scrubLiteral(text)
+  return walk(text) as string
 }
 
 const textOf = (content: ReadonlyArray<{ readonly type: string; readonly text?: string }>) =>

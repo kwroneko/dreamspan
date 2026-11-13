@@ -1,3 +1,4 @@
+import { lcmPath } from "./lcmPath.ts"
 import { recoveredOperationText } from "./operationReceipts.ts"
 import { continuityEffectsReason, toRolloutEffect } from "./workshopEffects.ts"
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
@@ -539,7 +540,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return row.result === null ? null : (JSON.parse(row.result) as string)
       }).pipe(query("RolloutReceipt")),
 
-    WorkshopSummaryContext: ({ userId, chatId, forkId, leafSlotId }) =>
+    WorkshopSummaryContext: ({ userId, chatId, forkId, leafSlotId, rolloutId, transcript }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{
           kind: string
@@ -551,13 +552,84 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const state = foldState((yield* base.events(leafSlotId)).map((e) => e.event))
         const settings = resolveLcm(state.lcm, yield* base.lcmDefaults!())
         const model = yield* base.model(state.modelBindings.summarizer ?? state.modelBindings[""] ?? null)
-        const undone = yield* sql<{
+        const candidates = yield* sql<{
+          rollout: string
           call: string
           target: string
-          state: string
-        }>`SELECT e.tool_call_id AS call,e.target_id AS target,'undone' AS state
-          FROM rollout_effects e JOIN rollouts r ON r.id=e.rollout_id WHERE r.chat_id=${chatId} AND e.undone_at IS NOT NULL
+          result: string | null
+        }>`SELECT e.rollout_id AS rollout,e.tool_call_id AS call,e.target_id AS target,receipt.result_json AS result
+          FROM rollout_effects e JOIN rollouts r ON r.id=e.rollout_id
+          LEFT JOIN rollout_receipts receipt ON receipt.rollout_id=e.rollout_id AND receipt.tool_call_id=e.tool_call_id
+          WHERE r.chat_id=${chatId} AND e.undone_at IS NOT NULL
           ORDER BY e.undone_at,e.rollout_id,e.tool_call_id,e.seq`
+        // Only calls actually visible before this position (or retained in this run) may
+        // contribute facts. A chat-wide effects scan alone leaks future/alternate branches.
+        const visible = new Map<string, Map<string, string>>()
+        const add = (run: string, messages: ReadonlyArray<AgentMessage>, version?: string) => {
+          let calls = visible.get(run)
+          if (!calls) visible.set(run, (calls = new Map()))
+          for (const { step } of placedSteps(messages, [], false, version))
+            if (step.kind === "tool" && step.result !== undefined) calls.set(step.id, step.result)
+        }
+        if (candidates.length) {
+          const path = leafSlotId === null ? [] : yield* lcmPath(sql, userId, chatId, leafSlotId)
+          const versions = path.flatMap((s) => (s.versionId ? [s.versionId] : []))
+          const parsed = new Map<string, ReadonlyArray<AgentMessage>>()
+          for (const row of yield* sql<{ version: string; rollout: string; transcript: string | null }>`
+            SELECT v.id AS version,v.rollout_id AS rollout,p.transcript_json AS transcript
+            FROM json_each(${JSON.stringify(versions)}) wanted CROSS JOIN versions v ON v.id=wanted.value
+            JOIN rollout_payloads p ON p.rollout_id=v.rollout_id`) {
+            if (!row.transcript) continue
+            let messages = parsed.get(row.rollout)
+            if (!messages) parsed.set(row.rollout, (messages = JSON.parse(row.transcript) as Array<AgentMessage>))
+            add(row.rollout, messages, row.version)
+          }
+          if (rolloutId && transcript) {
+            const [run] = yield* sql`SELECT id FROM rollouts WHERE id=${rolloutId} AND chat_id=${chatId}`
+            if (!run) return yield* new NotFound({ entity: "rollout", id: rolloutId })
+            add(rolloutId, JSON.parse(transcript) as Array<AgentMessage>)
+          }
+        }
+        const receipts = visible.size
+          ? yield* sql<{ rollout: string; call: string; result: string }>`
+          SELECT rollout_id AS rollout,tool_call_id AS call,result_json AS result FROM rollout_receipts
+          WHERE rollout_id IN (SELECT value FROM json_each(${JSON.stringify([...visible.keys()])}))`
+          : []
+        // Equality alone is not provenance: independent runs commonly reuse ids and
+        // return the same text (for example, two SetChatPin calls both return "Done").
+        // Inherited effects must belong to the saved resume ancestry, never a future run.
+        const ancestry = new Map<string, Set<string>>()
+        if (visible.size)
+          for (const row of yield* sql<{ kept: string; source: string }>`
+            WITH RECURSIVE up(kept,source,depth) AS (
+              SELECT value,value,0 FROM json_each(${JSON.stringify([...visible.keys()])})
+              UNION
+              SELECT up.kept,src.rollout_id,up.depth+1 FROM up
+                JOIN versions v ON v.rollout_id=up.source AND v.origin='resumed' AND v.source_version_id IS NOT NULL
+                JOIN versions src ON src.id=v.source_version_id
+                JOIN rollouts r ON r.id=src.rollout_id AND r.chat_id=${chatId}
+                WHERE up.depth<64
+            ) SELECT DISTINCT kept,source FROM up`) {
+            let sources = ancestry.get(row.kept)
+            if (!sources) ancestry.set(row.kept, (sources = new Set()))
+            sources.add(row.source)
+          }
+        const undone = candidates
+          .filter((e) => {
+            if (visible.get(e.rollout)?.has(e.call)) return true
+            // A resumed run can retain a canonical effect through a copied receipt.
+            return (
+              e.result !== null &&
+              receipts.some(
+                (r) =>
+                  ancestry.get(r.rollout)?.has(e.rollout) &&
+                  r.call === e.call &&
+                  r.result === e.result &&
+                  visible.get(r.rollout)?.get(r.call) === recoveredOperationText(JSON.parse(r.result) as string)
+              )
+            )
+          })
+          .map((e) => ({ call: e.call, target: e.target, state: "undone" }))
         return model
           ? JSON.stringify({
               model,

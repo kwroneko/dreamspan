@@ -1,3 +1,5 @@
+**Reviewed review-worklcm1 (2026-11-13):** The implemented transcript-summary subset is hardened for wrapped/nested credential data, causal Undo notes and impossible summary-model windows. The same subset remains obsolete as a proposal; ARCHITECTURE §16 records behavior and crash/wire gates. No additional Proposed item is promoted to Decided.
+
 **Built worklcm1 (2026-11-13):** Long workshops use LCM over messages and agent steps, with in-run compaction and original-step recovery. These portions of §2.2–§2.4, §7 and §10 question 4 are obsolete as implementation proposals; see ARCHITECTURE §16, “Workshop transcript summaries”. **[D]** Owner, 2026-11-13: “the agent NEEDS LCM summaries. It was INVENTED FOR CODING AGENTS.” This supersedes the earlier fallback recommendation and closes question 4.
 
 # Workshop, setup tools and plugins (Phase 6)

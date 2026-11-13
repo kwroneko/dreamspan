@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs"
 import { assert, it } from "@effect/vitest"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { AssistantMessage } from "@earendil-works/pi-ai"
@@ -6,6 +7,11 @@ import { Effect, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { Summarizer } from "../src/lcm/Summarizer.ts"
+import { workshopCompactor } from "../src/agent/workshopCompactor.ts"
+import { liveSuffix } from "../src/agent/messages.ts"
+import { prepareTokenizer } from "../src/importer/tokenizer.ts"
+import type { AssembledRequest, ModelInput } from "../src/assembler/types.ts"
+import type { Providers } from "../src/providers/Providers.ts"
 import { activeRunSummaries } from "../src/agent/compaction.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
@@ -188,3 +194,136 @@ it.live(
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, undefined, Summarizer.manual)))
   }
 )
+
+it.live("measures a two-hour workshop with actual local token counts at 200k and 32k", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const storage = yield* Reader
+    const tokenize = yield* Effect.promise(() => prepareTokenizer("o200k_base"))
+    for (const window of [200_000, 32_768]) {
+      const reserve = window / 4,
+        target = window === 200_000 ? 1200 : 1024
+      const model = { api: "openai-completions", kind: "openai-chat", key: "gpt-4o", context: window } as ModelInput
+      const prefix = {
+        messages: [{ role: "user", content: " anchor".repeat(8000) }],
+        prefill: null,
+        breakpoints: [],
+        samplers: { max_tokens: reserve, seed: -1 }
+      } as unknown as AssembledRequest
+      const costs: Array<{ interval: number; input: number; output: number }> = []
+      let interval = 0
+      const reader = {
+        ...storage,
+        WorkshopSummaryContext: () =>
+          Effect.succeed(
+            JSON.stringify({
+              enabled: true,
+              target,
+              changes: "[]",
+              tail: null,
+              model
+            })
+          )
+      }
+      const typedReader = reader as unknown as Reader["Service"]
+      const providers = {
+        stream: (request: { options: { payload: { messages: unknown } } }) => {
+          const text = " keeper".repeat(target)
+          costs.push({
+            interval,
+            input: tokenize(JSON.stringify(request.options.payload.messages)),
+            output: tokenize(text)
+          })
+          return Stream.succeed({ type: "text", delta: text })
+        }
+      } as unknown as Providers["Service"]
+      let messages: AgentMessage[] = [{ role: "rpRequest", timestamp: 0 }]
+      const count = (transcript: ReadonlyArray<AgentMessage>) =>
+        reader.CountRolloutContext({
+          model: JSON.stringify(model),
+          request: JSON.stringify(prefix),
+          transcript: JSON.stringify(transcript),
+          tools: "[]"
+        })
+      const fixed = yield* count(messages)
+      const boundaries: Array<{ interval: number; before: number; after: number; rewritten: number }> = []
+      for (interval = 1; interval <= 120; interval++) {
+        messages.push(
+          {
+            role: "assistant",
+            api: model.api as "openai-completions",
+            provider: "openai",
+            model: model.key,
+            stopReason: "toolUse",
+            timestamp: 0,
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+            },
+            content: [{ type: "toolCall", id: `lookup-${interval}`, name: "read_card", arguments: { card: "keeper" } }]
+          },
+          {
+            role: "toolResult",
+            toolCallId: `lookup-${interval}`,
+            toolName: "read_card",
+            isError: false,
+            timestamp: 0,
+            content: [{ type: "text", text: " lookup".repeat(1940) }]
+          }
+        )
+        const before = yield* count(messages),
+          previous = messages
+        messages = [
+          ...(yield* workshopCompactor.compact({
+            reader: typedReader,
+            providers,
+            request: { userId: "synthetic", chatId: "synthetic" } as never,
+            rolloutId: "cost-run",
+            model,
+            prefix,
+            messages,
+            tools: [],
+            reserve,
+            leafSlotId: null
+          }))
+        ]
+        if (messages.length !== previous.length) {
+          const after = yield* count(messages)
+          const beforeWire = liveSuffix(previous),
+            afterWire = liveSuffix(messages)
+          let same = 0
+          while (same < beforeWire.length && JSON.stringify(beforeWire[same]) === JSON.stringify(afterWire[same]))
+            same++
+          const preserved =
+            same === 0 ? fixed : yield* count([{ role: "rpRequest", timestamp: 0 }, ...afterWire.slice(0, same)])
+          boundaries.push({ interval, before, after, rewritten: after - preserved })
+          assert.isAtMost(after, fixed + (window - reserve - fixed) / 2)
+        }
+      }
+      assert.lengthOf(
+        messages.filter((m) => m.role === "toolResult"),
+        120
+      )
+      assert.isAbove(boundaries.length, 0)
+      const measured = {
+        window,
+        reserve,
+        fixed,
+        first: boundaries[0],
+        compactions: boundaries.length,
+        summaryRequests: costs.length,
+        summaryInput: costs.reduce((n, c) => n + c.input, 0),
+        summaryOutput: costs.reduce((n, c) => n + c.output, 0),
+        rewritten: boundaries.reduce((n, c) => n + c.rewritten, 0),
+        firstSummary: costs[0]
+      }
+      console.info(JSON.stringify(measured))
+      if (process.env.WORKSHOP_COST_OUTPUT)
+        appendFileSync(process.env.WORKSHOP_COST_OUTPUT, JSON.stringify(measured) + "\n")
+    }
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config, undefined, Summarizer.manual)))
+})

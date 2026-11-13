@@ -111,6 +111,9 @@ export function workshopSummaryTests() {
           })
           const settings = await openSummarySettings(page)
           await expect(settings).toContainText("When on, they use this chat’s summary model and add token costs")
+          await expect(settings.getByRole("button", { name: "The current preset", exact: true })).toHaveCount(0)
+          await expect(settings.getByRole("switch", { name: "Include notes in summary requests" })).toHaveCount(0)
+          await expect(settings).toContainText("This workshop’s messages and tool steps only.")
           await expectLayout(page, info, `workshop-summary-settings-${width}-${theme}`, {
             scope: '[aria-label="Summary settings"]'
           })

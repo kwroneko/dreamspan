@@ -298,7 +298,8 @@ export function LcmFields({
   fallback,
   write,
   disabled,
-  instruction
+  instruction,
+  transcriptOnly = false
 }: {
   scope: "chat" | "account"
   /** The settings as they resolve, the fit and the figures (an account default has no figures). */
@@ -309,6 +310,8 @@ export function LcmFields({
   disabled: boolean
   /** The instruction's editor, placed after how the request is sent. */
   instruction?: ReactNode
+  /** This kind always summarizes its own conversation and tool steps, without a preset or notes. */
+  transcriptOnly?: boolean
 }) {
   const { resolved, fit, now, fitted } = view
   const presets = usePresetSelection(null)
@@ -337,98 +340,110 @@ export function LcmFields({
   return (
     <div className="flex flex-col gap-5">
       <Fieldset legend="Send with">
-        <Segmented
-          label="Send with"
-          wrap
-          value={resolved.withPreset}
-          onValueChange={(value) => void choose({ withPreset: value })}
-          options={[
-            {
-              value: "current",
-              label: "The current preset",
-              description: "Summary requests use your current preset, so they can reuse the chat's cached prompt."
-            },
-            {
-              value: "specific",
-              label: "A specific preset",
-              description:
-                "Summary requests use this preset. Its prompt differs from the chat's, so the chat's cached prompt can't be reused."
-            },
-            {
-              value: "raw",
-              label: "Instruction and messages only",
-              description: "Only the instruction, the earlier summaries and the messages."
-            }
-          ]}
-        />
-        {specific && (
-          <div className="flex min-w-0 items-center gap-2">
-            <PresetPickerPopover
-              selection={{
-                ...presets,
-                usage: "summary",
-                value: chosen ?? "",
-                current,
-                label: current?.label ?? "Choose a preset",
-                choose: async (value) => (await choose({ withPreset: "specific", preset: value as RefId })) === null
-              }}
-              side="bottom"
-              triggerLabel="Preset for summaries"
-              hint="Choose the preset summary requests use."
-              triggerClassName="flex h-9 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-left text-sm text-text hover:bg-surface-raised"
-              trigger={
-                <>
-                  <span className="min-w-0 truncate">{current?.label ?? "Choose a preset"}</span>
-                  <Icon name="down" size={14} />
-                </>
-              }
+        {transcriptOnly ? (
+          <Tooltip label="Presets and notes aren’t sent to the summary model.">
+            <p tabIndex={0} className="text-sm text-muted">
+              This workshop’s messages and tool steps only.
+            </p>
+          </Tooltip>
+        ) : (
+          <>
+            <Segmented
+              label="Send with"
+              wrap
+              value={resolved.withPreset}
+              onValueChange={(value) => void choose({ withPreset: value })}
+              options={[
+                {
+                  value: "current",
+                  label: "The current preset",
+                  description: "Summary requests use your current preset, so they can reuse the chat's cached prompt."
+                },
+                {
+                  value: "specific",
+                  label: "A specific preset",
+                  description:
+                    "Summary requests use this preset. Its prompt differs from the chat's, so the chat's cached prompt can't be reused."
+                },
+                {
+                  value: "raw",
+                  label: "Instruction and messages only",
+                  description: "Only the instruction, the earlier summaries and the messages."
+                }
+              ]}
             />
-            <IconButton
-              label="Open this preset in the large editor"
-              hint={
-                chosen && !unavailable
-                  ? "Open this preset in the large editor"
-                  : "Choose an available preset to open in the large editor"
+            {specific && (
+              <div className="flex min-w-0 items-center gap-2">
+                <PresetPickerPopover
+                  selection={{
+                    ...presets,
+                    usage: "summary",
+                    value: chosen ?? "",
+                    current,
+                    label: current?.label ?? "Choose a preset",
+                    choose: async (value) => (await choose({ withPreset: "specific", preset: value as RefId })) === null
+                  }}
+                  side="bottom"
+                  triggerLabel="Preset for summaries"
+                  hint="Choose the preset summary requests use."
+                  triggerClassName="flex h-9 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-left text-sm text-text hover:bg-surface-raised"
+                  trigger={
+                    <>
+                      <span className="min-w-0 truncate">{current?.label ?? "Choose a preset"}</span>
+                      <Icon name="down" size={14} />
+                    </>
+                  }
+                />
+                <IconButton
+                  label="Open this preset in the large editor"
+                  hint={
+                    chosen && !unavailable
+                      ? "Open this preset in the large editor"
+                      : "Choose an available preset to open in the large editor"
+                  }
+                  icon="expand"
+                  disabled={disabled || !chosen || unavailable}
+                  onClick={() => {
+                    if (chosen) workspace?.open(chosen)
+                  }}
+                />
+              </div>
+            )}
+            {unavailable && (
+              <p role="status" className="text-sm text-warning">
+                The chosen preset is no longer available; summaries use your current preset.
+              </p>
+            )}
+            <Origin
+              scope={scope}
+              from={resolved.from.withPreset ?? "builtin"}
+              same={
+                resolved.withPreset === fallbackPreset && (!specific || resolved.preset === (fallback.preset ?? null))
               }
-              icon="expand"
-              disabled={disabled || !chosen || unavailable}
-              onClick={() => {
-                if (chosen) workspace?.open(chosen)
-              }}
+              fallback={presetLabel(fallbackPreset)}
+              disabled={disabled}
+              onReset={() => void choose({ withPreset: null, preset: null })}
             />
-          </div>
+            {errorFor("withPreset") && <p className="text-sm text-danger">{errorFor("withPreset")}</p>}
+            <Switch
+              checked={resolved.withNotes}
+              disabled={disabled}
+              onCheckedChange={(withNotes) => void choose({ withNotes })}
+              about="Send the chat’s notes when summarizing too. Leave off if they describe events after the messages being summarized."
+            >
+              Include notes in summary requests
+            </Switch>
+            <Origin
+              scope={scope}
+              from={resolved.from.withNotes ?? "builtin"}
+              same={resolved.withNotes === (fallback.withNotes ?? LCM_BUILTIN.withNotes)}
+              fallback={(fallback.withNotes ?? LCM_BUILTIN.withNotes) ? "on" : "off"}
+              disabled={disabled}
+              onReset={() => void choose({ withNotes: null })}
+            />
+            {errorFor("withNotes") && <p className="text-sm text-danger">{errorFor("withNotes")}</p>}
+          </>
         )}
-        {unavailable && (
-          <p role="status" className="text-sm text-warning">
-            The chosen preset is no longer available; summaries use your current preset.
-          </p>
-        )}
-        <Origin
-          scope={scope}
-          from={resolved.from.withPreset ?? "builtin"}
-          same={resolved.withPreset === fallbackPreset && (!specific || resolved.preset === (fallback.preset ?? null))}
-          fallback={presetLabel(fallbackPreset)}
-          disabled={disabled}
-          onReset={() => void choose({ withPreset: null, preset: null })}
-        />
-        {errorFor("withPreset") && <p className="text-sm text-danger">{errorFor("withPreset")}</p>}
-        <Switch
-          checked={resolved.withNotes}
-          disabled={disabled}
-          onCheckedChange={(withNotes) => void choose({ withNotes })}
-          about="Send the chat’s notes when summarizing too. Leave off if they describe events after the messages being summarized."
-        >
-          Include notes in summary requests
-        </Switch>
-        <Origin
-          scope={scope}
-          from={resolved.from.withNotes ?? "builtin"}
-          same={resolved.withNotes === (fallback.withNotes ?? LCM_BUILTIN.withNotes)}
-          fallback={(fallback.withNotes ?? LCM_BUILTIN.withNotes) ? "on" : "off"}
-          disabled={disabled}
-          onReset={() => void choose({ withNotes: null })}
-        />
-        {errorFor("withNotes") && <p className="text-sm text-danger">{errorFor("withNotes")}</p>}
       </Fieldset>
       {instruction}
       <Pair

@@ -67,7 +67,9 @@ export const workshopCompactor: RunCompactor = {
         userId: request.userId,
         chatId: request.chatId,
         forkId: request.forkId ?? null,
-        leafSlotId: input.leafSlotId
+        leafSlotId: input.leafSlotId,
+        transcript: JSON.stringify(messages),
+        rolloutId
       })
       if (resolved === null) {
         if ((yield* count(messages)) <= room) return messages
@@ -118,10 +120,12 @@ export const workshopCompactor: RunCompactor = {
           : "")
       ).replaceAll("{{words}}", String(Math.floor(target * 0.75)))
       const checks = yield* Effect.serviceOption(SummaryChecks)
-      const allowance = Math.max(
-        1,
-        (summaryModel.context ?? 128_000) - target * 3 - (yield* countText(instruction)) - 128
-      )
+      const allowance = (summaryModel.context ?? 128_000) - target * 3 - (yield* countText(instruction)) - 128
+      if (allowance < (yield* countText(JSON.stringify({ workshop_transcript: "x" }))))
+        return yield* new GenerationFailed({
+          class: "budget",
+          message: "The summary model has too little room. Choose a summary model with more room, then resume."
+        })
       // Summarize bounded pieces when a single old run is bigger than the summary model.
       const summarize = Effect.fnUntraced(function* (material: string) {
         const chunks: Array<string> = []
