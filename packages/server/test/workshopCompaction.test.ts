@@ -10,6 +10,7 @@ import {
 import { liveSuffix } from "../src/agent/messages.ts"
 import { planResume, planStepResume, StepNotResumable } from "../src/agent/resume.ts"
 import { loadedSet } from "../src/agent/toolLoading.ts"
+import { DISPATCH_DEFINITIONS, dispatcherMessages } from "../src/agent/dispatcher.ts"
 import { stepsOf } from "../src/agent/steps.ts"
 
 const assistant = (id: string, name = "read_card"): AgentMessage => ({
@@ -97,6 +98,33 @@ it("condenses children without mutating originals or losing deferred load points
   )
   assert.deepStrictEqual([...loadedSet(liveSuffix(messages), new Set(["edit_card"]))], ["edit_card"])
   assert.include(transcriptData(messages), "ORIGINAL RESULT")
+})
+
+it("with the dispatcher, a summarized call stays real data and a kept one replays wrapped after its load point", () => {
+  // merge-batch10 seam: worklcm1's projection runs first (convertToLlm), then calltool1's wire
+  // projection; the stored transcript always names the real tool.
+  const loader = assistant("load", "load_skill")
+  const loaded: AgentMessage = { ...result("load"), toolName: "load_skill", details: { loaded: ["edit_card"] } }
+  const edit = (id: string) => assistant(id, "edit_card")
+  const edited = (id: string): AgentMessage => ({ ...result(id, `EDITED ${id}`), toolName: "edit_card" })
+  const messages: Array<AgentMessage> = [
+    transcript[0]!,
+    loader,
+    loaded,
+    edit("early"),
+    edited("early"),
+    edit("late"),
+    edited("late"),
+    { role: "rpCompaction", id: "leaf", from: 3, through: 5, content: "Edited the card once.", timestamp: 0 }
+  ]
+  const deferred = [{ name: "edit_card", description: "Edits a card.", parameters: { type: "object" } as never }]
+  const wire = JSON.stringify(dispatcherMessages(liveSuffix(messages), deferred))
+  assert.notInclude(wire, '"early"', "the summarized call and result are gone from the wire")
+  assert.include(wire, "Edited the card once.")
+  assert.include(wire, DISPATCH_DEFINITIONS, "the load point still carries the definition")
+  assert.include(wire, '"name":"call_tool","arguments":{"name":"edit_card"', "the kept call is wrapped")
+  assert.include(transcriptData(messages), "edit_card", "the summary's material names the real tool")
+  assert.notInclude(transcriptData(messages), "call_tool")
 })
 
 it("treats tool instructions as quoted data and redacts credential-shaped values before summarization", () => {

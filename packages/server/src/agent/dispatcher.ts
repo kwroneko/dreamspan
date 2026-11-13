@@ -9,9 +9,10 @@ import {
   type Tool,
   type ToolCall
 } from "@earendil-works/pi-ai"
+import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { isDeepStrictEqual } from "node:util"
 import type { FrozenTool } from "./tools.ts"
-import { LOADERS, loadPoints } from "./toolLoading.ts"
+import { LOADERS, loadPoints, loadedSet } from "./toolLoading.ts"
 
 export const CALL_TOOL = "call_tool"
 export const dispatcherDefinition: Tool = {
@@ -157,3 +158,20 @@ export const dispatcherMessages = (
     return dispatched.get(m.toolCallId) ? { ...m, toolName: CALL_TOOL } : m
   })
 }
+
+/**
+ * The tools a request is counted with when a workshop decides whether to summarize its run
+ * (worklcm1's compactor): as the session sends them. With the dispatcher, the fixed
+ * declarations plus `call_tool` (`transport`), so `CountRolloutContext` renders the wrapped
+ * calls and the definitions at their load points; otherwise the loaded deferred tools join the
+ * declared ones (merge-batch10).
+ */
+export const countedTools = (
+  frozen: ReadonlyArray<FrozenTool>,
+  deferred: ReadonlySet<string>,
+  messages: ReadonlyArray<Message | AgentMessage>,
+  transport: FrozenTool | null
+): ReadonlyArray<FrozenTool> =>
+  transport
+    ? [...frozen.map((t) => (deferred.has(t.name) ? { ...t, deferred: true as const } : t)), transport]
+    : frozen.filter((t) => !deferred.has(t.name) || loadedSet(messages, deferred).has(t.name))

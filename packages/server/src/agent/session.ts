@@ -42,6 +42,7 @@ import { forTarget, rolloutRequest } from "./wire.ts"
 import {
   BAD_ARGS,
   CALL_TOOL,
+  countedTools,
   dispatcherDefinition,
   dispatcherMessages,
   dispatchRefusal,
@@ -762,9 +763,18 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 model,
                 prefix: generation.request,
                 messages: context.messages,
-                tools: frozen
-                  .filter((t) => !deferred.has(t.name) || loadedSet(context.messages, deferred).has(t.name))
-                  .concat(sends ? [sendTool as unknown as FrozenTool] : []),
+                tools: countedTools(
+                  frozen,
+                  deferred,
+                  context.messages,
+                  dispatch
+                    ? (run.offered?.find((t) => t.name === CALL_TOOL) ?? {
+                        ...dispatcherDefinition,
+                        label: "Called a loaded tool",
+                        effect: "read"
+                      })
+                    : null
+                ).concat(sends ? [sendTool as unknown as FrozenTool] : []),
                 reserve: generation.request.samplers.max_tokens,
                 leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null
               }),

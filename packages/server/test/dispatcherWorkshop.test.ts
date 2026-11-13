@@ -12,7 +12,7 @@ import { liveSuffix } from "../src/agent/messages.ts"
 import { dispatcherMessages } from "../src/agent/dispatcher.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { FrozenTool } from "../src/agent/tools.ts"
-import { DISPATCH_DEFINITIONS, dispatcherDefinition } from "../src/agent/dispatcher.ts"
+import { countedTools, DISPATCH_DEFINITIONS, dispatcherDefinition } from "../src/agent/dispatcher.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
 type Body = {
@@ -196,6 +196,17 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
       wireCount,
       "dispatcher budgets must count the replay wrappers and text definitions, with only its fixed declarations"
     )
+    // merge-batch10: the workshop compactor (worklcm1) counts its run with the same wire.
+    const real = frozen.agent.tools.filter((t) => t.name !== "call_tool")
+    const compactorCount = yield* count(material.transcript!, [
+      ...countedTools(
+        real,
+        new Set(real.filter((t) => t.deferred).map((t) => t.name)),
+        JSON.parse(material.transcript!) as AgentMessage[],
+        frozen.agent.tools.find((t) => t.name === "call_tool") ?? null
+      )
+    ])
+    assert.strictEqual(compactorCount, wireCount, "compaction must count the dispatcher's real request")
 
     // A restart/deploy must keep the frozen transport definition as well as the real tools.
     const originalDescription = dispatcherDefinition.description
