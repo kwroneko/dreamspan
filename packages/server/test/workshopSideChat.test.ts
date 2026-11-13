@@ -356,6 +356,7 @@ describe("side chat", () => {
         chatId: workshop.id,
         forkId: workshop.currentForkId,
         leafSlotId: null,
+        viewers: null,
         slotId: "unused" as ToolContext["slotId"],
         versionId: "unused" as VersionId,
         rolloutId: "unused",
@@ -557,6 +558,7 @@ describe("side chat", () => {
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
+      const reader = yield* Reader
       // Built-in workshop library seeds exist in both runs; only the attached chats differ.
       yield* api.CreateWorkshop({})
       let workshopRequests = 0
@@ -615,7 +617,7 @@ describe("side chat", () => {
                   yield* eventually(() => mock.requests().length === 5)
                   assert.lengthOf(yield* api.ListAttachedWorkshops({ chatId: chat.id }), 3)
                   workshopRequests = mock.requests().length
-                })
+                }).pipe(Effect.provideService(Reader, reader))
             }
           : {})
       })

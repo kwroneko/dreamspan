@@ -478,7 +478,7 @@ const OTHER_STORY = "That position is in another chat, not the story this worksh
 const BRANCH_GONE = "The branch of the story this was sent from isn't there any more."
 
 /** Where a read was made, as the wrapper names it. */
-export interface StoryPlace {
+interface StoryPlace {
   readonly title: string | null
   /** The branch's own name; "Original" for the story's first branch; null for another unnamed one. */
   readonly branch: string | null
@@ -558,7 +558,7 @@ export const STORY_NOTICE =
  * Story text as the side chat's model gets it: quoted material with a line saying it is the
  * story's content to discuss, not instructions and not a conversation to continue.
  */
-export const wrapStory = (place: StoryPlace, text: string) =>
+const wrapStory = (place: StoryPlace, text: string) =>
   [
     `<story_excerpt story=${quote(place.title ?? "Untitled")} branch=${quote(place.branch ?? "unnamed")} up_to_message="${place.upTo}">`,
     STORY_NOTICE,

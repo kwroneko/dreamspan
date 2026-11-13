@@ -6,7 +6,7 @@
 import type { StoryAt } from "@rp/shared/chat.ts"
 import { createContext } from "react"
 
-export interface ReplyExtras {
+interface ReplyExtras {
   readonly storyAt?: StoryAt
 }
 

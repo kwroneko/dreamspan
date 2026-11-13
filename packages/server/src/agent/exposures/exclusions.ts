@@ -116,6 +116,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   LinkStImportChat: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ListActivity: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListArchiveCandidates: "Not in W6's first exposures; use the bounded workshop read tools.",
+  ListAttachedWorkshops:
+    "The story's Workshop tab lists its side chats; a workshop reads its own story with the story tools.",
   ListBin: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListBranches: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListCardNotes: "Not in W6's first exposures; use the bounded workshop read tools.",

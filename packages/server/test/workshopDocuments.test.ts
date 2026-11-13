@@ -36,6 +36,7 @@ const fixture = (dataDir: string, api: Api) =>
       userId: user.id,
       chatId: chat.id,
       forkId: null,
+      viewers: null,
       slotId: chat.activeLeafSlotId as SlotId,
       versionId: "unused" as VersionId,
       rolloutId,
