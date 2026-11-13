@@ -46,20 +46,48 @@ const bodies = (requests: ReadonlyArray<Recorded>) =>
  * that never answers. Once resumed, each finishes.
  */
 const provider = () => {
-  const held = { text: 0, wait: 0, plain: 0 }
+  const held = { text: 0, wait: 0, plain: 0, first: 0, reasoning: 0, json: 0, unicode: 0 }
   const handler = (request: Recorded, res: ServerResponse) => {
     const body = request.body as unknown as Body
     const user = lastUser(body)
     const tail = JSON.stringify(body.messages.at(-1)?.content ?? "")
     if (body.messages.at(-1)?.role === "assistant")
-      return sse(res, completionChunks([tail.includes("Mira sets") ? " down." : "ves."], { prompt_tokens: 20 }))
+      return sse(
+        res,
+        completionChunks([tail.includes("Mira sets") ? " down." : tail.includes("🌊") ? " waves." : "ves."], {
+          prompt_tokens: 20
+        })
+      )
     if (user.includes("Cut the plain.") && held.plain++ === 0) {
       res.writeHead(200, { "content-type": "text/event-stream" })
       res.write(`data: ${JSON.stringify(completionChunks(["Mira sets"], {})[0])}\n\n`)
       return
     }
     if (!user.includes("Cut the")) return sse(res, completionChunks(["Mira nods."], { prompt_tokens: 9 }))
+    if (user.includes("Cut the first.")) {
+      if (held.first++ === 0) return
+      return sse(res, completionChunks(["Ansel waves."], { prompt_tokens: 20 }))
+    }
     if (!hasResult(body)) return sse(res, searchCall)
+    if (user.includes("Cut the reasoning.") && held.reasoning++ === 0) {
+      res.writeHead(200, { "content-type": "text/event-stream" })
+      res.write(`data: ${JSON.stringify(chunk({ role: "assistant", reasoning_content: "Consider the tide 🌊." }))}\n\n`)
+      return
+    }
+    if (user.includes("Cut the json.") && held.json++ === 0) {
+      res.writeHead(200, { "content-type": "text/event-stream" })
+      res.write(
+        `data: ${JSON.stringify(chunk({ role: "assistant", tool_calls: [{ index: 0, id: "incomplete", type: "function", function: { name: "write_note", arguments: '{"title":"Must never exist","content":"cut' } }] }))}\n\n`
+      )
+      return
+    }
+    if (user.includes("Cut the unicode.") && held.unicode++ === 0) {
+      res.writeHead(200, { "content-type": "text/event-stream" })
+      res.write(`data: ${JSON.stringify(completionChunks(["Ansel 🌊"], {})[0])}\n\n`)
+      const torn = Buffer.from(`data: ${JSON.stringify(completionChunks(["漣"], {})[0])}\n\n`)
+      res.write(torn.subarray(0, torn.indexOf(Buffer.from("漣")) + 1))
+      return
+    }
     if (user.includes("Cut the text.") && held.text++ === 0) {
       // One delta, then nothing more: the app dies here. The saves after a stall keep it.
       res.writeHead(200, { "content-type": "text/event-stream" })
@@ -107,14 +135,27 @@ const spawnServer = (config: ReturnType<typeof testConfig>) =>
   )
 
 const crashAndResume = (
-  message: "Cut the text." | "Cut the wait." | "Cut the plain.",
-  cutReached: (dataDir: string, held: { text: number; wait: number }) => Effect.Effect<boolean, unknown>
+  message:
+    | "Cut the text."
+    | "Cut the wait."
+    | "Cut the plain."
+    | "Cut the first."
+    | "Cut the reasoning."
+    | "Cut the json."
+    | "Cut the unicode.",
+  cutReached: (dataDir: string, held: ReturnType<typeof provider>["held"]) => Effect.Effect<boolean, unknown>
 ) => {
   const config = testConfig()
   // A plain reply (Tools off) goes on by Continue, the agent's by Resume.
   const plain = message === "Cut the plain."
-  const kept = plain ? "Mira sets" : message === "Cut the text." ? "Ansel wa" : null
-  const whole = plain ? "Mira sets down." : "Ansel waves."
+  const kept = plain
+    ? "Mira sets"
+    : message === "Cut the text."
+      ? "Ansel wa"
+      : message === "Cut the unicode."
+        ? "Ansel 🌊"
+        : null
+  const whole = plain ? "Mira sets down." : message === "Cut the unicode." ? "Ansel 🌊 waves." : "Ansel waves."
   return Effect.gen(function* () {
     const script = provider()
     const mock = yield* Effect.acquireRelease(
@@ -194,6 +235,18 @@ const crashAndResume = (
           )
         else assert.deepStrictEqual(after[0]!.messages, cutRequest.messages, "the unanswered request, sent again")
         assert.notInclude(JSON.stringify(after[0]!.messages), "Resume", "no new user message")
+        assert.notInclude(JSON.stringify(after[0]!.messages), "Consider the tide", "cut thinking is resampled")
+        assert.notInclude(
+          JSON.stringify(after[0]!.messages),
+          "Must never exist",
+          "partial tool arguments are not executed or replayed"
+        )
+        const [notes] = yield* fixtureSql(
+          config.dataDir,
+          [{ sql: "SELECT count(*) AS n FROM entities WHERE kind = 'note'" }],
+          { readOnly: true }
+        )
+        assert.strictEqual(notes![0]!.n, 0, "an incomplete tool call creates no note")
       }).pipe(Effect.provide(serverLayer(config)))
     )
   })
@@ -250,3 +303,207 @@ it.live(
     ),
   { timeout: 180_000, tags: ["slow"] }
 )
+
+it.live(
+  "killed before the first byte: restart sends nothing and Resume resends the identical request",
+  () => crashAndResume("Cut the first.", (_dir, held) => Effect.succeed(held.first > 0)),
+  { timeout: 180_000, tags: ["slow"] }
+)
+
+it.live(
+  "killed during reasoning: saved thinking is resampled without a new user message",
+  () => crashAndResume("Cut the reasoning.", (dir) => savedText(dir, "Consider the tide")),
+  { timeout: 180_000, tags: ["slow"] }
+)
+
+it.live(
+  "killed inside tool-call JSON: no partial write is treated as a completed call",
+  () =>
+    crashAndResume("Cut the json.", (_dir, held) =>
+      held.json > 0 ? Effect.as(Effect.sleep(2500), true) : Effect.succeed(false)
+    ),
+  { timeout: 180_000, tags: ["slow"] }
+)
+
+it.live(
+  "killed inside a UTF-8 character and SSE frame: only complete text is kept",
+  () => crashAndResume("Cut the unicode.", (dir) => savedText(dir, "Ansel 🌊")),
+  { timeout: 180_000, tags: ["slow"] }
+)
+
+for (const phase of ["approval", "delegated reply"] as const)
+  it.live(
+    `workshop killed during ${phase}: receipts survive several messages and no send repeats`,
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        let target: ChatId
+        let armed = false
+        let targetHeld = 0
+        const steps = () =>
+          [
+            ["create_card", { name: "Crash keeper", description: "A synthetic lighthouse keeper." }, "create"],
+            ["send_message", { message: "The keeper is ready." }, "post"],
+            ["rename_chat", { chat: target, name: "Renamed once" }, "rename"],
+            ["generate_reply", { chat: target }, "generate"]
+          ] as const
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const body = request.body as unknown as Body
+              if (!JSON.stringify(body.messages).includes("Crash workshop task")) {
+                if (armed && phase === "delegated reply") {
+                  targetHeld++
+                  return
+                }
+                return sse(res, completionChunks(["Target wrote once."], {}))
+              }
+              const count = body.messages.filter((m) => m.role === "tool").length
+              const step = steps()[count]
+              if (!step) return sse(res, completionChunks(["Recovered."], {}))
+              const [name, args, id] = step
+              return sse(res, [
+                chunk({
+                  role: "assistant",
+                  tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }]
+                }),
+                chunk({}, "tool_calls")
+              ])
+            })
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const workshop = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const api = yield* client()
+            const seeded = yield* generateReply(api, {
+              connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+              model: {},
+              preset: { openai_max_context: 32768 }
+            })
+            target = seeded.chat.id
+            const chat = yield* api.CreateWorkshop({})
+            yield* api.SetWorkshopGrant({
+              chatId: chat.id,
+              capability: "library.write",
+              mode: phase === "approval" ? "ask" : "allow"
+            })
+            yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "generate", mode: "allow" })
+            return chat
+          }).pipe(Effect.provide(serverLayer(config)))
+        )
+        armed = true
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const child = yield* spawnServer(config)
+            const api = yield* clientAt(child.port)
+            const sent = yield* posted(
+              api.SendMessage({
+                chatId: workshop.id,
+                parentSlotId: workshop.activeLeafSlotId,
+                branch: false,
+                content: "Crash workshop task"
+              })
+            )
+            yield* posted(api.Generate({ chatId: workshop.id, parentSlotId: sent.entry.slotId, branch: false }))
+            const deadline = Date.now() + 30_000
+            while (true) {
+              const [rows] = yield* fixtureSql(
+                config.dataDir,
+                [
+                  {
+                    sql:
+                      phase === "approval"
+                        ? "SELECT count(*) AS n FROM tool_approvals WHERE status = 'pending'"
+                        : "SELECT count(*) AS n FROM rollout_receipts WHERE tool_call_id = 'generate'"
+                  }
+                ],
+                { readOnly: true }
+              )
+              if (Number(rows![0]!.n) > 0 && (phase === "approval" || targetHeld > 0)) break
+              if (Date.now() > deadline)
+                return yield* Effect.die(new Error(`workshop never reached ${phase}: ${child.output()}`))
+              yield* Effect.sleep(50)
+            }
+            yield* child.kill()
+          })
+        )
+        const before = bodies(mock.requests()).length
+        const heldBefore = targetHeld
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const api = yield* client()
+            const me = yield* api.Whoami()
+            const path = yield* (yield* Reader).GetPath({
+              userId: me.id,
+              chatId: workshop.id,
+              leafSlotId: null,
+              limit: 100
+            })
+            const cut = path.entries.at(-1)!
+            assert.strictEqual(cut.version.status, "interrupted")
+            if (phase === "delegated reply")
+              assert.strictEqual(path.entries.at(-2)!.version.content, "The keeper is ready.")
+            yield* Effect.sleep(1000)
+            assert.lengthOf(bodies(mock.requests()), before, "restart never sends")
+            const events: Array<ChatEvent> = []
+            yield* api.SubscribeChat({ chatId: workshop.id }).pipe(
+              Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+              Effect.forkScoped
+            )
+            yield* eventually(() => events.length > 0)
+            const entry = yield* api.ResumeVersion({ versionId: cut.version.id, expectedRowVersion: cut.rowVersion })
+            if (phase === "approval") {
+              const prompt = () =>
+                events
+                  .flatMap((e) => (e._tag === "Steps" ? e.steps : []))
+                  .findLast((s) => s.kind === "tool" && s.status === "waiting")
+              yield* eventually(() => prompt() !== undefined)
+              const step = prompt()!
+              assert.isTrue(step.kind === "tool" && step.approval !== undefined)
+              if (step.kind !== "tool" || !step.approval) return yield* Effect.die("no approval")
+              assert.strictEqual(step.approval.uncertain, false, "waiting before the kill had not run")
+              assert.lengthOf(bodies(mock.requests()), before, "Resume waits for fresh consent before a new request")
+              assert.isEmpty((yield* api.ListLibrary({ kind: "card" })).filter((c) => c.label === "Crash keeper"))
+              yield* api.AnswerToolApproval({
+                rolloutId: step.approval.rolloutId,
+                toolCallId: step.approval.toolCallId,
+                digest: step.approval.digest,
+                answer: "allow"
+              })
+            }
+            yield* eventually(() =>
+              events.some(
+                (e) => e._tag === "Version" && e.version.content === "Recovered." && e.version.status === "complete"
+              )
+            )
+            assert.lengthOf(
+              (yield* api.ListLibrary({ kind: "card" })).filter((c) => c.label === "Crash keeper"),
+              1
+            )
+            assert.strictEqual((yield* api.GetChat({ chatId: target })).title, "Renamed once")
+            assert.strictEqual(targetHeld, heldBefore, "the delegated provider request is never sent twice")
+            const effects = yield* api.ListRolloutEffects({ chatId: workshop.id })
+            assert.lengthOf(effects, 3, "one library change, one setup change and one delegated generation")
+            if (phase === "delegated reply") {
+              const visible = yield* api.ListVersionEffects({ versionId: entry.version.id })
+              assert.includeMembers(
+                visible.map((effect) => effect.toolCallId),
+                ["rename", "generate"],
+                "the resumed reply retains Undo and regeneration warnings for committed calls"
+              )
+              const sent = bodies(mock.requests()).slice(before)
+              assert.lengthOf(sent, 1)
+              assert.include(
+                JSON.stringify(sent[0]!.messages),
+                "already committed",
+                "the pending generation receipt explains the crash boundary"
+              )
+              assert.strictEqual(finished(events, entry.version.id)!.content, "Recovered.")
+            }
+          }).pipe(Effect.provide(serverLayer(config)))
+        )
+      })
+    },
+    { timeout: 180_000, tags: ["slow"] }
+  )

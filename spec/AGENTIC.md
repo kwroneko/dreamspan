@@ -397,6 +397,12 @@ Each case was reproduced against a scripted provider (`test/resumeAudit.test.ts`
 
 - **[P]** A reply that failed shows Resume inside its error box; one the app stopped mid-write shows a note, "The app stopped while this reply was being written.", with Resume. An agent reply's run goes on. A plain reply with text is continued (as Continue, without the composer's guidance); one with no text is written again as a new version. Either way the model and settings the chat has now apply.
 
-### 12.8 Left for later
+### 12.8 Review follow-ups (built; obsolete as implementation proposals)
 
-- The model's binding taken off at the reply (back to the default) isn't seen by Resume: it uses the binding from before the reply.
+- **[P]** Removing the reply's model binding follows the account's current default for Resume, Continue and a new version. With no default, the action refuses before creating a version or sending anything. It never recovers the earlier binding from the reply's parent.
+- **[P]** When the model changes, size the frozen request, kept transcript, tools and any continuation against the new context budget before creating the resumed version or running a pending call. A run that cannot fit asks for a model with more room; no transcript is silently trimmed. Unchanged-model replay retains its previous behavior, including existing small-budget workshops whose tool definitions alone exceed the budget.
+- **[P]** A pending call with a committed receipt keeps its recorded result even if its tool has since been removed. This does not permit another execution. Provider identity comes from the provider registry when deciding whether thinking and signatures belong to the target, including kinds whose names differ from their provider's.
+- **[P]** A committed outside effect remains in the resumed reply's Changes list even when the process died before its transcript result was saved: the matching receipt copied to the new run proves the result and preserves Undo and the regeneration warning.
+- **[P]** A stopped reply also has visible Resume beside its status, including plain replies. The existing status-note and button patterns are reused.
+
+Built by review-resume1; implementation and verification: ARCHITECTURE §16.

@@ -10,9 +10,19 @@ import {
   providerBaseUrl,
   resolveProviderSettings
 } from "../src/providerDefinitions.ts"
-import { resolveModel } from "../src/providers.ts"
+import { ProviderSettings, resolveModel } from "../src/providers.ts"
+import { Schema } from "effect"
 
 const bedrock = builtinProviders.find((p) => p.id === "anthropic-bedrock")!
+
+describe("silent-provider limit", () => {
+  it("accepts omitted or positive whole seconds and refuses invalid connection settings", () => {
+    expect(Schema.is(ProviderSettings)({})).toBe(true)
+    expect(Schema.is(ProviderSettings)({ idleTimeoutS: 300 })).toBe(true)
+    for (const idleTimeoutS of [0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, "300"])
+      expect(Schema.is(ProviderSettings)({ idleTimeoutS })).toBe(false)
+  })
+})
 
 describe("findProvider", () => {
   it("uses the connection's own provider", () => {

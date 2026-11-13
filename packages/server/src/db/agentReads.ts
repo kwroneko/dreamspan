@@ -6,7 +6,7 @@ import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { providerRequest } from "../assembler/wire.ts"
 import type { AssembledRequest, ModelInput } from "../assembler/types.ts"
 import { liveSuffix } from "../agent/messages.ts"
-import { rolloutRequest } from "../agent/wire.ts"
+import { forTarget, rolloutRequest } from "../agent/wire.ts"
 import type { Tool } from "@earendil-works/pi-ai"
 // Agent rollouts' reads (spec/AGENTIC.md §5): a version's steps, projected from its stored
 // transcript with the tools its snapshot froze, as the live display projects the running one;
@@ -449,7 +449,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return row.result === null ? null : (JSON.parse(row.result) as string)
       }).pipe(query("RolloutReceipt")),
 
-    CountRolloutContext: ({ model, request, transcript, tools }) =>
+    CountRolloutContext: ({ model, request, transcript, tools, continuation }) =>
       Effect.gen(function* () {
         const target = JSON.parse(model) as ModelInput
         const count = yield* prepareTextTokens(assembler.textCounters.list(), target)
@@ -464,7 +464,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const wire = rolloutRequest(
           providerRequest(assembled, target),
           target.api,
-          liveSuffix(history),
+          forTarget(liveSuffix(history), target),
           definitions as ReadonlyArray<Tool>,
           { replayReasoning: true, reasoningTarget: target }
         )
@@ -480,7 +480,8 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           imageTokens +
           count(JSON.stringify(messages)) +
           count(wire.context.systemPrompt ?? "") +
-          count(JSON.stringify(definitions))
+          count(JSON.stringify(definitions)) +
+          (continuation === undefined ? 0 : count(JSON.stringify({ role: "assistant", content: continuation })) + 3)
         )
       }).pipe(query("CountRolloutContext")),
     RolloutMaterial: ({ userId, versionId }) =>

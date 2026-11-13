@@ -7,15 +7,17 @@ import type { UserId } from "@rp/shared/domain.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
+import type { GenerationDefaults } from "@rp/shared/generation.ts"
 
 export interface ShownModel {
   readonly connection: ConnectionId
   readonly model: ModelId
 }
 
-/** The chat's model binding as the composer reads it at `slotId`, or undefined: the default. */
+/** Resolve the default here too: assembly at the parent must not recover a removed binding. */
 export const shownModel = <E>(
   reader: {
+    readonly GetGenerationDefaults: (payload: { readonly userId: UserId }) => Effect.Effect<GenerationDefaults, E>
     readonly StateEventsAt: (payload: {
       readonly userId: UserId
       readonly chatId: ChatId
@@ -25,8 +27,11 @@ export const shownModel = <E>(
     }) => Effect.Effect<ReadonlyArray<FoldableEvent>, E>
   },
   at: { readonly userId: UserId; readonly chatId: ChatId; readonly slotId: SlotId; readonly forkId: ForkId | null }
-): Effect.Effect<ShownModel | undefined, E> =>
-  Effect.map(reader.StateEventsAt({ ...at, displayEnd: true }), (events) => {
+): Effect.Effect<ShownModel | null, E> =>
+  Effect.gen(function* () {
+    const events = yield* reader.StateEventsAt({ ...at, displayEnd: true })
     const binding = foldState(events).modelBindings[""]
-    return binding ? { connection: binding.connection as ConnectionId, model: binding.model as ModelId } : undefined
+    return binding
+      ? { connection: binding.connection as ConnectionId, model: binding.model as ModelId }
+      : (yield* reader.GetGenerationDefaults({ userId: at.userId })).model
   })

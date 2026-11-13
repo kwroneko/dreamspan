@@ -132,7 +132,7 @@ function BodyText({
   )
 }
 
-/** The Resume beside a failed or interrupted reply's status (spec/AGENTIC.md §12.6). */
+/** Resume stays visible beside every stopped, interrupted or failed reply. */
 function ResumeButton({ onResume }: { onResume: () => void }) {
   return (
     <Button
@@ -203,12 +203,16 @@ function VersionBody({
           {onResume && <ResumeButton onResume={onResume} />}
         </div>
       )}
-      {version.status === "interrupted" && onResume && (
+      {(version.status === "interrupted" || version.status === "stopped") && onResume && (
         <div
           role="note"
           className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-text"
         >
-          <p>The app stopped while this reply was being written.</p>
+          <p>
+            {version.status === "stopped"
+              ? "This reply was stopped."
+              : "The app stopped while this reply was being written."}
+          </p>
           <ResumeButton onResume={onResume} />
         </div>
       )}
@@ -795,7 +799,8 @@ export const Message = memo(function Message({
       depth={positionOf(entry)}
       placement={model ? 2 : 1}
       onResume={
-        version.writer === "model" && (version.status === "failed" || version.status === "interrupted")
+        version.writer === "model" &&
+        (version.status === "failed" || version.status === "interrupted" || version.status === "stopped")
           ? () => void session.resumeReply(entry).then(report)
           : undefined
       }

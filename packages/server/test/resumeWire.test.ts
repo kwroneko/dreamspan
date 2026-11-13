@@ -95,6 +95,30 @@ describe("a resumed run's suffix on DeepSeek", () => {
 })
 
 describe("forTarget", () => {
+  it("keeps the registered provider's own signatures when its kind has a different name", () => {
+    const turn = callTurn(
+      { api: "anthropic-messages", provider: "amazon-bedrock", model: "claude-test" },
+      { text: "Plan.", signature: "signed" }
+    )
+    expect(forTarget([turn], { api: "anthropic-messages", key: "claude-test", provider: "amazon-bedrock" })[0]).toBe(
+      turn
+    )
+  })
+  it("drops thinking and signatures on a provider switch even when the API and model key match", () => {
+    const turn = callTurn(
+      { api: "openai-completions", provider: "openrouter", model: "shared-key" },
+      { text: "Private plan.", signature: '[{"type":"reasoning.encrypted","data":"opaque"}]' }
+    )
+    const [converted] = forTarget([turn], {
+      api: "openai-completions",
+      key: "shared-key",
+      provider: "deepseek"
+    } as never) as [AssistantMessage]
+    expect(converted.content).toEqual([
+      { type: "toolCall", id: "call_1", name: "look_up", arguments: { topic: "keeper" } }
+    ])
+  })
+
   it("drops another model's thinking and call signatures, and keeps the same model's", () => {
     const signed = {
       ...callTurn(claudeWrote, { text: "Plan.", signature: "sig" }),

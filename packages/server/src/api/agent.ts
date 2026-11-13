@@ -23,6 +23,7 @@ import { offeredByGrants } from "../agent/approvals.ts"
 import { planTurn } from "../agent/modes.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
+import { shownModel } from "../chat/shownModel.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
@@ -141,6 +142,7 @@ const agentVersionResumer = Effect.gen(function* () {
       let planned: ResumePlan | StepNotResumable
       let snapshot = material.snapshot
       let chosen: RetryModel | undefined
+      let checkBudget = false
       if (options?.saved) {
         // The stored request as it was, with its model and tools: only on the user's word.
         const model = frozen.inputs.model
@@ -153,10 +155,8 @@ const agentVersionResumer = Effect.gen(function* () {
         // before the reply.
         const events = yield* reader.StateEventsAt({ userId, chatId, slotId: source.slotId, forkId, displayEnd: true })
         const state = foldState(events)
-        const binding = state.modelBindings[""]
-        const shown =
-          options?.model ??
-          (binding ? { connection: binding.connection as ConnectionId, model: binding.model as ModelId } : undefined)
+        const shown = options?.model ?? (yield* shownModel(reader, { userId, chatId, slotId: source.slotId, forkId }))
+        if (!shown) return yield* refuse("No model is chosen for this chat. Choose one, then resume.")
         const failed = yield* reader
           .AssembleContext({
             userId,
@@ -191,6 +191,7 @@ const agentVersionResumer = Effect.gen(function* () {
         planned = plan(material, frozen as Frozen, model)
         // Unchanged, the frozen request is sent byte for byte, so the provider's cache still holds.
         const modelChanged = !isDeepStrictEqual(frozen.inputs.model, model)
+        checkBudget = modelChanged
         let rebuilt: ContextSnapshot = modelChanged
           ? forModel(frozen, {
               model,
@@ -226,6 +227,23 @@ const agentVersionResumer = Effect.gen(function* () {
             }
           ]
         }
+      // Assembly sizes today's chat, not the frozen prefix and kept tool results. Check the
+      // actual carried run before creating a version or executing any dangling effect.
+      const resumedSnapshot = JSON.parse(snapshot) as ContextSnapshot & Frozen
+      const budget = resumedSnapshot.contextBudget
+      if (checkBudget && budget && resumedSnapshot.inputs.model) {
+        const count = yield* reader.CountRolloutContext({
+          model: JSON.stringify(resumedSnapshot.inputs.model),
+          request: JSON.stringify(resumedSnapshot.request),
+          transcript: JSON.stringify(planned.transcript),
+          tools: JSON.stringify(resumedSnapshot.agent?.tools ?? []),
+          ...(planned.continuation === undefined ? {} : { continuation: planned.continuation })
+        })
+        if (count > budget.maximum - budget.responseReserve)
+          return yield* refuse(
+            "The saved run is too large for this model's context window. Choose a model with more room, then resume."
+          )
+      }
       const rolloutId = uuidv7()
       const added = yield* writer.StartResumedVersion({
         userId,

@@ -600,6 +600,6 @@ export const layer = Layer.effect(
         })
       )
 
-    return Option.some({ generate })
+    return Option.some({ generate, requiresModel: true })
   })
 )

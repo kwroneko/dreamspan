@@ -5,7 +5,7 @@
 import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai"
 import type { ProviderRequest } from "../assembler/wire.ts"
 import type { ModelInput } from "../assembler/types.ts"
-type ReasoningTarget = Pick<ModelInput, "api" | "kind" | "key">
+type ReasoningTarget = Pick<ModelInput, "api" | "kind" | "key"> & { readonly provider?: string | undefined }
 
 /** A suffix message as Chat Completions takes it: assistant `tool_calls`, `role: "tool"` results. */
 const signedDetails = (signature: string | undefined): ReadonlyArray<unknown> | undefined => {
@@ -34,7 +34,9 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
       .join("")
     // pi-ai stores OpenRouter's opaque reasoning_details in thinkingSignature.
     // Replaying only visible thinking loses encrypted reasoning required by Claude/Gemini.
-    const provider = target?.kind === "openai-chat" || target?.kind === "openai-responses" ? "openai" : target?.kind
+    const provider =
+      target?.provider ??
+      (target?.kind === "openai-chat" || target?.kind === "openai-responses" ? "openai" : target?.kind)
     const sameModel = !target || (m.api === target.api && m.model === target.key && m.provider === provider)
     const details =
       replayReasoning && sameModel
@@ -100,9 +102,18 @@ const completionsMessage = (m: Message, replayReasoning = false, target?: Reason
  * reasoning only from the model that signed it, and pi-ai would otherwise turn unsigned
  * thinking into the turn's visible text. Text, tool calls and results stay as they were.
  */
-export const forTarget = (suffix: ReadonlyArray<Message>, target: Pick<ModelInput, "api" | "key">): Array<Message> =>
+export const forTarget = (
+  suffix: ReadonlyArray<Message>,
+  target: Pick<ModelInput, "api" | "key"> & { readonly provider?: string | undefined }
+): Array<Message> =>
   suffix.map((m) => {
-    if (m.role !== "assistant" || (m.api === target.api && m.model === target.key)) return m
+    if (
+      m.role !== "assistant" ||
+      (m.api === target.api &&
+        m.model === target.key &&
+        (target.provider === undefined || m.provider === target.provider))
+    )
+      return m
     if (!m.content.some((p) => p.type === "thinking" || (p.type === "toolCall" && p.thoughtSignature))) return m
     const content: AssistantMessage["content"] = []
     for (const p of m.content) {

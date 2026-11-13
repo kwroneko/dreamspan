@@ -1039,6 +1039,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
   - **[P]** (phase4ui, 2026-11-05) Activity reads the usage ledger, one row per rollout and purpose, so a refusal judgment (a `decision` request riding on a reply's rollout) is listed beside summaries and condensations. A summary row links to its request; a judgment's to the reply.
 
 ### 7.5 Resuming
+
+- **[P]** (review-resume1, 2026-11-13) **Built; obsolete as an implementation proposal:** removing a model binding resolves the current default before Resume, Continue or a new version; a model switch checks the kept run against the new context budget; a removed tool's committed receipt still supplies its result; provider identity controls replayed thinking; stopped plain replies have visible Resume. See AGENTIC §12.8 and ARCHITECTURE §16. Decision statuses above and below are unchanged.
 - **[D]** Resume a stopped or broken rollout mid-way **without sending another turn and without the model being able to tell**. reference-harness does this; most coding harnesses don't. **Built** (resumeui, 2026-11-12; ARCHITECTURE §16 "Agent rollouts", "In the client"): Resume among the message's actions on an agent reply that stopped or failed.
 - **[P]** As in reference-harness (`src/agent/recovery.ts`): **Built; obsolete as a proposal** (2026-11-05; ARCHITECTURE §16, "Agent rollouts": `ResumeVersion`, `agent/resume.ts`).
   - a frozen context snapshot is taken when the rollout starts

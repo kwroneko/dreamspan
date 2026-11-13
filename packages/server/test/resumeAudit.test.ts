@@ -11,7 +11,7 @@ import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { Effect, Stream } from "effect"
 import type { ServerResponse } from "node:http"
 import type { RolloutTool } from "../src/agent/tools.ts"
-import { Reader } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
@@ -99,6 +99,271 @@ const stopWhen = (api: Api, events: ReadonlyArray<ChatEvent>, reached: () => boo
     yield* eventually(() => finished(events, versionId) !== undefined)
     return finished(events, versionId)!
   })
+
+describe("resume review regressions", () => {
+  for (const action of ["resume", "continue", "regenerate"] as const)
+    it.live(`${action} does not recover an earlier binding when the default was also cleared`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* mockOf((_request, res) =>
+          action === "continue"
+            ? sse(res, completionChunks(["Mira waits."], {}))
+            : json(res, 400, { error: { message: "Try again." } })
+        )
+        const api = yield* client()
+        const { version, chat, connection, model, preset } = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          ...(action === "resume" ? { state: agentOn } : {})
+        })
+        const me = yield* api.Whoami()
+        yield* (yield* Writer).AddStateEvent({
+          userId: me.id,
+          chatId: chat.id,
+          slotId: null,
+          versionId: null,
+          scope: null,
+          data: { key: "model.binding", value: { connection: connection.id, model: model.id } }
+        })
+        yield* api.ChangeCast({ chatId: chat.id, slotId: version.slotId, change: { _tag: "DefaultModel" } })
+        yield* api.SetGenerationDefaults({ defaults: { model: null, preset: preset.ref.id } })
+        const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: version.slotId })
+        const sent = bodies(mock.requests()).length
+        const input = { versionId: version.id, expectedRowVersion: slot.entry.rowVersion }
+        const refused = yield* action === "resume"
+          ? api.ResumeVersion(input).pipe(Effect.flip)
+          : action === "continue"
+            ? api.ContinueVersion(input).pipe(Effect.flip)
+            : api.Regenerate({ slotId: version.slotId, expectedRowVersion: slot.entry.rowVersion }).pipe(Effect.flip)
+        assert.strictEqual(
+          refused._tag,
+          action === "resume" ? "NotResumable" : action === "continue" ? "NotContinuable" : "GenerationUnavailable"
+        )
+        assert.include(refused.message, "No model is chosen")
+        assert.lengthOf(bodies(mock.requests()), sent)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+
+  for (const removed of ["connection", "chat", "host consent"] as const)
+    it.live(`saved-request replay respects removed ${removed} and sends nothing`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* mockOf((_request, res) => json(res, 400, { error: { message: "Try again." } }))
+        const api = yield* client()
+        const { version, events, chat, connection } = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, apiKey: "synthetic-secret-only" },
+          model: {},
+          state: agentOn
+        })
+        const me = yield* api.Whoami()
+        const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: version.slotId })
+        if (removed === "connection") yield* api.DeleteConnection({ connectionId: connection.id })
+        else if (removed === "chat") yield* api.DeleteChat({ chatId: chat.id })
+        else {
+          const other = yield* mockOf((_request, res) => sse(res, completionChunks(["Must not send."], {})))
+          yield* api.UpdateConnection({
+            connectionId: connection.id,
+            expectedRowVersion: connection.rowVersion,
+            settings: {
+              name: connection.name,
+              baseUrl: `${other.url}/v1`,
+              compat: connection.compat,
+              cacheTtlS: connection.cacheTtlS,
+              maxConcurrent: connection.maxConcurrent,
+              presetOverrideRefId: connection.presetOverrideRefId
+            }
+          })
+          yield* Effect.addFinalizer(() => Effect.sync(() => assert.lengthOf(bodies(other.requests()), 0)))
+        }
+        const sent = bodies(mock.requests()).length
+        const result = yield* api
+          .ResumeVersion({ versionId: version.id, expectedRowVersion: slot.entry.rowVersion, saved: true })
+          .pipe(Effect.result)
+        // Credential refusal can occur in the provider layer, after the new version was created.
+        if (result._tag === "Success") {
+          yield* eventually(() => finished(events, result.success.version.id) !== undefined)
+          assert.strictEqual(finished(events, result.success.version.id)!.status, "failed")
+        }
+        assert.lengthOf(bodies(mock.requests()), sent, "removed authority is never used")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+
+  it.live("provider errors keep the provider's words and redact credentials in every durable error", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const secret = "synthetic-resume-secret-0000"
+      const mock = yield* mockOf((_request, res) =>
+        json(res, 401, { error: { message: `Wrong key ${secret}; please replace it.` } })
+      )
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, apiKey: secret },
+        model: {},
+        state: agentOn
+      })
+      assert.include(version.error!.message, "please replace it")
+      assert.notInclude(version.error!.message, secret)
+      const [rows] = yield* fixtureSql(
+        config.dataDir,
+        [
+          {
+            sql: "SELECT error_json AS error FROM version_records UNION ALL SELECT error FROM rollouts UNION ALL SELECT error_json AS error FROM llm_requests"
+          }
+        ],
+        { readOnly: true }
+      )
+      assert.notInclude(JSON.stringify(rows), secret)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  for (const action of ["resume", "continue", "regenerate"] as const)
+    it.live(`${action} follows the default after the reply's model binding is removed`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* mockOf((_request, res) =>
+          action === "continue"
+            ? sse(res, completionChunks(["Mira"], {}))
+            : json(res, 400, { error: { message: "Try another model." } })
+        )
+        const api = yield* client()
+        const { version, events, chat, connection, model, preset } = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: { prefill: "assistant" },
+          ...(action === "resume" ? { state: agentOn } : {})
+        })
+        const me = yield* api.Whoami()
+        yield* (yield* Writer).AddStateEvent({
+          userId: me.id,
+          chatId: chat.id,
+          slotId: null,
+          versionId: null,
+          scope: null,
+          data: { key: "model.binding", value: { connection: connection.id, model: model.id } }
+        })
+        const next = yield* api.AddUserModel({
+          connectionId: connection.id,
+          key: "new-default",
+          overrides: { prefill: "assistant" }
+        })
+        yield* api.SetGenerationDefaults({
+          defaults: { model: { connection: connection.id, model: next.id }, preset: preset.ref.id }
+        })
+        yield* api.ChangeCast({ chatId: chat.id, slotId: version.slotId, change: { _tag: "DefaultModel" } })
+        mock.setHandler((_request, res) => sse(res, completionChunks([" waves."], {})))
+        const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: version.slotId })
+        const input = { versionId: version.id, expectedRowVersion: slot.entry.rowVersion }
+        const entry = yield* action === "resume"
+          ? api.ResumeVersion(input)
+          : action === "continue"
+            ? api.ContinueVersion(input)
+            : api.Regenerate({ slotId: version.slotId, expectedRowVersion: slot.entry.rowVersion })
+        yield* eventually(() => finished(events, entry.version.id) !== undefined)
+        assert.strictEqual(bodies(mock.requests()).at(-1)!.model, "new-default")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+
+  it.live("a removed tool's committed receipt still answers its dangling call", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      let committed = false
+      let runs = 0
+      const registry = yield* ExecutionRegistry
+      yield* registry.rolloutTools.register({
+        id: "commit_once",
+        label: "Changes a note",
+        effect: "chat_state",
+        description: "Changes a note.",
+        parameters: Type.Object({}),
+        execute: (context) =>
+          Effect.gen(function* () {
+            runs++
+            yield* context.writer
+              .ApplyRolloutEffect({
+                userId: context.userId,
+                rolloutId: context.rolloutId,
+                toolCallId: context.toolCallId,
+                events: [],
+                result: "Committed once."
+              })
+              .pipe(Effect.orDie)
+            committed = true
+            return yield* Effect.never
+          })
+      })
+      const mock = yield* mockOf((request, res) =>
+        results(request.body as unknown as Body) === 0
+          ? sse(res, toolCalls([["commit_once", {}, "c1"]]))
+          : sse(res, completionChunks(["Done."], {}))
+      )
+      const api = yield* client()
+      const events: Array<ChatEvent> = []
+      let chatId: string | undefined
+      yield* Effect.forkScoped(
+        generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          events,
+          state: [...agentOn, { key: "agent.tools", value: { tools: ["commit_once"] } }],
+          before: (chat) =>
+            Effect.sync(() => {
+              chatId = chat.id
+            })
+        })
+      )
+      const stopped = yield* stopWhen(api, events, () => committed)
+      yield* api.ChangeCast({
+        chatId: chatId as never,
+        slotId: stopped.slotId,
+        change: { _tag: "AgentTools", tools: [] }
+      })
+      const resumed = yield* resume(api, events, stopped.id)
+      assert.strictEqual(resumed.status, "complete")
+      const result = bodies(mock.requests())
+        .at(-1)!
+        .messages.find((m) => m.role === "tool")!
+      assert.strictEqual(result.content, "Committed once.")
+      assert.strictEqual(runs, 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("refuses a smaller model when the kept tool results exceed its window before sending", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const tool = { ...lookup().tool, execute: () => Effect.succeed({ text: "keeper ledger ".repeat(1100) }) }
+      yield* agentWith([tool as RolloutTool<never>])
+      const mock = yield* mockOf((request, res) =>
+        results(request.body as unknown as Body) === 0
+          ? sse(res, toolCalls([["look_up", { topic: "keeper" }, "c1"]]))
+          : json(res, 400, { error: { message: "Try another model." } })
+      )
+      const api = yield* client()
+      const { version, chat, connection } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: { context: 32768 },
+        state: agentOn,
+        preset: { openai_max_context: 32768, openai_max_tokens: 256 }
+      })
+      const smaller = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "small-window",
+        overrides: { context: 2048 }
+      })
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId: version.slotId,
+        change: { _tag: "Model", connection: connection.id, model: smaller.id }
+      })
+      const me = yield* api.Whoami()
+      const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: version.slotId })
+      const sent = bodies(mock.requests()).length
+      const result = yield* api
+        .ResumeVersion({ versionId: version.id, expectedRowVersion: slot.entry.rowVersion })
+        .pipe(Effect.result)
+      assert.strictEqual(result._tag, "Failure", "the kept transcript cannot fit")
+      assert.lengthOf(bodies(mock.requests()), sent, "no oversized request is sent")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
 
 describe("audit: a stop midway", () => {
   it.live("while text streams: kept, and carried on through a prefill on a model that takes one", () => {
@@ -387,11 +652,17 @@ describe("a provider that goes silent (spec/AGENTIC.md §12.5)", () => {
     return Effect.gen(function* () {
       yield* agentWith([lookup().tool as RolloutTool<never>])
       let silent = true
+      let closed = false
       const mock = yield* mockOf((request, res) => {
         const body = request.body as unknown as Body
         if (results(body) === 0) return sse(res, toolCalls([["look_up", { topic: "keeper" }, "c1"]]))
         // Headers, then nothing: a provider that took the request and went quiet.
-        if (silent) return void res.writeHead(200, { "content-type": "text/event-stream" })
+        if (silent) {
+          res.on("close", () => {
+            closed = true
+          })
+          return void res.writeHead(200, { "content-type": "text/event-stream" })
+        }
         sse(res, completionChunks(["Ansel waves."], { prompt_tokens: 20, completion_tokens: 2 }))
       })
       const api = yield* client()
@@ -406,6 +677,7 @@ describe("a provider that goes silent (spec/AGENTIC.md §12.5)", () => {
       assert.include(version.error?.message ?? "", "nothing for 1 s")
       assert.isBelow(Date.now() - started, 15_000)
       assert.lengthOf(bodies(mock.requests()), 2, "a silent request isn't retried by itself")
+      yield* eventually(() => closed)
       silent = false
       const resumed = yield* resume(api, events, version.id)
       assert.strictEqual(resumed.content, "Ansel waves.")
@@ -677,6 +949,12 @@ describe("audit: Resume uses the chat's model as it is now", () => {
       assert.strictEqual(rows![1]!.snapshot, rows![0]!.snapshot)
       const sent = bodies(mock.requests())
       assert.deepStrictEqual(sent.at(-1), sent.at(-2))
+      const raw = mock
+        .requests()
+        .filter((request) => request.path === "/v1/chat/completions")
+        .slice(-2)
+      assert.isString(raw[0]!.raw)
+      assert.strictEqual(raw[1]!.raw, raw[0]!.raw, "the actual HTTP request body is byte-identical")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })

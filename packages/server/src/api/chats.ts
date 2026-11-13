@@ -387,6 +387,8 @@ export const makeChatHandlers = Effect.gen(function* () {
         const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
         // "Regenerate with…" names a model; otherwise it's the one the composer shows here.
         const model = named ?? (yield* shownModel(reader, { userId: id, chatId, slotId, forkId: forkId ?? null }))
+        if (!model && Option.isSome(generator) && generator.value.requiresModel === true)
+          return yield* new GenerationUnavailable({ message: "No model is chosen for this chat. Choose one first." })
         if (before.version.context) {
           const resumed = yield* regenerateSeveral({
             versionId: before.version.id,
@@ -458,6 +460,8 @@ export const makeChatHandlers = Effect.gen(function* () {
           slotId: source.slotId,
           forkId: forkId ?? null
         })
+        if (!model && Option.isSome(generator) && generator.value.requiresModel === true)
+          return yield* refuse("No model is chosen for this chat. Choose one first.")
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId: source.slotId,

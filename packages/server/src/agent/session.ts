@@ -21,6 +21,7 @@ import type { Reader, Writer } from "../db/Database.ts"
 import { GenerationFailed, type GenerationChunk, type GenerationRequest } from "../chat/Generator.ts"
 import type { ReplyOutputStrategy } from "../chat/replyOutput.ts"
 import type { Providers, ProviderError } from "../providers/Providers.ts"
+import { ProviderRegistry } from "../providers/registry.ts"
 import type { AgentPlan } from "./modes.ts"
 import { countSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
 import { danglingCalls } from "./resume.ts"
@@ -137,6 +138,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       const { request, generation, rolloutId, output, providers } = input
       const { plan, tools, writer } = run
       const model = generation.model!
+      const registry = yield* Effect.serviceOption(ProviderRegistry)
+      const target = {
+        ...model,
+        provider: Option.isSome(registry) ? registry.value.kinds.get(model.kind)?.piProvider : undefined
+      }
       const services = yield* Effect.context<never>()
       const runFork = Effect.runForkWith(services)
       const runPromise = Effect.runPromiseWith(services)
@@ -241,7 +247,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         continuation = undefined
         const last = requests >= plan.turnCap || carried !== undefined
         // Another model's thinking isn't sent to this one (a resume on another model, §12.3).
-        const suffix = forTarget(liveSuffix(transcript.messages), model)
+        const suffix = forTarget(liveSuffix(transcript.messages), target)
         const wire = rolloutRequest(
           prefix,
           model.api,
@@ -252,7 +258,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           {
             explicitTail: model.cacheBreakpoints === "explicit",
             replayReasoning: several || plan.continuity === "resume_previous",
-            reasoningTarget: model
+            reasoningTarget: target
           }
         )
         // Text streams into the body as it comes; a tool call in the same turn makes it an
@@ -719,19 +725,45 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         yield* Effect.addFinalizer(() => Effect.sync(() => signal.abort()))
         for (const call of dangling) {
           const tool = agentTools.find((t) => t.name === call.name)
-          const result = tool
-            ? yield* Effect.promise(() =>
-                tool.execute(call.id, call.arguments as never, signal.signal).catch((error: unknown) => ({
-                  content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
+          // A completed write is evidence even after its tool was removed. Reading its
+          // receipt never grants permission to execute a new call.
+          const receipt =
+            call.name === SEND_MESSAGE
+              ? null
+              : yield* run.reader
+                  .RolloutToolReceipt({
+                    userId: request.userId,
+                    rolloutId,
+                    toolCallId: call.id
+                  })
+                  .pipe(
+                    Effect.mapError(
+                      () =>
+                        new GenerationFailed({
+                          class: "server",
+                          message: "The app couldn't check whether this tool already finished. Resume to try again."
+                        })
+                    )
+                  )
+          const result = receipt
+            ? {
+                content: [{ type: "text" as const, text: budgetResult(receipt.text) }],
+                details: null,
+                isError: receipt.isError
+              }
+            : tool
+              ? yield* Effect.promise(() =>
+                  tool.execute(call.id, call.arguments as never, signal.signal).catch((error: unknown) => ({
+                    content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
+                    details: null,
+                    isError: true
+                  }))
+                )
+              : {
+                  content: [{ type: "text" as const, text: `There's no tool “${call.name}”.` }],
                   details: null,
                   isError: true
-                }))
-              )
-            : {
-                content: [{ type: "text" as const, text: `There's no tool “${call.name}”.` }],
-                details: null,
-                isError: true
-              }
+                }
           agent.state.messages = [
             ...agent.state.messages,
             {

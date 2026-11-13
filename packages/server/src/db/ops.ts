@@ -4183,7 +4183,13 @@ export class ReadOps extends RpcGroup.make(
    * mode, the frozen snapshot and the transcript as last saved, and the version's own status.
    */
   Rpc.make("CountRolloutContext", {
-    payload: { model: Schema.String, request: Schema.String, transcript: Schema.String, tools: Schema.String },
+    payload: {
+      model: Schema.String,
+      request: Schema.String,
+      transcript: Schema.String,
+      tools: Schema.String,
+      continuation: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Int,
     error: StorageError
   }),
