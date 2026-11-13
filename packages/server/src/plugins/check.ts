@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from "node:crypto"
-import { readFile, readdir, rename, rm } from "node:fs/promises"
+import { readFile, readdir, rename, rm, lstat } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Schema } from "effect"
@@ -87,4 +87,24 @@ export const readBuild = async (dataDir: string, owner: string, id: string, comm
     JSON.parse(await readFile(join(folder, "rp-plugin.json"), "utf8"))
   )
   return { folder, manifest }
+}
+
+/** Read only a generated browser entry attested by this process, after checking its source again. */
+export const readClientBuild = async (dataDir: string, owner: string, id: string, commit: string) => {
+  const { folder, manifest } = await readBuild(dataDir, owner, id, commit)
+  const encoded = await readFile(join(folder, "check.json"), "utf8")
+  if (checkedReports.get(folder) !== createHash("sha256").update(encoded).digest("hex"))
+    throw new Error("Unattested plugin build")
+  const report = JSON.parse(encoded) as PluginReport & { artifacts: Record<string, string> }
+  if (!report.ok || report.commit !== commit || !manifest.client) throw new Error("Unchecked client entry")
+  const { repoTask } = await import("./repoTask.ts")
+  await repoTask(dataDir, { op: "verify", owner, id, commit })
+  const file = join(folder, "client.mjs")
+  const info = await lstat(file)
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 16 * 1024 * 1024)
+    throw new Error("Invalid client artifact")
+  const bytes = await readFile(file)
+  if (createHash("sha256").update(bytes).digest("hex") !== report.artifacts["client.mjs"])
+    throw new Error("Changed plugin artifact")
+  return { manifest, bytes }
 }

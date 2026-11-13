@@ -232,6 +232,8 @@ const copied = (path: string, built = false) => copiedBy(path, built)
 // are absent from the image and both loaders turn a missing module into a plain startup error.
 const developmentImports = new Set(["./dev/fakeCardSource.ts", "./dev/fakeSavedMedia.ts"])
 const computedReviews: Record<string, string> = {
+  "packages/client/src/plugins.tsx: import(/* @vite-ignore */ url)":
+    "Canonical same-origin checked client module URLs built only from authenticated enabled-commit descriptors; no content or arbitrary caller import path.",
   'packages/server/src/plugins/Host.ts: import(pathToFileURL(join(folder, "server.mjs")).href)':
     "Only explicit admin-enabled, checked server bundle URLs in the confined plugin build tree; never content.",
   "packages/server/src/plugins/probeChild.ts: import(pathToFileURL(join(folder, `${side}.mjs`)).href)":
@@ -253,6 +255,11 @@ const computedReviews: Record<string, string> = {
 
 /** Every filesystem read is classified; a new expression requires review. */
 const readReviews: Record<string, { reason: string; expressions: Array<string> }> = {
+  "packages/server/src/plugins/serve.ts": {
+    reason:
+      "The Vite build manifest shipped with the configured client dist; facade points only to a validated assets filename.",
+    expressions: ['readFile(join(config.clientDist, ".vite/manifest.json"), "utf8")']
+  },
   "packages/server/src/plugins/repoTask.ts": {
     reason:
       "Confined synthetic request/response files for bounded Git operations under DATA_DIR/plugins/.ops; no plugin code is evaluated.",
@@ -279,7 +286,8 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       'readFile(join(root, "packages/server/dist/workers/stamp.json"))',
       'readFile(join(staging, "check.json"), "utf8")',
       'readFile(join(build, "check.json"))',
-      'readFile(join(folder, "rp-plugin.json"), "utf8")'
+      'readFile(join(folder, "rp-plugin.json"), "utf8")',
+      'readFile(join(folder, "check.json"), "utf8")'
     ]
   },
   "packages/server/src/plugins/checkChild.ts": {

@@ -155,17 +155,19 @@ export const sameTree = (a: Map<string, Uint8Array>, b: Map<string, Uint8Array>)
     return other !== undefined && Buffer.from(value).equals(other)
   })
 
-export const snapshot = async (dataDir: string, owner: string, id: string, commit: string, build: string) => {
+export const snapshot = async (dataDir: string, owner: string, id: string, commit: string, build?: string) => {
   const folder = await confined(dataDir, pluginFolder(dataDir, owner, id))
   await safeGit(folder)
   if ((await git.resolveRef({ fs, dir: folder, ref: "HEAD" })) !== commit)
     throw new Error("Plugin HEAD differs from pinned commit")
   const tree = await commitFiles(folder, commit)
   if (!sameTree(tree, await diskFiles(folder))) throw new Error("Plugin working tree differs from pinned commit")
-  await confined(dataDir, build, true)
-  for (const [path, contents] of tree) {
-    await mkdir(join(build, path, ".."), { recursive: true })
-    await writeFile(join(build, path), contents, { flag: "wx" })
+  if (build) {
+    await confined(dataDir, build, true)
+    for (const [path, contents] of tree) {
+      await mkdir(join(build, path, ".."), { recursive: true })
+      await writeFile(join(build, path), contents, { flag: "wx" })
+    }
   }
   for (const reserved of ["server.mjs", "worker.mjs", "client.mjs", "worker-bridge.mjs", "check.json"])
     if (tree.has(reserved)) throw new Error("Reserved plugin build filename")

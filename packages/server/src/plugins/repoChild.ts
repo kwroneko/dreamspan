@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { saveFiles, repoLog, repoDiff, checkoutCommit, confined, pluginFolder } from "./repo.ts"
+import { snapshot, saveFiles, repoLog, repoDiff, checkoutCommit, confined, pluginFolder } from "./repo.ts"
 import type { RepoRequest } from "./repoTask.ts"
 const [dataDir, folder] = process.argv.slice(2) as [string, string]
 try {
@@ -12,6 +12,9 @@ try {
   else {
     await confined(dataDir, repo)
     switch (request.op) {
+      case "verify":
+        result = await snapshot(dataDir, request.owner, request.id, request.commit)
+        break
       case "log":
         result = await repoLog(repo)
         break

@@ -1,3 +1,4 @@
+import { pluginRoutes } from "./plugins/serve.ts"
 import { PluginHost } from "./plugins/Host.ts"
 import { makePluginHandlers } from "./api/plugins.ts"
 import { AuthenticatedPluginApi } from "@rp/shared/api.ts"
@@ -700,6 +701,7 @@ export const serverWith = <E>(
     Layer.mergeAll(
       RpcRoute,
       HealthRoute,
+      pluginRoutes,
       FramePanelRoute,
       AuthRoutes,
       ImportRoutes.layer,

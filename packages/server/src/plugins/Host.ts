@@ -15,7 +15,7 @@ import { StateModules } from "../db/stateModules.ts"
 import { AssemblyModules } from "../assembler/modules.ts"
 import { Notices } from "../chat/Notices.ts"
 import { Network } from "../net/Network.ts"
-import { checkPlugin, readBuild } from "./check.ts"
+import { checkPlugin, readBuild, readClientBuild } from "./check.ts"
 import { declaredHandles, type RegistrationRegistry } from "./handles.ts"
 import { pluginFolder, readManifest } from "./repo.ts"
 import { repoTask } from "./repoTask.ts"
@@ -24,6 +24,7 @@ import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
 type Target = { readonly scope: "instance" | "user"; readonly id: string }
 type Version = Target & { readonly commit: string }
 type Failure = PluginRejected
+import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
 const attempt = <A>(run: () => Promise<A>) =>
   Effect.tryPromise({
     try: run,
@@ -32,6 +33,8 @@ const attempt = <A>(run: () => Promise<A>) =>
 export class PluginHost extends Context.Service<
   PluginHost,
   {
+    readonly clients: (actor: User) => Effect.Effect<ReadonlyArray<ClientPlugin>, unknown>
+    readonly clientAsset: (actor: User, target: Version) => Effect.Effect<Uint8Array, unknown>
     readonly list: (actor: User) => Effect.Effect<ReadonlyArray<typeof PluginView.Type>, Failure | unknown>
     readonly get: (actor: User, target: Target) => Effect.Effect<typeof PluginView.Type, Failure | unknown>
     readonly create: (
@@ -81,6 +84,7 @@ export class PluginHost extends Context.Service<
         claims = new Map<string, string>(),
         reports = new Map<string, PluginReport>()
       const lock = yield* Semaphore.make(1)
+      const assetChecks = yield* Semaphore.make(4)
       const keyOf = (owner: string, id: string) => `${owner}/${id}`
       const ownerOf = (actor: User, target: Target, admin = false) => {
         if ((admin || target.scope === "instance") && actor.role !== "admin")
@@ -136,8 +140,7 @@ export class PluginHost extends Context.Service<
               }
             })
           if (owner) notify(owner as UserId, id, report.message)
-          else
-            for (const user of yield* reader.ListUsers()) if (user.role === "admin") notify(user.id, id, report.message)
+          else for (const user of yield* reader.ListUsers()) notify(user.id, id, report.message)
         })
       const activate = (actor: User, owner: string, id: string, commit: string, report: PluginReport) =>
         Effect.gen(function* () {
@@ -244,7 +247,8 @@ export class PluginHost extends Context.Service<
               }
             })
             .pipe(Effect.onError(() => close(owner, target.id)))
-          notify(actor.id, target.id, "Plugins changed")
+          if (owner) notify(actor.id, target.id, "Plugins changed")
+          else for (const user of yield* reader.ListUsers()) notify(user.id, target.id, "Plugins changed")
           return report
         })
       const get = (actor: User, target: Target) =>
@@ -278,7 +282,44 @@ export class PluginHost extends Context.Service<
               : null)
           return { ...target, commit, manifest, pin, report }
         })
+      const clients = (actor: User) =>
+        Effect.gen(function* () {
+          if (!config.plugins) return []
+          const result: Array<ClientPlugin> = []
+          for (const scope of ["instance", "user"] as const) {
+            const owner = scope === "instance" ? "" : actor.id
+            const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+            for (const [id, pin] of Object.entries(pins.value)) {
+              if (pin.suspended || !active.has(keyOf(owner, id))) continue
+              const build = yield* attempt(() => readBuild(config.dataDir, owner, id, pin.commit)).pipe(Effect.option)
+              if (build._tag === "Some" && build.value.manifest.client)
+                result.push({ scope, id, commit: pin.commit, manifest: build.value.manifest })
+            }
+          }
+          return result
+        })
       const service = PluginHost.of({
+        clients,
+        clientAsset: (actor, target) =>
+          Semaphore.withPermit(assetChecks)(
+            Effect.gen(function* () {
+              const authorize = Semaphore.withPermit(lock)(
+                Effect.gen(function* () {
+                  const enabled = (yield* clients(actor)).some(
+                    (p) => p.scope === target.scope && p.id === target.id && p.commit === target.commit
+                  )
+                  if (!enabled) return yield* new PluginRejected({ message: "Plugin is off" })
+                })
+              )
+              yield* authorize
+              const build = yield* attempt(() =>
+                readClientBuild(config.dataDir, target.scope === "instance" ? "" : actor.id, target.id, target.commit)
+              )
+              // A disable/update admitted during the file check wins before any bytes are returned.
+              yield* authorize
+              return build.bytes
+            })
+          ),
         check: (actor, target) => Semaphore.withPermit(lock)(check(actor, target)),
         enable: (actor, target) => Semaphore.withPermit(lock)(enable(actor, target)),
         pin: (actor, target) =>

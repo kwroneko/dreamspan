@@ -13,6 +13,7 @@ export type RepoRequest =
       readonly initial: boolean
       readonly message: string
     }
+  | { readonly op: "verify"; readonly owner: string; readonly id: string; readonly commit: string }
   | { readonly op: "log"; readonly owner: string; readonly id: string }
   | {
       readonly op: "diff"

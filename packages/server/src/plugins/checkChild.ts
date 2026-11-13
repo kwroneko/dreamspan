@@ -7,6 +7,7 @@ import ts from "typescript"
 import { build } from "rolldown"
 import { snapshot } from "./repo.ts"
 import { runPluginChild } from "./process.ts"
+import { CLIENT_PLUGIN_SURFACES } from "@rp/shared/pluginClient.ts"
 import type { PluginReport } from "@rp/shared/plugins.ts"
 
 const [dataDir, owner, id, commit, folder, appStamp, previous, expectedReport] = process.argv.slice(2) as [
@@ -61,7 +62,13 @@ try {
     throw new Error("Server code needs an instance plugin and an admin")
   for (const surface of manifest.surfaces) {
     const [side, name] = surface.split(":")
-    if (side === "server" ? !server.includes(name!) : side === "worker" ? !worker.includes(name!) : side !== "client")
+    if (
+      side === "server"
+        ? !server.includes(name!)
+        : side === "worker"
+          ? !worker.includes(name!)
+          : side !== "client" || !CLIENT_PLUGIN_SURFACES.includes(name!)
+    )
       throw new Error("Unknown surface")
   }
   const sources: Array<string> = []
@@ -83,7 +90,7 @@ try {
     if (prior.ok && prior.appStamp === appStamp && prior.commit === commit && prior.artifacts) {
       const copied: Array<[string, Buffer]> = []
       for (const [file, checksum] of Object.entries(prior.artifacts)) {
-        if (!/^(?:server|worker|worker-bridge|test-[0-9]+)\.mjs$/.test(file)) throw new Error("Invalid artifact")
+        if (!/^(?:server|worker|client|worker-bridge|test-[0-9]+)\.mjs$/.test(file)) throw new Error("Invalid artifact")
         const path = join(previous, file),
           info = await lstat(path)
         if (!info.isFile() || info.isSymbolicLink() || info.size > 16 * 1024 * 1024)
@@ -116,7 +123,13 @@ try {
       types: ["node"],
       typeRoots: [join(root, "node_modules/@types")],
       jsx: ts.JsxEmit.ReactJSX,
-      paths: { "@rp/plugin-api/server": [api("server")], "@rp/plugin-api/worker": [api("worker")] }
+      paths: {
+        "@rp/plugin-api/server": [api("server")],
+        "@rp/plugin-api/worker": [api("worker")],
+        "@rp/plugin-api/client": [api("client")],
+        react: [join(root, "node_modules/@types/react/index.d.ts")],
+        "react/jsx-runtime": [join(root, "node_modules/@types/react/jsx-runtime.d.ts")]
+      }
     }
     const compiler = ts.createCompilerHost(options)
     const program = ts.createProgram(sources, options, compiler)
@@ -138,6 +151,9 @@ try {
             ![
               "@rp/plugin-api/server",
               "@rp/plugin-api/worker",
+              "@rp/plugin-api/client",
+              "react",
+              "react/jsx-runtime",
               ...(test ? ["node:test", "node:assert/strict"] : [])
             ].includes(value)
           )
@@ -159,11 +175,9 @@ try {
     for (const side of ["server", "worker", "client"] as const) {
       const entry = manifest[side]
       if (!entry) continue
-      // P2 supplies the client API and browser output. P1 retains its entry in the manifest.
-      if (side === "client") continue
       await build({
         input: join(folder, entry),
-        platform: "node",
+        platform: side === "client" ? "browser" : "node",
         tsconfig: false,
         output: { file: join(folder, `${side}.mjs`), format: "esm" },
         plugins: [
@@ -172,9 +186,13 @@ try {
             resolveId(source, importer) {
               if (importer === "\0rolldown/runtime.js" && source === "node:module")
                 return { id: source, external: true }
+              if (
+                side === "client" &&
+                ["@rp/plugin-api/client", "react", "react/jsx-runtime", "react/jsx-dev-runtime"].includes(source)
+              )
+                return { id: "/plugin-host.mjs", external: true }
               if (source === `@rp/plugin-api/${side}`) return { id: pathToFileURL(api(side)).href, external: true }
-              if (source === "@rp/plugin-api/server" || source === "@rp/plugin-api/worker")
-                throw new Error("Wrong API entry")
+              if (source.startsWith("@rp/plugin-api/")) throw new Error("Wrong API entry")
               if (importer && !source.startsWith(".") && !source.startsWith("/"))
                 throw new Error("Plugin dependency must be vendored")
               return null
@@ -268,7 +286,7 @@ const report: PluginReport = {
 
 const artifacts: Record<string, string> = {}
 for (const file of await readdir(folder).catch(() => []))
-  if (/^(?:server|worker|worker-bridge|test-[0-9]+)\.mjs$/.test(file))
+  if (/^(?:server|worker|client|worker-bridge|test-[0-9]+)\.mjs$/.test(file))
     artifacts[file] = createHash("sha256")
       .update(await readFile(join(folder, file)))
       .digest("hex")

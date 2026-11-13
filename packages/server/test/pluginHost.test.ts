@@ -472,7 +472,9 @@ it("isolates every user-scoped read and data RPC in both directions, including a
         for (const [index, party] of parties.entries()) {
           const other = parties[1 - index]!
           expect((yield* party.api.ListPlugins()).map((p) => p.id)).toEqual([party.id])
-          expect((yield* party.api.ListClientPlugins()).map((p) => p.id)).toEqual([party.id])
+          // A synthetic settings pin alone has no checked build or active runtime. P2 must not advertise it for loading.
+          // The browser privacy test covers real enabled pins in both accounts.
+          expect(yield* party.api.ListClientPlugins()).toEqual([])
           expect(yield* party.api.GetPlugin({ scope: "user", id: other.id })).toMatchObject({
             commit: null,
             manifest: null,
@@ -707,3 +709,29 @@ it("starts healthy and suspends a user pin whose enabling admin was disabled", a
     )
   )
 }, 60000)
+
+it("checks browser JSX against the shipped API and serves only attested unchanged client output", async () => {
+  const data = tempDir("plugin-browser-build")
+  const id = "browser-build"
+  const source =
+    'import React, {ui,type Activate,useState} from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.composerControls!.register({id:"browser.roll",order:1,placement:"tools",component:({draft})=>{const [n,setN]=useState(0);return <ui.Button hint="Synthetic roll" onClick={()=>{setN(n+1);draft.append(String(n))}}>Roll</ui.Button>}}) };'
+  const files = {
+    ...fixture(id, "export const unused = true", {
+      server: null,
+      client: "client.tsx",
+      surfaces: ["client:composerControls"]
+    }),
+    "client.tsx": source
+  }
+  const commit = await saveFiles(data, "", id, files, true, "Synthetic browser plugin")
+  expect(await checkPlugin(data, "", id, commit)).toMatchObject({ ok: true })
+  const { readClientBuild } = await import("../src/plugins/check.ts")
+  const output = await readClientBuild(data, "", id, commit)
+  expect(output.bytes.toString()).toContain('"/plugin-host.mjs"')
+  const folder = join(data, "plugins/.builds/instance", id, commit)
+  await writeFile(join(folder, "client.mjs"), Buffer.concat([output.bytes, Buffer.from("\n// changed output")]))
+  await expect(readClientBuild(data, "", id, commit)).rejects.toThrow("artifact")
+  await writeFile(join(folder, "client.mjs"), output.bytes)
+  await writeFile(join(pluginFolder(data, "", id), "client.tsx"), source + "\n// changed tree")
+  await expect(readClientBuild(data, "", id, commit)).rejects.toThrow()
+}, 90_000)

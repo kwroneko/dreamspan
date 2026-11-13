@@ -81,7 +81,11 @@ function NotFound() {
 export const buildRouter = (
   options: { history?: RouterHistory; layouts?: Readonly<Record<string, () => ReactNode>> } = {}
 ) => {
-  const rootRoute = createRootRoute({ component: Outlet, notFoundComponent: NotFound })
+  const rootRoute = createRootRoute({
+    component: Outlet,
+    notFoundComponent: NotFound,
+    search: { middlewares: [retainSearchParams(["plugins"])] }
+  })
   const component = (entry: RouteEntry) => options.layouts?.[entry.id] ?? entry.component
   const children = (parentId: string, parent: AnyRoute): Array<AnyRoute> =>
     routes

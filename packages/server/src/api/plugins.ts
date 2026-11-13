@@ -1,4 +1,3 @@
-import { AppConfig } from "../config.ts"
 import { CurrentUser } from "@rp/shared/api.ts"
 import { PluginRejected, type PluginApi } from "@rp/shared/plugins.ts"
 import { ServerError, StaleWrite } from "@rp/shared/errors.ts"
@@ -17,7 +16,6 @@ const boundary = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   )
 export const makePluginHandlers = Effect.gen(function* () {
   const host = yield* PluginHost
-  const config = yield* AppConfig
   return {
     ListPlugins: () => boundary(Effect.flatMap(CurrentUser, (user) => host.list(user))),
     GetPlugin: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.get(user, target))),
@@ -32,17 +30,6 @@ export const makePluginHandlers = Effect.gen(function* () {
     PinPluginCommit: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.pin(user, target))),
     DisablePlugin: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.disable(user, target))),
     DeletePluginData: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.deleteData(user, target))),
-    ListClientPlugins: () =>
-      boundary(
-        Effect.gen(function* () {
-          if (!config.plugins) return []
-          const views = yield* host.list(yield* CurrentUser)
-          return views.flatMap((view) =>
-            view.pin && !view.pin.suspended && view.manifest?.client
-              ? [{ scope: view.scope, id: view.id, commit: view.pin.commit, manifest: view.manifest }]
-              : []
-          )
-        })
-      )
+    ListClientPlugins: () => boundary(Effect.flatMap(CurrentUser, (user) => host.clients(user)))
   } satisfies Parameters<typeof PluginApi.of>[0]
 })

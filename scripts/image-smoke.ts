@@ -1,3 +1,5 @@
+import { chromium } from "@playwright/test"
+import { pluginFiles as clientPluginFiles } from "../packages/client/e2e/support/plugin.ts"
 // Final-image check, against a disposable container started by the deploy gate.
 // Usage: IMAGE_SMOKE_PASSWORD=... npm run smoke:image -- http://127.0.0.1:PORT CONTAINER
 // The caller must disable card sources and set IMAGE_SMOKE_FLAGS (documented in §1).
@@ -7,6 +9,8 @@ import { randomUUID } from "node:crypto"
 import { chmodSync, mkdtempSync, rmSync } from "node:fs"
 import { crc32, deflateSync } from "node:zlib"
 import { promisify } from "node:util"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { AppApi, type AppRpcs } from "../packages/shared/src/api.ts"
 import { ImportResult } from "../packages/shared/src/libraryImport.ts"
 import { LOCAL_ENCODINGS, type LocalEncoding } from "../packages/server/src/importer/tokenizer.ts"
@@ -335,6 +339,38 @@ export const smoke = async (base: string, container: string, password: string) =
       }
       requireThat((yield* api.Whoami()).id === user.id, "broken plugin disturbed the server")
       pass("one synthetic plugin enabled; broken plugin off with a visible report")
+      step = "browser client plugins in the production image"
+      for (const broken of [false, true]) {
+        const id = broken ? "image-client-broken" : "image-client"
+        const source = broken
+          ? 'throw new Error("synthetic client import"); export const activate = () => undefined;'
+          : 'import {type Activate} from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.appBanners!.register({id:"image.client",order:0,component:()=> <p>Synthetic client works</p>}) };'
+        const commit = yield* api.CreatePlugin({
+          scope: "instance",
+          id,
+          files: clientPluginFiles(id, source, ["appBanners"])
+        })
+        requireThat(
+          (yield* api.EnablePlugin({ scope: "instance", id, commit, consent: true })).ok,
+          "client plugin did not build in production"
+        )
+      }
+      yield* Effect.tryPromise(async () => {
+        const browser = await chromium.launch({ headless: true })
+        try {
+          const context = await browser.newContext()
+          const [name, ...value] = cookie!.split("=")
+          await context.addCookies([{ name: name!, value: value.join("="), url: base }])
+          const page = await context.newPage()
+          await page.goto(new URL("/settings/account", base).href)
+          await page.getByText("Synthetic client works", { exact: true }).waitFor()
+          await page.getByText("image-client-broken failed and is off here.", { exact: true }).waitFor()
+          await page.getByRole("heading", { name: "Account", level: 1, exact: true }).waitFor()
+        } finally {
+          await browser.close()
+        }
+      })
+      pass("production browser loads one client plugin and recovers from a broken module")
       step = "synthetic PNG and JSON card import, media and chat"
       for (const extension of ["png", "json"]) {
         const card = syntheticCard(`Image smoke ${extension} ${randomUUID()}`)
@@ -421,7 +457,7 @@ export const smoke = async (base: string, container: string, password: string) =
       step = `negative launch ${setting}`
       const name = `rp-image-smoke-${randomUUID()}`
       names.add(name)
-      const dir = mkdtempSync("<work>/artifacts/imagesmoke1/negative-")
+      const dir = mkdtempSync(join(tmpdir(), "rp-image-smoke-negative-"))
       chmodSync(dir, 0o777)
       dirs.push(dir)
       let code = 0,

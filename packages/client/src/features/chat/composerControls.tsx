@@ -24,6 +24,7 @@ export type Placement = "banner" | "queue" | "strip" | "speaker" | "tools" | "ac
 type Invocation = "button" | "keyboard"
 
 export interface ComposerControlContext {
+  readonly draft: import("../../../../plugin-api/src/client.ts").DraftControl
   readonly compact?: boolean
   readonly recoverQueued: (text: string, images?: MessageImages) => void
   readonly session: ChatSession
