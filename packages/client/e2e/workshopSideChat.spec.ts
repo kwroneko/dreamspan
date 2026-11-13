@@ -12,6 +12,7 @@ import {
   SIDE_ANSWER,
   sidePanel,
   useSideChatProvider,
+  workshopSideChatBranchTests,
   workshopSideChatEffectsTests,
   workshopSideChatTests
 } from "./support/workshopSideChat.ts"
@@ -19,6 +20,7 @@ import { STORY_REPLY } from "./support/workshopProvider.ts"
 
 workshopSideChatTests()
 workshopSideChatEffectsTests()
+workshopSideChatBranchTests()
 
 /** Stop forwarding at the bound even if the renderer is too busy to run an assertion. */
 const readFuse = async (page: Page) => {

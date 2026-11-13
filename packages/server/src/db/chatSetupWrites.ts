@@ -12,7 +12,15 @@ import { recordHistoryReduction } from "./historyChanges.ts"
 // first entry posts after it, in the same transaction (FinishGeneration): a message, then
 // a reply to it, or the reply asked for. The rest wait for that reply. One rule covers
 // Send and Generate: whatever is aimed at a reply still being written waits for it.
-import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import {
+  type ChatId,
+  type EntityId,
+  type ForkId,
+  NewVersion,
+  type SlotId,
+  type StoryAt,
+  type VersionId
+} from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
@@ -291,7 +299,15 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             yield* sql`UPDATE queued_messages SET round_start_slot_id = coalesce(round_start_slot_id, ${next.slotId})
               WHERE id IN ${sql.in(starting)}`
         }
-        return { posted, next: { slotId: next.slotId, versionId: next.version.id as VersionId, forkId: next.forkId } }
+        return {
+          posted,
+          next: {
+            slotId: next.slotId,
+            versionId: next.version.id as VersionId,
+            forkId: next.forkId,
+            ...(first!.story_at_json === null ? {} : { storyAt: JSON.parse(first!.story_at_json) as StoryAt })
+          }
+        }
       })
 
     /**
@@ -465,7 +481,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         commitDraft,
         rewrite,
         round,
-        autoPick
+        autoPick,
+        storyAt
       }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
@@ -532,6 +549,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 no_reply: kind === "message" && noReply === true ? 1 : 0,
                 direction: kind === "generate" && direction !== null && direction.trim() !== "" ? direction : null,
                 auto_pick: autoPick === true && (kind === "generate" || noReply !== true) ? 1 : 0,
+                // A side chat's reply reads its story where the sending tab showed it (spec/WORKSHOP.md §4).
+                story_at_json: storyAt === undefined ? null : JSON.stringify(storyAt),
                 created_at: at,
                 updated_at: at
               })} RETURNING *`

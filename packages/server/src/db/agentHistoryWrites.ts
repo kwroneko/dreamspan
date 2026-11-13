@@ -10,6 +10,7 @@ import type { WriteOps } from "./ops.ts"
 import { agentHistorySnapshot, checkWorkshopAccess, rewriteFork, type WorkshopCall } from "./agentHistoryShared.ts"
 import { selectedIn, nextSeq } from "./forkState.ts"
 import { transaction } from "./tx.ts"
+import { nextReceiptTime } from "./operationReceipts.ts"
 import { workshopLimits } from "../workshopLimits.ts"
 
 const reject = (message: string) => new HistoryRejected({ message })
@@ -166,9 +167,11 @@ export const makeAgentHistoryWriteHandlers = (
         })
         const seq = yield* nextSeq(sql, input.chatId)
         const [after] = yield* sql<{ state_seq: number }>`SELECT state_seq FROM chats WHERE id=${input.chatId}`
-        yield* sql`INSERT INTO rollout_receipts(rollout_id,tool_call_id,result_json,created_at) VALUES (${input.rolloutId},${input.toolCallId},${JSON.stringify(result)},${Date.now()})`
+        // The run's receipt clock, as every other reply effect: bulk Undo follows call order.
+        const receiptAt = yield* nextReceiptTime(sql, input.rolloutId)
+        yield* sql`INSERT INTO rollout_receipts(rollout_id,tool_call_id,result_json,created_at) VALUES (${input.rolloutId},${input.toolCallId},${JSON.stringify(result)},${receiptAt})`
         yield* sql`INSERT INTO rollout_effects(rollout_id,tool_call_id,seq,kind,target_kind,target_id,title,undo_json,created_at)
-        VALUES (${input.rolloutId},${input.toolCallId},0,'changeset.apply','chat',${input.chatId},${input.title},${JSON.stringify({ changesetId: applied.changesetIds[0], chatId: input.chatId, forkId: input.forkId, bytes, seq: after?.state_seq ?? seq })},${Date.now()})`
+        VALUES (${input.rolloutId},${input.toolCallId},0,'changeset.apply','chat',${input.chatId},${input.title},${JSON.stringify({ changesetId: applied.changesetIds[0], chatId: input.chatId, forkId: input.forkId, bytes, seq: after?.state_seq ?? seq })},${receiptAt})`
         return result
       }).pipe(transaction(sql, "ApplyAgentChangeset"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>

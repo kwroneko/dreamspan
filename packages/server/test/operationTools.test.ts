@@ -180,120 +180,150 @@ describe("operation tools", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live(
-    "undoes the first library and chat exposures, and refuses default tool selections before changing them",
-    () => {
-      const config = testConfig()
-      return Effect.gen(function* () {
-        const f = yield* fixture(config.dataDir)
-        const first = yield* f.api.CreateCard({ label: "First", name: "First" })
-        const second = yield* f.api.CreateCard({ label: "Second", name: "Second" })
-        const variant = yield* f.api.ForkCard({
-          refId: first.id,
-          name: "First variant",
-          nickname: "",
-          characterVersion: ""
-        })
-        const preset = yield* f.api.CreatePreset({ label: "Story preset" })
-        const lorebook = yield* f.api.CreateLorebook({ label: "Story lorebook" })
-        const started = yield* f.run("start_chat", { cards: [first.id], title: "Editable story" })
-        assert.isUndefined(started.isError, started.text)
-        const story = yield* f.api.GetChat({ chatId: JSON.parse(started.text).chatId })
-        const connection = yield* f.api.CreateConnection({
-          kind: "openai-chat",
-          settings: {
-            name: "Named connection",
-            baseUrl: "http://127.0.0.1:1/v1",
-            compat: {},
-            cacheTtlS: null,
-            maxConcurrent: null,
-            presetOverrideRefId: null
-          }
-        })
-        yield* f.api.AddUserModel({
-          connectionId: connection.id,
-          key: "synthetic-model",
-          overrides: { name: "Named model" }
-        })
-        const changes = [
-          { _tag: "Model", connection: "Named connection", model: "Named model" },
-          { _tag: "Persona", entityId: second.id },
-          { _tag: "Preset", ref: preset.id },
-          { _tag: "Lorebook", ref: lorebook.id, active: true },
-          { _tag: "CardLorebook", entityId: first.id, on: false },
-          { _tag: "AgentEnabled", on: true },
-          { _tag: "CardsRotation", on: true },
-          { _tag: "ReplyOrder", order: "natural" },
-          { _tag: "Join", entityId: second.id },
-          { _tag: "Leave", entityId: first.id },
-          { _tag: "Swap", entityId: variant.id, replaces: first.id }
-        ]
-        for (const change of changes) {
-          const id = `cast-${change._tag}`
-          const before = yield* f.api.GetCast({
-            chatId: story.id,
-            slotId: story.activeLeafSlotId,
-            forkId: story.currentForkId
-          })
-          const result = yield* f.run("change_chat", { chat: story.id, change }, id)
-          assert.isUndefined(result.isError, `${id}: ${result.text}`)
-          const effect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === id)!
-          yield* f.api.UndoRolloutEffect(effect)
-          const after = yield* f.api.GetCast({
-            chatId: story.id,
-            slotId: story.activeLeafSlotId,
-            forkId: story.currentForkId
-          })
-          assert.deepStrictEqual(after.participants, before.participants, id)
-          assert.deepStrictEqual(after.playedByMe, before.playedByMe, id)
-          assert.deepStrictEqual(after.absent, before.absent, id)
-          assert.deepStrictEqual(after.model, before.model, id)
-          assert.strictEqual(after.preset, before.preset, id)
-          assert.deepStrictEqual(after.lorebooks, before.lorebooks, id)
+  it.live("undoes the first library and chat exposures, including tool selections to and from the app default", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* fixture(config.dataDir)
+      const first = yield* f.api.CreateCard({ label: "First", name: "First" })
+      const second = yield* f.api.CreateCard({ label: "Second", name: "Second" })
+      const variant = yield* f.api.ForkCard({
+        refId: first.id,
+        name: "First variant",
+        nickname: "",
+        characterVersion: ""
+      })
+      const preset = yield* f.api.CreatePreset({ label: "Story preset" })
+      const lorebook = yield* f.api.CreateLorebook({ label: "Story lorebook" })
+      const started = yield* f.run("start_chat", { cards: [first.id], title: "Editable story" })
+      assert.isUndefined(started.isError, started.text)
+      const story = yield* f.api.GetChat({ chatId: JSON.parse(started.text).chatId })
+      const connection = yield* f.api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Named connection",
+          baseUrl: "http://127.0.0.1:1/v1",
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
         }
-        const noUndo = yield* f.run(
-          "change_chat",
-          { chat: story.id, change: { _tag: "AgentTools", tools: [] } },
-          "tools-default"
-        )
-        assert.isTrue(noUndo.isError)
-        assert.include(noUndo.text, "cannot yet be restored by Undo")
-        yield* f.api.ChangeCast({
+      })
+      yield* f.api.AddUserModel({
+        connectionId: connection.id,
+        key: "synthetic-model",
+        overrides: { name: "Named model" }
+      })
+      const changes = [
+        { _tag: "Model", connection: "Named connection", model: "Named model" },
+        { _tag: "Persona", entityId: second.id },
+        { _tag: "Preset", ref: preset.id },
+        { _tag: "Lorebook", ref: lorebook.id, active: true },
+        { _tag: "CardLorebook", entityId: first.id, on: false },
+        { _tag: "AgentEnabled", on: true },
+        { _tag: "CardsRotation", on: true },
+        { _tag: "ReplyOrder", order: "natural" },
+        { _tag: "Join", entityId: second.id },
+        { _tag: "Leave", entityId: first.id },
+        { _tag: "Swap", entityId: variant.id, replaces: first.id }
+      ]
+      for (const change of changes) {
+        const id = `cast-${change._tag}`
+        const before = yield* f.api.GetCast({
           chatId: story.id,
           slotId: story.activeLeafSlotId,
-          forkId: story.currentForkId,
-          change: { _tag: "AgentTools", tools: [] }
+          forkId: story.currentForkId
         })
-        const tools = yield* f.run(
-          "change_chat",
-          { chat: story.id, change: { _tag: "AgentTools", tools: ["read_messages"] } },
-          "tools-explicit"
-        )
-        assert.isUndefined(tools.isError, tools.text)
-        yield* f.api.UndoRolloutEffect(
-          (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === "tools-explicit")!
-        )
-        assert.deepStrictEqual(
-          (yield* f.api.GetCast({ chatId: story.id, slotId: story.activeLeafSlotId, forkId: story.currentForkId }))
-            .agentTools,
-          []
-        )
-        for (const [name, args] of [
-          ["rename_ref", { kind: "preset", item: preset.id, label: "Renamed preset", subtitle: "copy" }],
-          ["set_ref_archived", { kind: "lorebook", item: lorebook.id, archived: true }],
-          ["set_card_favourite", { card: first.id, favourite: true }],
-          ["set_chat_pin", { chat: story.id, pinned: true }],
-          ["fork_variant", { kind: "preset", item: preset.id, label: "Copied preset", subtitle: "" }]
-        ] as const) {
-          const result = yield* f.run(name, args)
-          assert.isUndefined(result.isError, `${name}: ${result.text}`)
-          const effect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === name)!
+        const result = yield* f.run("change_chat", { chat: story.id, change }, id)
+        assert.isUndefined(result.isError, `${id}: ${result.text}`)
+        const effect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === id)!
+        yield* f.api.UndoRolloutEffect(effect)
+        const after = yield* f.api.GetCast({
+          chatId: story.id,
+          slotId: story.activeLeafSlotId,
+          forkId: story.currentForkId
+        })
+        assert.deepStrictEqual(after.participants, before.participants, id)
+        assert.deepStrictEqual(after.playedByMe, before.playedByMe, id)
+        assert.deepStrictEqual(after.absent, before.absent, id)
+        assert.deepStrictEqual(after.model, before.model, id)
+        assert.strictEqual(after.preset, before.preset, id)
+        assert.deepStrictEqual(after.lorebooks, before.lorebooks, id)
+      }
+      const castTools = () =>
+        f.api
+          .GetCast({ chatId: story.id, slotId: story.activeLeafSlotId, forkId: story.currentForkId })
+          .pipe(Effect.map((cast) => cast.agentTools))
+      const undoCall = (id: string) =>
+        Effect.gen(function* () {
+          const effect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === id)!
           yield* f.api.UndoRolloutEffect(effect)
-        }
-        assert.strictEqual((yield* f.api.OpenEditor({ refId: preset.id })).ref.label, "Story preset")
-      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
-    }
-  )
+        })
+      // From the app default to a choice of its own, and Undo goes back to the default exactly.
+      assert.isUndefined(yield* castTools())
+      const fromDefault = yield* f.run(
+        "change_chat",
+        { chat: story.id, change: { _tag: "AgentTools", tools: [] } },
+        "tools-from-default"
+      )
+      assert.isUndefined(fromDefault.isError, fromDefault.text)
+      assert.deepStrictEqual(yield* castTools(), [])
+      yield* undoCall("tools-from-default")
+      assert.isUndefined(yield* castTools())
+      // Clearing the chat's choice is an ordinary change with Undo too.
+      yield* f.api.ChangeCast({
+        chatId: story.id,
+        slotId: story.activeLeafSlotId,
+        forkId: story.currentForkId,
+        change: { _tag: "AgentTools", tools: ["search_chat"] }
+      })
+      const cleared = yield* f.run(
+        "change_chat",
+        { chat: story.id, change: { _tag: "AgentTools", tools: null } },
+        "tools-clear"
+      )
+      assert.isUndefined(cleared.isError, cleared.text)
+      assert.isUndefined(yield* castTools())
+      const clearEffect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find(
+        (e) => e.toolCallId === "tools-clear"
+      )!
+      assert.isNotNull(clearEffect.undo)
+      yield* undoCall("tools-clear")
+      assert.deepStrictEqual(yield* castTools(), ["search_chat"])
+      yield* f.api.ChangeCast({
+        chatId: story.id,
+        slotId: story.activeLeafSlotId,
+        forkId: story.currentForkId,
+        change: { _tag: "AgentTools", tools: [] }
+      })
+      const tools = yield* f.run(
+        "change_chat",
+        { chat: story.id, change: { _tag: "AgentTools", tools: ["read_messages"] } },
+        "tools-explicit"
+      )
+      assert.isUndefined(tools.isError, tools.text)
+      yield* f.api.UndoRolloutEffect(
+        (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === "tools-explicit")!
+      )
+      assert.deepStrictEqual(
+        (yield* f.api.GetCast({ chatId: story.id, slotId: story.activeLeafSlotId, forkId: story.currentForkId }))
+          .agentTools,
+        []
+      )
+      for (const [name, args] of [
+        ["rename_ref", { kind: "preset", item: preset.id, label: "Renamed preset", subtitle: "copy" }],
+        ["set_ref_archived", { kind: "lorebook", item: lorebook.id, archived: true }],
+        ["set_card_favourite", { card: first.id, favourite: true }],
+        ["set_chat_pin", { chat: story.id, pinned: true }],
+        ["fork_variant", { kind: "preset", item: preset.id, label: "Copied preset", subtitle: "" }]
+      ] as const) {
+        const result = yield* f.run(name, args)
+        assert.isUndefined(result.isError, `${name}: ${result.text}`)
+        const effect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === name)!
+        yield* f.api.UndoRolloutEffect(effect)
+      }
+      assert.strictEqual((yield* f.api.OpenEditor({ refId: preset.id })).ref.label, "Story preset")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 
   it.live(
     "runs the bounded reads and history commands, restores revisions, and changes owned defaults with Undo",

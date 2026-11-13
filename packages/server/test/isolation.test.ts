@@ -1193,6 +1193,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  UndoRolloutEffects: {
+    probe: (actor, owner) =>
+      refused(actor.api.UndoRolloutEffects({ chatId: owner.chat.chatId, rolloutId: owner.chat.rolloutId }), "NotFound")
+  },
   SetWorkshopGrant: {
     probe: (actor, owner) =>
       refused(

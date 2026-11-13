@@ -107,15 +107,18 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           key: "lcm.settings",
           value: yield* newChatLcmSettings(sql, userId, false)
         })
-        for (const entity of new Set([card.entity_id, ...(account.persona ? [account.persona] : [])]))
+        // A side chat beside a story doesn't play the account persona: its card is a story
+        // character, whose description and book would put the story's roleplay in its context.
+        const persona = attachTo === undefined ? account.persona : null
+        for (const entity of new Set([card.entity_id, ...(persona ? [persona] : [])]))
           yield* graph.insertStateEvent(userId, chatId, null, null, null, {
             key: "participant.join",
             value: { entity: entity as EntityId }
           })
-        if (account.persona)
+        if (persona)
           yield* graph.insertStateEvent(userId, chatId, null, null, null, {
             key: "played_by_me.set",
-            value: { entities: [account.persona] }
+            value: { entities: [persona] }
           })
         yield* graph.insertStateEvent(userId, chatId, null, null, null, {
           key: "preset.binding",

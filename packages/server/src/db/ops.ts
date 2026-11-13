@@ -27,7 +27,9 @@ import {
   EffectList,
   RolloutEffect,
   RolloutEffectRecord,
-  EffectUndoRefused
+  EffectUndoRefused,
+  ReplyEffects,
+  UndoAllReport
 } from "@rp/shared/workshopApi.ts"
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
@@ -96,7 +98,7 @@ import {
   Version,
   VersionId
 } from "@rp/shared/chat.ts"
-import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
+import { ContextIssue, StoryAtField, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import { RecentRemote, SourcePrefs } from "@rp/shared/cardSources.ts"
 import {
   ForkNote,
@@ -428,7 +430,13 @@ export const SavedMediaDownload = Schema.Struct({
 export type SavedMediaDownload = typeof SavedMediaDownload.Type
 
 /** A reply the send queue posted, generating, for the caller to start in its fork. */
-const QueuedReply = Schema.Struct({ slotId: SlotId, versionId: VersionId, forkId: Schema.optionalKey(ForkId) })
+const QueuedReply = Schema.Struct({
+  slotId: SlotId,
+  versionId: VersionId,
+  forkId: Schema.optionalKey(ForkId),
+  /** A side chat's story position, as the queued entry was sent with it. */
+  storyAt: StoryAtField
+})
 
 /** What the send queue did behind a slot (chatSetupWrites.ts). */
 export const QueueOutcome = Schema.Struct({
@@ -2206,6 +2214,12 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: RolloutEffect,
     error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
   }),
+  /** Every change of one reply not yet undone, newest first, in one transaction (workshopEffects.ts). */
+  Rpc.make("UndoRolloutEffects", {
+    payload: { userId: UserId, ...ReplyEffects },
+    success: UndoAllReport,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   // --- Workshop grants and approvals (workshopGrants.ts; spec/WORKSHOP.md §3.4). Never reached
   // by a tool: the session gives tools a writer without these (agent/tools.ts).
   /** The owner's choice for a capability in a workshop; null removes it (the default holds). */
@@ -2347,7 +2361,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
        */
       round: Schema.optionalKey(Schema.Array(EntityId)),
       /** The reply's speaker and the round's are Auto's picks: the decision model may change each (DESIGN §2.3). */
-      autoPick: Schema.optionalKey(Schema.Boolean)
+      autoPick: Schema.optionalKey(Schema.Boolean),
+      /** A side chat's story position (spec/WORKSHOP.md §4): kept with a queued entry for its reply. */
+      storyAt: StoryAtField
     },
     success: Schema.Union([
       /** `queue`: the chat's queue, when the post queued the rest of a round behind it. */
@@ -3923,10 +3939,21 @@ export class ReadOps extends RpcGroup.make(
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** One live slot with its selected version, as a path shows it, and its chat. */
-  /** A slot as a fork shows it (absent or null: the fork through it, forkAt). */
+  /** Invalidates carried story tool results after edits, swipes, summary or speaker changes. */
+  Rpc.make("StoryReadStamp", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.String,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** One live slot as a fork shows it (absent/null: forkAt), and its chat. */
   Rpc.make("GetSlot", {
-    payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      /** Refuse a slot outside the named fork's display path, rather than reading its own path. */
+      onForkOnly: Schema.optionalKey(Schema.Boolean)
+    },
     success: Schema.Struct({ chatId: ChatId, entry: PathEntry }),
     error: Schema.Union([NotFound, StorageError])
   }),

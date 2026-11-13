@@ -1,9 +1,10 @@
 // Workshop turn continuity is a delta from reference-harness's loadCompletedSessionMaterial:
 // retain the frozen request and the WHOLE transcript; verify the shown path before reuse.
 import { isDeepStrictEqual } from "node:util"
+import type { UserId } from "@rp/shared/domain.ts"
 import type { PathWindow } from "@rp/shared/chatApi.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { PathEntry } from "@rp/shared/chat.ts"
+import type { PathEntry, StoryAt } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { ASSEMBLER_VERSION, type ContextSnapshot } from "../assembler/types.ts"
 import type { Reader } from "../db/Database.ts"
@@ -24,7 +25,17 @@ export interface ContinuityRecord {
   readonly historical?: number
   readonly breakpoints?: ReadonlyArray<number>
 }
-export type ContinuousSnapshot = ContextSnapshot & { readonly continuity?: ContinuityRecord }
+export type ContinuousSnapshot = ContextSnapshot & {
+  readonly continuity?: ContinuityRecord
+  readonly storyAt?: StoryAt
+  readonly storyStamp?: string | null
+}
+
+/** A gone or unowned story has no reusable read material. */
+export const storyReadStamp = (reader: Reader["Service"], userId: UserId, at: StoryAt | undefined) =>
+  at === undefined
+    ? Effect.succeed(undefined)
+    : reader.StoryReadStamp({ userId, chatId: at.chatId }).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
 
 export const pathStamp = (entry: PathEntry) =>
   JSON.stringify([
@@ -63,7 +74,7 @@ export const previousRun = Effect.fnUntraced(function* (
   reader: Reader["Service"],
   request: GenerationRequest,
   path: ReadonlyArray<PathEntry>,
-  fresh: ContextSnapshot
+  fresh: ContinuousSnapshot
 ) {
   const index = path.findLastIndex((entry) => entry.side === "assistant" && entry.version.context !== null)
   if (index < 0) return { reason: "There is no previous run to carry on." } as const
@@ -74,6 +85,12 @@ export const previousRun = Effect.fnUntraced(function* (
   if (material._tag === "None") return { reason: "The previous run is no longer available." } as const
   const stored = material.value
   const snapshot = JSON.parse(stored.snapshot) as ContinuousSnapshot
+  if (!isDeepStrictEqual(snapshot.storyAt, request.storyAt))
+    return {
+      reason: "The story position changed, so this request was put together again without earlier story reads."
+    } as const
+  if (snapshot.storyStamp !== fresh.storyStamp)
+    return { reason: "The story changed, so this request was put together again without earlier story reads." } as const
   if (snapshot.assemblerVersion !== ASSEMBLER_VERSION)
     return {
       reason: "The previous request used an earlier assembler, so this request was put together again."

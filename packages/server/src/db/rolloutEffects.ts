@@ -1,4 +1,4 @@
-import { pendingOperationReceipt } from "./operationReceipts.ts"
+import { nextReceiptTime, pendingOperationReceipt } from "./operationReceipts.ts"
 // A rollout's chat-state effects (spec/AGENTIC.md §4.3): a tool call's notes and state events,
 // attached to the version being generated so they hold only while it's shown (a swipe reverses
 // them), written with the call's receipt in one transaction. A call already receipted writes
@@ -41,7 +41,8 @@ export const makeRolloutEffectHandlers = (steps: LibrarySteps) => {
           }
           return text
         }
-        yield* sql`INSERT OR IGNORE INTO rollout_receipts ${sql.insert({ rollout_id: rolloutId, tool_call_id: toolCallId, result_json: JSON.stringify(result), is_error: isError ? 1 : 0, created_at: Date.now() })}`
+        const at = yield* nextReceiptTime(sql, rolloutId)
+        yield* sql`INSERT OR IGNORE INTO rollout_receipts ${sql.insert({ rollout_id: rolloutId, tool_call_id: toolCallId, result_json: JSON.stringify(result), is_error: isError ? 1 : 0, created_at: at })}`
         for (const [seq, effect] of (effects ?? []).entries()) {
           yield* sql`INSERT INTO rollout_effects ${sql.insert({
             rollout_id: rolloutId,
@@ -52,7 +53,7 @@ export const makeRolloutEffectHandlers = (steps: LibrarySteps) => {
             target_id: effect.targetId,
             title: effect.title,
             undo_json: effect.undo === null ? null : JSON.stringify(effect.undo),
-            created_at: Date.now()
+            created_at: at
           })}`
         }
         const [row] = yield* sql<{

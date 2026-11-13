@@ -998,13 +998,16 @@ it.live("a side-chat reading grant never authorizes the general readers for anot
       version: said("OTHER-STORY-SECRET"),
       commitDraft: null
     })
+    // The story's tab position, as a side chat's request carries it (workfix1).
+    const shown = yield* f.reader.GetChat({ userId: f.userId, chatId: f.chat.id })
     const context: ToolContext = {
       ...f.context,
       chatId: side.id,
       forkId: side.currentForkId,
       leafSlotId: side.activeLeafSlotId,
       rolloutId: run,
-      cache: new Map()
+      cache: new Map(),
+      storyAt: { chatId: f.chat.id, forkId: shown.currentForkId!, leafSlotId: shown.activeLeafSlotId }
     }
     for (const name of ["read_chat", "search_chats"]) {
       const tool = f.tool(name)
