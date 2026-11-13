@@ -7,6 +7,7 @@
 // This module is pure: matching, the split, the loaded set and the index text.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { Message } from "@earendil-works/pi-ai"
+import { pinnedRoute } from "@rp/shared/providers.ts"
 import type { FrozenTool, RolloutTool } from "./tools.ts"
 
 export const TOOL_SEARCH = "tool_search"
@@ -133,6 +134,8 @@ export interface WireTarget {
   readonly kind: string
   readonly api: string
   readonly key: string
+  /** The model's settings in effect; a router's `routing` says which upstreams may serve it. */
+  readonly settings?: { readonly routing?: Readonly<Record<string, unknown>> }
 }
 
 /**
@@ -160,10 +163,25 @@ export const matchPatterns = (names: ReadonlyArray<string>, patterns: ReadonlyAr
 // not prove cache behavior. Dated aliases of these same model versions use the same wire.
 const measuredClaude = /^(?:claude-(?:sonnet|haiku)-4-5(?:-\d{8})?|claude-(?:sonnet|opus|haiku)-5-5(?:-\d{8})?)$/
 
+// OpenRouter Chat Completions, measured live 2026-11-13 (spec/TOOL-LOADING.md §8): Claude only,
+// with its routing pinned to Anthropic or Google Vertex. Through Amazon Bedrock, and for models
+// OpenRouter defers itself (DeepSeek V4 Flash), each newly called loaded tool rewrote the cache
+// after the system prompt.
+const measuredRouterClaude = /^anthropic\/claude-(?:(?:sonnet|haiku)-4\.5|(?:sonnet|opus|haiku)-5\.5)$/
+const measuredRouterUpstreams: ReadonlySet<string> = new Set(["anthropic", "google-vertex"])
+
 export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
   {
     id: "anthropic-messages",
     supports: (t) => t.kind === "anthropic" && measuredClaude.test(t.key),
+    declaresDeferred: true
+  },
+  {
+    id: "openai-completions",
+    supports: (t) =>
+      t.kind === "openrouter" &&
+      measuredRouterClaude.test(t.key) &&
+      measuredRouterUpstreams.has(pinnedRoute(t.settings?.routing) ?? ""),
     declaresDeferred: true
   }
   // Responses serialization remains covered by golden tests, but no live cache measurement

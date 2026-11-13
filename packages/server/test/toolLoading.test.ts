@@ -18,7 +18,12 @@ import {
   loadSkillDescription,
   toolSearchDescription
 } from "../src/agent/toolLoading.ts"
-import { applyAnthropicToolLoading, applyResponsesToolLoading } from "../src/providers/toolLoading.ts"
+import {
+  applyAnthropicToolLoading,
+  applyResponsesToolLoading,
+  applyRouterToolLoading,
+  LOADED_DEFINITIONS
+} from "../src/providers/toolLoading.ts"
 import { prepareTokenizer } from "../src/importer/tokenizer.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
 import { planStepResume, StepNotResumable } from "../src/agent/resume.ts"
@@ -143,6 +148,35 @@ describe("the split", () => {
         assert.strictEqual(offer.tools, tools, target.key)
       }
       assert.strictEqual(split(registry, tools, "rp", claude).deferred.size, 0)
+    }).pipe(Effect.provide(ExecutionRegistry.layer))
+  )
+
+  it.effect("defers on OpenRouter only for the measured models and upstreams", () =>
+    Effect.gen(function* () {
+      const { registry, tools } = yield* workshopTools
+      const route = (only: Array<string>) => ({ routing: { only, allow_fallbacks: false } })
+      const cases: ReadonlyArray<[string, Record<string, unknown> | undefined, boolean]> = [
+        ["anthropic/claude-sonnet-4.5", route(["anthropic"]), true],
+        ["anthropic/claude-haiku-4.5", route(["google-vertex"]), true],
+        ["anthropic/claude-opus-5.5", route(["google-vertex/us-east5"]), true],
+        ["anthropic/claude-sonnet-4.5", undefined, false],
+        ["anthropic/claude-sonnet-4.5", route(["anthropic", "amazon-bedrock"]), false],
+        // Bedrock rewrites the whole cache at the first call of each loaded tool (measured).
+        ["anthropic/claude-sonnet-4.5", route(["amazon-bedrock"]), false],
+        ["anthropic/claude-sonnet-4", route(["anthropic"]), false],
+        ["openai/gpt-5.4-mini", undefined, false],
+        // OpenRouter defers it itself, and each newly called loaded tool rewrote the cache (measured).
+        ["deepseek/deepseek-v4-flash", route(["deepseek"]), false]
+      ]
+      for (const [key, settings, defers] of cases) {
+        const offer = split(registry, tools, "workshop", {
+          kind: "openrouter",
+          api: "openai-completions",
+          key,
+          ...(settings ? { settings } : {})
+        })
+        assert.strictEqual(offer.deferred.size > 0, defers, `${key} ${JSON.stringify(settings)}`)
+      }
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
@@ -370,19 +404,18 @@ const piTool = (t: AnyTool): Tool => ({
   parameters: t.parameters as Tool["parameters"]
 })
 
-const serialize = (
-  api: "anthropic-messages" | "openai-responses",
-  modelId: string,
-  messages: ReadonlyArray<Message>,
-  tools: ReadonlyArray<Tool>
-) =>
+type WireApi = "anthropic-messages" | "openai-responses" | "openai-completions"
+const providerOf = (api: WireApi) =>
+  api === "anthropic-messages" ? "anthropic" : api === "openai-responses" ? "openai" : "openrouter"
+
+const serialize = (api: WireApi, modelId: string, messages: ReadonlyArray<Message>, tools: ReadonlyArray<Tool>) =>
   Effect.promise(async () => {
     const adapter = await import(`@earendil-works/pi-ai/api/${api}`)
     const model: Model<Api> = {
       id: modelId,
       name: "Synthetic",
       api,
-      provider: api === "anthropic-messages" ? "anthropic" : "openai",
+      provider: providerOf(api),
       baseUrl: "http://127.0.0.1:1",
       input: ["text"],
       reasoning: false,
@@ -414,8 +447,8 @@ const serialize = (
     return body!
   })
 
-const conversation = (api: "anthropic-messages" | "openai-responses", modelId: string) => {
-  const provider = api === "anthropic-messages" ? "anthropic" : "openai"
+const conversation = (api: WireApi, modelId: string) => {
+  const provider = providerOf(api)
   const id = (n: string) => (api === "openai-responses" ? `call_${n}|fc_${n}` : `toolu_${n}`)
   const assistant = (name: string, args: unknown, n: string) =>
     ({
@@ -560,6 +593,78 @@ describe("the wire", () => {
       )
       assert.strictEqual(b[a.length + 4]!.namespace, "read_card")
       assert.isUndefined(b[a.length]!.namespace, "a loader is a top-level tool")
+    }).pipe(Effect.provide(ExecutionRegistry.layer))
+  )
+
+  // pi-ai marks the newest message for caching, so that marker moves on every request by design;
+  // the transforms must leave everything else in the earlier messages as it was.
+  const unmarked = (messages: ReadonlyArray<unknown>) =>
+    JSON.stringify(messages, (key, value: unknown) => {
+      if (key === "cache_control") return undefined
+      if (Array.isArray(value) && value.length === 1) {
+        const only = value[0] as { type?: string; text?: unknown; cache_control?: unknown }
+        if (only?.type === "text" && only.cache_control !== undefined && typeof only.text === "string") return only.text
+      }
+      return value
+    })
+
+  const router = (modelId: string) =>
+    Effect.gen(function* () {
+      const { registry, tools } = yield* workshopTools
+      const offer = split(registry, tools, "workshop", claude)
+      const deferred = offer.tools.filter((t) => offer.deferred.has(t.id)).map(piTool)
+      const all = [...offer.tools.filter((t) => !offer.deferred.has(t.id)).map(piTool), ...deferred]
+      const { before, after } = conversation("openai-completions", modelId)
+      const loading = (messages: ReadonlyArray<Message>) => ({
+        api: "openai-completions",
+        deferred,
+        loads: loadPoints(messages, offer.deferred)
+      })
+      const first = applyRouterToolLoading(
+        yield* serialize("openai-completions", modelId, before, all),
+        loading(before)
+      )
+      const second = applyRouterToolLoading(yield* serialize("openai-completions", modelId, after, all), loading(after))
+      type T = { function: { name: string; defer_loading?: boolean } }
+      const flagged = (body: Record<string, unknown>) =>
+        (body.tools as Array<T>).filter((t) => t.function.defer_loading).map((t) => t.function.name)
+      type M = { role: string; tool_call_id?: string; content: unknown }
+      return {
+        deferred,
+        first,
+        second,
+        flagged,
+        messages: (body: Record<string, unknown>) => body.messages as Array<M>
+      }
+    })
+
+  it.effect("OpenRouter Claude: the flags never change and the load's result carries the definitions", () =>
+    Effect.gen(function* () {
+      const { deferred, first, second, flagged, messages } = yield* router("anthropic/claude-sonnet-4.5")
+      assert.strictEqual(JSON.stringify(second.tools), JSON.stringify(first.tools))
+      assert.deepStrictEqual(
+        flagged(first),
+        deferred.map((t) => t.name)
+      )
+      // Anthropic refuses a marker on a deferred tool: pi-ai's moves to the last immediate one.
+      type Marked = { cache_control?: unknown; function: { name: string } }
+      assert.deepStrictEqual(
+        (first.tools as Array<Marked>).filter((t) => t.cache_control !== undefined).map((t) => t.function.name),
+        [(first.tools as Array<Marked>).findLast((t) => !flagged(first).includes(t.function.name))!.function.name]
+      )
+      const a = messages(first)
+      const b = messages(second)
+      assert.strictEqual(unmarked(b.slice(0, a.length)), unmarked(a))
+      const load = b.find((m) => m.role === "tool" && m.tool_call_id === "toolu_2")!
+      const text = load.content as string
+      assert.isTrue(text.startsWith("Loaded 5 tools."))
+      assert.include(text, LOADED_DEFINITIONS)
+      const definitions = text
+        .slice(text.indexOf(LOADED_DEFINITIONS) + LOADED_DEFINITIONS.length)
+        .trim()
+        .split("\n")
+        .map((line) => (JSON.parse(line) as { name: string }).name)
+      assert.deepStrictEqual(definitions, ["read_card", "create_card", "edit_card", "clone_card", "set_card_favourite"])
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 

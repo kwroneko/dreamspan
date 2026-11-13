@@ -27,7 +27,7 @@ import { bedrockOpenAIChatKind, bedrockOpenAIResponsesKind } from "./bedrockOpen
 import { vertexKind } from "./vertex.ts"
 import { builtinProviders } from "@rp/shared/providerDefinitions.ts"
 import { builtinShims } from "./shims.ts"
-import { applyAnthropicToolLoading, applyResponsesToolLoading } from "./toolLoading.ts"
+import { applyAnthropicToolLoading, applyResponsesToolLoading, applyRouterToolLoading } from "./toolLoading.ts"
 
 const completions = openAICompletionsApi()
 
@@ -144,6 +144,14 @@ export const layer = Layer.effectDiscard(
       transform: (payload, request) =>
         request.toolLoading?.api === "openai-responses"
           ? applyResponsesToolLoading(payload, request.toolLoading)
+          : payload
+    })
+    yield* registry.transforms.register({
+      id: "openrouter-tool-loading",
+      appliesTo: (target) => target.kind === "openrouter" && target.api === "openai-completions",
+      transform: (payload, request) =>
+        request.toolLoading?.api === "openai-completions"
+          ? applyRouterToolLoading(payload, request.toolLoading)
           : payload
     })
     // Explicit cache breakpoints (PROVIDERS §8), for Anthropic Messages so far.

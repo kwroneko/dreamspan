@@ -81,6 +81,57 @@ export const applyAnthropicToolLoading = (payload: Json, loading: ToolLoadingReq
   return payload
 }
 
+/** The heading the loaded definitions follow in a loading call's result. */
+export const LOADED_DEFINITIONS = "Loaded tool definitions (call them by name):"
+
+/**
+ * OpenRouter Chat Completions to Claude on an upstream that defers natively (OpenRouter's tool
+ * search guide, "Client-side tool search"): every deferred tool is declared on every request with
+ * `function.defer_loading: true`, and the flags never change. A tool sent without its flag joins
+ * Anthropic's tool prefix and rewrites the cache, and a `tool_reference` reaches the model only as
+ * its name (both measured), so the loading call's result carries the loaded definitions as text
+ * instead and the model calls the declared tools (reference-harness's `declare_deferred_tools` without
+ * tool references).
+ */
+export const applyRouterToolLoading = (payload: Json, loading: ToolLoadingRequest): Json => {
+  const byName = new Map(loading.deferred.map((t) => [t.name, t]))
+  const tools = Array.isArray(payload.tools) ? (payload.tools as Array<unknown>) : []
+  let marker: unknown
+  for (const tool of tools) {
+    const fn = isObject(tool) && isObject(tool.function) ? tool.function : undefined
+    if (!isObject(tool) || !fn || typeof fn.name !== "string" || !byName.has(fn.name)) continue
+    fn.defer_loading = true
+    // Anthropic refuses a cache marker on a deferred tool (measured through OpenRouter: a bare
+    // "Provider returned error"), so pi-ai's marker on the last tool moves to the last immediate one.
+    if (tool.cache_control !== undefined) {
+      marker = tool.cache_control
+      delete tool.cache_control
+    }
+  }
+  if (marker !== undefined) {
+    const last = tools.findLast((t) => isObject(t) && isObject(t.function) && t.function.defer_loading !== true)
+    if (isObject(last)) last.cache_control = marker
+  }
+  if (loading.loads.length === 0) return payload
+  const loads = new Map(loading.loads.map((l) => [l.toolCallId, l.names]))
+  for (const message of Array.isArray(payload.messages) ? payload.messages : []) {
+    if (!isObject(message) || message.role !== "tool" || typeof message.tool_call_id !== "string") continue
+    const names = loads.get(message.tool_call_id) ?? loads.get(message.tool_call_id.split("|")[0] ?? "")
+    if (!names) continue
+    const definitions = names.flatMap((name) => {
+      const tool = byName.get(name)
+      return tool
+        ? [JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.parameters })]
+        : []
+    })
+    if (definitions.length === 0) continue
+    const text = `\n\n${LOADED_DEFINITIONS}\n${definitions.join("\n")}`
+    if (typeof message.content === "string") message.content = `${message.content}${text}`
+    else if (Array.isArray(message.content)) message.content.push({ type: "text", text })
+  }
+  return payload
+}
+
 /** pi-ai's Responses call id normalization (`call_id` is the part before `|`). */
 const responsesId = (id: string) =>
   (id.split("|")[0] ?? id)

@@ -1,6 +1,6 @@
 # Dynamic tool loading: tool_search, load_skill and card skills
 
-**Status**: Implemented portions obsolete as proposals (§2–§7, §10), reviewed 2026-11-13 (`review-toolload1`); ARCHITECTURE.md records the implementation. Remaining choices are **[P]** unless they quote the owner. It is a delta from the build at master `44c46181` (agent session `agent/session.ts`, provider transforms `providers/builtins.ts`) and from reference-harness on branch `latest` (`src/agent/declared-tools.ts`, `src/tools/tool-search.ts`, `src/tools/load-skill.ts`).
+**Status**: Implemented portions obsolete as proposals (§2–§7, §10), reviewed 2026-11-13 (`review-toolload1`); provider research and the OpenRouter wire 2026-11-13 (§8.1, §8.2, §13); ARCHITECTURE.md records the implementation. Remaining choices are **[P]** unless they quote the owner. It is a delta from the build at master `44c46181` (agent session `agent/session.ts`, provider transforms `providers/builtins.ts`) and from reference-harness on branch `latest` (`src/agent/declared-tools.ts`, `src/tools/tool-search.ts`, `src/tools/load-skill.ts`).
 
 The owner: "we obviously need toolsearch (that *doesn't* break the cache) and skills like reference-harness does. We can't load all tools at once." And: "This MUST actually be tested with each provider. It will not work consistently out of the box." And on cards: "workshops still have a card you're talking to. It would either supply personality or specific skills/agent defs etc, but it can just be a regular card. We will likely supply some default ones of our own."
 
@@ -30,10 +30,13 @@ Registry `ExecutionRegistry.toolLoadingWires`, keyed by wire API: `{ id, support
 | Wire | Supports | How a load is sent |
 | --- | --- | --- |
 | `anthropic-messages` | connection kind `anthropic` only; measured Sonnet/Haiku 4.5 and Sonnet/Opus/Haiku 5.5, including dated aliases | Every tool declared on every request; deferred ones get `defer_loading: true`. The cache marker pi-ai puts on the last tool moves to the last immediate one (a deferred tool can't carry it). The loading call's `tool_result` becomes `tool_reference` blocks only; its text moves after the message's tool results (the API refuses the two mixed: measured, §8) |
+| `openai-completions` (OpenRouter) | connection kind `openrouter`, model `anthropic/claude-sonnet-4.5`, `-haiku-4.5`, `-sonnet-5.5`, `-opus-5.5` or `-haiku-5.5`, with the model's routing pinned to one upstream: `anthropic` or `google-vertex` (any region). Unpinned, Bedrock-pinned and every other model: nothing | Every tool declared on every request; deferred ones get `function.defer_loading: true` and the flags never change. pi-ai's cache marker on the last tool moves to the last immediate one (with it on a deferred tool OpenRouter returns 400 "Provider returned error": measured). The loading call's tool message gets the loaded definitions appended as text, after the heading "Loaded tool definitions (call them by name):", one JSON line `{name, description, parameters}` each; the model then calls the declared tools by name |
 | `openai-responses` (candidate only, disabled) | none until measured live | Only immediate tools top-level. After the loading call's `function_call_output`: a `tool_search_call` / `tool_search_output` pair (`execution: "client"`) with the loaded definitions, `defer_loading: true`. A later `function_call` of a loaded tool gets `namespace` = its name |
-| every other wire and host (Chat Completions, OpenRouter, DeepSeek, Google, Bedrock, Vertex, Bedrock-hosted OpenAI) | nothing | Every tool from the start, as today |
+| every other wire and host (OpenAI and other Chat Completions servers, DeepSeek, Google, Bedrock, Vertex, Bedrock-hosted OpenAI) | nothing | Every tool from the start, as today |
 
-The transforms are `providers/toolLoading.ts`, registered first in `providers/builtins.ts` so the breakpoint transforms see the final tools. They act only when the session passes `toolLoading` in the stream options.
+The transforms are `providers/toolLoading.ts`, registered first in `providers/builtins.ts` so the breakpoint transforms see the final tools. They act only when the session passes `toolLoading` in the stream options. Why OpenRouter's Claude gets definitions as text, not `tool_reference` or a reveal: §8.2.
+
+Every tool's `parameters` are sent in a form every provider accepts (`portableParameters`, `agent/operations.ts`): a `pattern` with a Unicode property escape (`\p{…}`, `\P{…}`) is left out, and a schema that isn't an object becomes an empty object schema. OpenAI's models through OpenRouter refused both with 400 "Provider returned error" (measured on `openai/gpt-5.4-nano`: `create_preset` and `create_lorebook` carried `^\P{Cc}*$`, `read_settings` had no `type: "object"`). The app still checks arguments against the full schema, so a name with a control character is still refused, by the app instead of the provider.
 
 ## 4. The loaded set comes from the transcript
 
@@ -98,23 +101,71 @@ A card carries skills in `extensions.rp_harness.skills` (format **[P]**), which 
 
 Found by measuring: Anthropic rejects a `tool_result` holding both `tool_reference` and text ("Tool definitions/code execution functions cannot be mixed with other content"); §3's text move is the fix.
 
+### 8.1 Through the app, 2026-11-13
+
+The same test, with OpenRouter models pinned as the model page's routing setting pins them (`routing: { only: [upstream], allow_fallbacks: false }`). Every target passed.
+
+| Target | Loading | Before the load (read/input) | Read after load | Tool list bytes | Result |
+| --- | --- | --- | --- | --- | --- |
+| OpenRouter → claude-haiku-4.5, pinned `anthropic` | yes | 7727/7732, 7968/7973 | 8050 of 8055 | same on all 6 (30 tools, 26 flagged) | pass; `read_card` called twice |
+| OpenRouter → claude-sonnet-4.5, pinned `anthropic` | yes | 7727/7732, 7962/7967 | 8103 of 8108 | same on all 6 | pass |
+| OpenRouter → claude-sonnet-5.5, pinned `anthropic` | yes | 10732/10734, 11002/11004 | 11153 of 11155 | same on all 6 | pass; `read_card` called twice |
+| OpenRouter → claude-haiku-4.5, pinned `google-vertex` | yes | 7727/7732, 7967/7972 | 8052 of 8057 | same on all 6 | pass |
+| OpenRouter → claude-sonnet-4.5, pinned `google-vertex` | yes | 7728/7733, 7966/7971 | 8110 of 8115 | same on all 6 | pass; `read_card` called twice |
+| OpenRouter → claude-sonnet-4.5, pinned `amazon-bedrock` | no (all tools, §8.2) | 13105/13110, 13339/13344, 13483/13488, 13786/13791 | — | same | pass (baseline) |
+| OpenRouter → claude-haiku-4.5, unpinned | no (all tools) | 13105/13110, 13351/13356, 13506/13511, 13817/13822 | — | same | pass (baseline) |
+| OpenRouter → deepseek/deepseek-v4-flash | no (all tools, §8.2) | 11904/12047, 12032/12174, 12160/12454, 12416/12734 | — | same | pass (baseline) |
+| OpenRouter → openai/gpt-5.4-nano | no (all tools) | 5632/6416, 5632/6519, 5632/6744, 6656/6969 | — | same | pass (baseline); the 2026-11-12 400 was the tool schemas (§3), fixed |
+
+The first app run on OpenRouter Claude failed: 400 `{"message":"api_error: Provider returned error","type":"invalid_request_error"}`. Replaying the saved body with one change at a time found the cause: pi-ai's `cache_control` on the last tool, which was deferred. §3's marker move fixed it.
+
+### 8.2 Probes for each provider, 2026-11-13
+
+Hand-written requests of the same shape (26 deferred and 4 immediate synthetic tools, a load of 5, ≈6k tokens of synthetic text). R*n* is request *n*; the load is in R3's history. "Read" is the provider's cache read. Each long text was placed both before the tool list (system prompt) and after it (first user message), because a provider that renders tools after the system prompt rewrites only what follows them.
+
+| Host → model | Mechanism | Result | Verdict |
+| --- | --- | --- | --- |
+| Anthropic direct (4 models) | `tool_reference` in the load's result (the built wire) | expanded in place (+≈640 tokens, written once); R3 read the whole prefix; each model called `read_card` | pass (§8) |
+| OpenRouter → Claude, `anthropic` / `google-vertex` (haiku-4.5, sonnet-4.5, sonnet-5.5, opus-5.5, haiku-5.5) | flags fixed, definitions as text in the load's result | sonnet-4.5 R3 read 7294 of 7299; haiku-4.5 7291 of 7296; 5.5 models ≈11083 of 11085. Extended to 7 requests with the text after the tools: every request read the one before (Vertex R3 7298/7837 … R7 8060/8141; Anthropic the same), including the first call of each newly used loaded tool | pass: built (§3) |
+| same | `tool_reference` parts in the tool message | cache held (R3 read 7294 of 7299), but OpenRouter passed them on as text without expanding (+85 tokens, against +637 direct). Haiku 4.5 and the 5.5 models then called `tool_search` instead of the loaded tool | fail: the model can't see the definitions |
+| same | reveal: drop a loaded tool's flag | R3 read 0, wrote 7939 | fail: the tool list is cached as one prefix |
+| OpenRouter → Claude, `amazon-bedrock` | definitions as text, and `tool_reference` | the load itself held, but the first call of each newly used loaded tool read 0 and rewrote everything (R4 and R6; input +108–187 over the Anthropic upstream). Reproduced 4 times | fail |
+| OpenRouter Responses → Claude (all three upstreams) | `defer_loading` with OpenRouter's tool search | deferral and expansion work; the load busts once (R3 read 0, write ≈8220). Caching needs a top-level `cache_control` there | fail: one full rewrite per load |
+| OpenRouter → openai/gpt-5.4-mini, Responses | `tool_search_call` / `tool_search_output` pair (the built candidate) | R3 read 0, 3 runs of 3; reads afterwards | fail |
+| same | `additional_tools` item at the load | cache held, and the model called `read_card`, but any later request replaying that call: 400 "Provider returned error" (with or without `namespace`, and replayed verbatim) | fail |
+| OpenRouter → openai/gpt-5.4-mini, Chat Completions | `function.defer_loading` and reveal | R3 cache bust | fail |
+| OpenRouter → deepseek/deepseek-v4-flash, pinned `deepseek` | `function.defer_loading` (OpenRouter defers it itself: R1 6210 in against 8861 with all tools) | text before the tools: reveal kept the prefix (R3 read 6144 of 6282). Text after the tools: reveal read 256 of 6871 at the load; definitions as text held the load (R3 6272 of 6767) and the model called `read_card`, but the first call of each newly used loaded tool read 384 (R4, R6) | fail: a workshop's history comes after the tools |
+| DeepSeek direct, Chat Completions | `function.defer_loading` | accepted and ignored (R1 8860 in, with and without) | no mechanism |
+| OpenRouter Chat Completions | OpenRouter's `deferred_tools` protocol (`v1`, `portable`) | 403 "Deferred-tool protocol is unavailable for this workspace." Its docs also forbid history edits, which step edits need | not usable |
+
+Not reached from the test environment (a limit of the test setup, not of the providers): OpenAI direct (both APIs), OpenRouter's `/v1/messages` and its endpoint list, and DeepSeek's Anthropic-compatible API. They stay at "every tool from the start" until measured.
+
+DeepSeek through OpenRouter also needs `reasoning` / `reasoning_content` on a replayed assistant tool call (400 without). Its valid ids are `deepseek/deepseek-v4-flash`, `deepseek/deepseek-v4-pro` and `deepseek/deepseek-chat`.
+
 ## 9. reference-harness's caching problems, and how this avoids them
 
 1. Responses `supports_tool_search` off by default (f631da3f; 71 of 72 skill loads rewrote the whole context): here the Responses wire uses `tool_search_output` items whenever it's on, and a wire is on only for its measured host.
 2. Responses deferred `function_call` replay without namespace: 400 "Missing namespace for function_call" (347a99b2, 5c44829b): the transform sets `namespace` to the tool's name on every replayed call of a loaded tool.
 3. Anthropic: declaring a loaded tool only at load time changes `tools`, rewriting the cache and invalidating thinking bound to the prefix (e4a7823d, f4f4119e): every tool is declared from the first request, deferred ones marked; the tool list bytes never change (measured, §8).
-4. Bedrock has no cache lookback, and its own breakpoints work (96a2c8ce, 58480097): Bedrock gets no wire, so nothing is deferred there until it is measured.
-5. Tools the agent shouldn't search (6618bd30, harness-only tools): only the run's frozen offer is searchable.
+4. Bedrock has no cache lookback, and its own breakpoints work (96a2c8ce, 58480097): Bedrock gets no wire. Through OpenRouter it was measured (§8.2): each newly used loaded tool rewrote the whole cache, so a Bedrock-pinned or unpinned OpenRouter Claude gets every tool. Direct Bedrock (connection kind `bedrock`) is not measured: Anthropic's docs list tool search on Bedrock's InvokeModel only, not Converse.
+5. Hosts that don't defer natively: reference-harness's `declare_deferred_tools` with `supports_tool_references` off sends loaded definitions as text. That works through OpenRouter only where the upstream defers natively (Anthropic, Vertex); where OpenRouter defers itself (DeepSeek) or Bedrock serves, the first call of each loaded tool rewrote the cache (§8.2), so those get every tool instead.
+6. Tools the agent shouldn't search (6618bd30, harness-only tools): only the run's frozen offer is searchable.
 
 ## 10. Built, and not yet
 
-Built: §2–§6 server side, §7 (fields and the inspector's groups), the transforms, tests (`toolLoading.test.ts`, `toolLoadingWorkshop.test.ts`, live `live/toolLoading.test.ts`, e2e `toolLoading.spec.ts`).
+Built: §2–§6 server side, §7 (fields and the inspector's groups), the transforms (Anthropic Messages, OpenRouter Chat Completions for pinned Claude), portable tool schemas, tests (`toolLoading.test.ts`, `toolLoadingWorkshop.test.ts`, `operationTools.test.ts`, live `live/toolLoading.test.ts`, e2e `toolLoading.spec.ts`).
 
-Not yet: a client view of a card's skills in the card editor; wires for Bedrock, Vertex, OpenRouter and DeepSeek, and either option of §11.1 for them.
+Not yet: a client view of a card's skills in the card editor; any loading for OpenAI (direct or through OpenRouter), DeepSeek, Google, direct Bedrock and direct Vertex, and the fallback of §11.1 for them.
 
 ## 11. Open questions
 
-1. **Hosts without a wire** (OpenRouter, DeepSeek, Bedrock, Google). Today they get every tool from the start. Neither option is built:
+1. **Hosts without a wire** (OpenAI, DeepSeek, Google, Bedrock, Vertex, and OpenRouter except pinned Claude). §8.2 found no way, on any of them, to load a tool that keeps the cache: OpenAI's tool search rewrote it at the load or refused the replayed call, DeepSeek ignores the flag, and where OpenRouter defers itself or serves through Bedrock the first call of each loaded tool rewrote it. Today they get every tool from the start, which is (c) below. The options **[P]**, none built beyond (c):
+
+   - (c) **Every tool from the start** (today). Worked example: a workshop on DeepSeek, a 40,000-token chat, the user asks to make a card warmer. Every request carries all 28 definitions (≈4,200 tokens) before the chat; after the first request they are cache reads like the rest. Nothing is ever rewritten. The cost is ≈4,200 tokens of context and cache reads on every request, and the model choosing among 28 tools.
+   - (a) **Grow `tools` at a load.** Same example: the run starts with 4 tools; the assistant calls `load_skill("cards")`, and the next request adds the 5 card tools to `tools`. Everything after the system prompt changes position, so that request pays for the 40,000 tokens again, uncached or as a cache write, once per load (measured below: DeepSeek read 1,536 of 52,414). A long chat pays that on every skill it loads.
+   - (b) **Definitions as text, one dispatcher**. Same example: the run starts with 4 tools plus `call_tool { name, arguments }`. The `load_skill("cards")` result carries the 5 definitions as text (≈1,800 tokens). To edit, the model calls `call_tool { "name": "edit_card", "arguments": { "card": "Tide", … } }`; the app checks the arguments against `edit_card`'s schema and runs it as if called directly (approvals and receipts included). `tools` never changes, so the next request reads the 40,000 tokens from the cache (measured: 50,688 of 52,397). The price: the provider doesn't enforce the arguments' schema, the model calls through one more step, and `call_tool` is one more definition on every request. Unlike §8.2's text mode, the loaded tools aren't declared, so nothing new is called that the provider could treat as a first use.
+
+   (a) and (b) measured 2026-11-12, without the app (synthetic transcript; a load of 5 definitions, ≈1.8k tokens; "control" repeats the request unchanged):
    - (a) **Grow `tools` at a load.** The loaded definitions join `tools`; the request after the load rereads nothing past the system prompt, so it pays for the whole transcript uncached (or as a cache write), once per load.
    - (b) **Definitions as text, one dispatcher.** An immediate `call_tool { name, arguments }` is declared from the start; a load returns the loaded definitions as tool-result text, and the model calls them through `call_tool`. `tools` never changes, so the request after a load reads the whole cache. The price: the model calls tools indirectly (argument schemas aren't enforced by the provider, so the app validates them), and `call_tool` itself is one more tool from the first request.
 
@@ -128,10 +179,33 @@ Not yet: a client view of a card's skills in the card editor; wires for Bedrock,
    | OpenRouter → anthropic/claude-haiku-4.5 | 57,928 tokens | read 57,925 | write 59,788, read 0 | read 58,039, write 1,752 |
 
    So (a) costs the whole transcript once per load (≈50k tokens at 50k); (b) costs only the loaded definitions. Switching a running chat to (b) costs one full rewrite itself, since adding `call_tool` changes `tools` (measured: DeepSeek read 1,536, OpenRouter wrote everything). DeepSeek also needs `reasoning_content` on a replayed assistant tool call (400 otherwise).
+
+   (b) on the two OpenRouter routes where §8.2's text mode failed, 2026-11-13 (7 requests, the long text after the tools, `call_tool` and 4 immediate tools; the load in R3's history; R3, R5 and R6 call loaded tools through `call_tool`, the model choosing it unprompted at R3):
+
+   | Route | R2 read/input | R3 (load) | R4 | R6 (a second loaded tool's first call) | R7 |
+   | --- | --- | --- | --- | --- | --- |
+   | deepseek/deepseek-v4-flash, pinned `deepseek` | 6144/6346 | 6272/6830 | 6784/6921 | 6912/7097 | 6912/7166 |
+   | claude-haiku-4.5, pinned `amazon-bedrock` | 7286/7372 | 7367/7906 | 7901/8008 | 8102/8206 | 8201/8282 |
+
+   So (b) keeps the cache where every other mechanism failed. Whether to build it, for which hosts, and whether a chat already running switches to it (one full rewrite) is the owner's choice.
+
 ## 12. Review verification (2026-11-13)
 
-The active loading profile is limited to the five measured Anthropic model versions in §8. Responses and all other unmeasured profiles send every tool from the start. No provider calls were made during review; §8 records the builder's measurements, not new live verification.
+(Round 3 has since added pinned OpenRouter Claude, §3 and §8.1.) The active loading profile is limited to the five measured Anthropic model versions in §8. Responses and all other unmeasured profiles send every tool from the start. No provider calls were made during review; §8 records the builder's measurements, not new live verification.
 
 Public documentation checked: [Anthropic custom tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) specifies top-level declarations and tool-reference results; [Anthropic tool caching](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching) requires cache markers on immediate tools. The existing transform follows these shapes and keeps reference-only results, with skill text after results. [OpenAI tool search](https://developers.openai.com/api/docs/guides/tools-tool-search) documents client call/output items, deferred definitions and namespaced calls; its unmeasured candidate transform remains covered offline, disabled in built-in profiles.
 
 Regressions: `toolLoadingReview.test.ts` (untrusted index/read, frozen and selected skills, collisions, transcript load provenance, continuity changes, limits), `toolLoading.test.ts` (wire bytes and RP/unprofiled parity), `toolLoadingWorkshop.test.ts` (real server loop, approvals, batches, carry and step edit), `formats/cardExport.test.ts` (skills plus notes round trips), browser `toolLoading.spec.ts` (saved inspector groups after restart and layout).
+
+## 13. What each provider documents (checked 2026-11-13)
+
+| Source | What it says that matters here |
+| --- | --- |
+| [OpenRouter tool search](https://openrouter.ai/docs/guides/features/server-tools/tool-search) | Client-side deferral: `defer_loading` on a function tool. Native deferral where Claude runs on Anthropic, Vertex, Azure Foundry or Claude Platform on AWS; OpenRouter defers the rest itself, rolled out per account. Its own search tool's name is checked. The `deferred_tools` protocol, its error codes, and its ban on history edits |
+| [OpenRouter prompt caching](https://openrouter.ai/docs/guides/best-practices/prompt-caching) | Claude on the Responses API needs a top-level `cache_control` to cache |
+| [OpenRouter provider selection](https://openrouter.ai/docs/guides/routing/provider-selection) | `only`, `order` and `allow_fallbacks`: how a model is pinned to one upstream |
+| [OpenAI tool search](https://developers.openai.com/api/docs/guides/tools-tool-search) | gpt-5.4 and later only. Loaded tools go at the end of the context, keeping the cache; `tool_search_call` / `tool_search_output` and `additional_tools` items |
+| [Anthropic tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) | Custom tool search returns `tool_reference` blocks; supported models; on Bedrock through InvokeModel only (not Converse), and on Vertex |
+| [DeepSeek Anthropic API](https://api-docs.deepseek.com/guides/anthropic_api) | Tool fields `name`, `input_schema`, `description`; `cache_control` ignored; no `defer_loading`, no `tool_reference` |
+| reference-harness `latest` (9b385944), `spec/DYNAMIC-TOOL-LOADING.md` | Per-transport table; compat flags `supports_tool_search` (on by default), `supports_tool_references`, `declare_deferred_tools` (definitions as text when references are off), `drop_stale_thinking` |
+| pi-ai 0.84.2 (npm) | Deferral modes: `kimi` (tools in a system message) only for Kimi K3 on Moonshot and Fireworks, never DeepSeek or OpenRouter; `supportsAdditionalTools` / `supportsToolSearch` for OpenAI gpt-5.4+; tool references off for Haiku. The installed pi-ai 1.0.3 has no deferral support |

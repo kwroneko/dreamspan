@@ -12,6 +12,7 @@ import { join } from "node:path"
 import { posted } from "../support/config.ts"
 import { findings, LIVE, liveEnabled, liveKey, lore, wireUsage } from "./support/live.ts"
 import { type CacheDialect, liveTest, wireCounts } from "./support/scenarios.ts"
+import { LOADED_DEFINITIONS } from "../../src/providers/toolLoading.ts"
 
 const f = findings("toolLoading")
 
@@ -25,7 +26,22 @@ interface Target {
   /** Whether the app defers tools for this target (a registered, matching wire). */
   readonly loads: boolean
   readonly loreTokens: number
+  /** A router's upstream, pinned with no fallbacks, as the model page's routing setting sets it. */
+  readonly pin?: string
 }
+
+// OpenRouter's Claude, pinned to one upstream: deferral is measured per upstream, not per model.
+const router = (model: string, pin: string, loads: boolean): Target => ({
+  id: `openrouter ${model.replace(/^anthropic\/claude-/, "")} ${pin}`,
+  kind: "openrouter",
+  route: "openrouter/v1",
+  provider: "openrouter",
+  model,
+  dialect: "openrouter",
+  loads,
+  loreTokens: 6000,
+  pin
+})
 
 // Support is per model: the current Claude models, each with enough lore to pass any cache minimum.
 const claude = (version: string, model: string): Target => ({
@@ -83,6 +99,26 @@ const targets: ReadonlyArray<Target> = [
     loads: false,
     loreTokens: 6000
   },
+  router("anthropic/claude-haiku-4.5", "anthropic", true),
+  router("anthropic/claude-sonnet-4.5", "anthropic", true),
+  router("anthropic/claude-sonnet-5.5", "anthropic", true),
+  router("anthropic/claude-haiku-4.5", "google-vertex", true),
+  router("anthropic/claude-sonnet-4.5", "google-vertex", true),
+  // Bedrock rewrites its cache at the first call of each loaded tool, so it gets every tool.
+  router("anthropic/claude-sonnet-4.5", "amazon-bedrock", false),
+  // OpenRouter defers DeepSeek itself, and each newly called loaded tool rewrote the cache after
+  // the system prompt, so it gets every tool too.
+  {
+    id: "openrouter deepseek-v4-flash",
+    kind: "openrouter",
+    route: "openrouter/v1",
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    dialect: "openrouter",
+    loads: false,
+    loreTokens: 6000,
+    pin: "deepseek"
+  },
   {
     id: "openrouter openai",
     kind: "openrouter",
@@ -139,7 +175,11 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
           },
           apiKey: liveKey(t.route)
         })
-        const model = yield* api.AddUserModel({ connectionId: connection.id, key: t.model, overrides: {} })
+        const model = yield* api.AddUserModel({
+          connectionId: connection.id,
+          key: t.model,
+          overrides: t.pin ? { settings: { routing: { only: [t.pin], allow_fallbacks: false } } } : {}
+        })
         yield* api.ChangeGenerationDefaults({ change: { model: { connection: connection.id, model: model.id } } })
         const chat = yield* api.CreateWorkshop({})
         const events: Array<ChatEvent> = []
@@ -168,7 +208,14 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
         const version = events
           .flatMap((e) => (e._tag === "Version" && e.version.id === versionId ? [e.version] : []))
           .at(-1)
-        const exchanges = recorder.exchanges.slice(from).filter((e) => !e.path.endsWith("/models"))
+        // Model requests only: a router's endpoint list (`/models/{id}/endpoints`) isn't one.
+        const exchanges = recorder.exchanges.slice(from).filter((e) => !e.path.includes("/models"))
+        type Fn = { function?: { defer_loading?: boolean } }
+        const flagged = (e: (typeof exchanges)[number]) =>
+          Array.isArray(e.request?.tools)
+            ? (e.request.tools as Array<Fn>).filter((tool) => tool.function?.defer_loading === true).length
+            : 0
+        const firstFlagged = exchanges[0] ? flagged(exchanges[0]) : 0
         const rows = exchanges.map((e, i) => {
           const body = JSON.stringify(e.request ?? {})
           const counts = wireCounts(t.dialect, wireUsage(e.body))
@@ -181,8 +228,14 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
             input: uncached + read + (t.dialect === "anthropic" ? write : 0),
             read,
             write,
-            // The first request whose history carries a load: Anthropic's reference, Responses' output item.
-            loaded: body.includes('"tool_reference"') || body.includes('"tool_search_output"'),
+            // The first request whose history carries a load: Anthropic's reference, Responses' output
+            // item, OpenRouter's definitions in the load's result or a loaded tool sent unflagged.
+            loaded:
+              body.includes('"tool_reference"') ||
+              body.includes('"tool_search_output"') ||
+              body.includes(LOADED_DEFINITIONS) ||
+              flagged(e) < firstFlagged,
+            flagged: flagged(e),
             tools: Array.isArray(e.request?.tools) ? (e.request.tools as Array<unknown>).length : 0,
             toolsBytes: JSON.stringify(e.request?.tools ?? null).length
           }
@@ -191,6 +244,19 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
         writeFileSync(
           join(LIVE.out, `toolLoading-${t.id.replace(/[^a-z0-9]+/gi, "-")}.json`),
           JSON.stringify({ target: t, status: version?.status, error: version?.error, rows }, null, 2)
+        )
+        // The requests themselves, and any refusal, for reading a failure afterwards.
+        writeFileSync(
+          join(LIVE.out, `toolLoading-${t.id.replace(/[^a-z0-9]+/gi, "-")}-requests.json`),
+          JSON.stringify(
+            exchanges.map((e) => ({
+              status: e.status,
+              request: e.request,
+              ...(e.status !== 200 ? { body: e.body } : {})
+            })),
+            null,
+            1
+          )
         )
         process.stdout.write(`[live] ${t.id} ${JSON.stringify(rows)}\n`)
         f.check(t.id, "the reply finished", version?.status === "complete", {
@@ -218,7 +284,7 @@ describe.skipIf(!liveEnabled && !(LIVE.keyDir && only))("live tool loading", () 
                 actual: { before, after }
               }
             )
-            if (t.dialect === "anthropic")
+            if (t.dialect === "anthropic" || t.model.startsWith("anthropic/"))
               f.check(
                 t.id,
                 "the tool list is the same bytes on every request",

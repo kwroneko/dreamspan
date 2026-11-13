@@ -5,6 +5,7 @@ import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
+import { portableParameters } from "../src/agent/operations.ts"
 import { client, serverLayer, testConfig, outcome } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { eventually } from "./support/generation.ts"
@@ -682,4 +683,43 @@ it.live("revision restores cannot remove a user's agent-edit field permissions",
     assert.include(result.text, "permissions")
     assert.deepStrictEqual((yield* f.api.OpenEditor({ refId: ref.id })).doc.agent_editable_fields, ["description"])
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+describe("tool schemas every provider accepts", () => {
+  it("drops Unicode property patterns and makes an empty payload an object", () => {
+    const label = { type: "string", maxLength: 200, allOf: [{ pattern: "^\\P{Cc}*$" }] }
+    assert.deepStrictEqual(
+      portableParameters({ type: "object", properties: { label, plain: { type: "string", pattern: "^a$" } } }),
+      {
+        type: "object",
+        properties: { label: { type: "string", maxLength: 200 }, plain: { type: "string", pattern: "^a$" } }
+      }
+    )
+    assert.deepStrictEqual(portableParameters({ not: { type: "null" }, $defs: {}, additionalProperties: false }), {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+      $defs: {}
+    })
+  })
+
+  it.effect("every workshop tool sends an object schema with no Unicode property escapes", () =>
+    Effect.gen(function* () {
+      const registry = yield* ExecutionRegistry
+      for (const entry of registry.operationTools.list()) {
+        const parameters = toolForKind(registry, "workshop", entry.id)!.parameters as Record<string, unknown>
+        assert.strictEqual(parameters.type, "object", entry.id)
+        assert.notMatch(JSON.stringify(parameters), /\\\\[pP]\{/, entry.id)
+      }
+    }).pipe(Effect.provide(ExecutionRegistry.layer))
+  )
+
+  it.live("still refuses a control character the model's copy no longer describes", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* fixture(config.dataDir)
+      const result = yield* f.run("create_preset", { label: "Tide\u0007" })
+      assert.isTrue(result.isError, result.text)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 })
