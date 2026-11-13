@@ -10,7 +10,7 @@
 // refuses one whose stamp moved, and works out the documents the writer stores
 // (libraryReplaceWrites.ts), so the writer's transaction does no matching.
 import type { UserId } from "@rp/shared/domain.ts"
-import { applyDrafts, type FieldPath, isHeldField, textField, withValues } from "@rp/shared/editing.ts"
+import { canonicalJson, applyDrafts, type FieldPath, isHeldField, textField, withValues } from "@rp/shared/editing.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import {
   AROUND,
@@ -292,9 +292,10 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
         for (const choice of choices) {
           const entry = byRef.get(choice.refId)
           if (entry === undefined) skip(choice.refId, "", "It's no longer in the library.")
+          else if (choice.unsaved === true || entry.blocked !== null)
+            skip(choice.refId, entry.candidate.label, LIBRARY_UNSAVED_REASON)
           else if (entry.stamp !== choice.stamp)
             skip(choice.refId, entry.candidate.label, "It changed since the search. Find again to include it.")
-          else if (entry.blocked !== null) skip(choice.refId, entry.candidate.label, entry.blocked)
           else current.push(entry)
         }
         const scanned = yield* scan(search, current)
@@ -313,13 +314,22 @@ export const makeLibraryReplaceReadHandlers = Effect.gen(function* () {
             return skip(candidate.ref_id, candidate.label, "The replacement wouldn't make a valid document.")
           // The user's own replace keeps an approved script approved, and an unapproved one is
           // still unapproved (owner, 2026-11-13). Approval is only ever the document's own flag here.
+          const scripts = (valid.doc.regex ?? []) as ReadonlyArray<{ id: string; name: string }>
+          const old = (entry.doc.regex ?? []) as ReadonlyArray<{ id: string; name: string }>
+          const approvedScripts =
+            entry.doc.regex_approved === true && valid.doc.regex_approved === true
+              ? scripts
+                  .filter((script) => canonicalJson(script) !== canonicalJson(old.find((s) => s.id === script.id)))
+                  .map((script) => script.name)
+              : []
           entries.push({
             refId: candidate.ref_id as LibraryReplaceEntry["refId"],
             label: candidate.label,
             head: candidate.head,
             rowVersion: candidate.row_version,
             doc: valid.doc,
-            matches: picked.reduce((n, f) => n + f.matches.length, 0)
+            matches: picked.reduce((n, f) => n + f.matches.length, 0),
+            approvedScripts
           })
         })
         return { entries, skipped }

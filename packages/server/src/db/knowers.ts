@@ -59,7 +59,9 @@ export const knowsSql = (
     const kept =
       fork === undefined || fork === null
         ? sql`1`
-        : sql`NOT EXISTS (SELECT 1 FROM json_each(${ids}) cv WHERE ${correctedAwaySql(sql, fork, "s.id", "cv.value")} OR ${rangeAwaySql(sql, ranges, "cv.value")} = 1)`
+        : sql`NOT EXISTS (SELECT 1 FROM json_each(${ids}) cv WHERE ${correctedAwaySql(sql, fork, "s.id", "cv.value")} OR (${rangeAwaySql(sql, ranges, "cv.value")} = 1
+          AND NOT EXISTS (SELECT 1 FROM json_each(v.presence_json, '$.narrators') narrator
+            WHERE narrator.value IN (SELECT value FROM json_each(${ids})))))`
     const rule = sql`CASE WHEN EXISTS (SELECT 1 FROM chat_merges m WHERE m.slot_id = s.id)
     THEN ${
       partialMerges
@@ -160,7 +162,11 @@ export const readKnowers = (
       const absent = row?.away_json ? (JSON.parse(row.away_json) as Array<string>) : []
       if (row)
         for (const card of new Set(corrections.flatMap((r) => r.identities))) {
-          if (card !== row.speaker_entity_id && rangeAway(corrections, row.chain_id, row.depth, row.seq, card) === true)
+          if (
+            !parsePresence(row.presence_json)?.narrators?.includes(card as never) &&
+            card !== row.speaker_entity_id &&
+            rangeAway(corrections, row.chain_id, row.depth, row.seq, card) === true
+          )
             absent.push(card)
         }
       const away = absent.length > 0 ? absent : undefined

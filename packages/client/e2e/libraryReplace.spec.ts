@@ -6,13 +6,17 @@
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { asUser } from "./support/rpc.ts"
+import { replaceEditorText, expectTextBox } from "./support/textbox.ts"
+import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
 let ids = { mira: "", odo: "" }
+let cookie = ""
+const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => withCookie(server(), cookie, use)
 test.beforeAll(async () => {
-  ids = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+  cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+  ids = await admin((api) =>
     Effect.gen(function* () {
       const mira = yield* api.CreateCard({
         label: "Mira",
@@ -28,9 +32,7 @@ test.beforeAll(async () => {
 })
 
 const description = (refId: string) =>
-  asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-    Effect.map(api.OpenEditor({ refId: refId as never }), (opened) => opened.doc.description as string)
-  )
+  admin((api) => Effect.map(api.OpenEditor({ refId: refId as never }), (opened) => opened.doc.description as string))
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
@@ -99,7 +101,7 @@ for (const width of [1440, 390])
     }, info) => {
       test.setTimeout(120_000)
       const word = `zephyr${width}${theme}`
-      const made = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      const made = await admin((api) =>
         Effect.gen(function* () {
           const clean = yield* api.CreateCard({
             label: `Clean ${word}`,
@@ -146,4 +148,120 @@ for (const width of [1440, 390])
       // The link opens its editor, where the unsaved changes still are.
       await link.click()
       await expect(page).toHaveURL(new RegExp(`/library/${made.open}`))
+    })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a second tab's debounced text is skipped at replace time at ${width} ${theme}`, async ({
+      page,
+      context
+    }, info) => {
+      test.setTimeout(120_000)
+      const word = `pending${width}${theme}`
+      const made = await admin((api) =>
+        Effect.gen(function* () {
+          const card = yield* api.CreateCard({
+            label: `Pending ${word}`,
+            name: "Pending",
+            description: `The ${word} rests.`
+          })
+          return card.id
+        })
+      )
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await page.goto(`${server().url}/library?replace=open`)
+      const panel = page.getByRole("region", { name: "Search and replace across the library" })
+      await panel.getByRole("textbox", { name: "Find", exact: true }).fill(word)
+      await panel.getByRole("textbox", { name: "Replace with", exact: true }).fill("breeze")
+      await panel.getByRole("button", { name: "Find", exact: true }).click()
+      await expect(panel.getByRole("button", { name: "Replace 1", exact: true })).toBeEnabled()
+      const editor = await context.newPage()
+      await editor.setViewportSize({ width, height: 900 })
+      await editor.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await editor.goto(`${server().url}/library/${made}`)
+      const text = editor.getByRole("textbox", { name: "Description", exact: true })
+      await expect(text).toBeVisible()
+      // Freeze this tab's debounce; IndexedDB still stores the exact typed text.
+      const now = new Date()
+      await editor.clock.install({ time: now })
+      await editor.clock.pauseAt(new Date(now.getTime() + 10))
+      await replaceEditorText(text, `The ${word} rests, typed but not sent.`)
+      await expectTextBox(text, `The ${word} rests, typed but not sent.`)
+      const before = await admin((api) => api.OpenEditor({ refId: made }))
+      expect(before.drafts.filter((d) => d.status === "active")).toHaveLength(0)
+      await panel.getByRole("button", { name: "Replace 1", exact: true }).click()
+      await expect(panel.locator(`[data-library-skipped="${made}"]`)).toContainText(
+        "It has unsaved changes, so it was skipped."
+      )
+      expect(await description(made)).toBe(`The ${word} rests.`)
+      await expectTextBox(text, `The ${word} rests, typed but not sent.`)
+      await editor.clock.resume()
+      await expectLayout(page, info, `pending-replace-${width}-${theme}`, { scope: "#library-replace" })
+      await editor.close()
+    })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`replace lists retained script approval and Undo restores it at ${width} ${theme}`, async ({ page }, info) => {
+      test.setTimeout(120_000)
+      const word = `script${width}${theme}`
+      const refId = await admin((api) =>
+        Effect.gen(function* () {
+          const card = yield* api.CreateCard({ label: `Script ${word}`, name: "Script" })
+          const opened = yield* api.OpenEditor({ refId: card.id })
+          const saved = yield* api.SaveEditorDraft({
+            refId: card.id,
+            draftId: null,
+            expectedSession: null,
+            expectedRowVersion: null,
+            baseRevisionId: opened.ref.headRevisionId,
+            field: '=["regex"]',
+            content: JSON.stringify([
+              {
+                id: "one",
+                name: word,
+                find_regex: "/x/g",
+                replace_string: word,
+                trim_strings: [],
+                placement: [2],
+                disabled: false,
+                markdown_only: false,
+                prompt_only: false,
+                run_on_edit: false,
+                substitute_regex: "none",
+                min_depth: null,
+                max_depth: null
+              }
+            ])
+          })
+          const draft = saved
+          const current = yield* api.OpenEditor({ refId: card.id })
+          yield* api.CommitEditorDrafts({
+            refId: card.id,
+            expectedRowVersion: current.ref.rowVersion,
+            fields: [{ field: draft.key.field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+            message: null
+          })
+          const head = yield* api.OpenEditor({ refId: card.id })
+          yield* api.SetRegexApproval({ refId: card.id, approved: true, expectedRowVersion: head.ref.rowVersion })
+          return card.id
+        })
+      )
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/library?replace=open`)
+      const panel = page.getByRole("region", { name: "Search and replace across the library" })
+      await panel.getByRole("textbox", { name: "Find", exact: true }).fill(word)
+      await panel.getByRole("textbox", { name: "Replace with", exact: true }).fill("beacon")
+      await panel.getByRole("button", { name: "Find", exact: true }).click()
+      await panel.getByRole("button", { name: "Replace 2", exact: true }).click()
+      await expect(panel.getByRole("list", { name: "Scripts kept approved" })).toContainText("beacon")
+      await expectLayout(page, info, `approved-replace-${width}-${theme}`, { scope: "#library-replace" })
+      await panel.getByRole("button", { name: "Undo", exact: true }).first().click()
+      const restored = await admin((api) => api.OpenEditor({ refId }))
+      expect(restored.doc.regex_approved).toBe(true)
+      expect((restored.doc.regex as Array<{ name: string }>)[0]!.name).toBe(word)
     })

@@ -122,6 +122,24 @@ for (const width of [1440, 390])
         scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
       })
 
+      const userId = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.map(api.Whoami(), (u) => u.id)
+      )
+      await page.evaluate(
+        (id) =>
+          localStorage.setItem(
+            `rp.chats.sidebar.${id}`,
+            JSON.stringify({ sideChatsShow: "workshops", sideChatsSort: "name", sideChatsReverse: true })
+          ),
+        userId
+      )
+      await page.goto(`${server().url}/`)
+      await open()
+      await expect(panel.getByRole("combobox", { name: "Show chats" })).toHaveText("All · 3")
+      await expect(rows).toHaveCount(3)
+      expect(new URL(page.url()).searchParams.has("sideChatsSort")).toBe(false)
+      expect(new URL(page.url()).searchParams.has("sideChatsReverse")).toBe(false)
+
       // The Chats page and its search use the same row, with the same marks.
       await page.goto(`${server().url}/chats`)
       const list = page.getByRole("list", { name: "Chats" })
@@ -158,3 +176,47 @@ test("a workshop's menu has no New chat with this cast; a story's still does", a
   expect(items.length).toBeGreaterThan(0)
   expect(items.some((name) => name.startsWith("New chat with this cast"))).toBe(false)
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`shared workshop branch rows stay recognizable at ${width} ${theme}`, async ({ page }, info) => {
+      test.setTimeout(120_000)
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const workshop = yield* api.GetChat({ chatId: ids.workshop as never })
+          yield* api.CreateFork({
+            chatId: workshop.id,
+            fromForkId: workshop.currentForkId,
+            atSlotId: workshop.activeLeafSlotId
+          })
+        })
+      )
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${ids.workshop}`)
+      if (width === 390) await page.getByRole("button", { name: "Chats and menu", exact: true }).click()
+      const branches = page.getByRole("region", { name: "Branches of the open chat", exact: true })
+      await expect(branches).toBeVisible()
+      const heading = branches.getByRole("button", { name: /^Branches of/ })
+      if ((await heading.getAttribute("aria-expanded")) === "false") await heading.click()
+      await expect(heading).toHaveAttribute("aria-expanded", "true")
+      const rows = branches.locator("[data-fork-row]")
+      await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2)
+      for (const row of await rows.all()) {
+        await expect(row).toHaveAttribute("data-kind-row", "")
+        await expect(row.locator('[data-kind-badge="workshop"]')).toHaveText("Workshop")
+        await expect(row.locator("[data-chat-id]")).toHaveAccessibleName(/Workshop/)
+      }
+      await expectLayout(page, info, `workshop-branch-footer-${width}-${theme}`, {
+        scope: '[aria-label="Branches of the open chat"]'
+      })
+      await page.goto(`${server().url}/?forks=${ids.workshop}`)
+      if (width === 390) await page.getByRole("button", { name: "Chats and menu", exact: true }).click()
+      const listed = page.locator(`[data-fork-row]:has([data-chat-id="${ids.workshop}"])`)
+      await expect.poll(() => listed.count()).toBeGreaterThanOrEqual(2)
+      for (const row of await listed.all()) await expect(row).toHaveAttribute("data-kind-row", "")
+      await expectLayout(page, info, `workshop-branch-list-${width}-${theme}`, {
+        scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
+      })
+    })

@@ -8,6 +8,7 @@
 import { useAtomValue } from "@effect/atom-react"
 import {
   type FieldExcerpt,
+  LIBRARY_UNSAVED_REASON,
   type LibraryChoice,
   type LibraryEdit,
   type LibraryEntryHit,
@@ -30,6 +31,8 @@ import { Alert, Badge, Disclosure } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 import { formatMoment } from "../chat/forks.ts"
+import { useSession } from "../../session.ts"
+import { pendingLibraryRefs } from "./libraryPending.ts"
 import { refreshOpenEditors } from "./openEditors.ts"
 
 const PANEL_ID = "library-replace"
@@ -122,7 +125,7 @@ function EntryRow({
         <Badge>{kindNames(entry.kind).one}</Badge>
         <span className="text-xs text-muted tabular-nums">{plural(entry.count, "match", "matches")}</span>
         {entry.unsaved && (
-          <Tooltip label="Its unsaved changes are searched too, but a replace skips it. Open it to save or revert them.">
+          <Tooltip label="Replace skips this entry because it has unsaved changes. Open it to save or revert them.">
             <span
               tabIndex={0}
               className="rounded text-xs text-warning outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -223,6 +226,7 @@ function RecentReplaces({ onUndone }: { onUndone: (message: string) => void }) {
 
 /** The panel the button opens, under the library's actions. */
 export function LibraryReplacePanel() {
+  const userId = useSession().user.id
   const [open, setOpen] = usePanel()
   const [find, setFind] = usePlaceParam("find", "")
   const [replace, setReplace] = useState("")
@@ -277,7 +281,16 @@ export function LibraryReplacePanel() {
     if (find === "" || search.kinds.length === 0) return
     const result = await finding.run((client) => client("PreviewLibraryReplace", { search }))
     if (result.ok) {
-      setFound({ asked, preview: result.value })
+      const pending = await pendingLibraryRefs(userId)
+      setFound({
+        asked,
+        preview: {
+          ...result.value,
+          entries: result.value.entries.map((entry) =>
+            pending.has(entry.refId) ? { ...entry, unsaved: true, blocked: LIBRARY_UNSAVED_REASON } : entry
+          )
+        }
+      })
       setLeft(new Set())
       setShown(LISTED)
     }
@@ -289,8 +302,16 @@ export function LibraryReplacePanel() {
   }
   const runReplace = async () => {
     if (choices.length === 0) return
+    const pending = await pendingLibraryRefs(userId)
     const result = await replacing.run(
-      (client) => client("ApplyLibraryReplace", { search, choices: [...choices, ...blockedChoices] }),
+      (client) =>
+        client("ApplyLibraryReplace", {
+          search,
+          choices: [...choices, ...blockedChoices].map((choice) => ({
+            ...choice,
+            ...(pending.has(choice.refId) ? { unsaved: true } : {})
+          }))
+        }),
       INVALIDATES
     )
     if (!result.ok) return
@@ -320,8 +341,8 @@ export function LibraryReplacePanel() {
       className="max-w-5xl"
     >
       <p className="text-sm text-muted">
-        Looks through every entry's text as its editor shows it, unsaved changes included. An entry with unsaved changes
-        is skipped when you replace, and listed afterwards. Archived entries and a chat's own notes are left out.
+        Finds text in your library. Entries with unsaved changes are skipped and listed afterwards. Archived entries and
+        a chat's own notes are left out.
       </p>
       <form onSubmit={submit} className="flex min-w-0 flex-col gap-2">
         <SearchReplace
@@ -423,6 +444,27 @@ export function LibraryReplacePanel() {
             )
           }
         >
+          {outcome.result.approvedScripts.length > 0 && (
+            <div>
+              <p>Scripts kept approved after your replace:</p>
+              <ul aria-label="Scripts kept approved" className="list-disc pl-5">
+                {outcome.result.approvedScripts.map((script, i) => (
+                  <li key={i} className="[overflow-wrap:anywhere]">
+                    <Tooltip label="Opens its editor.">
+                      <Link
+                        to="/library/$refId"
+                        params={{ refId: script.refId }}
+                        className="text-accent hover:underline"
+                      >
+                        {script.label}
+                      </Link>
+                    </Tooltip>
+                    : {script.name || "Unnamed script"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {outcome.result.skipped.length > 0 && (
             <>
               <p>{`Skipped ${plural(outcome.result.skipped.length, "entry", "entries")}:`}</p>

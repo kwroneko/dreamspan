@@ -4,7 +4,7 @@
 // changeset group; `library_edit_items` records each entry's revisions before and after, so the
 // whole replace is undone at once. An entry that moved since the plan, or has unsaved changes, is
 // left as it is.
-import { keepsRegexApproval, withHtmlApprovals, withoutGrantedAgentEdits } from "@rp/shared/editing.ts"
+import { withHtmlApprovals, withoutGrantedAgentEdits } from "@rp/shared/editing.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { Doc } from "@rp/shared/library.ts"
@@ -62,6 +62,7 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
         const originRef = JSON.stringify({ libraryEdit: groupId })
         let changed = 0
         let matches = 0
+        const approvedScripts: Array<{ refId: LibraryReplaceEntry["refId"]; label: string; name: string }> = []
         for (const entry of entries) {
           const skip = (reason: string) => skipped.push({ refId: entry.refId, label: entry.label, reason })
           const ref = yield* lib
@@ -93,10 +94,12 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
           }
           yield* sql`INSERT INTO library_edit_items (group_id, ref_id, before_revision_id, after_revision_id, matches)
             VALUES (${groupId}, ${ref.id}, ${head}, ${after}, ${entry.matches})`
+          for (const name of entry.approvedScripts)
+            approvedScripts.push({ refId: entry.refId, label: entry.label, name })
           changed++
           matches += entry.matches
         }
-        return { editId: changed > 0 ? groupId : null, entries: changed, matches, skipped }
+        return { editId: changed > 0 ? groupId : null, entries: changed, matches, skipped, approvedScripts }
       }).pipe(transaction(sql, "ApplyLibraryReplace")),
 
     UndoLibraryEdit: ({ userId, editId }: { readonly userId: UserId; readonly editId: string }) =>
@@ -133,12 +136,10 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
             continue
           }
           const head = yield* lib.loadDoc(ref.head_revision_id)
-          let before = withHtmlApprovals(
+          const before = withHtmlApprovals(
             head,
             withoutGrantedAgentEdits(ref.kind, head, yield* lib.loadDoc(item.before_revision_id))
           )
-          if (before.regex_approved === true && !keepsRegexApproval(head, before))
-            before = { ...before, regex_approved: false }
           const id = yield* write(ref, before, "changeset", originRef, `Undid: ${group.title}`)
           yield* sql`UPDATE library_edit_items SET undone_by_revision_id = ${id ?? item.before_revision_id}
             WHERE id = ${item.id}`

@@ -249,7 +249,7 @@ it.live(
           config.dataDir,
           [
             {
-              sql: "SELECT (SELECT count(*) FROM versions) AS versions, (SELECT count(*) FROM fork_overrides WHERE kind='presence_range') AS ranges, (SELECT sum(length(value_id)) FROM fork_overrides WHERE kind='presence_range') AS bytes"
+              sql: "SELECT (SELECT count(*) FROM versions) AS versions, (SELECT count(*) FROM fork_overrides WHERE kind='presence_range') AS ranges, (SELECT sum(length(value_id)) FROM fork_overrides WHERE kind='presence_range') AS bytes, (SELECT count(*) FROM fork_overrides) AS overrides, (SELECT count(*) FROM fork_steps WHERE kind='presence_range') AS range_steps, (SELECT sum(length(target_id)+coalesce(length(override_id),0)+length(label)) FROM fork_steps WHERE kind='presence_range') AS range_step_bytes, (SELECT sum(length(before_json)+length(after_json)) FROM changeset_items WHERE after_json LIKE '%presenceCorrection%') AS correction_history_bytes"
             }
           ],
           { readOnly: true }
@@ -275,6 +275,32 @@ it.live(
         "constant-size overlay for 3,000 messages and 20–50 swipes"
       )
       process.stdout.write(`BRANCH_CORRECTION_SHAPE ${JSON.stringify(shapeAfter[0]![0])}\n`)
+
+      // Accumulated corrections: 300 disjoint stretches on the same branch, with all
+      // 300 existing peers still present. Each range spans retained swipes without copies.
+      const marks = []
+      for (let i = 0; i < 300; i++)
+        marks.push(
+          yield* event(slotAt(100 + i * 8), {
+            key: "away.set",
+            value: { entity: wren, away: i % 2 === 0, source: "decision" }
+          })
+        )
+      const holds: number[] = []
+      for (const mark of marks) {
+        const start = performance.now()
+        assert.isNotNull(yield* h.writer.CorrectPresence({ userId: h.userId, chatId, forkId: main, eventId: mark.id }))
+        holds.push(performance.now() - start)
+      }
+      const accumulated = yield* shape()
+      assert.strictEqual(accumulated[0]![0]!.versions, shapeBefore[0]![0]!.versions)
+      assert.strictEqual(Number(accumulated[0]![0]!.ranges), 301)
+      assert.isBelow(Number(accumulated[0]![0]!.bytes), 100_000)
+      yield* time("301 corrections: separate Wren", assemble(wrenRow))
+      assert.deepStrictEqual(yield* peerRequest(), peerBefore)
+      process.stdout.write(
+        `ACCUMULATED_CORRECTIONS ${JSON.stringify({ ...accumulated[0]![0], medianMs: median(holds), maxMs: Math.max(...holds), totalMs: holds.reduce((a, b) => a + b, 0) })}\n`
+      )
 
       // C6: a second 3,000-message line, also with 20–50 swipes per position, frozen
       // into the owner-shape destination. Bring the older rows too, so projection reads

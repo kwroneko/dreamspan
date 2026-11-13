@@ -220,6 +220,21 @@ describe("Chats tab server browse", () => {
           branches: 0
         })
       }
+      // Group membership and multiple forks must not let the workshop into either story filter.
+      const wren = yield* api.CreateCard({ label: "Wren", name: "Wren" })
+      yield* api.ChangeCast({ chatId: workshop.id, slotId: null, change: { _tag: "Join", entityId: wren.entityId } })
+      yield* api.CreateFork({
+        chatId: workshop.id,
+        fromForkId: workshop.currentForkId!,
+        atSlotId: workshop.activeLeafSlotId
+      })
+      for (const filter of ["groups", "branches", "pinned"] as const) {
+        const result = yield* list(filter)
+        assert.lengthOf(result.sections[0]!.rows, 0)
+        assert.strictEqual(result.filterCounts[filter], 0)
+        assert.strictEqual(result.filterCounts.workshops, 1)
+        assert.strictEqual(result.filterCounts.all, 2)
+      }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 })

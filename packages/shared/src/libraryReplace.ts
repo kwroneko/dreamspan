@@ -93,6 +93,8 @@ export type LibraryPreview = typeof LibraryPreview.Type
 export const LibraryChoice = Schema.Struct({
   refId: RefId,
   stamp: Schema.String,
+  /** This browser still has text that has not reached a server draft. */
+  unsaved: Schema.optionalKey(Schema.Boolean),
   fields: Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(20000))
 })
 export type LibraryChoice = typeof LibraryChoice.Type
@@ -106,7 +108,9 @@ export const LibraryReplaceResult = Schema.Struct({
   editId: Schema.NullOr(Schema.String),
   entries: Schema.Int,
   matches: Schema.Int,
-  skipped: Schema.Array(LibrarySkipped)
+  skipped: Schema.Array(LibrarySkipped),
+  /** Scripts changed by this user replace whose existing approval was retained. */
+  approvedScripts: Schema.Array(Schema.Struct({ refId: RefId, label: Schema.String, name: Schema.String }))
 })
 export type LibraryReplaceResult = typeof LibraryReplaceResult.Type
 

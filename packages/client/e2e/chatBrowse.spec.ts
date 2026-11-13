@@ -104,24 +104,30 @@ for (const width of [1440, 390])
     await expect(page).toHaveURL(/sideChatsReverse=true/)
     expect(await page.evaluate(() => history.length)).toBe(initialHistory)
     const key = `rp.chats.sidebar.${userId}`
-    expect(await page.evaluate((k) => JSON.parse(localStorage.getItem(k)!), key)).toEqual({
-      sideChatsShow: "solo",
-      sideChatsSort: "name",
-      sideChatsReverse: true
-    })
+    expect(await page.evaluate((k) => localStorage.getItem(k), key)).toBeNull()
     await page.reload()
     await open()
     await expect(panel.getByRole("combobox", { name: "Show chats" })).toHaveText("One-on-one · 1")
     await expect(panel.getByRole("button", { name: "Sort chats: Name", exact: true })).toBeVisible()
     await expect(panel.getByRole("button", { name: "Order: Z to A", exact: true })).toBeVisible()
-    // A new visit seeds from per-account memory, and keeps choices when opening a chat.
-    await page.goto(`${server().url}/`)
-    await open()
-    await expect(panel.getByRole("combobox", { name: "Show chats" })).toHaveText("One-on-one · 1")
+    // A chat link keeps the current tab's URL choices.
     await chats.locator(`[data-chat-id="${chatId}"]`).click()
     await expect(page).toHaveURL(new RegExp(`/chats/${chatId}.*sideChatsSort=name`))
+    // An unqualified visit uses defaults, even if an older build left device memory.
+    await page.evaluate(
+      (k) =>
+        localStorage.setItem(
+          k,
+          JSON.stringify({ sideChatsShow: "solo", sideChatsSort: "name", sideChatsReverse: true })
+        ),
+      key
+    )
+    await page.goto(`${server().url}/`)
     await open()
-    // Explicit link choices take precedence over memory; switching sorts resets direction.
+    await expect(panel.getByRole("combobox", { name: "Show chats" })).toHaveText("All · 2")
+    await expect(panel.getByRole("button", { name: "Sort chats: Recent", exact: true })).toBeVisible()
+    await expect(panel.getByRole("button", { name: "Order: Newest first", exact: true })).toBeVisible()
+    // Explicit link choices carry their own state; switching sorts resets direction.
     await page.goto(`${server().url}/?sideChatsShow=all&sideChatsSort=started`)
     await open()
     await expect(panel.getByRole("combobox", { name: "Show chats" })).toHaveText("All · 2")

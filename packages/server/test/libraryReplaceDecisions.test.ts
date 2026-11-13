@@ -151,6 +151,12 @@ describe("library replace skips entries with unsaved changes", () => {
       const card = yield* api.CreateCard({ label: "Odo", name: "Odo", description: "{{char}} sails at dawn." })
       const asked = search("dawn", "dusk", { kinds: ["card"] })
       const preview = yield* api.PreviewLibraryReplace({ search: asked })
+      const flagged = yield* api.ApplyLibraryReplace({
+        search: asked,
+        choices: entries(preview).map((choice) => ({ ...choice, unsaved: true }))
+      })
+      assert.strictEqual(flagged.entries, 0)
+      assert.strictEqual(flagged.skipped[0]!.reason, LIBRARY_UNSAVED_REASON)
       const opened = yield* api.OpenEditor({ refId: card.id })
       yield* api.SaveEditorDraft({
         draftId: null,
@@ -222,6 +228,13 @@ describe("library replace and regex approval", () => {
       )
       const result = yield* f.api.ApplyLibraryReplace({ search: asked, choices: entries(preview) })
       assert.strictEqual(result.entries, 2)
+      assert.sameDeepMembers(
+        [...result.approvedScripts],
+        [
+          { refId: f.card, label: "Scripted", name: "beacon" },
+          { refId: f.preset, label: "preset", name: "beacon" }
+        ]
+      )
       for (const refId of [f.card, f.preset]) {
         const doc = (yield* f.api.OpenEditor({ refId })).doc
         const changed = (doc.regex as Array<typeof script>)[0]!
@@ -229,10 +242,32 @@ describe("library replace and regex approval", () => {
         assert.strictEqual(changed.replace_string, "beacon light")
         assert.isTrue(doc.regex_approved, `${refId}: still approved`)
       }
-      // Undo restores the old scripts but never an approval for them: it follows the restore rules.
+      // Undo restores exactly the approval the user had before their own replace.
       yield* f.api.UndoLibraryEdit({ editId: result.editId! })
       for (const refId of [f.card, f.preset])
-        assert.isFalse((yield* f.api.OpenEditor({ refId })).doc.regex_approved, `${refId}: undo grants nothing`)
+        assert.isTrue((yield* f.api.OpenEditor({ refId })).doc.regex_approved, `${refId}: prior approval restored`)
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.effect("keeps approval for the user's own material pattern and flag replacement, and reports it", () =>
+    Effect.gen(function* () {
+      const f = yield* withScripts(true)
+      const asked = search("/x/g", "/(a+)+$/gi", { kinds: ["card", "preset"] })
+      const preview = yield* f.api.PreviewLibraryReplace({ search: asked })
+      const result = yield* f.api.ApplyLibraryReplace({ search: asked, choices: entries(preview) })
+      assert.strictEqual(result.entries, 2)
+      assert.lengthOf(result.approvedScripts, 2)
+      for (const refId of [f.card, f.preset]) {
+        const doc = (yield* f.api.OpenEditor({ refId })).doc
+        assert.isTrue(doc.regex_approved)
+        assert.strictEqual((doc.regex as Array<typeof script>)[0]!.find_regex, "/(a+)+$/gi")
+      }
+      yield* f.api.UndoLibraryEdit({ editId: result.editId! })
+      for (const refId of [f.card, f.preset]) {
+        const doc = (yield* f.api.OpenEditor({ refId })).doc
+        assert.isTrue(doc.regex_approved)
+        assert.strictEqual((doc.regex as Array<typeof script>)[0]!.find_regex, "/x/g")
+      }
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 

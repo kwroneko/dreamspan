@@ -44,9 +44,11 @@ describe("the timeline's away rows", () => {
       mark("e2", "s2", wren, false, "decision")
     ])
     expect(undoExplanation(left!, name)).toBe(
-      "Wren was there after all: counted present from here, so Wren's replies see the messages written since."
+      "Wren was there after all: on this branch, counted present until the next presence mark, so Wren's replies see the messages written since."
     )
-    expect(undoExplanation(back!, name)).toContain("Wren hadn't come back: counted away from here")
+    expect(undoExplanation(back!, name)).toContain(
+      "Wren hadn't come back: on this branch, counted away until the next presence mark"
+    )
   })
   it("shows nothing for a narrator", () => {
     expect(awayTransitions([mark("e1", "s1", mira, true, "user")], new Set([mira]))).toEqual([])

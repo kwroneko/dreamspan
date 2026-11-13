@@ -65,7 +65,7 @@ export const rangedPresence = (
   const away = new Set(presence?.away ?? [])
   for (const card of new Set(ranges.flatMap((r) => r.identities))) {
     const value = rangeAway(ranges, chain, depth, seq, card)
-    if (value === true) away.add(card as EntityId)
+    if (value === true && !presence?.narrators?.includes(card as EntityId)) away.add(card as EntityId)
     if (value === false) away.delete(card as EntityId)
   }
   return away.size || presence?.narrators?.length
@@ -81,7 +81,8 @@ export const rangeAwaySql = (sql: SqlClient.SqlClient, ranges: ReadonlyArray<Pre
   ranges.length === 0
     ? sql`NULL`
     : sql`(SELECT r.value ->> 'away' FROM json_each(${JSON.stringify(ranges)}) r
-    WHERE coalesce((SELECT seq FROM versions source WHERE source.id=v.source_version_id AND v.fork_id IS NOT NULL), v.seq) <= r.value ->> 'cutoff'
+    WHERE NOT EXISTS (SELECT 1 FROM json_each(v.presence_json, '$.narrators') narrator WHERE narrator.value=${sql.literal(card)})
+      AND coalesce((SELECT seq FROM versions source WHERE source.id=v.source_version_id AND v.fork_id IS NOT NULL), v.seq) <= r.value ->> 'cutoff'
       AND EXISTS (SELECT 1 FROM json_each(r.value, '$.identities') presence_card WHERE presence_card.value=${sql.literal(card)})
       AND EXISTS (SELECT 1 FROM json_each(r.value, '$.spans') span
         WHERE span.value ->> 'chain'=s.chain_id AND s.depth BETWEEN span.value ->> 'lo' AND span.value ->> 'hi')

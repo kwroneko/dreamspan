@@ -48,7 +48,7 @@ const setup = Effect.gen(function* () {
 })
 
 describe("library search and replace", () => {
-  it.effect("undo never restores regex approval after the scripts changed", () =>
+  it.effect("undo restores prior regex approval after the user changed scripts with replace", () =>
     Effect.gen(function* () {
       const f = yield* setup
       const opened = yield* f.api.OpenEditor({ refId: f.mira })
@@ -94,7 +94,7 @@ describe("library search and replace", () => {
       // The user's own replace keeps an approved script approved (owner, 2026-11-13).
       assert.isTrue((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
       yield* f.api.UndoLibraryEdit({ editId: result.editId! })
-      assert.isFalse((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
+      assert.isTrue((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 

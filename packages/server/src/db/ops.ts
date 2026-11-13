@@ -602,7 +602,9 @@ export const LibraryReplaceEntry = Schema.Struct({
   head: Schema.String,
   rowVersion: Schema.Int,
   doc: Doc,
-  matches: Schema.Int
+  matches: Schema.Int,
+  /** Computed by the reader; only returned after this exact planned head commits. */
+  approvedScripts: Schema.Array(Schema.String)
 })
 export type LibraryReplaceEntry = typeof LibraryReplaceEntry.Type
 
@@ -2871,10 +2873,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
   }),
   /** A new revision on the head with an earlier revision's content. */
   /**
-   * A library-wide replace (libraryReplace.ts) as planned: per entry, its unsaved changes saved
-   * first as a revision of their own, then a `changeset` revision with the replacements, all
-   * under one changeset group (`editId`). An entry whose head, row version or drafts moved since
-   * the plan is left as it is, in `skipped` with the plan's own.
+   * A library-wide replace (libraryReplace.ts) as planned: one `changeset` revision per clean
+   * entry, under one changeset group (`editId`). Entries with unsaved changes or whose head or
+   * row version moved since the plan are skipped, alongside the plan's own skipped entries.
    */
   Rpc.make("ApplyLibraryReplace", {
     payload: {
