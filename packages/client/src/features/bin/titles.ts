@@ -32,6 +32,12 @@ export const binTitle = (item: BinItem) => {
         ? `Branch of ${count} message${count === 1 ? "" : "s"} in “${chat}”`
         : `Branch in “${chat}”`
     }
+    case "threads": {
+      // Undo of starting threads: the threads it took, by number, from the message they part at.
+      const forks = Array.isArray(item.origin.forkIds) ? item.origin.forkIds.length : 1
+      const what = forks === 1 ? "A thread" : `${forks} threads`
+      return number === null ? `${what} in “${chat}”` : `${what} from message ${number} in “${chat}”`
+    }
     case "card_asset":
     case "entity":
     case "connection":
@@ -64,6 +70,10 @@ export const purgeTitle = (item: BinItem) => {
       return typeof count === "number" && count > 0
         ? `Delete a branch of ${count} message${count === 1 ? "" : "s"} for good?`
         : "Delete this branch for good?"
+    }
+    case "threads": {
+      const forks = Array.isArray(item.origin.forkIds) ? item.origin.forkIds.length : 1
+      return forks === 1 ? "Delete this thread for good?" : `Delete these ${forks} threads for good?`
     }
     case "chat":
       return `Delete the chat “${binTitle(item)}” for good?`

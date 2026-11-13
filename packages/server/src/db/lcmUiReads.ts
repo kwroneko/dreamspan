@@ -46,10 +46,11 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
   ) {
     if (identities === undefined) return summaries
     const firstMissed = yield* firstUnknownPosition(sql, chatId, leaf, identities)
+    const fork = yield* viewAt(sql, chatId, leaf)
     const kept: Array<Summary> = []
     for (const summary of summaries) {
       if (!summary.audience && firstMissed !== null && summary.to - 1 >= firstMissed) continue
-      if (!summary.fresh && !(yield* inputsKnown(sql, summary.id, identities))) continue
+      if (!summary.fresh && !(yield* inputsKnown(sql, summary.id, identities, fork))) continue
       kept.push(summary)
     }
     return kept
@@ -344,7 +345,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         for (const job of jobRows) {
           if (job.audience_json === null && firstMissed !== null && job.last_depth >= firstMissed) continue
           if (identities !== undefined) {
-            if (job.result_summary_id && !(yield* inputsKnown(sql, job.result_summary_id, identities))) continue
+            if (job.result_summary_id && !(yield* inputsKnown(sql, job.result_summary_id, identities, fork))) continue
             if (job.rollout_id) {
               const [payload] = yield* sql<{
                 context_snapshot_json: string | null
@@ -354,11 +355,12 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
                 : undefined
               const ids =
                 snapshot?.summaryJob?.inputs.flatMap((input) => (input.versionId ? [input.versionId] : [])) ?? []
-              const known = yield* knownVersions(sql, ids, identities)
+              const known = yield* knownVersions(sql, ids, identities, fork)
               if (ids.some((id) => !known.has(id))) continue
               let childrenKnown = true
               for (const child of snapshot?.summaryJob?.children ?? [])
-                if (!(yield* inputsKnown(sql, child.summaryId, identities))) childrenKnown = false
+                if (!(yield* inputsKnown(sql, child.summaryId, identities, fork))) childrenKnown = false
+
               if (!childrenKnown) continue
             }
           }

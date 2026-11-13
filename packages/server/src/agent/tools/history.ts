@@ -46,16 +46,27 @@ const missedBy = (context: ToolContext, entries: ReadonlyArray<PathEntry>) =>
     const projected = new Map<number, { content: string; readable: boolean }>()
     if (viewers === null) return { missed, projected }
     const numberOf = new Map(entries.map((e) => [e.version.id as string, (e.position ?? e.depth) + 1]))
+    const speakers = new Map(entries.map((e) => [e.version.id as string, e.version.speakerEntityId]))
     const ids = [...numberOf.keys()]
     for (let at = 0; at < ids.length; at += KNOWERS_BATCH) {
       const known = yield* context.reader.KnowersOf({
         userId: context.userId,
         chatId: context.chatId,
+        forkId: context.forkId,
         versionIds: ids.slice(at, at + KNOWERS_BATCH),
         viewers
       })
-      for (const { versionId, knowers, content, readable } of known) {
+      for (const { versionId, knowers, away, content, readable } of known) {
         const n = numberOf.get(versionId)!
+        // Counted not there in this fork (threads started earlier): missed, a join included.
+        if (
+          away !== undefined &&
+          viewers.some((id) => away.includes(id)) &&
+          !viewers.includes(speakers.get(versionId) ?? "")
+        ) {
+          missed.add(n)
+          continue
+        }
         if (content !== undefined) projected.set(n, { content, readable: readable === true })
         if (knowers !== null && !viewers.some((id) => knowers.includes(id))) missed.add(n)
       }

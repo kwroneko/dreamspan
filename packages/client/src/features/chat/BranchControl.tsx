@@ -21,6 +21,7 @@ import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
 import { WindowedList } from "../../ui/WindowedList.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
+import { type BranchControlContext, useBranchParts } from "./branchParts.ts"
 import { sidebarCleared } from "../characters/shellData.tsx"
 import {
   type BranchGroup,
@@ -219,6 +220,7 @@ function BranchList({
   shown: Fork | undefined
   onDone: () => void
 }) {
+  const parts = useBranchParts()
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { panel?: string }
   const deleted = useDeletedToast()
@@ -227,7 +229,12 @@ function BranchList({
   const keepPanel = search.panel ? { panel: search.panel } : {}
   if (forks === null) return <p className="px-1 py-2 text-sm text-muted">Loading the branches…</p>
   const live = forks.length
-  const ordered = orderBranches(forks)
+  // A part may list some forks apart (another thread's, spec/THREADS.md §13.2): never as branches.
+  const context: BranchControlContext = { session, view, forks, shown }
+  const sections = parts.flatMap((part) => (part.Section ? [{ id: part.id, Section: part.Section }] : []))
+  const ordered = orderBranches(
+    forks.filter((fork) => fork.id === shown?.id || parts.every((part) => part.listed?.(fork, context) ?? true))
+  )
   const groups = new Set(ordered.map(branchGroup))
   // The URL names a branch only while it isn't the one the chat opens on.
   const linkSearch = (fork: Fork) =>
@@ -277,6 +284,9 @@ function BranchList({
   const atLatest = latest === undefined || latest.id === shown?.id
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {sections.map(({ id, Section }) => (
+        <Section key={id} {...context} onDone={onDone} />
+      ))}
       {/* The rows' 8 px gutter is inside the scrollport, so focus rings and borders aren't cut. */}
       <WindowedList
         items={ordered}
@@ -290,7 +300,9 @@ function BranchList({
         className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 py-1"
         renderItem={(fork, i) => {
           const group = branchGroup(fork)
-          const heading = groups.size > 1 && (i === 0 || branchGroup(ordered[i - 1]!) !== group)
+          // Under a section of a part's, the list is titled even with one group.
+          const heading =
+            (groups.size > 1 || sections.length > 0) && (i === 0 || branchGroup(ordered[i - 1]!) !== group)
           const label = branchLabel(fork)
           return (
             <>
@@ -379,6 +391,7 @@ function BranchList({
 export function BranchControl(props: BranchControlProps) {
   const { session, view } = props
   const { forks, shown, reload } = useChatForks(session, view)
+  const parts = useBranchParts()
   const narrow = useNarrow()
   const [open, setOpen] = useState(false)
   const request = useBranchesRequest()
@@ -392,7 +405,12 @@ export function BranchControl(props: BranchControlProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- read again each time it opens
   }, [open])
   const many = forks !== null && forks.length > 1
-  const label = shown ? branchLabel(shown) : "Branch"
+  // A part may name what's shown otherwise: "Thread: At the docks".
+  const context: BranchControlContext | null = forks === null ? null : { session, view, forks, shown }
+  const named = context === null ? null : (parts.map((part) => part.trigger?.(context) ?? null).find(Boolean) ?? null)
+  const kind = named?.kind ?? "Branch"
+  const icon = named?.icon ?? "branch"
+  const label = named?.label ?? (shown ? branchLabel(shown) : "Branch")
   // Sending in a branch that isn't the one the chat opens on makes it that; the header says which it is.
   const off = shown !== undefined && !shown.current
   // Its place in the list as the list orders it.
@@ -408,18 +426,20 @@ export function BranchControl(props: BranchControlProps) {
           disabled={!many}
           focusableWhenDisabled
           hint={
-            many
-              ? "Switches between this chat’s branches."
-              : forks === null
-                ? "Loading branches…"
-                : "No other branches yet."
+            named
+              ? named.hint
+              : many
+                ? "Switches between this chat’s branches."
+                : forks === null
+                  ? "Loading branches…"
+                  : "No other branches yet."
           }
           type="button"
-          aria-label={`Branch: ${label}, ${place}: switch branch`}
+          aria-label={`${kind}: ${label}, ${place}: switch ${kind.toLowerCase()}`}
           onClick={() => setOpen(true)}
           className="inline-flex h-8 max-w-32 min-w-7 shrink! items-center gap-1 rounded-md px-1.5 text-sm text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
         >
-          <Icon name="branch" size={16} />
+          <Icon name={icon} size={16} />
           <span className="truncate">{label}</span>
         </Button>
         <Sheet open={open} onOpenChange={setOpen} title={title}>
@@ -433,24 +453,27 @@ export function BranchControl(props: BranchControlProps) {
       onOpenChange={setOpen}
       trigger={
         <>
-          <Icon name="branch" size={14} className="shrink-0" />
+          <Icon name={icon} size={14} className="shrink-0" />
           {/* A narrow header (a split frame) keeps the icon, the name moving to the explanation:
               never a name cut to a letter or two. */}
           <span className="min-w-16 truncate @max-[32rem]/header:hidden">
-            <span className="text-muted @max-[40rem]/header:hidden">Branch: </span>
+            <span className="text-muted @max-[40rem]/header:hidden">{kind}: </span>
             {label}
             {off && <span className="text-xs text-muted"> · not where it opens</span>}
           </span>
           <Icon name="down" size={14} className="shrink-0 text-muted" />
         </>
       }
-      triggerLabel={`Branch: ${label}, ${place}: switch branch`}
+      triggerLabel={`${kind}: ${label}, ${place}: switch ${kind.toLowerCase()}`}
       triggerDisabled={!many}
       hint={
         forks === null
           ? "Loading branches…"
-          : `Branch “${label}”${off ? " (not where the chat opens)" : ""}. ${many ? "Switch to another of this chat’s branches, or rename or delete them." : "No other branches yet."}`
+          : named
+            ? named.hint
+            : `Branch “${label}”${off ? " (not where the chat opens)" : ""}. ${many ? "Switch to another of this chat’s branches, or rename or delete them." : "No other branches yet."}`
       }
+
       hintSide="bottom"
       triggerClassName="inline-flex h-8 max-w-72 min-w-0 shrink! items-center gap-1.5 rounded-md border border-border px-2 text-sm text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
       title={title}

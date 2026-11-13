@@ -133,7 +133,7 @@ export const readSummary = (
       // it, as a hidden one is, so a correction of who was there makes it stale.
       if (row.audience_json !== null) {
         const ids = inputs.flatMap((i) => (i.effective === null ? [] : [i.effective]))
-        const known = yield* knownVersions(sql, ids, audienceIds(row.audience_json))
+        const known = yield* knownVersions(sql, ids, audienceIds(row.audience_json), fork)
         for (const i of inputs) if (i.effective !== null && !known.has(i.effective)) i.effective = null
       }
       const children = yield* sql<{

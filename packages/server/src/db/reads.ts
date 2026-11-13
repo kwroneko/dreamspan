@@ -21,6 +21,8 @@ import {
   type VersionId
 } from "@rp/shared/chat.ts"
 import { chatForkSummaries } from "./forkSummaries.ts"
+import { shownSplits } from "./threads.ts"
+import { makeThreadReadHandlers } from "./threadReads.ts"
 import { Branch, type PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, type RefId, Revision, type RevisionId } from "@rp/shared/library.ts"
@@ -437,6 +439,8 @@ export const makeReadHandlers = Effect.gen(function* () {
 
   const handlers = {
     WorkshopOperationInfo: (input) => operationInfo(sql, input).pipe(query("WorkshopOperationInfo")),
+    // --- Parallel threads (spec/THREADS.md §4.3)
+    ...(yield* makeThreadReadHandlers),
     GetBinLimits: ({ userId }) => readBinLimits(sql, userId, binLimits).pipe(query("GetBinLimits")),
     FindUserByHandle: ({ handle }) =>
       sql<UserRow>`SELECT * FROM users WHERE handle = ${handle}`.pipe(
@@ -915,15 +919,19 @@ export const makeReadHandlers = Effect.gen(function* () {
           ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
         // Where each parts from its parent and its last message's time, as the shell lists them.
         const summaries = yield* chatForkSummaries(sql, userId, chatId, rows)
+        // The thread sets each is in, of those still shown (two threads with a live fork).
+        const shown = shownSplits(rows.map((row) => summaries.get(row.id)?.threads ?? []))
         return yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             const s = summaries.get(row.id)
+            const threads = (s?.threads ?? []).filter((place) => shown.has(place.splitId))
             return new Fork({
               ...toFork(row),
               startSlotId: (yield* branchStart(sql, row)) as SlotId | null,
               tipExcerpt: s?.preview ?? "",
               split: s?.split ?? null,
-              endAt: s?.endAt ?? null
+              endAt: s?.endAt ?? null,
+              ...(threads.length > 0 ? { threads } : {})
             })
           })
         )

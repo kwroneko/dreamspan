@@ -73,7 +73,7 @@ export const lcmPath = (
         // A view's path (db/lcmAudience.ts): a message its character didn't know is absent.
         const path = yield* wholePath(sql, userId, chatId, leaf, first, limit)
         const versions = path.flatMap((slot) => (slot.versionId === null ? [] : [slot.versionId]))
-        const known = yield* knownVersions(sql, versions, identities)
+        const known = yield* knownVersions(sql, versions, identities, yield* viewAt(sql, chatId, leaf))
         // A partial join is rendered from the same frozen rows as a reply. It remains a
         // versioned input, so changing its known text invalidates the summary as usual.
         const joins =
@@ -92,6 +92,7 @@ export const lcmPath = (
           )).map((v) => [v.versionId, v])
         )
         for (const version of projected.values()) if (!version.readable) known.delete(version.versionId)
+
         return path.map((slot) =>
           slot.versionId === null || known.has(slot.versionId)
             ? projected.has(slot.versionId ?? "")

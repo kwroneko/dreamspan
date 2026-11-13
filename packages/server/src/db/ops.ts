@@ -44,6 +44,7 @@ import {
 } from "@rp/shared/mergeApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { AwayMark } from "@rp/shared/contextsApi.ts"
+import { StartedThreads, ThreadName, ThreadSet, ThreadStarts, ThreadsRefused } from "@rp/shared/threads.ts"
 import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
@@ -1102,6 +1103,53 @@ export class WriteOpsChat extends RpcGroup.make(
     payload: { userId: UserId, forkId: ForkId },
     success: BinItem,
     error: Schema.Union([NotFound, CannotDeleteLastFork, StorageError])
+  }),
+  // --- Parallel threads (spec/THREADS.md §5; db/threadWrites.ts)
+  /**
+   * Starts threads at message `slotId` of fork `forkId` (S on its display path, not deleted
+   * there, at row version `expectedRowVersion`, else StaleWrite): the fork continues as the
+   * first of `threads`, each other gets a fork of its own at S. Its cast's away marks at S,
+   * each new thread's composer, and at an earlier message the played stretch's correction.
+   */
+  Rpc.make("StartThreads", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      slotId: SlotId,
+      expectedRowVersion: Schema.Int,
+      threads: ThreadStarts
+    },
+    success: Schema.Struct({ ...StartedThreads.fields, chat: Chat }),
+    error: Schema.Union([NotFound, StaleWrite, ThreadsRefused, StorageError])
+  }),
+  /** Names a thread (empty: unnamed) in all its branches, if it's at `rowVersion`; its new row version. */
+  Rpc.make("RenameThread", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      splitId: Schema.String,
+      ordinal: Schema.Int,
+      name: ThreadName,
+      rowVersion: Schema.Int
+    },
+    success: Schema.Int,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /** Undo of starting threads: a bin item of kind `threads` (db/bin.ts `removeThreads`). */
+  Rpc.make("UndoThreads", {
+    payload: { userId: UserId, chatId: ChatId, splitId: Schema.String },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * "Also change it in …" (db/noteCopyWrites.ts): a chat's own note as branch `fromForkId` has it
+   * at its latest message, bound in `toForkId` at its latest message; false when it's the same there.
+   */
+  Rpc.make("CopyNoteToBranch", {
+    payload: { userId: UserId, chatId: ChatId, noteRefId: RefId, fromForkId: ForkId, toForkId: ForkId },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError, EditRefused])
   }),
   /**
    * Deletes one swipe: the normal delete (owner, 2026-10-10). If it was showing, the
@@ -4213,11 +4261,14 @@ export class ReadOps extends RpcGroup.make(
   /**
    * Who knew each of these versions of the chat (`db/knowers.ts`): card ids, or null for
    * everyone. The agent's read tools leave out what a separate context's viewer didn't know.
+   * In fork `forkId`, those it counts not present for a message aren't among its knowers, and
+   * are listed as `away` (a join's too, who might have known part of it).
    */
   Rpc.make("KnowersOf", {
     payload: {
       userId: UserId,
       chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       versionIds: Schema.Array(Schema.String),
       viewers: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String)))
     },
@@ -4225,6 +4276,7 @@ export class ReadOps extends RpcGroup.make(
       Schema.Struct({
         versionId: Schema.String,
         knowers: Schema.NullOr(Schema.Array(Schema.String)),
+        away: Schema.optionalKey(Schema.Array(Schema.String)),
         content: Schema.optionalKey(Schema.String),
         readable: Schema.optionalKey(Schema.Boolean)
       })
@@ -4232,7 +4284,8 @@ export class ReadOps extends RpcGroup.make(
     error: StorageError
   }),
   /**
-   * The agent's `lookup_lore` (agentReads.ts, spec/AGENTIC.md §4.5): the enabled entries of the
+   * The agent's `lookup_lore`
+ (agentReads.ts, spec/AGENTIC.md §4.5): the enabled entries of the
    * lorebooks the rollout's context was assembled with (its snapshot's `agentLore`), named by
    * `entry` (a title or uid), or holding every word of `query` (case aside) in their keys, title or
    * text, those matching by key first. Reads only: what's admitted to the context is the assembler's.
@@ -4606,6 +4659,15 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListBranches", {
     payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Array(Branch),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The thread sets a live fork of the user's is in, innermost first, of those still shown
+   * (spec/THREADS.md §4.3, db/threadReads.ts): each set's threads with names and the fork each opens.
+   */
+  Rpc.make("ThreadsOf", {
+    payload: { userId: UserId, chatId: ChatId, forkId: ForkId },
+    success: Schema.Array(ThreadSet),
     error: Schema.Union([NotFound, StorageError])
   })
 ) {}

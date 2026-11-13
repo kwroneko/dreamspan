@@ -167,7 +167,8 @@ const joinFor = (
 /**
  * A window's messages with those the viewer doesn't know left out: kept in place, so the
  * numbering and the history's positions stay, but not in the context (`unknown`). A merge's
- * join keeps what the viewer knew of it (`joinFor`).
+ * join keeps what the viewer knew of it (`joinFor`), unless the viewer's fork counts it not
+ * there for the join (`away`: the played stretch of threads started earlier, THREADS §5.2).
  */
 export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<HistoryEntry>) =>
   Effect.gen(function* () {
@@ -178,13 +179,24 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
     if (ids.length === 0) return entries
     const identities = assembly.knowledge?.aliases ?? [viewer]
     const knows = (knowers: ReadonlyArray<string>) => identities.some((id) => knowers.includes(id))
-    const known = new Map((yield* sources.knowers(ids)).map((k) => [k.versionId, k.knowers]))
+    const read = yield* sources.knowers(ids)
+    const known = new Map(read.map((k) => [k.versionId, k.knowers]))
+    const away = new Map(read.flatMap((k) => (k.away?.length ? [[k.versionId, k.away] as const] : [])))
     const joins = sources.mergeRows ? entries.flatMap((e) => (e.inContext && e.merge ? [e.merge.id] : [])) : []
     const merged = new Map(
       joins.length ? (yield* sources.mergeRows!(joins)).map((m) => [m.mergeId, m.rows] as const) : []
     )
     return entries.map((entry) => {
+      const gone = away.get(entry.versionId)
+      if (
+        entry.inContext &&
+        gone !== undefined &&
+        knows(gone) &&
+        (entry.speaker === null || !identities.includes(entry.speaker))
+      )
+        return { ...entry, inContext: false, unknown: { knowers: known.get(entry.versionId) ?? [] } }
       const rows = entry.merge && entry.inContext ? merged.get(entry.merge.id) : undefined
+
       if (rows !== undefined) return joinFor(assembly, entry, rows, knows)
       const knowers = known.get(entry.versionId)
       if (!entry.inContext || knowers === undefined || knowers === null || knows(knowers)) return entry

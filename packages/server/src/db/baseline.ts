@@ -51,7 +51,9 @@ const shellSummaries: ReadonlyArray<string> = [
     joined_json TEXT NOT NULL CHECK (json_valid(joined_json)),
     departed_json TEXT NOT NULL CHECK (json_valid(departed_json)),
     activity_json TEXT NOT NULL CHECK (json_valid(activity_json)),
-    added_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(added_json))
+    added_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(added_json)),
+    -- The threads it's in (spec/THREADS.md §4.3): [split id, ordinal] pairs, innermost first.
+    threads_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(threads_json) AND json_type(threads_json) = 'array')
   ) STRICT`,
   `CREATE TABLE shell_user_stamps (user_id TEXT PRIMARY KEY, stamp INTEGER NOT NULL) STRICT`,
   `CREATE TRIGGER shell_slots_insert AFTER INSERT ON slots BEGIN ${bumpChat("NEW.chat_id")} END`,
@@ -95,6 +97,107 @@ const shellSummaries: ReadonlyArray<string> = [
   `CREATE TRIGGER shell_entities_delete AFTER DELETE ON entities BEGIN ${bumpUser("OLD.owner_user_id")} END`,
   `CREATE TRIGGER shell_entity_refs_delete AFTER DELETE ON entity_refs BEGIN ${bumpOwnerOf("OLD.entity_id")} END`,
   `CREATE TRIGGER shell_entity_revisions_delete AFTER DELETE ON entity_revisions BEGIN ${bumpOwnerOf("OLD.entity_id")} END`
+]
+
+/**
+ * Parallel threads in one chat (spec/THREADS.md §4): a thread is a fork; these say which forks
+ * run alongside each other from a message S. A split is frozen (its label only moves under a
+ * paused rebuild of the chat's labels, db/forkLabels.ts); a member changes only its name and
+ * extras. Which thread a fork is in is derived (§4.3, db/threads.ts), never stored per message.
+ */
+const threadSchema: ReadonlyArray<string> = [
+  `CREATE TABLE thread_splits (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    -- S: the message the threads continue from.
+    slot_id TEXT NOT NULL REFERENCES slots(id),
+    -- F: the branch it was started in, which continues as its first thread.
+    fork_id TEXT NOT NULL REFERENCES forks(id),
+    -- F's point when it was made (before its new threads' forks): visible where label <= point < F's end.
+    fork_label BLOB NOT NULL,
+    -- The chat's state_seq when it was made, from which a rebuild recomputes the label.
+    seq INTEGER NOT NULL CHECK (seq > 0),
+    -- Who started it: a registered storage kind (user, rollout, import).
+    origin TEXT NOT NULL DEFAULT 'user',
+    origin_ref TEXT,
+    -- Reserved: a reply that started it.
+    version_id TEXT REFERENCES versions(id) ON DELETE CASCADE,
+    -- Its Undo, while that's in the bin.
+    bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX thread_splits_chat ON thread_splits(chat_id)`,
+  `CREATE INDEX thread_splits_slot ON thread_splits(slot_id)`,
+  `CREATE INDEX thread_splits_fork ON thread_splits(fork_id)`,
+  `CREATE INDEX thread_splits_version ON thread_splits(version_id) WHERE version_id IS NOT NULL`,
+  `CREATE INDEX thread_splits_bin_item ON thread_splits(bin_item_id) WHERE bin_item_id IS NOT NULL`,
+  `CREATE TRIGGER thread_splits_same_chat BEFORE INSERT ON thread_splits
+    WHEN (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id
+      OR (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
+      OR (NEW.version_id IS NOT NULL AND (SELECT s.chat_id FROM versions v JOIN slots s ON s.id = v.slot_id
+        WHERE v.id = NEW.version_id) IS NOT NEW.chat_id)
+    BEGIN ${raise("a thread split's message, branch and reply are in its chat")}; END`,
+  `CREATE TRIGGER thread_splits_frozen BEFORE UPDATE OF id, chat_id, slot_id, fork_id, seq, origin, origin_ref,
+    version_id, created_at ON thread_splits
+    BEGIN ${raise("a thread split never changes")}; END`,
+  `CREATE TRIGGER thread_splits_label_fixed BEFORE UPDATE OF fork_label ON thread_splits
+    WHEN NEW.fork_label IS NOT OLD.fork_label AND NOT EXISTS (SELECT 1 FROM fork_label_pause)
+    BEGIN ${raise("a thread split keeps its label")}; END`,
+  `CREATE TABLE thread_members (
+    split_id TEXT NOT NULL REFERENCES thread_splits(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+    -- The fork that starts this thread; its later branches are in the thread too.
+    fork_id TEXT NOT NULL REFERENCES forks(id),
+    -- 1: made by this split at S from F; 0: F continuing.
+    starts INTEGER NOT NULL CHECK (starts IN (0, 1)),
+    name TEXT,
+    name_user INTEGER NOT NULL DEFAULT 0 CHECK (name_user IN (0, 1)),
+    -- Display extras later (a colour).
+    meta_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta_json) AND json_type(meta_json) = 'object'),
+    row_version INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (split_id, ordinal)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX thread_members_fork ON thread_members(fork_id)`,
+  // A fork starts at most one thread; a split has at most one continuing member.
+  `CREATE UNIQUE INDEX thread_members_starts ON thread_members(fork_id) WHERE starts = 1`,
+  `CREATE UNIQUE INDEX thread_members_continuing ON thread_members(split_id) WHERE starts = 0`,
+  `CREATE TRIGGER thread_members_fork BEFORE INSERT ON thread_members
+    WHEN (SELECT f.chat_id FROM forks f WHERE f.id = NEW.fork_id)
+        IS NOT (SELECT x.chat_id FROM thread_splits x WHERE x.id = NEW.split_id)
+      OR (NEW.starts = 0 AND NEW.fork_id IS NOT (SELECT x.fork_id FROM thread_splits x WHERE x.id = NEW.split_id))
+      OR (NEW.starts = 1 AND NOT EXISTS (SELECT 1 FROM forks f JOIN thread_splits x ON x.id = NEW.split_id
+        WHERE f.id = NEW.fork_id AND f.parent_fork_id = x.fork_id AND f.base_slot_id = x.slot_id))
+    BEGIN ${raise("a thread is its split's branch continuing, or a branch made from it at the split's message")}; END`,
+  `CREATE TRIGGER thread_members_fixed BEFORE UPDATE OF split_id, ordinal, fork_id, starts ON thread_members
+    BEGIN ${raise("a thread keeps its split, place and branch")}; END`,
+  `CREATE TABLE thread_sends (
+    slot_id TEXT PRIMARY KEY REFERENCES slots(id) ON DELETE CASCADE,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    group_id TEXT NOT NULL
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX thread_sends_group ON thread_sends(group_id)`,
+  `CREATE INDEX thread_sends_chat ON thread_sends(chat_id)`,
+  `CREATE TRIGGER thread_sends_same_chat BEFORE INSERT ON thread_sends
+    WHEN (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id
+      OR EXISTS (SELECT 1 FROM thread_sends t WHERE t.group_id = NEW.group_id AND t.chat_id IS NOT NEW.chat_id)
+    BEGIN ${raise("a send group's messages are in one chat")}; END`,
+  `CREATE TRIGGER thread_sends_frozen BEFORE UPDATE ON thread_sends
+    BEGIN ${raise("a send group never changes")}; END`,
+  // The per-branch correction of who was present (§3.4, §16.2 [D] 2026-11-12): a fork counts a
+  // character away for one message of its path. Its key is "<slot id>:<card id>".
+  `CREATE INDEX fork_overrides_presence ON fork_overrides(slot_id, target_id) WHERE kind = 'presence_away'`,
+  `CREATE TRIGGER fork_overrides_presence_away BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'presence_away'
+    AND (NEW.flag IS NULL OR NEW.slot_id IS NULL OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.slot_id)
+      OR NEW.value_id IS NULL OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object'
+      OR length(NEW.target_id) <= length(NEW.slot_id) + 1
+      OR substr(NEW.target_id, 1, length(NEW.slot_id) + 1) IS NOT NEW.slot_id || ':')
+    BEGIN ${raise("a presence correction names a message of its chat and a card")}; END`,
+  `CREATE TRIGGER fork_overrides_presence_away_update BEFORE UPDATE OF flag, value_id ON fork_overrides
+    WHEN NEW.kind = 'presence_away' AND (NEW.flag IS NULL OR NEW.value_id IS NULL
+      OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object')
+    BEGIN ${raise("a presence correction names a message of its chat and a card")}; END`,
+  // Starting threads changes what the branch it was started in is (db/forkSummaries.ts).
+  `CREATE TRIGGER shell_thread_splits_insert AFTER INSERT ON thread_splits BEGIN ${bumpChat("NEW.chat_id")} END`
 ]
 
 export const baseline: ReadonlyArray<string> = [
@@ -1277,6 +1380,9 @@ export const baseline: ReadonlyArray<string> = [
     held INTEGER NOT NULL DEFAULT 0 CHECK (held IN (0, 1)),
     -- 1: its reply's speaker is for the decision model to choose when it posts (Auto's pick if it can't).
     auto_pick INTEGER NOT NULL DEFAULT 0 CHECK (auto_pick IN (0, 1)),
+    -- A copy of a message sent to several threads that queued behind a reply: its group, so
+    -- the post writes its thread_sends row (spec/THREADS.md §6.2).
+    send_group TEXT,
     -- A round's entry: the slot of the round's first reply, once there is one, so the turns
     -- already decided can be shown (DESIGN §2.3).
     round_start_slot_id TEXT REFERENCES slots(id) ON DELETE SET NULL,
@@ -1756,7 +1862,7 @@ export const baseline: ReadonlyArray<string> = [
             JOIN bin_items b ON b.user_id = c.owner_user_id AND b.chat_id = c.id
           WHERE s.id = v.slot_id AND (
             (b.id = v.bin_item_id AND b.kind = 'version')
-            OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch'))))))
+            OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch', 'threads'))))))
     BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END`,
   `CREATE TRIGGER card_names_insert AFTER INSERT ON entity_refs
       WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
@@ -2099,7 +2205,12 @@ export const baseline: ReadonlyArray<string> = [
     framing TEXT,
     cast_json TEXT NOT NULL CHECK (json_valid(cast_json) AND json_type(cast_json) = 'array'),
     counts_json TEXT NOT NULL CHECK (json_valid(counts_json) AND json_type(counts_json) = 'object'),
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    -- How the characters read the joined line (spec/THREADS.md §7.3): 'together' (one transcript
+    -- for everyone) or 'separate'; a registered storage kind, frozen with the row.
+    timelines TEXT NOT NULL DEFAULT 'together',
+    -- Soft: the thread split whose thread this joins, when the source is one (§4.1).
+    split_id TEXT
   ) STRICT`,
   `CREATE INDEX chat_merges_chat ON chat_merges(chat_id)`,
   `CREATE INDEX chat_merges_source_fork ON chat_merges(chat_id, source_fork_id)`,
@@ -2122,6 +2233,10 @@ export const baseline: ReadonlyArray<string> = [
     -- The cards that knew this source message in the source (its version's knowers,
     -- spec/CHARACTER-CONTEXT.md §9.1); NULL for summaries and messages with no cast recorded.
     knowers_json TEXT CHECK (knowers_json IS NULL OR (json_valid(knowers_json) AND json_type(knowers_json) = 'array')),
+    -- Soft: the version copied, beside source_slot_id (spec/THREADS.md §4.1).
+    source_version_id TEXT,
+    -- The copied version's image media ids; NULL when it had none.
+    media_json TEXT CHECK (media_json IS NULL OR (json_valid(media_json) AND json_type(media_json) = 'array')),
     PRIMARY KEY (merge_id, ordinal)
   ) STRICT, WITHOUT ROWID`,
   `CREATE TRIGGER chat_merge_messages_frozen BEFORE UPDATE ON chat_merge_messages
@@ -2166,5 +2281,6 @@ export const baseline: ReadonlyArray<string> = [
     WHEN NEW.owner_user_id IS NOT OLD.owner_user_id AND EXISTS (SELECT 1 FROM library_edit_items WHERE group_id = OLD.id)
     BEGIN ${raise("a library edit's owner never changes")}; END`,
   ...forkLabelSchema,
+  ...threadSchema,
   ...shellSummaries
 ]

@@ -278,6 +278,12 @@
     },
     {
       "type": "index",
+      "name": "fork_overrides_presence",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE INDEX fork_overrides_presence ON fork_overrides(slot_id, target_id) WHERE kind = 'presence_away'"
+    },
+    {
+      "type": "index",
       "name": "fork_overrides_target",
       "tbl_name": "fork_overrides",
       "sql": "CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind, value_id)"
@@ -866,6 +872,66 @@
     },
     {
       "type": "index",
+      "name": "thread_members_continuing",
+      "tbl_name": "thread_members",
+      "sql": "CREATE UNIQUE INDEX thread_members_continuing ON thread_members(split_id) WHERE starts = 0"
+    },
+    {
+      "type": "index",
+      "name": "thread_members_fork",
+      "tbl_name": "thread_members",
+      "sql": "CREATE INDEX thread_members_fork ON thread_members(fork_id)"
+    },
+    {
+      "type": "index",
+      "name": "thread_members_starts",
+      "tbl_name": "thread_members",
+      "sql": "CREATE UNIQUE INDEX thread_members_starts ON thread_members(fork_id) WHERE starts = 1"
+    },
+    {
+      "type": "index",
+      "name": "thread_sends_chat",
+      "tbl_name": "thread_sends",
+      "sql": "CREATE INDEX thread_sends_chat ON thread_sends(chat_id)"
+    },
+    {
+      "type": "index",
+      "name": "thread_sends_group",
+      "tbl_name": "thread_sends",
+      "sql": "CREATE INDEX thread_sends_group ON thread_sends(group_id)"
+    },
+    {
+      "type": "index",
+      "name": "thread_splits_bin_item",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE INDEX thread_splits_bin_item ON thread_splits(bin_item_id) WHERE bin_item_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "thread_splits_chat",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE INDEX thread_splits_chat ON thread_splits(chat_id)"
+    },
+    {
+      "type": "index",
+      "name": "thread_splits_fork",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE INDEX thread_splits_fork ON thread_splits(fork_id)"
+    },
+    {
+      "type": "index",
+      "name": "thread_splits_slot",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE INDEX thread_splits_slot ON thread_splits(slot_id)"
+    },
+    {
+      "type": "index",
+      "name": "thread_splits_version",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE INDEX thread_splits_version ON thread_splits(version_id) WHERE version_id IS NOT NULL"
+    },
+    {
+      "type": "index",
       "name": "tool_approvals_call",
       "tbl_name": "tool_approvals",
       "sql": "CREATE INDEX tool_approvals_call ON tool_approvals(tool_call_id, rollout_id)"
@@ -982,13 +1048,13 @@
       "type": "table",
       "name": "chat_merge_messages",
       "tbl_name": "chat_merge_messages",
-      "sql": "CREATE TABLE chat_merge_messages ( merge_id TEXT NOT NULL REFERENCES chat_merges(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('message', 'summary')), source_slot_id TEXT, speaker_entity_id TEXT, speaker_name TEXT NOT NULL, side TEXT NOT NULL CHECK (side IN ('user', 'assistant')), content TEXT NOT NULL, sent_at INTEGER NOT NULL, included TEXT NOT NULL CHECK (included IN ('verbatim', 'summarized', 'left_out')), -- The cards that knew this source message in the source (its version's knowers, -- spec/CHARACTER-CONTEXT.md §9.1); NULL for summaries and messages with no cast recorded. knowers_json TEXT CHECK (knowers_json IS NULL OR (json_valid(knowers_json) AND json_type(knowers_json) = 'array')), PRIMARY KEY (merge_id, ordinal) ) STRICT, WITHOUT ROWID"
+      "sql": "CREATE TABLE chat_merge_messages ( merge_id TEXT NOT NULL REFERENCES chat_merges(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('message', 'summary')), source_slot_id TEXT, speaker_entity_id TEXT, speaker_name TEXT NOT NULL, side TEXT NOT NULL CHECK (side IN ('user', 'assistant')), content TEXT NOT NULL, sent_at INTEGER NOT NULL, included TEXT NOT NULL CHECK (included IN ('verbatim', 'summarized', 'left_out')), -- The cards that knew this source message in the source (its version's knowers, -- spec/CHARACTER-CONTEXT.md §9.1); NULL for summaries and messages with no cast recorded. knowers_json TEXT CHECK (knowers_json IS NULL OR (json_valid(knowers_json) AND json_type(knowers_json) = 'array')), -- Soft: the version copied, beside source_slot_id (spec/THREADS.md §4.1). source_version_id TEXT, -- The copied version's image media ids; NULL when it had none. media_json TEXT CHECK (media_json IS NULL OR (json_valid(media_json) AND json_type(media_json) = 'array')), PRIMARY KEY (merge_id, ordinal) ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "table",
       "name": "chat_merges",
       "tbl_name": "chat_merges",
-      "sql": "CREATE TABLE chat_merges ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, slot_id TEXT NOT NULL UNIQUE REFERENCES slots(id) ON DELETE CASCADE, fork_id TEXT, source_chat_id TEXT, source_fork_id TEXT, source_tip_slot_id TEXT, base_slot_id TEXT, start_slot_id TEXT, title TEXT NOT NULL, framing TEXT, cast_json TEXT NOT NULL CHECK (json_valid(cast_json) AND json_type(cast_json) = 'array'), counts_json TEXT NOT NULL CHECK (json_valid(counts_json) AND json_type(counts_json) = 'object'), created_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE chat_merges ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, slot_id TEXT NOT NULL UNIQUE REFERENCES slots(id) ON DELETE CASCADE, fork_id TEXT, source_chat_id TEXT, source_fork_id TEXT, source_tip_slot_id TEXT, base_slot_id TEXT, start_slot_id TEXT, title TEXT NOT NULL, framing TEXT, cast_json TEXT NOT NULL CHECK (json_valid(cast_json) AND json_type(cast_json) = 'array'), counts_json TEXT NOT NULL CHECK (json_valid(counts_json) AND json_type(counts_json) = 'object'), created_at INTEGER NOT NULL, -- How the characters read the joined line (spec/THREADS.md §7.3): 'together' (one transcript -- for everyone) or 'separate'; a registered storage kind, frozen with the row. timelines TEXT NOT NULL DEFAULT 'together', -- Soft: the thread split whose thread this joins, when the source is one (§4.1). split_id TEXT ) STRICT"
     },
     {
       "type": "table",
@@ -1120,7 +1186,7 @@
       "type": "table",
       "name": "fork_summaries",
       "tbl_name": "fork_summaries",
-      "sql": "CREATE TABLE fork_summaries ( fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE, chat_id TEXT NOT NULL, -- The computation's format, and the chat's and owner's stamps it was computed at. format INTEGER NOT NULL, stamp INTEGER NOT NULL, user_stamp INTEGER NOT NULL, preview TEXT NOT NULL, messages INTEGER NOT NULL, leaf TEXT, end_at INTEGER, -- Where it parts from the fork it was made from: its first own message's time (else its -- making) and how many messages it shares (forkSummaries.ts); null for a chat's first. split_at INTEGER, split_after INTEGER, -- Entity ids only: names and avatars are read with the summary. cast_json TEXT NOT NULL CHECK (json_valid(cast_json)), joined_json TEXT NOT NULL CHECK (json_valid(joined_json)), departed_json TEXT NOT NULL CHECK (json_valid(departed_json)), activity_json TEXT NOT NULL CHECK (json_valid(activity_json)), added_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(added_json)) ) STRICT"
+      "sql": "CREATE TABLE fork_summaries ( fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE, chat_id TEXT NOT NULL, -- The computation's format, and the chat's and owner's stamps it was computed at. format INTEGER NOT NULL, stamp INTEGER NOT NULL, user_stamp INTEGER NOT NULL, preview TEXT NOT NULL, messages INTEGER NOT NULL, leaf TEXT, end_at INTEGER, -- Where it parts from the fork it was made from: its first own message's time (else its -- making) and how many messages it shares (forkSummaries.ts); null for a chat's first. split_at INTEGER, split_after INTEGER, -- Entity ids only: names and avatars are read with the summary. cast_json TEXT NOT NULL CHECK (json_valid(cast_json)), joined_json TEXT NOT NULL CHECK (json_valid(joined_json)), departed_json TEXT NOT NULL CHECK (json_valid(departed_json)), activity_json TEXT NOT NULL CHECK (json_valid(activity_json)), added_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(added_json)), -- The threads it's in (spec/THREADS.md §4.3): [split id, ordinal] pairs, innermost first. threads_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(threads_json) AND json_type(threads_json) = 'array') ) STRICT"
     },
     {
       "type": "table",
@@ -1222,7 +1288,7 @@
       "type": "table",
       "name": "queued_messages",
       "tbl_name": "queued_messages",
-      "sql": "CREATE TABLE queued_messages ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The reply it waits for: the slot, not a version, so it posts after whichever version -- ends up selected. reply_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- Order among the entries waiting in a chat. seq INTEGER NOT NULL, -- A message to post, or a reply to generate. kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')), content TEXT NOT NULL, -- As on versions: the typed text before regex scripts rewrote it, and what they did. raw_content TEXT, rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'message': who replies to it once it posts, picked when it was sent, as an -- immediate send's reply is. reply_speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'generate': the one-turn direction the reply gets. direction TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT, images_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images_json)), -- 1: a reply of a round (DESIGN §2.3), queued by the server behind the round's reply before it. round INTEGER NOT NULL DEFAULT 0 CHECK (round IN (0, 1)), -- 1: its round stopped (Stop, a failed reply, a restart) and waits for Continue round. held INTEGER NOT NULL DEFAULT 0 CHECK (held IN (0, 1)), -- 1: its reply's speaker is for the decision model to choose when it posts (Auto's pick if it can't). auto_pick INTEGER NOT NULL DEFAULT 0 CHECK (auto_pick IN (0, 1)), -- A round's entry: the slot of the round's first reply, once there is one, so the turns -- already decided can be shown (DESIGN §2.3). round_start_slot_id TEXT REFERENCES slots(id) ON DELETE SET NULL, CHECK (round = 0 OR kind = 'generate'), CHECK (held = 0 OR round = 1), CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0), CHECK (kind = 'generate' OR direction IS NULL), CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL) ) STRICT"
+      "sql": "CREATE TABLE queued_messages ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The reply it waits for: the slot, not a version, so it posts after whichever version -- ends up selected. reply_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- Order among the entries waiting in a chat. seq INTEGER NOT NULL, -- A message to post, or a reply to generate. kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')), content TEXT NOT NULL, -- As on versions: the typed text before regex scripts rewrote it, and what they did. raw_content TEXT, rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'message': who replies to it once it posts, picked when it was sent, as an -- immediate send's reply is. reply_speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'generate': the one-turn direction the reply gets. direction TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT, images_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images_json)), -- 1: a reply of a round (DESIGN §2.3), queued by the server behind the round's reply before it. round INTEGER NOT NULL DEFAULT 0 CHECK (round IN (0, 1)), -- 1: its round stopped (Stop, a failed reply, a restart) and waits for Continue round. held INTEGER NOT NULL DEFAULT 0 CHECK (held IN (0, 1)), -- 1: its reply's speaker is for the decision model to choose when it posts (Auto's pick if it can't). auto_pick INTEGER NOT NULL DEFAULT 0 CHECK (auto_pick IN (0, 1)), -- A copy of a message sent to several threads that queued behind a reply: its group, so -- the post writes its thread_sends row (spec/THREADS.md §6.2). send_group TEXT, -- A round's entry: the slot of the round's first reply, once there is one, so the turns -- already decided can be shown (DESIGN §2.3). round_start_slot_id TEXT REFERENCES slots(id) ON DELETE SET NULL, CHECK (round = 0 OR kind = 'generate'), CHECK (held = 0 OR round = 1), CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0), CHECK (kind = 'generate' OR direction IS NULL), CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1373,6 +1439,24 @@
       "name": "summary_revisions_fts_idx",
       "tbl_name": "summary_revisions_fts_idx",
       "sql": "CREATE TABLE 'summary_revisions_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "thread_members",
+      "tbl_name": "thread_members",
+      "sql": "CREATE TABLE thread_members ( split_id TEXT NOT NULL REFERENCES thread_splits(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL CHECK (ordinal >= 0), -- The fork that starts this thread; its later branches are in the thread too. fork_id TEXT NOT NULL REFERENCES forks(id), -- 1: made by this split at S from F; 0: F continuing. starts INTEGER NOT NULL CHECK (starts IN (0, 1)), name TEXT, name_user INTEGER NOT NULL DEFAULT 0 CHECK (name_user IN (0, 1)), -- Display extras later (a colour). meta_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta_json) AND json_type(meta_json) = 'object'), row_version INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (split_id, ordinal) ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "thread_sends",
+      "tbl_name": "thread_sends",
+      "sql": "CREATE TABLE thread_sends ( slot_id TEXT PRIMARY KEY REFERENCES slots(id) ON DELETE CASCADE, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, group_id TEXT NOT NULL ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "thread_splits",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE TABLE thread_splits ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- S: the message the threads continue from. slot_id TEXT NOT NULL REFERENCES slots(id), -- F: the branch it was started in, which continues as its first thread. fork_id TEXT NOT NULL REFERENCES forks(id), -- F's point when it was made (before its new threads' forks): visible where label <= point < F's end. fork_label BLOB NOT NULL, -- The chat's state_seq when it was made, from which a rebuild recomputes the label. seq INTEGER NOT NULL CHECK (seq > 0), -- Who started it: a registered storage kind (user, rollout, import). origin TEXT NOT NULL DEFAULT 'user', origin_ref TEXT, -- Reserved: a reply that started it. version_id TEXT REFERENCES versions(id) ON DELETE CASCADE, -- Its Undo, while that's in the bin. bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
@@ -1817,6 +1901,18 @@
       "name": "fork_overrides_insert_update",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TRIGGER fork_overrides_insert_update BEFORE UPDATE OF flag, value_id, bin_item_id, changeset_id ON fork_overrides WHEN NEW.kind = 'insert' AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'an insertion places an inserted slot of its chat below its parent'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_presence_away",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_presence_away BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'presence_away' AND (NEW.flag IS NULL OR NEW.slot_id IS NULL OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.slot_id) OR NEW.value_id IS NULL OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object' OR length(NEW.target_id) <= length(NEW.slot_id) + 1 OR substr(NEW.target_id, 1, length(NEW.slot_id) + 1) IS NOT NEW.slot_id || ':') BEGIN SELECT RAISE(ABORT, 'a presence correction names a message of its chat and a card'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_presence_away_update",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_presence_away_update BEFORE UPDATE OF flag, value_id ON fork_overrides WHEN NEW.kind = 'presence_away' AND (NEW.flag IS NULL OR NEW.value_id IS NULL OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object') BEGIN SELECT RAISE(ABORT, 'a presence correction names a message of its chat and a card'); END"
     },
     {
       "type": "trigger",
@@ -2339,6 +2435,12 @@
       "name": "shell_state_events_update",
       "tbl_name": "state_events",
       "sql": "CREATE TRIGGER shell_state_events_update AFTER UPDATE OF chat_id, slot_id, version_id, seq, key, scope, value_json, fork_id, fork_seq, superseded_by_changeset ON state_events BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_thread_splits_insert",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE TRIGGER shell_thread_splits_insert AFTER INSERT ON thread_splits BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
     },
     {
       "type": "trigger",
@@ -2888,6 +2990,48 @@
     },
     {
       "type": "trigger",
+      "name": "thread_members_fixed",
+      "tbl_name": "thread_members",
+      "sql": "CREATE TRIGGER thread_members_fixed BEFORE UPDATE OF split_id, ordinal, fork_id, starts ON thread_members BEGIN SELECT RAISE(ABORT, 'a thread keeps its split, place and branch'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "thread_members_fork",
+      "tbl_name": "thread_members",
+      "sql": "CREATE TRIGGER thread_members_fork BEFORE INSERT ON thread_members WHEN (SELECT f.chat_id FROM forks f WHERE f.id = NEW.fork_id) IS NOT (SELECT x.chat_id FROM thread_splits x WHERE x.id = NEW.split_id) OR (NEW.starts = 0 AND NEW.fork_id IS NOT (SELECT x.fork_id FROM thread_splits x WHERE x.id = NEW.split_id)) OR (NEW.starts = 1 AND NOT EXISTS (SELECT 1 FROM forks f JOIN thread_splits x ON x.id = NEW.split_id WHERE f.id = NEW.fork_id AND f.parent_fork_id = x.fork_id AND f.base_slot_id = x.slot_id)) BEGIN SELECT RAISE(ABORT, 'a thread is its split''s branch continuing, or a branch made from it at the split''s message'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "thread_sends_frozen",
+      "tbl_name": "thread_sends",
+      "sql": "CREATE TRIGGER thread_sends_frozen BEFORE UPDATE ON thread_sends BEGIN SELECT RAISE(ABORT, 'a send group never changes'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "thread_sends_same_chat",
+      "tbl_name": "thread_sends",
+      "sql": "CREATE TRIGGER thread_sends_same_chat BEFORE INSERT ON thread_sends WHEN (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id OR EXISTS (SELECT 1 FROM thread_sends t WHERE t.group_id = NEW.group_id AND t.chat_id IS NOT NEW.chat_id) BEGIN SELECT RAISE(ABORT, 'a send group''s messages are in one chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "thread_splits_frozen",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE TRIGGER thread_splits_frozen BEFORE UPDATE OF id, chat_id, slot_id, fork_id, seq, origin, origin_ref, version_id, created_at ON thread_splits BEGIN SELECT RAISE(ABORT, 'a thread split never changes'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "thread_splits_label_fixed",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE TRIGGER thread_splits_label_fixed BEFORE UPDATE OF fork_label ON thread_splits WHEN NEW.fork_label IS NOT OLD.fork_label AND NOT EXISTS (SELECT 1 FROM fork_label_pause) BEGIN SELECT RAISE(ABORT, 'a thread split keeps its label'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "thread_splits_same_chat",
+      "tbl_name": "thread_splits",
+      "sql": "CREATE TRIGGER thread_splits_same_chat BEFORE INSERT ON thread_splits WHEN (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id OR (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id OR (NEW.version_id IS NOT NULL AND (SELECT s.chat_id FROM versions v JOIN slots s ON s.id = v.slot_id WHERE v.id = NEW.version_id) IS NOT NEW.chat_id) BEGIN SELECT RAISE(ABORT, 'a thread split''s message, branch and reply are in its chat'); END"
+    },
+    {
+      "type": "trigger",
       "name": "tool_approvals_identity",
       "tbl_name": "tool_approvals",
       "sql": "CREATE TRIGGER tool_approvals_identity BEFORE UPDATE ON tool_approvals BEGIN SELECT RAISE(ABORT, 'approval identity is immutable') WHERE NEW.rollout_id <> OLD.rollout_id OR NEW.tool_call_id <> OLD.tool_call_id OR NEW.digest <> OLD.digest OR NEW.capability <> OLD.capability OR NEW.created_at <> OLD.created_at; SELECT RAISE(ABORT, 'an answered approval is final') WHERE OLD.answer IS NOT NULL AND (NEW.answer IS NOT OLD.answer OR NEW.answered_at IS NOT OLD.answered_at OR NEW.note IS NOT OLD.note OR NOT (NEW.status = OLD.status OR (OLD.status = 'allowed' AND NEW.status = 'used'))); END"
@@ -3076,7 +3220,7 @@
       "type": "trigger",
       "name": "versions_model_content_frozen",
       "tbl_name": "version_texts",
-      "sql": "CREATE TRIGGER versions_model_content_frozen BEFORE UPDATE OF content ON version_texts WHEN NEW.content IS NOT OLD.content AND EXISTS ( SELECT 1 FROM versions v WHERE v.seq = OLD.version_seq AND v.writer = 'model' AND v.status <> 'generating' AND NOT (v.purged_at IS NOT NULL AND NEW.content = '' AND EXISTS ( SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id JOIN bin_items b ON b.user_id = c.owner_user_id AND b.chat_id = c.id WHERE s.id = v.slot_id AND ( (b.id = v.bin_item_id AND b.kind = 'version') OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch')))))) BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END"
+      "sql": "CREATE TRIGGER versions_model_content_frozen BEFORE UPDATE OF content ON version_texts WHEN NEW.content IS NOT OLD.content AND EXISTS ( SELECT 1 FROM versions v WHERE v.seq = OLD.version_seq AND v.writer = 'model' AND v.status <> 'generating' AND NOT (v.purged_at IS NOT NULL AND NEW.content = '' AND EXISTS ( SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id JOIN bin_items b ON b.user_id = c.owner_user_id AND b.chat_id = c.id WHERE s.id = v.slot_id AND ( (b.id = v.bin_item_id AND b.kind = 'version') OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch', 'threads')))))) BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END"
     },
     {
       "type": "trigger",

@@ -8,7 +8,6 @@ import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { NewVersion } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { knowersOf, parsePresence } from "@rp/shared/knowledge.ts"
 import {
   fillMergeTemplate,
   MERGE_JOIN_DEFAULT,
@@ -40,6 +39,7 @@ import { inFork, shownIn, slotDeletedIn, writeInsert } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
+import { readKnowers } from "./knowers.ts"
 import { MergeResult, NotFound, StaleWrite, type ReadOps, type WriteOps } from "./ops.ts"
 import { castAt } from "./participation.ts"
 import { type ChatRow, toChat } from "./rows.ts"
@@ -58,6 +58,7 @@ interface ForkRow {
 
 interface SourceRow {
   readonly id: string
+  readonly version_id: string
   readonly position: number
   readonly deleted: number
   readonly excluded: number
@@ -176,7 +177,7 @@ const readStretch = (
     ? Effect.succeed([] as ReadonlyArray<SourceRow>)
     : sql<SourceRow>`
         ${displaySlots(sql, pieces, first, last)}
-        SELECT s.id, path.position, ${slotDeletedIn(sql, fork.id, "s")} AS deleted,
+        SELECT s.id, v.id AS version_id, path.position, ${slotDeletedIn(sql, fork.id, "s")} AS deleted,
           ${contextExcludedIn(sql, fork.id)} AS excluded, v.status, v.speaker_entity_id, v.content,
           v.created_at, f.writer AS first_writer, f.origin AS first_origin, v.origin, v.cast_json, v.presence_json
         FROM display_slots path JOIN slots s ON s.id = path.id
@@ -194,16 +195,6 @@ const usable = (row: SourceRow) =>
 
 const sideOf = (row: SourceRow): "user" | "assistant" =>
   row.first_writer === "human" && row.first_origin !== "greeting" ? "user" : "assistant"
-
-/** The cards that knew a source message there, in its cast's order; null when no cast was recorded. */
-const knownBy = (row: SourceRow): ReadonlyArray<string> | null => {
-  const knowers = knowersOf({
-    cast: row.cast_json === null ? null : (JSON.parse(row.cast_json) as Array<string>),
-    speaker: row.speaker_entity_id,
-    presence: parsePresence(row.presence_json)
-  })
-  return knowers === null ? null : [...knowers]
-}
 
 /** What a merge of `request.source` into `request.forkId` below `request.at` brings (spec §3). */
 const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeRequest) =>
@@ -304,6 +295,22 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     const read = yield* readStretch(sql, source, sourcePieces, first, sourceLength - 1)
     const nested = read.filter((row) => row.first_origin === "merge" && usable(row)).length
     const messages = read.filter((row) => usable(row) && row.first_origin !== "merge")
+    const sourceCast = yield* castAt(sql, source.chat_id, sourceEnd, source.id)
+    // Freeze what this source branch knew, including its played-stretch corrections.
+    const knowers = new Map(
+      (yield* readKnowers(
+        sql,
+        source.chat_id,
+        sql`1`,
+        messages.map((m) => m.version_id),
+        null,
+        source.id
+      )).map((row) => [
+        row.versionId,
+        row.knowers ?? (row.away?.length ? sourceCast.filter((id) => !row.away!.includes(id)) : null)
+      ])
+    )
+    const knownBy = (row: SourceRow) => knowers.get(row.version_id) ?? null
     const speakers = [...new Set(messages.flatMap((row) => (row.speaker_entity_id ? [row.speaker_entity_id] : [])))]
     const cards = new Map(
       (yield* loadCards(sql, userId, speakers as Array<EntityId>)).map((c) => [c.card.entityId as string, c.card])
@@ -396,7 +403,6 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
 
     // The cast: the union of both at the merge point (DESIGN §3.3 [D]).
     const destCast = yield* castAt(sql, request.chatId, atId, fork.id)
-    const sourceCast = yield* castAt(sql, source.chat_id, sourceEnd, source.id)
     const union = [...new Set([...destCast, ...sourceCast])]
     const added = sourceCast.filter((id) => !destCast.includes(id))
     const castCards = new Map(

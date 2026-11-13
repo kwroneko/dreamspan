@@ -19,7 +19,8 @@ import {
   FrozenMacros,
   PathEntry,
   QueuedMessage,
-  SlotId
+  SlotId,
+  ThreadPlace
 } from "./chat.ts"
 import { ChatNameInput, GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
@@ -178,8 +179,16 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   recentAt: Schema.Number,
   /** Its chat's Recent: the latest `recentAt` of the chat's live forks. */
   chatRecentAt: Schema.Number,
-  /** How many live forks (branches) its chat has. */
+  /** How many live forks (branches) its chat has, not counting the forks of parallel threads started from a branch. */
   branches: Schema.Int,
+  /** The thread sets it's in that are shown (spec/THREADS.md §4.3), innermost first; absent when none. */
+  threads: Schema.optionalKey(Schema.Array(ThreadPlace)),
+  /**
+   * The thread of its innermost shown set, in every section: its name (null:
+   * unnamed) and its characters at the message the threads start from, what an unnamed one is
+   * called by.
+   */
+  thread: Schema.optionalKey(Schema.Struct({ name: Schema.NullOr(Schema.String), cast: Schema.Array(EntityId) })),
   /** Present characters the model writes, by id; `ShellLibrary.people` describes each once. */
   cast: Schema.Array(EntityId),
   /** Characters with participation after the split, absent from its inherited cast. */
@@ -219,8 +228,10 @@ export class ShellCards extends Schema.Class<ShellCards>("ShellCards")({
  * - `chats`: each chat once, by its current fork, the most recent chat first (All chats);
  * - `just`, `with`, `was`: the scope card's chats, once each, by how it is in them, its latest turn first;
  * - `current`: a chat's current fork;
- * - `pinnedBranches`, `peers`, `other`: pinned branches, unpinned named branches, the rest;
- *   each by its last message, newest first;
+ * - `threads`: the forks in a shown set of parallel threads (spec/THREADS.md §13.6), by their
+ *   last message, newest first;
+ * - `pinnedBranches`, `peers`, `other`: pinned branches, unpinned named branches, the rest,
+ *   each by its last message, newest first, leaving out the forks `threads` lists;
  * - `groups`: chats of two or more characters, once each, by `sort`;
  * - `card`: each chat the scope card joined, once, its latest turn first, then newest;
  * - `all`: every fork in scope, newest first.
@@ -234,6 +245,7 @@ export const ShellSection = Schema.Literals([
   "with",
   "was",
   "current",
+  "threads",
   "pinnedBranches",
   "peers",
   "other",

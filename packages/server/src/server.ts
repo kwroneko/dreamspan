@@ -11,12 +11,14 @@ import {
   AuthenticatedDecisionApi,
   AuthenticatedProviderListApi,
   AuthenticatedSplitChatApi,
-  AuthenticatedChatContextsApi
+  AuthenticatedChatContextsApi,
+  AuthenticatedChatThreadsApi
 } from "@rp/shared/api.ts"
 import { makeAgentHandlers } from "./api/agent.ts"
 import { makeMergeHandlers } from "./api/merges.ts"
 import { makeSplitChatHandlers } from "./api/splitChats.ts"
 import { makeChatContextsHandlers } from "./api/contexts.ts"
+import { makeThreadHandlers } from "./api/threads.ts"
 import { Commands } from "./commands.ts"
 import { makeHistoryHandlers } from "./api/history.ts"
 import { makeMessageHandlers } from "./api/messages.ts"
@@ -183,6 +185,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedSummaryRequestApi.toLayer(makeSummaryRequestHandlers),
   AuthenticatedSplitChatApi.toLayer(makeSplitChatHandlers),
   AuthenticatedChatContextsApi.toLayer(makeChatContextsHandlers),
+  AuthenticatedChatThreadsApi.toLayer(makeThreadHandlers),
   AuthenticatedChatMergeApi.toLayer(makeMergeHandlers),
   AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),

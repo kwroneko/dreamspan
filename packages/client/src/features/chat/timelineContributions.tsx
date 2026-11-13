@@ -41,6 +41,24 @@ export const timelineTransforms = makeRegistry<{
 }>()
 export const useTimelineTransforms = () =>
   useSyncExternalStore(timelineTransforms.subscribe, timelineTransforms.snapshot, timelineTransforms.snapshot)
+
+// A transform may read a store of its own (the threads' sets): it says when that changed, and
+// the timeline's rows are made again.
+let inputs = 0
+const inputListeners = new Set<() => void>()
+/** What a registered transform reads besides its context changed. */
+export const timelineInputsChanged = () => {
+  inputs++
+  for (const listener of inputListeners) listener()
+}
+export const useTimelineInputs = () =>
+  useSyncExternalStore(
+    (listener) => {
+      inputListeners.add(listener)
+      return () => inputListeners.delete(listener)
+    },
+    () => inputs
+  )
 export const messageRows = (entries: ReadonlyArray<PathEntry>): ReadonlyArray<TimelineRow> =>
   entries.map((entry) => ({
     key: entry.slotId,

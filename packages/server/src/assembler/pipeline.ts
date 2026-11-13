@@ -148,10 +148,13 @@ export class AssemblySources extends Context.Service<
      * everyone (nothing recorded). A merge's join is known to its source's cast. Fixtures
      * without it: everyone knew everything.
      */
-    readonly knowers?: (
-      versionIds: ReadonlyArray<string>
-    ) => Effect.Effect<
-      ReadonlyArray<{ readonly versionId: string; readonly knowers: ReadonlyArray<string> | null }>,
+    readonly knowers?: (versionIds: ReadonlyArray<string>) => Effect.Effect<
+      ReadonlyArray<{
+        readonly versionId: string
+        readonly knowers: ReadonlyArray<string> | null
+        /** Those the fork read counts not present for it (spec/THREADS.md §5.2), its speaker apart. */
+        readonly away?: ReadonlyArray<string>
+      }>,
       SourceError
     >
     /**

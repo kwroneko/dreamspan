@@ -75,7 +75,7 @@
 
 **Built 2026-11-02 (addbuttons):** The direct-add-actions requirement in §10.1 is implemented and obsolete as a plan; see ARCHITECTURE.md §14.6.
 
-**Built 2026-11-02 (homeurl):** Home's URL state requirement in §10.1 is implemented and obsolete as an implementation plan; see ARCHITECTURE.md §12. Most broader refresh state is implemented by urlstate (2026-11-02); saved-amendment/original-text dialog destinations are **Built** (dialogreload, 2026-11-08; ARCHITECTURE.md §5): `messageDialog` names the action and message version, **[P]** pushed like other places. See ARCHITECTURE.md §5.
+**Built 2026-11-02 (homeurl):** Home's URL state requirement in §10.1 is implemented and obsolete as an implementation plan; see ARCHITECTURE.md §12. Most broader refresh state is implemented by urlstate (2026-11-02); saved-amendment/original-text dialog destinations remain deferred after two failed phone attempts. See ARCHITECTURE.md §5.
 
 **Built 2026-10-30:** CCv3 `group_only_greetings` selection in §4 is implemented and obsolete as a proposal; see ARCHITECTURE.md §12. Other §4 fields retain their statuses.
 
@@ -147,7 +147,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** Decision models (Jev and others) can decide whether an entry is included. This must stay optional.
 - **[P]** Activation sources: keyword triggers as the fallback, an optional decision model asking whether each entry or group is relevant to the current scene, and an agent lookup tool for anything missed. **Partial**: keyword activation is built (ARCHITECTURE §15); decision-model activation and RP lookup tools remain Phase 4 work.
 - **[D]** Keyword matching follows ST's convention for now (owner, 2026-10-12): `use_regex` is ignored, as ST never reads it, and a key is a regular expression only when written as `/pattern/flags`. Low priority to revisit.
-- **[D]** A card's own lorebook (`character_book`) is used in new chats automatically, with no "import card lore" dialog. A chat imported from ST keeps what ST sent: the card's lorebook only if ST had imported it as a lorebook file. Each chat's settings can turn a card's lorebook on or off (owner, 2026-10-14). The chat's Lorebooks tab shows when a card's own book is replaced by a world file linked to that card. **Built 2026-11-12 (lorebooktab)**, including by-name links and the hover explanation; obsolete as an implementation requirement (ARCHITECTURE §12).
+- **[D]** A card's own lorebook (`character_book`) is used in new chats automatically, with no "import card lore" dialog. A chat imported from ST keeps what ST sent: the card's lorebook only if ST had imported it as a lorebook file. Each chat's settings can turn a card's lorebook on or off (owner, 2026-10-14).
 - **[P]** **Overtaken**: The following owner decisions allow above-history placement when the default override is off, pin only above-history entries, and evaluate tail entries every turn. Built: ARCHITECTURE §15. Earlier wording: “Placement is cache-friendly: entries are never inserted above the history. They go in a block near the tail, where they stay until the next compaction boundary.”
 
 - **[D]** (owner, 2026-10-27) Wherever lorebooks are selected there is a setting, **on by default**, that overrides entries' positions so lorebook entries are only placed **below the history**. What it does is made very clear, with a popover explaining why (entries that come and go above the history invalidate the cache for everything after them) and how, right where lorebooks are selected.
@@ -461,6 +461,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 ### 3.3 Threads and merges (the architecture must allow them now; the UX comes later)
 - **[D]** Parallel threads in one conversation that fork and **merge**, with the ability to send one message to several threads at once (same or different speaker, and the speaker can be any card). Design: [THREADS.md](THREADS.md) (Proposed, 2026-11-12).
 - **[D]** Concurrent threads and alternate branches are different concepts and must look different in the UI. Proposed UI: [THREADS.md](THREADS.md) §13.
+- **[D]** (owner, 2026-11-12; THREADS §16.2 question 1, answer (a)) Starting threads at an earlier message makes the messages already played after it one of the threads: they continue as the first thread ("This branch"), and the characters who go to the other threads are recorded as not present for those messages in this branch only (a per-branch correction of who knew them, never a change to the messages other branches show). The other mode, both threads starting empty at that message with the played messages left as an alternate, is struck as redundant: "whoever wants both threads to start empty at #40 makes a branch at #40 first and starts threads there, where #40 is the newest message."
 - **[P]** Messages form a **graph from day one**: slots point to their parents, and a merge is a slot with several parents. Threads are named lanes. **Every view is a selection of a path through the graph**, and context assembly always works on a path. **Former foundation removed** (owner, 2026-11-06): "remove the leftovers of the never-built ‘parallel threads in one chat’ design." Lanes, multi-parent slots and placement groups were unused scaffolding and are gone (ARCHITECTURE §3.7). This proposal is obsolete as an implementation foundation; future in-chat threads need their own schema. The product requirements above remain future work, as do the next two items.
 - **[P]** Sending to several threads creates one placement per thread, linked by a group ID. Editing one asks whether to edit the whole group. Proposed as `thread_sends`: [THREADS.md](THREADS.md) §6.
 - **[O]** How two merged threads become one sequence: ~~interleave by time~~, or the merge node carries a summary of the other thread. A merge is an explicit event that sets the merged state **[P]**. Proposed for in-chat threads: [THREADS.md](THREADS.md) §7.2–§7.3.
@@ -782,7 +783,7 @@ Design: [CHAT-MERGE.md](CHAT-MERGE.md).
 - **[P]** Placement is per piece, not only per card. The card's fixed definition stays where the layout puts it. Card modules and card-owned notes each have their own placement (top section, depth N or tail), so the parts that change during a chat can sit late in the context (§4.1a). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §15). Arbitrary agent-editable card fields remain Phase 4 work.
 
 ### 5.3 `{{user}}`, `{{char}}` and the speaker
-- **[D]** In ST these rebind every turn (to the current speaker and the current persona). That breaks the cache and fights instructions like "don't write for `{{user}}`". Users need to control and pin these bindings, and to edit presets and cards to stop relying on them, which requires search and replace. **Binding controls built** (U09, 2026-10-28; ARCHITECTURE.md §15); cross-entry search and replace remains separate. **Cross-entry search and replace built** (search, 2026-11-12; ARCHITECTURE §14.6 "Across the library").
+- **[D]** In ST these rebind every turn (to the current speaker and the current persona). That breaks the cache and fights instructions like "don't write for `{{user}}`". Users need to control and pin these bindings, and to edit presets and cards to stop relying on them, which requires search and replace. **Binding controls built** (U09, 2026-10-28; ARCHITECTURE.md §15); cross-entry search and replace remains separate.
 - **[D]** In preset text, `{{char}}` is every character in the chat except your persona, comma-joined, so the start of the request is the same whoever speaks; a card's own text uses that card's name, and the chat can pin other text in its place (owner, 2026-10-29). In a one-on-one chat it's the one name, as in ST; in a group ST uses the current speaker, which rebuilds the cache on most turns, and the ST fidelity gate lists this as a documented difference. `{{user}}` is in §2.2. The speaker for this turn is named by the end-of-request instruction (§2.2), which realises the earlier proposed "tail directive".
 
 ### 5.4 Role projection [P]
@@ -820,8 +821,6 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[P]** Warn in the preset editor when an evaluated random/clock macro or other per-turn source lies before the reusable history, and quantify the downstream input that loses reuse. Assembly's volatility detection and issue are **built, obsolete as implementation proposals** (2026-11-03; ARCHITECTURE §15); editor-specific placement and wording remain proposed.
 
 ### 5.6 Macros
-
-**Built 2026-11-07 (lorebookmacros); obsolete as an implementation requirement:** the owner’s §5.6 macro-colouring requirement now also reaches standalone lorebook entry content, with the shared editor’s changed-line marks. Snippets already use the shared note editor. See ARCHITECTURE §14.6.
 
 - **[D] Decided (owner, 2026-11-02, macrohighlight):** “Highlight using the real parser”, with comments dimmed, implemented value macros in one color and implemented directives in another, classified through the registry; unknown macros stay unstyled. Applies to every shared prompt-text field editor, including presets, cards, notes, lorebooks and snippets. “No hover popups or autocomplete: highlighting only.” Keep 5,000-line texts fast. **Built; obsolete as an implementation requirement:** ARCHITECTURE §10 and §14.6.
 - **[P]** (macrohighlight, 2026-11-02, implementation choice): reuse the engine's scoped pairing, cache completed parser nodes before edits, and decorate only visible CodeMirror ranges; share the display macro registry. **Built; obsolete as an implementation proposal:** ARCHITECTURE §10.
@@ -901,7 +900,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - **[P]** A prompt added behind the bar can be typed into at once; its text is kept as live drafts, but nothing sends it until the bar's Save, and a reply's checkpoint leaves it out, so Revert takes it away entirely. Deleting a prompt that was only added behind the bar removes it at once (it was never saved or sent).
 - **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12, §14).
 - **[P]** Every write carries the revision it was based on, so a stale tab can never silently overwrite newer state. **Built optimistic bases** (ARCHITECTURE §3.10, §14); compound forms retain documented snapshots and setting-save/draft-end operations are separate. This is not universal live field collaboration.
-- **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats. **Built:** message text across all chats, from the left panel's chat search (search, 2026-11-12; ARCHITECTURE §12 "Finding a message"). **Built:** search and replace through every library entry at once, from the library's Search and replace button (search, 2026-11-12; ARCHITECTURE §14.6 "Across the library").
+- **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats.
 - **[D]** Text boxes work like a code editor (owner, 2026-10-16), and almost every text box needs it:
   - the left edge marks new, modified and unchanged lines
   - a diff view of the current changes against the last revision
@@ -1039,7 +1038,7 @@ Tools that “change a card” during RP create notes replacing its fields, incl
   - **[P]** (phase4ui, 2026-11-05) Activity reads the usage ledger, one row per rollout and purpose, so a refusal judgment (a `decision` request riding on a reply's rollout) is listed beside summaries and condensations. A summary row links to its request; a judgment's to the reply.
 
 ### 7.5 Resuming
-- **[D]** Resume a stopped or broken rollout mid-way **without sending another turn and without the model being able to tell**. reference-harness does this; most coding harnesses don't. **Built** (resumeui, 2026-11-12; ARCHITECTURE §16 "Agent rollouts", "In the client"): Resume among the message's actions on an agent reply that stopped or failed.
+- **[D]** Resume a stopped or broken rollout mid-way **without sending another turn and without the model being able to tell**. reference-harness does this; most coding harnesses don't.
 - **[P]** As in reference-harness (`src/agent/recovery.ts`): **Built; obsolete as a proposal** (2026-11-05; ARCHITECTURE §16, "Agent rollouts": `ResumeVersion`, `agent/resume.ts`).
   - a frozen context snapshot is taken when the rollout starts
   - the transcript is flushed as each turn completes
@@ -1048,7 +1047,7 @@ Tools that “change a card” during RP create notes replacing its fields, incl
   - after a tool call but before its result: re-run the tool
   - midway through a tool call: discard it and resample
   - midway through text: continue it through prefill where supported, otherwise discard it
-- **[P]** Any step of a rollout can be edited before resuming. **Built** (server 2026-11-05, `ResumeFromStep`; the inspector's Edit and Resume from here, resumeui 2026-11-12; ARCHITECTURE §16).
+- **[P]** Any step of a rollout can be edited before resuming. **Server built** (2026-11-05; `ResumeFromStep`, ARCHITECTURE §16); the inspector's controls are AGENTIC U8.
 
 ### 7.6 Decision models
 - **[D]** Jev and similar decision models are integrated as in reference-harness (`spec/DECISION-MODEL.md`), but are **never mandatory**. Each decision point has a heuristic fallback. Phase 4 design: AGENTIC §7 (points `presence` and `lore`, opt-in per connection). **Built** (phase4decide, 2026-11-05; ARCHITECTURE §16 "Decision models").
@@ -1057,14 +1056,13 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 - **[P]** (phase4decide) `lore` asks only about entries that carry a question for the decision model (the entry's `decision_hint`, set in its Matching settings), at most 32 per reply, over the last six messages; a yes includes the entry as if its keys had matched.
 
 ### 7.7 Agent use ("workshop")
-- **Design (proposed, 2026-11-12):** [WORKSHOP.md](WORKSHOP.md) designs everything in this section, the Phase 6 parts of §7.3 and §10.3, and the plugin loader, as deltas from the build and reference-harness, with build units in its §9 and open questions in its §10. It promotes nothing here.
 - **[D]** Agentic work outside the RP itself: creating cards with tools, editing and cloning them, changing settings, setting up chat modes, eventually writing plugins.
 - **[D]** It needs a **clear UX distinction** within one shared UI, and it must be hard to slip into "Claude Code mode" from RP by accident. It ships preconfigured with an agent preset and a default assistant card the user can swap for any of their own.
 - **[P]** Technically it's a chat configuration made of: **Unbuilt workshop configuration (Phase 6)**; registry/state groundwork is not a running workshop.
   - an output contract that allows several messages
   - **rollout continuity**: fork fresh per turn, or **resume the previous rollout** **[D]** (the timeline stays separate either way)
   - the meta toolset
-- **[P]** The chat kind (RP or Workshop) is chosen at creation and can't be toggled afterwards. Workshops have a distinct accent, a badge and a capability strip. **Built (workshop1, workshop2; ARCHITECTURE §16, “Workshop chats”): the kind is set by the Chats page’s Workshop card and never changes; the accent, the badge and a read-only capability chip. Choosing what the assistant may do is unbuilt (WORKSHOP W4).**
+- **[P]** The chat kind (RP or Workshop) is chosen at creation and can't be toggled afterwards. Workshops have a distinct accent, a badge and a capability strip. **Unbuilt Phase 6 proposal.**
 - **[P]** An out-of-character side channel attached to an RP chat: a small workshop docked in a panel that can read the story but writes to its own timeline. **Unbuilt Phase 6 proposal.**
 - **[P]** Permissions: **Unbuilt tool/plugin consent UX (Phase 6)**; imported data already cannot grant executable capabilities.
   - tools with external effects need approval
@@ -1152,7 +1150,7 @@ Tools that “change a card” during RP create notes replacing its fields, incl
   - **[O]** How branches, forks and edits interact with shared summaries has to be worked out from what the user sees and expects, not only from what's correct (owner, 2026-10-13). So does how the UI shows which summary covers which messages, and where "re-summarize" lives. **Answered by later owner rules** (§3.4, §10.3) and built per-fork summary selections, revisions, range/rail views and rerun controls (ARCHITECTURE §16); owner UX acceptance remains unverified.
 - **[D]** A summary that fails (for example, the model keeps refusing) leaves the original messages in the context for as long as they fit; no placeholder replaces them until there's no room (owner, 2026-10-13).
 - **[D]** LCM is on by default for new chats (owner, 2026-10-13). Imported chats stay off by default, as above.
-- **[D]** Both summarizer styles are supported: the reply itself is the summary (direct output, which chat-only models without tool calling need), or the model writes it through tools as reference-harness does (owner, 2026-10-12 and 2026-10-13). **Built** (setting "Written as" beside the other summary settings; ARCHITECTURE §16).
+- **[D]** Both summarizer styles are supported: the reply itself is the summary (direct output, which chat-only models without tool calling need), or the model writes it through tools as reference-harness does (owner, 2026-10-12 and 2026-10-13).
 - **[P]** Summaries are **editable**, with versions. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §16).
 - **[D]** Memory retrieval of *some* sort will be a feature. LCM is already a form of RAG (owner, 2026-10-10).
 - **[D]** Assume vector search will exist somewhere eventually. Plain embedding search over all messages is of doubtful value on its own (owner, 2026-10-10). sqlite-vec already covers vector search, but only by brute force; an indexed ANN search is a benefit of alternatives such as Turso, not a requirement.

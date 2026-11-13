@@ -1915,6 +1915,85 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  // Parallel threads (spec/THREADS.md): another user's chat, branch or split is NotFound.
+  StartThreads: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.StartThreads({
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId,
+          slotId: owner.chat.slotId,
+          expectedRowVersion: 1,
+          threads: [
+            { name: null, cast: [], writesAs: null },
+            { name: null, cast: [], writesAs: null }
+          ]
+        }),
+        "NotFound"
+      )
+  },
+  ThreadsOf: {
+    probe: (actor, owner) =>
+      refused(actor.api.ThreadsOf({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
+  },
+  RenameThread: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RenameThread({ chatId: owner.chat.chatId, splitId: "a-split", ordinal: 0, name: "x", rowVersion: 1 }),
+        "NotFound"
+      )
+  },
+  UndoThreads: {
+    probe: (actor, owner) =>
+      refused(actor.api.UndoThreads({ chatId: owner.chat.chatId, splitId: "a-split" }), "NotFound")
+  },
+  CopyNoteToBranch: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Every independently supplied scope is checked, including foreign target/source forks.
+        for (const direction of [
+          { fromForkId: actor.chat.forkId, toForkId: owner.chat.forkId },
+          { fromForkId: owner.chat.forkId, toForkId: actor.chat.forkId }
+        ])
+          yield* refused(
+            actor.api.CopyNoteToBranch({
+              chatId: actor.chat.chatId,
+              noteRefId: actor.chat.noteRefId,
+              ...direction
+            }),
+            "NotFound"
+          )
+        const other = yield* actor.api.CreateChat({ title: "Synthetic other chat" })
+        yield* refused(
+          actor.api.CopyNoteToBranch({
+            chatId: actor.chat.chatId,
+            noteRefId: actor.chat.noteRefId,
+            fromForkId: actor.chat.forkId,
+            toForkId: other.currentForkId!
+          }),
+          "NotFound"
+        )
+        // Their note in their chat, and their note into the actor's own branch: both NotFound.
+        yield* refused(
+          actor.api.CopyNoteToBranch({
+            chatId: owner.chat.chatId,
+            noteRefId: owner.chat.noteRefId,
+            fromForkId: owner.chat.forkId,
+            toForkId: owner.chat.forkId
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.CopyNoteToBranch({
+            chatId: actor.chat.chatId,
+            noteRefId: owner.chat.noteRefId,
+            fromForkId: actor.chat.forkId,
+            toForkId: actor.chat.forkId
+          }),
+          "NotFound"
+        )
+      })
+  },
   // Merging another chat in (spec/CHAT-MERGE.md): neither side may be someone else's chat.
   PreviewChatMerge: {
     probe: (actor, owner) =>

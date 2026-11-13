@@ -1,5 +1,10 @@
 // Each unexposed RPC is an explicit decision. New operations must be classified here or exposed.
 export const operationExclusions: Readonly<Record<string, string>> = {
+  CopyNoteToBranch: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  StartThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  RenameThread: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  UndoThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  ThreadsOf: "Not in W6's first exposures; use the bounded workshop read tools.",
   AddRemoteVersionAsCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   AddUserModel: "User-only security, consent, account, credential or network configuration.",
   AdoptRemoteCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
@@ -288,6 +293,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
 }
 
 export const commandExclusions: Readonly<Record<string, string>> = {
+  "thread.start": "Starting parallel threads is outside W6 and needs a complete undo adapter.",
   "chat.merge": "Merging chats is outside W6 and needs a complete undo adapter.",
   "message.insert": "The insertion workflow is not in W6 and needs its own undo adapter."
 }

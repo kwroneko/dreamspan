@@ -5,6 +5,8 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { readSummary, SummaryReads } from "./lcmReads.ts"
 import { audienceScope, firstUnknownPosition, inputsKnown } from "./lcmAudience.ts"
+import { viewAt } from "./forkState.ts"
+
 import {
   followsInDisplay,
   insertedOnPath,
@@ -265,7 +267,12 @@ export const selectSummaryLayer = (
       )
         continue
       // A stale one only when the view knew every message it was written from.
-      if (view !== undefined && !summary.fresh && !(yield* inputsKnown(sql, summary.id, view.identities))) continue
+      if (
+        view !== undefined &&
+        !summary.fresh &&
+        !(yield* inputsKnown(sql, summary.id, view.identities, yield* viewAt(sql, chatId, leaf)))
+      )
+        continue
       found.push(summary)
     }
     const ending = new Map<number, Array<Summary>>()

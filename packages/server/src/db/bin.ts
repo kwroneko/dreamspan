@@ -32,6 +32,7 @@ import type { ForkRow } from "./rows.ts"
 import { binItemForks } from "./binForks.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { NotFound } from "./ops.ts"
+import { setSplitApplied } from "./threads.ts"
 import type { QueuedRow } from "./queueRows.ts"
 
 interface BinRow {
@@ -558,6 +559,57 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       return itemId
     })
 
+  /**
+   * Undo of starting threads (spec/THREADS.md §5.2): one bin item of kind `threads` naming the
+   * split, which takes the threads' own forks as `deleteFork` takes a branch (forks made from
+   * them later stay), and in the branch they were started in, suppresses the split's away marks
+   * and its corrections of the played stretch (`setSplitApplied`). Restoring reverses both.
+   */
+  const removeThreads = (userId: UserId, chatId: string, splitId: string) =>
+    Effect.gen(function* () {
+      const [split] = yield* sql<{
+        id: string
+        fork_id: string
+        slot_id: string
+        bin_item_id: string | null
+        chat_title: string | null
+        depth: number
+      }>`SELECT x.id, x.fork_id, x.slot_id, x.bin_item_id, c.title AS chat_title, s.depth FROM thread_splits x
+        JOIN chats c ON c.id = x.chat_id JOIN slots s ON s.id = x.slot_id
+        WHERE x.id = ${splitId} AND x.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+      if (!split || split.bin_item_id !== null) return yield* new NotFound({ entity: "threads", id: splitId })
+      // S as the branch it was started in numbers it.
+      const position = (yield* displayThrough(sql, chatId, split.fork_id, split.slot_id))?.end ?? split.depth
+      const members = yield* sql<{ fork_id: string; name: string | null }>`
+        SELECT m.fork_id, m.name FROM thread_members m JOIN forks f ON f.id = m.fork_id
+        WHERE m.split_id = ${splitId} AND m.starts = 1 AND f.deleted_at IS NULL ORDER BY m.ordinal`
+      if (members.length === 0) return yield* new NotFound({ entity: "threads", id: splitId })
+      const forkIds = members.map((m) => m.fork_id)
+      const named = members.flatMap((m) => (m.name === null ? [] : [m.name]))
+      const itemId = yield* insertItem({
+        userId,
+        kind: "threads",
+        targetId: splitId,
+        chatId,
+        title: `${members.length === 1 ? "A thread" : `${members.length} threads`} in ${chatName(split.chat_title)}`,
+        excerpt: named.join(", "),
+        origin: {
+          chatId,
+          chatTitle: split.chat_title,
+          splitId,
+          slotId: split.slot_id,
+          position,
+          parentForkId: split.fork_id,
+          forkId: forkIds[0]!,
+          forkIds
+        },
+        byteSize: 0
+      })
+      for (const forkId of forkIds) yield* removeFork(userId, forkId, { itemId, forkIds })
+      yield* setSplitApplied(sql, { id: splitId, chatId, forkId: split.fork_id }, false, itemId)
+      return itemId
+    })
+
   /** One visible chat group, in one bin item; deeper split groups keep their shared path. */
   const deleteChatGroup = (
     userId: UserId,
@@ -749,7 +801,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         AND purged_at IS NULL`
       yield* sql`UPDATE versions SET deleted_at = NULL, bin_item_id = NULL WHERE bin_item_id = ${item.id}
         AND purged_at IS NULL`
-      if (item.kind === "branch") {
+      if (item.kind === "branch" || item.kind === "threads") {
         yield* sql`UPDATE forks SET deleted_at = NULL, bin_item_id = NULL, row_version = row_version + 1
           WHERE id = ${forkId}`
         // Every message on its path is shown by it again, whoever's deletion marked it.
@@ -864,6 +916,13 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       if (forkId !== undefined && item.chat_id !== null) {
         yield* discardDeletedQueue(item.chat_id)
         for (const restored of origin.forkIds ?? [forkId]) yield* restoreInFork(item, restored)
+        // Undone threads apply in their branch again: its away marks and played-stretch corrections.
+        if (item.kind === "threads") {
+          const [split] = yield* sql<{ id: string; chat_id: string; fork_id: string }>`
+            SELECT id, chat_id, fork_id FROM thread_splits WHERE id = ${item.target_id} AND bin_item_id = ${itemId}`
+          if (split)
+            yield* setSplitApplied(sql, { id: split.id, chatId: split.chat_id, forkId: split.fork_id }, true, null)
+        }
         yield* replaceCurrentFork(item.chat_id)
         yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
         yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${item.chat_id}`
@@ -879,6 +938,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         chat: "chats",
         message: "slots",
         branch: "slots",
+        threads: "slots",
         version: "versions",
         entity: "entities",
         connection: "connections",
@@ -989,18 +1049,22 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       // Messages and branches keep their slots as empty placeholders, so the
       // conversation's structure and any summaries over it remain valid. A branch's forks
       // keep their rows, losing their names and tips.
-      yield* run(`UPDATE slots SET purged_at = ? WHERE bin_item_id IN (${items("'message', 'branch'")})`, [now])
+      yield* run(`UPDATE slots SET purged_at = ? WHERE bin_item_id IN (${items("'message', 'branch', 'threads'")})`, [
+        now
+      ])
       // The head of a purged fork's slots stays a barrier, as a purged branch's root always did.
       yield* run(
-        `UPDATE slots SET branch_deleted = 1 WHERE bin_item_id IN (${items("'branch'")})
+        `UPDATE slots SET branch_deleted = 1 WHERE bin_item_id IN (${items("'branch', 'threads'")})
            AND NOT EXISTS (SELECT 1 FROM slots p WHERE p.id = slots.parent_slot_id AND p.bin_item_id = slots.bin_item_id)`
       )
       yield* run(
         `UPDATE forks SET purged_at = ?, name = NULL, tip_slot_id = NULL, bin_item_id = NULL, row_version = row_version + 1
-         WHERE bin_item_id IN (${items("'branch'")})`,
+         WHERE bin_item_id IN (${items("'branch', 'threads'")})`,
         [now]
       )
-      yield* purgeVersions(`slot_id IN (SELECT id FROM slots WHERE bin_item_id IN (${items("'message', 'branch'")}))`)
+      yield* purgeVersions(
+        `slot_id IN (SELECT id FROM slots WHERE bin_item_id IN (${items("'message', 'branch', 'threads'")}))`
+      )
       // A swipe goes with every fork's copy standing in for it (schema/forkVersions.ts), first,
       // while the swipe's bin item still says which it is.
       yield* purgeVersions(
@@ -1271,6 +1335,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     deleteChatGroup,
     deleteMessage,
     deleteFork,
+    removeThreads,
     deleteVersion,
     deleteEntity,
     deleteConnection,

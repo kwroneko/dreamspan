@@ -221,6 +221,19 @@ export const rebuildForkLabels = (db: DatabaseSync, chatId: string) => {
     .all(chatId) as Array<{ slot_id: string; fork: string; seq: number }>
   const setChange = db.prepare("UPDATE history_changes SET label = ? WHERE slot_id = ? AND fork_id = ? AND seq = ?")
   for (const c of changes) setChange.run(pointAt(c.fork, c.seq), c.slot_id, c.fork, c.seq)
+  // A thread split's label is its branch's point when it was made, before its threads' forks
+  // (spec/THREADS.md §4.1): the forks made from that branch at or after its seq aren't counted.
+  const splits = db
+    .prepare("SELECT id, fork_id AS fork, seq FROM thread_splits WHERE chat_id = ?")
+    .all(chatId) as Array<{ id: string; fork: string; seq: number }>
+  const setSplit = db.prepare("UPDATE thread_splits SET fork_label = ? WHERE id = ?")
+  for (const x of splits) setSplit.run(pointAt(x.fork, x.seq), x.id)
   db.prepare("DELETE FROM fork_label_pause WHERE paused = 2").run()
-  return { forks: forks.length, overrides: rows.length, events: events.length, changes: changes.length }
+  return {
+    forks: forks.length,
+    overrides: rows.length,
+    events: events.length,
+    changes: changes.length,
+    splits: splits.length
+  }
 }
