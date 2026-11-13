@@ -121,6 +121,16 @@ export const previousRun = Effect.fnUntraced(function* (
     } as const
   if ((snapshot.lcm === undefined) !== (fresh.lcm === undefined))
     return { reason: "The Summaries setting changed, so this request was put together again." } as const
+  // A carried prefix is a cache optimization, never authority over the live LCM layer.
+  // Compare only coverage/revisions and budgets: recent measures naturally change each turn.
+  if (
+    fresh.lcm &&
+    (!isDeepStrictEqual(snapshot.lcm?.selected, fresh.lcm.selected) ||
+      snapshot.lcm?.cursor !== fresh.lcm.cursor ||
+      !isDeepStrictEqual(snapshot.lcm?.recentBudget, fresh.lcm.recentBudget) ||
+      !isDeepStrictEqual(snapshot.lcm?.layerBudget, fresh.lcm.layerBudget))
+  )
+    return { reason: "The summaries or their limits changed, so this request was put together again." } as const
   if (!isDeepStrictEqual(snapshot.inputs.preset, fresh.inputs.preset))
     return { reason: "The preset changed, so this request was put together again." } as const
   // A capability turned on or off changes what the instructions say the assistant may do.

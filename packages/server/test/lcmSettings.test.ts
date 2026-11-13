@@ -186,7 +186,11 @@ lcmTest("pairs that don't fit are scaled down and said so, and the reply still a
     )
     assert.isBelow(view.fitted!.recent.target, view.fitted!.recent.maximum)
     // The chunk the settings name is too large for the scaled band: said under it.
-    assert.isTrue(view.fit.some((m) => m.field === "leafInput" && m.message.startsWith("Two chunks (8,000)")))
+    assert.isTrue(
+      view.fit.some(
+        (m) => m.field === "leafInput" && m.message.startsWith("Chunk size 4,000 needs a gap of at least 8,000 tokens.")
+      )
+    )
     assert.isNotNull(view.now)
     const last = h.rows.at(-1)!
     const built = yield* h.reader.AssembleContext({

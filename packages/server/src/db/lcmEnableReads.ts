@@ -1,3 +1,6 @@
+import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { workshopTranscript } from "./workshopTranscript.ts"
+import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { requireSummaries } from "./chatKindPolicy.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 // What enabling LCM on a chat takes (spec/LCM.md §2.7, §2.11), measured in one read: the
@@ -83,8 +86,9 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
     // one assembly of the next context with LCM on, as the planner would see it.
     LcmSettingsAt: ({ userId, chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {
-        const [chat] =
-          yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        const [chat] = yield* sql<{
+          kind: string
+        }>`SELECT kind FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
         const sources = sqlSources(sql, { userId, chatId, next: true, leafSlotId })
         const base = yield* Effect.map(AssemblySources, (s) => s).pipe(Effect.provide(sources.layer))
@@ -117,13 +121,32 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
               }
             : null
         const room = measure ? { context: measure.context, fixed: measure.fixed, reply: measure.reply } : null
+        let recentNow = measure?.recentNow ?? 0
+        if (resolved.enabled && at && chatKinds.get(chat.kind)?.summaryTranscript) {
+          const selected = yield* selectSummaryLayer(sql, userId, chatId, at)
+          const path = (yield* lcmPath(sql, userId, chatId, at, selected.cursor ?? undefined)).filter(
+            (s) => s.position > selected.cursorDepth
+          )
+          const transcripts = yield* workshopTranscript(
+            sql,
+            userId,
+            chatId,
+            path.flatMap((s) => (s.versionId ? [s.versionId] : []))
+          )
+          const model = yield* base.model(state.modelBindings[""] ?? null)
+          const count = yield* prepareTextTokens(assembler.textCounters.list(), model)
+          recentNow = path.reduce(
+            (n, s) => n + count(s.content + (s.versionId ? (transcripts.get(s.versionId) ?? "") : "")) + 3,
+            0
+          )
+        }
         return {
           stored: state.lcm,
           resolved,
           account,
           fitted,
           room,
-          now: measure ? { recent: measure.recentNow, layer: measure.layerNow } : null,
+          now: measure ? { recent: recentNow, layer: measure.layerNow } : null,
           fit: lcmMisfits(resolved, room, built?.recentBudget)
         }
       }).pipe(

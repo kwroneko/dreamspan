@@ -694,6 +694,9 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
               model,
               enabled: settings.enabled,
               target: settings.leafTarget,
+              recentTarget: settings.recentTarget,
+              recentMax: settings.recentMax,
+              layerMax: settings.layerMax,
               tail: settings.tail,
               changes: JSON.stringify(undone)
             })

@@ -58,6 +58,8 @@ import { executionRegistry } from "../execution.ts"
 export interface AgentRun {
   readonly allowsOutside?: boolean
   readonly checkpoints?: ReadonlyArray<number>
+  /** Verbatim history already inside the frozen prefix, counted by assembly. */
+  readonly recentPrefix?: number | undefined
   readonly plan: AgentPlan
   readonly mode: string
   readonly tools: ReadonlyArray<RolloutTool<never>>
@@ -763,6 +765,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 rolloutId,
                 model,
                 prefix: generation.request,
+                recentPrefix: run.recentPrefix,
                 messages: context.messages,
                 tools: countedTools(
                   frozen,
