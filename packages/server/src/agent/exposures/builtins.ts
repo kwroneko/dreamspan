@@ -1,3 +1,7 @@
+import { documentDiff, documentChangeRows, safeAgentDocument, executableNotice } from "../../db/agentDocuments.ts"
+import { promptPreset } from "@rp/shared/docs/preset.ts"
+import { builtinPreset } from "../../db/assemblySources.ts"
+import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { workshopLimits } from "../../workshopLimits.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { chatCursor } from "@rp/shared/chatApi.ts"
@@ -22,7 +26,10 @@ const library = (ctx: ToolContext, kind: EntityKind, value: unknown) =>
     const proof = (ctx.cache.get(key) ?? {}) as { chat?: unknown; refs?: unknown[] }
     ctx.cache.set(key, {
       ...proof,
-      refs: [...(proof.refs ?? []), { refId: found.ref.id, rowVersion: found.ref.rowVersion }]
+      refs: [
+        ...(proof.refs ?? []),
+        { refId: found.ref.id, rowVersion: found.ref.rowVersion, archivedAt: found.ref.archivedAt ?? null }
+      ]
     })
     return found.ref
   })
@@ -145,8 +152,24 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
         }
       })
   }),
-  exposure("create_preset", "CreatePreset", "library.write", "library", "Create a preset"),
-  exposure("create_lorebook", "CreateLorebook", "library.write", "library", "Create a lorebook"),
+  exposure("create_preset", "CreatePreset", "library.write", "library", "Create a preset", {
+    describe: (payload) =>
+      Effect.succeed({
+        title: `Create the preset “${String(payload.label)}”`,
+        rows: [
+          ...documentChangeRows(documentDiff({}, promptPreset(builtinPreset))),
+          { label: "Executable content", value: executableNotice }
+        ],
+        changes: documentDiff({}, promptPreset(builtinPreset))
+      })
+  }),
+  exposure("create_lorebook", "CreateLorebook", "library.write", "library", "Create a lorebook", {
+    describe: (payload) =>
+      Effect.succeed({
+        title: `Create the lorebook “${String(payload.label)}”`,
+        rows: [{ label: "Entries", value: "An empty lorebook; entries can be added afterward." }]
+      })
+  }),
   exposure("fork_variant", "ForkVariant", "library.write", "library", "Copy a library entry", {
     parameters: Schema.Struct({ ...refArgs, label: name, subtitle: label }),
     adapt: (args, ctx) =>
@@ -161,11 +184,33 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
   }),
   exposure("set_ref_archived", "SetRefArchived", "library.write", "library", "Archive or restore a library entry", {
     parameters: Schema.Struct({ ...refArgs, archived: Schema.Boolean }),
-    adapt: (args, ctx) => refPayload(args, ctx).pipe(Effect.map(({ refId }) => ({ refId, archived: args.archived })))
+    adapt: (args, ctx) => refPayload(args, ctx).pipe(Effect.map(({ refId }) => ({ refId, archived: args.archived }))),
+    describe: (payload, ctx) =>
+      ctx.reader.OpenEditor({ userId: ctx.userId, refId: payload.refId as RefId }).pipe(
+        Effect.map(({ ref }) => ({
+          title: `${payload.archived ? "Archive" : "Restore from archive"} the ${ref.kind} “${ref.label}”`,
+          rows: []
+        }))
+      )
   }),
   exposure("restore_revision", "RestoreRevision", "library.write", "library", "Restore a library revision", {
     parameters: Schema.Struct({ ...refArgs, revision: name }),
-    adapt: (args, ctx) => refPayload(args, ctx).pipe(Effect.map((ref) => ({ ...ref, revisionId: args.revision })))
+    adapt: (args, ctx) => refPayload(args, ctx).pipe(Effect.map((ref) => ({ ...ref, revisionId: args.revision }))),
+    describe: (payload, ctx) =>
+      Effect.gen(function* () {
+        const { ref, doc } = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: payload.refId as RefId })
+        const revision = yield* ctx.reader.GetRevisionDoc({
+          userId: ctx.userId,
+          refId: ref.id,
+          revisionId: payload.revisionId as RevisionId
+        })
+        const changes = documentDiff(doc, safeAgentDocument(ref.kind, doc, revision))
+        return {
+          title: `Restore a revision of the ${ref.kind} “${ref.label}”`,
+          rows: [...documentChangeRows(changes), { label: "Executable content", value: executableNotice }],
+          changes
+        }
+      })
   }),
   exposure("set_card_favourite", "SetCardFavourite", "library.write", "library", "Set a card's favourite status", {
     parameters: Schema.Struct({ card: name, favourite: Schema.Boolean }),

@@ -12,7 +12,7 @@ import { stateEventsThrough } from "./stateRead.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
 import type { Rpc } from "effect/rpc"
 import type { OpsOf } from "./opsOf.ts"
-import type { RefId } from "@rp/shared/library.ts"
+import type { Doc, RefId } from "@rp/shared/library.ts"
 import type { StoredStateEventData } from "@rp/shared/state.ts"
 import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
 import { makeLibraryQueries } from "./library.ts"
@@ -32,6 +32,8 @@ interface Policy<I, B> {
   readonly targetKind: string
   readonly target: (input: I, after: B) => string
   readonly before: (sql: SqlClient.SqlClient, userId: UserId, input: I) => Effect.Effect<B, unknown>
+  /** Compare saved target state; a policy may exclude metadata that ordinary use updates. */
+  readonly matches?: (current: B, expected: B) => boolean
   readonly undo: (
     sql: SqlClient.SqlClient,
     ops: OperationHandlers,
@@ -44,6 +46,10 @@ interface Policy<I, B> {
 // Each policy stays typed. Only the heterogeneous registry erases its input and snapshot types.
 export type OperationPolicy = Policy<never, never>
 const policy = <I, B>(entry: Policy<I, B>): OperationPolicy => entry as unknown as OperationPolicy
+export const operationSnapshotMatches = (entry: OperationPolicy, current: unknown, expected: unknown) =>
+  entry.matches
+    ? entry.matches(current as never, expected as never)
+    : JSON.stringify(current) === JSON.stringify(expected)
 interface ChatSnapshot {
   id: ChatId
   title: string
@@ -106,6 +112,25 @@ const refSnapshot = (sql: SqlClient.SqlClient, userId: UserId, input: { refId: R
     }>`SELECT archived_at FROM entities WHERE id = ${ref.entity_id}`
     return { ref, archived: entity!.archived_at }
   })
+type RefSnapshot = Effect.Success<ReturnType<typeof refSnapshot>>
+const refSnapshotMatches = (current: RefSnapshot, expected: RefSnapshot) => {
+  // Keep complete snapshots in the receipt. Using a preset updates this timestamp
+  // without changing its document or version, and Undo must retain that usage record.
+  const target = (snapshot: RefSnapshot) => ({ ...snapshot, ref: { ...snapshot.ref, last_used_at: null } })
+  return JSON.stringify(target(current)) === JSON.stringify(target(expected))
+}
+/** Undo may restore only an immutable revision of this owned entry, even if a
+ * stored recipe is malformed. The caller already checks the current saved head. */
+export const previousLibraryDocument = (sql: SqlClient.SqlClient, userId: UserId, refId: string, revisionId: string) =>
+  sql<{ doc_json: string }>`SELECT v.doc_json FROM entity_revisions v
+    JOIN entity_refs r ON r.entity_id = v.entity_id JOIN entities e ON e.id = r.entity_id
+    WHERE r.id = ${refId} AND v.id = ${revisionId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`.pipe(
+    Effect.flatMap(([row]) =>
+      row
+        ? Effect.succeed(JSON.parse(row.doc_json) as Doc)
+        : Effect.fail(refuseOperation("The previous document is unavailable for this entry."))
+    )
+  )
 const refPolicy = (id: string): OperationPolicy =>
   policy<{ refId: RefId }, Effect.Success<ReturnType<typeof refSnapshot>>>({
     id,
@@ -122,18 +147,29 @@ const refPolicy = (id: string): OperationPolicy =>
     targetKind: "entity",
     target: (_input, after) => after.ref.entity_id,
     before: refSnapshot,
+    matches: refSnapshotMatches,
     undo: (sql, ops, userId, input, before, after) =>
       Effect.gen(function* () {
         const now = yield* refSnapshot(sql, userId, input)
-        if (JSON.stringify(now) !== JSON.stringify(after))
+        if (!refSnapshotMatches(now, after))
           return yield* refuseOperation("The library entry changed since. Open its history.")
         if (before.ref.head_revision_id !== after.ref.head_revision_id)
-          yield* ops.RestoreRevision!({
-            userId,
-            refId: input.refId,
-            revisionId: before.ref.head_revision_id as never,
-            expectedRowVersion: now.ref.row_version
-          })
+          if (before.ref.kind === "preset" || before.ref.kind === "lorebook")
+            yield* ops.EditRef!({
+              userId,
+              refId: input.refId,
+              expectedRowVersion: now.ref.row_version,
+              doc: yield* previousLibraryDocument(sql, userId, input.refId, before.ref.head_revision_id),
+              message: "Undid a workshop change",
+              commitDraft: null
+            })
+          else
+            yield* ops.RestoreRevision!({
+              userId,
+              refId: input.refId,
+              revisionId: before.ref.head_revision_id as never,
+              expectedRowVersion: now.ref.row_version
+            })
         yield* sql`UPDATE entity_refs SET label = ${before.ref.label}, subtitle = ${before.ref.subtitle},
       row_version = row_version + 1, updated_at = ${Date.now()} WHERE id = ${input.refId}`
         yield* sql`UPDATE entities SET archived_at = ${before.archived} WHERE id = ${before.ref.entity_id}`

@@ -47,6 +47,11 @@ export interface OperationExposure {
   readonly description: string
   readonly parameters?: Schema.Top
   readonly adapt?: (args: Record<string, unknown>, ctx: ToolContext) => Effect.Effect<unknown, unknown>
+  /** Optional server-built description of the prepared, owner-resolved payload. */
+  readonly describe?: (
+    payload: Record<string, unknown>,
+    ctx: ToolContext
+  ) => Effect.Effect<Pick<import("@rp/shared/agent.ts").ApprovalPrompt, "title" | "rows" | "changes">, unknown>
   readonly render?: (result: unknown, args: Record<string, unknown>) => string
   readonly effects?: (result: unknown, args: Record<string, unknown>) => ReadonlyArray<RolloutEffectRecord>
   readonly summarize?: (args: Record<string, unknown>) => string
@@ -165,7 +170,9 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
             const model = yield* ctx.reader.GetModel({ userId: ctx.userId, modelId: proof.chat.model.model })
             rows.unshift({ label: "provider", value: `${connection.name} · ${model.key}` })
           }
-          return { title: entry.explanation, rows }
+          return entry.describe
+            ? yield* entry.describe(payload as Record<string, unknown>, ctx)
+            : { title: entry.explanation, rows }
         }).pipe(Effect.mapError((error) => new ToolInputRefused(failure(error).text))),
       execute: (ctx, args) =>
         Effect.gen(function* () {

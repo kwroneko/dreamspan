@@ -19,6 +19,8 @@ export const workshopMode: OrchestrationMode = {
       "read_lorebook",
       "create_card",
       "edit_card",
+      "edit_preset",
+      "edit_lorebook",
       "clone_card",
       "start_chat"
     ],

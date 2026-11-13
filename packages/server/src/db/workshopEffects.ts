@@ -1,6 +1,14 @@
+import { safeAgentDocument } from "./agentDocuments.ts"
 import { pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
 import { isDeepStrictEqual } from "node:util"
-import { operationPolicies, operationInfo, refuseOperation, type OperationHandlers } from "./operationPolicies.ts"
+import {
+  operationPolicies,
+  operationInfo,
+  previousLibraryDocument,
+  operationSnapshotMatches,
+  refuseOperation,
+  type OperationHandlers
+} from "./operationPolicies.ts"
 import { settingsRegistry, writeSetting } from "./settings.ts"
 import { Schema } from "effect"
 // Setup tools compose the same typed user operations in one outer writer transaction.
@@ -55,7 +63,11 @@ type Key = {
   readonly rolloutId: string
   readonly toolCallId: string
   readonly approvalDigest?: string
-  readonly expectedRefs?: ReadonlyArray<{ readonly refId: RefId; readonly rowVersion: number }>
+  readonly expectedRefs?: ReadonlyArray<{
+    readonly refId: RefId
+    readonly rowVersion: number
+    readonly archivedAt?: number | null
+  }>
 }
 interface EffectRow {
   rollout_id: string
@@ -143,6 +155,7 @@ const checkedRef = (ctx: UndoContext, effect: RolloutEffect) =>
       head = String(edge!.restoredHead)
       version = Number(edge!.restoredRowVersion)
     }
+    if (undo.exactDocument === true && ref.archived_at !== undo.archivedAt) return yield* refuse()
     if (ref.entity_id !== effect.targetId || ref.head_revision_id !== head || ref.row_version !== version)
       return yield* refuse()
     return ref
@@ -252,12 +265,24 @@ const reviseUndoer: Undoer = {
   run: (ctx, effect) =>
     Effect.gen(function* () {
       const ref = yield* checkedRef(ctx, effect)
-      const change = yield* ctx.ops.RestoreRevision({
-        userId: ctx.userId,
-        refId: ref.id as RefId,
-        revisionId: String(effect.undo!.before) as RevisionId,
-        expectedRowVersion: ref.row_version
-      })
+      // Explicit user Undo restores the recorded document exactly, including its prior
+      // approvals, and leaves active drafts alone. This is never tool-reachable approval.
+      const change =
+        effect.undo!.exactDocument === true
+          ? yield* ctx.ops.EditRef({
+              userId: ctx.userId,
+              refId: ref.id as RefId,
+              expectedRowVersion: ref.row_version,
+              doc: yield* previousLibraryDocument(ctx.sql, ctx.userId, ref.id, String(effect.undo!.before)),
+              message: "Undid a workshop edit",
+              commitDraft: null
+            })
+          : yield* ctx.ops.RestoreRevision({
+              userId: ctx.userId,
+              refId: ref.id as RefId,
+              revisionId: String(effect.undo!.before) as RevisionId,
+              expectedRowVersion: ref.row_version
+            })
       return { restoredHead: change.ref.headRevisionId, restoredRowVersion: change.ref.rowVersion }
     })
 }
@@ -299,7 +324,7 @@ const operationUndo: Undoer = {
       const policy = operationPolicies.get(String(recipe.operation))
       if (!policy) return false
       const current = yield* policy.before(sql, userId, recipe.input as never)
-      return JSON.stringify(current) === JSON.stringify(recipe.next)
+      return operationSnapshotMatches(policy, current, recipe.next)
     }).pipe(Effect.orElseSucceed(() => false)),
   run: (ctx, effect) =>
     Effect.gen(function* () {
@@ -307,7 +332,7 @@ const operationUndo: Undoer = {
       const policy = operationPolicies.get(String(recipe.operation))
       if (!policy) return yield* refuse("This operation no longer has an undo policy.")
       const current = yield* policy.before(ctx.sql, ctx.userId, recipe.input as never)
-      if (JSON.stringify(current) !== JSON.stringify(recipe.next)) return yield* refuse()
+      if (!operationSnapshotMatches(policy, current, recipe.next)) return yield* refuse()
       return (yield* policy.undo(
         ctx.sql,
         ctx.ops as OperationHandlers,
@@ -424,7 +449,10 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         }
         for (const expected of key.expectedRefs ?? []) {
           const ref = yield* lib.ownedRef(key.userId, expected.refId)
-          if (ref.row_version !== expected.rowVersion)
+          if (
+            ref.row_version !== expected.rowVersion ||
+            ("archivedAt" in expected && ref.archived_at !== expected.archivedAt)
+          )
             return yield* new EffectUndoRefused({
               message: "The saved item changed while waiting. Read it again before making this change."
             })
@@ -526,11 +554,14 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     chat?: { id: import("@rp/shared/chat.ts").ChatId }
                     chats?: ReadonlyArray<{ id: import("@rp/shared/chat.ts").ChatId }>
                     historyTargets?: ReadonlyArray<{ chatId: string; forkId: string }>
-                    refs?: Array<{ refId: string; rowVersion: number }>
+                    refs?: Array<{ refId: string; rowVersion: number; archivedAt?: number | null }>
                   }
                   for (const expectedRef of proof.refs ?? []) {
                     const current = yield* lib.ownedRef(input.userId, expectedRef.refId)
-                    if (current.row_version !== expectedRef.rowVersion)
+                    if (
+                      current.row_version !== expectedRef.rowVersion ||
+                      ("archivedAt" in expectedRef && current.archived_at !== expectedRef.archivedAt)
+                    )
                       return yield* refuseOperation("The saved library item changed while waiting. Read it again.")
                   }
                   for (const chat of proof.chats ?? []) {
@@ -589,11 +620,34 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     yield* sql`SELECT 1 FROM entity_revisions WHERE id = ${String(value.revisionId)} AND entity_id = ${ref.entity_id}`
                   if (!revision) return yield* new NotFound({ entity: "revision", id: String(value.revisionId) })
                   const next = yield* lib.loadDoc(String(value.revisionId))
+                  // Content restores are sanitized below. Permission-only restores retain
+                  // W6's explicit refusal rather than claiming to change a user's grant.
+                  const presetPermissionChange =
+                    ref.kind === "preset" &&
+                    ((isDeepStrictEqual(old.regex, next.regex) &&
+                      (next.regex_approved === true) !== (old.regex_approved === true)) ||
+                      ([
+                        "regex",
+                        "prompts",
+                        "order",
+                        "utility_prompts",
+                        "prefill",
+                        "reply_sections",
+                        "lorebooks",
+                        "extensions",
+                        "unsupported"
+                      ].every((key) => isDeepStrictEqual(old[key], next[key])) &&
+                        ["html_scripts_approved", "html_network_approved"].some(
+                          (key) => (old[key] === true) !== (next[key] === true)
+                        )))
                   if (
-                    !isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, old, next), next) ||
-                    !isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, next, old), old) ||
-                    !isDeepStrictEqual(withHtmlApprovals(old, next), next) ||
-                    (next.regex_approved === true) !== (old.regex_approved === true)
+                    presetPermissionChange ||
+                    (ref.kind !== "preset" &&
+                      ref.kind !== "lorebook" &&
+                      (!isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, old, next), next) ||
+                        !isDeepStrictEqual(withoutGrantedAgentEdits(ref.kind, next, old), old) ||
+                        !isDeepStrictEqual(withHtmlApprovals(old, next), next) ||
+                        (next.regex_approved === true) !== (old.regex_approved === true)))
                   )
                     return yield* refuseOperation(
                       "Restoring this revision would change permissions. Restore it yourself from History."
@@ -613,6 +667,25 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     value.value,
                     Number(value.expectedRevision)
                   )
+                } else if (input.operation === "RestoreRevision") {
+                  const ref = yield* lib.ownedRef(input.userId, String(value.refId))
+                  // Assistant restores are saved edits; unlike the user's History action,
+                  // they must never settle or replace active drafts.
+                  if (ref.kind === "preset" || ref.kind === "lorebook")
+                    result = yield* ops.EditRef({
+                      userId: input.userId,
+                      refId: ref.id as RefId,
+                      expectedRowVersion: Number(value.expectedRowVersion),
+                      doc: safeAgentDocument(
+                        ref.kind,
+                        yield* lib.loadDoc(ref.head_revision_id),
+                        yield* lib.loadDoc(String(value.revisionId))
+                      ),
+                      message: "Restored in the workshop",
+                      commitDraft: null,
+                      agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
+                    })
+                  else result = yield* handler!(payload)
                 } else result = yield* handler!(payload)
                 const after = yield* policy!.before(sql, input.userId, value as never)
                 const priorRef = before as { ref?: { id: string; head_revision_id: string; row_version: number } }
@@ -674,14 +747,15 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
               )
             )
             if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
-            yield* checkDocument(valid.doc)
+            const doc = safeAgentDocument(input.kind, {}, valid.doc)
+            yield* checkDocument(doc)
             const { ref } = yield* ops.CreateEntity({
               userId: input.userId,
               kind: input.kind,
               label: input.label,
               subtitle: "",
               schemaVersion: Number(valid.doc.schema_version ?? 1),
-              doc: valid.doc,
+              doc,
               origin: "agent",
               originRef: `${input.rolloutId}:${input.toolCallId}`,
               sourcePath: null,
@@ -723,6 +797,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                         undo: {
                           refId: before.id,
                           before: before.head_revision_id,
+                          exactDocument: before.kind === "preset" || before.kind === "lorebook",
+                          archivedAt: before.archived_at,
                           beforeRowVersion: before.row_version,
                           head: change.ref.headRevisionId,
                           rowVersion: change.ref.rowVersion

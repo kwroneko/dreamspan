@@ -1,3 +1,4 @@
+import { workshopDocumentTests } from "./support/workshopDocuments.ts"
 import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
 import { workshopChatTests } from "./support/workshopChat.ts"
 import { workshopApprovalTests } from "./support/workshopApprovals.ts"
@@ -41,6 +42,7 @@ import { expectTextBox } from "./support/textbox.ts"
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
+if (process.env.LAYOUT_AUDIT_WORKSHOP_DOCUMENTS_ONLY === "1") workshopDocumentTests()
 if (process.env.LAYOUT_AUDIT_CARDEX_ONLY === "1") {
   cardexCriteriaTests()
   cardexCreatorTests()
