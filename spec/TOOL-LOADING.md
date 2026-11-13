@@ -1,6 +1,6 @@
 # Dynamic tool loading: tool_search, load_skill and card skills
 
-**Status**: Proposed, 2026-11-12 (job `toolload1`). Built in the same job: the server side of §2–§7 (see §10). Everything below is **[P]** unless it quotes the owner. It is a delta from the build at master `44c46181` (agent session `agent/session.ts`, provider transforms `providers/builtins.ts`) and from reference-harness on branch `latest` (`src/agent/declared-tools.ts`, `src/tools/tool-search.ts`, `src/tools/load-skill.ts`).
+**Status**: Implemented portions obsolete as proposals (§2–§7, §10), reviewed 2026-11-13 (`review-toolload1`); ARCHITECTURE.md records the implementation. Remaining choices are **[P]** unless they quote the owner. It is a delta from the build at master `44c46181` (agent session `agent/session.ts`, provider transforms `providers/builtins.ts`) and from reference-harness on branch `latest` (`src/agent/declared-tools.ts`, `src/tools/tool-search.ts`, `src/tools/load-skill.ts`).
 
 The owner: "we obviously need toolsearch (that *doesn't* break the cache) and skills like reference-harness does. We can't load all tools at once." And: "This MUST actually be tested with each provider. It will not work consistently out of the box." And on cards: "workshops still have a card you're talking to. It would either supply personality or specific skills/agent defs etc, but it can just be a regular card. We will likely supply some default ones of our own."
 
@@ -29,15 +29,15 @@ Registry `ExecutionRegistry.toolLoadingWires`, keyed by wire API: `{ id, support
 
 | Wire | Supports | How a load is sent |
 | --- | --- | --- |
-| `anthropic-messages` | connection kind `anthropic` only; Claude 4.5 and later (Anthropic's tool search model list) | Every tool declared on every request; deferred ones get `defer_loading: true`. The cache marker pi-ai puts on the last tool moves to the last immediate one (a deferred tool can't carry it). The loading call's `tool_result` becomes `tool_reference` blocks only; its text moves after the message's tool results (the API refuses the two mixed: measured, §8) |
-| `openai-responses` | connection kind `openai-responses` only; gpt-5.4 and later | Only immediate tools top-level. After the loading call's `function_call_output`: a `tool_search_call` / `tool_search_output` pair (`execution: "client"`) with the loaded definitions, `defer_loading: true`. A later `function_call` of a loaded tool gets `namespace` = its name |
+| `anthropic-messages` | connection kind `anthropic` only; measured Sonnet/Haiku 4.5 and Sonnet/Opus/Haiku 5.5, including dated aliases | Every tool declared on every request; deferred ones get `defer_loading: true`. The cache marker pi-ai puts on the last tool moves to the last immediate one (a deferred tool can't carry it). The loading call's `tool_result` becomes `tool_reference` blocks only; its text moves after the message's tool results (the API refuses the two mixed: measured, §8) |
+| `openai-responses` (candidate only, disabled) | none until measured live | Only immediate tools top-level. After the loading call's `function_call_output`: a `tool_search_call` / `tool_search_output` pair (`execution: "client"`) with the loaded definitions, `defer_loading: true`. A later `function_call` of a loaded tool gets `namespace` = its name |
 | every other wire and host (Chat Completions, OpenRouter, DeepSeek, Google, Bedrock, Vertex, Bedrock-hosted OpenAI) | nothing | Every tool from the start, as today |
 
 The transforms are `providers/toolLoading.ts`, registered first in `providers/builtins.ts` so the breakpoint transforms see the final tools. They act only when the session passes `toolLoading` in the stream options.
 
 ## 4. The loaded set comes from the transcript
 
-A loading tool's successful result stores `details.loaded` (names). The loaded set at any point is the deferred names some successful loading result names (`loadedSet`, `loadPoints` in `agent/toolLoading.ts`), as in reference-harness. Nothing else stores it, so resume, step edits and carried turns load the same tools at the same points:
+A loading tool's successful result stores `details.loaded` (names). Only a result matching an earlier `tool_search` or `load_skill` call is a load point; unrelated and orphan results are ignored. The loaded set at any point is the deferred names some successful loading result names (`loadedSet`, `loadPoints` in `agent/toolLoading.ts`), as in reference-harness. Nothing else stores it, so resume, step edits and carried turns load the same tools at the same points:
 
 - Editing a load result's text keeps its `details`: the load stays.
 - Editing a loading call's arguments runs it again under a new id: a new load.
@@ -49,7 +49,7 @@ A call to a deferred tool before it's loaded returns, as an error result: “rea
 
 - `tool_search { query, max_results? }`: `select:a,b` loads exact names; other words search names (weight 3) and descriptions (1), up to 5. Its description lists the deferred tools no skill covers.
 - `load_skill { name }`: returns `<skill name="…">instructions</skill>` and loads the skill's tools. Its description is the skill index, frozen with the run's tools.
-- Both are `read` tools: no capability, never asked first. Loading grants nothing: a loaded tool still goes through the offered-tools check, capability standing, approvals and receipts. Only tools in the run's frozen offer can be loaded, and an Off capability's tools aren't in it.
+- Both are `read` tools. Search and registered skills need no extra capability; a card-carried skill requires `skills.card` approval. Loading grants nothing: a loaded tool still goes through the offered-tools check, capability standing, approvals and receipts. Only tools in the run's frozen offer can be loaded, and an Off capability's tools aren't in it.
 - Skills are registry entries (`ExecutionRegistry.skills`, `agent/skills.ts`): `{ id, label, description, instructions, tools: patterns, kinds?, always? }`. Built in: `cards`, `presets-lorebooks`, `library`, `chat-setup`, `stories`, `settings`; together they cover every workshop tool (tested). A skill is listed in a run only when it loads a deferred tool there, or has instructions only.
 
 ## 6. Card skills
@@ -66,11 +66,12 @@ A card carries skills in `extensions.rp_harness.skills` (format **[P]**), which 
 
 - `{ "use": id }` names a registered skill: one registered with `always: false` is offered only when the workshop's card names it. The built-in skills are `always: false` **[P]**: the seeded Assistant card names them all (`ExecutionRegistry.workshopCardSkills`, passed to `CreateWorkshop` as `assistantSkills`), so a user's own workshop card chooses its skills. A card that names none still reaches every deferred tool through `tool_search`, whose description then lists them all. Assistant cards seeded before this have no references (re-import expected).
 - A card's own skill: name `^[a-z0-9][a-z0-9_-]{0,47}$`, description and instructions required; at most 16 entries; anything else is ignored.
-- Which cards: those the assistant speaks as at the revisions the request was assembled with; cards played by the user (persona) are left out. Read once per fresh run and frozen in the snapshot (`agent.cardSkills`).
-- A registered skill wins a name clash: a card can't stand in for a built-in skill.
+- Which cards: those the assistant speaks as at the revisions the request was assembled with; cards played by the user (persona) are left out. Read once per fresh run. All offered skills, including registered skills, are frozen in the existing snapshot field `agent.cardSkills`; loading never reads the current registry. Unlisted skills cannot be loaded.
+- Registered skill names are reserved even when not selected. Duplicate card-carried names are omitted from the offer, independent of card order; their tools remain searchable.
 - Card skills only name tools, never grant them: their patterns match only the run's offer.
+- The model sees only a validated skill name and a fixed approval notice before approval, with no imported description or source-card name in the index. Model-facing `read_card` results omit the skills extension; stored cards and exports retain it.
 - An imported card is untrusted: loading one of its own skills needs the new capability `skills.card` (“Use skills from cards”, default Ask first). The approval shows the skill's description, instructions and the tools it loads. The workshop chip lists the capability whenever the kind loads tools as it goes.
-- Card swap mid-workshop: tools loaded so far stay loaded (they're in the transcript); the next fresh turn reads the new card's skills, so `load_skill`'s description changes and that request writes the cache once in full. A resumed run keeps its frozen skills.
+- Card or skill changes between turns rebuild the request with a fresh transcript and catalog; this intentionally changes the prefix once. Carrying old loads into a different offer would be incorrect. Resume and step edits retain the frozen skills and definitions. Model changes already rebuild through the existing continuity checks.
 
 ## 7. Inspector
 
@@ -87,7 +88,7 @@ A card carries skills in `extensions.rp_harness.skills` (format **[P]**), which 
 | Anthropic, claude-sonnet-5-5 | yes | 0/10860 (write 10738), 10738/11103, 11101/11256 | 11254 of 11256 | same on all (31 tools) | pass |
 | Anthropic, claude-opus-5-5 | yes | 10738/11074, 11072/11226 | 11224 of 11226 | same on all (31 tools) | pass |
 | Anthropic, claude-haiku-5-5 | yes | not recorded | 11368 of 11370 | same on all (30 tools) | pass |
-| OpenAI Responses, gpt-5.4-mini | yes | NOT TESTED live (2026-11-12) | — | — | golden wire test only |
+| OpenAI Responses, gpt-5.4-mini | no (disabled after review) | NOT TESTED live (2026-11-12) | — | — | golden wire test only |
 | Anthropic on Bedrock | no (no wire) | NOT TESTED live (2026-11-12) | — | — | nothing deferred |
 | Vertex | no (no wire) | NOT TESTED live (2026-11-12) | — | — | nothing deferred |
 | OpenRouter → anthropic/claude-haiku-4.5 | no (all tools) | each request read the previous one (13151/13156 …) | — | same | pass (baseline) |
@@ -127,3 +128,11 @@ Not yet: a client view of a card's skills in the card editor; wires for Bedrock,
 
    So (a) costs the whole transcript once per load (≈50k tokens at 50k); (b) costs only the loaded definitions. Switching a running chat to (b) costs one full rewrite itself, since adding `call_tool` changes `tools` (measured: DeepSeek read 1,536, OpenRouter wrote everything). DeepSeek also needs `reasoning_content` on a replayed assistant tool call (400 otherwise).
 2. **Built-in skills only with the Assistant card** (§6) is now built as Proposed: confirm or revert.
+
+## 12. Review verification (2026-11-13)
+
+The active loading profile is limited to the five measured Anthropic model versions in §8. Responses and all other unmeasured profiles send every tool from the start. No provider calls were made during review; §8 records the builder's measurements, not new live verification.
+
+Public documentation checked: [Anthropic custom tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) specifies top-level declarations and tool-reference results; [Anthropic tool caching](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching) requires cache markers on immediate tools. The existing transform follows these shapes and keeps reference-only results, with skill text after results. [OpenAI tool search](https://developers.openai.com/api/docs/guides/tools-tool-search) documents client call/output items, deferred definitions and namespaced calls; its unmeasured candidate transform remains covered offline, disabled in built-in profiles.
+
+Regressions: `toolLoadingReview.test.ts` (untrusted index/read, frozen and selected skills, collisions, transcript load provenance, continuity changes, limits), `toolLoading.test.ts` (wire bytes and RP/unprofiled parity), `toolLoadingWorkshop.test.ts` (real server loop, approvals, batches, carry and step edit), `formats/cardExport.test.ts` (skills plus notes round trips), browser `toolLoading.spec.ts` (saved inspector groups after restart and layout).

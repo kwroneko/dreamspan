@@ -48,7 +48,7 @@ export interface ToolContext {
     readonly kind: string
     readonly tools: ReadonlyArray<FrozenTool>
     readonly loaded: ReadonlySet<string>
-    /** The skills written in the workshop's cards, frozen with the run. */
+    /** The offered skills, registered or card-carried, frozen with the run. */
     readonly cardSkills: ReadonlyArray<import("./toolLoading.ts").Skill>
   }
 }

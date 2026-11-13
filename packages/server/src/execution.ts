@@ -143,7 +143,7 @@ export class ExecutionRegistry extends Context.Service<
       for (const skill of builtinSkills) yield* workshopCardSkills.register({ id: skill.id })
       const toolLoaders = makeRegistry<RolloutTool<never>>()
       yield* toolLoaders.register(toolSearch as RolloutTool<never>)
-      yield* toolLoaders.register(makeLoadSkill(skills) as RolloutTool<never>)
+      yield* toolLoaders.register(makeLoadSkill() as RolloutTool<never>)
       const replies = makeRegistry<ReplyOutputStrategy>()
       const summaries = makeRegistry<SummaryStrategy>()
       const summaryTools = makeRegistry<SummaryToolFactory>()

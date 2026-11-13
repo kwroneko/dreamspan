@@ -382,9 +382,17 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           for (const row of rows) {
             row.sort((a, b) => rect(a).left - rect(b).left)
             const autoMargin = row.some((c) => /(?:^|\s|:)(?:m[lrsexy]?|m[lrse])-auto(?:\s|$)/.test(c.className))
-            const spacer = [...el.children].some(
-              (c) => num(css(c as HTMLElement).flexGrow) > 0 && !c.textContent?.trim() && !c.children.length
-            )
+            const spacer = [...el.children].some((c) => {
+              const element = c as HTMLElement
+              const style = css(element)
+              if (style.display === "none" || ["absolute", "fixed"].includes(style.position)) return false
+              // A collapsing action toolbar still separates the groups on either side. It
+              // can retain hidden controls while its own box has zero width or height.
+              const r = rect(element)
+              return (
+                num(style.flexGrow) > 0 && (!r.width || !r.height || (!c.textContent?.trim() && !c.children.length))
+              )
+            })
             const gaps = row.slice(1).map((c, i) => rect(c).left - rect(row[i]!).right)
             if (
               gaps.length > 1 &&

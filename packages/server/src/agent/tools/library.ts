@@ -1,4 +1,5 @@
 /** Library heads only; every lookup and snapshot is scoped to the rollout's owner. */
+import { withoutCardSkills } from "../toolLoading.ts"
 import { Type } from "@earendil-works/pi-ai"
 import type { EntityKind, LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
@@ -89,17 +90,18 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
       const found = yield* resolveLibrary(context, kind, String(args[kind]))
       if ("error" in found) return { text: found.error, isError: true }
       const snapshot = yield* context.reader.OpenEditor({ userId: context.userId, refId: found.ref.id })
+      const visible = kind === "card" ? withoutCardSkills(snapshot.doc) : snapshot.doc
       const fields = args.fields as ReadonlyArray<string> | undefined
       const doc =
         kind === "card" && fields
           ? Object.fromEntries(
-              Object.entries(snapshot.doc).filter(
+              Object.entries(visible).filter(
                 ([key]) =>
                   fields.includes(key) ||
                   ["alternate_greetings", "character_book", "agent_editable_fields"].includes(key)
               )
             )
-          : snapshot.doc
+          : visible
       return { text: JSON.stringify({ ...identity(snapshot.ref), revision: snapshot.ref.headRevisionId, doc }) }
     }).pipe(Effect.catch(failRead))
 })

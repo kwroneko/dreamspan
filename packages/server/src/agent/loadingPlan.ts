@@ -89,5 +89,5 @@ export const planToolLoading = (
         ]
       }
     })
-    return { offer, cardSkills: listed.filter((s) => s.source !== undefined) }
+    return { offer, cardSkills: listed }
   })

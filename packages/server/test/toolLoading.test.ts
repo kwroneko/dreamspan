@@ -112,18 +112,14 @@ describe("the split", () => {
         { kind: "bedrock", api: "anthropic-messages", key: "us.anthropic.claude-sonnet-4-5-v1:0" },
         { kind: "vertex", api: "anthropic-messages", key: "claude-sonnet-4-5" },
         { kind: "anthropic", api: "anthropic-messages", key: "claude-sonnet-4-0" },
-        { kind: "openai-responses", api: "openai-responses", key: "gpt-5.2" }
+        { kind: "openai-responses", api: "openai-responses", key: "gpt-5.2" },
+        { kind: "openai-responses", api: "openai-responses", key: "gpt-5.4" }
       ]) {
         const offer = split(registry, tools, "workshop", target)
         assert.strictEqual(offer.deferred.size, 0, target.key)
         assert.strictEqual(offer.tools, tools, target.key)
       }
       assert.strictEqual(split(registry, tools, "rp", claude).deferred.size, 0)
-      assert.isAbove(
-        split(registry, tools, "workshop", { kind: "openai-responses", api: "openai-responses", key: "gpt-5.4" })
-          .deferred.size,
-        0
-      )
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
@@ -240,7 +236,15 @@ describe("the loaded set", () => {
       result("b", ["read_card", "edit_card"]),
       result("c", ["read_preset"], true),
       result("d", ["not_offered"])
-    ]
+    ].flatMap((r) => [
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: r.role === "toolResult" ? r.toolCallId : "", name: "tool_search", arguments: {} }
+        ]
+      } as Message,
+      r
+    ])
     assert.deepStrictEqual(loadPoints(messages, deferred), [
       { toolCallId: "a", names: ["read_card"] },
       { toolCallId: "b", names: ["edit_card"] }
@@ -485,8 +489,7 @@ describe("the wire", () => {
   it.effect("Responses: loaded definitions follow their load point, and later calls name their namespace", () =>
     Effect.gen(function* () {
       const { registry, tools } = yield* workshopTools
-      const target = { kind: "openai-responses", api: "openai-responses", key: "gpt-5.4" }
-      const offer = split(registry, tools, "workshop", target)
+      const offer = split(registry, tools, "workshop", claude)
       const deferred = offer.tools.filter((t) => offer.deferred.has(t.id)).map(piTool)
       const immediate = offer.tools.filter((t) => !offer.deferred.has(t.id)).map(piTool)
       const { before, after } = conversation("openai-responses", "gpt-5.4")
@@ -534,6 +537,23 @@ describe("the wire", () => {
       )
       assert.strictEqual(b[a.length + 4]!.namespace, "read_card")
       assert.isUndefined(b[a.length]!.namespace, "a loader is a top-level tool")
+    }).pipe(Effect.provide(ExecutionRegistry.layer))
+  )
+
+  it.effect("RP and unprofiled agents keep the original serialized requests", () =>
+    Effect.gen(function* () {
+      const { registry, tools } = yield* workshopTools
+      for (const kind of ["rp", "synthetic-plugin-kind"]) {
+        const offer = split(registry, tools, kind, claude)
+        assert.strictEqual(offer.tools, tools)
+        assert.strictEqual(offer.deferred.size, 0)
+        for (const api of ["anthropic-messages", "openai-responses"] as const) {
+          const messages = conversation(api, api === "anthropic-messages" ? claude.key : "gpt-5.4").before
+          const baseline = yield* serialize(api, "synthetic-model", messages, tools.map(piTool))
+          const current = yield* serialize(api, "synthetic-model", messages, offer.tools.map(piTool))
+          assert.strictEqual(JSON.stringify(current), JSON.stringify(baseline))
+        }
+      }
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 

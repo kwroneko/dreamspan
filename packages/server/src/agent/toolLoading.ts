@@ -95,6 +95,14 @@ export const cardSkills = (
   return { uses, own }
 }
 
+/** Reading a card is not approval to activate its skills. Keep skill bodies behind load_skill. */
+export const withoutCardSkills = <T extends { readonly extensions?: Readonly<Record<string, unknown>> }>(doc: T): T => {
+  const ours = doc.extensions?.rp_harness
+  if (!ours || typeof ours !== "object" || Array.isArray(ours) || !Object.hasOwn(ours, "skills")) return doc
+  const { skills: _skills, ...rest } = ours as Record<string, unknown>
+  return { ...doc, extensions: { ...doc.extensions, rp_harness: rest } }
+}
+
 /**
  * A run's skill index: the registered skills for its kind that are always offered or that the
  * workshop's cards name, then the cards' own skills under names not already taken. Registered
@@ -107,10 +115,13 @@ export const runSkills = (
 ): Array<Skill> => {
   const used = new Set(cards.flatMap((c) => c.uses))
   const base = registered.filter((s) => (!s.kinds || s.kinds.includes(kind)) && (s.always !== false || used.has(s.id)))
-  const taken = new Set(base.map((s) => s.id))
+  const taken = new Set(registered.map((s) => s.id))
   const own: Array<Skill> = []
-  for (const skill of cards.flatMap((c) => c.own)) {
-    if (taken.has(skill.id)) continue
+  const candidates = cards.flatMap((c) => c.own)
+  const counts = new Map<string, number>()
+  for (const skill of candidates) counts.set(skill.id, (counts.get(skill.id) ?? 0) + 1)
+  for (const skill of candidates) {
+    if (taken.has(skill.id) || counts.get(skill.id) !== 1) continue
     taken.add(skill.id)
     own.push(skill)
   }
@@ -145,27 +156,18 @@ const matchesPattern = (name: string, pattern: string) =>
 export const matchPatterns = (names: ReadonlyArray<string>, patterns: ReadonlyArray<string>) =>
   names.filter((name, i) => names.indexOf(name) === i && patterns.some((p) => matchesPattern(name, p)))
 
-/** Anthropic: Claude 4.5 and later (the tool search documentation's model list), any host. */
-const claudeDeferred = (key: string) =>
-  /claude-(opus|sonnet|haiku)-4-[5-9](?!\d)|claude-(opus|sonnet|haiku)-[5-9](?!\d)|claude-(fable|mythos)/i.test(key)
-
-/** OpenAI Responses: `tool_search` is documented for gpt-5.4 and later. */
-const responsesDeferred = (key: string) => /^(openai\/)?gpt-(5\.([4-9]|[1-9]\d)|([6-9]|[1-9]\d)(\.|-|$))/i.test(key)
+// Only models measured in toolload1's live report are enabled. Public API support alone does
+// not prove cache behavior. Dated aliases of these same model versions use the same wire.
+const measuredClaude = /^(?:claude-(?:sonnet|haiku)-4-5(?:-\d{8})?|claude-(?:sonnet|opus|haiku)-5-5(?:-\d{8})?)$/
 
 export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
-  // Anthropic's own API only, until each other host (Bedrock, Vertex) is measured live: Bedrock
-  // has no cache lookback and its own tool-reference support, so nothing carries over.
   {
     id: "anthropic-messages",
-    supports: (t) => t.kind === "anthropic" && claudeDeferred(t.key),
+    supports: (t) => t.kind === "anthropic" && measuredClaude.test(t.key),
     declaresDeferred: true
-  },
-  // OpenAI's own endpoint only: a compatible server (Bedrock's) may reject the items.
-  {
-    id: "openai-responses",
-    supports: (t) => t.kind === "openai-responses" && responsesDeferred(t.key),
-    declaresDeferred: false
   }
+  // Responses serialization remains covered by golden tests, but no live cache measurement
+  // succeeded. It and every other unmeasured wire send the entire catalog from the start.
 ]
 
 /** The workshop's core: finding things, and the two ways to load the rest. */
@@ -218,7 +220,7 @@ export const frozenOffer = (
 
 /** What one loading call loaded, from its result (session.ts writes `details.loaded`). */
 const loadedBy = (message: AgentMessage | Message): ReadonlyArray<string> => {
-  if (message.role !== "toolResult" || message.isError) return []
+  if (message.role !== "toolResult" || message.isError || !LOADERS.has(message.toolName)) return []
   const loaded = (message.details as { loaded?: unknown } | null | undefined)?.loaded
   return Array.isArray(loaded) ? loaded.filter((n): n is string => typeof n === "string") : []
 }
@@ -230,8 +232,13 @@ export const loadPoints = (
 ): Array<{ readonly toolCallId: string; readonly names: ReadonlyArray<string> }> => {
   const seen = new Set<string>()
   const points: Array<{ readonly toolCallId: string; readonly names: ReadonlyArray<string> }> = []
+  const calls = new Map<string, string>()
   for (const message of messages) {
-    if (message.role !== "toolResult") continue
+    if (message.role === "assistant") {
+      for (const part of message.content) if (part.type === "toolCall") calls.set(part.id, part.name)
+    }
+    if (message.role !== "toolResult" || calls.get(message.toolCallId) !== message.toolName) continue
+    calls.delete(message.toolCallId)
     const names = loadedBy(message).filter((n) => deferred.has(n) && !seen.has(n))
     if (names.length === 0) continue
     for (const n of names) seen.add(n)
@@ -263,7 +270,7 @@ export const loadSkillDescription = (skills: ReadonlyArray<Skill>) =>
     "Loads a skill: returns its instructions and makes the tools it lists callable. Load a skill before working in its area; its tools aren't available until then.",
     "Skills:",
     ...skills.map(
-      (s) => `- ${s.id}: ${oneLine(s.description, 160)}${s.source ? ` (from the card ${s.source.name})` : ""}`
+      (s) => `- ${s.id}: ${s.source ? "Card skill. Ask before sharing its instructions." : oneLine(s.description, 160)}`
     )
   ].join("\n")
 

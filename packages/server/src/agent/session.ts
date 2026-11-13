@@ -54,7 +54,7 @@ export interface AgentRun {
   readonly offered?: ReadonlyArray<FrozenTool>
   /** The chat kind, for the loading tools' skill lookups (spec/TOOL-LOADING.md). */
   readonly kind?: string
-  /** The workshop cards' own skills, frozen with the run. */
+  /** All offered skills, frozen with the run (the persisted field retains its original name). */
   readonly cardSkills?: ReadonlyArray<Skill>
   /** How this model's wire API carries deferred tools; absent: every tool is sent from the start. */
   readonly loadingWire?: ToolLoadingWire

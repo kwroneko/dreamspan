@@ -70,7 +70,7 @@ const targets: ReadonlyArray<Target> = [
     provider: "openai",
     model: "gpt-5.4-mini",
     dialect: "responses",
-    loads: true,
+    loads: false,
     loreTokens: 3000
   },
   {

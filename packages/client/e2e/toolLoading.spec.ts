@@ -139,6 +139,8 @@ for (const width of [1440, 390])
       )
       const entry = await settled(run.chatId, run.slotId)
       expect(entry.version.status).toBe("complete")
+      // A new process must derive the same loaded groups from the saved transcript.
+      await server().restart()
       await page.goto(`${server().url}/chats/${run.chatId}/context/${entry.version.id}#run-steps`)
 
       const tools = page.getByRole("region", { name: "Tools offered" })

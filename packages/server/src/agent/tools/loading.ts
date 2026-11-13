@@ -7,8 +7,7 @@
 // not files, and the result's `loaded` names are what the wire layer serializes as the load point.
 import { Type } from "@earendil-works/pi-ai"
 import { Effect } from "effect"
-import type { Registry } from "../../registry.ts"
-import { LOAD_SKILL, loadedText, matchPatterns, searchTools, type Skill, TOOL_SEARCH } from "../toolLoading.ts"
+import { LOAD_SKILL, loadedText, matchPatterns, searchTools, TOOL_SEARCH } from "../toolLoading.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 
 const MAX_RESULTS = 5
@@ -75,17 +74,10 @@ export const toolSearch: RolloutTool<{ readonly query: string; readonly max_resu
 /** A card's own skills are untrusted: loading one asks first (spec/TOOL-LOADING.md §6). */
 export const CARD_SKILLS = "skills.card"
 
-/** The skills a call may load: the registered ones for the kind, then the workshop cards' own. */
-const availableSkills = (skills: Pick<Registry<Skill>, "list">, context: ToolContext) => {
-  const kind = context.offer?.kind ?? ""
-  const registered = skills.list().filter((s) => !s.kinds || s.kinds.includes(kind))
-  const taken = new Set(registered.map((s) => s.id))
-  return [...registered, ...(context.offer?.cardSkills ?? []).filter((s) => !taken.has(s.id))]
-}
+/** The offer freezes both registered and card skills; later registry edits cannot change it. */
+const availableSkills = (context: ToolContext) => context.offer?.cardSkills ?? []
 
-export const makeLoadSkill = (
-  skills: Pick<Registry<Skill>, "get" | "list">
-): RolloutTool<{ readonly name: string }> => ({
+export const makeLoadSkill = (): RolloutTool<{ readonly name: string }> => ({
   id: LOAD_SKILL,
   label: "Loaded a skill",
   explanation: "Load a group of tools with instructions for using them.",
@@ -97,11 +89,11 @@ export const makeLoadSkill = (
   titleField: "name",
   summarize: ({ name }) => name,
   capabilityFor: (context, { name }) =>
-    availableSkills(skills, context).find((s) => s.id === name)?.source ? CARD_SKILLS : undefined,
+    availableSkills(context).find((s) => s.id === name)?.source ? CARD_SKILLS : undefined,
   // What the user is shown before a card's skill is first used: its own words and what it loads.
   describe: (context, { name }) =>
     Effect.sync(() => {
-      const skill = availableSkills(skills, context).find((s) => s.id === name)
+      const skill = availableSkills(context).find((s) => s.id === name)
       const tools = skill
         ? matchPatterns(
             (context.offer?.tools ?? []).map((t) => t.name),
@@ -122,7 +114,7 @@ export const makeLoadSkill = (
   execute: (context, { name }) =>
     Effect.sync((): ToolOutput => {
       if (!context.offer) return notActive
-      const available = availableSkills(skills, context)
+      const available = availableSkills(context)
       const skill = available.find((s) => s.id === name)
       if (!skill)
         return {

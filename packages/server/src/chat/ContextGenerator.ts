@@ -422,7 +422,10 @@ export const layer = Layer.effect(
             const path = yield* readContinuityPath(reader, request, parent).pipe(
               Effect.catch(serverFailure("ReadContinuityPath"))
             )
-            const prior = yield* previousRun(reader, request, path, snapshot)
+            const prior = yield* previousRun(reader, request, path, {
+              ...snapshot,
+              agent: { tools: frozenTools, cardSkills }
+            })
             const baseline = path.map(pathStamp)
             if ("reason" in prior)
               continuity = {

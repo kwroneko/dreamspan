@@ -2860,3 +2860,13 @@ test.describe("text search review layout", () => {
         await expectLayout(page, info, `library-search-review-${width}-${theme}`, { scope: "main" })
       })
 })
+
+test("collapsed action spacer keeps its two flex gaps", async ({ page }) => {
+  await page.setContent(`<style>body{margin:20px}span{white-space:nowrap}</style>
+    <div style="display:flex;align-items:center;gap:8px;width:240px">
+      <span>First</span><span>Second</span><span>Third</span>
+      <div style="flex:1;min-width:0;opacity:0"><span style="display:none">Reserved action</span></div>
+      <span>Fourth</span>
+    </div>`)
+  expect((await layoutAudit(page)).filter((v) => v.kind === "gap")).toEqual([])
+})
