@@ -47,6 +47,7 @@ import {
   AuthenticatedPanelApprovalApi,
   AuthenticatedCardArchiveApi,
   AuthenticatedTextSearchApi,
+  AuthenticatedDraftPreviewApi,
   AuthenticatedCardSourcesApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
@@ -68,7 +69,7 @@ import { RpcSerialization, RpcServer, type RpcGroup } from "effect/rpc"
 import { makeAccountHandlers } from "./api/accounts.ts"
 import { makeLibraryHandlers } from "./api/library.ts"
 import { makeChatEventHandlers, makeChatHandlers, makeMessageVersionHandlers } from "./api/chats.ts"
-import { makeChatSetupHandlers } from "./api/chatSetup.ts"
+import { makeChatSetupHandlers, makeDraftPreviewHandlers } from "./api/chatSetup.ts"
 import {
   makeEditorHandlers,
   makeWorkshopPresetHandlers,
@@ -204,6 +205,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedSavedMediaApi.toLayer(makeSavedMediaHandlers),
 
   AuthenticatedTextSearchApi.toLayer(makeTextSearchHandlers),
+  AuthenticatedDraftPreviewApi.toLayer(makeDraftPreviewHandlers),
   AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
 )
 

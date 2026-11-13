@@ -4,7 +4,8 @@ import { Placement, REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
 import { SelectiveLogic } from "./docs/lorebook.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, ContextIssue, ForkId, SlotId, VersionId } from "./chat.ts"
+import { ChatId, ContextIssue, EntityId, ForkId, SlotId, VersionId } from "./chat.ts"
+import { StartChatInput } from "./chatStart.ts"
 import { NotFound, ServerError } from "./errors.ts"
 import { LlmRequestId, RequestStatus, UsageSource } from "./usage.ts"
 import { RefId } from "./library.ts"
@@ -536,6 +537,26 @@ export const NextContext = Schema.Struct({
 })
 export type NextContext = typeof NextContext.Type
 
+/**
+ * The request a chat not sent yet would make first (DESIGN §2.1), as the inspector shows a
+ * reply's: mapped for the model's API, never captured from a provider, since nothing is sent.
+ */
+export const DraftRequest = Schema.Struct({
+  builtAt: Schema.Number,
+  type: Schema.Literals(["normal", "swipe", "impersonate", "continue", "quiet"]),
+  mode: Schema.Literals(["st", "layouts"]),
+  tokenizer: Schema.optionalKey(TokenizerInfo),
+  ...ContextDisplay.fields
+})
+export type DraftRequest = typeof DraftRequest.Type
+
+/** A chat not sent yet: its first request's size and budget, and the request; null when it can't be built. */
+export const DraftChatPreview = Schema.Struct({
+  ...NextContext.fields,
+  request: Schema.NullOr(DraftRequest)
+})
+export type DraftChatPreview = typeof DraftChatPreview.Type
+
 /** Versions one metrics read takes. */
 export const MAX_METRICS_VERSIONS = 200
 
@@ -551,5 +572,20 @@ export class InspectorApi extends RpcGroup.make(
     payload: { versionIds: Schema.Array(VersionId).check(Schema.isMaxLength(MAX_METRICS_VERSIONS)) },
     success: Schema.Array(VersionMetrics),
     error: ServerError
+  })
+) {}
+
+/** A chat not sent yet's first request; its own group, served by its own handler layer (api.ts). */
+export class DraftPreviewApi extends RpcGroup.make(
+  /**
+   * The first request of a chat not sent yet (DESIGN §2.1), from what `StartChat` would take:
+   * built by the same assembler, counted with local tokenizers. Nothing is written, nothing is
+   * sent to a provider, and no remote token count runs. `replier`: who answers a sent message,
+   * as the Generate after the send names them.
+   */
+  Rpc.make("PreviewChat", {
+    payload: { ...StartChatInput, replier: Schema.optionalKey(Schema.NullOr(EntityId)) },
+    success: DraftChatPreview,
+    error: Schema.Union([NotFound, ServerError])
   })
 ) {}

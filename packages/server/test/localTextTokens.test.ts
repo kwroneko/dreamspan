@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process"
+import { slowIt } from "./support/slow.ts"
 import { createHash } from "node:crypto"
 import { gunzipSync } from "node:zlib"
 // Counts independently generated with Hugging Face tokenizers 0.22.1 from each model's
@@ -39,6 +41,24 @@ describe("published local text tokenizers", () => {
 
   it("counts a long unbroken word without the old pure-JS tokenizer's quadratic stall", async () => {
     assert.deepStrictEqual(await countTokens("o200k_base", ["x".repeat(20_000)]), [2500])
+  })
+
+  it("counts a quarter-million-space run in pieces, without a quadratic stall", async () => {
+    const huge = `x${" ".repeat(262_145)}x`
+    for (const encoding of ["o200k_base", "llama3", "qwen3"] as const) {
+      const started = performance.now()
+      const [count] = await countTokens(encoding, [huge, `x${" ".repeat(4_000)}x`])
+      assert.isBelow(performance.now() - started, 10_000)
+      // Boundary merges make this approximate; the request's text is never rewritten.
+      assert.approximately(count!, 2_052, 65)
+    }
+    // Shorter runs count whole: the same run counts the same in a short text and a long one.
+    const [short, long] = await countTokens("o200k_base", [
+      `a${" ".repeat(4_095)}b`,
+      `a${" ".repeat(4_095)}b ${"word ".repeat(1_000)}`
+    ])
+    const [words] = await countTokens("o200k_base", [` ${"word ".repeat(1_000)}`])
+    assert.strictEqual(long, short! + words!)
   })
 
   it("Llama 3 matches Meta's llama/test_tokenizer.py encode and dialog examples, without BOS/EOS", async () => {
@@ -100,4 +120,22 @@ it("applies a calibration once to raw counts, preserves empty fields and marks i
   assert.deepStrictEqual(raw.counts, [0, 2, 10])
   assert.isFalse(result.tokenizer.exact)
   assert.include(result.tokenizer.note ?? "", "Calibrated from 3")
+})
+
+slowIt("bounds degenerate non-space and combining-mark runs in an isolated tokenizer process", async () => {
+  const script = `
+    const { countTokens } = await import('./packages/server/src/importer/tokenizer.ts');
+    for (const encoding of ['o200k_base', 'llama3', 'qwen3']) {
+      const counts = await countTokens(encoding, ['x'.repeat(262145), '\u0301'.repeat(262145), 'abcdef'.repeat(50000), ('x'.repeat(4095)+' ').repeat(64), '😀'.repeat(131073)]);
+      if (!counts.every(n => Number.isFinite(n) && n > 0)) process.exit(1);
+    }
+  `
+  await new Promise<void>((resolve, reject) => {
+    execFile(
+      process.execPath,
+      ["--no-wasm-code-gc", "--input-type=module", "-e", script],
+      { cwd: new URL("../../../", import.meta.url), timeout: 20_000 },
+      (error) => (error ? reject(error) : resolve())
+    )
+  })
 })

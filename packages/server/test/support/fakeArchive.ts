@@ -15,7 +15,9 @@
 // `refuseDownloads`, a card whose downloads are refused (an empty list, 403). Misuse answers
 // 400 `bad_request`, a cursor of another query 400 `invalid_cursor`. `publish` makes a newer
 // version of a card under the same slug (its file changes, so its version, the file's SHA-256,
-// does), the older file still downloadable. No real archive's cards, names or images are used:
+// does), the older file still downloadable. Standalone lorebooks (`kind: "lorebook"`, a World
+// Info JSON in every download mode) are listed for `kind=lorebook`, and beside cards when the
+// words name one (`syntheticLorebooks`); `publish` gives them one more entry. No real archive's cards, names or images are used:
 // everything is generated here. The development server and the tests use it in place of cardex, and the tests
 // count what reaches it, so they can check that nothing is sent before the user asks (§5.1).
 import { createHash } from "node:crypto"
@@ -126,7 +128,84 @@ interface FakeCard {
   readonly parent?: string
   /** An earlier version, its own card on the archive under a slug of its own, not in searches. */
   readonly older?: boolean
+  /** A standalone lorebook (v1's `kind: "lorebook"`): its file a World Info JSON, not a card. */
+  readonly lorebook?: boolean
 }
+
+const LORE_NOUNS = ["Gazetteer", "Almanac", "Atlas", "Bestiary"]
+const LORE_CREATORS = ["inkmap", "atlas_hand"]
+const LORE_TAGS = ["worldbuilding", "places", "factions", "creatures"]
+
+/** A lorebook's file as SillyTavern's World Info export: `entries` keyed by uid. */
+const worldInfoJson = (name: string, entries: ReadonlyArray<readonly [string, string]>) =>
+  JSON.stringify({
+    description: `${name}, a synthetic lorebook made for testing.`,
+    entries: Object.fromEntries(
+      entries.map(([key, content], uid) => [
+        String(uid),
+        {
+          uid,
+          key: [key],
+          keysecondary: [],
+          comment: key,
+          content,
+          constant: false,
+          selective: true,
+          selectiveLogic: 0,
+          order: 100,
+          position: 0,
+          disable: false,
+          excludeRecursion: false,
+          probability: 100,
+          useProbability: true,
+          depth: 4,
+          displayIndex: uid,
+          extensions: {}
+        }
+      ])
+    )
+  })
+
+/**
+ * Standalone lorebooks: their own names, creators and tags, so the cards' tests see none of
+ * them. Searches list them for `kind=lorebook`, and for `both` (unchosen) only when the words
+ * name one, so a search for "gazetteer" finds them beside no card.
+ */
+const syntheticLorebooks = (count: number): ReadonlyArray<FakeCard> =>
+  Array.from({ length: count }, (_, n): FakeCard => {
+    const name = `${ADJECTIVES[n % ADJECTIVES.length]} ${LORE_NOUNS[n % LORE_NOUNS.length]}`
+    const tags = [LORE_TAGS[n % LORE_TAGS.length]!, LORE_TAGS[(n + 1) % LORE_TAGS.length]!]
+    const json = worldInfoJson(name, [
+      ["harbor", `The harbor of ${name} opens at dawn.`],
+      ["tower", `A tower of ${name} keeps the old maps.`]
+    ])
+    const sha256 = createHash("sha256").update(json).digest("hex")
+    return {
+      slug: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${sha256.slice(0, 8)}`,
+      name,
+      creator: LORE_CREATORS[n % LORE_CREATORS.length]!,
+      site: SITES[n % SITES.length]!,
+      tags,
+      tagline: `A ${tags[0]} lorebook of ${LORE_NOUNS[n % LORE_NOUNS.length]!.toLowerCase()} entries.`,
+      nsfw: false,
+      tokens: 600 + n * 50,
+      popularity: 500 + n,
+      addedAt: Date.UTC(2026, 1, 1) + n * 3_600_000,
+      // Some have no picture, as on cardex.
+      hasCover: n % 4 !== 2,
+      hasLorebook: false,
+      createdAt: Date.UTC(2025, 6, 1) + n * 86_400_000,
+      deleted: false,
+      verified: false,
+      recommended: false,
+      fork: false,
+      originalOnly: false,
+      json,
+      sha256,
+      color: hsl((n * 83 + 20) % 360),
+      lorebook: true
+    }
+  })
 
 /** A deterministic pseudo-random sequence, so every run serves the same archive. */
 const sequence = (seed: number) => {
@@ -404,12 +483,15 @@ export interface FakeArchiveOptions {
   readonly coverless?: boolean
   /** Leave `download_modes` out, as a response cached from before cardex listed them. */
   readonly omitDownloadModes?: boolean
+  /** How many standalone lorebooks it has (12 by default). */
+  readonly lorebooks?: number
 }
 
 export interface FakeArchive {
   readonly origin: string
   readonly host: string
   readonly cards: ReadonlyArray<FakeCard>
+  readonly lorebooks: ReadonlyArray<FakeCard>
   /** Requests received, by path, and all together. */
   readonly conditionalHits: () => number
   readonly notModified: () => number
@@ -467,10 +549,29 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       }
     ]
   })
+  const lorebooks = [...syntheticLorebooks(options.lorebooks ?? 12)]
+  // Every third lorebook has an earlier version, as cards do.
+  for (const [n, book] of lorebooks.entries()) {
+    if (n % 3 !== 1) continue
+    const doc = JSON.parse(book.json) as { description: string }
+    doc.description = `${doc.description} (An earlier draft.)`
+    const json = JSON.stringify(doc)
+    olderVersions.push({
+      ...book,
+      slug: `${book.slug}-v09`,
+      json,
+      sha256: createHash("sha256").update(json).digest("hex"),
+      addedAt: book.addedAt - 30 * 86_400_000,
+      older: true,
+      supersededBy: book.slug
+    })
+  }
+  /** The list a card or lorebook is in. */
+  const listOf = (c: FakeCard) => (c.lorebook ? lorebooks : cards)
   let countCap = options.countCap ?? 100_000
   let cursorEpoch = 0
-  const bySlug = new Map([...cards, ...olderVersions].map((c) => [c.slug, c]))
-  const bySha = new Map([...cards, ...olderVersions].map((c) => [c.sha256, c]))
+  const bySlug = new Map([...cards, ...lorebooks, ...olderVersions].map((c) => [c.slug, c]))
+  const bySha = new Map([...cards, ...lorebooks, ...olderVersions].map((c) => [c.sha256, c]))
   /** A card's listing on its site, as v1's origins name it. */
   const externalOf = (c: FakeCard) => `ext-${c.slug}`
   const originKeys = new Map<string, readonly [string, string]>()
@@ -480,7 +581,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
   const regional = new Set<string>()
   const noOrigins = new Set<string>()
   const originKey = (pair: readonly [string, string]) => JSON.stringify(pair)
-  for (const c of cards) {
+  for (const c of [...cards, ...lorebooks]) {
     const pair = [c.site, externalOf(c)] as const
     originKeys.set(c.slug, pair)
     originHeads.set(originKey(pair), c.slug)
@@ -545,18 +646,39 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     }
     return made
   }
+  /** A lorebook's next version: one more entry. */
+  const reviseLorebook = (book: FakeCard) => {
+    const doc = JSON.parse(book.json) as { entries: Record<string, Record<string, unknown>> }
+    const revision = Object.keys(doc.entries).length - 1
+    const first = doc.entries["0"]!
+    doc.entries[String(revision + 1)] = {
+      ...first,
+      uid: revision + 1,
+      displayIndex: revision + 1,
+      key: [`garden ${revision}`],
+      comment: `garden ${revision}`,
+      content: `Revised ${revision}: ${book.name} now lists a garden.`
+    }
+    return { json: JSON.stringify(doc), revision }
+  }
   const publish = (slug: string) => {
-    const at = cards.findIndex((c) => c.slug === slug)
+    const list = listOf(bySlug.get(slug) ?? cards[0]!)
+    const at = list.findIndex((c) => c.slug === slug)
     if (at < 0) throw new Error(`no fake card ${slug}`)
-    const card = cards[at]!
-    const doc = JSON.parse(card.json) as { data: { description: string; character_version: string } }
-    const revision = Number(doc.data.character_version.split(".")[1] ?? "0") + 1
-    doc.data.description = `${doc.data.description} Revised ${revision}: ${card.name} now keeps a garden.`
-    doc.data.character_version = `1.${revision}`
-    const json = JSON.stringify(doc)
+    const card = list[at]!
+    let json: string
+    let revision: number
+    if (card.lorebook) ({ json, revision } = reviseLorebook(card))
+    else {
+      const doc = JSON.parse(card.json) as { data: { description: string; character_version: string } }
+      revision = Number(doc.data.character_version.split(".")[1] ?? "0") + 1
+      doc.data.description = `${doc.data.description} Revised ${revision}: ${card.name} now keeps a garden.`
+      doc.data.character_version = `1.${revision}`
+      json = JSON.stringify(doc)
+    }
     const sha256 = createHash("sha256").update(json).digest("hex")
     const next: FakeCard = { ...card, json, sha256, addedAt: card.addedAt + revision * 86_400_000 }
-    cards[at] = next
+    list[at] = next
     bySlug.set(slug, next)
     bySha.set(sha256, next)
     return next
@@ -567,19 +689,21 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     const next = { ...old, supersededBy: target }
     bySlug.set(slug, next)
     bySha.set(old.sha256, next)
-    const at = cards.findIndex((c) => c.slug === slug)
-    if (at >= 0) cards[at] = next
+    const list = listOf(old)
+    const at = list.findIndex((c) => c.slug === slug)
+    if (at >= 0) list[at] = next
   }
   const publishSuccessor = (slug: string, site?: string) => {
     const original = bySlug.get(slug)!
+    const list = listOf(original)
     const changed = publish(slug)
     const nextSlug = `${roots.get(slug) ?? slug}-successor-${++successorSerial}`
     const next = { ...changed, slug: nextSlug, site: site ?? original.site, supersededBy: undefined }
-    cards[cards.findIndex((c) => c.slug === slug)] = original
+    list[list.findIndex((c) => c.slug === slug)] = original
     bySlug.set(slug, original)
     bySha.set(original.sha256, original)
     pointSuccessor(slug, nextSlug)
-    cards.push(next)
+    list.push(next)
     bySlug.set(nextSlug, next)
     bySha.set(next.sha256, next)
     const previousKey = originKeys.get(slug)!
@@ -644,7 +768,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     tags: c.tags,
     tagline: c.tagline,
     nsfw: c.nsfw,
-    kind: "character",
+    kind: c.lorebook ? "lorebook" : "character",
     token_count: c.tokens,
     stats: { popularity: c.popularity, rating_avg: 4, rating_count: 10 },
     thumbnail_url: c.hasCover ? `/t/${c.sha256}.512.webp?v=1` : null,
@@ -741,12 +865,19 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       const before = params.get(`${kind}_before`)
       return (!after || value >= Date.parse(after)) && (!before || value < Date.parse(before))
     }
-    const matching = cards.filter(
+    // Lorebooks for `lorebook`, and for `both` when the words name one (see `syntheticLorebooks`).
+    const pool =
+      kind === "lorebook"
+        ? lorebooks
+        : kind === "both" && q
+          ? [...cards, ...lorebooks.filter((c) => [c.name, c.tagline].some((t) => t.toLowerCase().includes(q)))]
+          : cards
+    const matching = pool.filter(
       (c) =>
         // Meaning search finds something for any words; text search needs them.
         (semantic || !q || words(c)) &&
-        kind !== "lorebook" &&
-        (!truthy(params.get("has_cover") ?? "true") || c.hasCover) &&
+        // Live, lorebooks without a picture are listed whatever `has_cover` says.
+        (!truthy(params.get("has_cover") ?? "true") || c.hasCover || c.lorebook === true) &&
         (kind !== "character_lorebook" || c.hasLorebook) &&
         !notSites.includes(c.site) &&
         groups.every((group) => group.some((tag) => c.tags.includes(tag))) &&
@@ -829,7 +960,8 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     // These synthetic originals are themselves JSON.
     if (refused.has(c.slug)) return json(res, 403, error("download_refused", "this card can't be downloaded"))
     if (!downloadModes(c).includes(mode)) return json(res, 404, error("no_derived_download", "not in this form"))
-    if (mode === "json" || mode === "original") {
+    // A lorebook's every form is JSON; here all of them the creator's file.
+    if (mode === "json" || mode === "original" || c.lorebook) {
       return send(res, 200, c.json, {
         "content-type": "application/json; charset=utf-8",
         "content-disposition": `attachment; filename="${c.slug}.json"`
@@ -1133,7 +1265,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     return {
       card: {
         slug: c.slug,
-        kind: "character",
+        kind: c.lorebook ? "lorebook" : "character",
         nsfw: c.nsfw,
         tags: c.tags,
         path: `/c/${c.slug}`,
@@ -1151,6 +1283,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       files: [
         {
           sha256: c.sha256,
+          ...(c.lorebook ? { kind: "json_lorebook", mime: "application/json" } : {}),
           ext: c.originalOnly ? "charx" : "json",
           is_original: true,
           current: true,
@@ -1163,39 +1296,41 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
       top: { name: { value: c.name, from: null } },
       earlier_origins: noOrigins.has(c.slug)
         ? []
-        : head?.slug !== c.slug
-          ? [
-              {
-                origin: {
-                  source: pair[0],
-                  external_id: pair[1],
-                  path: origin.path,
-                  card_slug: head?.slug ?? c.supersededBy
-                },
-                listing: { ...origin, card_slug: head?.slug ?? c.supersededBy },
-                active_from: new Date(c.addedAt).toISOString(),
-                active_to: new Date(c.addedAt + 1).toISOString()
-              }
-            ]
-          : [
-              {
-                listing: {
-                  source: c.site,
-                  source_label: "Synthetic site",
-                  external_id: `previous-${c.slug}`,
-                  path: `/o/${c.site}/previous-${c.slug}`,
-                  source_url: "https://synthetic.example/previous"
-                },
-                origin: {
-                  source: c.site,
-                  external_id: `previous-${c.slug}`,
-                  path: `/o/${c.site}/previous-${c.slug}`,
-                  card_slug: next.slug
-                },
-                active_from: "2025-01-01T00:00:00Z",
-                active_to: "2026-01-01T00:00:00Z"
-              }
-            ],
+        : c.lorebook && head?.slug === c.slug
+          ? []
+          : head?.slug !== c.slug
+            ? [
+                {
+                  origin: {
+                    source: pair[0],
+                    external_id: pair[1],
+                    path: origin.path,
+                    card_slug: head?.slug ?? c.supersededBy
+                  },
+                  listing: { ...origin, card_slug: head?.slug ?? c.supersededBy },
+                  active_from: new Date(c.addedAt).toISOString(),
+                  active_to: new Date(c.addedAt + 1).toISOString()
+                }
+              ]
+            : [
+                {
+                  listing: {
+                    source: c.site,
+                    source_label: "Synthetic site",
+                    external_id: `previous-${c.slug}`,
+                    path: `/o/${c.site}/previous-${c.slug}`,
+                    source_url: "https://synthetic.example/previous"
+                  },
+                  origin: {
+                    source: c.site,
+                    external_id: `previous-${c.slug}`,
+                    path: `/o/${c.site}/previous-${c.slug}`,
+                    card_slug: next.slug
+                  },
+                  active_from: "2025-01-01T00:00:00Z",
+                  active_to: "2026-01-01T00:00:00Z"
+                }
+              ],
       related: [],
       variants: []
     }
@@ -1209,6 +1344,7 @@ export const startFakeArchive = async (options: FakeArchiveOptions = {}): Promis
     origin,
     host: `127.0.0.1:${port}`,
     cards,
+    lorebooks,
     conditionalHits: () => conditionalHits,
     notModified: () => notModified,
     hits: () => seen.length,

@@ -5,6 +5,7 @@ import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
 import type { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import type { ChatView } from "./session.ts"
+import type { DraftPreviewState } from "./draftRequest.tsx"
 
 export interface PendingComposerContext {
   /** A phone: the speaker chip is its portrait, Generate an icon, as at the chat's composer. */
@@ -22,6 +23,8 @@ export interface PendingComposerContext {
   readonly view: ChatView
   /** Opens the side panel at a tab, as the saved composer's chips do. */
   readonly onSettings: (tab: string) => void
+  /** The first request, built as the box and the choices change (draftRequest.tsx). */
+  readonly draft: DraftPreviewState
   /** The cards from a card source the first turn adds (spec/CARD-SOURCES.md §4.4), by name; empty for local cards. */
   readonly adds: string
 }

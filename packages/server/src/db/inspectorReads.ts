@@ -11,14 +11,27 @@ import { createHash } from "node:crypto"
 import type { ChatId, SlotId, SpeakerPick, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
-import { type ContextSource, type RequestFigures, RunContext, versionMetricsOf } from "@rp/shared/inspectorApi.ts"
+import {
+  type ContextMessage,
+  type ContextSource,
+  type RequestFigures,
+  RunContext,
+  versionMetricsOf
+} from "@rp/shared/inspectorApi.ts"
 import { separateContextOf } from "./inspectorContexts.ts"
 import type { Assembler } from "../assembler/assembler.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"
 import { fallbackDescription } from "../assembler/sourceDescriptors.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
-import type { ContextSnapshot, Source, WireContext, InspectionInputs, InspectionNode } from "../assembler/types.ts"
+import type {
+  ContextSnapshot,
+  Source,
+  WireContext,
+  InspectionInputs,
+  InspectionNode,
+  RequestImage
+} from "../assembler/types.ts"
 import { builtinPreset } from "./assemblySources.ts"
 import type { ReadOps } from "./ops.ts"
 import type { LlmRequestRow } from "./providers.ts"
@@ -288,6 +301,26 @@ export const inspectionInputs = (
     } satisfies InspectionInputs
   })
 
+/** A captured or mapped request's messages as the inspector lists them, with their tokens. */
+export const contextMessages = (
+  wire: WireContext,
+  images: ReadonlyArray<ReadonlyArray<RequestImage> | undefined>,
+  counts: ReadonlyArray<number>,
+  sourceOf: (source: ContextSource) => ContextSource = (source) => source
+): Array<ContextMessage> =>
+  wire.messages.map((message, at) => ({
+    role: message.role,
+    ...(message.prefill ? { prefill: message.prefill } : {}),
+    name: message.name ?? null,
+    content: message.content,
+    tokens: (counts[at] ?? 0) + tokensOf({ content: "", images: images[at] }) + (message.content ? 3 : 0),
+    ...(images[at]?.length ? { images: images[at].map(contextImage) } : {}),
+    sources: (message.sources ?? []).map(sourceOf),
+    ...(message.parts ? { parts: message.parts } : {}),
+    ...(message.groups ? { groups: message.groups } : {}),
+    breakpoint: message.breakpoint ?? null
+  }))
+
 /** The decision model's pick of the reply's speaker, as the inspector shows it. */
 const speakerPickOf = (json: string | null) => {
   const pick = json === null ? null : (JSON.parse(json) as SpeakerPick)
@@ -370,32 +403,17 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           ...speakerPickOf(row.speaker_pick_json),
           ...(separateContext ? { separateContext } : {}),
           messages: display
-            ? wire!.messages.map((message, at) => ({
-                role: message.role,
-                ...(message.prefill ? { prefill: message.prefill } : {}),
-                name: message.name ?? null,
-                content: message.content,
-                tokens:
-                  (textCounts.counts[at] ?? 0) +
-                  tokensOf({ content: "", images: images[at] }) +
-                  (message.content ? 3 : 0),
-                ...(images[at]?.length ? { images: images[at].map(contextImage) } : {}),
-                sources: (message.sources ?? []).map((source) => {
-                  if (!source.summary) return source
-                  const now = current.get(source.summary.id)
-                  return {
-                    ...source,
-                    summary: {
-                      ...source.summary,
-                      changed:
-                        !now || now.revisionId !== source.summary.revision || (!source.summary.stale && !now.fresh)
-                    }
+            ? contextMessages(wire!, images, textCounts.counts, (source) => {
+                if (!source.summary) return source
+                const now = current.get(source.summary.id)
+                return {
+                  ...source,
+                  summary: {
+                    ...source.summary,
+                    changed: !now || now.revisionId !== source.summary.revision || (!source.summary.stale && !now.fresh)
                   }
-                }),
-                ...(message.parts ? { parts: message.parts } : {}),
-                ...(message.groups ? { groups: message.groups } : {}),
-                breakpoint: message.breakpoint ?? null
-              }))
+                }
+              })
             : [],
           samplers: display ? { ...wire!.samplers } : {},
           ...(display ?? {

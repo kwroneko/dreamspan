@@ -13,6 +13,7 @@ import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type {
   ContextMessage,
   ContextSource,
+  DraftRequest,
   RunContext,
   InspectorUsage,
   SourceActivation
@@ -447,7 +448,7 @@ function Message({
 }
 
 /** What this turn left out by its condition, or skipped: the inspector's list, no prompt text. */
-function NotSent({ run }: { run: RunContext }) {
+function NotSent({ run }: { run: Pick<RunContext, "notSent" | "messages" | "chatId"> }) {
   const listed =
     run.notSent ??
     run.messages
@@ -571,7 +572,7 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
 /** A context this small opens with every turn's text showing. */
 const OPEN_ALL = { messages: 60, characters: 120_000 }
 
-function Messages({ run }: { run: RunContext }) {
+function Messages({ run }: { run: Pick<RunContext, "messages" | "chatId"> }) {
   "use no memo"
   const parent = useRef<HTMLDivElement>(null)
   const all = () => new Set(run.messages.keys())
@@ -750,6 +751,59 @@ function Inspector({ run }: { run: RunContext }) {
         />
         <Usage requests={run.requests} />
       </Card>
+    </div>
+  )
+}
+
+/**
+ * The request a chat not sent yet would make first (DESIGN §2.1), in the inspector's terms:
+ * built now, never sent, so it has no usage, no continuity and no links into the chat.
+ */
+export function DraftRequestView({ request }: { request: DraftRequest }) {
+  const tokens = request.messages.reduce((sum, m) => sum + m.tokens, 0)
+  const run = { ...request, chatId: "" as ChatId }
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader
+          title="Request"
+          description={`Built now: ${counted(request.messages.length, "message")}, about ${counted(tokens, "token")}. ${request.tokenizer ? tokenizerText(request.tokenizer) : ""}`}
+        />
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-muted">Model</dt>
+          <dd>
+            {request.model ? `${request.model.model} on ${request.model.connection} (${request.model.kind})` : "none"}
+          </dd>
+          <dt className="text-muted">Preset</dt>
+          <dd>
+            {request.preset.label ?? BUILTIN_PRESET_LABEL} ({request.preset.scope})
+          </dd>
+          <dt className="text-muted">Generation</dt>
+          <dd>
+            {request.type}, {request.mode === "st" ? "the earlier fixed layout" : "the preset's layout"}
+          </dd>
+          <dt className="text-muted">Samplers</dt>
+          <dd className="break-words">
+            {Object.entries(request.samplers)
+              .map(([name, value]) => `${name} ${value}`)
+              .join(", ")}
+          </dd>
+        </dl>
+      </Card>
+      {request.issues.length > 0 && (
+        <Alert tone="warning" title="Notes on this context">
+          <ul className="list-disc pl-5">
+            {request.issues.map((issue, i) => (
+              <li key={i}>{issue.message}</li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+      <section aria-label="Messages" className="flex flex-col gap-2">
+        <h2 className="text-base font-semibold">Messages</h2>
+        <Messages run={run} />
+      </section>
+      <NotSent run={run} />
     </div>
   )
 }

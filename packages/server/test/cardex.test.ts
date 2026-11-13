@@ -404,7 +404,10 @@ describe("v1 as card sources", () => {
     const params = searchParams(query, "c:abc")
     assert.strictEqual(params.get("q"), "lantern")
     assert.lengthOf(params.get("tags")!.split(","), 20)
-    assert.strictEqual(params.get("kind"), "character")
+    // Unchosen, characters and standalone lorebooks both (§3.9).
+    assert.strictEqual(params.get("kind"), "both")
+    assert.strictEqual(searchParams({ ...query, filters: { kind: "lorebook" } }, null).get("kind"), "lorebook")
+    assert.strictEqual(searchParams({ ...query, filters: { kind: "nonsense" } }, null).get("kind"), "both")
     assert.strictEqual(params.get("source"), "chub,risuai")
     assert.strictEqual(params.get("min_tokens"), "100")
     assert.isFalse(params.has("max_tokens"))
@@ -438,9 +441,11 @@ describe("v1 as card sources", () => {
       const fields = caps.filters.find((f) => f.id === "fields")!
       assert.isTrue(fields.kind === "choice" && fields.multi)
       const kind = caps.filters.find((f) => f.id === "kind")!
-      assert.deepStrictEqual(kind.kind === "choice" ? kind.options.map((o) => o.value) : [], [
-        "character",
-        "character_lorebook"
+      assert.deepStrictEqual(kind.kind === "choice" ? kind.options.map((o) => [o.value, o.label]) : [], [
+        ["both", "Characters and lorebooks"],
+        ["character", "Characters"],
+        ["character_lorebook", "Characters with a lorebook"],
+        ["lorebook", "Lorebooks"]
       ])
       const c = archive.cards[0]!
       const identity = `${c.site}/${c.creator}`
@@ -478,7 +483,8 @@ describe("v1 as card sources", () => {
           { source: ["chub"], chub_recommended: true },
           (slug) => archive.cards.find((x) => x.slug === slug)!.recommended
         ],
-        [{ has_cover: "false" }, () => true]
+        [{ has_cover: "false" }, () => true],
+        [{ kind: "lorebook" }, (slug) => archive.lorebooks.some((x) => x.slug === slug)]
       ]
       for (const [filters, matches] of cases) {
         const seen: Array<string> = []
@@ -504,6 +510,29 @@ describe("v1 as card sources", () => {
         adapter.search(direct(), { ...emptySourceQuery, filters: { chub_verified: true } }, null)
       )
       assert.strictEqual(badFlags.code, "bad_request")
+    })
+  )
+
+  it.effect("standalone lorebooks: marked in results, listed beside cards, their original file fetched (§3.9)", () =>
+    Effect.gen(function* () {
+      const adapter = fakeCardexAdapter(archive)
+      // Unchosen, the kind is both: the words name lorebooks, and they come back marked.
+      const mixed = yield* adapter.search(direct(), { ...emptySourceQuery, text: "gazetteer" }, null)
+      assert.isAbove(mixed.items.length, 0)
+      assert.isTrue(mixed.items.every((item) => item.kind === "lorebook"))
+      const cards = yield* adapter.search(direct(), { ...emptySourceQuery, filters: { kind: "character" } }, null)
+      assert.isTrue(cards.items.every((item) => item.kind === undefined))
+      // A lorebook without a picture is listed all the same.
+      const books = yield* adapter.search(direct(), { ...emptySourceQuery, filters: { kind: "lorebook" } }, null)
+      assert.lengthOf(books.items, archive.lorebooks.length)
+      assert.isTrue(books.items.some((item) => item.thumb === undefined))
+      const book = archive.lorebooks[0]!
+      const seen: Array<string> = []
+      const file = yield* adapter.card(direct(seen), book.slug)
+      assert.strictEqual(file.summary.kind, "lorebook")
+      assert.strictEqual(Buffer.from(file.bytes).toString("utf8"), book.json)
+      assert.match(file.fileName, /\.json$/)
+      assert.isTrue(seen.some((path) => path.includes("mode=original")))
     })
   )
 

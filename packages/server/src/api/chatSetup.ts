@@ -6,13 +6,23 @@ import type { RevisionId } from "@rp/shared/library.ts"
 // Every handler acts as the authenticated user; storage enforces ownership, so another
 // user's ids are NotFound. Changes are published to the chat's subscribers.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { CastCard, ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import { CastCard, type ChatId, type EntityId, type ForkId, type SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
-import { Cast, type CastChange, ChatNote, ShellCards, ShellForks, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
+import {
+  Cast,
+  CardForChat,
+  type CastChange,
+  ChatNote,
+  ShellCards,
+  ShellForks,
+  ShellLibrary
+} from "@rp/shared/chatSetupApi.ts"
+import { StartChatInput } from "@rp/shared/chatStart.ts"
+import { cardTextOfDoc } from "../db/cards.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { awayAt } from "@rp/shared/knowledge.ts"
 import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
-import { Effect, Option, Queue, Semaphore, Stream } from "effect"
+import { Effect, Option, Queue, Schema, Semaphore, Stream } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Generator } from "../chat/Generator.ts"
@@ -86,6 +96,157 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "agent.permission", value: { ...change.target, on: change.on } }
   }
 }
+
+const StartChatPayload = Schema.Struct(StartChatInput)
+type StartChatPayload = typeof StartChatPayload.Type
+
+/** A source's card as a pending chat reads it, from the file adding it would store. */
+const draftCardOf = (entityId: EntityId, docJson: string) => {
+  const text = cardTextOfDoc(entityId, docJson)
+  const { avatarCrop: _, ...card } = text.card
+  return new CardForChat({
+    card: new CastCard({ ...card, avatarMediaId: null }),
+    greetings: text.greetings,
+    groupGreetings: text.groupGreetings,
+    description: text.description,
+    personality: text.personality,
+    scenario: text.scenario
+  })
+}
+
+/**
+ * A new chat's greetings as `StartChat` writes them: who greets (the preview's choices, else
+ * every card in the supplied order), each greeter's greetings, and every greeting's random and
+ * time macros frozen, whatever the client sent: the values it saw in the preview are kept, and
+ * any it didn't send are drawn now. `PreviewChat` draws the same way.
+ */
+const drawGreeters = <E>(
+  reader: Reader["Service"],
+  id: UserId,
+  input: Pick<StartChatPayload, "cards" | "persona" | "greeting"> & {
+    readonly frozen: StartChatPayload["frozen"] | undefined
+    readonly greeters: StartChatPayload["greeters"] | undefined
+  },
+  cardForChat: (entityId: EntityId) => Effect.Effect<CardForChat, E>,
+  /** `picked`: only each greeter's picked greeting, frozen (a preview reads no other). */
+  only: "all" | "picked" = "all"
+) =>
+  Effect.gen(function* () {
+    const { cards, persona, greeting, frozen, greeters } = input
+    // The names the greetings show with: the persona's and each card's, as in the preview.
+    const [player] = persona === null ? [] : yield* reader.CastCards({ userId: id, entityIds: [persona] })
+    const asked =
+      greeters ??
+      cards.map((entityId, index) => ({
+        entityId,
+        greeting: index === 0 ? (greeting ?? 0) : 0,
+        frozen: index === 0 ? frozen : undefined
+      }))
+    return yield* Effect.forEach(asked, (greeter) =>
+      Effect.map(cardForChat(greeter.entityId), (card) => {
+        const options = offeredGreetings(card, new Set(cards.filter((entity) => entity !== persona)).size)
+        const picked =
+          greeters === undefined && cards.length > 1 && !(greeter.entityId === cards[0] && greeting !== null)
+            ? (options[Math.floor(Math.random() * options.length)]?.index ?? 0)
+            : (greetingPick(options, greeter.greeting)?.index ?? 0)
+        const fields = { description: card.description, personality: card.personality, scenario: card.scenario }
+        const names = {
+          user: player?.modelName ?? player?.name ?? "User",
+          char: card.card.modelName ?? card.card.name
+        }
+        return {
+          entityId: greeter.entityId,
+          // A single card's greeting as asked, or a group's preview/random choice.
+          greeting: picked,
+          // Resolve the registry once: workers persist this trusted snapshot instead
+          // of consulting a separate registry in another isolate.
+          options: (only === "all" ? options : options.filter((option) => option.index === picked)).map((option) => ({
+            index: option.index,
+            text: option.text,
+            frozen: freezeTemplate(option.text, fields, names, option.index === picked ? (greeter.frozen ?? {}) : {})
+          }))
+        }
+      })
+    )
+  })
+
+/**
+ * The first request of a chat not sent yet (`PreviewChat`, DESIGN §2.1): `StartChat`'s
+ * preparation, then the request built over stand-ins (db/draftSources.ts). Nothing is written,
+ * no generation starts, and no provider is asked anything, not even a token count. A card from
+ * a card source reads the file adding it would store, from the source's cache.
+ */
+export const makeDraftPreviewHandlers = Effect.gen(function* () {
+  const reader = yield* Reader
+  const sources = yield* Effect.serviceOption(CardSources)
+  return {
+    PreviewChat: ({ cards, persona, greeting, first, frozen, greeters, replier }) =>
+      Effect.gen(function* () {
+        const user = yield* CurrentUser
+        const id = user.id
+        const remote = [...new Set(cards)].flatMap((entityId) => {
+          const from = remoteOf(entityId)
+          return from === null ? [] : [{ entityId, ...from }]
+        })
+        if (persona !== null && remoteOf(persona) !== null) return yield* new NotFound({ entity: "card", id: persona })
+        if (remote.length > 0 && Option.isNone(sources))
+          return yield* new NotFound({ entity: "card", id: remote[0]!.entityId })
+        // Every card it names is the caller's, as StartChat's writes require: the persona, and
+        // who speaks or replies is one of the chat's cards.
+        if (persona !== null) yield* reader.GetCardForChat({ userId: id, entityId: persona })
+        for (const greeter of greeters ?? [])
+          if (!cards.includes(greeter.entityId)) return yield* new NotFound({ entity: "card", id: greeter.entityId })
+        const members = new Set<string>([...cards, ...(persona === null ? [] : [persona])])
+        for (const named of [first.speakerEntityId, replier ?? null])
+          if (named !== null && !members.has(named)) return yield* new NotFound({ entity: "card", id: named })
+        const fromSources = new Map(
+          yield* Effect.forEach(remote, (card) =>
+            Effect.map(
+              sources.pipe(Option.getOrThrow).preparePreview(user, card.sourceId, card.remoteId),
+              ({ payload }) => [card.entityId as string, payload.file] as const
+            ).pipe(
+              Effect.catchTag("SourceFailed", (error) =>
+                Effect.fail(new ServerError({ message: `The card couldn't be read. ${error.message}` }))
+              )
+            )
+          )
+        )
+        const localCards = new Map(
+          yield* Effect.forEach(
+            [...new Set(cards)].filter((entityId) => remoteOf(entityId) === null),
+            (entityId) =>
+              Effect.map(reader.GetCardForChat({ userId: id, entityId }), (card) => [entityId, card] as const)
+          )
+        )
+        const drawn = yield* drawGreeters(
+          reader,
+          id,
+          { cards, persona, greeting, frozen, greeters },
+          (entityId) => {
+            const file = fromSources.get(entityId)
+            return file
+              ? Effect.succeed(draftCardOf(entityId, file.docJson))
+              : Effect.succeed(localCards.get(entityId)!)
+          },
+          "picked"
+        )
+        return yield* reader.AssembleDraftChat({
+          userId: id,
+          cards,
+          persona,
+          greeters: drawn,
+          first,
+          replier: replier ?? null,
+          remote: [...fromSources].map(([entity, file]) => ({
+            entity,
+            docJson: file.docJson,
+            notes: [...(file.noteDocJson === null ? [] : [file.noteDocJson]), ...(file.notesDocJson ?? [])]
+          })),
+          now: Date.now()
+        })
+      }).pipe(internal("PreviewChat"))
+  } satisfies Partial<Parameters<typeof AppApi.of>[0]>
+})
 
 /** The chat's `card.binding`s in a fold, as the database operations take them. */
 const bindingsOf = (state: ChatState) =>
@@ -449,53 +610,10 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             ).pipe(Effect.catchTag("SourceFailed", notSent))
           )
         )
-        const cardForChat = (entityId: EntityId) => {
+        const drawn = yield* drawGreeters(reader, id, { cards, persona, greeting, frozen, greeters }, (entityId) => {
           const from = fromSources.get(entityId)
           return from ? Effect.succeed(from.shown) : reader.GetCardForChat({ userId: id, entityId })
-        }
-        // The names the greetings show with: the persona's and each card's, as in the preview.
-        const [player] = persona === null ? [] : yield* reader.CastCards({ userId: id, entityIds: [persona] })
-        // Who greets: the preview's choices, else every card in the supplied order.
-        const asked =
-          greeters ??
-          cards.map((entityId, index) => ({
-            entityId,
-            greeting: index === 0 ? (greeting ?? 0) : 0,
-            frozen: index === 0 ? frozen : undefined
-          }))
-        // Every greeting's random and time macros are frozen here, whatever the client sent:
-        // the values it saw in the preview are kept, and any it didn't send are drawn now.
-        const drawn = yield* Effect.forEach(asked, (greeter) =>
-          Effect.map(cardForChat(greeter.entityId), (card) => {
-            const options = offeredGreetings(card, new Set(cards.filter((entity) => entity !== persona)).size)
-            const picked =
-              greeters === undefined && cards.length > 1 && !(greeter.entityId === cards[0] && greeting !== null)
-                ? (options[Math.floor(Math.random() * options.length)]?.index ?? 0)
-                : (greetingPick(options, greeter.greeting)?.index ?? 0)
-            const fields = { description: card.description, personality: card.personality, scenario: card.scenario }
-            const names = {
-              user: player?.modelName ?? player?.name ?? "User",
-              char: card.card.modelName ?? card.card.name
-            }
-            return {
-              entityId: greeter.entityId,
-              // A single card's greeting as asked, or a group's preview/random choice.
-              greeting: picked,
-              // Resolve the registry once: workers persist this trusted snapshot instead
-              // of consulting a separate registry in another isolate.
-              options: options.map((option) => ({
-                index: option.index,
-                text: option.text,
-                frozen: freezeTemplate(
-                  option.text,
-                  fields,
-                  names,
-                  option.index === picked ? (greeter.frozen ?? {}) : {}
-                )
-              }))
-            }
-          })
-        )
+        })
         const start = {
           guidance: guidance ?? false,
           userId: id,

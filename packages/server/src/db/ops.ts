@@ -173,7 +173,7 @@ import {
   ProxyMode
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
-import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
 import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
@@ -1840,7 +1840,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
    * transaction: what `ImportFile` stores for a new card file, then its `card_origins` row.
    * A card the user already has from there (a live card, archived or not) is answered
    * instead, with `existing`, so it's never added twice; an origin whose card is in the bin
-   * or purged is let go, and the card is added again.
+   * or purged is let go, and the card is added again. A standalone lorebook's file (§3.9) is
+   * added the same way, as a lorebook: its document says which (`adoptedKind`).
    */
   Rpc.make("AdoptRemoteCard", {
     payload: AdoptFields,
@@ -4619,6 +4620,26 @@ export class ReadOps extends RpcGroup.make(
       leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
     },
     success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The first request of a chat not made yet (DESIGN §2.1), assembled over `draftSources.ts`
+   * from what `StartChat` would write: nothing is written, and nothing leaves the worker.
+   */
+  Rpc.make("AssembleDraftChat", {
+    payload: {
+      userId: UserId,
+      cards: StartChatFields.cards,
+      persona: StartChatFields.persona,
+      greeters: StartChatFields.greeters,
+      first: FirstTurn,
+      replier: Schema.NullOr(EntityId),
+      remote: Schema.Array(
+        Schema.Struct({ entity: Schema.String, docJson: Schema.String, notes: Schema.Array(Schema.String) })
+      ),
+      now: Schema.Number
+    },
+    success: DraftChatPreview,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */

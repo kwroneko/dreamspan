@@ -102,7 +102,7 @@ export function cardexCriteriaTests() {
               ["Rating", "Safe", "Rating: Safe"],
               ["Match", "Meaning", "Match: Meaning"],
               ["Search in", "Name", "Search in: Name"],
-              ["Kind", "With a lorebook", "Kind: With a lorebook"],
+              ["Kind", "Characters with a lorebook", "Kind: Characters with a lorebook"],
               ["Cover", "Any", "Cover: Any"]
             ]) {
               await panel
@@ -193,7 +193,7 @@ export function cardexCriteriaTests() {
             await filters.click()
             await panel
               .getByRole("group", { name: "Kind", exact: true })
-              .getByRole("button", { name: "With a lorebook", exact: true })
+              .getByRole("button", { name: "Characters with a lorebook", exact: true })
               .click()
             await panel.getByRole("button", { name: "Close", exact: true }).click()
             if (place === "home")
@@ -228,7 +228,7 @@ export function cardexCriteriaTests() {
             await expect(
               scope.getByText("cardex couldn't use name order just now. Showing best matches.", { exact: true })
             ).toHaveCount(0)
-            await expect(chips).toContainText("Kind: With a lorebook")
+            await expect(chips).toContainText("Kind: Characters with a lorebook")
             await expect(scope.getByRole("button", { name: "Order: A to Z", exact: true })).toBeVisible()
             await clear()
             await search.scrollIntoViewIfNeeded()
@@ -237,7 +237,7 @@ export function cardexCriteriaTests() {
             const cards = scope.locator("[data-remote-card]")
             const expected = (await (
               await fetch(
-                `http://127.0.0.1:${port}/api/v1/search?q=synthetic&kind=character&nsfw=include&sort=name&limit=48`
+                `http://127.0.0.1:${port}/api/v1/search?q=synthetic&kind=both&nsfw=include&sort=name&limit=48`
               )
             ).json()) as { items: { slug: string }[] }
             const firstIds = expected.items.map((item) => item.slug)

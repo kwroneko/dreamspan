@@ -78,8 +78,17 @@ export const bundleEntry = (dir: string, name: string) =>
     return pathToFileURL(path)
   })
 
-/** Reads that browse, and can be slow at scale: they never hold the last free reader (readerPool.ts). */
-const BACKGROUND_READS: ReadonlySet<string> = new Set(["ShellLibrary", "ShellCards", "ShellForks", "CacheWarmth"])
+/**
+ * Reads that browse, and can be slow at scale: they never hold the last free reader (readerPool.ts).
+ * A pending chat's first-request preview is one: a card with a huge greeting takes minutes to build.
+ */
+const BACKGROUND_READS: ReadonlySet<string> = new Set([
+  "ShellLibrary",
+  "ShellCards",
+  "ShellForks",
+  "CacheWarmth",
+  "AssembleDraftChat"
+])
 
 /**
  * Reads a reply waits on before its request goes out (chat/ContextGenerator.ts; the provider
