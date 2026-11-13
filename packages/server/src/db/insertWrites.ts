@@ -11,6 +11,7 @@ import type { Bin } from "./bin.ts"
 import { onDisplayPath, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import { selectionIn, shownIn, slotDeletedIn, versionAsShown, writeInsert } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
+import { extendStretches } from "./stretches.ts"
 import { presenceAt, presenceJson } from "./participation.ts"
 import { InsertRefused } from "@rp/shared/messagesApi.ts"
 import { InsertResult, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
@@ -156,6 +157,8 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
           }
 
           yield* writeInsert(sql, { id: fork.id, chatId }, slotId, 1)
+          // Inside a separate join's parallel stretch, it is part of it (spec/THREADS.md §7.3).
+          if (anchorSlotId !== null) yield* extendStretches(sql, chatId, fork, anchorSlotId, slotId)
           // The editor's draft, if it still holds what was inserted (§3.10).
           if (body._tag !== "Duplicate" && body.draft !== undefined)
             yield* bin.drafts.commit(userId, body.draft, {

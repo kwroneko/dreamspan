@@ -117,6 +117,15 @@ const story = (server: Parameters<typeof lcmHarness>[0], timelines: MergeTimelin
       joins: [{ forkId: D, title: preview.sourceTitle, framing: null, digest: preview.digest }]
     })
     const J = yield* tipOf(F)
+    // A Lantern message inserted into the stretch after the join: the stretch's too.
+    yield* writer.InsertMessage({
+      userId,
+      chatId,
+      forkId: F,
+      anchorSlotId: lantern[10]!,
+      expectedRowVersion: (yield* reader.GetSlot({ userId, slotId: lantern[10]!, forkId: F })).entry.rowVersion,
+      body: { _tag: "Write", speaker: mira, content: `LANTERN inserted. ${filler}` }
+    })
     for (let n = 0; n < 70; n++) yield* say(F, n % 2 ? wren : mira, `After ${n}. ${filler}`)
     yield* h.settle
     const summaries = Effect.map(
@@ -200,15 +209,26 @@ describe("summaries across splits and joins (TH7)", () => {
         const shared = all.filter((s) => s.audience === null)
         const wren = all.filter((s) => s.audience === stretchAudience(t.wren))
         const mira = all.filter((s) => s.audience === stretchAudience(t.mira))
-        // The join recorded its stretch: the Lantern from its first message after S, and the join.
-        const [[merge]] = (yield* fixtureSql(
+        // The join recorded its stretch: the Lantern's 24 messages after S and the one inserted
+        // among them later, the join, and S before them.
+        const [stretch] = (yield* fixtureSql(
           t.h.dataDir,
-          [{ sql: "SELECT stretch_json FROM chat_merges WHERE chat_id = ?", params: [t.h.chat.id] }],
+          [
+            {
+              sql: `SELECT t.opens, s.inserted, count(*) AS n FROM thread_stretch_slots t JOIN slots s ON s.id = t.slot_id
+                GROUP BY t.opens, s.inserted ORDER BY t.opens, s.inserted`,
+              params: []
+            }
+          ],
           { readOnly: true }
-        )) as unknown as [[{ stretch_json: string }]]
+        )) as unknown as [Array<{ opens: number; inserted: number; n: number }>]
         assert.deepStrictEqual(
-          (JSON.parse(merge.stretch_json) as Array<{ lo: number; hi: number }>).map((g) => [g.lo, g.hi]),
-          [[t.sDepth + 1, t.jDepth]]
+          stretch.map((r) => [r.opens, r.inserted, r.n]),
+          [
+            [0, 0, 25],
+            [0, 1, 1],
+            [1, 0, 1]
+          ]
         )
         assert.deepStrictEqual(
           [...new Set(all.map((s) => s.audience))].filter((a) => a !== null && !a.includes(STRETCH_VIEW)),
@@ -250,6 +270,7 @@ describe("summaries across splits and joins (TH7)", () => {
           viewer: t.wren
         })
         assert.isTrue(view.layer.some((s) => s.audience?.includes(t.wren)))
+        assert.isTrue(view.stretchViews, "the panel offers each character's summaries")
         assert.isFalse(view.layer.some((s) => s.audience === undefined && s.to - 1 > t.sDepth))
         assert.isFalse(view.layer.some((s) => s.content?.includes("lantern")))
         const whole = yield* t.h.reader.GetLcmState({ userId: t.h.userId, chatId: t.h.chat.id, leafSlotId })

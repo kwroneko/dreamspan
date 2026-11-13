@@ -119,6 +119,46 @@ describe("what each speaker reads at a join", () => {
     )
   )
 
+  it.live(
+    "a message inserted into the stretch after a separate join is the stretch's too: never read by one who wasn't there",
+    () =>
+      runStory(
+        null,
+        (t) =>
+          Effect.gen(function* () {
+            const { lanternSlot } = yield* play(t)
+            yield* t.join(t.F, [t.D], null, "separate")
+            const insert = (anchor: SlotId, content: string) =>
+              Effect.gen(function* () {
+                const slot = yield* t.reader.GetSlot({ userId: t.userId, slotId: anchor, forkId: t.F })
+                return yield* t.writer.InsertMessage({
+                  userId: t.userId,
+                  chatId: t.chatId,
+                  forkId: t.F,
+                  anchorSlotId: anchor,
+                  expectedRowVersion: slot.entry.rowVersion,
+                  body: { _tag: "Write", speaker: t.mira, content }
+                })
+              })
+            // In the Lantern after the join: right after the split, and among its messages.
+            yield* insert(t.S, "A lamp is lit in the Lantern's window.")
+            yield* insert(lanternSlot, "Mira mends a torn sail by the hearth.")
+            const mira = yield* t.contextFor(t.F, t.mira)
+            assert.include(mira, "A lamp is lit in the Lantern's window.")
+            assert.include(mira, "Mira mends a torn sail by the hearth.")
+            const wren = yield* t.contextFor(t.F, t.wren)
+            assert.include(wren, "Wren counts the crates on the pier.")
+            assert.notInclude(wren, "A lamp is lit")
+            assert.notInclude(wren, "torn sail")
+            assert.notInclude(wren, "stokes the fire")
+            // Both are recorded in the join's stretch.
+            const stretch = t.stretchOf(t.F)
+            assert.strictEqual(stretch.filter((row) => row.inserted === 1 && row.opens === 0).length, 2)
+          }),
+        { narrator: true }
+      )
+  )
+
   it.live("a together join reads as merges do: everyone both threads, the docks as the section", () =>
     runStory(
       null,

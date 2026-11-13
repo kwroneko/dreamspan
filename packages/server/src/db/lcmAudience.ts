@@ -44,7 +44,7 @@ export const audienceScope = (sql: SqlClient.SqlClient, alias: string, identitie
         WHERE a.value NOT IN (SELECT value FROM json_each(${JSON.stringify([...identities])}))))`
 
 /**
- * Whether a live separate join (one with a stretch, `chat_merges.stretch_json`) is on the path to
+ * Whether a live separate join (one with a stretch, `thread_stretch_slots`) is on the path to
  * `leaf`: only there does a chat with one shared context keep views (spec/THREADS.md §7.3). One
  * indexed read of the chat's merges, then a path probe per such join (few).
  */
@@ -52,7 +52,8 @@ export const stretchOnPath = (sql: SqlClient.SqlClient, chatId: string, leaf: st
   Effect.gen(function* () {
     if (leaf === null) return false
     const joins = yield* sql<{ slot_id: string }>`SELECT m.slot_id FROM chat_merges m JOIN slots j ON j.id = m.slot_id
-      WHERE m.chat_id = ${chatId} AND m.stretch_json IS NOT NULL AND j.deleted_at IS NULL`
+      WHERE m.chat_id = ${chatId} AND m.timelines = 'separate' AND j.deleted_at IS NULL
+        AND EXISTS (SELECT 1 FROM thread_stretch_slots t WHERE t.merge_id = m.id)`
     for (const join of joins) if (yield* onPath(sql, chatId, leaf, join.slot_id)) return true
     return false
   })

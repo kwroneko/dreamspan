@@ -41,7 +41,7 @@ import {
   slotPlace
 } from "./displayPath.ts"
 import { inFork, shownIn, slotDeletedIn, writeInsert } from "./forkState.ts"
-import { pathSegments } from "./pathSegments.ts"
+import { recordStretch } from "./stretches.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -114,6 +114,9 @@ interface MergePlan {
   readonly sourceEnd: string | null
   readonly base: string | null
   readonly start: string | null
+  /** The parallel span's slots as the destination shows them, and the one before it (TH7). */
+  readonly span: ReadonlyArray<string>
+  readonly beforeSpan: string | null
   readonly rows: ReadonlyArray<MergedRow>
   readonly transcript: string
   readonly union: ReadonlyArray<string>
@@ -364,7 +367,9 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
                 return yield* new StaleWrite({ entity: "slot", id: request.start!, expected: 0, actual: 0 })
               return startPos
             })
-    const span = (yield* readStretch(sql, fork, pieces, spanFrom, atPos)).filter(usable)
+    const spanRead = yield* readStretch(sql, fork, pieces, spanFrom, atPos)
+    const beforeSpan = spanFrom > 0 ? yield* slotAtPosition(sql, pieces, spanFrom - 1) : null
+    const span = spanRead.filter(usable)
     const startRow = span[0] ?? null
     const spanTokens = span.reduce((n, row) => n + estimateTokens(row.content), 0)
     const budget = Math.min(MERGE_BUDGET_MAX, Math.max(MERGE_BUDGET_MIN, spanTokens))
@@ -611,6 +616,8 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       sourceEnd,
       base,
       start: startRow?.id ?? null,
+      span: spanRead.map((row) => row.id),
+      beforeSpan,
       rows,
       transcript,
       union,
@@ -627,25 +634,6 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
   })
 
 /** The merge whose join is `slotId`, read for the timeline. */
-/**
- * A separate join's parallel stretch (spec/THREADS.md §7.3, TH7): the join at `slotId` and the
- * destination's messages from `start` on, as segments of the join's path (`{chain, lo, hi}`,
- * `chat_merges.stretch_json`); the join alone when it has no span. A stretch view's knowledge
- * applies there only (db/knowers.ts `inStretchSql`).
- */
-const stretchOf = (sql: SqlClient.SqlClient, chatId: string, slotId: string, start: string | null) =>
-  Effect.gen(function* () {
-    const [at] = yield* sql<{ depth: number; chain_id: string; floor: number | null }>`
-      SELECT j.depth, j.chain_id, (SELECT depth FROM slots WHERE id = ${start} AND chat_id = ${chatId}) AS floor
-      FROM slots j WHERE j.id = ${slotId}`
-    if (at === undefined) return null
-    if (at.floor === null || at.floor > at.depth) return [{ chain: at.chain_id, lo: at.depth, hi: at.depth }]
-    const segments = yield* sql<{ chain_id: string; lo: number; hi: number }>`
-      ${pathSegments(sql, chatId, slotId, at.depth - at.floor + 1)}
-      SELECT chain_id, max(lo, floor) AS lo, hi FROM segments ORDER BY hi`
-    return segments.map((g) => ({ chain: g.chain_id, lo: g.lo, hi: g.hi }))
-  })
-
 const mergeInfo = (sql: SqlClient.SqlClient, userId: UserId, chatId: string, slotId: string) =>
   Effect.gen(function* () {
     yield* ownedChat(sql, userId, chatId)
@@ -789,7 +777,6 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
             plan.fork.id
           )
         const mergeId = uuidv7()
-        const stretch = plan.timelines === "separate" ? yield* stretchOf(sql, chatId, slotId, plan.start) : null
         const inDestination = new Set(plan.destCast)
         const inSource = new Set(plan.sourceSide)
         yield* sql`INSERT INTO chat_merges ${sql.insert({
@@ -814,9 +801,9 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
           counts_json: JSON.stringify(plan.counts),
           created_at: now,
           timelines: plan.timelines,
-          split_id: plan.splitId,
-          stretch_json: stretch === null ? null : JSON.stringify(stretch)
+          split_id: plan.splitId
         })}`
+        if (plan.timelines === "separate") yield* recordStretch(sql, mergeId, slotId, plan.span, plan.beforeSpan)
         for (let i = 0; i < plan.rows.length; i += 200)
           yield* sql`INSERT INTO chat_merge_messages ${sql.insert(
             plan.rows.slice(i, i + 200).map((r, n) => ({

@@ -103,7 +103,7 @@ export interface Knowledge {
   /**
    * With the whole path (`viewer` null) but a character speaking: whom a separate join's
    * parallel stretch is filtered for (spec/THREADS.md §7.3). The rest of the history stays whole.
-   * `stored`: the stretches as each join recorded them (`chat_merges.stretch_json`), for a stretch
+   * `stored`: the stretches as each join recorded them (`thread_stretch_slots`), for a stretch
    * view's own summary, whose chunk may end before the join (TH7); else those of the joins read.
    */
   readonly stretch?: {
@@ -205,11 +205,15 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
       return yield* filterKnown(assembly, entries, assembly.knowledge?.aliases ?? [viewer], () => true)
     const stretch = assembly.knowledge?.stretch
     if (!stretch) return entries
-    if (stretch.stored) {
-      // As the joins recorded their stretches: the same messages its summary's inputs leave out.
+    // As the joins recorded their stretches (`thread_stretch_slots`): inserted messages included.
+    const recorded = Effect.gen(function* () {
       const ids = entries.filter((e) => e.inContext).map((e) => e.versionId)
-      const found = ids.length ? yield* sources.knowers(ids) : []
-      const stretched = new Set(found.flatMap((k) => (k.stretched ? [k.versionId] : [])))
+      const found = ids.length ? yield* sources.knowers!(ids) : []
+      return new Set(found.flatMap((k) => (k.stretched ? [k.versionId] : [])))
+    })
+    if (stretch.stored) {
+      // The same messages its summary's inputs leave out.
+      const stretched = yield* recorded
       return yield* filterKnown(assembly, entries, stretch.aliases ?? [stretch.viewer], (e) =>
         stretched.has(e.versionId)
       )
@@ -224,10 +228,13 @@ export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<Histor
         if (found) span.from = found.depth
       }
     if (open.length === 0) return entries
+    // The joins read open their stretches; what each recorded holds a message inserted into one too.
+    const stretched = yield* recorded
     const inStretch = (entry: HistoryEntry) =>
       entry.merge
         ? entry.merge.timelines === "separate"
-        : open.some((span) => span.start !== null && entry.depth < span.to && entry.depth >= (span.from ?? -Infinity))
+        : stretched.has(entry.versionId) ||
+          open.some((span) => span.start !== null && entry.depth < span.to && entry.depth >= (span.from ?? -Infinity))
     return yield* filterKnown(assembly, entries, stretch.aliases ?? [stretch.viewer], inStretch)
   })
 

@@ -2207,10 +2207,7 @@ export const baseline: ReadonlyArray<string> = [
     -- for everyone) or 'separate'; a registered storage kind, frozen with the row.
     timelines TEXT NOT NULL DEFAULT 'together',
     -- Soft: the thread split whose thread this joins, when the source is one (§4.1).
-    split_id TEXT,
-    -- A separate join's parallel stretch (§7.3, TH7): the join and the destination's messages
-    -- from its span's start, as segments of the join's path, [{chain, lo, hi}]; NULL otherwise.
-    stretch_json TEXT CHECK (stretch_json IS NULL OR (json_valid(stretch_json) AND json_type(stretch_json) = 'array'))
+    split_id TEXT
   ) STRICT`,
   `CREATE INDEX chat_merges_chat ON chat_merges(chat_id)`,
   `CREATE INDEX chat_merges_source_fork ON chat_merges(chat_id, source_fork_id)`,
@@ -2219,6 +2216,17 @@ export const baseline: ReadonlyArray<string> = [
     BEGIN SELECT RAISE(ABORT, 'a merge''s join message is in its chat'); END`,
   `CREATE TRIGGER chat_merges_frozen BEFORE UPDATE ON chat_merges
     BEGIN SELECT RAISE(ABORT, 'a merge never changes'); END`,
+  // A separate join's parallel stretch (spec/THREADS.md §7.3, TH7): the join and the destination's
+  // messages beside the joined part, as its branch showed them, inserted ones included, and the
+  // message just before them (`opens` 1, not in it): one inserted after that one or after one
+  // in the stretch, in a branch that shows the join, joins the stretch (db/stretches.ts).
+  `CREATE TABLE thread_stretch_slots (
+    merge_id TEXT NOT NULL REFERENCES chat_merges(id) ON DELETE CASCADE,
+    slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+    opens INTEGER NOT NULL DEFAULT 0 CHECK (opens IN (0, 1)),
+    PRIMARY KEY (merge_id, slot_id)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX thread_stretch_slots_slot ON thread_stretch_slots(slot_id)`,
   `CREATE TABLE chat_merge_messages (
     merge_id TEXT NOT NULL REFERENCES chat_merges(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL,

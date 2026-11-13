@@ -183,6 +183,20 @@ const story = (dataDir: string, setting: "separate" | null, narrator: boolean) =
         db.close()
       }
     }
+    /** The recorded stretch slots of the separate joins in `fork`'s chat (thread_stretch_slots). */
+    const stretchOf = (_fork: ForkId) => {
+      const db = new DatabaseSync(databaseFile(dataDir), { readOnly: true })
+      try {
+        return db
+          .prepare(
+            `SELECT t.slot_id, t.opens, s.inserted FROM thread_stretch_slots t JOIN chat_merges m ON m.id = t.merge_id
+              JOIN slots s ON s.id = t.slot_id WHERE m.chat_id = ?`
+          )
+          .all(chatId) as Array<{ slot_id: string; opens: number; inserted: number }>
+      } finally {
+        db.close()
+      }
+    }
     const preview = (into: ForkId, source: ForkId, at: SlotId | null = null, timelines?: MergeTimelines) =>
       api.PreviewChatMerge({
         chatId,
@@ -233,6 +247,7 @@ const story = (dataDir: string, setting: "separate" | null, narrator: boolean) =
       contextFor,
       requestFor,
       stored,
+      stretchOf,
       preview,
       join
     }

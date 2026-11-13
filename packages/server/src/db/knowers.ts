@@ -32,18 +32,17 @@ const mergeKnowersSql = (slot: string) => `(SELECT json_group_array(candidate.en
   WHERE m.slot_id = ${slot} AND mm.included = 'verbatim' AND mm.knowers_json IS NOT NULL
     AND NOT EXISTS (SELECT 1 FROM json_each(mm.knowers_json) k WHERE k.value = candidate.entity)))`
 
-/** Whether these identities are a stretch view's (`STRETCH_VIEW`, kept in `chat_merges.stretch_json`). */
+/** Whether these identities are a stretch view's (`STRETCH_VIEW`; the stretches are `thread_stretch_slots`). */
 export const isStretchView = (identities: ReadonlyArray<string> | undefined) =>
   identities !== undefined && identities.includes(STRETCH_VIEW)
 
 /**
- * SQL: whether slot `s` is in a live separate join's parallel stretch (the join and the
- * destination's messages from its span's start, on the join's path), by chain and depth.
+ * SQL: whether slot `s` is in a live separate join's parallel stretch (`thread_stretch_slots`,
+ * db/stretches.ts: the join and the destination's messages beside it, inserted ones included).
  */
 const inStretchSql = (sql: SqlClient.SqlClient) =>
-  sql`EXISTS (SELECT 1 FROM chat_merges sm JOIN slots js ON js.id = sm.slot_id, json_each(sm.stretch_json) g
-    WHERE sm.chat_id = s.chat_id AND sm.stretch_json IS NOT NULL AND js.deleted_at IS NULL
-      AND g.value ->> 'chain' = s.chain_id AND s.depth BETWEEN g.value ->> 'lo' AND g.value ->> 'hi')`
+  sql`EXISTS (SELECT 1 FROM thread_stretch_slots st JOIN chat_merges sm ON sm.id = st.merge_id
+    JOIN slots js ON js.id = sm.slot_id WHERE st.slot_id = s.id AND st.opens = 0 AND js.deleted_at IS NULL)`
 
 /**
  * Whether the viewer knew the version `v` of slot `s` (SQL, both aliases in scope). `viewers` is

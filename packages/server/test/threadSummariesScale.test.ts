@@ -166,12 +166,18 @@ it.live(
       const J = joined.entries[0]!.slotId as SlotId
       const after = yield* say(main, J, "Morning comes to the harbor.")
       const leafSlotId = after.slotId as SlotId
-      const [[merge]] = (yield* fixtureSql(
+      const [[recorded]] = (yield* fixtureSql(
         config.dataDir,
-        [{ sql: "SELECT stretch_json FROM chat_merges WHERE slot_id = ?", params: [J] }],
+        [
+          {
+            sql: `SELECT count(*) AS n FROM thread_stretch_slots t JOIN chat_merges m ON m.id = t.merge_id
+              WHERE m.slot_id = ? AND t.opens = 0`,
+            params: [J]
+          }
+        ],
         { readOnly: true }
-      )) as unknown as [[{ stretch_json: string }]]
-      assert.lengthOf(JSON.parse(merge.stretch_json) as Array<unknown>, 1, "the Lantern's stretch, one segment")
+      )) as unknown as [[{ n: number }]]
+      assert.strictEqual(recorded.n, 3_001, "the Lantern's 3,000 messages after S and the join")
 
       const plan = yield* time(
         "PlanSummaries after a reply",

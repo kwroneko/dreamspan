@@ -147,3 +147,25 @@ test("joining the docks into the Lantern: one Joined row, Joined at #5, not offe
   const stored = await admin((api) => api.ThreadsOf({ chatId, forkId: lantern }))
   expect(stored[0]!.threads[1]).toMatchObject({ openForkId: docks, joined: { number: 5, upToDate: true } })
 })
+
+test("a join that keeps each character to its own thread offers each one's summaries", async ({ page }) => {
+  const { chatId } = await seed("views")
+  await open(page, `/chats/${chatId}`, 1280, "light")
+  const history = page.locator("[data-history-panel]")
+  await (await chatMenu(page)).getByRole("menuitem", { name: "Join threads…", exact: true }).click()
+  const dialog = joinDialog(page)
+  await dialog
+    .getByRole("radiogroup", { name: "How the characters see it" })
+    .getByRole("radio", { name: /^Each character reads only its own thread/ })
+    .click()
+  await dialog.getByRole("button", { name: "Join", exact: true }).click()
+  await expect(page.getByText("Joined “At the docks”", { exact: true })).toBeVisible()
+  // One shared context: the History panel's searches offer whose summaries, Mira's and Wren's.
+  await page.goto(`${server().url}/chats/${chatId}?panel=history`)
+  await expect(page.getByRole("heading", { name: "Searches", exact: true })).toBeVisible()
+  const picker = history.getByRole("combobox", { name: /^Summaries of/ })
+  await picker.click()
+  await expect(page.getByRole("option", { name: /^Wren/ })).toBeVisible()
+  await expect(page.getByRole("option", { name: /^Mira/ })).toBeVisible()
+  await expect(page.getByRole("option", { name: /^Ash/ })).toHaveCount(0)
+})
