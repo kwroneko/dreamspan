@@ -256,3 +256,24 @@ export const readManifest = async (dataDir: string, folder: string) => {
   if (!info.isFile() || info.isSymbolicLink() || info.size > limits.file) throw new Error("Invalid plugin manifest")
   return Schema.decodeUnknownSync(PluginManifest)(JSON.parse(await readFile(file, "utf8")))
 }
+
+/** Commit metadata only: never use the mutable working manifest as consent text. */
+export const repoVersions = async (folder: string, extra: ReadonlyArray<string>) => {
+  const log = await repoLog(folder)
+  const commits = [...new Set([...log.map((v) => v.commit), ...extra])].slice(0, 100)
+  return Promise.all(
+    commits.map(async (commit) => {
+      try {
+        const files = await commitFiles(folder, commit)
+        const raw = files.get("rp-plugin.json")
+        const manifest = raw
+          ? Schema.decodeUnknownSync(PluginManifest)(JSON.parse(Buffer.from(raw).toString("utf8")))
+          : null
+        const message = log.find((v) => v.commit === commit)?.message ?? "Previously enabled version"
+        return { commit, message, manifest }
+      } catch {
+        return { commit, message: "Version unavailable", manifest: null }
+      }
+    })
+  )
+}

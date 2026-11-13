@@ -273,6 +273,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       ]).pipe(Effect.asVoid)
   },
+  GoBackPlugin: {
+    adminOnly: (actor) =>
+      Effect.all([
+        refused(actor.api.GoBackPlugin({ scope: "instance", id: "synthetic", expectedRevision: 0 }), "PluginRejected"),
+        refused(actor.api.GoBackPlugin({ scope: "user", id: "synthetic", expectedRevision: 0 }), "PluginRejected")
+      ]).pipe(Effect.asVoid)
+  },
   PinPluginCommit: {
     adminOnly: (actor) =>
       Effect.all([

@@ -27,6 +27,8 @@ export const PluginPin = Schema.Struct({
   commit: PluginCommit,
   enabledAt: Schema.Number,
   enabledBy: Schema.String,
+  previousCommit: Schema.optionalKey(PluginCommit),
+  enabledCommits: Schema.optionalKey(Schema.Array(PluginCommit)),
   suspended: Schema.optionalKey(Schema.Struct({ reason: Schema.String, at: Schema.Number, appStamp: Schema.String })),
   sessionTrust: Schema.optionalKey(Schema.Struct({ workshop: Schema.String, until: Schema.Number }))
 })
@@ -62,11 +64,19 @@ export const PluginView = Schema.Struct({
   pin: Schema.NullOr(PluginPin),
   report: Schema.NullOr(PluginReport)
 })
+export const PluginDetails = Schema.Struct({
+  ...PluginView.fields,
+  revision: Schema.Int,
+  versions: Schema.Array(
+    Schema.Struct({ commit: PluginCommit, message: Schema.String, manifest: Schema.NullOr(PluginManifest) })
+  ),
+  data: Schema.NullOr(Schema.Array(Schema.Struct({ key: Schema.String, bytes: Schema.Int })))
+})
 const PluginFiles = Schema.Record(Schema.String, Schema.String)
 const Error = Schema.Union([PluginRejected, Forbidden, ServerError, StaleWrite])
 export class PluginApi extends RpcGroup.make(
   Rpc.make("ListPlugins", { success: Schema.Array(PluginView), error: Error }),
-  Rpc.make("GetPlugin", { payload: PluginTarget, success: PluginView, error: Error }),
+  Rpc.make("GetPlugin", { payload: PluginTarget, success: PluginDetails, error: Error }),
   // Local source only; registry fetch/merge and archive imports belong to later units.
   Rpc.make("CreatePlugin", { payload: { ...PluginTarget, files: PluginFiles }, success: PluginCommit, error: Error }),
   Rpc.make("CommitPlugin", {
@@ -86,12 +96,17 @@ export class PluginApi extends RpcGroup.make(
   }),
   Rpc.make("CheckPlugin", { payload: PluginVersion, success: PluginReport, error: Error }),
   Rpc.make("EnablePlugin", {
-    payload: { ...PluginVersion, consent: Schema.Literal(true) },
+    payload: { ...PluginVersion, consent: Schema.Literal(true), expectedRevision: Schema.optionalKey(Schema.Int) },
     success: PluginReport,
     error: Error
   }),
   Rpc.make("PinPluginCommit", {
-    payload: { ...PluginVersion, consent: Schema.Literal(true) },
+    payload: { ...PluginVersion, consent: Schema.Literal(true), expectedRevision: Schema.optionalKey(Schema.Int) },
+    success: PluginReport,
+    error: Error
+  }),
+  Rpc.make("GoBackPlugin", {
+    payload: { ...PluginTarget, expectedRevision: Schema.Int },
     success: PluginReport,
     error: Error
   }),

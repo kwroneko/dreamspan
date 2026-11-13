@@ -85,6 +85,12 @@ export const makePluginReadHandlers = Effect.gen(function* () {
         WHERE plugin_id = ${pluginId} AND owner_user_id = ${owner} AND key = ${key}`
         return row ? dataView(row) : null
       }).pipe(query("GetPluginData")),
+    PluginDataInfo: ({ userId, pluginId, owner }) =>
+      Effect.gen(function* () {
+        yield* authorize(sql, userId, owner, pluginId)
+        return yield* sql<{ key: string; bytes: number }>`SELECT key, length(CAST(value_json AS BLOB)) AS bytes
+          FROM plugin_data WHERE plugin_id = ${pluginId} AND owner_user_id = ${owner} ORDER BY key LIMIT 1000`
+      }).pipe(query("PluginDataInfo")),
     ListPluginData: ({ userId, pluginId, owner }) =>
       Effect.gen(function* () {
         yield* authorize(sql, userId, owner, pluginId)
@@ -92,7 +98,10 @@ export const makePluginReadHandlers = Effect.gen(function* () {
         WHERE plugin_id = ${pluginId} AND owner_user_id = ${owner} ORDER BY key LIMIT 1000`
         return rows.map(dataView)
       }).pipe(query("ListPluginData"))
-  } satisfies Pick<Handlers<typeof ReadOps>, "GetPluginPins" | "AllPluginPins" | "GetPluginData" | "ListPluginData">
+  } satisfies Pick<
+    Handlers<typeof ReadOps>,
+    "GetPluginPins" | "AllPluginPins" | "GetPluginData" | "ListPluginData" | "PluginDataInfo"
+  >
 })
 export const makePluginWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient

@@ -28,6 +28,7 @@ export const makePluginHandlers = Effect.gen(function* () {
     CheckPlugin: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.check(user, target))),
     EnablePlugin: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.enable(user, target))),
     PinPluginCommit: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.pin(user, target))),
+    GoBackPlugin: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.goBack(user, target))),
     DisablePlugin: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.disable(user, target))),
     DeletePluginData: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.deleteData(user, target))),
     ListClientPlugins: () => boundary(Effect.flatMap(CurrentUser, (user) => host.clients(user)))

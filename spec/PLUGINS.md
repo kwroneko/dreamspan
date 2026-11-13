@@ -7,6 +7,8 @@
 **Built P2 client host (2026-11-13):** WORKSHOP §5.5, its P2 row in §9, the browser asset routes in §8 and `ComposerControlContext.draft` are implemented and obsolete as implementation proposals. See ARCHITECTURE §17's client host for the supported typed surfaces and recovery limits. Separate checked client modules, the shared facade/API, deadlines and live scopes retain their **[P]** status; module caching uses authenticated `no-store` responses rather than the proposed immutable cache. Settings/consent UI (P3), authoring tools (P4), editable copies (P5) and the future sandbox remain unbuilt. No Proposed item is promoted to Decided.
 
 
+**Built P3 settings and consent (2026-11-13):** WORKSHOP §9's P3 row and the Settings/consent/recovery subset of §§5.1, 5.6, 6.3 and 8 are implemented and obsolete as implementation proposals; see ARCHITECTURE §17, “Settings → Plugins and consent”. The existing Settings patterns, exact-version consent, durable details/check/data metadata, Turn off, previous-enabled-version Go back and data deletion are built. Session trust remains Open (PLUGINS §10 question 1; WORKSHOP §10 question 3): updates always ask; no automatic/session trust behavior was inferred. An earlier version that adds declared access asks again. P4–P5, installation fetching, internal overrides and the future sandbox remain unbuilt. Proposed details remain **[P]**. No baseline change relative to P2.
+
 ---
 
 ## 1. What the owner decided (2026-10-11)

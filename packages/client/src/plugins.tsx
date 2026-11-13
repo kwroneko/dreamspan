@@ -115,7 +115,7 @@ export const clientPluginHost = (p: ClientPlugin) => {
       })
   }
   const reserved = (name: string, id: string) =>
-    (name === "appBanners" && id === "plugins.host") ||
+    (name === "appBanners" && (id === "plugins.host" || id.startsWith("plugins.host."))) ||
     (name === "routes" && (id === "settings.plugins" || id.startsWith("settings.plugins.")))
   const adapter = <A extends { readonly id: string }, B extends { readonly id: string }>(
     name: string,
@@ -295,6 +295,11 @@ const checkChanges = () => {
     })
     .catch(() => undefined)
 }
+let routesNeedReload = false
+const routesChanged = () => {
+  routesNeedReload = true
+  changed()
+}
 let syncing: Promise<void> | undefined
 /** P3 calls this after its own successful enable/disable. Other tabs offer a reload. */
 const syncClientPlugins = () =>
@@ -303,7 +308,7 @@ const syncClientPlugins = () =>
     const plugins = await readPlugins()
     knownPlugins = fingerprint(plugins)
     snapshot = {
-      changed: false,
+      changed: routesNeedReload,
       errors: snapshot.errors.filter((error) => plugins.some((p) => error.key.startsWith(`${keyOf(p)}/${p.commit}/`)))
     }
     publish()
@@ -311,7 +316,7 @@ const syncClientPlugins = () =>
       if (!plugins.some((p) => keyOf(p) === key && p.commit === current.plugin.commit)) {
         current.close()
         active.delete(key)
-        if (current.plugin.manifest.surfaces.includes("client:routes")) changed()
+        if (current.plugin.manifest.surfaces.includes("client:routes")) routesChanged()
       }
     }
     await Promise.all(
@@ -319,7 +324,7 @@ const syncClientPlugins = () =>
         .filter((p) => !active.has(keyOf(p)))
         .map((p) => {
           if (p.manifest.surfaces.includes("client:routes")) {
-            changed()
+            routesChanged()
           }
           return loadClientPlugin(p)
         })
@@ -337,6 +342,8 @@ async function reload(url?: string) {
   if (url) location.assign(url)
   else location.reload()
 }
+export const openWithoutPlugins = () => reload(withoutPlugins(location.href))
+
 function FailureDetails({ part }: { readonly part: string }) {
   const [open, setOpen] = useState(false)
   return (

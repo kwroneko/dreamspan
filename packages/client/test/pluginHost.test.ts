@@ -122,6 +122,7 @@ it("keeps host recovery registrations outside plugin replacements", () => {
       component: () => null
     })
   ).toThrow("cannot be replaced")
+  expect(() => scope.host.registries.appBanners!.disable("plugins.host.suspended")).toThrow("cannot be replaced")
   scope.close()
 })
 

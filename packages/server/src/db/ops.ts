@@ -3476,6 +3476,11 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.NullOr(PluginData),
     error: Schema.Union([PluginRejected, StorageError])
   }),
+  Rpc.make("PluginDataInfo", {
+    payload: { userId: UserId, pluginId: PluginId, owner: Schema.String },
+    success: Schema.Array(Schema.Struct({ key: Schema.String, bytes: Schema.Int })),
+    error: Schema.Union([PluginRejected, StorageError])
+  }),
   Rpc.make("ListPluginData", {
     payload: { userId: UserId, pluginId: PluginId, owner: Schema.String },
     success: Schema.Array(PluginData),

@@ -1,3 +1,4 @@
+import * as plugins from "./plugins/index.tsx"
 import * as costs from "./costs.tsx"
 import * as clientVersion from "./clientVersion.tsx"
 import * as snippets from "./snippets/index.tsx"
@@ -48,6 +49,7 @@ export const registerFeatures = () => {
   workbench.register()
   clientVersion.register()
   settings.register()
+  plugins.register()
   login.register()
   characters.register()
   status.register()

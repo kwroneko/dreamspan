@@ -3,8 +3,15 @@ import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
-import { PluginRejected, type PluginPin, type PluginReport, type PluginView } from "@rp/shared/plugins.ts"
+import {
+  PluginRejected,
+  type PluginPin,
+  type PluginReport,
+  type PluginView,
+  type PluginDetails
+} from "@rp/shared/plugins.ts"
 import type { User, UserId } from "@rp/shared/domain.ts"
+import { pluginAccessGrows } from "@rp/shared/pluginConsent.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { AppConfig } from "../config.ts"
 import { ExecutionRegistry } from "../execution.ts"
@@ -22,7 +29,7 @@ import { repoTask } from "./repoTask.ts"
 import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
 
 type Target = { readonly scope: "instance" | "user"; readonly id: string }
-type Version = Target & { readonly commit: string }
+type Version = Target & { readonly commit: string; readonly expectedRevision?: number }
 type Failure = PluginRejected
 import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
 const attempt = <A>(run: () => Promise<A>) =>
@@ -36,7 +43,11 @@ export class PluginHost extends Context.Service<
     readonly clients: (actor: User) => Effect.Effect<ReadonlyArray<ClientPlugin>, unknown>
     readonly clientAsset: (actor: User, target: Version) => Effect.Effect<Uint8Array, unknown>
     readonly list: (actor: User) => Effect.Effect<ReadonlyArray<typeof PluginView.Type>, Failure | unknown>
-    readonly get: (actor: User, target: Target) => Effect.Effect<typeof PluginView.Type, Failure | unknown>
+    readonly get: (actor: User, target: Target) => Effect.Effect<typeof PluginDetails.Type, Failure | unknown>
+    readonly goBack: (
+      actor: User,
+      target: Target & { readonly expectedRevision: number }
+    ) => Effect.Effect<PluginReport, Failure | unknown>
     readonly create: (
       actor: User,
       target: Target,
@@ -219,9 +230,15 @@ export class PluginHost extends Context.Service<
       const enable = (actor: User, target: Version) =>
         Effect.gen(function* () {
           const owner = yield* authorize(actor, target, true)
+          const before = yield* reader.GetPluginPins({ userId: actor.id, owner })
+          if (target.expectedRevision !== undefined && before.revision !== target.expectedRevision)
+            return yield* new PluginRejected({ message: "Plugins changed elsewhere. Review this version again." })
           if (!config.plugins) return yield* new PluginRejected({ message: "Plugins are disabled by the server" })
           const report = yield* check(actor, target)
           if (!report.ok) return report
+          const previous = before.value[target.id]
+          if (previous?.commit === target.commit && !previous.suspended && active.has(keyOf(owner, target.id)))
+            return report
           // Files are durable before settings. A kill here leaves code present but unenabled.
           yield* close(owner, target.id)
           const loaded = yield* activate(actor, owner, target.id, target.commit, report).pipe(Effect.exit)
@@ -243,7 +260,23 @@ export class PluginHost extends Context.Service<
               revision: pins.revision,
               value: {
                 ...pins.value,
-                [target.id]: { commit: target.commit, enabledAt: Date.now(), enabledBy: actor.id }
+                [target.id]: {
+                  commit: target.commit,
+                  enabledAt: Date.now(),
+                  enabledBy: actor.id,
+                  ...(previous?.commit && previous.commit !== target.commit
+                    ? { previousCommit: previous.commit }
+                    : previous?.previousCommit
+                      ? { previousCommit: previous.previousCommit }
+                      : {}),
+                  enabledCommits: [
+                    ...new Set([
+                      target.commit,
+                      ...(previous?.enabledCommits ?? []),
+                      ...(previous ? [previous.commit] : [])
+                    ])
+                  ].slice(0, 50)
+                }
               }
             })
             .pipe(Effect.onError(() => close(owner, target.id)))
@@ -281,6 +314,65 @@ export class PluginHost extends Context.Service<
                 }
               : null)
           return { ...target, commit, manifest, pin, report }
+        })
+      const details = (actor: User, target: Target) =>
+        Effect.gen(function* () {
+          const view = yield* get(actor, target)
+          const owner = target.scope === "instance" ? "" : actor.id
+          const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+          const versions = yield* attempt(() =>
+            repoTask<typeof PluginDetails.Type.versions>(config.dataDir, {
+              op: "versions",
+              owner,
+              id: target.id,
+              extra: [
+                ...(pins.value[target.id]?.enabledCommits ?? []),
+                ...(pins.value[target.id] ? [pins.value[target.id]!.commit] : [])
+              ]
+            })
+          ).pipe(Effect.catch(() => Effect.succeed([])))
+          const data =
+            target.scope === "instance" && actor.role !== "admin"
+              ? null
+              : yield* reader.PluginDataInfo({ userId: actor.id, pluginId: target.id, owner })
+          return { ...view, pin: pins.value[target.id] ?? null, revision: pins.revision, versions, data }
+        })
+      const authorizeLocal = (actor: User, target: Target) =>
+        Effect.gen(function* () {
+          const owner = yield* authorize(actor, target)
+          if (actor.role !== "admin") {
+            const manifest = yield* attempt(() =>
+              readManifest(config.dataDir, pluginFolder(config.dataDir, owner, target.id))
+            ).pipe(Effect.catch(() => Effect.succeed(null)))
+            if (manifest && (manifest.server || manifest.worker || manifest.overrides.length))
+              return yield* new PluginRejected({ message: "Only an admin can manage server plugins" })
+          }
+          return owner
+        })
+      const rollback = (actor: User, target: Version) =>
+        Effect.gen(function* () {
+          const owner = yield* authorize(actor, target, true)
+          const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+          if (target.expectedRevision !== undefined && pins.revision !== target.expectedRevision)
+            return yield* new PluginRejected({ message: "Plugins changed elsewhere. Review this version again." })
+          const pin = pins.value[target.id]
+          if (pin?.commit === target.commit && !pin.suspended) return yield* enable(actor, target)
+          // Persist suspension before checkout. Failed checks must leave the plugin off.
+          if (pin && !pin.suspended)
+            yield* suspend(actor, owner, target.id, {
+              commit: pin.commit,
+              appStamp: "",
+              ok: false,
+              step: "snapshot",
+              message: "Plugin version changed; turn it on to apply it",
+              at: Date.now()
+            })
+          else yield* close(owner, target.id)
+          yield* attempt(() =>
+            repoTask(config.dataDir, { op: "checkout", owner, id: target.id, commit: target.commit })
+          )
+          // The revision changed when suspension was persisted; the outer guard already ran under the same lock.
+          return yield* enable(actor, { scope: target.scope, id: target.id, commit: target.commit })
         })
       const clients = (actor: User) =>
         Effect.gen(function* () {
@@ -322,30 +414,36 @@ export class PluginHost extends Context.Service<
           ),
         check: (actor, target) => Semaphore.withPermit(lock)(check(actor, target)),
         enable: (actor, target) => Semaphore.withPermit(lock)(enable(actor, target)),
-        pin: (actor, target) =>
+        pin: (actor, target) => Semaphore.withPermit(lock)(rollback(actor, target)),
+        goBack: (actor, target) =>
           Semaphore.withPermit(lock)(
             Effect.gen(function* () {
               const owner = yield* authorize(actor, target, true)
               const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
-              const pin = pins.value[target.id]
-              // Suspend durably before changing HEAD or files, including a failed rollback.
-              if (pin)
-                yield* suspend(actor, owner, target.id, {
-                  commit: pin.commit,
-                  appStamp: "",
-                  ok: false,
-                  step: "snapshot",
-                  message: "Plugin revision changed; enable it to apply it",
-                  at: Date.now()
+              const previous = pins.value[target.id]?.previousCommit
+              if (!previous) return yield* new PluginRejected({ message: "No earlier enabled version is available" })
+              const versions = yield* attempt(() =>
+                repoTask<typeof PluginDetails.Type.versions>(config.dataDir, {
+                  op: "versions",
+                  owner,
+                  id: target.id,
+                  extra: [pins.value[target.id]!.commit, previous]
                 })
-              else yield* close(owner, target.id)
-              yield* attempt(() =>
-                repoTask(config.dataDir, { op: "checkout", owner, id: target.id, commit: target.commit })
               )
-              return yield* enable(actor, target)
+              const currentManifest = versions.find((v) => v.commit === pins.value[target.id]!.commit)?.manifest
+              const previousManifest = versions.find((v) => v.commit === previous)?.manifest
+              if (!previousManifest)
+                return yield* new PluginRejected({
+                  message: "The earlier version is unavailable. Choose another version."
+                })
+              if (pluginAccessGrows(currentManifest, previousManifest))
+                return yield* new PluginRejected({
+                  message: "This version adds access. Review it before turning it on."
+                })
+              return yield* rollback(actor, { ...target, commit: previous })
             })
           ),
-        get,
+        get: (actor, target) => Semaphore.withPermit(lock)(details(actor, target)),
         list: (actor) =>
           Effect.gen(function* () {
             const result: Array<typeof PluginView.Type> = []
@@ -355,8 +453,19 @@ export class PluginHost extends Context.Service<
                 "plugins",
                 ...(scope === "instance" ? ["instance"] : ["users", actor.id])
               )
-              const ids = yield* attempt(() => readdir(base)).pipe(Effect.catch(() => Effect.succeed([])))
-              for (const id of ids) if (/^[a-z][a-z0-9-]{0,63}$/.test(id)) result.push(yield* get(actor, { scope, id }))
+              const folders = yield* attempt(() => readdir(base)).pipe(Effect.catch(() => Effect.succeed([])))
+              const pins = yield* reader.GetPluginPins({
+                userId: actor.id,
+                owner: scope === "instance" ? "" : actor.id
+              })
+              const ids = new Set([...folders, ...Object.keys(pins.value)])
+              result.push(
+                ...(yield* Effect.forEach(
+                  [...ids].filter((id) => /^[a-z][a-z0-9-]{0,63}$/.test(id)),
+                  (id) => get(actor, { scope, id }),
+                  { concurrency: 4 }
+                ))
+              )
             }
             return result
           }),
@@ -390,7 +499,7 @@ export class PluginHost extends Context.Service<
                   appStamp: "",
                   ok: false,
                   step: "snapshot",
-                  message: "Plugin changed; enable its new commit to apply it",
+                  message: "Plugin changed; turn on its new version to apply it",
                   at: Date.now()
                 })
               return yield* attempt(() =>
@@ -419,7 +528,7 @@ export class PluginHost extends Context.Service<
         disable: (actor, target) =>
           Semaphore.withPermit(lock)(
             Effect.gen(function* () {
-              const owner = yield* authorize(actor, target)
+              const owner = yield* authorizeLocal(actor, target)
               const pins = yield* reader.GetPluginPins({ userId: actor.id, owner }),
                 pin = pins.value[target.id]
               yield* close(owner, target.id)
@@ -435,10 +544,12 @@ export class PluginHost extends Context.Service<
             })
           ),
         deleteData: (actor, target) =>
-          Effect.gen(function* () {
-            const owner = yield* authorize(actor, target)
-            yield* writer.DeletePluginData({ userId: actor.id, pluginId: target.id, owner, key: null, revision: 0 })
-          })
+          Semaphore.withPermit(lock)(
+            Effect.gen(function* () {
+              const owner = yield* authorizeLocal(actor, target)
+              yield* writer.DeletePluginData({ userId: actor.id, pluginId: target.id, owner, key: null, revision: 0 })
+            })
+          )
       })
       if (config.plugins) {
         const users = yield* reader.ListUsers()

@@ -14,6 +14,7 @@ export type RepoRequest =
       readonly message: string
     }
   | { readonly op: "verify"; readonly owner: string; readonly id: string; readonly commit: string }
+  | { readonly op: "versions"; readonly owner: string; readonly id: string; readonly extra: ReadonlyArray<string> }
   | { readonly op: "log"; readonly owner: string; readonly id: string }
   | {
       readonly op: "diff"
