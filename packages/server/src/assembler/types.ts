@@ -638,6 +638,11 @@ export interface HistoryMerge {
   readonly start: string | null
   /** The source's cast at the merge, by the names the model knows them by. */
   readonly cast: ReadonlyArray<string>
+  /**
+   * Each character reads only the line it was in (spec/THREADS.md §7.3); absent: together. In a
+   * chat with one shared context it filters the parallel stretch only.
+   */
+  readonly timelines?: "separate"
 }
 
 /**

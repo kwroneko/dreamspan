@@ -29,10 +29,19 @@ const castList = (names: ReadonlyArray<string>) =>
       : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`
 
 /**
+ * How the characters read a joined line (spec/THREADS.md §7.3): `together`, every reply reads
+ * it; `separate`, each character reads only what it was present for (a narrator reads it all).
+ */
+export const MergeTimelines = Schema.Literals(["together", "separate"])
+export type MergeTimelines = typeof MergeTimelines.Type
+
+/**
  * What to merge: the source fork, the destination message to merge below (`at`, null: the
  * fork's newest), and for chats that share nothing, the destination message the parallel span
  * starts at (`start`; absent: the merge position). `includeLeftOut` brings the older source
- * messages that have no summary as written instead of leaving them out.
+ * messages that have no summary as written instead of leaving them out. `timelines` chooses
+ * how the characters read it in a chat with one shared context (absent: together); a chat with
+ * separate contexts always reads it separately.
  */
 export const MergeRequest = Schema.Struct({
   chatId: ChatId,
@@ -40,16 +49,10 @@ export const MergeRequest = Schema.Struct({
   at: Schema.NullOr(SlotId),
   source: Schema.Struct({ chatId: ChatId, forkId: ForkId }),
   start: Schema.optionalKey(Schema.NullOr(SlotId)),
-  includeLeftOut: Schema.Boolean
+  includeLeftOut: Schema.Boolean,
+  timelines: Schema.optionalKey(MergeTimelines)
 })
 export type MergeRequest = typeof MergeRequest.Type
-
-/**
- * How the characters read a joined line (spec/THREADS.md §7.3): `together`, every reply reads
- * it; `separate`, each character reads only what it was present for (a narrator reads it all).
- */
-export const MergeTimelines = Schema.Literals(["together", "separate"])
-export type MergeTimelines = typeof MergeTimelines.Type
 
 /** What one speaker reads of a join (the preview's "For"): `section`, or nothing when `readable` is false. */
 export const MergeView = Schema.Struct({
@@ -106,8 +109,10 @@ export class ChatMergePreview extends Schema.Class<ChatMergePreview>("ChatMergeP
   join: Schema.String,
   /** A summary covering the merge position, written again with the next reply (numbers, one-based). */
   rewrites: Schema.NullOr(Schema.Struct({ from: Schema.Int, to: Schema.Int, tokens: Schema.Int })),
-  /** How the characters read it: the chat's Context setting (separate contexts: `separate`). */
+  /** How the characters read it: as asked in a shared-context chat; `separate` with separate contexts. */
   timelines: Schema.optionalKey(MergeTimelines),
+  /** Whether the chat lets this merge choose (one shared context): the dialog's choice is offered. */
+  choosesTimelines: Schema.optionalKey(Schema.Boolean),
   /** The source is another thread of this branch (spec/THREADS.md §7): a join. */
   thread: Schema.optionalKey(Schema.Boolean),
   /** A join's characters away here that it brings back (they're present from the join on). */
@@ -184,6 +189,8 @@ export const JoinThreadsInput = Schema.Struct({
   forkId: ForkId,
   at: Schema.NullOr(SlotId),
   includeLeftOut: Schema.Boolean,
+  /** How the characters read every join (`MergeRequest.timelines`). */
+  timelines: Schema.optionalKey(MergeTimelines),
   joins: Schema.Array(
     Schema.Struct({
       forkId: ForkId,

@@ -136,6 +136,12 @@ const decoded = <A>(
 const sectionsOf = (json: string | null): { replySections?: ReplySections } =>
   json === null ? {} : { replySections: JSON.parse(json) as ReplySections }
 
+/** A join as the history reads it: its view only when separate, so a together join reads as before. */
+const historyMerge = (json: string): HistoryMerge => {
+  const { timelines, ...merge } = JSON.parse(json) as HistoryMerge & { readonly timelines: string }
+  return timelines === "separate" ? { ...merge, timelines: "separate" } : merge
+}
+
 interface HistoryRow {
   readonly images_json: string
   readonly merge_json: string | null
@@ -626,6 +632,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             v.macro_mode = 'template' AND EXISTS (SELECT 1 FROM state_events w WHERE w.version_id = v.id
               AND w.key = 'var.set' AND w.origin = 'rollout') AS written,
             (SELECT json_object('id', m.id, 'title', m.title, 'framing', m.framing, 'start', m.start_slot_id,
+                'timelines', m.timelines,
                 'cast', (SELECT json_group_array(c.value ->> 'name') FROM json_each(m.cast_json) c
                   WHERE c.value ->> 'from' <> 'destination'))
               FROM chat_merges m WHERE m.slot_id = s.id) AS merge_json`
@@ -675,7 +682,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             versions: row.version_count,
             selectedOrdinal: row.ordinal,
             versionNumber: row.version_number,
-            ...(row.merge_json ? { merge: JSON.parse(row.merge_json) as HistoryMerge } : {}),
+            ...(row.merge_json ? { merge: historyMerge(row.merge_json) } : {}),
             amends: row.amend_count
           }))
         const older =

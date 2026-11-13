@@ -10,14 +10,15 @@ import {
   type ChatMergePreview,
   fillMergeTemplate,
   MERGE_BLOCK_SECTION_DEFAULT,
-  MERGE_SECTION_DEFAULT
+  MERGE_SECTION_DEFAULT,
+  type MergeTimelines
 } from "@rp/shared/mergeApi.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type ComponentType, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Switch } from "../../ui/Choice.tsx"
+import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -250,6 +251,8 @@ export function MergeChatDialog({
   const [at, setAt] = useState<SlotId | null>(initialAt)
   const [start, setStart] = useState<SlotId | null>(null)
   const [includeLeftOut, setIncludeLeftOut] = useState(false)
+  /** How the characters see a join, in a chat with one shared context (spec/THREADS.md §7.1). */
+  const [timelines, setTimelines] = useState<MergeTimelines>("together")
   /** Each source's preview, in order, once all are read. */
   const [read, setRead] = useState<{ readonly for: unknown; readonly previews: ReadonlyArray<ChatMergePreview> }>({
     for: null,
@@ -274,10 +277,11 @@ export function MergeChatDialog({
             at,
             source: { chatId: one.chat, forkId: one.fork },
             ...(start === null ? {} : { start }),
-            includeLeftOut
+            includeLeftOut,
+            ...(joining && timelines === "separate" ? { timelines } : {})
           }))
         : [],
-    [session.id, forkId, at, sources, start, includeLeftOut]
+    [session.id, forkId, at, sources, start, includeLeftOut, joining, timelines]
   )
   const request = requests[0] ?? null
   const previewAll = () => Promise.all(requests.map((one) => reader.run((client) => client("PreviewChatMerge", one))))
@@ -360,6 +364,7 @@ export function MergeChatDialog({
               forkId,
               at,
               includeLeftOut,
+              ...(timelines === "separate" ? { timelines } : {}),
               joins: all.map((one, index) => ({
                 forkId: sources[index]!.fork,
                 title: several ? one.sourceTitle : shownTitle,
@@ -576,13 +581,36 @@ export function MergeChatDialog({
                   ))}
                 </ul>
               </section>
-              {joining && (
+              {joining && preview.choosesTimelines === true && (
+                <section aria-labelledby="join-view-label" className="flex flex-col gap-2 text-sm">
+                  <span id="join-view-label" className="font-medium">
+                    How the characters see it
+                  </span>
+                  <RadioGroup<MergeTimelines>
+                    aria-labelledby="join-view-label"
+                    value={timelines}
+                    onValueChange={setTimelines}
+                    options={[
+                      {
+                        value: "together",
+                        label: several ? "Everyone reads every thread" : "Everyone reads both threads",
+                        description: several
+                          ? "Every reply sees all of them, the other threads as sections before this one's messages since they parted."
+                          : `Every reply sees both, the other thread as a section before this one's messages since #${preview.from - 1}.`
+                      },
+                      {
+                        value: "separate",
+                        label: "Each character reads only its own thread",
+                        description: "Characters see only the thread they were in. A narrator sees every thread."
+                      }
+                    ]}
+                  />
+                </section>
+              )}
+              {joining && preview.choosesTimelines !== true && (
                 <p className="text-sm text-muted" data-testid="join-view">
-                  {preview.timelines === "separate"
-                    ? "Each character reads what it was present for (this chat's Context setting). A narrator reads every thread."
-                    : several
-                      ? "Everyone reads every thread: each reply sees the other threads as sections before this one's messages since they parted."
-                      : `Everyone reads both threads: each reply sees “${shownTitle}” as a section before this one's messages since #${preview.from - 1}.`}
+                  Each character reads what it was present for (this chat's Context setting). A narrator reads every
+                  thread.
                 </p>
               )}
             </>

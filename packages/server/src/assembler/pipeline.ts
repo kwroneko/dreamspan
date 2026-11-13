@@ -276,6 +276,13 @@ export interface Assembly {
   contextBudget?: ContextSnapshot["contextBudget"]
   /** The chat's context view and whose knowledge filters the history (`knowledge` stage). */
   knowledge?: Knowledge
+  /**
+   * The parallel stretches of the separate joins read so far (spec/THREADS.md §7.3), newest
+   * first: from the destination message the span starts at (its position once read; null
+   * until then) to the join. The history is read newest window first, so a join opens its
+   * stretch before the messages in it are read.
+   */
+  parallelStretches?: Array<{ readonly start: string | null; from: number | null; readonly to: number }>
   lcm?: SummaryLayer
   lcmPieces?: ReadonlyArray<number>
   lcmFailurePieces?: ReadonlyArray<{ readonly from: number; readonly to: number; readonly piece: number }>

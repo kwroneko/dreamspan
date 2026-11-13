@@ -123,6 +123,10 @@ interface MergePlan {
   readonly counts: Record<string, number>
   /** The split whose other thread this joins (spec/THREADS.md §7); null for any other merge. */
   readonly splitId: string | null
+  /**
+   * The join's own view (`chat_merges.timelines`): as asked in a chat with one shared context,
+   * where it decides; together otherwise, since separate contexts read every join by presence.
+   */
   readonly timelines: MergeTimelines
   /** Characters away at the join that the joined thread brings back (an `away.set` false at J each). */
   readonly back: ReadonlyArray<string>
@@ -493,9 +497,13 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     const back = splitId === null ? [] : inThread.filter((id) => destAway.includes(id))
     const named = splitId === null ? sourceCast : inThread
     const castNames = named.map((id) => castCards.get(id)?.modelName || castCards.get(id)?.name || "someone")
-    // How the characters read it: the chat's Context setting (spec/THREADS.md §7.3). Choosing it
-    // per join in a shared-context chat waits for its assembly (TH6).
-    const timelines: MergeTimelines = (destState.contextPerSpeaker ?? "shared") === "shared" ? "together" : "separate"
+    // How the characters read it (spec/THREADS.md §7.3): as asked in a chat with one shared
+    // context (together by default); a chat with separate contexts reads it separately, whatever
+    // the join records, and the join records its own choice only (together there), so a chat
+    // switched to one shared context later reads such a join whole.
+    const choosesTimelines = (destState.contextPerSpeaker ?? "shared") === "shared"
+    const chosen: MergeTimelines = choosesTimelines ? (request.timelines ?? "together") : "together"
+    const timelines: MergeTimelines = choosesTimelines ? chosen : "separate"
     // With separate timelines, what each character reads of it, as assembly filters it: the
     // rows it knew, those read with the source's cast where none was recorded.
     const views: Array<MergeView> = []
@@ -571,6 +579,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       join: fillMergeTemplate(MERGE_JOIN_DEFAULT, title, castNames),
       rewrites: covering ? { from: covering.from, to: covering.to, tokens: covering.tokens } : null,
       timelines,
+      ...(choosesTimelines ? { choosesTimelines } : {}),
       ...(splitId === null ? {} : { thread: true, back: back as Array<EntityId> }),
       ...(timelines === "separate" ? { views } : {})
     }
@@ -582,7 +591,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       .update(
         JSON.stringify([
           [request.chatId, request.forkId, atId, request.source.chatId, request.source.forkId],
-          [request.start === undefined ? "absent" : request.start, request.includeLeftOut],
+          [request.start === undefined ? "absent" : request.start, request.includeLeftOut, chosen, timelines],
           source.tip_slot_id,
           sourceEnd,
           previewFields,
@@ -610,7 +619,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       castNames,
       counts,
       splitId,
-      timelines,
+      timelines: chosen,
       back,
       sourceSide: named
     } satisfies MergePlan
