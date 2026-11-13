@@ -121,9 +121,14 @@ function EntryRow({
         </Tooltip>
         <Badge>{kindNames(entry.kind).one}</Badge>
         <span className="text-xs text-muted tabular-nums">{plural(entry.count, "match", "matches")}</span>
-        {entry.unsaved && !blocked && (
-          <Tooltip label="Its unsaved changes are searched too. Replacing saves them first, as a revision of their own.">
-            <span className="text-xs text-warning">Unsaved changes</span>
+        {entry.unsaved && (
+          <Tooltip label="Its unsaved changes are searched too, but a replace skips it. Open it to save or revert them.">
+            <span
+              tabIndex={0}
+              className="rounded text-xs text-warning outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              Unsaved changes, skipped
+            </span>
           </Tooltip>
         )}
         <Button
@@ -256,6 +261,10 @@ export function LibraryReplacePanel() {
     const fields = entry.fields.filter((f) => !left.has(fieldKey(entry, f.field))).map((f) => f.field)
     return fields.length === 0 ? [] : [{ refId: entry.refId, stamp: entry.stamp, fields }]
   })
+  // Entries a replace can't change are sent too, so its result says which it skipped and why.
+  const blockedChoices: Array<LibraryChoice> = (preview?.entries ?? []).flatMap((entry) =>
+    entry.blocked === null ? [] : [{ refId: entry.refId, stamp: entry.stamp, fields: entry.fields.map((f) => f.field) }]
+  )
   const ticked = (preview?.entries ?? []).reduce(
     (n, entry) =>
       entry.blocked !== null
@@ -280,7 +289,10 @@ export function LibraryReplacePanel() {
   }
   const runReplace = async () => {
     if (choices.length === 0) return
-    const result = await replacing.run((client) => client("ApplyLibraryReplace", { search, choices }), INVALIDATES)
+    const result = await replacing.run(
+      (client) => client("ApplyLibraryReplace", { search, choices: [...choices, ...blockedChoices] }),
+      INVALIDATES
+    )
     if (!result.ok) return
     setOutcome({ result: result.value })
     void refreshOpenEditors()
@@ -308,8 +320,8 @@ export function LibraryReplacePanel() {
       className="max-w-5xl"
     >
       <p className="text-sm text-muted">
-        Looks through every entry's text as its editor shows it, unsaved changes included. Archived entries and a chat's
-        own notes are left out.
+        Looks through every entry's text as its editor shows it, unsaved changes included. An entry with unsaved changes
+        is skipped when you replace, and listed afterwards. Archived entries and a chat's own notes are left out.
       </p>
       <form onSubmit={submit} className="flex min-w-0 flex-col gap-2">
         <SearchReplace
@@ -412,13 +424,25 @@ export function LibraryReplacePanel() {
           }
         >
           {outcome.result.skipped.length > 0 && (
-            <ul className="list-disc pl-5">
-              {outcome.result.skipped.map((s) => (
-                <li key={s.refId}>
-                  {s.label || "An entry"}: {s.reason}
-                </li>
-              ))}
-            </ul>
+            <>
+              <p>{`Skipped ${plural(outcome.result.skipped.length, "entry", "entries")}:`}</p>
+              <ul aria-label="Skipped entries" className="list-disc pl-5">
+                {outcome.result.skipped.map((s) => (
+                  <li key={s.refId} data-library-skipped={s.refId}>
+                    {s.label !== "" ? (
+                      <Tooltip label="Opens its editor.">
+                        <Link to="/library/$refId" params={{ refId: s.refId }} className="text-accent hover:underline">
+                          {s.label}
+                        </Link>
+                      </Tooltip>
+                    ) : (
+                      "An entry"
+                    )}
+                    : {s.reason}
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </Alert>
       )}

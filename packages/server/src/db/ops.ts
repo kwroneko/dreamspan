@@ -592,16 +592,14 @@ export const StartChatResult = Schema.Struct({ ...AppendResult.fields, composer:
 
 /**
  * An entry a library-wide replace changes, as the reader worked it out (libraryReplace.ts): the
- * head and drafts it was read at, its unsaved changes applied (`checkpoint`, null without any)
- * and the document with the replacements in it.
+ * head it was read at and the document with the replacements in it. An entry with unsaved
+ * changes is never one.
  */
 export const LibraryReplaceEntry = Schema.Struct({
   refId: RefId,
   label: Schema.String,
   head: Schema.String,
   rowVersion: Schema.Int,
-  drafts: Schema.Array(Schema.Struct({ id: Schema.String, field: Schema.String, rowVersion: Schema.Int })),
-  checkpoint: Schema.NullOr(Doc),
   doc: Doc,
   matches: Schema.Int
 })

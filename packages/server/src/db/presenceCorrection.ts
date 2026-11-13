@@ -1,4 +1,6 @@
-// A compensating presence event, retaining the original decision and payloads in History.
+// A compensating presence event, retaining the original decision and payloads in History. It
+// corrects the scene check either way: a "left" mark becomes the user's "back" (the character
+// counts as present from there), a "back" mark becomes the user's "away" (the character stays away).
 // All work runs in the calling writer transaction. Branch-local corrections reuse ordinary
 // fork copies; shared versions are never changed for that setting.
 import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
@@ -7,7 +9,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { parsePresence } from "@rp/shared/knowledge.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { displayLength, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
+import { displayLength, displaySlots, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import { effectiveOverride, nextSeq, originalSql, replacedIn, writeOverride } from "./forkState.ts"
 import type { makeGraphWrites } from "./graphWrites.ts"
 import { historyFork } from "./historyShared.ts"
@@ -24,7 +26,7 @@ const UNDO_CORRECTS_EVERY_BRANCH: boolean = true
 interface Correction {
   readonly scope: "all" | "branch"
   readonly forks: ReadonlyArray<{ id: string; replacement: string }>
-  readonly versions: ReadonlyArray<{ id: string; before: string; after: string | null }>
+  readonly versions: ReadonlyArray<{ id: string; before: string | null; after: string | null }>
   readonly copies: ReadonlyArray<{ original: string; copy: string; previous: string | null; slot: string }>
 }
 
@@ -59,7 +61,9 @@ export const correctPresence =
       const event = ownEvents.find((e) => e.id === eventId)
       if (!event || event.slot_id === null || event.key !== "away.set") return null
       const value = JSON.parse(event.value_json) as { entity: EntityId; away: boolean; source?: string }
-      if (!value.away || value.source !== "decision") return null
+      if (value.source !== "decision") return null
+      // Undoing a "left" puts the character back in the scene; undoing a "back" keeps them away.
+      const restoreAway = !value.away
       const forks = UNDO_CORRECTS_EVERY_BRANCH
         ? yield* sql<{
             id: string
@@ -69,9 +73,9 @@ export const correctPresence =
       const affected: Array<{ id: string; rows: typeof ownEvents }> = []
       const versions = new Map<
         string,
-        { id: string; seq: number; slot_id: string; original: string; before: string; after: string | null }
+        { id: string; seq: number; slot_id: string; original: string; before: string | null; after: string | null }
       >()
-      const candidates = yield* sql<{
+      type Candidate = {
         id: string
         seq: number
         slot_id: string
@@ -80,14 +84,20 @@ export const correctPresence =
         source_version_id: string | null
         fork_id: string | null
         written_in: string
-        presence_json: string
-      }>`
+        presence_json: string | null
+      }
+      // Keeping someone away also reaches messages whose presence record is empty, so those are
+      // read from the slots in each branch's range (below); undoing a departure only has records
+      // that name them.
+      const candidates: ReadonlyArray<Candidate> = restoreAway
+        ? []
+        : yield* sql<Candidate>`
         SELECT v.id, v.seq, v.slot_id, s.chain_id, s.depth, v.source_version_id, v.fork_id,
           v.authoring_fork_id AS written_in, t.presence_json
         FROM ${sql.literal(presenceCandidatesFrom)}
         WHERE s.chat_id = ${chatId} AND t.presence_json IS NOT NULL AND v.purged_at IS NULL
           AND (${UNDO_CORRECTS_EVERY_BRANCH ? 1 : 0} = 1 OR v.id = ${replacedIn(sql, forkId, originalSql("v"))})`
-      const byFork = new Map<string, Array<(typeof candidates)[number]>>()
+      const byFork = new Map<string, Array<Candidate>>()
       for (const row of candidates) {
         const rows = byFork.get(row.written_in) ?? []
         rows.push(row)
@@ -120,14 +130,31 @@ export const correctPresence =
         const nextPlace = next?.slot_id ? yield* slotPlace(sql, chatId, next.slot_id) : null
         const through = nextPlace ? positionOf(pieces, nextPlace)! : displayLength(pieces) - 1
         if (through <= from) continue
-        const rows = UNDO_CORRECTS_EVERY_BRANCH ? (byFork.get(fork.id) ?? []) : candidates
+        const rows: ReadonlyArray<Candidate> = restoreAway
+          ? yield* sql<Candidate>`
+              ${displaySlots(sql, pieces, from + 1, through)}
+              SELECT v.id, v.seq, v.slot_id, s.chain_id, s.depth, v.source_version_id, v.fork_id,
+                v.authoring_fork_id AS written_in, t.presence_json
+              FROM display_slots d JOIN slots s ON s.id = d.id JOIN versions v ON v.slot_id = s.id
+                JOIN version_texts t ON t.version_seq = v.seq
+              WHERE v.purged_at IS NULL AND v.authoring_fork_id = ${fork.id}`
+          : UNDO_CORRECTS_EVERY_BRANCH
+            ? (byFork.get(fork.id) ?? [])
+            : candidates
         for (const row of rows) {
           const position = positionOf(pieces, { id: row.slot_id, chainId: row.chain_id, depth: row.depth })
           if (position === null || position <= from || position > through) continue
           const presence = parsePresence(row.presence_json)
-          const away = (presence?.away ?? []).filter((id) => !identities.has(id))
-          if (away.length === (presence?.away ?? []).length) continue
+          const was = presence?.away ?? []
           const narrators = presence?.narrators ?? []
+          // A narrator is never in or out of the scene.
+          if (restoreAway && narrators.includes(value.entity)) continue
+          const away = restoreAway
+            ? was.includes(value.entity)
+              ? was
+              : [...was, value.entity]
+            : was.filter((id) => !identities.has(id))
+          if (away.length === was.length) continue
           const after = presenceJson(
             away.length || narrators.length
               ? { ...(away.length ? { away } : {}), ...(narrators.length ? { narrators } : {}) }
@@ -158,7 +185,7 @@ export const correctPresence =
           event.slot_id,
           event.version_id,
           event.scope as never,
-          { key: "away.set", value: { entity: value.entity, away: false } },
+          { key: "away.set", value: { entity: value.entity, away: restoreAway } },
           fork.id
         )
         correction.forks.push({ id: fork.id, replacement: replacement.id })

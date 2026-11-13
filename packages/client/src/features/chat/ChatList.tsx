@@ -24,6 +24,7 @@ import { type ShellFork, useShellForks } from "../characters/shellData.tsx"
 import { PinButton } from "../characters/ShellBrowser.tsx"
 import { chatName, formatDay, formatWhen } from "./chatTitle.ts"
 import { KindBadge } from "./KindBadge.tsx"
+import { kindRowProps, useChatKindLook } from "./kindLooks.ts"
 
 const PAGE = 50
 
@@ -79,6 +80,7 @@ function Row({
   onDelete: () => void
 }) {
   const unseen = useUnseen(chat.id)
+  const kindLook = useChatKindLook(chat.kind)
   const search = useSearch({ strict: false }) as { panel?: string }
   const { title, unfinished } = importState(chat.title)
   const characters = (summary?.cast ?? []).filter((card) => !card.persona)
@@ -88,7 +90,7 @@ function Row({
     : null
   const others = characters.filter((card) => card.name !== name.name).map((card) => card.name)
   return (
-    <li className="tile-toggle-surface group relative">
+    <li {...kindRowProps(kindLook)} className="tile-toggle-surface group relative rounded-lg">
       <Tooltip label="Opens this chat.">
         <Link
           to="/chats/$chatId"

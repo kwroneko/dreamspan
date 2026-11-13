@@ -70,7 +70,8 @@ for (const width of [1440, 390])
       /^Pinned · 1/,
       /^Group chats · 1/,
       /^One-on-one · 1/,
-      /^With branches · 1/
+      /^With branches · 1/,
+      /^Workshops · 0/
     ])
     await page.keyboard.press("Escape")
     for (const [label, name] of [

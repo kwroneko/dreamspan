@@ -1,3 +1,4 @@
+import { kindHides } from "./kindLooks.ts"
 import { chatPanels, isPanelTab, useChatPanels } from "./panels.tsx"
 // Commands in the chat's ⋯ menu and on keys. The host supplies the viewed fork and navigation;
 // contributions own the behavior, label, ordering and availability. A command with a
@@ -78,6 +79,7 @@ export const availableCommands = (
     .sort((a, b) => a.order - b.order)
     .filter(
       (entry) =>
+        !kindHides(context.view.chat?.kind, entry.id) &&
         (entry.panel === undefined || isPanelTab(entry.panel, context.view, panels)) &&
         entry.available?.(context) !== false
     )

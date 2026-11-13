@@ -101,7 +101,7 @@ const shellForksAtom = Atom.family((key: string) =>
                   ({
                     sections: [],
                     people: [],
-                    filterCounts: { all: 0, pinned: 0, groups: 0, solo: 0, branches: 0 }
+                    filterCounts: { all: 0, pinned: 0, groups: 0, solo: 0, branches: 0, workshops: 0 }
                   }) as ShellForks,
                 applyShellForks
               ),

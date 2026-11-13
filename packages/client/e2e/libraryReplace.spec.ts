@@ -91,3 +91,59 @@ for (const width of [1440, 390])
       await expect(again).toHaveCount(0)
       expect(new URL(page.url()).searchParams.get("replace")).toBeNull()
     })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a replace skips an entry with unsaved changes and says so at ${width} in ${theme}`, async ({
+      page
+    }, info) => {
+      test.setTimeout(120_000)
+      const word = `zephyr${width}${theme}`
+      const made = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const clean = yield* api.CreateCard({
+            label: `Clean ${word}`,
+            name: "Clean",
+            description: `The ${word} blows.`
+          })
+          const open = yield* api.CreateCard({ label: `Open ${word}`, name: "Open", description: `The ${word} rests.` })
+          const opened = yield* api.OpenEditor({ refId: open.id })
+          yield* api.SaveEditorDraft({
+            draftId: null,
+            expectedSession: null,
+            refId: open.id,
+            field: JSON.stringify(["description"]),
+            content: `The ${word} rests, still being typed.`,
+            expectedRowVersion: null,
+            baseRevisionId: opened.ref.headRevisionId
+          })
+          return { clean: clean.id, open: open.id }
+        })
+      )
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/library?replace=open`)
+      const panel = page.getByRole("region", { name: "Search and replace across the library" })
+      await panel.getByRole("textbox", { name: "Find", exact: true }).fill(word)
+      await panel.getByRole("textbox", { name: "Replace with", exact: true }).fill("breeze")
+      await panel.getByRole("button", { name: "Find", exact: true }).click()
+      const hits = panel.getByRole("list", { name: "Entries found" }).locator("[data-library-hit]")
+      await expect(hits).toHaveCount(2)
+      // The open entry is listed, marked, and can't be ticked.
+      const openHit = panel.locator(`[data-library-hit="${made.open}"]`)
+      await expect(openHit.getByText("Unsaved changes, skipped")).toBeVisible()
+      await expect(openHit.getByRole("checkbox", { name: "Replace in Open", exact: true })).toBeDisabled()
+      await panel.getByRole("button", { name: "Replace 1", exact: true }).click()
+      await expect(panel.getByText("Replaced 1 match in 1 entry.")).toBeVisible()
+      const skipped = panel.getByRole("list", { name: "Skipped entries" })
+      await expect(skipped).toContainText("It has unsaved changes, so it was skipped.")
+      const link = skipped.getByRole("link", { name: "Open", exact: true })
+      await expect(link).toBeVisible()
+      await expectLayout(page, info, `library-replace-skipped-${width}-${theme}`, { scope: "#library-replace" })
+      expect(await description(made.clean)).toBe(`The breeze blows.`)
+      expect(await description(made.open)).toBe(`The ${word} rests.`)
+      // The link opens its editor, where the unsaved changes still are.
+      await link.click()
+      await expect(page).toHaveURL(new RegExp(`/library/${made.open}`))
+    })

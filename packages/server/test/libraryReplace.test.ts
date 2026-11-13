@@ -41,7 +41,10 @@ const setup = Effect.gen(function* () {
     preview.entries
       .filter((e) => e.blocked === null)
       .map((e) => ({ refId: e.refId, stamp: e.stamp, fields: e.fields.map((f) => f.field) }))
-  return { api, mira: mira.id, odo: odo.id, note: note.id, book: book.id, text, entry, all }
+  /** Every entry found, blocked ones too, as the panel sends them so a replace can say it skipped them. */
+  const every = (preview: LibraryPreview) =>
+    preview.entries.map((e) => ({ refId: e.refId, stamp: e.stamp, fields: e.fields.map((f) => f.field) }))
+  return { api, mira: mira.id, odo: odo.id, note: note.id, book: book.id, text, entry, all, every }
 })
 
 describe("library search and replace", () => {
@@ -88,7 +91,8 @@ describe("library search and replace", () => {
       const asked = search("lighthouse", "beacon")
       const preview = yield* f.api.PreviewLibraryReplace({ search: asked })
       const result = yield* f.api.ApplyLibraryReplace({ search: asked, choices: f.all(preview) })
-      assert.isFalse((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
+      // The user's own replace keeps an approved script approved (owner, 2026-11-13).
+      assert.isTrue((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
       yield* f.api.UndoLibraryEdit({ editId: result.editId! })
       assert.isFalse((yield* f.api.OpenEditor({ refId: f.mira })).doc.regex_approved)
     }).pipe(Effect.provide(serverLayer(testConfig())))
@@ -197,7 +201,7 @@ describe("library search and replace", () => {
       const asked = search("tide", "waves", { kinds: ["note"] })
       const result = yield* f.api.ApplyLibraryReplace({
         search: asked,
-        choices: f.all(yield* f.api.PreviewLibraryReplace({ search: asked }))
+        choices: f.every(yield* f.api.PreviewLibraryReplace({ search: asked }))
       })
       assert.strictEqual(result.entries, 0)
       assert.strictEqual(result.skipped[0]!.refId, f.note)
@@ -309,7 +313,7 @@ describe("library search and replace", () => {
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 
-  it.effect("goes through unsaved changes, saving them first as their own revision", () =>
+  it.effect("lists an entry with unsaved changes, marked, and skips it (libraryReplaceDecisions.test.ts)", () =>
     Effect.gen(function* () {
       const f = yield* setup
       const opened = yield* f.api.OpenEditor({ refId: f.odo })
@@ -326,20 +330,13 @@ describe("library search and replace", () => {
       const preview = yield* f.api.PreviewLibraryReplace({ search: asked })
       const odo = f.entry(preview, f.odo)!
       assert.isTrue(odo.unsaved)
-      assert.isNull(odo.blocked)
-      const result = yield* f.api.ApplyLibraryReplace({ search: asked, choices: f.all(preview) })
-      assert.strictEqual(result.entries, 1)
+      assert.isNotNull(odo.blocked)
+      const result = yield* f.api.ApplyLibraryReplace({ search: asked, choices: f.every(preview) })
+      assert.strictEqual(result.entries, 0)
+      assert.strictEqual(result.skipped[0]!.refId, f.odo)
       const after = yield* f.api.OpenEditor({ refId: f.odo })
-      assert.strictEqual(after.doc.scenario, "A storm; {{char}} stays at sea.")
-      assert.isFalse(after.drafts.some((d) => d.status === "active"))
-      const revisions = yield* f.api.ListRevisions({ refId: f.odo, limit: 5 })
-      assert.deepStrictEqual(
-        revisions.slice(0, 2).map((r) => r.origin),
-        ["changeset", "user"]
-      )
-      // Undone, the unsaved text stays, now saved.
-      yield* f.api.UndoLibraryEdit({ editId: result.editId! })
-      assert.strictEqual(yield* f.text(f.odo, ["scenario"]), "A storm; {{char}} stays ashore.")
+      assert.notInclude(String(after.doc.scenario ?? ""), "at sea")
+      assert.isTrue(after.drafts.some((d) => d.status === "active"))
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 

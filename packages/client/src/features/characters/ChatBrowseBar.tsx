@@ -12,7 +12,11 @@ const FILTERS = {
   pinned: { label: "Pinned", hint: "Shows pinned chats" },
   groups: { label: "Group chats", hint: "Shows chats with two or more characters in the cast" },
   solo: { label: "One-on-one", hint: "Shows chats with one character in the cast" },
-  branches: { label: "With branches", hint: "Shows chats with more than one branch" }
+  branches: { label: "With branches", hint: "Shows chats with more than one branch" },
+  workshops: {
+    label: "Workshops",
+    hint: "Shows only workshops. The other choices leave them out; All shows everything"
+  }
 } as const
 const SORTS = {
   recent: { label: "Recent", hint: "Orders chats by their latest activity" },
