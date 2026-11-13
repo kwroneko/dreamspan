@@ -1,3 +1,4 @@
+import { CALL_TOOL, dispatcherDefinition } from "../agent/dispatcher.ts"
 import { storyReadStamp } from "../agent/continuity.ts"
 import { loadingWireFor } from "../agent/loadingPlan.ts"
 import { loadedSet } from "../agent/toolLoading.ts"
@@ -57,7 +58,17 @@ const forModel = (
     inputs: { ...snapshot.inputs, model: now.model },
     request: { ...snapshot.request, samplers: now.samplers },
     ...(now.budget ? { contextBudget: now.budget } : {}),
-    ...(continuity ? { continuity: { ...continuity, breakpoints: [] } } : {})
+    ...(continuity
+      ? {
+          continuity: {
+            ...continuity,
+            parent: undefined,
+            breakpoints: [],
+            reason:
+              "The model changed. If its tool list changes, the next request reads the chat again once at full input cost."
+          }
+        }
+      : {})
   } as ContextSnapshot
 }
 
@@ -239,6 +250,23 @@ const agentVersionResumer = Effect.gen(function* () {
             })
           : undefined
         if (tools) rebuilt = { ...rebuilt, agent: { ...frozenAgent, tools } } as ContextSnapshot
+        if (modelChanged && frozenAgent?.tools) {
+          const real = ((rebuilt as Frozen).agent?.tools ?? []).filter((t) => t.name !== CALL_TOOL)
+          const dispatcher = loadingWireFor(execution, model)?.dispatcher && real.some((t) => t.deferred)
+          const transport = frozenAgent.tools.find((t) => t.name === CALL_TOOL)
+          rebuilt = {
+            ...rebuilt,
+            agent: {
+              ...(rebuilt as Frozen).agent,
+              tools: [
+                ...real,
+                ...(dispatcher
+                  ? [transport ?? { ...dispatcherDefinition, label: "Called a loaded tool", effect: "read" }]
+                  : [])
+              ]
+            }
+          } as ContextSnapshot
+        }
         if (modelChanged || tools) snapshot = JSON.stringify(rebuilt)
         if (modelChanged) chosen = { connection: model.connectionId as ConnectionId, model: model.modelId as ModelId }
       }
@@ -273,7 +301,11 @@ const agentVersionResumer = Effect.gen(function* () {
           model: JSON.stringify(resumedSnapshot.inputs.model),
           request: JSON.stringify(resumedSnapshot.request),
           transcript: JSON.stringify(planned.transcript),
-          tools: JSON.stringify(offered.filter((t) => !deferred.has(t.name) || loaded.has(t.name))),
+          tools: JSON.stringify(
+            offered.some((t) => t.name === CALL_TOOL)
+              ? offered
+              : offered.filter((t) => !deferred.has(t.name) || loaded.has(t.name))
+          ),
           ...(planned.continuation === undefined ? {} : { continuation: planned.continuation })
         })
         if (count > budget.maximum - budget.responseReserve && !execution.chatKinds.get(chat.kind)?.summaryTranscript)

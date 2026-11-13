@@ -78,6 +78,9 @@ export type PermitResult =
   { readonly run: true; readonly approvalDigest?: string } | { readonly run: false; readonly text: string }
 
 export interface PermitInput {
+  /** Dispatcher lookups must not reveal a forbidden name. */
+  readonly validate?: () => string | undefined
+  readonly unavailableText?: string
   readonly tool: RolloutTool<never>
   readonly context: ToolContext
   readonly args: unknown
@@ -102,10 +105,13 @@ export interface PermitDeps {
  */
 export const makePermit =
   (deps: PermitDeps) =>
-  ({ tool, context, args, dangling, onWaiting }: PermitInput): Effect.Effect<PermitResult> =>
+  ({ tool, context, args, dangling, onWaiting, unavailableText, validate }: PermitInput): Effect.Effect<PermitResult> =>
     Effect.gen(function* () {
       const { reader, writer, userId, rolloutId, registries } = deps
-      if (tool.capability === undefined && IN_REPLY.has(tool.effect)) return { run: true } as const
+      if (tool.capability === undefined && IN_REPLY.has(tool.effect)) {
+        const invalid = validate?.()
+        return invalid ? ({ run: false, text: invalid } as const) : ({ run: true } as const)
+      }
       const grants = new Map<string, CapabilityMode>(
         (yield* reader.WorkshopGrants({ userId: userId as never, chatId: deps.chatId as never, now: Date.now() })).map(
           (g) => [g.capability, g.mode]
@@ -114,7 +120,9 @@ export const makePermit =
       const mode = resolveMode(registries, grants, tool.capability, tool.effect)
       const capability = tool.capability ?? `effect:${tool.effect}`
       const capabilityLabel = registries.workshopCapabilities.get(tool.capability ?? "")?.label ?? tool.label
-      if (mode === "off") return { run: false, text: offText(capabilityLabel) } as const
+      if (mode === "off") return { run: false, text: unavailableText ?? offText(capabilityLabel) } as const
+      const invalid = validate?.()
+      if (invalid) return { run: false, text: invalid } as const
       const digest = argsDigest({ tool: tool.id, capability, args })
       const toolCallId = context.toolCallId
       let uncertain = false
@@ -144,6 +152,7 @@ export const makePermit =
         // Only a call on the story is bound to the asking tab's position; a library or
         // setting change can be allowed from any tab.
         ...(described?.storyAt ? { storyAt: described.storyAt } : {}),
+        ...(described?.storyScope ? { storyScope: described.storyScope } : {}),
         rolloutId,
         toolCallId,
         digest,
@@ -175,7 +184,7 @@ export const makePermit =
           ),
           Effect.ensuring(Effect.sync(() => (waiters.delete(key), onWaiting(null))))
         )
-      if (answered.revoked) return { run: false, text: offText(capabilityLabel) } as const
+      if (answered.revoked) return { run: false, text: unavailableText ?? offText(capabilityLabel) } as const
       if (answered.answer === "deny")
         return { run: false, text: answered.note ? `${DECLINED} Their note: ${answered.note}` : DECLINED } as const
       const grantsNow = new Map<string, CapabilityMode>(
@@ -184,7 +193,7 @@ export const makePermit =
         )
       )
       if (resolveMode(registries, grantsNow, tool.capability, tool.effect) === "off")
-        return { run: false, text: offText(capabilityLabel) } as const
+        return { run: false, text: unavailableText ?? offText(capabilityLabel) } as const
       const consumed = yield* writer.SettleToolApproval({
         userId: userId as never,
         rolloutId,

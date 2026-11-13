@@ -3,6 +3,7 @@
 // edit changes, and the answers. Allow lets this one call run; Allow in this workshop also lets the
 // assistant do this kind of thing here without asking; Decline tells it not to, with a note if the
 // user writes one. The answer names the call's arguments' digest, so it holds for this call only.
+import { StoryScope } from "../../workshop/StoryScope.tsx"
 import type { ApprovalAnswer } from "@rp/shared/workshopApi.ts"
 import { ReplyExtrasContext } from "../replyExtras.ts"
 import { useContext, useState } from "react"
@@ -57,27 +58,35 @@ export function ApprovalPanel({ step }: StepActionProps) {
         <p className="text-xs text-muted [overflow-wrap:anywhere]">Asks first: {approval.capabilityLabel}</p>
       </div>
       {approval.uncertain && <Alert tone="warning">{UNCERTAIN_TEXT}</Alert>}
+      {approval.storyScope && (
+        <p className="text-xs font-medium [overflow-wrap:anywhere]">
+          <StoryScope scope={approval.storyScope} at={approval.storyAt} />
+        </p>
+      )}
       {approval.rows.length > 0 && (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs" aria-label="What it will write">
-          {approval.rows.map((row) => (
-            <div key={row.label} className="contents">
-              <dt className="max-w-28 text-muted [overflow-wrap:anywhere]">{row.label}</dt>
-              <dd className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
-                {row.value.length <= 4000 ? (
-                  row.value
-                ) : (
-                  <details>
-                    <Tooltip label="Opens the full text the assistant will use for this field.">
-                      <summary className="cursor-pointer">
-                        {row.value.slice(0, 240)}… (cut short; show all {row.value.length.toLocaleString()} characters)
-                      </summary>
-                    </Tooltip>
-                    <div className="mt-1 max-h-60 overflow-y-auto">{row.value}</div>
-                  </details>
-                )}
-              </dd>
-            </div>
-          ))}
+          {approval.rows
+            .filter((row) => !approval.storyScope || !["Scope", "Story position"].includes(row.label))
+            .map((row) => (
+              <div key={row.label} className="contents">
+                <dt className="max-w-28 text-muted [overflow-wrap:anywhere]">{row.label}</dt>
+                <dd className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {row.value.length <= 4000 ? (
+                    row.value
+                  ) : (
+                    <details>
+                      <Tooltip label="Opens the full text the assistant will use for this field.">
+                        <summary className="cursor-pointer">
+                          {row.value.slice(0, 240)}… (cut short; show all {row.value.length.toLocaleString()}{" "}
+                          characters)
+                        </summary>
+                      </Tooltip>
+                      <div className="mt-1 max-h-60 overflow-y-auto">{row.value}</div>
+                    </details>
+                  )}
+                </dd>
+              </div>
+            ))}
         </dl>
       )}
       {approval.changes?.map((change) => (

@@ -110,9 +110,15 @@ export const previousRun = Effect.fnUntraced(function* (
     snapshot.inputs.model?.connectionId !== fresh.inputs.model?.connectionId ||
     snapshot.inputs.model?.modelId !== fresh.inputs.model?.modelId
   )
-    return { reason: "The model changed, so this request was put together again." } as const
+    return {
+      reason:
+        "The model changed, so this request was put together again. A different tool list makes it read the chat again once at full input cost."
+    } as const
   if (!isDeepStrictEqual(snapshot.inputs.model, fresh.inputs.model))
-    return { reason: "The model or connection settings changed, so this request was put together again." } as const
+    return {
+      reason:
+        "The model or connection settings changed, so this request was put together again. A different tool list makes it read the chat again once at full input cost."
+    } as const
   if ((snapshot.lcm === undefined) !== (fresh.lcm === undefined))
     return { reason: "The Summaries setting changed, so this request was put together again." } as const
   if (!isDeepStrictEqual(snapshot.inputs.preset, fresh.inputs.preset))

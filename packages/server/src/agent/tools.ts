@@ -47,6 +47,8 @@ export interface ToolContext {
    * A side chat's request: where its story tools read the story (spec/WORKSHOP.md §4), as the
    * browser tab the request came from showed it. Absent: nothing says where, so they don't read.
    */
+  /** Workshop replay consults the live catalog without freezing metadata into model definitions. */
+  readonly storyReadOf?: (id: string) => WorkshopStoryRead | undefined
   readonly storyAt?: import("@rp/shared/chat.ts").StoryAt
   /**
    * The run's frozen offer and what of it is loaded at this call (spec/TOOL-LOADING.md), for the
@@ -71,7 +73,11 @@ export interface ToolOutput {
   readonly loaded?: ReadonlyArray<string>
 }
 
+export type WorkshopStoryRead = "positioned" | "conversation" | "library" | "account" | "refused"
+
 export interface RolloutTool<A = never> {
+  /** Declares how a workshop tool reads story facts; deliberately not sent to the model. */
+  readonly storyRead?: WorkshopStoryRead
   /** Kinds that must resolve this name through kindTools, including a disabled variant. */
   readonly kindOverrides?: ReadonlyArray<string>
   /** The name the model sees. */
@@ -115,7 +121,7 @@ export interface RolloutTool<A = never> {
   readonly describe?: (
     context: ToolContext,
     args: A
-  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt">, unknown>
+  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope">, unknown>
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
 

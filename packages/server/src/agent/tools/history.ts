@@ -3,6 +3,7 @@
 // the one being generated, in the generation's fork, with each message as that fork shows it.
 // A join is read row by row, as the messages and summaries it brought (spec/THREADS.md §11).
 import { createHash } from "node:crypto"
+import { forkLabel } from "@rp/shared/branchNaming.ts"
 import { Type } from "@earendil-works/pi-ai"
 import type { ChatId, EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
@@ -1003,6 +1004,7 @@ interface StoryPlace {
   readonly title: string | null
   /** The branch's own name; "Original" for the story's first branch; null for another unnamed one. */
   readonly branch: string | null
+  readonly naming?: import("@rp/shared/branchNaming.ts").BranchNaming
   /** The newest message's number on that branch (from 1); 0 with none. */
   readonly upTo: number
 }
@@ -1052,7 +1054,13 @@ export const storyContext = (context: ToolContext) =>
       title: chat.title?.trim() || null,
       place: {
         title: chat.title?.trim() || null,
-        branch: fork.name?.trim() || (fork.parentForkId === null ? "Original" : null),
+        branch: forkLabel({
+          name: fork.name,
+          original: fork.parentForkId === null,
+          split: fork.split,
+          createdAt: fork.createdAt
+        }),
+        naming: { name: fork.name, original: fork.parentForkId === null, split: fork.split, createdAt: fork.createdAt },
         upTo: leaf === null ? 0 : (leaf.position ?? leaf.depth) + 1
       } satisfies StoryPlace,
       context: {
@@ -1109,6 +1117,7 @@ const overStory = <A>(
 ): RolloutTool<A & { readonly offset?: number }> => ({
   ...tool,
   id: definition.id,
+  storyRead: "positioned",
   label: definition.label,
   ...(definition.explanation === undefined ? {} : { explanation: definition.explanation }),
   description: definition.description,

@@ -108,6 +108,7 @@ export class ExecutionRegistry extends Context.Service<
         }
       })
       const validate = (tool: RolloutTool<never>) => {
+        if (tool.id === "call_tool") throw new Error("call_tool is reserved for the tool-loading transport.")
         if (
           (outsideEffect(tool.effect) && !tool.capability) ||
           (tool.capability && !workshopCapabilities.get(tool.capability))
@@ -205,12 +206,36 @@ export const executionRegistry = Effect.gen(function* () {
 })
 
 /** A kind may replace an ambiguous public tool name without changing story semantics. */
-export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string, name: string) => {
+export const toolForKind = (
+  registry: ExecutionRegistry["Service"],
+  kind: string,
+  name: string
+): RolloutTool<never> | undefined => {
+  if (name === "call_tool") return undefined
   const exposure = registry.chatKinds.get(kind)?.allowsOutside ? registry.operationTools.get(name) : undefined
   const common = exposure ? registry.operationTool(exposure) : registry.rolloutTools.get(name)
   const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
   const tool = common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)
   if (tool?.replyTool === false && registry.chatKinds.get(kind)?.allowsOutside !== true) return undefined
+  if (tool?.storyRead === "conversation" && registry.chatKinds.get(kind)?.allowsOutside)
+    return {
+      ...tool,
+      execute: (ctx, args) =>
+        tool.execute(
+          {
+            ...ctx,
+            storyReadOf: (id) => {
+              const exposure = registry.operationTools.get(id)
+              return (
+                registry.kindTools.get(`${kind}:${id}`)?.tool.storyRead ??
+                exposure?.storyRead ??
+                registry.rolloutTools.get(id)?.storyRead
+              )
+            }
+          },
+          args
+        )
+    }
   if (!tool || registry.chatKinds.get(kind)?.allowsOutside || !tool.capability) return tool
   // Capability grants are workshop metadata. Preserve the frozen story definition shape.
   const storyTool = { ...tool }

@@ -44,6 +44,7 @@ import {
 } from "../agent/tools.ts"
 import { makePermit, offeredByGrants } from "../agent/approvals.ts"
 import { loaderFor, loadingWireFor, planToolLoading } from "../agent/loadingPlan.ts"
+import { dispatcherDefinition } from "../agent/dispatcher.ts"
 import { frozenOffer, loadedSet, type Skill } from "../agent/toolLoading.ts"
 import { DecisionEngine } from "../decision/engine.ts"
 import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
@@ -438,7 +439,13 @@ export const layer = Layer.effect(
             plan.contract === "final_text"
               ? []
               : [plan.contract === "several" ? severalMessageDefinition : sendMessageDefinition]
-          const frozenTools = [...frozenOffer(offer.tools, offer.deferred, frozenTool), ...contractTools]
+          const frozenTools: ReadonlyArray<FrozenTool> = [
+            ...frozenOffer(offer.tools, offer.deferred, frozenTool),
+            ...contractTools,
+            ...(offer.deferred.size && loadingWireFor(execution, generation.model)?.dispatcher
+              ? [{ ...dispatcherDefinition, label: "Called a loaded tool", effect: "read" as const }]
+              : [])
+          ]
           let continuity: ContinuityRecord | undefined
           let seed: ReadonlyArray<AgentMessage> | undefined
           if (agentic && plan.continuity === "resume_previous") {
@@ -490,11 +497,13 @@ export const layer = Layer.effect(
                     transcript: JSON.stringify(transcript),
                     // A deferred tool takes context only once it's loaded.
                     tools: JSON.stringify(
-                      frozenTools.filter(
-                        (t) =>
-                          (t as { readonly deferred?: true }).deferred !== true ||
-                          loadedSet(transcript, offer.deferred).has(t.name)
-                      )
+                      frozenTools.some((t) => t.name === "call_tool")
+                        ? frozenTools
+                        : frozenTools.filter(
+                            (t) =>
+                              (t as { readonly deferred?: true }).deferred !== true ||
+                              loadedSet(transcript, offer.deferred).has(t.name)
+                          )
                     )
                   })
                   .pipe(Effect.catch(serverFailure("CountRolloutContext")))
