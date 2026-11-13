@@ -2,6 +2,9 @@
 
 **Status**: Proposed, 2026-11-12 (job `phase6`). The design for PLAN Phase 6 and DESIGN §7.7, with the Phase 6 parts of §7.3 and §10.3, and the plugin loader as a delta to [PLUGINS.md](PLUGINS.md). Everything below is **[P]** unless it cites a **[D]** in DESIGN or PLUGINS. It is a delta from two things: the build at master `21c7fb3d` (ARCHITECTURE §2, §3.7, §3.13, §5, §16 "Agent rollouts"), and reference-harness on branch `latest` (`9b385944`, 2026-10-29): its tool set (`src/tools/`), effect classes (`tools/side-effects.ts`), workspace files and skills (its ARCHITECTURE §9a), sandbox (§11a) and MCP adapter (`src/mcp/tool-adapter.ts`). Build units are in §9; their sections become obsolete as they move to ARCHITECTURE.
 
+**Built P1 foundation (2026-11-13):** the server/worker API, repository/check/activation host, private storage, settings, authenticated management RPCs and image-smoke steps in §5, §8 and §9's P1 row are implemented and obsolete as implementation proposals; see ARCHITECTURE §17. Internal service overrides, complete credential-bearing provider transport contracts and the client tier remain outside this implementation. P2–P5 remain proposed. Proposed details used here remain **[P]**; Git uses the coordinator's proposed pinned JavaScript library.
+
+
 **Built sidewrite1 (2026-11-13):** §3.4, §3.5, §3.6 and §4’s story targeting now use the side tab’s validated request position for writes as well as reads. This subset is obsolete as an implementation proposal; see ARCHITECTURE §16, “Side-chat write positions”. Positioned approvals refuse a moved answering tab. Standalone workshops keep current-branch behavior; no Proposed item is promoted to Decided. No baseline change.
 
 

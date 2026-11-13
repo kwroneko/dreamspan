@@ -4,7 +4,7 @@ import { settingsRegistry } from "./settings.ts"
 import { storageKinds } from "./storageKinds.ts"
 // Trusted code references only: never accept these from chat/library content or public RPC.
 // Each worker request carries the active module stack, so scope exit and respawns agree.
-import { Context, Effect, Layer, Schema, Scope, Exit } from "effect"
+import { Context, Effect, Layer, Schema, Scope, Exit, Cause } from "effect"
 import { RpcClient } from "effect/rpc"
 import type { Headers } from "effect/http"
 import { stateKeys, type StateKeyRegistrationError } from "@rp/shared/state.ts"
@@ -48,13 +48,30 @@ export class StateModules extends Context.Service<
   {
     readonly register: (source: ModuleSource) => Effect.Effect<void, StateKeyRegistrationError, Scope.Scope>
     readonly list: () => ReadonlyArray<ModuleSource>
+    readonly onFailure: (id: string, handler: () => void) => Effect.Effect<void, never, Scope.Scope>
+    readonly reportFailure: (cause: Cause.Cause<unknown>) => void
   }
 >()("rp/db/StateModules") {
   static readonly layer = Layer.sync(StateModules, () => {
     // Preserve the entire registration stack, including overrides of the same module id.
     // This matches the server even when an override changes which keys it installs.
     const active: Array<{ readonly source: ModuleSource }> = []
+    const failures = new Map<string, () => void>()
     return StateModules.of({
+      onFailure: (id, handler) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            failures.set(id, handler)
+          }),
+          () =>
+            Effect.sync(() => {
+              failures.delete(id)
+            })
+        ),
+      reportFailure: (cause) => {
+        const text = Cause.pretty(cause)
+        for (const [id, handler] of failures) if (text.includes(`rp-plugin-fault:${id}`)) handler()
+      },
       register: (source) =>
         Effect.gen(function* () {
           // A failed install rolls back any partial registrations immediately.
@@ -89,7 +106,7 @@ export const stateModuleClient = <A extends object>(calls: A, modules: StateModu
         Effect.suspend(() =>
           RpcClient.withHeaders((call as Call)(...args), {
             [HEADER]: JSON.stringify({ modules: modules.list(), schemaModule: import.meta.resolve("effect/Schema") })
-          })
+          }).pipe(Effect.onError((cause) => Effect.sync(() => modules.reportFailure(cause))))
         )
     ])
   ) as A

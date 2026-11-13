@@ -301,6 +301,40 @@ export const smoke = async (base: string, container: string, password: string) =
       const defaults = yield* api.GetGenerationDefaults()
       requireThat(defaults.model === null && defaults.preset === null, "expected a fresh synthetic data directory")
       pass("admin login and baseline/default settings initialized")
+      step = "plugins: empty instance and explicit synthetic enable/check"
+      requireThat((yield* api.ListPlugins()).length === 0, "fresh image unexpectedly has plugins")
+      pass("no-plugins startup")
+      const pluginFiles = (id: string, broken: boolean) => ({
+        "rp-plugin.json": JSON.stringify({
+          id,
+          name: "Synthetic image plugin",
+          api: 1,
+          server: "index.ts",
+          worker: null,
+          client: null,
+          surfaces: [],
+          overrides: [],
+          replaces: [],
+          network: false,
+          base: null
+        }),
+        "index.ts": broken
+          ? 'throw new Error("synthetic broken plugin");'
+          : 'import {Effect, type Activate} from "@rp/plugin-api/server"; export const activate: Activate = () => Effect.void;'
+      })
+      for (const broken of [false, true]) {
+        const id = broken ? "image-broken" : "image-tiny"
+        const commit = yield* api.CreatePlugin({ scope: "instance", id, files: pluginFiles(id, broken) })
+        const report = yield* api.EnablePlugin({ scope: "instance", id, commit, consent: true })
+        requireThat(report.ok === !broken, `synthetic plugin ${id} had the wrong check result`)
+        const view = yield* api.GetPlugin({ scope: "instance", id })
+        requireThat(
+          broken ? view.pin === null && view.report?.ok === false : view.pin?.commit === commit,
+          "plugin state/report mismatch"
+        )
+      }
+      requireThat((yield* api.Whoami()).id === user.id, "broken plugin disturbed the server")
+      pass("one synthetic plugin enabled; broken plugin off with a visible report")
       step = "synthetic PNG and JSON card import, media and chat"
       for (const extension of ["png", "json"]) {
         const card = syntheticCard(`Image smoke ${extension} ${randomUUID()}`)

@@ -112,6 +112,7 @@ export interface RolloutTool<A = never> {
  * anything): what the assistant may do, and answers to its requests.
  */
 export const USER_ONLY_WRITES = [
+  "SetPluginPins",
   "SetWorkshopGrant",
   "AnswerToolApproval",
   "RequestToolApproval",

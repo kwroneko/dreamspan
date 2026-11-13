@@ -18,6 +18,8 @@
     "vue-router"
   ],
   "workspaces": {
+    // Versioned external plugin entry points, consumed by checked data-volume modules.
+    "packages/plugin-api": { "includeEntryExports": false },
     ".": {
       // Throwaway experiments, kept for their findings and not part of the build.
       "project": ["**/*.{js,ts,tsx}", "!spikes/**"]

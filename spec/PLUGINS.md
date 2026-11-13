@@ -2,6 +2,9 @@
 
 **Status**: Proposed, 2026-10-11. The owner's statements of 2026-10-11 are marked **[D]**. Supersedes the recommendation in [CORDIS.md](CORDIS.md), whose evaluation of Cordis itself still stands. Building the plugin system is PLAN phase 6. §8 lists what has to shape the code before then. Implemented registry groundwork in §8 is obsolete as an implementation proposal (2026-10-30; ARCHITECTURE §3.8, §5, §6, §11, §15, §16): shared registries, provider kinds/transforms/costs, state modules in database workers, execution/planning/summary strategies, assembler stages/macros/role projections/source descriptors, format/import/export/parser workflows, and client features/routes/slots. These are swappable registrations; plugin loading/installation, consent and in-app agent authoring remain unbuilt. Built [P] details remain [P]. The loader, consent and agent authoring are designed as a delta to this spec in [WORKSHOP.md](WORKSHOP.md) §5–§6 (proposed, 2026-11-12).
 
+**Built P1 foundation (2026-11-13):** repository pinning, source confinement, checks, scoped server/worker registration, settings, private storage and management RPCs are obsolete as implementation proposals; see ARCHITECTURE §17 and WORKSHOP's P1 status. The full-trust threat model is retained. Browser loading/consent UI, authoring tools, editable copies, internal service overrides and the future sandbox remain unbuilt. Proposed choices remain **[P]**.
+
+
 ---
 
 ## 1. What the owner decided (2026-10-11)

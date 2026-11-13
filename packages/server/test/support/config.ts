@@ -23,6 +23,7 @@ import { tempDir } from "./tempDir.ts"
  * across a restart, by anything at all.
  */
 export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigShape => ({
+  plugins: true,
   host: "127.0.0.1",
   port: 0,
   dataDir: tempDir("server"),

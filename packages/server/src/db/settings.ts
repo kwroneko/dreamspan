@@ -1,3 +1,4 @@
+import { PluginPins } from "@rp/shared/plugins.ts"
 import { ExternalMediaPrefs } from "@rp/shared/externalMedia.ts"
 import { MediaHosts } from "@rp/shared/savedMedia.ts"
 // All settings use this registry and writer; feature handlers keep their ownership checks.
@@ -23,6 +24,8 @@ export interface SettingDefinition {
 }
 
 const definitions: ReadonlyArray<SettingDefinition> = [
+  { id: "plugins.instance", scope: "app", schema: PluginPins },
+  { id: "plugins.user", scope: "user", schema: PluginPins },
   {
     id: "network",
     scope: "app",

@@ -41,6 +41,9 @@ const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8")
 const command = JSON.parse(dockerfile.match(/^CMD (.+)$/m)![1]!) as Array<string>
 if (command.length !== 2 || command[0] !== "node") throw new Error("Review the production CMD entry")
 const ENTRIES = [join(root, command[1]!), ...workers.map(([, source]) => join(server, "src", source))]
+const pluginEntries = Object.values(
+  JSON.parse(readFileSync(join(root, "packages/plugin-api/package.json"), "utf8")).exports as Record<string, string>
+).map((source) => join(root, "packages/plugin-api", source))
 const clientEntries = objectStrings(join(root, "packages/client/vite.config.ts"), "input").flatMap(([, source]) => {
   if (!source.endsWith(".html")) return [join(root, "packages/client", source)]
   const html = readFileSync(join(root, "packages/client", source), "utf8")
@@ -229,6 +232,11 @@ const copied = (path: string, built = false) => copiedBy(path, built)
 // are absent from the image and both loaders turn a missing module into a plain startup error.
 const developmentImports = new Set(["./dev/fakeCardSource.ts", "./dev/fakeSavedMedia.ts"])
 const computedReviews: Record<string, string> = {
+  'packages/server/src/plugins/Host.ts: import(pathToFileURL(join(folder, "server.mjs")).href)':
+    "Only explicit admin-enabled, checked server bundle URLs in the confined plugin build tree; never content.",
+  "packages/server/src/plugins/probeChild.ts: import(pathToFileURL(join(folder, `${side}.mjs`)).href)":
+    "Checked synthetic/admin-authorized server and worker bundles, in a bounded clean-environment permission child.",
+
   "packages/server/src/db/Database.ts: worker(entry)":
     "The source writer/reader/formats URLs and stamped bundle entries, checked by this graph and the bundle test.",
   "packages/server/src/assembler/modules.ts: import(source.module)":
@@ -245,6 +253,60 @@ const computedReviews: Record<string, string> = {
 
 /** Every filesystem read is classified; a new expression requires review. */
 const readReviews: Record<string, { reason: string; expressions: Array<string> }> = {
+  "packages/server/src/plugins/repoTask.ts": {
+    reason:
+      "Confined synthetic request/response files for bounded Git operations under DATA_DIR/plugins/.ops; no plugin code is evaluated.",
+    expressions: ['readFile(response, "utf8")']
+  },
+  "packages/server/src/plugins/repoChild.ts": {
+    reason:
+      "Confined synthetic request/response files for bounded Git operations under DATA_DIR/plugins/.ops; no plugin code is evaluated.",
+    expressions: ['readFile(join(folder, "request.json"), "utf8")']
+  },
+
+  "packages/server/src/plugins/Host.ts": {
+    reason:
+      "Confined plugin repositories in the configured data volume; source/manifest size and symlink checks precede execution.",
+    expressions: ["readdir(base)"]
+  },
+  "packages/server/src/plugins/check.ts": {
+    reason:
+      "Installed source/API closure and worker stamp hash, and confined checked-plugin artifacts in the data volume.",
+    expressions: [
+      "readdir(dir, { withFileTypes: true })",
+      "readFile(file)",
+      'readFile(join(root, "package-lock.json"))',
+      'readFile(join(root, "packages/server/dist/workers/stamp.json"))',
+      'readFile(join(staging, "check.json"), "utf8")',
+      'readFile(join(folder, "rp-plugin.json"), "utf8")'
+    ]
+  },
+  "packages/server/src/plugins/checkChild.ts": {
+    reason:
+      "Installed source/API closure and worker stamp hash, and confined checked-plugin artifacts in the data volume.",
+    expressions: [
+      "readdir(dir, { withFileTypes: true })",
+      'readFile(join(previous, "check.json"), "utf8")',
+      "readFile(path)",
+      "readdir(folder)",
+      "readFile(join(folder, file))"
+    ]
+  },
+  "packages/server/src/plugins/process.ts": {
+    reason: "Only the checked child PID in /proc; sampled RSS limit, no process discovery.",
+    expressions: ['readFile(`/proc/${child.pid}/status`, "utf8")']
+  },
+  "packages/server/src/plugins/repo.ts": {
+    reason:
+      "Confined plugin repositories in the configured data volume; source/manifest size and symlink checks precede execution.",
+    expressions: [
+      "readdir(dir, { withFileTypes: true })",
+      "readFile(join(dir, entry.name))",
+      "readdir(folder)",
+      'readFile(file, "utf8")'
+    ]
+  },
+
   "packages/server/src/server.ts": {
     reason: "Generated client build-id.json; final COPY includes the whole dist directory.",
     expressions: ['readFile(join(config.clientDist, "build-id.json"), "utf8")']
@@ -323,6 +385,7 @@ const productionPackages = (client = false) => {
   for (const manifest of [
     "package.json",
     "packages/shared/package.json",
+    "packages/plugin-api/package.json",
     client ? "packages/client/package.json" : "packages/server/package.json"
   ]) {
     const json = JSON.parse(readFileSync(join(root, manifest), "utf8")) as {
@@ -416,7 +479,10 @@ const productionImportProblems = (
 
 describe("production entries", () => {
   it("reach no module the image leaves out", () => {
-    const { problems, modules } = productionImportProblems(ENTRIES, readFileSync(join(root, ".dockerignore"), "utf8"))
+    const { problems, modules } = productionImportProblems(
+      [...ENTRIES, ...pluginEntries],
+      readFileSync(join(root, ".dockerignore"), "utf8")
+    )
     expect(modules).toBeGreaterThan(100)
     expect(problems).toEqual([])
   })

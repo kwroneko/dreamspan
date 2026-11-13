@@ -1,0 +1,430 @@
+// Full-trust server plugins, scoped registrations and worker bridges. Consent is never inferred.
+import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
+import { readdir } from "node:fs/promises"
+import { join } from "node:path"
+import { pathToFileURL } from "node:url"
+import { PluginRejected, type PluginPin, type PluginReport, type PluginView } from "@rp/shared/plugins.ts"
+import type { User, UserId } from "@rp/shared/domain.ts"
+import { Reader, Writer } from "../db/Database.ts"
+import { AppConfig } from "../config.ts"
+import { ExecutionRegistry } from "../execution.ts"
+import { Commands } from "../commands.ts"
+import { ProviderRegistry } from "../providers/registry.ts"
+import { DecisionEngine } from "../decision/engine.ts"
+import { StateModules } from "../db/stateModules.ts"
+import { AssemblyModules } from "../assembler/modules.ts"
+import { Notices } from "../chat/Notices.ts"
+import { Network } from "../net/Network.ts"
+import { checkPlugin, readBuild } from "./check.ts"
+import { declaredHandles, type RegistrationRegistry } from "./handles.ts"
+import { pluginFolder, readManifest } from "./repo.ts"
+import { repoTask } from "./repoTask.ts"
+import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
+
+type Target = { readonly scope: "instance" | "user"; readonly id: string }
+type Version = Target & { readonly commit: string }
+type Failure = PluginRejected
+const attempt = <A>(run: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: run,
+    catch: () => new PluginRejected({ message: "Plugin files are unavailable or invalid" })
+  })
+export class PluginHost extends Context.Service<
+  PluginHost,
+  {
+    readonly list: (actor: User) => Effect.Effect<ReadonlyArray<typeof PluginView.Type>, Failure | unknown>
+    readonly get: (actor: User, target: Target) => Effect.Effect<typeof PluginView.Type, Failure | unknown>
+    readonly create: (
+      actor: User,
+      target: Target,
+      files: Readonly<Record<string, string>>
+    ) => Effect.Effect<string, Failure | unknown>
+    readonly commit: (
+      actor: User,
+      target: Target,
+      files: Readonly<Record<string, string>>,
+      message: string
+    ) => Effect.Effect<string, Failure | unknown>
+    readonly log: (
+      actor: User,
+      target: Target
+    ) => Effect.Effect<ReadonlyArray<{ commit: string; message: string }>, Failure>
+    readonly diff: (
+      actor: User,
+      target: Target,
+      before: string,
+      after: string
+    ) => Effect.Effect<ReadonlyArray<string>, Failure>
+    readonly check: (actor: User, target: Version) => Effect.Effect<PluginReport, Failure>
+    readonly pin: (actor: User, target: Version) => Effect.Effect<PluginReport, Failure | unknown>
+    readonly enable: (actor: User, target: Version) => Effect.Effect<PluginReport, Failure | unknown>
+    readonly disable: (actor: User, target: Target) => Effect.Effect<void, Failure | unknown>
+    readonly deleteData: (actor: User, target: Target) => Effect.Effect<void, Failure | unknown>
+  }
+>()("rp/plugins/PluginHost") {
+  static readonly layer = Layer.effect(
+    PluginHost,
+    Effect.gen(function* () {
+      const config = yield* AppConfig,
+        reader = yield* Reader,
+        writer = yield* Writer
+      const execution = yield* ExecutionRegistry,
+        commands = yield* Commands,
+        providers = yield* ProviderRegistry
+      const decisions = yield* DecisionEngine,
+        states = yield* StateModules,
+        assemblies = yield* AssemblyModules
+      const notices = yield* Notices,
+        network = yield* Network
+      const lifetime = yield* Effect.scope
+      const active = new Map<string, Scope.Closeable>(),
+        claims = new Map<string, string>(),
+        reports = new Map<string, PluginReport>()
+      const lock = yield* Semaphore.make(1)
+      const keyOf = (owner: string, id: string) => `${owner}/${id}`
+      const ownerOf = (actor: User, target: Target, admin = false) => {
+        if ((admin || target.scope === "instance") && actor.role !== "admin")
+          throw new PluginRejected({ message: "Only an admin can manage this plugin" })
+        return target.scope === "instance" ? "" : actor.id
+      }
+      const authorize = (actor: User, target: Target, admin = false) =>
+        Effect.try({
+          try: () => ownerOf(actor, target, admin),
+          catch: () => new PluginRejected({ message: "Only an admin can manage this plugin" })
+        })
+      const registryMap: Record<string, RegistrationRegistry> = {
+        rolloutTools: execution.rolloutTools,
+        operationTools: execution.operationTools,
+        workshopCapabilities: execution.workshopCapabilities,
+        orchestrationModes: execution.orchestrationModes,
+        replyStrategies: execution.replyStrategies,
+        replyParsers: execution.replyParsers,
+        liveRewrites: execution.liveRewrites,
+        chatKinds: execution.chatKinds,
+        commands: commands,
+        providerKinds: providers.kinds,
+        requestTransforms: providers.transforms,
+        responseObservers: providers.observers,
+        costFormulas: providers.costs,
+        decisionPoints: decisions.points
+      }
+      const notify = (userId: UserId, id: string, message: string) =>
+        notices.publish(userId, { _tag: "PluginsChanged", id, message })
+      const close = (owner: string, id: string) =>
+        Effect.gen(function* () {
+          const key = keyOf(owner, id),
+            scope = active.get(key)
+          active.delete(key)
+          if (scope) yield* Scope.close(scope, Exit.void)
+        })
+      const suspend = (actor: User, owner: string, id: string, report: PluginReport) =>
+        Effect.gen(function* () {
+          yield* close(owner, id)
+          reports.set(keyOf(owner, id), report)
+          const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+          if (pins.value[id])
+            yield* writer.SetPluginPins({
+              userId: actor.id,
+              owner,
+              revision: pins.revision,
+              value: {
+                ...pins.value,
+                [id]: {
+                  ...pins.value[id],
+                  suspended: { reason: report.message, at: Date.now(), appStamp: report.appStamp }
+                }
+              }
+            })
+          if (owner) notify(owner as UserId, id, report.message)
+          else
+            for (const user of yield* reader.ListUsers()) if (user.role === "admin") notify(user.id, id, report.message)
+        })
+      const activate = (actor: User, owner: string, id: string, commit: string, report: PluginReport) =>
+        Effect.gen(function* () {
+          const { folder, manifest } = yield* attempt(() => readBuild(config.dataDir, owner, id, commit))
+          const scope = yield* Scope.make()
+          const fail = () => {
+            Effect.runFork(
+              suspend(actor, owner, id, {
+                ...report,
+                ok: false,
+                step: "activate",
+                message: "Plugin handler failed; plugin turned off"
+              }).pipe(Effect.catchCause(() => Effect.void))
+            )
+          }
+          const effect = Effect.gen(function* () {
+            if (manifest.server) {
+              const module = yield* attempt(
+                () => import(pathToFileURL(join(folder, "server.mjs")).href) as Promise<{ activate: Activate }>
+              )
+              const fetch = network.fetchFor({ mode: "inherit" }, (route) => {
+                Effect.runFork(Effect.logInfo(`Plugin ${id} network request via ${route.via}`))
+              })
+              const host: ServerHost = Object.freeze({
+                api: 1,
+                id,
+                registries: declaredHandles(manifest, "server", registryMap, scope, claims, fail),
+                ...(manifest.surfaces.includes("server:storage")
+                  ? {
+                      storage: Object.freeze({
+                        get: (key: string) => reader.GetPluginData({ userId: actor.id, pluginId: id, owner, key }),
+                        list: () => reader.ListPluginData({ userId: actor.id, pluginId: id, owner }),
+                        set: (key: string, value: unknown, revision: number) =>
+                          writer.SetPluginData({ userId: actor.id, pluginId: id, owner, key, value, revision }),
+                        delete: (key: string, revision: number) =>
+                          writer.DeletePluginData({ userId: actor.id, pluginId: id, owner, key, revision })
+                      })
+                    }
+                  : {}),
+                ...(manifest.network ? { network: Object.freeze({ fetch }) } : {}),
+                // Untrusted text is never logged: even a thrown message may contain a secret.
+                log: () => {
+                  Effect.runFork(Effect.logInfo(`Plugin ${id} log event`))
+                },
+                notices: Object.freeze({ publish: () => notify(actor.id, id, "Plugin notification") })
+              })
+              yield* Effect.suspend(() => module.activate(host)).pipe(
+                Effect.setContext(Context.make(Scope.Scope, scope)),
+                Effect.timeout("5 seconds")
+              )
+            }
+            if (manifest.worker) {
+              const module = pathToFileURL(join(folder, "worker-bridge.mjs")).href
+              yield* states.onFailure(id, fail)
+              yield* states.register({ id: `plugin:${id}`, module, exportName: "state" })
+              yield* assemblies.register({ id: `plugin:${id}`, module, exportName: "assembly" })
+            }
+          })
+          yield* Scope.provide(effect, scope).pipe(Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))))
+          active.set(keyOf(owner, id), scope)
+          yield* Scope.addFinalizer(lifetime, Scope.close(scope, Exit.void))
+        })
+      const check = (actor: User, target: Version) =>
+        Effect.gen(function* () {
+          const owner = yield* authorize(actor, target, true)
+          const report = yield* attempt(() => checkPlugin(config.dataDir, owner, target.id, target.commit))
+          reports.set(keyOf(owner, target.id), report)
+          return report
+        })
+      const enable = (actor: User, target: Version) =>
+        Semaphore.withPermit(lock)(
+          Effect.gen(function* () {
+            const owner = yield* authorize(actor, target, true)
+            if (!config.plugins) return yield* new PluginRejected({ message: "Plugins are disabled by the server" })
+            const report = yield* check(actor, target)
+            if (!report.ok) return report
+            // Files are durable before settings. A kill here leaves code present but unenabled.
+            yield* close(owner, target.id)
+            const loaded = yield* activate(actor, owner, target.id, target.commit, report).pipe(Effect.exit)
+            if (Exit.isFailure(loaded)) {
+              const failed: PluginReport = {
+                ...report,
+                ok: false,
+                step: "activate",
+                message: "Plugin activation failed; plugin turned off"
+              }
+              yield* suspend(actor, owner, target.id, failed)
+              return failed
+            }
+            const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+            yield* writer
+              .SetPluginPins({
+                userId: actor.id,
+                owner,
+                revision: pins.revision,
+                value: {
+                  ...pins.value,
+                  [target.id]: { commit: target.commit, enabledAt: Date.now(), enabledBy: actor.id }
+                }
+              })
+              .pipe(Effect.onError(() => close(owner, target.id)))
+            notify(actor.id, target.id, "Plugins changed")
+            return report
+          })
+        )
+      const get = (actor: User, target: Target) =>
+        Effect.gen(function* () {
+          const owner = target.scope === "instance" ? "" : actor.id
+          const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+          const pin: PluginPin | null = pins.value[target.id] ?? null
+          const folder = pluginFolder(config.dataDir, owner, target.id)
+          const log = yield* attempt(() =>
+            repoTask<ReadonlyArray<{ commit: string; message: string }>>(config.dataDir, {
+              op: "log",
+              owner,
+              id: target.id
+            })
+          ).pipe(Effect.catch(() => Effect.succeed([])))
+          const commit = log[0]?.commit ?? pin?.commit ?? null
+          const manifest = yield* attempt(() => readManifest(config.dataDir, folder)).pipe(
+            Effect.catch(() => Effect.succeed(null))
+          )
+          const report =
+            reports.get(keyOf(owner, target.id)) ??
+            (pin?.suspended
+              ? {
+                  commit: pin.commit,
+                  appStamp: pin.suspended.appStamp,
+                  ok: false,
+                  step: "activate" as const,
+                  message: pin.suspended.reason,
+                  at: pin.suspended.at
+                }
+              : null)
+          return { ...target, commit, manifest, pin, report }
+        })
+      const service = PluginHost.of({
+        check: (actor, target) => Semaphore.withPermit(lock)(check(actor, target)),
+        enable,
+        pin: (actor, target) =>
+          Effect.gen(function* () {
+            const owner = yield* authorize(actor, target, true)
+            yield* Semaphore.withPermit(lock)(
+              Effect.gen(function* () {
+                yield* close(owner, target.id)
+                yield* attempt(() =>
+                  repoTask(config.dataDir, { op: "checkout", owner, id: target.id, commit: target.commit })
+                )
+              })
+            )
+            return yield* enable(actor, target)
+          }),
+        get,
+        list: (actor) =>
+          Effect.gen(function* () {
+            const result: Array<typeof PluginView.Type> = []
+            for (const scope of ["instance", "user"] as const) {
+              const base = join(
+                config.dataDir,
+                "plugins",
+                ...(scope === "instance" ? ["instance"] : ["users", actor.id])
+              )
+              const ids = yield* attempt(() => readdir(base)).pipe(Effect.catch(() => Effect.succeed([])))
+              for (const id of ids) if (/^[a-z][a-z0-9-]{0,63}$/.test(id)) result.push(yield* get(actor, { scope, id }))
+            }
+            return result
+          }),
+        create: (actor, target, files) =>
+          Semaphore.withPermit(lock)(
+            Effect.gen(function* () {
+              const owner = yield* authorize(actor, target, true)
+              return yield* attempt(() =>
+                repoTask<string>(config.dataDir, {
+                  op: "save",
+                  owner,
+                  id: target.id,
+                  files,
+                  initial: true,
+                  message: "Initial plugin"
+                })
+              )
+            })
+          ),
+        commit: (actor, target, files, message) =>
+          Semaphore.withPermit(lock)(
+            Effect.gen(function* () {
+              const owner = yield* authorize(actor, target, true)
+              // Editing a pinned repo immediately turns it off; applying any new commit is explicit.
+              yield* close(owner, target.id)
+              const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+              const pin = pins.value[target.id]
+              if (pin)
+                yield* suspend(actor, owner, target.id, {
+                  commit: pin.commit,
+                  appStamp: "",
+                  ok: false,
+                  step: "snapshot",
+                  message: "Plugin changed; enable its new commit to apply it",
+                  at: Date.now()
+                })
+              return yield* attempt(() =>
+                repoTask<string>(config.dataDir, { op: "save", owner, id: target.id, files, initial: false, message })
+              )
+            })
+          ),
+        log: (actor, target) =>
+          Effect.gen(function* () {
+            const owner = yield* authorize(actor, target)
+            return yield* attempt(async () =>
+              repoTask<ReadonlyArray<{ commit: string; message: string }>>(config.dataDir, {
+                op: "log",
+                owner,
+                id: target.id
+              })
+            )
+          }),
+        diff: (actor, target, before, after) =>
+          Effect.gen(function* () {
+            const owner = yield* authorize(actor, target)
+            return yield* attempt(async () =>
+              repoTask<ReadonlyArray<string>>(config.dataDir, { op: "diff", owner, id: target.id, before, after })
+            )
+          }),
+        disable: (actor, target) =>
+          Semaphore.withPermit(lock)(
+            Effect.gen(function* () {
+              const owner = yield* authorize(actor, target)
+              const pins = yield* reader.GetPluginPins({ userId: actor.id, owner }),
+                pin = pins.value[target.id]
+              yield* close(owner, target.id)
+              if (pin)
+                yield* suspend(actor, owner, target.id, {
+                  commit: pin.commit,
+                  appStamp: "",
+                  ok: false,
+                  step: "ready",
+                  message: "Plugin turned off",
+                  at: Date.now()
+                })
+            })
+          ),
+        deleteData: (actor, target) =>
+          Effect.gen(function* () {
+            const owner = yield* authorize(actor, target)
+            yield* writer.DeletePluginData({ userId: actor.id, pluginId: target.id, owner, key: null, revision: 0 })
+          })
+      })
+      if (config.plugins) {
+        const users = yield* reader.ListUsers()
+        const pins = yield* reader.AllPluginPins()
+        for (const group of pins)
+          for (const [id, pin] of Object.entries(group.value)) {
+            if (pin.suspended) continue
+            const actor = users.find((u) => u.id === pin.enabledBy && u.role === "admin" && !u.disabled)
+            if (!actor) {
+              const admin = users.find((u) => u.role === "admin" && !u.disabled)
+              if (admin)
+                yield* suspend(admin, group.owner, id, {
+                  commit: pin.commit,
+                  appStamp: "",
+                  ok: false,
+                  step: "activate",
+                  message: "Plugin author is no longer an active admin",
+                  at: Date.now()
+                })
+              continue
+            }
+            const user: User = { id: actor.id, handle: actor.handle, displayName: actor.displayName, role: actor.role }
+            const report = yield* attempt(() => checkPlugin(config.dataDir, group.owner, id, pin.commit))
+            reports.set(keyOf(group.owner, id), report)
+            if (!report.ok) {
+              yield* suspend(user, group.owner, id, report)
+              continue
+            }
+            yield* activate(user, group.owner, id, pin.commit, report).pipe(
+              Effect.catchCause(() =>
+                suspend(user, group.owner, id, {
+                  ...report,
+                  ok: false,
+                  step: "activate",
+                  message: "Plugin startup activation failed; plugin turned off"
+                })
+              )
+            )
+          }
+      }
+      return service
+    })
+  )
+}

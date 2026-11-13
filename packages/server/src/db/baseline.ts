@@ -230,6 +230,23 @@ export const baseline: ReadonlyArray<string> = [
     no_replies INTEGER NOT NULL DEFAULT 0 CHECK (no_replies IN (0, 1)),
     UNIQUE (user_id, target_kind, target_id, field)
   ) STRICT`,
+  `CREATE TABLE plugin_data (
+    plugin_id TEXT NOT NULL CHECK (length(plugin_id) BETWEEN 1 AND 64),
+    owner_user_id TEXT NOT NULL,
+    key TEXT NOT NULL CHECK (length(key) BETWEEN 1 AND 200),
+    value_json TEXT NOT NULL CHECK (json_valid(value_json) AND length(CAST(value_json AS BLOB)) <= 524288),
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (plugin_id, owner_user_id, key)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX plugin_data_owner ON plugin_data(owner_user_id)`,
+  `CREATE TRIGGER plugin_data_owner_insert BEFORE INSERT ON plugin_data
+    WHEN NEW.owner_user_id <> '' AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.owner_user_id)
+    BEGIN SELECT RAISE(ABORT, 'plugin data needs an owner'); END`,
+  `CREATE TRIGGER plugin_data_identity_fixed BEFORE UPDATE OF plugin_id, owner_user_id, key ON plugin_data
+    BEGIN SELECT RAISE(ABORT, 'plugin data never changes identity'); END`,
+  `CREATE TRIGGER plugin_data_user_deleted AFTER DELETE ON users
+    BEGIN DELETE FROM plugin_data WHERE owner_user_id = OLD.id; END`,
   `CREATE TABLE settings (
     scope TEXT NOT NULL CHECK (scope IN ('app', 'user', 'device')),
     scope_id TEXT NOT NULL,

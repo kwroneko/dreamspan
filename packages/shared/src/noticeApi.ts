@@ -9,6 +9,7 @@ import { ServerError } from "./errors.ts"
 import { StImportId, StImportStatus } from "./stImportApi.ts"
 
 export const Notice = Schema.Union([
+  Schema.TaggedStruct("PluginsChanged", { id: Schema.String, message: Schema.String }),
   /** A generation ended on its own: complete, or failed with its cause on the version. */
   Schema.TaggedStruct("ReplyFinished", {
     chatId: ChatId,

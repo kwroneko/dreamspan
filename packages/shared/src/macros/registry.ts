@@ -109,7 +109,10 @@ export const makeMacroRegistry = (): MacroRegistry => makeRegistry<MacroEntry>()
 const NAME = /^(?:[a-zA-Z][\w-]*|\/\/)$/
 
 /** Registers a macro under its name and each alias, for the scope's lifetime. */
-export const registerMacro = (registry: MacroRegistry, spec: MacroSpec): Effect.Effect<void, never, Scope.Scope> =>
+export const registerMacro = (
+  registry: Pick<MacroRegistry, "register">,
+  spec: MacroSpec
+): Effect.Effect<void, never, Scope.Scope> =>
   Effect.suspend(() => {
     const names = [spec.name, ...(spec.aliases ?? [])]
     const bad = names.find((name) => !NAME.test(name))
