@@ -33,6 +33,13 @@ import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { query } from "./tx.ts"
 import { workshopDefaultsOf } from "./workshopDefaults.ts"
 import { knowsSql, readKnowers } from "./knowers.ts"
+import { foldState } from "@rp/shared/state.ts"
+import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { resolveLcm } from "@rp/shared/lcmSettings.ts"
+import { sqlSources } from "./assemblySources.ts"
+import { AssemblySources } from "../assembler/pipeline.ts"
+import { inFork } from "./forkState.ts"
+import { withAssemblyModules } from "../assembler/modules.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
 const FEW = 2000
@@ -95,6 +102,13 @@ const transcriptEntries = (
           text: textOf(m.content),
           isError: m.isError,
           ...index(callStep.get(`${assistantAt}:${m.toolCallId}`))
+        }
+      ]
+    if (m.role === "rpCompaction")
+      return [
+        {
+          role: "app",
+          text: `Summarized transcript ${m.from}–${m.through - 1}. Original steps remain available.\n${m.content}`
         }
       ]
     if (m.role === "rpUser") {
@@ -525,10 +539,42 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         return row.result === null ? null : (JSON.parse(row.result) as string)
       }).pipe(query("RolloutReceipt")),
 
-    CountRolloutContext: ({ model, request, transcript, tools, continuation }) =>
+    WorkshopSummaryContext: ({ userId, chatId, forkId, leafSlotId }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{
+          kind: string
+        }>`SELECT kind FROM chats WHERE id=${chatId} AND owner_user_id=${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        if (!chatKinds.get(chat.kind)?.summaryTranscript) return null
+        const sources = sqlSources(sql, { userId, chatId, next: true, leafSlotId })
+        const base = yield* Effect.map(AssemblySources, (s) => s).pipe(Effect.provide(sources.layer))
+        const state = foldState((yield* base.events(leafSlotId)).map((e) => e.event))
+        const settings = resolveLcm(state.lcm, yield* base.lcmDefaults!())
+        const model = yield* base.model(state.modelBindings.summarizer ?? state.modelBindings[""] ?? null)
+        const undone = yield* sql<{
+          call: string
+          target: string
+          state: string
+        }>`SELECT e.tool_call_id AS call,e.target_id AS target,'undone' AS state
+          FROM rollout_effects e JOIN rollouts r ON r.id=e.rollout_id WHERE r.chat_id=${chatId} AND e.undone_at IS NOT NULL
+          ORDER BY e.undone_at,e.rollout_id,e.tool_call_id,e.seq`
+        return model
+          ? JSON.stringify({
+              model,
+              enabled: settings.enabled,
+              target: settings.leafTarget,
+              tail: settings.tail,
+              changes: JSON.stringify(undone)
+            })
+          : null
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("WorkshopSummaryContext"), (effect) =>
+        withAssemblyModules(assembler, effect)
+      ),
+    CountRolloutContext: ({ model, request, transcript, tools, continuation, text }) =>
       Effect.gen(function* () {
         const target = JSON.parse(model) as ModelInput
         const count = yield* prepareTextTokens(assembler.textCounters.list(), target)
+        if (text !== undefined) return count(text)
         const definitions = JSON.parse(tools) as ReadonlyArray<FrozenTool>
         const assembled = JSON.parse(request) as AssembledRequest
         const history = JSON.parse(transcript) as Array<AgentMessage>

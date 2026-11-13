@@ -218,6 +218,8 @@ describe("workshop context", () => {
           yield* api.CreateCard({ label, name: label, description: `Marker ${label}. ${filler(seed, 1800)}` })
         yield* useModel(api, `${mock.url}/v1`, { context: window, maxOutput: 2_000 })
         const chat = yield* api.CreateWorkshop({})
+        // Legacy elision remains available when the user explicitly turns LCM off.
+        yield* api.ChangeLcmSettings({ chatId: chat.id, change: { enabled: false } })
         const events = yield* watch(api, chat)
         yield* turn(api, chat, events, "Turn one.")
         const second = yield* turn(api, chat, events, "Turn two.")

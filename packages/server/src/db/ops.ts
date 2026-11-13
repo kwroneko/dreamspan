@@ -4633,10 +4633,17 @@ export class ReadOps extends RpcGroup.make(
       request: Schema.String,
       transcript: Schema.String,
       tools: Schema.String,
-      continuation: Schema.optionalKey(Schema.String)
+      continuation: Schema.optionalKey(Schema.String),
+      text: Schema.optionalKey(Schema.String)
     },
     success: Schema.Int,
     error: StorageError
+  }),
+  /** Resolve the owned workshop's enabled summary connection without reading other chats. */
+  Rpc.make("WorkshopSummaryContext", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId), leafSlotId: Schema.NullOr(SlotId) },
+    success: Schema.NullOr(Schema.String),
+    error: Schema.Union([NotFound, StorageError, AssemblyFailed])
   }),
   Rpc.make("RolloutMaterial", {
     payload: { userId: UserId, versionId: VersionId },

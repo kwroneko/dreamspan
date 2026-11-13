@@ -107,7 +107,7 @@ describe("workshop", () => {
       const api = yield* client()
       const user = yield* api.Whoami()
       const persona = yield* api.CreateCard({ label: "Tobin", name: "Tobin", persona: true })
-      yield* api.ChangeGenerationDefaults({ change: { persona: persona.entityId } })
+      yield* api.ChangeGenerationDefaults({ change: { persona: persona.entityId, lcm: { enabled: false } } })
       const first = yield* api.CreateWorkshop({ title: "My workshop" })
       assert.strictEqual(first.kind, "workshop")
       assert.strictEqual(first.title, "My workshop")
@@ -124,12 +124,15 @@ describe("workshop", () => {
       assert.deepStrictEqual(state.playedByMe, [workshopPersona])
       assert.deepStrictEqual(state.participants, [card.entityId, workshopPersona])
       assert.strictEqual(state.presetBindings[""]?.ref, preset.id)
-      // Summaries start as a new story chat's do (WORKSHOP-CONTEXT §2.4).
+      // Workshop summaries start on with their own sizing; RP keeps the account default.
       const story = yield* api.CreateChat({ title: "Synthetic story" })
       const storyState = foldState(
         yield* reader.StateEventsAt({ userId: user.id, chatId: story.id, slotId: story.activeLeafSlotId })
       )
-      assert.deepStrictEqual(state.lcm, storyState.lcm)
+      assert.strictEqual(state.lcm?.enabled, true)
+      assert.strictEqual(state.lcm?.withPreset, "raw")
+      assert.strictEqual(storyState.lcm?.enabled, false)
+      assert.notStrictEqual(state.lcm?.recentMax, storyState.lcm?.recentMax)
       yield* edit(api, card.id, "first_mes", "An edited greeting.")
       yield* edit(api, preset.id, "main", "Edited workshop prompt.")
       const second = yield* api.CreateWorkshop({})

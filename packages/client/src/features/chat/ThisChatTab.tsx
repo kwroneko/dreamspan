@@ -1,3 +1,4 @@
+import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
@@ -260,6 +261,14 @@ export function SummarySettings({ session }: { session: ChatSession }) {
   return (
     <Disclosure title="Summary settings">
       <section aria-label="Summary settings" className="flex flex-col gap-4">
+        {chatKinds.get(view.chat?.kind ?? "")?.summaryTranscript && (
+          <Tooltip label="New workshops start with summaries on. Summarizing sends only this workshop’s conversation and tool steps to the summary connection. Token use and cost appear in Activity.">
+            <p tabIndex={0} className="text-sm text-muted">
+              Summaries keep earlier messages and tool steps. When on, they use this chat’s summary model and add token
+              costs, including during long runs.
+            </p>
+          </Tooltip>
+        )}
         {settings === null ? (
           <Loading />
         ) : (

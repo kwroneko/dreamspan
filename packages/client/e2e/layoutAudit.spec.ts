@@ -1,4 +1,5 @@
 import { workshopDocumentTests } from "./support/workshopDocuments.ts"
+import { workshopSummaryTests } from "./support/workshopSummaries.ts"
 import { workshopRewriteTests } from "./support/workshopRewrite.ts"
 import { draftRequestTests } from "./support/draftRequest.ts"
 import { workshopBoundaryTests } from "./support/workshopBoundaries.ts"
@@ -48,6 +49,7 @@ import { expectTextBox } from "./support/textbox.ts"
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
 if (process.env.LAYOUT_AUDIT_WORKSHOP_DOCUMENTS_ONLY === "1") workshopDocumentTests()
+if (process.env.LAYOUT_AUDIT_WORKSHOP_SUMMARIES_ONLY === "1") workshopSummaryTests()
 if (process.env.LAYOUT_AUDIT_DRAFT_ONLY === "1") draftRequestTests()
 if (process.env.LAYOUT_AUDIT_CARDEX_ONLY === "1") {
   cardexCriteriaTests()

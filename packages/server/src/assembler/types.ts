@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 67
+export const ASSEMBLER_VERSION = 68
 
 export type Role = "system" | "user" | "assistant"
 
@@ -368,6 +368,8 @@ export interface ContextSnapshot {
     readonly samplers: AssembledRequest["samplers"]
   }
   readonly summaryJob?: {
+    /** Literal, own-workshop material frozen for summary replay; no preset or other chat. */
+    readonly workshopTranscript?: ReadonlyArray<RequestMessage>
     readonly id: string
     readonly clipTokens: number
     readonly inputs: ReadonlyArray<import("@rp/shared/lcm.ts").Summary["inputs"][number]>

@@ -22,6 +22,9 @@ import {
   type StoredWorkshopDefaults,
   workshopDefaultsOf
 } from "./workshopDefaults.ts"
+import { WORKSHOP_SUMMARY_INSTRUCTION, workshopLcmSizes } from "@rp/shared/workshopLcm.ts"
+import { resolveModel } from "@rp/shared/providers.ts"
+import { toModel, type ModelRow } from "./providers.ts"
 import { defaultSeed } from "./workshopSeeds.ts"
 
 export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
@@ -140,7 +143,22 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         yield* graph.insertStateEvent(userId, chatId, null, null, null, {
           key: "lcm.settings",
           // As a new story chat: the user's default (spec/WORKSHOP-CONTEXT.md §2.4).
-          value: yield* newChatLcmSettings(sql, userId)
+          value: yield* Effect.gen(function* () {
+            const defaults = yield* readDefaults(sql, userId)
+            const [row] = defaults.model
+              ? yield* sql<ModelRow>`SELECT * FROM models WHERE id=${defaults.model.model} AND connection_id=${defaults.model.connection}`
+              : []
+            const model = row ? toModel(row) : null
+            const resolved = model ? resolveModel(model.key, model.upstream, model.overrides) : null
+            return {
+              ...(yield* newChatLcmSettings(sql, userId)),
+              ...workshopLcmSizes(resolved?.context.value, resolved?.maxOutput.value ?? undefined),
+              enabled: true,
+              withPreset: "raw" as const,
+              withNotes: false,
+              tail: WORKSHOP_SUMMARY_INSTRUCTION
+            }
+          })
         })
         // A side chat plays the workshop persona too, but never the account's story persona nor a
         // card of its story: their descriptions and books would put the story's roleplay in its
