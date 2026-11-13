@@ -3,20 +3,22 @@ import { chatKinds } from "@rp/shared/chatKinds.ts"
 // 2026-11-05). One dialog for both entry points, the ⋯ menu (after the newest message) and a
 // message's actions (after that message): pick the chat or branch to bring in, see what comes in
 // and how the model will read it, and merge. Nothing is sent to a model here; the preview is
-// computed by the server from what's stored.
-import type { ChatId, Fork, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
+// computed by the server from what's stored. Its thread mode (spec/THREADS.md §7.1, "Join
+// threads") takes its sources from a picker the threads feature passes, several at once.
+import type { ChatId, EntityId, Fork, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import {
   type ChatMergePreview,
   fillMergeTemplate,
   MERGE_BLOCK_SECTION_DEFAULT,
-  MERGE_SECTION_DEFAULT
+  MERGE_SECTION_DEFAULT,
+  type MergeTimelines
 } from "@rp/shared/mergeApi.ts"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { type ComponentType, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Switch } from "../../ui/Choice.tsx"
+import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -26,7 +28,7 @@ import { showToast } from "../../ui/Toast.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useCast } from "./cast.ts"
 import type { ChatCommandDialogProps } from "./commands.tsx"
-import { branchLabel } from "./forks.ts"
+import { branchLabel, forksChanged } from "./forks.ts"
 import type { MessageActionProps } from "./messageActions.tsx"
 import { positionOf } from "./position.ts"
 import type { ChatSession } from "./session.ts"
@@ -49,6 +51,25 @@ const relation = (preview: ChatMergePreview) =>
       ? `Shares #1–${preview.shared} · merges ${plural(preview.messages, "message")} from #${preview.from}`
       : `Merges ${plural(preview.messages, "message")}`
 
+/** A thread's part in one line: "Joins 10 messages since #40", or "3 new since the last join". */
+const joined = (preview: ChatMergePreview) =>
+  preview.thread !== true
+    ? relation(preview)
+    : preview.continues
+      ? `${plural(preview.messages, "new message")} since the last join`
+      : `Joins ${plural(preview.messages, "message")} since #${preview.from - 1}`
+
+/** The cast after every source joins: each member once, added if any source adds it. */
+const unionCast = (previews: ReadonlyArray<ChatMergePreview>) => {
+  const members = new Map<string, ChatMergePreview["cast"][number]>()
+  for (const one of previews)
+    for (const member of one.cast) {
+      const seen = members.get(member.entity)
+      if (!seen || (!seen.added && member.added)) members.set(member.entity, member)
+    }
+  return [...members.values()]
+}
+
 /**
  * A chat to merge, as the chat list shows it: a chat made from a branch ("Make this branch its
  * own chat") is listed under its own name, apart from the chat it came from.
@@ -60,6 +81,15 @@ export interface MergeSource {
   readonly listed: ChatId
   readonly title: string
   readonly fork: ForkId
+}
+
+/** What a thread mode's picker gets: the dialog's position and what's ticked. */
+export interface MergeSourcePickerProps {
+  readonly session: ChatSession
+  readonly forkId: ForkId
+  readonly at: SlotId | null
+  readonly chosen: ReadonlyArray<MergeSource>
+  readonly onChoose: (next: ReadonlyArray<MergeSource>) => void
 }
 
 function SourcePicker({
@@ -201,23 +231,36 @@ function SourcePicker({
 export function MergeChatDialog({
   session,
   at: initialAt,
-  onClose
+  onClose,
+  threads: ThreadPicker
 }: {
   session: ChatSession
   /** The message to merge after; null: the newest. */
   at: SlotId | null
   onClose: () => void
+  /** Thread mode: other threads of this branch, from this picker, joined (`JoinThreads`). */
+  threads?: ComponentType<MergeSourcePickerProps>
 }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const { cast } = useCast()
   const navigate = useNavigate()
   const [forkId] = useState(() => view.forkId ?? view.chat?.currentForkId ?? null)
-  const [source, setSource] = useState<MergeSource | null>(null)
+  const [sources, setSources] = useState<ReadonlyArray<MergeSource>>([])
+  const source = sources[0] ?? null
+  const joining = ThreadPicker !== undefined
   const [at, setAt] = useState<SlotId | null>(initialAt)
   const [start, setStart] = useState<SlotId | null>(null)
   const [includeLeftOut, setIncludeLeftOut] = useState(false)
-  const [preview, setPreview] = useState<ChatMergePreview | null>(null)
+  /** How the characters see a join, in a chat with one shared context (spec/THREADS.md §7.1). */
+  const [timelines, setTimelines] = useState<MergeTimelines>("together")
+  /** Each source's preview, in order, once all are read. */
+  const [read, setRead] = useState<{ readonly for: unknown; readonly previews: ReadonlyArray<ChatMergePreview> }>({
+    for: null,
+    previews: []
+  })
   const [previewError, setPreviewError] = useState<AppError | null>(null)
+  /** "What the model reads" for one character, with separate timelines; null: the first. */
+  const [reader_, setReaderFor] = useState<EntityId | null>(null)
   /** null: the source's own title. */
   const [title, setTitle] = useState<string | null>(null)
   const [framing, setFraming] = useState<string | null>(null)
@@ -225,35 +268,43 @@ export function MergeChatDialog({
   const reader = useAction()
   const writer = useAction()
 
-  const request = useMemo(
+  const requests = useMemo(
     () =>
-      source && forkId
-        ? {
+      forkId
+        ? sources.map((one) => ({
             chatId: session.id,
             forkId,
             at,
-            source: { chatId: source.chat, forkId: source.fork },
+            source: { chatId: one.chat, forkId: one.fork },
             ...(start === null ? {} : { start }),
-            includeLeftOut
-          }
-        : null,
-    [session.id, forkId, at, source, start, includeLeftOut]
+            includeLeftOut,
+            ...(joining && timelines === "separate" ? { timelines } : {})
+          }))
+        : [],
+    [session.id, forkId, at, sources, start, includeLeftOut, joining, timelines]
   )
+  const request = requests[0] ?? null
+  const previewAll = () => Promise.all(requests.map((one) => reader.run((client) => client("PreviewChatMerge", one))))
   useEffect(() => {
-    if (request === null) return
+    if (requests.length === 0) return
     let live = true
-    void reader
-      .run((client) => client("PreviewChatMerge", request))
-      .then((result) => {
-        if (!live) return
-        setPreview(result.ok ? result.value : null)
-        setPreviewError(result.ok ? null : result.error)
-      })
+    void previewAll().then((results) => {
+      if (!live) return
+      const failed = results.find((result) => !result.ok)
+      setRead({ for: requests, previews: results.flatMap((result) => (result.ok ? [result.value] : [])) })
+      setPreviewError(failed && !failed.ok ? failed.error : null)
+    })
     return () => {
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request])
+  }, [requests])
+  // Previews read for the sources and span chosen now, all of them.
+  const previews = read.for === requests ? read.previews : []
+  const complete = requests.length > 0 && previews.length === requests.length && previewError === null
+  const preview = complete ? (previews[0] ?? null) : null
+  const all = complete ? previews : []
+  const several = all.length > 1
   const layout = cast?.mergeLayout ?? "parallel"
   const shownTitle = title?.trim() || preview?.sourceTitle || ""
   const defaultFraming = preview
@@ -265,6 +316,18 @@ export function MergeChatDialog({
     : ""
   const framingText = framing ?? defaultFraming
   const marker = preview ? preview.join.split(`“${preview.sourceTitle}”`).join(`“${shownTitle}”`) : ""
+  const views = preview?.views ?? null
+  const readerFor = views === null ? null : (views.find((v) => v.entity === reader_) ?? views[0] ?? null)
+  /** One source's part of "What the model reads": its framing, its text (for whom it's read), its marker. */
+  const readOf = (one: ChatMergePreview) => {
+    const view = readerFor === null ? null : one.views?.find((v) => v.entity === readerFor.entity)
+    const text = view === null || view === undefined ? one.section : view.readable ? view.section : null
+    return several
+      ? [one.framing, text ?? `[Nothing of “${one.sourceTitle}”: ${readerFor?.name ?? "they"} wasn't there.]`, one.join]
+      : [framingText.trim(), text ?? `[Nothing of “${shownTitle}”: ${readerFor?.name ?? "they"} wasn't there.]`]
+  }
+  const leftOut = all.reduce((n, one) => n + one.leftOut, 0)
+  const leftOutTokens = all.reduce((n, one) => n + one.leftOutTokens, 0)
 
   const entries = view.entries.filter((e) => e.version.origin !== "merge")
   const positions = [...entries].reverse().slice(0, 200)
@@ -290,36 +353,66 @@ export function MergeChatDialog({
       }))
   ]
 
+  const ownFraming = framing === null || framing.trim() === defaultFraming ? null : framing
   const merge = async () => {
-    if (!request || !preview) return
-    const result = await writer.run(
-      (client) =>
-        client("MergeChat", {
-          ...request,
-          title: shownTitle,
-          framing: framing === null || framing.trim() === defaultFraming ? null : framing,
-          digest: preview.digest
-        }),
-      ["chats"]
-    )
+    if (!request || !preview || !forkId) return
+    const result = joining
+      ? await writer.run(
+          (client) =>
+            client("JoinThreads", {
+              chatId: session.id,
+              forkId,
+              at,
+              includeLeftOut,
+              ...(timelines === "separate" ? { timelines } : {}),
+              joins: all.map((one, index) => ({
+                forkId: sources[index]!.fork,
+                title: several ? one.sourceTitle : shownTitle,
+                framing: several ? null : ownFraming,
+                digest: one.digest
+              }))
+            }),
+          ["chats"]
+        )
+      : await writer.run(
+          (client) =>
+            client("MergeChat", {
+              ...request,
+              title: shownTitle,
+              framing: ownFraming,
+              digest: preview.digest
+            }),
+          ["chats"]
+        )
     if (result.ok) {
+      // The threads' joined state (ThreadsOf) is read again.
+      if (joining) forksChanged(session.id)
       onClose()
-      showToast({ title: `Merged “${shownTitle}”`, description: "It's one entry in the timeline; open it to read it." })
+      showToast(
+        joining
+          ? {
+              title: several ? `Joined ${all.length} threads` : `Joined “${shownTitle}”`,
+              description: "Each is one entry in the timeline; open it to read it."
+            }
+          : { title: `Merged “${shownTitle}”`, description: "It's one entry in the timeline; open it to read it." }
+      )
       return
     }
     if (result.error.tag === "MergeChanged") {
       setStale(true)
-      const again = await reader.run((client) => client("PreviewChatMerge", request))
-      if (again.ok) setPreview(again.value)
+      const again = await previewAll()
+      if (again.every((one) => one.ok))
+        setRead({ for: requests, previews: again.flatMap((one) => (one.ok ? [one.value] : [])) })
     }
   }
   const summarizeFirst = () => {
-    if (!source) return
+    const first = sources.find((_, index) => (all[index]?.leftOut ?? 0) > 0) ?? source
+    if (!first) return
     onClose()
     void navigate({
       to: "/chats/$chatId",
-      params: { chatId: source.chat },
-      search: { fork: source.fork, panel: "summaries" }
+      params: { chatId: first.chat },
+      search: { fork: first.fork, panel: "summaries" }
     })
   }
 
@@ -329,12 +422,30 @@ export function MergeChatDialog({
       wide
       placement="top"
       onOpenChange={(open) => !open && !writer.pending && onClose()}
-      title="Merge a chat into this one"
-      description="Its messages join this chat as one entry, read by the model as a line that ran alongside. This chat's settings, preset and model apply; the other chat stays as it is."
+      title={joining ? "Join threads" : "Merge a chat into this one"}
+      description={
+        joining
+          ? "Each thread's messages since they parted join this one as one entry, read by the model as a line that ran alongside. This thread's settings apply; the other threads stay as they are and can be joined again later."
+          : "Its messages join this chat as one entry, read by the model as a line that ran alongside. This chat's settings, preset and model apply; the other chat stays as it is."
+      }
     >
       <div className="grid min-w-0 gap-4 sm:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-4">
-          {forkId && (
+          {forkId && ThreadPicker && (
+            <ThreadPicker
+              session={session}
+              forkId={forkId}
+              at={at}
+              chosen={sources}
+              onChoose={(next) => {
+                setStale(false)
+                setTitle(null)
+                setFraming(null)
+                setSources(next)
+              }}
+            />
+          )}
+          {forkId && !ThreadPicker && (
             <SourcePicker
               chatId={session.id}
               forkId={forkId}
@@ -346,11 +457,11 @@ export function MergeChatDialog({
                 setFraming(null)
                 setStart(null)
                 setIncludeLeftOut(false)
-                setSource(next)
+                setSources([next])
               }}
             />
           )}
-          <Field label="Merge after">
+          <Field label={joining ? "Join after" : "Merge after"}>
             <Select
               value={at ?? NEWEST}
               onValueChange={(value) => setAt(value === NEWEST ? null : (value as SlotId))}
@@ -371,8 +482,12 @@ export function MergeChatDialog({
           )}
         </div>
         <div className="flex min-w-0 flex-col gap-4">
-          {source === null && <p className="text-sm text-muted">Choose a chat to see what it brings in.</p>}
-          {previewError && <ErrorAlert error={previewError} title="Can't merge this" />}
+          {source === null && (
+            <p className="text-sm text-muted">
+              {joining ? "Choose a thread to see what it brings in." : "Choose a chat to see what it brings in."}
+            </p>
+          )}
+          {previewError && <ErrorAlert error={previewError} title={joining ? "Can't join this" : "Can't merge this"} />}
           {source && !preview && !previewError && (
             <p className="flex items-center gap-2 text-sm text-muted">
               <Spinner /> Reading “{source.title}”…
@@ -380,23 +495,30 @@ export function MergeChatDialog({
           )}
           {preview && (
             <>
-              <section aria-label="What comes in" className="flex flex-col gap-1 text-sm">
-                <p className="font-medium" data-testid="merge-relation">
-                  {relation(preview)}
-                </p>
-                <p className="text-muted">
-                  {[
-                    preview.verbatim > 0 && `${plural(preview.verbatim, "message")} as written`,
-                    preview.summarized > 0 &&
-                      `${plural(preview.summarized, "message")} through ${plural(preview.summaries, "summary", "summaries")}`,
-                    preview.leftOut > 0 && !includeLeftOut && `${plural(preview.leftOut, "message")} left out`
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                  {` · about ${preview.tokens.toLocaleString()} tokens`}
-                </p>
-              </section>
-              {preview.leftOut > 0 && (
+              {all.map((one) => (
+                <section
+                  key={one.sourceTitle + one.digest}
+                  aria-label={several ? `What comes in from “${one.sourceTitle}”` : "What comes in"}
+                  className="flex flex-col gap-1 text-sm"
+                >
+                  <p className="font-medium" data-testid="merge-relation">
+                    {several ? `“${one.sourceTitle}”: ` : ""}
+                    {joined(one)}
+                  </p>
+                  <p className="text-muted">
+                    {[
+                      one.verbatim > 0 && `${plural(one.verbatim, "message")} as written`,
+                      one.summarized > 0 &&
+                        `${plural(one.summarized, "message")} through ${plural(one.summaries, "summary", "summaries")}`,
+                      one.leftOut > 0 && !includeLeftOut && `${plural(one.leftOut, "message")} left out`
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    {` · about ${one.tokens.toLocaleString()} tokens`}
+                  </p>
+                </section>
+              ))}
+              {leftOut > 0 && (
                 <Alert
                   tone="warning"
                   title={includeLeftOut ? "Older messages included as written" : "Older messages left out"}
@@ -409,12 +531,12 @@ export function MergeChatDialog({
                     </Button>
                   }
                 >
-                  {plural(preview.leftOut, "older message")} (about {preview.leftOutTokens.toLocaleString()} tokens)
-                  have no summary in the other chat, and this chat's recent stretch is about{" "}
-                  {preview.spanTokens.toLocaleString()} tokens.
+                  {plural(leftOut, "older message")} (about {leftOutTokens.toLocaleString()} tokens) have no summary in
+                  the other {joining ? "thread" : "chat"}, and this {joining ? "thread" : "chat"}'s recent stretch is
+                  about {preview.spanTokens.toLocaleString()} tokens.
                 </Alert>
               )}
-              {preview.leftOut > 0 && (
+              {leftOut > 0 && (
                 <Switch
                   checked={includeLeftOut}
                   onCheckedChange={setIncludeLeftOut}
@@ -436,10 +558,16 @@ export function MergeChatDialog({
               <section aria-label="Cast" className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">Cast</span>
                 <ul className="flex flex-wrap gap-1.5">
-                  {preview.cast.map((member) => (
+                  {unionCast(all).map((member) => (
                     <li key={member.entity}>
                       <Tooltip
-                        label={member.added ? `${member.name} joins this chat.` : `${member.name} is already here.`}
+                        label={
+                          member.added
+                            ? `${member.name} joins this chat.`
+                            : all.some((one) => one.back?.includes(member.entity))
+                              ? `${member.name} is here again from the join on.`
+                              : `${member.name} is already here.`
+                        }
                       >
                         <span
                           tabIndex={0}
@@ -453,50 +581,107 @@ export function MergeChatDialog({
                   ))}
                 </ul>
               </section>
+              {joining && preview.choosesTimelines === true && (
+                <section aria-labelledby="join-view-label" className="flex flex-col gap-2 text-sm">
+                  <span id="join-view-label" className="font-medium">
+                    How the characters see it
+                  </span>
+                  <RadioGroup<MergeTimelines>
+                    aria-labelledby="join-view-label"
+                    value={timelines}
+                    onValueChange={setTimelines}
+                    options={[
+                      {
+                        value: "together",
+                        label: several ? "Everyone reads every thread" : "Everyone reads both threads",
+                        description: several
+                          ? "Every reply sees all of them, the other threads as sections before this one's messages since they parted."
+                          : `Every reply sees both, the other thread as a section before this one's messages since #${preview.from - 1}.`
+                      },
+                      {
+                        value: "separate",
+                        label: "Each character reads only its own thread",
+                        description: "Characters see only the thread they were in. A narrator sees every thread."
+                      }
+                    ]}
+                  />
+                </section>
+              )}
+              {joining && preview.choosesTimelines !== true && (
+                <p className="text-sm text-muted" data-testid="join-view">
+                  Each character reads what it was present for (this chat's Context setting). A narrator reads every
+                  thread.
+                </p>
+              )}
             </>
           )}
         </div>
       </div>
       {preview && (
         <div className="flex min-w-0 flex-col gap-4">
-          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-            <Field
-              label="Title"
-              about="What the timeline calls the merged messages, and the name the model reads for them."
-            >
-              <Input
-                value={title ?? preview.sourceTitle}
-                maxLength={200}
-                onChange={(event) => setTitle(event.currentTarget.value)}
-              />
-            </Field>
-            <Field
-              label="Framing line"
-              about="The line the model reads before the merged messages. Left as it is, the preset's own line is used when it has one."
-            >
-              <Textarea
-                className="min-h-16!"
-                value={framingText}
-                maxLength={2000}
-                onChange={(event) => setFraming(event.currentTarget.value)}
-              />
-            </Field>
-          </div>
+          {!several && (
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <Field
+                label="Title"
+                about="What the timeline calls the merged messages, and the name the model reads for them."
+              >
+                <Input
+                  value={title ?? preview.sourceTitle}
+                  maxLength={200}
+                  onChange={(event) => setTitle(event.currentTarget.value)}
+                />
+              </Field>
+              <Field
+                label="Framing line"
+                about="The line the model reads before the merged messages. Left as it is, the preset's own line is used when it has one."
+              >
+                <Textarea
+                  className="min-h-16!"
+                  value={framingText}
+                  maxLength={2000}
+                  onChange={(event) => setFraming(event.currentTarget.value)}
+                />
+              </Field>
+            </div>
+          )}
+          {several && (
+            <p className="text-sm text-muted">
+              Each thread comes in under its own name, with the preset's framing line. Join one at a time to change
+              them.
+            </p>
+          )}
           <details className="group min-w-0 rounded-md border border-border">
             <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus">
               What the model reads
             </summary>
+            {views !== null && readerFor !== null && (
+              <div className="border-t border-border px-3 py-2">
+                <Field
+                  label="For"
+                  about="With this chat's separate contexts, each character reads only what it was present for. A narrator and your own characters read it all."
+                >
+                  <Select
+                    value={readerFor.entity as string}
+                    onValueChange={(value) => setReaderFor(value as EntityId)}
+                    items={views.map((v) => ({
+                      value: v.entity as string,
+                      label: v.name,
+                      description: v.readable ? undefined : "Wasn't there: reads none of it"
+                    }))}
+                  />
+                </Field>
+              </div>
+            )}
             <pre
               data-testid="merge-section"
               className="max-h-64 min-w-0 overflow-y-auto border-t border-border px-3 py-2 text-xs whitespace-pre-wrap [overflow-wrap:anywhere]"
             >
               {[
-                framingText.trim(),
-                preview.section,
+                ...all.flatMap((one) => readOf(one)),
                 layout === "join"
                   ? null
-                  : `[This chat's own messages${preview.start ? ` from #${preview.start.number}` : ""}]`,
-                marker
+                  : `[This ${joining ? "thread" : "chat"}'s own messages${preview.start ? ` from #${preview.start.number}` : ""}]`,
+                several ? null : marker
               ]
                 .filter(Boolean)
                 .join("\n\n")}
@@ -505,21 +690,29 @@ export function MergeChatDialog({
         </div>
       )}
       {stale && preview && (
-        <Alert tone="warning">One of the chats changed while this was open. This is what merging brings now.</Alert>
+        <Alert tone="warning">
+          {joining
+            ? "One of the threads changed while this was open. This is what joining brings now."
+            : "One of the chats changed while this was open. This is what merging brings now."}
+        </Alert>
       )}
       <ErrorAlert error={writer.error && writer.error.tag !== "MergeChanged" ? writer.error : null} />
       <DialogActions>
-        <Button hint="Closes this without merging." onClick={onClose}>
+        <Button hint={joining ? "Closes this without joining." : "Closes this without merging."} onClick={onClose}>
           Cancel
         </Button>
         <Button
           variant="primary"
           disabled={!preview || reader.pending}
           pending={writer.pending}
-          hint="Adds the merged messages to this chat as one entry, after the message chosen."
+          hint={
+            joining
+              ? "Adds each chosen thread's messages to this thread as one entry, after the message chosen. Their characters are here again from there on."
+              : "Adds the merged messages to this chat as one entry, after the message chosen."
+          }
           onClick={() => void merge()}
         >
-          Merge
+          {joining ? "Join" : "Merge"}
         </Button>
       </DialogActions>
     </Dialog>

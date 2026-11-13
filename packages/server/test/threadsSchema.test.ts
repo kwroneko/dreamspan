@@ -102,7 +102,7 @@ describe("thread tables", () => {
       yield* insertCorrections(sql, { id: one.id, chatId: CHAT, forkId: CHAT }, ["s2"], ["card"])
       const [found] = yield* readKnowers(sql, CHAT, sql`1`, ["v-s2"], null, CHAT)
       assert.deepStrictEqual(found!.away, ["card"])
-      const [known] = yield* sql<{ knows: number }>`SELECT ${knowsSql(sql, ["card"], CHAT)} AS knows
+      const [known] = yield* sql<{ knows: number }>`SELECT ${yield* knowsSql(sql, ["card"], CHAT)} AS knows
         FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE v.id = 'v-s2'`
       assert.strictEqual(known!.knows, 0)
     }).pipe(Effect.provide(writerConnection(join(tempDir("threads-unknown-cast"), "db.sqlite"))))

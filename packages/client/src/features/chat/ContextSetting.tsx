@@ -40,6 +40,10 @@ export function ContextSetting({ session }: { session: ChatSession }) {
           onValueChange={(next) => void change(next)}
           options={options}
         />
+        <p className="text-sm text-muted">
+          One shared context also shares earlier messages and threads joined under separate contexts. A join explicitly
+          kept separate stays separate.
+        </p>
         {value === "separate" && <p className="text-sm text-warning">{SEPARATE_COST}</p>}
       </Fieldset>
       {error && (

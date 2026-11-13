@@ -21,7 +21,7 @@ const requested = new Map<string, string>()
 const latest = new Map<string, { readonly key: string; readonly sets: Sets }>()
 const listeners = new Set<() => void>()
 let revision = 0
-const subscribe = (listener: () => void) => {
+export const subscribeThreadSets = (listener: () => void) => {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
@@ -81,7 +81,7 @@ export function useThreadSetsOf(
   forkIds: ReadonlyArray<ForkId>,
   version: string
 ): ReadonlyMap<ForkId, Sets | null> {
-  useSyncExternalStore(subscribe, () => revision)
+  useSyncExternalStore(subscribeThreadSets, () => revision)
   const wanted = forkIds.join(",")
   useEffect(() => {
     if (chatId === null) return

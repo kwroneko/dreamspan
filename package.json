@@ -13,7 +13,7 @@
     "dev:client": "npm run dev -w @rp/client",
     "build": "npm run build -w @rp/client && npm run build -w @rp/server",
     "start": "node packages/server/src/main.ts",
-    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/server && tsc --noEmit -p packages/server/test/protocol && tsc --noEmit -p packages/client && tsc --noEmit -p packages/client/e2e && tsc --noEmit -p packages/client/perf",
+    "typecheck": "tsc --noEmit -p packages/shared && NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit -p packages/server && NODE_OPTIONS=--max-old-space-size=8192 tsc --noEmit -p packages/server/test/protocol && tsc --noEmit -p packages/client && tsc --noEmit -p packages/client/e2e && tsc --noEmit -p packages/client/perf",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

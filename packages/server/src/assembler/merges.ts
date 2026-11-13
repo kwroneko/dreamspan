@@ -107,10 +107,14 @@ const isJoin = (p: ProjectedEntry) => p.entry.merge !== undefined && p.system !=
  * C6): in a separate context, the viewer knew some of the merged rows and none of this chat's
  * own messages beside them, from the parallel span's start (from the history's start when the
  * span is empty or starts before the history read, and then not when summaries come before).
- * Its rows then go out as the messages they were, so its history reads on across the join.
+ * Its rows then go out as the messages they were, so its history reads on across the join. A
+ * summary reads a join as its section: the join is one of its inputs, sent as one message.
  */
 export const ownLine = (assembly: Assembly, history: ReadonlyArray<HistoryEntry>, join: HistoryEntry) => {
-  if ((assembly.knowledge?.viewer ?? null) === null || !join.known?.rows.length || join.known.ambiguous) return false
+  if (assembly.request.summaryJob) return false
+  const viewer =
+    assembly.knowledge?.viewer ?? (join.merge?.timelines === "separate" ? assembly.knowledge?.stretch?.viewer : null)
+  if ((viewer ?? null) === null || !join.known?.rows.length || join.known.ambiguous) return false
   const start = join.merge!.start === null ? undefined : history.find((e) => e.slotId === join.merge!.start)
   if (start === undefined && assembly.lcm?.cursor != null) return false
   const from = start?.depth ?? Number.NEGATIVE_INFINITY

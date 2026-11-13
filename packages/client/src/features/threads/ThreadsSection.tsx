@@ -141,6 +141,7 @@ function ThreadRow({
                   </span>
                   <span data-row-when className="block text-xs text-muted tabular-nums">
                     since {splitNumber(set)}
+                    {thread.joined ? ` · Joined at #${thread.joined.number}` : ""}
                     {opens ? ` · Last message ${formatMoment(branchLastAt(opens))}` : ""}
                   </span>
                 </Link>

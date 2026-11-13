@@ -9,6 +9,8 @@
 // registered and replaceable.
 import { Effect } from "effect"
 import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
+import { historyLeafOf } from "./types.ts"
+import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { viewedJoin } from "./mergeKnowledge.ts"
 import { AssemblySources, need, type Assembly, type AssemblerStage, type Cast } from "./pipeline.ts"
@@ -99,6 +101,18 @@ export interface Knowledge {
   readonly viewer: string | null
   /** Earlier identities of this same character on this fork (card replacements). */
   readonly aliases?: ReadonlyArray<string>
+  /**
+   * With the whole path (`viewer` null) but a character speaking: whom a separate join's
+   * parallel stretch is filtered for (spec/THREADS.md §7.3). The rest of the history stays whole.
+   * `stored`: the planning fork's live stretches (`threadStretches`), for a stretch
+   * view's own summary, whose chunk may end before the join (TH7); else those of the joins read.
+   */
+  readonly stretch?: {
+    readonly viewer: string
+    readonly aliases?: ReadonlyArray<string>
+    readonly stored?: boolean
+    readonly ranges?: ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>
+  }
 }
 
 /**
@@ -109,9 +123,25 @@ export interface Knowledge {
 export const knowledgeStage: AssemblerStage = {
   id: "knowledge",
   run: (assembly) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
+      const sources = yield* AssemblySources
       // A view's own summary is written from what its character knew (unit C7).
       const audience = assembly.request.summaryJob?.audience
+      // A stretch view's (spec/THREADS.md §7.3, TH7): only the separate joins' stretches.
+      const own = audience?.filter((id) => id !== STRETCH_VIEW) ?? []
+      if (audience?.length && own.length && own.length < audience.length) {
+        assembly.knowledge = {
+          view: "shared",
+          viewer: null,
+          stretch: {
+            viewer: own[0]!,
+            aliases: own,
+            stored: true,
+            ...(sources.stretches ? { ranges: yield* sources.stretches() } : {})
+          }
+        }
+        return assembly
+      }
       if (audience?.length) {
         assembly.knowledge = { view: "separate", viewer: audience[0]!, aliases: audience }
         return assembly
@@ -128,9 +158,25 @@ export const knowledgeStage: AssemblerStage = {
         })
       const view = found ?? views.get("separate") ?? separateView
       const viewer = view.viewer({ assembly, cast, roles: state.roles })
-      const aliases =
-        viewer === null ? undefined : identitiesOf((assembly.events ?? []).map((e) => e.event)).get(viewer)
-      assembly.knowledge = { view: view.id, viewer, ...(aliases && aliases.length > 1 ? { aliases } : {}) }
+      // A separate join in a chat read whole is read by the speaker's presence in its stretch.
+      const stretch = viewer === null ? separateView.viewer({ assembly, cast, roles: state.roles }) : null
+      const named = viewer ?? stretch
+      const aliases = named === null ? undefined : identitiesOf((assembly.events ?? []).map((e) => e.event)).get(named)
+      const alias = aliases && aliases.length > 1 ? { aliases } : {}
+      assembly.knowledge =
+        stretch === null
+          ? { view: view.id, viewer, ...alias }
+          : {
+              view: view.id,
+              viewer,
+              stretch: {
+                viewer: stretch,
+                ...alias,
+                ...(sources.stretches
+                  ? { ranges: yield* sources.stretches(historyLeafOf(need(assembly, "target"))) }
+                  : {})
+              }
+            }
       return assembly
     })
 }
@@ -169,24 +215,67 @@ const joinFor = (
  * numbering and the history's positions stay, but not in the context (`unknown`). A merge's
  * join keeps what the viewer knew of it (`joinFor`), unless the viewer's fork counts it not
  * there for the join (`away`: the played stretch of threads started earlier, THREADS §5.2).
+ * Read whole with a character speaking (`stretch`), only a separate join and the messages of
+ * its parallel stretch are (`inStretch`).
  */
 export const withoutUnknown = (assembly: Assembly, entries: ReadonlyArray<HistoryEntry>) =>
   Effect.gen(function* () {
     const viewer = assembly.knowledge?.viewer ?? null
     const sources = yield* AssemblySources
-    if (viewer === null || !sources.knowers) return entries
-    const ids = entries.filter((e) => e.inContext).map((e) => e.versionId)
+    if (!sources.knowers) return entries
+    if (viewer !== null)
+      return yield* filterKnown(assembly, entries, assembly.knowledge?.aliases ?? [viewer], () => true)
+    const stretch = assembly.knowledge?.stretch
+    if (!stretch) return entries
+    if (stretch.ranges?.length === 0) return entries
+    if (stretch.ranges || stretch.stored) {
+      const ids = entries.filter((e) => e.inContext).map((e) => e.versionId)
+      const found = ids.length ? yield* sources.knowers(ids) : []
+      const stretched = new Set(found.flatMap((k) => (k.stretched ? [k.versionId] : [])))
+      return yield* filterKnown(assembly, entries, stretch.aliases ?? [stretch.viewer], (e) =>
+        stretched.has(e.versionId)
+      )
+    }
+    const open = (assembly.parallelStretches ??= [])
+    for (const entry of [...entries].reverse())
+      if (entry.inContext && entry.merge?.timelines === "separate")
+        open.push({ start: entry.merge.start, from: null, to: entry.depth })
+    for (const span of open)
+      if (span.from === null && span.start !== null) {
+        const found = entries.find((e) => e.slotId === span.start)
+        if (found) span.from = found.depth
+      }
+    if (open.length === 0) return entries
+    const inStretch = (entry: HistoryEntry) =>
+      entry.merge
+        ? entry.merge.timelines === "separate"
+        : open.some((span) => span.start !== null && entry.depth < span.to && entry.depth >= (span.from ?? -Infinity))
+    return yield* filterKnown(assembly, entries, stretch.aliases ?? [stretch.viewer], inStretch)
+  })
+
+const filterKnown = (
+  assembly: Assembly,
+  entries: ReadonlyArray<HistoryEntry>,
+  identities: ReadonlyArray<string>,
+  applies: (entry: HistoryEntry) => boolean
+) =>
+  Effect.gen(function* () {
+    const sources = yield* AssemblySources
+    const ids = entries.filter((e) => e.inContext && applies(e)).map((e) => e.versionId)
     if (ids.length === 0) return entries
-    const identities = assembly.knowledge?.aliases ?? [viewer]
     const knows = (knowers: ReadonlyArray<string>) => identities.some((id) => knowers.includes(id))
+    if (!sources.knowers) return entries
     const read = yield* sources.knowers(ids)
     const known = new Map(read.map((k) => [k.versionId, k.knowers]))
     const away = new Map(read.flatMap((k) => (k.away?.length ? [[k.versionId, k.away] as const] : [])))
-    const joins = sources.mergeRows ? entries.flatMap((e) => (e.inContext && e.merge ? [e.merge.id] : [])) : []
+    const joins = sources.mergeRows
+      ? entries.flatMap((e) => (e.inContext && e.merge && applies(e) ? [e.merge.id] : []))
+      : []
     const merged = new Map(
       joins.length ? (yield* sources.mergeRows!(joins)).map((m) => [m.mergeId, m.rows] as const) : []
     )
     return entries.map((entry) => {
+      if (!applies(entry)) return entry
       const gone = away.get(entry.versionId)
       if (
         entry.inContext &&

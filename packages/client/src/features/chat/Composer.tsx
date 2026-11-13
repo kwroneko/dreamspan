@@ -1,6 +1,11 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { composerWorkspace } from "./composerWorkspace.ts"
-import { ComposerControls, invokeComposerControl, type ComposerControlContext } from "./composerControls.tsx"
+import {
+  ComposerControls,
+  invokeComposerControl,
+  type ComposerControlContext,
+  useSendRoute
+} from "./composerControls.tsx"
 // The composer (DESIGN §2.2): who's speaking, always visible, with a switcher and the
 // speakers used most recently; Send as them, or Generate a turn. With the guidance toggle
 // on, the text is guidance instead: a one-turn direction for Generate or Continue, never sent
@@ -354,6 +359,8 @@ export function Composer({
   // Listed first in the switcher, with nothing typed: who spoke last, the speaker too.
   const switcherRecent = useMemo(() => recentSpeakers(view.entries, 8), [view.entries])
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
+  // Another way to send, while one takes it (threads' "To 2 threads", composerSendRoutes).
+  const { route: sendRoute, hint: routeHint } = useSendRoute(session, view)
 
   /** The composer belongs to the fork shown (DESIGN §6.2). */
   useEffect(syncFork, [syncFork, view.forkId, view.leafSlotId, view.loading, view.opened])
@@ -460,18 +467,33 @@ export function Composer({
         choice.noReplies
       )
       try {
-        const { sent, outcome, draft, recovered } = await session.send(
-          from.text,
-          speaker,
-          plan.replier,
-          from,
-          plan.reply,
-          captured?.images,
-          captured?.ids,
-          plan.round,
-          // For the decision model to choose (the server asks it only if two or more can reply).
-          nextDecisionOn && plan.auto
-        )
+        // For the decision model to choose (the server asks it only if two or more can reply).
+        const autoPick = nextDecisionOn && plan.auto
+        const { sent, outcome, draft, recovered } =
+          sendRoute !== null
+            ? await sendRoute.send({
+                session,
+                view: session.snapshot(),
+                text: from.text,
+                speaker,
+                plan,
+                autoPick,
+                decides: nextDecisionOn,
+                composer: from,
+                images: captured?.images,
+                imageDraftIds: captured?.ids
+              })
+            : await session.send(
+                from.text,
+                speaker,
+                plan.replier,
+                from,
+                plan.reply,
+                captured?.images,
+                captured?.ids,
+                plan.round,
+                autoPick
+              )
         accepted = sent
         report(outcome)
         if (sent) replied(from.draftId)
@@ -556,7 +578,7 @@ export function Composer({
         ? `${replierName} ${replies}`
         : "Send"
   const sendHint = hasText
-    ? `${sendLabel}${
+    ? `${sendLabel}${routeHint}${
         decides
           ? ", then the decision model chooses who replies"
           : roundNames
