@@ -141,6 +141,7 @@ export const makePermit =
           text: "This change couldn't be described safely. Read the item again before trying."
         } as const
       const prompt: ApprovalPrompt = {
+        ...(context.storyAt ? { storyAt: context.storyAt } : {}),
         rolloutId,
         toolCallId,
         digest,

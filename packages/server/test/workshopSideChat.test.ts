@@ -140,6 +140,7 @@ const turn = (
   at?: StoryAt | null
 ) =>
   Effect.gen(function* () {
+    const storyAt = at === null ? undefined : (at ?? (yield* storyOf(api, workshop)))
     const events: Array<ChatEvent> = []
     const answered = new Set<string>()
     yield* api.SubscribeChat({ chatId: workshop.id }).pipe(
@@ -156,6 +157,7 @@ const turn = (
                     rolloutId: step.approval.rolloutId,
                     toolCallId: step.approval.toolCallId,
                     digest: step.approval.digest,
+                    ...(storyAt ? { storyAt } : {}),
                     answer: "allow"
                   })
                 }
@@ -168,7 +170,6 @@ const turn = (
     const sent = yield* posted(
       api.SendMessage({ chatId: chat.id, parentSlotId: chat.activeLeafSlotId, branch: false, content })
     )
-    const storyAt = at === null ? undefined : (at ?? (yield* storyOf(api, workshop)))
     const generated = yield* posted(
       api.Generate({
         chatId: chat.id,

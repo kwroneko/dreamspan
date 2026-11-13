@@ -16,8 +16,6 @@ export const makeAgentHistoryReadHandlers = Effect.gen(function* () {
     AgentRewriteTargets: ({ userId, chatId, forkId, messages }) =>
       Effect.gen(function* () {
         const fork = yield* historyFork(sql, userId, chatId, forkId)
-        const [shown] = yield* sql`SELECT 1 FROM chats WHERE id=${chatId} AND current_fork_id=${forkId}`
-        if (!shown) return yield* new HistoryRejected({ message: "The shown branch changed. Read the chat again." })
         const pieces = yield* pathPieces(sql, chatId, forkId, fork.tip_slot_id)
         if (!messages.length) return []
         return yield* sql<{ message: number; targetId: string; beforeId: string; before: string }>`

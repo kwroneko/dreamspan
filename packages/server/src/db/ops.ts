@@ -2066,6 +2066,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
   }),
   Rpc.make("StartEditRollout", {
     payload: {
+      storyAt: StoryAtField,
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
@@ -2078,6 +2079,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
   }),
   Rpc.make("ApplyAgentChangeset", {
     payload: {
+      storyAt: StoryAtField,
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
@@ -2249,6 +2251,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
    */
   Rpc.make("AnswerToolApproval", {
     payload: {
+      storyAt: StoryAtField,
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
@@ -4502,7 +4505,7 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("WorkshopOperationInfo", {
-    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId) },
+    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId), storyAt: StoryAtField },
     success: Schema.Struct({
       user: User,
       settings: Schema.Array(

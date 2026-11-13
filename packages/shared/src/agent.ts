@@ -1,6 +1,7 @@
 // What an agent rollout shows of its work (spec/AGENTIC.md §5.1): its steps, live while it runs
 // and afterwards from its transcript.
 import { Schema } from "effect"
+import { StoryAtField } from "./chatPosition.ts"
 
 const EffectClass = Schema.Literals(["read", "chat_state", "external", "library", "setup", "outside"])
 
@@ -9,6 +10,7 @@ const EffectClass = Schema.Literals(["read", "chat_state", "external", "library"
  * arguments and the items they name (spec/WORKSHOP.md §3.4): never the model's own wording of it.
  */
 export const ApprovalPrompt = Schema.Struct({
+  storyAt: StoryAtField,
   rolloutId: Schema.String,
   toolCallId: Schema.String,
   /** The arguments' digest: an answer names it, so it holds only for this exact call. */

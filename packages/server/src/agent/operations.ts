@@ -152,6 +152,9 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
                     model: import("@rp/shared/providers.ts").ModelId
                   }
                 }
+                storyAt?: import("@rp/shared/chat.ts").StoryAt
+                upTo?: number
+                branchLabel?: string
                 chats?: ReadonlyArray<{ id: string; title: string }>
               }
             | undefined
@@ -161,6 +164,11 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
           }))
           for (const chat of proof?.chats ?? [])
             rows.unshift({ label: "affected chat", value: `${chat.title} (${chat.id})` })
+          if (proof?.storyAt)
+            rows.unshift({
+              label: "Story position",
+              value: `Branch ${proof.branchLabel ?? "Unnamed"} (${proof.storyAt.forkId}); through message ${proof.upTo ?? 0}`
+            })
           if (proof?.chat) rows.unshift({ label: "chat", value: proof.chat.title })
           if (entry.capability === "generate" && proof?.chat?.model) {
             const connection = yield* ctx.reader.GetConnection({

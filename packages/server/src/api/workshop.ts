@@ -79,7 +79,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         if (mode === "off") cancelCapability(chatId, capability)
         return yield* capabilitiesOf(userId, chatId)
       }).pipe(internal("SetWorkshopGrant")),
-    AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note }) =>
+    AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note, storyAt }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
         const text = note?.trim() ?? ""
@@ -88,6 +88,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           rolloutId,
           toolCallId,
           digest,
+          ...(storyAt ? { storyAt } : {}),
           answer,
           note: text === "" ? null : text
         })

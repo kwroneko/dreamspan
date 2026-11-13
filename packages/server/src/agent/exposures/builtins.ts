@@ -1,3 +1,4 @@
+import { storyWriteChat } from "../storyWriteScope.ts"
 import { checkStoryReadScope } from "../storyReadScope.ts"
 import { documentDiff, documentChangeRows, safeAgentDocument, executableNotice } from "../../db/agentDocuments.ts"
 import { promptPreset } from "@rp/shared/docs/preset.ts"
@@ -59,9 +60,16 @@ export const resolveChat = (ctx: ToolContext, value: unknown) =>
   })
 const chatPayload = (ctx: ToolContext, args: Record<string, unknown>) =>
   Effect.gen(function* () {
-    const chat = yield* resolveChat(ctx, args.chat)
-    const info = yield* ctx.reader.WorkshopOperationInfo({ userId: ctx.userId, chatId: chat.id })
-    ctx.cache.set(`operation:proof:${ctx.toolCallId}`, { chat: info.proof })
+    const chat = yield* storyWriteChat(ctx, yield* resolveChat(ctx, args.chat))
+    const info = yield* ctx.reader.WorkshopOperationInfo({
+      userId: ctx.userId,
+      chatId: chat.id,
+      ...(chat.storyTarget ? { storyAt: chat.storyTarget } : {})
+    })
+    ctx.cache.set(`operation:proof:${ctx.toolCallId}`, {
+      chat: info.proof,
+      ...(chat.storyTarget ? { storyAt: chat.storyTarget, upTo: chat.upTo, branchLabel: chat.branchLabel } : {})
+    })
     return { chatId: chat.id, forkId: chat.currentForkId, slotId: chat.activeLeafSlotId }
   })
 const exposure = (

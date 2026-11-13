@@ -95,9 +95,465 @@ const fixture = (dataDir: string) =>
       path
     }
   })
+const beside = (dataDir: string, atEnd = false) =>
+  Effect.gen(function* () {
+    const f = yield* fixture(dataDir)
+    const sibling = (yield* f.writer.CreateFork({
+      userId: f.userId,
+      chatId: f.chat.id,
+      fromForkId: f.forkId,
+      atSlotId: f.entries.at(-1)!.slotId
+    })).fork
+    yield* f.writer.AddSelectedVersion({
+      userId: f.userId,
+      forkId: sibling.id,
+      slotId: f.entries[0]!.slotId,
+      version: said("NEWEST sentinel"),
+      expectedRowVersion: sibling.rowVersion,
+      commitDraft: null
+    })
+    const side = yield* f.api.CreateWorkshop({ attachTo: f.chat.id })
+    const rolloutId = `side-${side.id}`
+    yield* fixtureSql(dataDir, [
+      {
+        sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?, ?, 'workshop', 'running', 'assistant', 'interactive', 1, 1)",
+        params: [rolloutId, side.id]
+      }
+    ])
+    const context = {
+      ...f.context,
+      rolloutId,
+      chatId: side.id,
+      forkId: side.currentForkId,
+      leafSlotId: side.activeLeafSlotId,
+      cache: new Map<string, unknown>(),
+      storyAt: { chatId: f.chat.id, forkId: f.forkId, leafSlotId: (atEnd ? f.entries.at(-1)! : f.entries[4]!).slotId }
+    }
+    yield* fixtureSql(dataDir, [
+      {
+        sql: "INSERT INTO rollout_payloads(rollout_id,context_snapshot_json) VALUES (?,?)",
+        params: [rolloutId, JSON.stringify({ storyAt: context.storyAt })]
+      }
+    ])
+    const run = (name: string, args: unknown, id = name) =>
+      f.tool(name).execute({ ...context, toolCallId: id }, args as never)
+    return { ...f, side, sibling, context, run }
+  })
 const pairs = [{ find: "Aria", replace: "Ari", in: ["messages", "summaries"] }]
 
 describe("workshop chat rewrites", () => {
+  it.live("bounds side writes, refuses missing and changed positions and deleted branches", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir)
+      const args = { chat: f.chat.id, title: "Bounded", messages: [{ message: 6, text: "future" }] }
+      assert.isTrue((yield* f.run("rewrite_messages", args)).isError)
+      const tool = f.tool("rewrite_messages")
+      const allowed = { ...args, messages: [{ message: 1, text: "allowed" }] }
+      const ctx = { ...f.context, toolCallId: "waiting" }
+      yield* tool.describe!(ctx, allowed as never)
+      const moved = yield* tool.execute({ ...ctx, storyAt: { ...ctx.storyAt, forkId: f.sibling.id } }, allowed as never)
+      assert.isTrue(moved.isError)
+      const { storyAt: originalAt, ...withoutPosition } = ctx
+      const absent = yield* tool.execute({ ...withoutPosition, toolCallId: "no-position" }, allowed as never)
+      assert.isTrue(absent.isError)
+      const forged = yield* tool.execute(
+        { ...ctx, toolCallId: "other-chat", storyAt: { ...originalAt, chatId: f.workshop.id } },
+        allowed as never
+      )
+      assert.isTrue(forged.isError)
+      yield* f.api.DeleteFork({ forkId: f.forkId })
+      const deleted = yield* tool.execute(ctx, allowed as never)
+      assert.isTrue(deleted.isError)
+      const newest = yield* f.reader.GetPath({
+        userId: f.userId,
+        chatId: f.chat.id,
+        forkId: f.sibling.id,
+        leafSlotId: null,
+        limit: 100
+      })
+      assert.strictEqual(newest.entries[0]!.version.content, "NEWEST sentinel")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("allows a summary ending at the tab boundary and refuses later summaries and direct worker escapes", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir)
+      const inputs = (yield* f.path()).entries.map((entry) => ({
+        slotId: entry.slotId,
+        versionId: entry.version.id,
+        amendCount: 0
+      }))
+      const prefix = yield* completeFixture(
+        config.dataDir,
+        f.writer,
+        f.userId,
+        f.chat.id,
+        inputs.slice(0, 5),
+        [],
+        "Prefix summary"
+      )
+      const later = yield* completeFixture(
+        config.dataDir,
+        f.writer,
+        f.userId,
+        f.chat.id,
+        inputs.slice(5),
+        [],
+        "Later summary"
+      )
+      const args = {
+        chat: f.chat.id,
+        title: "Summary boundary",
+        messages: [{ message: 1, text: "Prefix changed" }],
+        summaries: [{ summary: prefix.id, text: "Prefix revised" }]
+      }
+      const accepted = yield* f.run("rewrite_messages", args, "summary-prefix")
+      assert.isUndefined(accepted.isError, accepted.text)
+      const refused = yield* f.run(
+        "rewrite_messages",
+        { ...args, summaries: [{ summary: later.id, text: "Future revised" }] },
+        "summary-future"
+      )
+      assert.isTrue(refused.isError)
+      const snapshot = yield* f.reader.AgentHistorySnapshot({ userId: f.userId, chatId: f.chat.id, forkId: f.forkId })
+      const payload = {
+        userId: f.userId,
+        rolloutId: f.context.rolloutId,
+        toolCallId: "worker-escape",
+        chatId: f.chat.id,
+        forkId: f.forkId,
+        expected: snapshot.stamp,
+        title: "Direct",
+        includeSwipes: false,
+        summariesIncluded: false,
+        edits: [
+          {
+            kind: "version_replace" as const,
+            targetId: f.entries[5]!.version.id,
+            beforeId: f.entries[5]!.version.id,
+            before: f.entries[5]!.version.content,
+            after: "Forbidden future"
+          }
+        ]
+      }
+      assert.strictEqual(
+        yield* outcome(f.writer.ApplyAgentChangeset({ ...payload, storyAt: f.context.storyAt })),
+        "HistoryRejected"
+      )
+      assert.strictEqual(yield* outcome(f.writer.ApplyAgentChangeset(payload)), "HistoryRejected")
+      const anotherPosition = { ...f.context.storyAt, forkId: f.sibling.id }
+      const info = yield* f.reader.WorkshopOperationInfo({
+        userId: f.userId,
+        chatId: f.chat.id,
+        storyAt: anotherPosition
+      })
+      const redirected = yield* f.writer
+        .RunWorkshopOperation({
+          userId: f.userId,
+          rolloutId: f.context.rolloutId,
+          toolCallId: "forged-run-position",
+          capability: "chats.setup",
+          expected: { proof: { chat: info.proof, storyAt: anotherPosition } },
+          operation: "AddStateEvents",
+          payload: {
+            userId: f.userId,
+            chatId: f.chat.id,
+            forkId: f.sibling.id,
+            slotId: anotherPosition.leafSlotId,
+            data: [{ key: "agent.enabled", value: { on: true } }]
+          }
+        })
+        .pipe(Effect.flip)
+      assert.strictEqual(redirected._tag, "EffectUndoRefused")
+      assert.include(redirected.message, "saved for this run")
+
+      assert.strictEqual(
+        yield* outcome(
+          f.writer.RunWorkshopOperation({
+            userId: f.userId,
+            rolloutId: f.context.rolloutId,
+            toolCallId: "missing-proof",
+            capability: "chats.setup",
+            expected: {},
+            operation: "AddStateEvents",
+            payload: {
+              userId: f.userId,
+              chatId: f.chat.id,
+              forkId: f.sibling.id,
+              slotId: f.entries[4]!.slotId,
+              data: [{ key: "agent.enabled", value: { on: true } }]
+            }
+          })
+        ),
+        "EffectUndoRefused"
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+  it.live("changes setup and notes only from the side tab's branch and position, including Undo", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir)
+      const preset = yield* f.api.CreatePreset({ label: "Tab preset" })
+      const note = yield* f.writer.CreateEntity({
+        userId: f.userId,
+        kind: "note",
+        label: "Direction",
+        subtitle: "",
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null,
+        doc: { ...newChatNote(f.chat.id, "Direction"), content: "Before note" }
+      })
+      const read = (forkId: typeof f.forkId, slotId: SlotId) => f.api.GetCast({ chatId: f.chat.id, forkId, slotId })
+      const before = yield* read(f.forkId, f.entries[4]!.slotId)
+      const result = yield* f.run("change_chat", { chat: f.chat.id, change: { _tag: "Preset", ref: preset.id } })
+      assert.isUndefined(result.isError, result.text)
+      assert.strictEqual((yield* read(f.forkId, f.entries[4]!.slotId)).preset, preset.id)
+      assert.strictEqual((yield* read(f.forkId, f.entries[3]!.slotId)).preset, before.preset)
+      assert.strictEqual((yield* read(f.sibling.id, f.entries[4]!.slotId)).preset, before.preset)
+      let effect = (yield* f.api.ListRolloutEffects({ chatId: f.side.id }))[0]!
+      assert.include(effect.title, f.forkId)
+      yield* f.api.UndoRolloutEffect(effect)
+      assert.strictEqual((yield* read(f.forkId, f.entries[4]!.slotId)).preset, before.preset)
+      const notes = (forkId: typeof f.forkId, slotId: SlotId) =>
+        f.reader.ChatNoteEntries({ userId: f.userId, chatId: f.chat.id, forkId, slotId, cards: [] })
+      const changed = yield* f.run("rewrite_instructions", {
+        chat: f.chat.id,
+        title: "Tab note",
+        changes: [{ note: note.ref.id, text: "After note" }]
+      })
+      assert.isUndefined(changed.isError, changed.text)
+      assert.strictEqual((yield* notes(f.forkId, f.entries[4]!.slotId))[0]!.doc.content, "After note")
+      assert.strictEqual((yield* notes(f.forkId, f.entries[3]!.slotId))[0]!.doc.content, "Before note")
+      assert.strictEqual((yield* notes(f.sibling.id, f.entries[4]!.slotId))[0]!.doc.content, "Before note")
+      effect = (yield* f.api.ListRolloutEffects({ chatId: f.side.id }))[0]!
+      yield* f.api.UndoRolloutEffect(effect)
+      assert.strictEqual((yield* notes(f.forkId, f.entries[4]!.slotId))[0]!.doc.content, "Before note")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("generates and undoes on the side tab's branch without redirecting or queueing", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir, true)
+      yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "generate", mode: "allow" })
+      const at = { ...f.context.storyAt, leafSlotId: f.entries.at(-1)!.slotId }
+      const connection = yield* f.api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Synthetic target model",
+          baseUrl: "http://127.0.0.1:1/v1",
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        }
+      })
+      const model = yield* f.api.AddUserModel({ connectionId: connection.id, key: "synthetic-target", overrides: {} })
+      yield* f.api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
+      const described = { ...f.context, toolCallId: "generate-adapter", storyAt: at }
+      const prompt = yield* f.tool("generate_reply").describe!(described, { chat: f.chat.id } as never)
+      assert.include(JSON.stringify(prompt), f.forkId)
+      const adapted = described.cache.get("operation:prepared:generate-adapter") as {
+        payload: { forkId: string; parentSlotId: string }
+      }
+      assert.strictEqual(adapted.payload.forkId, f.forkId)
+      assert.strictEqual(adapted.payload.parentSlotId, at.leafSlotId)
+      const invoke = (storyAt: typeof at, id: string) =>
+        Effect.gen(function* () {
+          const info = yield* f.reader.WorkshopOperationInfo({ userId: f.userId, chatId: f.chat.id, storyAt })
+          return yield* f.writer.RunWorkshopOperation({
+            userId: f.userId,
+            rolloutId: f.context.rolloutId,
+            toolCallId: id,
+            capability: "generate",
+            operation: "SendOrQueue",
+            expected: { proof: { chat: info.proof, storyAt } },
+            payload: {
+              userId: f.userId,
+              chatId: f.chat.id,
+              forkId: at.forkId,
+              parentSlotId: storyAt.leafSlotId,
+              branch: false,
+              kind: "generate",
+              content: "",
+              speakerEntityId: null,
+              replySpeakerEntityId: null,
+              direction: null,
+              commitDraft: null
+            }
+          })
+        })
+      assert.strictEqual(
+        yield* outcome(invoke({ ...at, leafSlotId: f.entries[4]!.slotId }, "historical")),
+        "EffectUndoRefused"
+      )
+      const result = (yield* invoke(at, "at-end")) as {
+        _tag: string
+        result: { slotId: SlotId; version: { id: VersionId }; forkId: typeof f.forkId }
+      }
+      assert.strictEqual(result._tag, "Posted")
+      assert.strictEqual(result.result.forkId, f.forkId)
+      yield* f.writer.FinishGeneration({
+        userId: f.userId,
+        versionId: result.result.version.id,
+        content: "Synthetic reply",
+        status: "complete",
+        error: null
+      })
+      assert.strictEqual((yield* f.path()).entries.at(-1)!.version.content, "Synthetic reply")
+      assert.lengthOf(
+        (yield* f.reader.GetPath({
+          userId: f.userId,
+          chatId: f.chat.id,
+          forkId: f.sibling.id,
+          leafSlotId: null,
+          limit: 100
+        })).entries,
+        10
+      )
+      const effect = (yield* f.api.ListRolloutEffects({ chatId: f.side.id }))[0]!
+      assert.include(effect.title, f.forkId)
+      yield* f.api.UndoRolloutEffect(effect)
+      assert.lengthOf((yield* f.path()).entries, 10)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+  it.live("refuses approval from a moved tab and accepts the original declared position", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir)
+      yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "chats.rewrite", mode: "ask" })
+      const ctx = { ...f.context, toolCallId: "approved" }
+      const args = { chat: f.chat.id, title: "Approved tab", messages: [{ message: 1, text: "Approved sentinel" }] }
+      let waiting: ApprovalPrompt | null = null
+      const permission = yield* makePermit({
+        registries: f.registry,
+        reader: f.reader,
+        writer: f.writer,
+        userId: f.userId,
+        chatId: f.side.id,
+        rolloutId: ctx.rolloutId
+      })({
+        tool: f.tool("rewrite_messages"),
+        context: ctx,
+        args,
+        dangling: false,
+        onWaiting: (p) => {
+          waiting = p
+        }
+      }).pipe(Effect.forkScoped)
+      yield* eventually(() => waiting !== null)
+      assert.include(JSON.stringify(waiting), "messages 1–5")
+      assert.strictEqual(
+        yield* outcome(
+          f.api.AnswerToolApproval({ ...waiting!, storyAt: { ...ctx.storyAt, forkId: f.sibling.id }, answer: "allow" })
+        ),
+        "ApprovalRefused"
+      )
+      yield* f.api.AnswerToolApproval({ ...waiting!, storyAt: ctx.storyAt, answer: "allow" })
+      const permit = yield* Fiber.join(permission)
+      assert.isTrue(permit.run)
+      if (!permit.run) throw new Error("Not allowed")
+      const result = yield* f
+        .tool("rewrite_messages")
+        .execute({ ...ctx, ...(permit.approvalDigest ? { approvalDigest: permit.approvalDigest } : {}) }, args as never)
+      assert.isUndefined(result.isError, result.text)
+      assert.strictEqual((yield* f.path()).entries[0]!.version.content, "Approved sentinel")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+  for (const name of ["rewrite_chat", "rewrite_messages", "rewrite_instructions", "history_rename"]) {
+    it.live(`targets the side tab's older branch for ${name} and undoes there`, () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const f = yield* fixture(config.dataDir)
+        const sibling = (yield* f.writer.CreateFork({
+          userId: f.userId,
+          chatId: f.chat.id,
+          fromForkId: f.forkId,
+          atSlotId: f.entries.at(-1)!.slotId
+        })).fork
+        yield* f.writer.AddSelectedVersion({
+          userId: f.userId,
+          forkId: sibling.id,
+          slotId: f.entries[0]!.slotId,
+          version: said("NEWEST sentinel"),
+          expectedRowVersion: sibling.rowVersion,
+          commitDraft: null
+        })
+        const side = yield* f.api.CreateWorkshop({ attachTo: f.chat.id })
+        const sideRun = `side-${side.id}`
+        yield* fixtureSql(config.dataDir, [
+          {
+            sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?, ?, 'workshop', 'running', 'assistant', 'interactive', 1, 1)",
+            params: [sideRun, side.id]
+          }
+        ])
+        const ctx = {
+          ...f.context,
+          rolloutId: sideRun,
+          chatId: side.id,
+          forkId: side.currentForkId,
+          leafSlotId: side.activeLeafSlotId,
+          cache: new Map<string, unknown>(),
+          toolCallId: name,
+          storyAt: { chatId: f.chat.id, forkId: f.forkId, leafSlotId: f.entries[4]!.slotId }
+        }
+        yield* fixtureSql(config.dataDir, [
+          {
+            sql: "INSERT INTO rollout_payloads(rollout_id,context_snapshot_json) VALUES (?,?)",
+            params: [sideRun, JSON.stringify({ storyAt: ctx.storyAt })]
+          }
+        ])
+        const args =
+          name === "rewrite_chat"
+            ? { chat: f.chat.id, title: "Tab rewrite", pairs }
+            : name === "rewrite_messages"
+              ? { chat: f.chat.id, title: "Tab rewrite", messages: [{ message: 1, text: "Ari tab sentinel" }] }
+              : name === "history_rename"
+                ? {
+                    chatId: f.chat.id,
+                    forkId: f.forkId,
+                    scope: "this",
+                    entityId: "unused",
+                    oldName: "Aria",
+                    newName: "Ari"
+                  }
+                : { chat: f.chat.id, title: "Tab rewrite", changes: [{ preset: null }] }
+        const prompt = yield* f.tool(name).describe!(ctx, args as never)
+        assert.include(JSON.stringify(prompt), f.forkId)
+        const result = yield* f.tool(name).execute(ctx, args as never)
+        assert.isUndefined(result.isError, result.text)
+        const [provenance] = yield* fixtureSql(
+          config.dataDir,
+          [{ sql: "SELECT leaf_slot_id FROM rollouts WHERE chat_id=? AND kind='edit'", params: [f.chat.id] }],
+          { readOnly: true }
+        )
+        assert.strictEqual(provenance![0]!.leaf_slot_id, ctx.storyAt.leafSlotId)
+        const old = (yield* f.path()).entries
+        if (name !== "rewrite_instructions") {
+          assert.include(old[0]!.version.content, "Ari ")
+          assert.include(old[5]!.version.content, "Aria ")
+        }
+        const newest = yield* f.reader.GetPath({
+          userId: f.userId,
+          chatId: f.chat.id,
+          forkId: sibling.id,
+          leafSlotId: null,
+          limit: 100
+        })
+        assert.strictEqual(newest.entries[0]!.version.content, "NEWEST sentinel")
+        const effect = (yield* f.api.ListRolloutEffects({ chatId: side.id }))[0]!
+        assert.include(effect.title, f.forkId)
+        yield* f.api.UndoRolloutEffect(effect)
+        assert.include((yield* f.path()).entries[0]!.version.content, "Aria ")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    })
+  }
+
   it.live(
     "renames messages and dependent summaries once, preserves forks and swipes, and undoes the whole changeset",
     () => {

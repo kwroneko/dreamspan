@@ -5,8 +5,10 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { startWorkshopProvider } from "./workshopProvider.ts"
 import { level1 } from "./summaries.ts"
 import { expectLayout } from "./layoutAudit.ts"
+import { openPanel } from "./panel.ts"
 
 export function workshopRewriteTests() {
+  sideWriteTests()
   test.describe("workshop history provenance", () => {
     const server = serverPerFile(withAdmin)
     for (const width of [1440, 390])
@@ -127,6 +129,144 @@ export function workshopRewriteTests() {
             await page.getByRole("button", { name: "Undo all", exact: true }).click()
             await expect(page.getByRole("button", { name: "Undo all", exact: true })).toBeDisabled()
             await expectLayout(page, info, `rewrite-history-undone-${width}-${theme}`)
+          } finally {
+            await provider.stop()
+          }
+        })
+  })
+}
+
+/** Approval follows the answering tab too; two branch sentinels make redirection visible. */
+function sideWriteTests() {
+  test.describe("side workshop rewrite target", () => {
+    const server = serverPerFile(withAdmin)
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const)
+        test(`older branch approval and Undo ${width} ${theme}`, async ({ page }, info) => {
+          test.setTimeout(180000)
+          const admin = <A>(run: (api: import("./rpc.ts").Client) => Effect.Effect<A, unknown>) =>
+            asUser(server(), ADMIN.handle, ADMIN.password, run)
+          const fixture = await admin((api) =>
+            Effect.gen(function* () {
+              const chat = yield* api.CreateChat({ title: `Tab target ${width} ${theme}` })
+              const sent = yield* api.SendMessage({
+                chatId: chat.id,
+                parentSlotId: null,
+                branch: false,
+                content: "OLDER sentinel"
+              })
+              if (sent._tag !== "Posted") throw new Error("queued")
+              const original = sent.entry.forkId!
+              const fork = yield* api.CreateFork({
+                chatId: chat.id,
+                fromForkId: original,
+                atSlotId: sent.entry.slotId,
+                name: "Newer branch"
+              })
+              const path = yield* api.ReadPath({
+                chatId: chat.id,
+                forkId: fork.fork.id,
+                leafSlotId: null,
+                range: { _tag: "Bottom" },
+                limit: 10
+              })
+              const slot = path.entries[0]!
+              yield* api.EditVersion({
+                slotId: sent.entry.slotId,
+                forkId: fork.fork.id,
+                sourceVersionId: slot.version.id,
+                expectedRowVersion: slot.rowVersion,
+                content: "NEWER sentinel"
+              })
+              return { chat, original, newer: fork.fork.id }
+            })
+          )
+          const provider = await startWorkshopProvider({
+            perTask: true,
+            calls: [
+              {
+                name: "rewrite_messages",
+                arguments: {
+                  chat: fixture.chat.id,
+                  title: "Edit older branch",
+                  messages: [{ message: 1, text: "CHANGED older sentinel" }]
+                }
+              }
+            ]
+          })
+          try {
+            const workshop = await admin((api) =>
+              Effect.gen(function* () {
+                const connection = yield* api.CreateConnection({
+                  kind: "openai-chat",
+                  settings: {
+                    name: "Synthetic tab writer",
+                    baseUrl: provider.baseUrl,
+                    compat: {},
+                    cacheTtlS: null,
+                    maxConcurrent: null,
+                    presetOverrideRefId: null
+                  }
+                })
+                const model = yield* api.AddUserModel({
+                  connectionId: connection.id,
+                  key: "workshop-small",
+                  overrides: { context: 65536 }
+                })
+                yield* api.SetGenerationDefaults({
+                  defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+                })
+                yield* api.SetDisplayPrefs({ prefs: { steps: "expanded" } })
+                const side = yield* api.CreateWorkshop({ attachTo: fixture.chat.id })
+                yield* api.SetWorkshopGrant({ chatId: side.id, capability: "chats.rewrite", mode: "ask" })
+                return side
+              })
+            )
+            await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+            await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+            await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+            await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+            const url = (fork: string) =>
+              `${server().url}/chats/${fixture.chat.id}?fork=${fork}&panel=workshop&workshop=${workshop.id}`
+            await page.goto(url(fixture.original))
+            const side = page.locator(`[data-side-chat="${workshop.id}"]`)
+            await side.getByLabel("Message", { exact: true }).fill("Change the first message here.")
+            await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+            const approval = side.locator("[data-approval]")
+            await expect(approval).toContainText(fixture.original)
+            await expect(approval).toContainText("messages 1–1")
+            await expect(approval).toContainText("OLDER sentinel")
+            await expect(approval).not.toContainText("NEWER sentinel")
+            await expectLayout(page, info, `side-write-approval-${width}-${theme}`, { scope: "[data-approval]" })
+            await page.goto(url(fixture.newer))
+            await expect(approval).toBeVisible()
+            await approval.getByRole("button", { name: "Allow", exact: true }).click()
+            await expect(approval).toContainText("The story tab moved")
+            await page.goto(url(fixture.original))
+            await expect(approval).toBeVisible()
+            await approval.getByRole("button", { name: "Allow", exact: true }).click()
+            await expect(approval).toHaveCount(0)
+            await page.goto(`${server().url}/chats/${workshop.id}`)
+            await openPanel(page, "Changes")
+            const effect = page.locator('[data-effect-kind="changeset.apply"]')
+            await expect(effect).toContainText(fixture.original)
+            await expectLayout(page, info, `side-write-effect-${width}-${theme}`)
+            const read = (forkId: typeof fixture.original) =>
+              admin((api) =>
+                api.ReadPath({
+                  chatId: fixture.chat.id,
+                  forkId,
+                  leafSlotId: null,
+                  range: { _tag: "Bottom" },
+                  limit: 10
+                })
+              )
+            expect((await read(fixture.original)).entries[0]!.version.content).toBe("CHANGED older sentinel")
+            expect((await read(fixture.newer)).entries[0]!.version.content).toBe("NEWER sentinel")
+            await effect.getByRole("button", { name: "Undo", exact: true }).click()
+            await expect(effect).toContainText("Undone")
+            expect((await read(fixture.original)).entries[0]!.version.content).toBe("OLDER sentinel")
+            expect((await read(fixture.newer)).entries[0]!.version.content).toBe("NEWER sentinel")
           } finally {
             await provider.stop()
           }

@@ -503,7 +503,7 @@ interface StoryPlace {
 }
 
 /** The workshop's story at the request's position, as a context the history reads take. */
-const storyContext = (context: ToolContext) =>
+export const storyContext = (context: ToolContext) =>
   Effect.gen(function* () {
     const story = yield* cached(
       context,
