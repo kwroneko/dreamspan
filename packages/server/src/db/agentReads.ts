@@ -287,12 +287,10 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const fork = forkId ?? (yield* forkThrough(sql, chatId, leafSlotId, chat.current_fork_id))?.id ?? null
         if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
         if ((yield* placedInsertions(sql, chatId, fork)).length > 0) return null
-        // FTS indexes the whole join. Match only after projecting its rows, before limits,
-        // so hidden text cannot starve visible matches or change excerpts.
-        if (viewers != null) {
-          const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`
-          if (merged!.n > 0) return null
-        }
+        // FTS indexes a join as one text: the tools read it row by row, each row as its viewer
+        // knew it (spec/THREADS.md §11), so a merged chat is searched over its path.
+        const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`
+        if (merged!.n > 0) return null
         // Each token as the start of a word, quoted so FTS syntax in it is only text.
         const match = tokens.length ? tokens.map((t) => `"${t.replaceAll('"', '""')}"*`).join(" AND ") : null
         type Row = {
@@ -347,6 +345,55 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           content: r.content
         }))
       }).pipe(query("SearchChat")),
+
+    JoinRows: ({ userId, chatId, slotIds }) =>
+      Effect.gen(function* () {
+        const joins = yield* sql<{ id: string; slot_id: string; title: string; timelines: string }>`
+          SELECT m.id, m.slot_id, m.title, m.timelines FROM json_each(${JSON.stringify(slotIds)}) asked
+          CROSS JOIN chat_merges m ON m.slot_id = asked.value
+          JOIN chats c ON c.id = m.chat_id
+          WHERE m.chat_id = ${chatId} AND c.owner_user_id = ${userId}`
+        if (joins.length === 0) return []
+        const rows = yield* sql<{
+          merge_id: string
+          ordinal: number
+          kind: "message" | "summary"
+          speaker_name: string
+          side: "user" | "assistant"
+          speaker_entity_id: string | null
+          content: string
+          included: "verbatim" | "summarized" | "left_out"
+          knowers: string
+          source_from: number | null
+          source_to: number | null
+        }>`SELECT mm.merge_id, mm.ordinal, mm.kind, mm.speaker_name, mm.side, mm.speaker_entity_id, mm.content,
+            mm.included, mm.source_from, mm.source_to,
+            coalesce(mm.knowers_json, (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c
+              WHERE c.value ->> 'from' <> 'destination')) AS knowers
+          FROM json_each(${JSON.stringify(joins.map((j) => j.id))}) asked
+          CROSS JOIN chat_merges m ON m.id = asked.value
+          CROSS JOIN chat_merge_messages mm ON mm.merge_id = m.id
+          ORDER BY mm.merge_id, mm.ordinal`
+        return joins.map((join) => ({
+          slotId: join.slot_id,
+          title: join.title,
+          timelines: join.timelines,
+          rows: rows
+            .filter((row) => row.merge_id === join.id)
+            .map((row) => ({
+              ordinal: row.ordinal,
+              kind: row.kind,
+              name: row.speaker_name,
+              side: row.side,
+              speaker: row.speaker_entity_id,
+              content: row.content,
+              included: row.included,
+              knowers: JSON.parse(row.knowers) as Array<string>,
+              from: row.source_from,
+              to: row.source_to
+            }))
+        }))
+      }).pipe(query("JoinRows")),
 
     KnowersOf: ({ userId, chatId, forkId, versionIds, viewers }) =>
       Effect.gen(function* () {

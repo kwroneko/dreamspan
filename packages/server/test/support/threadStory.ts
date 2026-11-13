@@ -224,6 +224,7 @@ const story = (dataDir: string, setting: "separate" | null, narrator: boolean) =
         })
       })
     return {
+      dataDir,
       api,
       reader,
       writer,

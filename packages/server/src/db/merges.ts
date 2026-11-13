@@ -101,6 +101,9 @@ interface MergedRow {
   readonly content: string
   readonly sentAt: number
   readonly included: "verbatim" | "summarized" | "left_out"
+  /** Where it was in the source (zero-based display positions): a message's own, a summary's range. */
+  readonly sourceFrom: number
+  readonly sourceTo: number
 }
 
 interface MergePlan {
@@ -456,7 +459,9 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
           side: "assistant",
           content: s.content.trim(),
           sentAt: 0,
-          included: "verbatim"
+          included: "verbatim",
+          sourceFrom: s.from,
+          sourceTo: s.to
         })
       }
       const verbatim = i >= verbatimFrom
@@ -479,7 +484,9 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
         side: sideOf(row),
         content: row.content,
         sentAt: row.created_at,
-        included: kept ? "verbatim" : inSummary ? "summarized" : "left_out"
+        included: kept ? "verbatim" : inSummary ? "summarized" : "left_out",
+        sourceFrom: row.position,
+        sourceTo: row.position
       })
     }
     const notes = [
@@ -819,7 +826,9 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
               side: r.side,
               content: r.content,
               sent_at: r.sentAt,
-              included: r.included
+              included: r.included,
+              source_from: r.sourceFrom,
+              source_to: r.sourceTo
             }))
           )}`
         return slotId

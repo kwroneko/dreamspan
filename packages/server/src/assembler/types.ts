@@ -11,10 +11,11 @@ import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import type { matchLorebooks } from "./lorebook.ts"
 import { type NoteDoc, type ReplaceableCardField, replacesInPlace } from "@rp/shared/docs/note.ts"
 import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/docs/preset.ts"
+import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 64
+export const ASSEMBLER_VERSION = 65
 
 export type Role = "system" | "user" | "assistant"
 
@@ -206,6 +207,12 @@ export interface SnapshotInputs {
   readonly viewer?: string
   /** The viewer's identities through card replacements (`Knowledge.aliases`); absent: only `viewer`. */
   readonly viewerAliases?: ReadonlyArray<string>
+  /**
+   * Read whole with a character speaking: its identities, by whose presence a separate join's
+   * parallel stretch is read (`Knowledge.stretch`, spec/THREADS.md §7.3), for the agent's read
+   * tools to read it so too (§11, TH8); absent: no character, or a viewer.
+   */
+  readonly stretchViewers?: ReadonlyArray<string>
   readonly model: ModelInput | null
 }
 
@@ -546,7 +553,11 @@ export interface Generation {
   /** Labels and source decisions read in the same transaction as assembly; scrubbed on the main thread. */
   readonly inspection?: InspectionInputs
   readonly leafSlotId: string | null
-  /** A separate context's viewer, as its identities: the agent's read tools leave out what it didn't know (C5). */
+  /**
+   * A separate context's viewer, as its identities: the agent's read tools leave out what it
+   * didn't know (C5). Read whole with a character speaking, its identities and `STRETCH_VIEW`:
+   * the same, in a separate join's parallel stretch only (spec/THREADS.md §11, TH8).
+   */
   readonly viewers: ReadonlyArray<string> | null
   readonly request: AssembledRequest
   readonly model: ModelInput | null
@@ -572,7 +583,11 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
   const written = new Map((snapshot.templateWrites ?? []).map((t) => [t.version, t.writes]))
   return {
     leafSlotId: snapshot.inputs.leafSlotId,
-    viewers: snapshot.inputs.viewer ? (snapshot.inputs.viewerAliases ?? [snapshot.inputs.viewer]) : null,
+    viewers: snapshot.inputs.viewer
+      ? (snapshot.inputs.viewerAliases ?? [snapshot.inputs.viewer])
+      : snapshot.inputs.stretchViewers
+        ? [...snapshot.inputs.stretchViewers, STRETCH_VIEW]
+        : null,
     request: snapshot.request,
     ...(snapshot.replySections ? { replySections: snapshot.replySections } : {}),
     model: snapshot.inputs.model,

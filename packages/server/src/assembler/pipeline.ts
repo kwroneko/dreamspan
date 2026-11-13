@@ -501,13 +501,18 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
         preset: { ref: preset.ref, revision: preset.revision, scope: preset.scope },
         cards,
         ...(presence ? { presence } : {}),
-        // A separate context's viewer, for the tools to read as the history did (C5).
+        // A separate context's viewer, for the tools to read as the history did (C5); read
+        // whole, the speaker by whose presence a separate join's stretch is read (TH8). The
+        // tools apply it only where such a join is on the path they read, even one this
+        // request's history no longer reached.
         ...(assembly.knowledge?.viewer
           ? {
               viewer: assembly.knowledge.viewer,
               ...(assembly.knowledge.aliases ? { viewerAliases: assembly.knowledge.aliases } : {})
             }
-          : {}),
+          : assembly.knowledge?.stretch && !assembly.knowledge.stretch.stored
+            ? { stretchViewers: assembly.knowledge.stretch.aliases ?? [assembly.knowledge.stretch.viewer] }
+            : {}),
         model: assembly.model ?? null
       },
       ...(request.summaryJob
