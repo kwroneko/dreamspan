@@ -208,7 +208,8 @@ export function workshopSideChatTests() {
           await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
           const answer = side.getByRole("article").filter({ hasText: SIDE_ANSWER })
           await expect(answer).toHaveCount(1, { timeout: 60_000 })
-          // Its steps, opened if they're folded.
+          // Text arrives before the final event, which folds live steps. Open only after it settles.
+          await expect(answer.locator("[data-steps-panel]")).toHaveAttribute("data-steps-panel", "done")
           await expect(answer.locator("[data-steps-badge]")).toHaveText(/^1 step/)
           const fold = answer.locator("[data-steps-panel] button[aria-expanded]").first()
           await expect(fold).toBeVisible()
