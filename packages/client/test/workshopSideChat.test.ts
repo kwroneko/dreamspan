@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { Chat, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { Chat, ForkId, SlotId, PathEntry } from "@rp/shared/chat.ts"
 import { chatPlaceKey } from "../src/features/chat/chatPlace.ts"
 import { availableCommands, type ChatCommandContext } from "../src/features/chat/commands.tsx"
 import { takesSideChat } from "../src/features/chat/kindLooks.ts"
@@ -140,6 +140,27 @@ describe("where the side chat reads the story", () => {
     // The tab moves to another branch: the next request names it.
     view = { ...view, forkId: "fork-other" as ForkId, leafSlotId: "slot-3" as SlotId }
     expect(storyPosition(story)).toEqual({ chatId: "story", forkId: "fork-other", leafSlotId: "slot-3" })
+  })
+
+  it("bounds an older window at its newest loaded message, not the unseen path tip", () => {
+    const story = storyIn(() => ({
+      chat: { currentForkId: "root" } as unknown as Chat,
+      forkId: "root" as ForkId,
+      leafSlotId: "unseen-100" as SlotId,
+      newer: "shown-6" as SlotId,
+      entries: [{ slotId: "shown-5" }, { slotId: "shown-6" }] as Array<PathEntry>
+    }))
+    expect(storyPosition(story)?.leafSlotId).toBe("shown-6")
+  })
+
+  it("sends no position while the story is switching branches", () => {
+    const story = storyIn(() => ({
+      chat: { currentForkId: "root" } as unknown as Chat,
+      forkId: "new-branch" as ForkId,
+      leafSlotId: null,
+      loading: true
+    }))
+    expect(storyPosition(story)).toBeUndefined()
   })
 
   it("uses the story's branch before one is chosen, and sends none before the story opens", () => {

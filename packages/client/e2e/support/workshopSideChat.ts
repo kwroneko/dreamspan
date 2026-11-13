@@ -180,12 +180,14 @@ export function workshopSideChatBranchTests() {
         return sidePanel(tab).locator(`[data-side-chat="${workshop.id}"]`)
       }
       const first = await open(page, original)
-      await expect(sidePanel(page).locator("[data-side-chat-reading]")).toHaveText("Reads “Original”, up to message 2")
+      await expect(sidePanel(page).locator("[data-side-chat-reading]")).toHaveText(
+        "Reads “Original”, up to message 2. Regenerate uses this position; Resume needs the original position."
+      )
       const second = await context.newPage()
       await second.setViewportSize({ width: 1440, height: 900 })
       const secondSide = await open(second, branch)
       await expect(sidePanel(second).locator("[data-side-chat-reading]")).toHaveText(
-        "Reads “Other road”, up to message 2"
+        "Reads “Other road”, up to message 2. Regenerate uses this position; Resume needs the original position."
       )
 
       const ask = async (side: typeof first, text: string, answers: number) => {
@@ -272,6 +274,9 @@ export function workshopSideChatTests() {
           const workshopId = new URL(page.url()).searchParams.get("workshop")!
           const panel = sidePanel(page)
           const side = panel.locator(`[data-side-chat="${workshopId}"]`)
+          await expect(panel.locator("[data-side-chat-reading]")).toContainText(
+            "Regenerate uses this position; Resume needs the original position."
+          )
           await expect(side).toBeVisible()
           await expect(side).toHaveAttribute("data-chat-kind", "workshop")
           await expect(side.locator('[data-kind-badge="workshop"]')).toBeVisible()

@@ -55,23 +55,28 @@ const PAGE_PROVIDERS: ReadonlySet<string> = new Set(["chat.portraits", "chat.pre
 const ABOUT =
   "Talk about this story with an assistant, out of character. It reads the branch shown here, up to its newest message; nothing said here reaches the story."
 
+/** An older window can end before the branch's tip; don't read the unseen tail. */
+const shownStoryLeaf = (view: ChatView) =>
+  view.newer != null ? (view.entries.at(-1)?.slotId ?? null) : view.leafSlotId
+
 /** Where this tab shows the story, read at the moment of each request; none before it's open. */
 export const storyPosition = (story: ChatSession): StoryAt | undefined => {
   const view = story.snapshot()
   const forkId = view.forkId ?? view.chat?.currentForkId ?? null
-  if (view.chat === null || forkId === null) return undefined
-  return { chatId: story.id, forkId, leafSlotId: view.leafSlotId }
+  if (view.loading || view.chat === null || forkId === null) return undefined
+  return { chatId: story.id, forkId, leafSlotId: shownStoryLeaf(view) }
 }
 
 /** "Reads “Original”, up to message 12": the branch and message the next request reads to. */
 function ReadingLine({ story, view }: { story: ChatSession; view: ChatView }) {
   const { shown } = useChatForks(story, view)
-  const leaf = view.entries.find((e) => e.slotId === view.leafSlotId)
+  const leaf = view.entries.find((e) => e.slotId === shownStoryLeaf(view))
   const upTo = leaf ? (leaf.position ?? leaf.depth) + 1 : null
   return (
     <p className="shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted" data-side-chat-reading="">
       Reads {shown ? <span className="font-medium text-text">“{branchLabel(shown)}”</span> : "this branch"}
-      {upTo !== null ? `, up to message ${upTo}` : ""}
+      {upTo !== null ? `, up to message ${upTo}` : ""}. Regenerate uses this position; Resume needs the original
+      position.
     </p>
   )
 }

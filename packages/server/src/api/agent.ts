@@ -1,3 +1,5 @@
+import { storyReadStamp } from "../agent/continuity.ts"
+import { isDeepStrictEqual } from "node:util"
 import { outsideEffect } from "../agent/effects.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 type RetryModel = { readonly connection: ConnectionId; readonly model: ModelId }
@@ -25,6 +27,8 @@ import { internal } from "./internal.ts"
 
 /** What a resume needs of the stopped run's frozen snapshot. */
 interface Frozen {
+  readonly storyAt?: StoryAt
+  readonly storyStamp?: string | null
   readonly inputs?: { readonly model?: { readonly prefill?: string } | null }
   readonly continuity?: { readonly historical?: number }
   readonly agent?: { readonly tools?: ReadonlyArray<FrozenTool>; readonly contract?: string }
@@ -57,6 +61,17 @@ const agentVersionResumer = Effect.gen(function* () {
       const userId = (yield* CurrentUser).id
       const refuse = (message: string) => Effect.fail(new NotResumable({ versionId, message }))
       const material = yield* reader.RolloutMaterial({ userId, versionId })
+      if (!isDeepStrictEqual((JSON.parse(material.snapshot) as Frozen).storyAt, options?.storyAt))
+        return yield* refuse(
+          "The story position changed. Return to the branch and message this reply read before resuming, or regenerate it to use the position shown now."
+        )
+      if (
+        (JSON.parse(material.snapshot) as Frozen).storyStamp !==
+        (yield* storyReadStamp(reader, userId, options?.storyAt))
+      )
+        return yield* refuse(
+          "The story changed since this reply read it. Regenerate it to read the story as it is now."
+        )
       if (material.mode === null) return yield* refuse("It wasn't written with tools.")
       if (material.versionStatus === "generating" || material.status === "running")
         return yield* refuse("It's still being written.")
@@ -296,6 +311,14 @@ export const regenerateSeveral = Effect.fnUntraced(function* (input: {
   const reader = yield* Reader
   const material = yield* reader.RolloutMaterial({ userId, versionId: input.versionId }).pipe(Effect.option)
   if (material._tag === "None" || (JSON.parse(material.value.snapshot) as Frozen).agent?.contract !== "several")
+    return null
+  // A new version can assemble afresh at the current position; a retained transcript
+  // cannot, because its old tool results may contain another branch or later messages.
+  if (!isDeepStrictEqual((JSON.parse(material.value.snapshot) as Frozen).storyAt, input.storyAt)) return null
+  if (
+    (JSON.parse(material.value.snapshot) as Frozen).storyStamp !==
+    (yield* storyReadStamp(reader, userId, input.storyAt))
+  )
     return null
   const resume = yield* agentVersionResumer
   return yield* resume(

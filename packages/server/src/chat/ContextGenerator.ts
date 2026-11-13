@@ -6,6 +6,7 @@ import { liveSuffix } from "../agent/messages.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import {
   previousRun,
+  storyReadStamp,
   readContinuityPath,
   pathStamp,
   summarizeMessageSteps,
@@ -393,6 +394,14 @@ export const layer = Layer.effect(
           }
           let generation = JSON.parse(assembled.generation) as Generation
           let snapshot = JSON.parse(assembled.snapshot) as ContinuousSnapshot
+          if (request.storyAt)
+            snapshot = {
+              ...snapshot,
+              storyStamp:
+                (yield* storyReadStamp(reader, request.userId, request.storyAt).pipe(
+                  Effect.catch(serverFailure("StoryReadStamp"))
+                )) ?? null
+            }
           let continuity: ContinuityRecord | undefined
           let seed: ReadonlyArray<AgentMessage> | undefined
           if (agentic && plan.continuity === "resume_previous") {
@@ -526,7 +535,7 @@ export const layer = Layer.effect(
               modelId: model.modelId as ModelId,
               // An agent turn's tools and contract are frozen with its context (spec/AGENTIC.md §3.3).
               snapshot: agentic
-                ? `${JSON.stringify({ ...snapshot, ...(continuity ? { continuity } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
+                ? `${JSON.stringify({ ...snapshot, ...(request.storyAt ? { storyAt: request.storyAt } : {}), ...(continuity ? { continuity } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
                     {
                       mode: planned.mode,
                       contract: plan.contract,

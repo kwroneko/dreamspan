@@ -1,5 +1,5 @@
 import { safeAgentDocument } from "./agentDocuments.ts"
-import { pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
+import { nextReceiptTime, pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
 import { isDeepStrictEqual } from "node:util"
 import {
   operationPolicies,
@@ -331,16 +331,38 @@ const operationUndo: Undoer = {
       const recipe = effect.undo!
       const policy = operationPolicies.get(String(recipe.operation))
       if (!policy) return yield* refuse("This operation no longer has an undo policy.")
+      // A newer operation may have been undone through a fresh state write/revision.
+      // Follow only exact recorded restore edges; an intervening user write still
+      // fails the final policy proof, even if its visible value happens to be equal.
+      const restored = yield* ctx.sql<{
+        undo_json: string
+        undo_result_json: string
+      }>`SELECT undo_json, undo_result_json
+        FROM rollout_effects WHERE target_kind = ${effect.targetKind} AND target_id = ${effect.targetId}
+          AND undone_at IS NOT NULL AND undo_json IS NOT NULL AND undo_result_json IS NOT NULL`
+      const edges = restored
+        .map((row) => ({ recipe: JSON.parse(row.undo_json), result: JSON.parse(row.undo_result_json) }))
+        .filter((edge) => edge.recipe.operation === recipe.operation && Object.hasOwn(edge.result, "restoredSnapshot"))
+      let expected = recipe.next
+      for (;;) {
+        const at = edges.findIndex((edge) => isDeepStrictEqual(edge.recipe.prior, expected))
+        if (at < 0) break
+        expected = edges.splice(at, 1)[0]!.result.restoredSnapshot
+      }
       const current = yield* policy.before(ctx.sql, ctx.userId, recipe.input as never)
-      if (!operationSnapshotMatches(policy, current, recipe.next)) return yield* refuse()
-      return (yield* policy.undo(
+      if (!operationSnapshotMatches(policy, current, expected)) return yield* refuse()
+      const result = yield* policy.undo(
         ctx.sql,
         ctx.ops as OperationHandlers,
         ctx.userId,
         recipe.input as never,
         recipe.prior as never,
-        recipe.next as never
-      )) as Record<string, unknown>
+        expected as never
+      )
+      return {
+        ...(result as Record<string, unknown>),
+        restoredSnapshot: yield* policy.before(ctx.sql, ctx.userId, recipe.input as never)
+      }
     }).pipe(
       Effect.mapError((error) =>
         refuse(error instanceof Error ? error.message : "This change cannot be undone safely.")
@@ -416,7 +438,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         const undoResult = yield* undoer
           .run({ sql, userId, ops, bin }, toRolloutEffect(row))
           .pipe(Effect.catchTag(["StaleWrite", "InvalidDocument", "RefOperationRefused"], () => Effect.fail(refuse())))
-        const at = Date.now()
+        const at = Math.max(Date.now(), row.created_at)
         yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_result_json = ${JSON.stringify(undoResult)} WHERE rollout_id = ${row.rollout_id} AND tool_call_id = ${row.tool_call_id} AND seq = ${row.seq}`
         return toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })
       })
@@ -485,7 +507,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
           return yield* new EffectUndoRefused({
             message: `This run can change at most ${limits.effects} items. Start another turn to continue.`
           })
-        const at = Date.now()
+        const at = yield* nextReceiptTime(sql, key.rolloutId)
         yield* sql`INSERT INTO rollout_receipts ${sql.insert({ rollout_id: key.rolloutId, tool_call_id: key.toolCallId, result_json: JSON.stringify(result), created_at: at })}`
         for (const [seq, effect] of effects.entries())
           yield* sql`INSERT INTO rollout_effects ${sql.insert({ rollout_id: key.rolloutId, tool_call_id: key.toolCallId, seq, kind: effect.kind, target_kind: effect.targetKind, target_id: effect.targetId, title: effect.title, undo_json: effect.undo === null ? null : JSON.stringify(effect.undo), created_at: at })}`

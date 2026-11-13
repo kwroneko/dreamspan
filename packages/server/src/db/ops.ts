@@ -3689,10 +3689,21 @@ export class ReadOps extends RpcGroup.make(
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** One live slot with its selected version, as a path shows it, and its chat. */
-  /** A slot as a fork shows it (absent or null: the fork through it, forkAt). */
+  /** Invalidates carried story tool results after edits, swipes, summary or speaker changes. */
+  Rpc.make("StoryReadStamp", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.String,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** One live slot as a fork shows it (absent/null: forkAt), and its chat. */
   Rpc.make("GetSlot", {
-    payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      /** Refuse a slot outside the named fork's display path, rather than reading its own path. */
+      onForkOnly: Schema.optionalKey(Schema.Boolean)
+    },
     success: Schema.Struct({ chatId: ChatId, entry: PathEntry }),
     error: Schema.Union([NotFound, StorageError])
   }),

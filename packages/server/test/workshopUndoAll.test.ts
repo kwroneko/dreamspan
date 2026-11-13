@@ -107,6 +107,127 @@ describe("undo all of a reply", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("keeps causal call order despite a clock rollback and non-sortable provider call ids", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const ref = yield* f.create("Ordered card", "z-first")
+      // Simulate the wall clock moving backwards between writes in the worker.
+      const future = Date.now() + 60_000
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE rollout_receipts SET created_at = ? WHERE rollout_id = ?", params: [future, f.rolloutId] },
+        {
+          sql: "INSERT OR REPLACE INTO rollout_effects SELECT rollout_id, tool_call_id, seq, kind, target_kind, target_id, title, undo_json, undo_result_json, undone_at, ? FROM rollout_effects WHERE rollout_id = ?",
+          params: [future, f.rolloutId]
+        }
+      ])
+      const out = yield* f.run(
+        "edit_card",
+        { card: ref, changes: [{ field: "description", text: "Second change" }] },
+        "a-second"
+      )
+      assert.isUndefined(out.isError, out.text)
+      const rows = yield* api.ListRolloutEffects({ chatId: f.chat.id })
+      assert.deepStrictEqual(
+        rows.map((e) => e.toolCallId),
+        ["a-second", "z-first"]
+      )
+      assert.isAbove(rows[0]!.createdAt, future)
+      const report = yield* api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.rolloutId })
+      assert.isNull(report.refused)
+      assert.deepStrictEqual(
+        report.undone.map((e) => e.toolCallId),
+        ["a-second", "z-first"]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("orders registered outside-tool effects after prior calls when the clock moves backwards", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      yield* f.create("First card", "z-first")
+      const future = Date.now() + 60_000
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE rollout_receipts SET created_at = ? WHERE rollout_id = ?", params: [future, f.rolloutId] },
+        {
+          sql: "INSERT OR REPLACE INTO rollout_effects SELECT rollout_id, tool_call_id, seq, kind, target_kind, target_id, title, undo_json, undo_result_json, undone_at, ? FROM rollout_effects WHERE rollout_id = ?",
+          params: [future, f.rolloutId]
+        }
+      ])
+      yield* (yield* Writer).RecordRolloutEffects({
+        userId: (yield* api.Whoami()).id,
+        rolloutId: f.rolloutId,
+        toolCallId: "a-second",
+        result: "Done",
+        isError: false,
+        effects: [
+          {
+            kind: "setting.set",
+            targetKind: "setting",
+            targetId: "synthetic",
+            title: "Registered tool change",
+            undo: null
+          }
+        ]
+      })
+      const listed = yield* api.ListRolloutEffects({ chatId: f.chat.id })
+      assert.deepStrictEqual(
+        listed.map((e) => e.toolCallId),
+        ["a-second", "z-first"]
+      )
+      assert.isAbove(listed[0]!.createdAt, future)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("undoes consecutive tool-selection changes including reset to the app default", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const f = yield* fixture(config.dataDir, api)
+      const story = yield* api.CreateChat({ title: "Tool choices" })
+      yield* api.ChangeCast({ chatId: story.id, slotId: null, change: { _tag: "AgentTools", tools: ["search_chat"] } })
+      for (const [id, tools] of [
+        ["one", null],
+        ["two", []]
+      ] as const) {
+        const out = yield* f.run("change_chat", { chat: story.id, change: { _tag: "AgentTools", tools } }, id)
+        assert.isUndefined(out.isError, out.text)
+      }
+      const report = yield* api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.rolloutId })
+      assert.isNull(report.refused)
+      assert.deepStrictEqual(
+        report.undone.map((e) => e.toolCallId),
+        ["two", "one"]
+      )
+      assert.deepStrictEqual((yield* api.GetCast({ chatId: story.id, slotId: null })).agentTools, ["search_chat"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("protects a later reply's setting, then follows its recorded Undo before undoing the older reply", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const first = yield* fixture(config.dataDir, api, 1)
+      const later = yield* fixture(config.dataDir, api, 2)
+      const story = yield* api.CreateChat({ title: "Shared target" })
+      for (const [f, tools] of [
+        [first, []],
+        [later, ["search_chat"]]
+      ] as const) {
+        const out = yield* f.run("change_chat", { chat: story.id, change: { _tag: "AgentTools", tools } }, "change")
+        assert.isUndefined(out.isError, out.text)
+      }
+      assert.isNotNull((yield* api.UndoRolloutEffects({ chatId: first.chat.id, rolloutId: first.rolloutId })).refused)
+      assert.deepStrictEqual((yield* api.GetCast({ chatId: story.id, slotId: null })).agentTools, ["search_chat"])
+      assert.isNull((yield* api.UndoRolloutEffects({ chatId: later.chat.id, rolloutId: later.rolloutId })).refused)
+      assert.isNull((yield* api.UndoRolloutEffects({ chatId: first.chat.id, rolloutId: first.rolloutId })).refused)
+      assert.isUndefined((yield* api.GetCast({ chatId: story.id, slotId: null })).agentTools)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("stops at the first refusal, keeps what was undone and leaves the older ones untouched", () => {
     const config = testConfig()
     return Effect.gen(function* () {

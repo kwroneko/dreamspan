@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 // Workshops beside a story (spec/WORKSHOP.md §4). The attachment lives only in the workshop: its
 // chat-wide `workshop.attached { chat }` event names the story. Nothing is written in the story, so
 // its requests and rows are the same with or without side chats; a story finds its workshops by
@@ -11,6 +12,20 @@ import { query } from "./tx.ts"
 export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
+    StoryReadStamp: ({ userId, chatId }) =>
+      Effect.gen(function* () {
+        // Only metadata leaves this worker. Include current speaker/library heads because
+        // story message labels and template names resolve from them at read time.
+        const [row] = yield* sql<{ stamp: string }>`SELECT json_array(c.shell_stamp, c.state_seq,
+        (SELECT coalesce(json_group_array(json_array(id, row_version, selected_revision_id, status)), '[]')
+          FROM (SELECT id, row_version, selected_revision_id, status FROM summaries WHERE chat_id = c.id ORDER BY id)),
+        (SELECT coalesce(json_group_array(json_array(id, row_version, head_revision_id, deleted_at, purged_at)), '[]')
+          FROM (SELECT r.id, r.row_version, r.head_revision_id, e.deleted_at, e.purged_at FROM entity_refs r
+            JOIN entities e ON e.id = r.entity_id WHERE e.owner_user_id = c.owner_user_id ORDER BY r.id))) AS stamp
+        FROM chats c WHERE c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND c.status = 'active'`
+        if (!row) return yield* new NotFound({ entity: "story", id: chatId })
+        return createHash("sha256").update(row.stamp).digest("hex")
+      }).pipe(query("StoryReadStamp")),
     AttachedWorkshops: ({ userId, chatId }) =>
       Effect.gen(function* () {
         const [story] = yield* sql<{ id: string }>`SELECT id FROM chats

@@ -517,10 +517,12 @@ const storyContext = (context: ToolContext) =>
     const leaf =
       at.leafSlotId === null
         ? null
-        : yield* context.reader.GetSlot({ userId: context.userId, slotId: at.leafSlotId, forkId: fork.id }).pipe(
-            Effect.map((slot) => (slot.chatId === chat.id ? slot.entry : undefined)),
-            Effect.catchTag("NotFound", () => Effect.succeed(undefined))
-          )
+        : yield* context.reader
+            .GetSlot({ userId: context.userId, slotId: at.leafSlotId, forkId: fork.id, onForkOnly: true })
+            .pipe(
+              Effect.map((slot) => (slot.chatId === chat.id ? slot.entry : undefined)),
+              Effect.catchTag("NotFound", () => Effect.succeed(undefined))
+            )
     if (leaf === undefined) return { error: BRANCH_GONE } as const
     // A fresh view for every call: edits, visibility and shared summary revisions can change
     // without moving the tip. Never keep reading the pre-edit text from a rollout cache.
@@ -545,10 +547,16 @@ const storyContext = (context: ToolContext) =>
     } as const
   })
 
-const quote = (value: string) => `"${value.replaceAll('"', "'")}"`
-/** The wrapper's closing tag; one inside the story's text is broken up so it can't end the quote. */
+/** Encode both attributes and payload: story text cannot manufacture delimiters or roles. */
+const escapeStory = (text: string): string =>
+  text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;")
+const quote = (value: string) => `"${escapeStory(value.length > 120 ? `${value.slice(0, 120)}…` : value)}"`
 const CLOSE = "</story_excerpt>"
-const BROKEN_CLOSE = "</story_excerpt >"
 
 /** What the side chat's model is told about every story excerpt it gets. */
 export const STORY_NOTICE =
@@ -563,7 +571,7 @@ const wrapStory = (place: StoryPlace, text: string) =>
     `<story_excerpt story=${quote(place.title ?? "Untitled")} branch=${quote(place.branch ?? "unnamed")} up_to_message="${place.upTo}">`,
     STORY_NOTICE,
     "",
-    text.replaceAll(CLOSE, BROKEN_CLOSE),
+    escapeStory(text),
     CLOSE
   ].join("\n")
 
@@ -624,7 +632,17 @@ const overStory = <A>(
         const offset = Math.max(0, Math.trunc(args.offset ?? 0))
         const maxTokens = (args as { readonly max_tokens?: number }).max_tokens ?? definition.pageTokens
         const pageChars = Math.min(15_000, maxTokens === undefined ? 15_000 : maxTokens * 4)
-        const end = Math.min(output.text.length, offset + pageChars)
+        // Encoding can expand a character sixfold. Fit the encoded payload and metadata
+        // before the global result cap, so neither the wrapper nor a page is cut off.
+        const budget = Math.min(pageChars, 15_500 - wrapStory(story.place, "").length)
+        let low = offset
+        let high = Math.min(output.text.length, offset + budget)
+        while (low < high) {
+          const middle = Math.ceil((low + high) / 2)
+          if (escapeStory(output.text.slice(offset, middle)).length <= budget) low = middle
+          else high = middle - 1
+        }
+        const end = low
         const page = output.text.slice(offset, end)
         // The tool's own note, outside the quote: where the next page starts.
         const more = end < output.text.length ? `\n[More: repeat with offset=${end}.]` : ""
