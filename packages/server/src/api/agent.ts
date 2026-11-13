@@ -6,24 +6,26 @@ import type { ContextBudget } from "@rp/shared/inspectorApi.ts"
 import { isDeepStrictEqual } from "node:util"
 // The agent RPCs (@rp/shared/agentApi.ts). Storage checks the version or chat is the caller's.
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
-import { foldState, permissionKey } from "@rp/shared/state.ts"
+import { type ChatState, foldState, permissionKey } from "@rp/shared/state.ts"
 import { ACTIVITY_PAGE, NotResumable, type StepEdit } from "@rp/shared/agent.ts"
 import { type AgentApi } from "@rp/shared/agentApi.ts"
 import { CurrentUser } from "@rp/shared/api.ts"
-import type { EntityId, ForkId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, VersionId } from "@rp/shared/chat.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect, Option } from "effect"
 import { planResume, planStepResume, planMessageResume, type ResumePlan, StepNotResumable } from "../agent/resume.ts"
 import { countSteps } from "../agent/steps.ts"
 import { notesAt } from "../agent/tools/notes.ts"
-import type { FrozenTool } from "../agent/tools.ts"
+import { type FrozenTool, frozenTool, sendMessageDefinition, severalMessageDefinition } from "../agent/tools.ts"
+import { offeredByGrants } from "../agent/approvals.ts"
+import { planTurn } from "../agent/modes.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
-import { shownModel } from "../chat/shownModel.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
-import { ExecutionRegistry } from "../execution.ts"
+import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { internal } from "./internal.ts"
 
 /** What a resume needs of the stopped run's frozen snapshot. */
@@ -59,6 +61,47 @@ const agentVersionResumer = Effect.gen(function* () {
   const hub = yield* ChatHub
   const generations = yield* Generations
   const generator = yield* Generator
+  const execution = yield* ExecutionRegistry
+  /**
+   * The tools the chat offers now, as the stopped run's definitions where they're the same
+   * tools (spec/AGENTIC.md §12.3), or undefined when that's what the run froze. Its output
+   * contract's tool stays as frozen.
+   */
+  const toolsNow = (at: {
+    readonly userId: UserId
+    readonly chatId: ChatId
+    readonly state: ChatState
+    readonly frozen: ReadonlyArray<FrozenTool>
+  }) =>
+    Effect.gen(function* () {
+      const chat = yield* reader.GetChat({ userId: at.userId, chatId: at.chatId })
+      const profile = execution.chatKinds.get(chat.kind)
+      if (!profile) return undefined
+      const planned = planTurn(execution.orchestrationModes, at.state, chat.kind, profile.planner)
+      if ("unavailable" in planned) return undefined
+      const candidates = planned.plan.tools.flatMap((id) => {
+        const tool = toolForKind(execution, chat.kind, id)
+        return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
+      })
+      // A workshop capability turned off isn't offered anew; one the run was offered stays and
+      // is refused when called, as it is mid-run (spec/WORKSHOP.md §3.4), so the model is told why.
+      const { tools: granted } = yield* offeredByGrants(
+        { registries: execution, reader, userId: at.userId, chatId: at.chatId },
+        candidates
+      )
+      const tools = candidates.filter((tool) => granted.includes(tool) || at.frozen.some((t) => t.name === tool.id))
+      const contract = new Set([sendMessageDefinition.name, severalMessageDefinition.name])
+      const now = [
+        ...tools.map((tool) => at.frozen.find((t) => t.name === tool.id) ?? frozenTool(tool)),
+        ...at.frozen.filter((t) => contract.has(t.name))
+      ]
+      return isDeepStrictEqual(
+        now.map((t) => t.name),
+        at.frozen.map((t) => t.name)
+      )
+        ? undefined
+        : now
+    })
   /**
    * A new version that carries on `versionId`'s run as `plan` keeps it (spec/AGENTIC.md §4.2):
    * written with its rollout in one transaction, then generated from the kept transcript.
@@ -74,7 +117,7 @@ const agentVersionResumer = Effect.gen(function* () {
       model: ModelInput
     ) => ResumePlan | StepNotResumable,
     reason: "resume" | "edit",
-    options?: { readonly model?: RetryModel; readonly direction?: string }
+    options?: { readonly model?: RetryModel; readonly direction?: string; readonly saved?: boolean }
   ) =>
     Effect.gen(function* () {
       if (Option.isNone(generator))
@@ -87,48 +130,76 @@ const agentVersionResumer = Effect.gen(function* () {
         return yield* refuse("It's still being written.")
       const source = yield* reader.GetVersion({ userId, versionId })
       const chatId = (yield* reader.GetSlot({ userId, slotId: source.slotId, forkId })).chatId
-      // The chat's settings as they are now decide the model: the one "Retry with…" names, or
-      // the one the composer shows under this reply, which takes a choice made after it stopped
-      // (spec/AGENTIC.md §12.3). The assembly alone reads the state before the reply.
-      const shown = options?.model ?? (yield* shownModel(reader, { userId, chatId, slotId: source.slotId, forkId }))
-      const assembled = yield* reader
-        .AssembleContext({
-          userId,
-          chatId,
-          slotId: source.slotId,
-          versionId: source.id,
-          forkId,
-          now: Date.now(),
-          timeZone: "UTC",
-          frozen: null,
-          ...(shown ? { model: shown } : {})
-        })
-        .pipe(Effect.catchTag("AssemblyFailed", (error) => refuse(error.message)))
-      const fresh = JSON.parse(assembled.snapshot) as ContextSnapshot
-      const model = fresh.inputs.model
-      if (!model)
-        return yield* refuse(
-          options?.model
-            ? "The chosen model is unavailable."
-            : "No model is chosen for this chat. Choose one, then resume."
-        )
       const frozen = JSON.parse(material.snapshot) as ContextSnapshot
-      let planned = plan(material, frozen as Frozen, model)
-      if (planned instanceof StepNotResumable) return yield* refuse(planned.message)
-      // Unchanged, the frozen request is sent byte for byte, so the provider's cache still holds.
-      const changed = !isDeepStrictEqual(frozen.inputs.model, model)
-      const snapshot = changed
-        ? JSON.stringify(
-            forModel(frozen, {
+      const frozenAgent = (frozen as Frozen).agent
+      let planned: ResumePlan | StepNotResumable
+      let snapshot = material.snapshot
+      let chosen: RetryModel | undefined
+      if (options?.saved) {
+        // The stored request as it was, with its model and tools: only on the user's word.
+        const model = frozen.inputs.model
+        if (!model) return yield* refuse("Its saved request names no model.")
+        planned = plan(material, frozen as Frozen, model)
+      } else {
+        // The chat's settings as they are now decide the model and the tools: the model "Retry
+        // with…" names, or the one the composer shows under this reply, which takes a choice
+        // made after it stopped (spec/AGENTIC.md §12.3). The assembly alone reads the state
+        // before the reply.
+        const events = yield* reader.StateEventsAt({ userId, chatId, slotId: source.slotId, forkId, displayEnd: true })
+        const state = foldState(events)
+        const binding = state.modelBindings[""]
+        const shown =
+          options?.model ??
+          (binding ? { connection: binding.connection as ConnectionId, model: binding.model as ModelId } : undefined)
+        const failed = yield* reader
+          .AssembleContext({
+            userId,
+            chatId,
+            slotId: source.slotId,
+            versionId: source.id,
+            forkId,
+            now: Date.now(),
+            timeZone: "UTC",
+            frozen: null,
+            ...(shown ? { model: shown } : {})
+          })
+          .pipe(
+            Effect.map((assembled) => ({ assembled })),
+            Effect.catchTag("AssemblyFailed", (error) => Effect.succeed({ failure: error.message }))
+          )
+        // Never sent silently: the user is told, and may send the saved request instead.
+        if ("failure" in failed)
+          return yield* new NotResumable({
+            versionId,
+            message: `Its request can't be built from the chat as it is now: ${failed.failure}`,
+            savedRequest: true
+          })
+        const fresh = JSON.parse(failed.assembled.snapshot) as ContextSnapshot
+        const model = fresh.inputs.model
+        if (!model)
+          return yield* refuse(
+            options?.model
+              ? "The chosen model is unavailable."
+              : "No model is chosen for this chat. Choose one, then resume."
+          )
+        planned = plan(material, frozen as Frozen, model)
+        // Unchanged, the frozen request is sent byte for byte, so the provider's cache still holds.
+        const modelChanged = !isDeepStrictEqual(frozen.inputs.model, model)
+        let rebuilt: ContextSnapshot = modelChanged
+          ? forModel(frozen, {
               model,
               samplers: fresh.request.samplers,
               ...(fresh.contextBudget ? { budget: fresh.contextBudget } : {})
             })
-          )
-        : material.snapshot
-      const chosen = changed
-        ? { connection: model.connectionId as ConnectionId, model: model.modelId as ModelId }
-        : undefined
+          : frozen
+        const tools = frozenAgent?.tools
+          ? yield* toolsNow({ userId, chatId, state, frozen: frozenAgent.tools })
+          : undefined
+        if (tools) rebuilt = { ...rebuilt, agent: { ...frozenAgent, tools } } as ContextSnapshot
+        if (modelChanged || tools) snapshot = JSON.stringify(rebuilt)
+        if (modelChanged) chosen = { connection: model.connectionId as ConnectionId, model: model.modelId as ModelId }
+      }
+      if (planned instanceof StepNotResumable) return yield* refuse(planned.message)
       if (options?.direction !== undefined)
         planned = {
           ...planned,
@@ -148,7 +219,8 @@ const agentVersionResumer = Effect.gen(function* () {
         forkId,
         expectedRowVersion,
         rolloutId,
-        ...(chosen ? { model: chosen, snapshot } : {}),
+        ...(chosen ? { model: chosen } : {}),
+        ...(snapshot === material.snapshot ? {} : { snapshot }),
         version: {
           speakerEntityId: source.speakerEntityId,
           writer: "model",
@@ -196,7 +268,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
         internal("GetRolloutSteps")
       ),
 
-    ResumeVersion: ({ versionId, forkId, expectedRowVersion }) =>
+    ResumeVersion: ({ versionId, forkId, expectedRowVersion, saved }) =>
       resume(
         versionId,
         forkId ?? null,
@@ -209,7 +281,8 @@ export const makeAgentHandlers = Effect.gen(function* () {
                 prefill: model.prefill === "assistant",
                 historical: frozen.continuity?.historical ?? 0
               }),
-        "resume"
+        "resume",
+        saved ? { saved: true } : undefined
       ).pipe(internal("ResumeVersion")),
 
     ResumeFromStep: ({ versionId, step, edit, forkId, expectedRowVersion }) =>

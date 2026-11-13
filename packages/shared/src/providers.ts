@@ -100,9 +100,14 @@ export const ProviderSettings = Schema.Struct({
    * How a cache marker is written on the wire, where the provider's API takes another encoding than
    * the API type's own: `prompt_cache_breakpoint` for OpenAI's APIs on AWS Bedrock.
    */
-  cacheMarker: Schema.optionalKey(Schema.Literal("prompt_cache_breakpoint"))
+  cacheMarker: Schema.optionalKey(Schema.Literal("prompt_cache_breakpoint")),
+  /** Seconds without a byte from the provider before a request fails as "no response". Unset: DEFAULT_IDLE_TIMEOUT_S. */
+  idleTimeoutS: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)))
 })
 export type ProviderSettings = typeof ProviderSettings.Type
+
+/** How long a request may go without a byte from the provider: thinking models can be silent a long time. */
+export const DEFAULT_IDLE_TIMEOUT_S = 300
 
 /** A choice a provider offers (an API type, a way to sign in), as the client lists it. */
 const ProviderChoice = Schema.Struct({ id: Schema.String, label: Schema.String, about: Schema.String })

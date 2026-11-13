@@ -1708,14 +1708,25 @@ export class ChatSession {
    * sent nothing new: the run goes on from its frozen request, so no guidance goes with it and
    * nothing waits for live edits (`beforeReply`).
    */
-  resumeVersion(entry: PathEntry): Promise<Outcome<PathEntry>> {
+  resumeVersion(entry: PathEntry, options: { readonly saved?: boolean } = {}): Promise<Outcome<PathEntry>> {
     return this.slotWrite(entry.slotId, (client) =>
       client("ResumeVersion", {
         versionId: entry.version.id,
         forkId: this.view.forkId,
-        expectedRowVersion: entry.rowVersion
+        expectedRowVersion: entry.rowVersion,
+        ...(options.saved ? { saved: true } : {})
       })
     )
+  }
+
+  /**
+   * Resume beside a failed or interrupted reply (spec/AGENTIC.md §12.6): an agent reply's run
+   * goes on; a plain reply is continued from its text (as Continue, without the composer's
+   * guidance), or, with no text yet, written again as a new version.
+   */
+  resumeReply(entry: PathEntry): Promise<Outcome<unknown>> {
+    if (entry.version.agent === true) return this.resumeVersion(entry)
+    return entry.version.content.trim() !== "" ? this.continueVersion(entry, false) : this.regenerate(entry)
   }
 
   /** "Show as reply text": the reply's leading sections back in its text, as a new version (spec/REPLY-SECTIONS.md). */

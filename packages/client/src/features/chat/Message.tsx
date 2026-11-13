@@ -132,18 +132,35 @@ function BodyText({
   )
 }
 
+/** The Resume beside a failed or interrupted reply's status (spec/AGENTIC.md §12.6). */
+function ResumeButton({ onResume }: { onResume: () => void }) {
+  return (
+    <Button
+      variant="secondary"
+      className="self-start"
+      hint="Carries this reply on from where it stopped, as a new version, with the model and settings the chat has now. Nothing new is written for you."
+      onClick={onResume}
+    >
+      Resume
+    </Button>
+  )
+}
+
 function VersionBody({
   version,
   session,
   parentSlotId,
   depth,
-  placement
+  placement,
+  onResume
 }: {
   version: Version
   session: ChatSession
   parentSlotId: SlotId | null
   depth: number
   placement: 1 | 2
+  /** For a reply that failed or was interrupted: carries it on. */
+  onResume?: (() => void) | undefined
 }) {
   const live = useAtomValue(liveText(version.id))
   const waiting = useAtomValue(waitingCache(version.id))
@@ -175,11 +192,24 @@ function VersionBody({
         </p>
       )}
       {version.status === "failed" && version.error && (
-        <div role="note" className="rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
+        <div
+          role="note"
+          className="flex flex-col gap-2 rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger"
+        >
           <p>
             Failed ({version.error.class}): {version.error.message}
           </p>
           <SlotOutlet slot={versionFailureActions} props={{ version }} />
+          {onResume && <ResumeButton onResume={onResume} />}
+        </div>
+      )}
+      {version.status === "interrupted" && onResume && (
+        <div
+          role="note"
+          className="flex flex-col gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-text"
+        >
+          <p>The app stopped while this reply was being written.</p>
+          <ResumeButton onResume={onResume} />
         </div>
       )}
     </div>
@@ -764,6 +794,11 @@ export const Message = memo(function Message({
       parentSlotId={entry.parentSlotId}
       depth={positionOf(entry)}
       placement={model ? 2 : 1}
+      onResume={
+        version.writer === "model" && (version.status === "failed" || version.status === "interrupted")
+          ? () => void session.resumeReply(entry).then(report)
+          : undefined
+      }
     />
   )
   // The version controls: in the footer, or in the bar over the version shown while composing.
@@ -1014,9 +1049,19 @@ export const Message = memo(function Message({
           </footer>
         </div>
         {error && (
-          <p role="alert" className="text-sm text-danger">
-            {error.message}
-          </p>
+          <div role="alert" className="flex flex-col gap-2 text-sm text-danger">
+            <p>{error.message}</p>
+            {error.tag === "NotResumable" && error.reason === "saved_request" && (
+              <Button
+                variant="secondary"
+                className="self-start"
+                hint="Sends the request this reply stopped with, unchanged: the context, model and tools it had then, not the chat's settings now."
+                onClick={() => void session.resumeVersion(entry, { saved: true }).then(report)}
+              >
+                Send the saved request
+              </Button>
+            )}
+          </div>
         )}
       </div>
     </article>

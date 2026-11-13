@@ -381,6 +381,156 @@ describe("audit: the provider request fails", () => {
   })
 })
 
+describe("a provider that goes silent (spec/AGENTIC.md §12.5)", () => {
+  it.live("nothing for the connection's limit fails as no response, once, and Resume sends it again", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      yield* agentWith([lookup().tool as RolloutTool<never>])
+      let silent = true
+      const mock = yield* mockOf((request, res) => {
+        const body = request.body as unknown as Body
+        if (results(body) === 0) return sse(res, toolCalls([["look_up", { topic: "keeper" }, "c1"]]))
+        // Headers, then nothing: a provider that took the request and went quiet.
+        if (silent) return void res.writeHead(200, { "content-type": "text/event-stream" })
+        sse(res, completionChunks(["Ansel waves."], { prompt_tokens: 20, completion_tokens: 2 }))
+      })
+      const api = yield* client()
+      const started = Date.now()
+      const { version, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { idleTimeoutS: 1 } },
+        model: {},
+        state: agentOn
+      })
+      assert.strictEqual(version.status, "failed")
+      assert.strictEqual(version.error?.class, "no_response", JSON.stringify(version.error))
+      assert.include(version.error?.message ?? "", "nothing for 1 s")
+      assert.isBelow(Date.now() - started, 15_000)
+      assert.lengthOf(bodies(mock.requests()), 2, "a silent request isn't retried by itself")
+      silent = false
+      const resumed = yield* resume(api, events, version.id)
+      assert.strictEqual(resumed.content, "Ansel waves.")
+      const [, cut, again] = bodies(mock.requests()) as [Body, Body, Body]
+      assert.deepStrictEqual(again, cut)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("keep-alive comments count as hearing from it: a slow start isn't cut off", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* mockOf((_request, res) => {
+        res.writeHead(200, { "content-type": "text/event-stream" })
+        // A queued request: DeepSeek and OpenRouter send SSE comments while it waits.
+        const beat = setInterval(() => res.write(": keep-alive\n\n"), 300)
+        setTimeout(() => {
+          clearInterval(beat)
+          for (const chunk of completionChunks(["Mira waves."], { prompt_tokens: 20, completion_tokens: 2 }))
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`)
+          res.end("data: [DONE]\n\n")
+        }, 2500)
+      })
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { idleTimeoutS: 1 } },
+        model: {}
+      })
+      assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
+      assert.strictEqual(version.content, "Mira waves.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
+describe("Resume uses the chat's Tools setting as it is now (spec/AGENTIC.md §12.3)", () => {
+  it.live("a tool turned off isn't offered; the call already made keeps its result", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      let failing = true
+      const mock = yield* mockOf((request, res) => {
+        const body = request.body as unknown as Body
+        if (results(body) === 0) return sse(res, toolCalls([["search_chat", { query: "bridge" }, "c1"]]))
+        if (failing) return json(res, 400, { error: { message: "This model can't take that request." } })
+        sse(res, completionChunks(["Mira waves."], { prompt_tokens: 20, completion_tokens: 2 }))
+      })
+      const api = yield* client()
+      const { version, events, chat } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [...agentOn, { key: "agent.tools" as const, value: { tools: ["search_chat", "read_messages"] } }]
+      })
+      assert.strictEqual(version.status, "failed")
+      const names = (body: Body) =>
+        (body.tools as Array<{ function: { name: string } }> | undefined)?.map((t) => t.function.name) ?? []
+      const [, cut] = bodies(mock.requests()) as [Body, Body]
+      assert.includeMembers(names(cut), ["search_chat", "read_messages"])
+      // The user turns search_chat off in This chat, with the failed reply last.
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId: version.slotId,
+        change: { _tag: "AgentTools", tools: ["read_messages"] }
+      })
+      failing = false
+      const resumed = yield* resume(api, events, version.id)
+      assert.strictEqual(resumed.content, "Mira waves.")
+      const again = bodies(mock.requests()).at(-1)!
+      assert.deepStrictEqual(
+        names(again),
+        names(cut).filter((name) => name !== "search_chat"),
+        "the tool turned off isn't offered; the rest are as they were"
+      )
+      assert.deepStrictEqual(again.messages, cut.messages, "the call made and its result are kept")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
+describe("Resume when the chat's context can't be built now (spec/AGENTIC.md §12.4)", () => {
+  it.live("says why and sends nothing; the saved request goes only when asked for, unchanged", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      let failing = true
+      const mock = yield* mockOf((request, res) => {
+        const body = request.body as unknown as Body
+        if (results(body) === 0) return sse(res, toolCalls([["search_chat", { query: "bridge" }, "c1"]]))
+        if (failing) return json(res, 500, { error: { message: "Busy." } })
+        sse(res, completionChunks(["Mira waves."], { prompt_tokens: 20, completion_tokens: 2 }))
+      })
+      const api = yield* client()
+      const { version, events, preset } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: agentOn
+      })
+      assert.strictEqual(version.status, "failed")
+      const sent = bodies(mock.requests()).length
+      const cut = bodies(mock.requests()).at(-1)!
+      // The chat's preset no longer reads as one: the chat's context can't be built now.
+      const me = yield* api.Whoami()
+      // (A fixture only: revisions are immutable, so the trigger is set aside for the write.)
+      yield* fixtureSql(config.dataDir, [
+        { sql: "DROP TRIGGER entity_revisions_immutable" },
+        {
+          sql: `UPDATE entity_revisions SET doc_json = '{"samplers":"broken"}' WHERE entity_id = ?`,
+          params: [preset.entityId]
+        }
+      ])
+      const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: version.slotId })
+      const refused = yield* api
+        .ResumeVersion({ versionId: version.id, expectedRowVersion: slot.entry.rowVersion })
+        .pipe(Effect.flip)
+      assert.strictEqual(refused._tag, "NotResumable")
+      assert.isTrue((refused as { savedRequest?: boolean }).savedRequest, JSON.stringify(refused))
+      assert.lengthOf(bodies(mock.requests()), sent, "nothing is sent silently")
+      failing = false
+      const entry = yield* api.ResumeVersion({
+        versionId: version.id,
+        expectedRowVersion: slot.entry.rowVersion,
+        saved: true
+      })
+      yield* eventually(() => finished(events, entry.version.id) !== undefined)
+      assert.strictEqual(finished(events, entry.version.id)!.content, "Mira waves.")
+      assert.deepStrictEqual(bodies(mock.requests()).at(-1), cut, "the stored request, unchanged")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+})
+
 describe("audit: Resume uses the chat's model as it is now", () => {
   it.live(
     "a failed request goes to the newly chosen model, converted for its API, without the old model's thinking",
