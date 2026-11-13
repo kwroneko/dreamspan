@@ -6,7 +6,14 @@ import { importPromptPreset } from "../formats/presetSettings.ts"
 import { createHash } from "node:crypto"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { LoreRole } from "@rp/shared/docs/lorebook.ts"
-import { MAX_NOTE_DEPTH, NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc, Placement } from "@rp/shared/docs/note.ts"
+import {
+  ReplaceTarget,
+  MAX_NOTE_DEPTH,
+  NOTE_SCHEMA_VERSION,
+  noteDepth,
+  type NoteDoc,
+  Placement
+} from "@rp/shared/docs/note.ts"
 import { PRESET_SCHEMA_VERSION } from "@rp/shared/docs/preset.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
@@ -150,6 +157,16 @@ const exportedNotes = (card: CardDoc) => {
         placement,
         exportable: true,
         module_id: item.id,
+        ...(Predicate.isObject(item.condition) && item.condition.when === "own_turn"
+          ? { condition: { when: "own_turn" as const } }
+          : {}),
+        ...(Predicate.isString(item.move_group) ? { move_group: item.move_group } : {}),
+        ...(Predicate.isObject(item.replaces) &&
+        item.replaces.kind === "card_field" &&
+        item.replaces.card === undefined &&
+        Schema.is(ReplaceTarget)(item.replaces)
+          ? { replaces: item.replaces, ...(item.own_position === true ? { own_position: true } : {}) }
+          : {}),
         ...(item.scan_lore === true ? { scan_lore: true } : {}),
         ...(item.on_by_default === true ? { on_by_default: true } : {})
       })

@@ -35,6 +35,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ContinueVersion: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   CountTokens: "Not in W6's first exposures; use the bounded workshop read tools.",
   CreateCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  MoveToOwnTurnNote:
+    "Not exposed: paired note creation needs a complete workshop undo adapter; editing note documents uses existing note tools.",
   CreateCardNote: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   CreateChat: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   CreateChatNote: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",

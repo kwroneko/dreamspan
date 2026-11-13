@@ -22,6 +22,7 @@ import * as firstRun from "./firstRun/index.tsx"
 import * as library from "./library/index.ts"
 import * as login from "./login.tsx"
 import * as network from "./network.tsx"
+import * as ownTurnNotes from "./ownTurnNotes/index.tsx"
 import * as noteOverrides from "./noteOverrides/index.tsx"
 import * as pickers from "./pickers/index.tsx"
 import * as regex from "./regex/index.tsx"
@@ -55,6 +56,7 @@ export const registerFeatures = () => {
   chat.register()
   workshop.register()
   noteOverrides.register()
+  ownTurnNotes.register()
   pickers.register()
   insertMessage.register()
   threads.register()

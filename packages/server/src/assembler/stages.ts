@@ -6,7 +6,7 @@ import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { DEFAULT_RESPONSE, withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
-import { charDefinitions, newestMessage, presetOrder, withMain } from "@rp/shared/presetOrder.ts"
+import { charDefinitions, newestMessage, ownTurnNotes, presetOrder, withMain } from "@rp/shared/presetOrder.ts"
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
 import { conditionOf, triggersFor } from "@rp/shared/presetConditions.ts"
 import {
@@ -305,7 +305,9 @@ const activeNotes = (events: ReadonlyArray<PositionedEvent>, notes: ReadonlyArra
 }
 
 /** Whether a note has a condition, which makes it come and go with the turn (DESIGN §4.1). */
-const conditioned = (note: NoteInput) => noteCondition(note.doc).when !== "always"
+const conditioned = (note: NoteInput) =>
+  noteCondition(note.doc).when !== "always" ||
+  (note.doc.placement.mode === "section" && note.doc.placement.section === "own_turn")
 
 /**
  * Whether a note's condition holds for the message being generated: on the turn of any of its
@@ -314,7 +316,11 @@ const conditioned = (note: NoteInput) => noteCondition(note.doc).when !== "alway
  */
 const noteConditionHolds = (note: NoteInput, cast: Cast) => {
   const condition = noteCondition(note.doc)
+  const placement = note.doc.placement
+  if (placement.mode === "section" && placement.section === "own_turn" && cast.speaker?.entity !== noteCard(note.doc))
+    return false
   if (condition.when === "always") return true
+  if (condition.when === "own_turn") return noteCard(note.doc) !== null && cast.speaker?.entity === noteCard(note.doc)
   const named = inCastOf(condition.cards, cast)
   return condition.when === "turn"
     ? named.some((card) => cast.speaker?.entity === card.entity)
@@ -333,7 +339,15 @@ const isMuted = (cast: Cast, entity: string) => cast.absent.has(entity)
 /** A condition in words, for the request inspector. */
 const conditionText = (note: NoteInput, cast: Cast) => {
   const condition = noteCondition(note.doc)
-  if (condition.when === "always") return undefined
+  if (
+    condition.when === "always" &&
+    !(note.doc.placement.mode === "section" && note.doc.placement.section === "own_turn")
+  )
+    return undefined
+  if (condition.when === "always" || condition.when === "own_turn") {
+    const owner = [...cast.characters, ...cast.personas].find((c) => c.entity === noteCard(note.doc))
+    return `only on ${owner ? modelName(owner.doc) : "its card"}'s turns`
+  }
   // A card not in the cast never counts, so only the cast's are named, unless none of them is.
   const inCast = inCastOf(condition.cards, cast)
   const names = inCast.length > 0 ? inCast.map((c) => modelName(c.doc)) : ["a card not in the chat"]
@@ -422,6 +436,13 @@ const noteGateStage = sync("note-gate", (assembly) => {
     })
   )
   assembly.skippedNotes = active.filter((note) => !holds.get(note.entity))
+  for (const note of assembly.skippedNotes) {
+    if (
+      note.doc.condition?.when === "own_turn" ||
+      (note.doc.placement.mode === "section" && note.doc.placement.section === "own_turn")
+    )
+      need(assembly, "macros").verbatim(`note:${note.entity}`, noteSource(assembly, note), "")
+  }
   assembly.notes = active.filter((note) => holds.get(note.entity))
 })
 
@@ -1296,6 +1317,10 @@ const summaryNotes = (assembly: Assembly, notes = assembly.notes) => (notes ?? [
 
 const noteSource = (assembly: Assembly, note: NoteInput): Source => ({
   kind: "note",
+  ...(note.doc.condition?.when === "own_turn" ||
+  (note.doc.placement.mode === "section" && note.doc.placement.section === "own_turn")
+    ? { ownTurn: true }
+    : {}),
   entity: note.entity,
   revision: note.revision,
   activation: assembly.noteDecisions?.get(note.entity)
@@ -1361,7 +1386,7 @@ const noteText = (
 type NotePlace =
   | { readonly at: "chat"; readonly depth: number; readonly role: Role }
   | {
-      readonly at: "start" | "end" | "context_start" | "tail_start" | "tail_end"
+      readonly at: "start" | "end" | "context_start" | "tail_start" | "tail_end" | "own_turn"
       readonly volatile: boolean
       readonly role: Role
     }
@@ -1374,9 +1399,9 @@ const placeOf = (note: NoteInput): NotePlace | null => {
     case "tail":
       return { at: "chat", depth: 0, role: placement.role }
     case "section":
-      if (["context_start", "tail_start", "tail_end"].includes(placement.section))
+      if (["context_start", "tail_start", "tail_end", "own_turn"].includes(placement.section))
         return {
-          at: placement.section as "context_start" | "tail_start" | "tail_end",
+          at: placement.section as "context_start" | "tail_start" | "tail_end" | "own_turn",
           role: placement.role ?? "system",
           volatile: conditioned(note)
         }
@@ -1481,15 +1506,29 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
     const skipped = assembly.skippedNotes?.includes(note)
     // Every conditioned note is a potential writer; never expand a skipped one to find out.
     if (conditioned(note)) env.potentialVariableWrite()
-    return skipped
+    const text = skipped
       ? { text: "", piece: env.verbatim(`note:${note.entity}`, noteSource(assembly, note), "") }
       : isSummary(note)
         ? summaryText(assembly, note)
         : noteText(assembly, note, owner)
+    if (text && owner && note.doc.placement.mode === "section" && note.doc.placement.section === "own_turn") {
+      const name = modelName(owner.doc)
+      const wrapped = text.text ? `<${name}>\n${text.text}\n</${name}>` : ""
+      return {
+        text: wrapped,
+        piece: env.verbatim(`own-turn:${note.entity}`, noteSource(assembly, note), wrapped, [text.piece])
+      }
+    }
+    return text
   }
   const ownerOf = (note: NoteInput) => {
     const card = noteCard(note.doc)
-    return card === null ? null : (cards.find((c) => c.entity === card) ?? null)
+    return card === null
+      ? null
+      : ([
+          ...cards,
+          ...(note.doc.placement.mode === "section" && note.doc.placement.section === "own_turn" ? personas : [])
+        ].find((c) => c.entity === card) ?? null)
   }
   const placed: Array<PendingNote> = sorted.flatMap((note) => {
     const card = noteCard(note.doc)
@@ -1754,6 +1793,19 @@ const composeStage = sync("compose", (assembly) => {
     : optional("utility.new_chat_prompt", utility.new_chat_prompt)
 
   const collection = collectionOf(assembly)
+  if (
+    pendingNotes.placed.some((n) => n.place.at === "own_turn") &&
+    !collection.some((p) => p.identifier === "ownTurnNotes")
+  ) {
+    const history = collection.findIndex((p) => p.identifier === "chatHistory")
+    const tail =
+      history < 0 ? collection.length : history + (collection[history + 1]?.identifier === "newestMessage" ? 2 : 1)
+    collection.splice(tail, 0, { ...ownTurnNotes, content: "", piece: null, kind: "volatile" })
+    assembly.issues.push({
+      kind: "layout_ignored",
+      message: "Own-turn notes sent at the start of the tail: this preset has no Own-turn notes marker"
+    })
+  }
   // The cards card-swap left out this turn, for the inspector's "not sent" list.
   if (swapped)
     for (const card of cast.characters)
@@ -1974,18 +2026,25 @@ const composeStage = sync("compose", (assembly) => {
     const before = { context_start: 0, tail_start: 0 }
     for (const { text, place, id } of placed) {
       if (place.at === "chat") continue
-      if (place.at === "context_start" || place.at === "tail_start" || place.at === "tail_end") {
+      if (
+        place.at === "context_start" ||
+        place.at === "tail_start" ||
+        place.at === "tail_end" ||
+        place.at === "own_turn"
+      ) {
         const history = collection.findIndex((p) => p.identifier === "chatHistory")
         const tail =
           history < 0 ? collection.length : history + (collection[history + 1]?.identifier === "newestMessage" ? 2 : 1)
         const newest = collection.findIndex((p) => p.identifier === "newestMessage")
         const tailEnd = newest > history + 1 ? newest : collection.length
         const index =
-          place.at === "context_start"
-            ? before.context_start++
-            : place.at === "tail_start"
-              ? tail + before.tail_start++
-              : tailEnd
+          place.at === "own_turn"
+            ? collection.findIndex((p) => p.identifier === "ownTurnNotes")
+            : place.at === "context_start"
+              ? before.context_start++
+              : place.at === "tail_start"
+                ? tail + before.tail_start++
+                : tailEnd
         collection.splice(index, 0, {
           identifier: `note:${id}`,
           role: place.role,

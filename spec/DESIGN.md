@@ -1,3 +1,5 @@
+**Built 2026-11-13 (ownturn1):** §7.1’s own-turn card notes, movable preset marker and export notice are implemented and obsolete as implementation proposals (ARCHITECTURE §15). The [P] mechanisms remain marked Proposed; Suggest a split stays later.
+
 **Built 2026-11-07 (tokencut):** History fitting and cache estimates now use the selected model’s local tokenizer under §4’s real-tokenizer decision (originally line 558). This subset is obsolete as an implementation proposal; see ARCHITECTURE §15. Unknown models use the local o200k approximation; provider counting is never on the fitting path.
 
 **Built 2026-11-06 (chatsettings):** §7.1's independent Tools and Cards settings, shared Context and links to existing turn picking replace user-facing modes; the internal registry has one default planner. This shared-context subset is obsolete as an implementation proposal; see ARCHITECTURE §16. Separate contexts remain proposed.

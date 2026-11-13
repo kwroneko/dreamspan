@@ -143,7 +143,8 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     session,
     view.entries.some((entry) => entry.version.status === "generating")
   )
-  const notes = useSyncExternalStore(cacheNotes(session).subscribe, cacheNotes(session).snapshot)
+  const changes = useSyncExternalStore(cacheNotes(session).subscribe, cacheNotes(session).snapshot)
+  const notes = warmth?.speakerChange ? [{ short: "Speaker changes", text: warmth.speakerChange }, ...changes] : changes
   const [now, setNow] = useState(() => Date.now())
   const [countdown, setCountdown] = useState(countdownOn)
   const [open, setOpen] = useState(false)

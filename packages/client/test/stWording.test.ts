@@ -9,6 +9,7 @@ import { expect, it } from "vitest"
 
 /** Files that are interop surfaces through and through: the ST import and its reports. */
 const INTEROP_FILES = new Set([
+  "features/cardExport/ExportCheck.tsx",
   "features/library/stImport.tsx",
   "features/library/stJobs.tsx",
   "features/library/import.tsx",
@@ -20,6 +21,7 @@ const INTEROP_FILES = new Set([
 
 /** Single interop strings elsewhere: an import or export entry point. */
 const INTEROP_STRINGS = new Set([
+  "features/ownTurnNotes/fields.tsx\tSillyTavern gets the original",
   "features/chat/headerContributions.tsx\tDownloads the branch shown as a SillyTavern chat file or plain text.",
   "features/characters/CharactersPage.tsx\tImport from SillyTavern",
   "features/characters/CharactersPage.tsx\tOpens the SillyTavern importer.",

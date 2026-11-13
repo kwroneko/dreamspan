@@ -5,7 +5,7 @@ import { makeSnippetWrites } from "./snippetWrites.ts"
 // The editors' write handlers (ARCHITECTURE.md "Editing the library"). They run in the
 // writer worker, each as one transaction, through the library's own steps (libraryWrites.ts),
 // so every change flows on to the refs that follow the edited one.
-import { NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
+import { OWN_TURN_FRAMING, NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
 import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import {
   applyDrafts,
@@ -751,6 +751,85 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         const message = crop === null ? "Reset the avatar's cutout" : "Changed the avatar's cutout"
         return yield* userEdit(ref, doc, message, null)
       }).pipe(transaction(sql, "SetCardAvatarCrop")),
+
+    MoveToOwnTurnNote: ({ userId, cardRefId, expectedRevisionId, field, text, at, length, framing }) =>
+      Effect.gen(function* () {
+        const card = yield* lib.ownedRef(userId, cardRefId)
+        if (card.kind !== "card") return yield* new NotFound({ entity: "card", id: cardRefId })
+        if (card.head_revision_id !== expectedRevisionId)
+          return yield* refused(card, "The card changed. Read it again before moving a passage.")
+        const head = yield* lib.loadDoc(card.head_revision_id)
+        const rows = yield* sql<{ id: string; doc_json: string }>`SELECT r.id, h.doc_json
+          FROM entity_refs r JOIN entities e ON e.id = r.entity_id JOIN entity_revisions h ON h.id = r.head_revision_id
+          WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
+            AND json_extract(h.doc_json, '$.owner.card') = ${card.entity_id}`
+        const previous = rows
+          .map((r) => ({ id: r.id, doc: JSON.parse(r.doc_json) as Doc }))
+          .find((n) => {
+            const owner = n.doc.owner as { card?: string } | undefined
+            const target = n.doc.replaces as { kind?: string; field?: string; card?: string } | undefined
+            return (
+              owner?.card === card.entity_id && target?.kind === "card_field" && target.field === field && !target.card
+            )
+          })
+        if (previous && typeof previous.doc.move_group !== "string")
+          return yield* refused(card, "This field already has a replacement note. Open the notes to edit it.")
+        const source = previous ? String(previous.doc.content ?? "") : String(head[field] ?? "")
+        if (source !== text || at + length > source.length || !source.slice(at, at + length).trim())
+          return yield* refused(card, "The passage changed. Select it again before moving it.")
+        const group = previous?.doc.move_group ?? uuidv7()
+        const label = `Moved from ${{ description: "Description", personality: "Personality", scenario: "Scenario", mes_example: "Example messages", system_prompt: "System prompt", post_history_instructions: "Post-history instructions" }[field]}`
+        const ownCount = rows.filter((row) => {
+          const doc = JSON.parse(row.doc_json) as Doc
+          return doc.move_group === group && (doc.condition as { when?: string } | undefined)?.when === "own_turn"
+        }).length
+        const base = {
+          ...newCardNote(card.entity_id as EntityId, ownCount ? `${label} (${ownCount + 1})` : label),
+          on_by_default: previous ? previous.doc.on_by_default === true : true,
+          move_group: group
+        }
+        const replacement = {
+          ...(previous?.doc ?? base),
+          title: previous?.doc.title ?? label.replace("Moved from", "Shared"),
+          content: source.slice(0, at) + source.slice(at + length),
+          replaces: { kind: "card_field", field }
+        }
+        const conflict = yield* replacementConflict(
+          sql,
+          userId,
+          previous ? (yield* lib.ownedRef(userId, previous.id)).entity_id : null,
+          replacement
+        )
+        if (conflict && !previous) return yield* refused(card, conflict)
+        const create = (doc: Doc) =>
+          steps.createUpstream({
+            userId,
+            kind: "note",
+            label: String(doc.title ?? label),
+            subtitle: "",
+            doc: steps.encode(doc),
+            schemaVersion: NOTE_SCHEMA_VERSION,
+            origin: "user",
+            originRef: null,
+            sourcePath: null,
+            sourceHash: null
+          })
+        const replaced = previous
+          ? (yield* userEdit(
+              yield* lib.ownedRef(userId, previous.id),
+              replacement,
+              "Moved a passage to an own-turn note",
+              null
+            )).ref
+          : toLibraryRef(yield* create(replacement))
+        const own = yield* create({
+          ...base,
+          content: `${framing ?? OWN_TURN_FRAMING}\n\n${source.slice(at, at + length)}`,
+          condition: { when: "own_turn" },
+          placement: { mode: "section", section: "own_turn", role: "system" }
+        })
+        return [toLibraryRef(own), replaced]
+      }).pipe(transaction(sql, "MoveToOwnTurnNote")),
 
     CreateCardNote: ({ userId, cardRefId, title, link, chatNote }) =>
       Effect.gen(function* () {

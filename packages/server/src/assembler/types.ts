@@ -14,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 66
+export const ASSEMBLER_VERSION = 67
 
 export type Role = "system" | "user" | "assistant"
 
@@ -72,6 +72,7 @@ export type Source =
     }
   | {
       readonly kind: "note"
+      readonly ownTurn?: boolean
       readonly entity: string
       readonly revision: string
       readonly activation?: Extract<SourceActivation, { kind: "note" }> | undefined

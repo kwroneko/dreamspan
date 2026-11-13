@@ -7,6 +7,9 @@ import { LoreRole } from "./lorebook.ts"
 
 export const NOTE_SCHEMA_VERSION = 1
 
+export const OWN_TURN_FRAMING =
+  "[Background on {{char}}, as the story began. Where the story since then shows {{char}} differently, the story wins.]"
+
 /** The deepest a note goes in the chat: ST's own limit (`MAX_INJECTION_DEPTH`). */
 export const MAX_NOTE_DEPTH = 10_000
 
@@ -37,6 +40,7 @@ export const Placement = Schema.Union([
     section: Schema.Literals([
       "context_start",
       "tail_start",
+      "own_turn",
       "tail_end",
       "card",
       "before_main_prompt",
@@ -84,6 +88,7 @@ const SingleCardCondition = SingleCard.pipe(
  */
 export const NoteCondition = Schema.Union([
   Schema.Struct({ when: Schema.Literal("always") }),
+  Schema.Struct({ when: Schema.Literal("own_turn") }),
   CardCondition,
   SingleCardCondition
 ])
@@ -179,6 +184,8 @@ export const NoteDoc = Schema.Struct({
   link: Schema.optionalKey(EntityId),
   /** The card module this note was made from, or an export's note id: how re-imports find it. */
   module_id: Schema.optionalKey(Schema.String),
+  /** Notes made by the same field move, switched together. No card ids, so exports keep it. */
+  move_group: Schema.optionalKey(Schema.String),
   /** Private notes never leave in an export. */
   exportable: Schema.Boolean,
   /**
@@ -237,4 +244,4 @@ export const anyOf = (names: ReadonlyArray<string>) =>
 
 /** The cards a condition names: none for always. */
 export const conditionCards = (condition: NoteCondition): ReadonlyArray<EntityId> =>
-  condition.when === "always" ? [] : condition.cards
+  condition.when === "always" || condition.when === "own_turn" ? [] : condition.cards

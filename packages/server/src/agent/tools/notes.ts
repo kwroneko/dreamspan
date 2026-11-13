@@ -115,7 +115,11 @@ export const notesAt = (context: NotesPosition) =>
           ? notes
           : notes.filter((n) => {
               const condition = readNoteCondition(n.doc["condition"])
-              return condition.when !== "turn" || condition.cards.some((card) => viewers.includes(card))
+              const placement = n.doc.placement as { mode?: string; section?: string } | undefined
+              return condition.when === "own_turn" ||
+                (placement?.mode === "section" && placement.section === "own_turn")
+                ? n.card !== null && viewers.includes(n.card)
+                : condition.when !== "turn" || condition.cards.some((card) => viewers.includes(card))
             }),
       state
     }

@@ -1042,8 +1042,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId,
         revisionId: library.ref.headRevisionId
       })) as unknown as PresetDoc
-      // ST's twelve and the newest-message marker, the group nudge, the impersonation, continue and direction prompts.
-      assert.strictEqual(imported.prompts.length, 17)
+      // ST’s twelve, Newest message and Own-turn notes, plus the four end-of-request prompts.
+      assert.strictEqual(imported.prompts.length, 18)
     })
   )
 })

@@ -550,23 +550,50 @@ export function NoteList({
   onRevealed?: (() => void) | undefined
 }) {
   const shown = filter ? entries.filter(filter) : entries
+  const groups = new Map<string, Array<NoteListEntry>>()
+  for (const entry of shown) {
+    const owner = (entry.doc.owner as { card?: string } | undefined)?.card ?? ""
+    const key = typeof entry.doc.move_group === "string" ? `${owner}:${entry.doc.move_group}` : entry.ref.id
+    groups.set(key, [...(groups.get(key) ?? []), entry])
+  }
+  const block = (entry: NoteListEntry) => (
+    <NoteBlock
+      key={`${entry.ref.id}:${entry.chatNote?.forkId ?? ""}:${entry.chatNote?.slotId ?? ""}:${entry.generation ?? 0}`}
+      entry={entry}
+      cards={cards}
+      call={call}
+      open={blocks.isOpen(entry.ref.id)}
+      onOpenChange={(open) => blocks.setOpen(entry.ref.id, open)}
+      settingsOpen={settings.isOpen(entry.ref.id)}
+      onSettingsOpenChange={(open) => settings.setOpen(entry.ref.id, open)}
+      onRelinked={() => onRelinked?.(entry)}
+      reveal={added === entry.ref.id}
+      onRevealed={onRevealed}
+    />
+  )
   return (
     <ul aria-label={label} className="flex flex-col gap-1.5">
-      {shown.map((entry) => (
-        <NoteBlock
-          key={`${entry.ref.id}:${entry.chatNote?.forkId ?? ""}:${entry.chatNote?.slotId ?? ""}:${entry.generation ?? 0}`}
-          entry={entry}
-          cards={cards}
-          call={call}
-          open={blocks.isOpen(entry.ref.id)}
-          onOpenChange={(open) => blocks.setOpen(entry.ref.id, open)}
-          settingsOpen={settings.isOpen(entry.ref.id)}
-          onSettingsOpenChange={(open) => settings.setOpen(entry.ref.id, open)}
-          onRelinked={() => onRelinked?.(entry)}
-          reveal={added === entry.ref.id}
-          onRevealed={onRevealed}
-        />
-      ))}
+      {[...groups].map(([key, group]) =>
+        group.length < 2 ? (
+          block(group[0]!)
+        ) : (
+          <li key={key} data-moved-note-pair>
+            <div
+              role="group"
+              aria-label="Moved card text"
+              className="flex min-w-0 flex-col gap-1 rounded-md border border-border p-2"
+            >
+              <div className="flex items-center gap-2 px-2 py-2 text-sm font-medium">
+                {(group.find((e) => e.doc.condition !== undefined) ?? group[0]!).control}
+                {String(group.find((e) => e.doc.condition !== undefined)?.doc.title ?? "Moved card text")}
+              </div>
+              <ul className="flex min-w-0 flex-col gap-1.5">
+                {group.map((entry) => block({ ...entry, control: undefined }))}
+              </ul>
+            </div>
+          </li>
+        )
+      )}
     </ul>
   )
 }

@@ -44,6 +44,7 @@ import {
   type AppRpcs,
   AppCoreApi,
   AuthenticatedGalleryApi,
+  AuthenticatedOwnTurnNoteApi,
   AuthenticatedPanelApprovalApi,
   AuthenticatedCardArchiveApi,
   AuthenticatedTextSearchApi,
@@ -72,6 +73,7 @@ import { makeChatEventHandlers, makeChatHandlers, makeMessageVersionHandlers } f
 import { makeChatSetupHandlers, makeDraftPreviewHandlers } from "./api/chatSetup.ts"
 import {
   makeEditorHandlers,
+  makeOwnTurnNoteHandlers,
   makeWorkshopPresetHandlers,
   makeGalleryHandlers,
   makePanelApprovalHandlers,
@@ -179,6 +181,7 @@ const CoreHandlers = AppCoreApi.toLayer(
 
 const HandlerLayers = Layer.mergeAll(
   CoreHandlers,
+  AuthenticatedOwnTurnNoteApi.toLayer(makeOwnTurnNoteHandlers),
   AuthenticatedWorkshopPresetApi.toLayer(makeWorkshopPresetHandlers),
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
   AuthenticatedShellUpdatesApi.toLayer(
