@@ -1,3 +1,5 @@
+import { historyFork } from "./historyShared.ts"
+import { onForkPath } from "./forks.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 // Worker-only undo policies for operation exposures. No non-database work in a transaction.
 import { Effect } from "effect"
@@ -401,7 +403,10 @@ export const operationPolicies = makeRegistry<OperationPolicy>([
   })
 ])
 
-export const operationInfo = (sql: SqlClient.SqlClient, input: { userId: UserId; chatId?: ChatId }) =>
+export const operationInfo = (
+  sql: SqlClient.SqlClient,
+  input: { userId: UserId; chatId?: ChatId; storyAt?: import("@rp/shared/chat.ts").StoryAt }
+) =>
   Effect.gen(function* () {
     const [row] = yield* sql<{
       id: string
@@ -420,11 +425,20 @@ export const operationInfo = (sql: SqlClient.SqlClient, input: { userId: UserId;
     let proof: unknown = null
     if (input.chatId) {
       const chat = yield* snapshotChat(sql, input.userId, input.chatId)
+      if (input.storyAt) {
+        const at = input.storyAt
+        const fork = yield* historyFork(sql, input.userId, input.chatId, at.forkId)
+        if (
+          at.chatId !== input.chatId ||
+          (at.leafSlotId !== null && !(yield* onForkPath(sql, input.chatId, fork, at.leafSlotId)))
+        )
+          return yield* new NotFound({ entity: "story position", id: at.forkId })
+      }
       const rows = yield* stateEventsThrough(
         sql,
         input.chatId,
-        chat.active_leaf_slot_id as SlotId | null,
-        chat.current_fork_id
+        input.storyAt ? input.storyAt.leafSlotId : (chat.active_leaf_slot_id as SlotId | null),
+        input.storyAt ? input.storyAt.forkId : chat.current_fork_id
       )
       const state = foldState(
         rows.map((r) => ({ scope: r.scope, data: { key: r.key, value: JSON.parse(r.value_json) } })) as never

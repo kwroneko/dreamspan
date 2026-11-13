@@ -4,7 +4,8 @@
 // assistant do this kind of thing here without asking; Decline tells it not to, with a note if the
 // user writes one. The answer names the call's arguments' digest, so it holds for this call only.
 import type { ApprovalAnswer } from "@rp/shared/workshopApi.ts"
-import { useState } from "react"
+import { ReplyExtrasContext } from "../replyExtras.ts"
+import { useContext, useState } from "react"
 import { ErrorAlert, useAction } from "../../../actions.tsx"
 import { Button } from "../../../ui/Button.tsx"
 import { Field, Textarea } from "../../../ui/Field.tsx"
@@ -20,6 +21,7 @@ const UNCERTAIN_TEXT =
 export function ApprovalPanel({ step }: StepActionProps) {
   const approval = step.status === "waiting" ? step.approval : undefined
   const action = useAction()
+  const replyExtras = useContext(ReplyExtrasContext)
   const [answering, setAnswering] = useState<ApprovalAnswer | null>(null)
   const [noting, setNoting] = useState(false)
   const [note, setNote] = useState("")
@@ -34,6 +36,7 @@ export function ApprovalPanel({ step }: StepActionProps) {
           toolCallId: approval.toolCallId,
           digest: approval.digest,
           answer: choice,
+          ...replyExtras(),
           ...(choice === "deny" && trimmed !== "" ? { note: trimmed } : {})
         }),
       // Allowing it in this workshop changes what the chip shows.

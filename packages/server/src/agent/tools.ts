@@ -97,12 +97,13 @@ export interface RolloutTool<A = never> {
   /**
    * What the call will do, for its approval (spec/WORKSHOP.md §3.4), worked out by the server from
    * the real arguments and the items they name: the target's own name, an edit's fields before
-   * and after. Absent: the arguments as they are.
+   * and after. Absent: the arguments as they are. `storyAt`: the call reads or changes the story
+   * at the request's position, so only a tab still showing it may allow it.
    */
   readonly describe?: (
     context: ToolContext,
     args: A
-  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes">, unknown>
+  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt">, unknown>
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
 

@@ -754,7 +754,7 @@ interface StoryPlace {
 }
 
 /** The workshop's story at the request's position, as a context the history reads take. */
-const storyContext = (context: ToolContext) =>
+export const storyContext = (context: ToolContext) =>
   Effect.gen(function* () {
     const story = yield* cached(
       context,
@@ -875,6 +875,8 @@ const overStory = <A>(
   // The approval names the story by its title, as the user knows it.
   describe: (context, args) =>
     Effect.map(storyContext(context), (story) => ({
+      // Allow holds only from a tab still showing this position (AnswerToolApproval).
+      ...("error" in story || context.storyAt === undefined ? {} : { storyAt: context.storyAt }),
       title: "error" in story ? definition.ask : `${definition.ask} “${story.title ?? "Untitled"}”`,
       rows: [
         // The approval names the branch and the message it reads up to, as the tab showed them.

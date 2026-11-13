@@ -86,16 +86,22 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
         if (rows.length !== 1)
           return yield* new ApprovalRefused({ message: "This call already asked. Use a new call." })
       }).pipe(transaction(sql, "RequestToolApproval")),
-    AnswerToolApproval: ({ userId, rolloutId, toolCallId, digest, answer, note }) =>
+    AnswerToolApproval: ({ userId, rolloutId, toolCallId, digest, answer, note, storyAt }) =>
       Effect.gen(function* () {
         const { chat_id } = yield* ownedRollout(sql, userId, rolloutId)
         const [row] = yield* sql<{
           status: string
           digest: string
           capability: string
-        }>`SELECT status, digest, capability
+          prompt_json: string
+        }>`SELECT status, digest, capability, prompt_json
           FROM tool_approvals WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
         if (!row) return yield* new NotFound({ entity: "approval", id: toolCallId })
+        const expectedAt = JSON.parse(row.prompt_json).storyAt
+        if (answer !== "deny" && expectedAt && JSON.stringify(expectedAt) !== JSON.stringify(storyAt))
+          return yield* new ApprovalRefused({
+            message: "The story tab moved. Send the request again from its new position."
+          })
         if (row.digest !== digest)
           return yield* new ApprovalRefused({ message: "This answer is for a different request. Look again." })
         const [run] = yield* sql<{ status: string }>`SELECT status FROM rollouts WHERE id = ${rolloutId}`

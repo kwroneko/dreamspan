@@ -1,9 +1,11 @@
+import { checkStoryWrite } from "./storyWriteScope.ts"
+import { displaySlots } from "./displayPath.ts"
 import { Effect, Schema } from "effect"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { HistoryRejected, type HistoryEdit } from "@rp/shared/historyApi.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
-import type { ChatId, ForkId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, StoryAt } from "@rp/shared/chat.ts"
 import type { LibrarySteps } from "./editorWrites.ts"
 import type { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import type { WriteOps } from "./ops.ts"
@@ -28,9 +30,15 @@ export const makeAgentHistoryWriteHandlers = (
   history: Effect.Success<typeof makeHistoryWriteHandlers>
 ) => {
   const { sql } = steps
-  const startEdit = Effect.fnUntraced(function* (input: WorkshopCall & { chatId: ChatId; forkId: ForkId }) {
+  const startEdit = Effect.fnUntraced(function* (
+    input: WorkshopCall & { chatId: ChatId; forkId: ForkId; storyAt?: StoryAt }
+  ) {
     const source = yield* checkWorkshopAccess(sql, input, "chats.rewrite")
     const fork = yield* rewriteFork(sql, input.userId, input.chatId, input.forkId)
+    const position = yield* checkStoryWrite(sql, input.userId, input.rolloutId, input.chatId, input.storyAt)
+    if (position && input.forkId !== input.storyAt!.forkId)
+      return yield* reject("This edit names another story branch.")
+    const leaf = position ? input.storyAt!.leafSlotId : fork.tip_slot_id
     const id = uuidv7()
     const at = Date.now()
     const [message] = yield* sql<{
@@ -39,7 +47,7 @@ export const makeAgentHistoryWriteHandlers = (
     }>`SELECT id,slot_id FROM versions WHERE rollout_id=${input.rolloutId}
       ORDER BY (status='generating') DESC,created_at DESC,id DESC LIMIT 1`
     yield* sql`INSERT INTO rollouts(id,chat_id,fork_id,kind,status,role,request_class,leaf_slot_id,created_at,started_at,updated_at,completed_at)
-      VALUES (${id},${input.chatId},${input.forkId},'edit','completed','assistant','interactive',${fork.tip_slot_id},${at},${at},${at},${at})`
+      VALUES (${id},${input.chatId},${input.forkId},'edit','completed','assistant','interactive',${leaf},${at},${at},${at},${at})`
     yield* sql`INSERT INTO rollout_payloads(rollout_id,context_snapshot_json) VALUES (${id},${JSON.stringify({ workshop: { chat: source.chat_id, rollout: input.rolloutId, toolCall: input.toolCallId, version: message?.id ?? null, slot: message?.slot_id ?? null } })})`
     return id
   })
@@ -56,6 +64,40 @@ export const makeAgentHistoryWriteHandlers = (
         }>`SELECT result_json FROM rollout_receipts WHERE rollout_id=${input.rolloutId} AND tool_call_id=${input.toolCallId}`
         if (receipt) return JSON.parse(receipt.result_json) as string
         yield* checkWorkshopAccess(sql, input, "chats.rewrite")
+        const position = yield* checkStoryWrite(sql, input.userId, input.rolloutId, input.chatId, input.storyAt)
+        let range: { first: number; last: number } | undefined
+        if (position) {
+          if (input.forkId !== input.storyAt!.forkId)
+            return yield* reject("This change names another branch. Send the request again.")
+          if (
+            input.edits.some(
+              (edit) =>
+                edit.kind === "state_event" &&
+                (edit.targetId || edit.atSlotId !== (input.storyAt!.leafSlotId ?? undefined))
+            )
+          )
+            return yield* reject("Instruction changes must start at the story tab’s position.")
+          // One set-based check for the whole rewrite, including summary endpoints and
+          // inserted messages. Never walk a thousands-message path once per edited text.
+          const [bounds] = yield* sql<{ invalid: number; first: number | null; last: number | null }>`
+            ${displaySlots(sql, position.pieces, 0, position.upTo - 1)}
+            SELECT coalesce(sum(CASE WHEN w.value ->> '$.kind'='version_replace' THEN d.id IS NULL
+              ELSE a.id IS NULL OR b.id IS NULL END),0) AS invalid,
+              min(coalesce(d.position,a.position))+1 AS first,max(coalesce(d.position,b.position))+1 AS last
+            FROM json_each(${JSON.stringify(input.edits)}) w
+            LEFT JOIN versions v ON w.value ->> '$.kind'='version_replace' AND v.id=w.value ->> '$.targetId'
+            LEFT JOIN summaries s ON w.value ->> '$.kind'='summary_revision' AND s.id=w.value ->> '$.targetId' AND s.chat_id=${input.chatId}
+            LEFT JOIN display_slots d ON d.id=v.slot_id
+            LEFT JOIN display_slots a ON a.id=s.first_slot_id
+            LEFT JOIN display_slots b ON b.id=s.last_slot_id
+            WHERE w.value ->> '$.kind'<>'state_event'`
+          if (bounds!.invalid) return yield* reject("Choose texts at or before the story tab’s position.")
+          const instructions = input.notes?.length || input.edits.some((e) => e.kind === "state_event")
+          range = {
+            first: bounds!.first ?? position.upTo,
+            last: instructions ? position.upTo : (bounds!.last ?? position.upTo)
+          }
+        }
         const items = input.edits.length + (input.notes?.length ?? 0)
         if (items > workshopLimits.rewriteItems || items === 0)
           return yield* reject(
@@ -142,7 +184,9 @@ export const makeAgentHistoryWriteHandlers = (
               scope: null,
               data: { key: "note.binding", value: { note: ref.entity_id, revision } }
             }),
-            ...(snapshot.leaf ? { atSlotId: snapshot.leaf } : {})
+            ...((input.storyAt ? input.storyAt.leafSlotId : snapshot.leaf)
+              ? { atSlotId: (input.storyAt ? input.storyAt.leafSlotId : snapshot.leaf)! }
+              : {})
           })
         }
         const editRollout = yield* startEdit(input)
@@ -170,8 +214,11 @@ export const makeAgentHistoryWriteHandlers = (
         // The run's receipt clock, as every other reply effect: bulk Undo follows call order.
         const receiptAt = yield* nextReceiptTime(sql, input.rolloutId)
         yield* sql`INSERT INTO rollout_receipts(rollout_id,tool_call_id,result_json,created_at) VALUES (${input.rolloutId},${input.toolCallId},${JSON.stringify(result)},${receiptAt})`
+        const effectTitle = position
+          ? `${input.title} · ${position.label} (${input.forkId}) · messages ${range!.first}–${range!.last}`
+          : input.title
         yield* sql`INSERT INTO rollout_effects(rollout_id,tool_call_id,seq,kind,target_kind,target_id,title,undo_json,created_at)
-        VALUES (${input.rolloutId},${input.toolCallId},0,'changeset.apply','chat',${input.chatId},${input.title},${JSON.stringify({ changesetId: applied.changesetIds[0], chatId: input.chatId, forkId: input.forkId, bytes, seq: after?.state_seq ?? seq })},${receiptAt})`
+        VALUES (${input.rolloutId},${input.toolCallId},0,'changeset.apply','chat',${input.chatId},${effectTitle},${JSON.stringify({ changesetId: applied.changesetIds[0], chatId: input.chatId, forkId: input.forkId, bytes, seq: after?.state_seq ?? seq })},${receiptAt})`
         return result
       }).pipe(transaction(sql, "ApplyAgentChangeset"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
