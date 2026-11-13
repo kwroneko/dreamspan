@@ -1,5 +1,5 @@
 // SearchMessages at the owner's scale (ARCHITECTURE §12 "Finding a message"): a 3,000-message
-// chat with 300 branches, 20 swipes on every message (63,000 versions with the common word),
+// chat with 300 branches, 40 swipes on every message (123,000 versions with the common word),
 // each branch selecting a swipe on twenty early messages. A word in every 50th message and in
 // all of its swipes finds each message once, with the branches that show it; a word every
 // version has fills the first page from the newest messages, skipping their swipes. Budget
@@ -44,38 +44,42 @@ describe("message search at scale", () => {
           // Each message with its swipes right after it, as replies and swipes are written.
           {
             sql: `${n}, w(y) AS (SELECT 0 UNION ALL SELECT y+1 FROM w WHERE y<${SWIPES})
-              INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
+              INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at,authoring_fork_id)
               SELECT CASE WHEN y=0 THEN ?||'-v'||x ELSE ?||'-w'||x||'-'||y END,?||'-s'||x,y,'complete',NULL,
                 CASE WHEN y=0 THEN 'human' ELSE 'model' END,
                 CASE WHEN y=0 AND x%50=0 THEN 'The lighthouse burns at '||x||' while the tide turns.'
                   WHEN y=0 THEN 'The tide turns at '||x||'.'
                   ELSE 'A swipe of the tide and the lighthouse at '||x||'/'||y||'.' END,
-                'verbatim',CASE WHEN y=0 THEN 'user_written' ELSE 'generated' END,1,1
+                'verbatim',CASE WHEN y=0 THEN 'user_written' ELSE 'generated' END,1,1,?
               FROM n CROSS JOIN w ORDER BY x, y`,
-            params: [c, c, c]
+            params: [c, c, c, main]
           },
           {
             sql: `${n} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
               SELECT ?||'-s'||x,?,CASE WHEN x=0 THEN NULL ELSE ?||'-s'||(x-1) END,x,?||'-v'||x,1,? FROM n`,
             params: [c, c, c, c, main]
           },
+          {
+            sql: `${k} INSERT INTO forks(id,chat_id,parent_fork_id,branched_at,base_slot_id,tip_slot_id,created_at)
+              SELECT ?||'-f'||x,?,?,0,?||'-s'||(10*(x+1)-1),?||'-s'||(10*(x+1)-1),1+x FROM k`,
+            params: [c, c, main, c, c]
+          },
           // A side reply at each branch's base, off the main path.
           {
-            sql: `${k} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at)
-              SELECT ?||'-sv'||x,?||'-side'||x,0,'complete',NULL,'human','A side reply.','verbatim','user_written',1,1 FROM k`,
-            params: [c, c]
+            sql: `${k} INSERT INTO version_records(id,slot_id,ordinal,status,speaker_entity_id,writer,content,macro_mode,origin,created_at,updated_at,authoring_fork_id)
+              SELECT ?||'-sv'||x,?||'-side'||x,0,'complete',NULL,'human','A side reply.','verbatim','user_written',1,1,?||'-f'||x FROM k`,
+            params: [c, c, c]
           },
           {
             sql: `${k} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
-              SELECT ?||'-side'||x,?,?||'-s'||(10*(x+1)-1),10*(x+1),?||'-sv'||x,1,? FROM k`,
-            params: [c, c, c, c, main]
+              SELECT ?||'-side'||x,?,?||'-s'||(10*(x+1)-1),10*(x+1),?||'-sv'||x,1,?||'-f'||x FROM k`,
+            params: [c, c, c, c, c]
+          },
+          {
+            sql: `${k} UPDATE forks SET tip_slot_id=?||'-side'||x FROM k WHERE id=?||'-f'||x`,
+            params: [c, c]
           },
           { sql: "UPDATE forks SET tip_slot_id=? WHERE id=?", params: [`${c}-s${LENGTH - 1}`, main] },
-          {
-            sql: `${k} INSERT INTO forks(id,chat_id,parent_fork_id,branched_at,base_slot_id,tip_slot_id,created_at)
-              SELECT ?||'-f'||x,?,?,0,?||'-s'||(10*(x+1)-1),?||'-side'||x,1+x FROM k`,
-            params: [c, c, main, c, c]
-          },
           // Every branch shows the first swipe on messages 0, 10, … 190.
           {
             sql: `${k}, j(y) AS (SELECT 0 UNION ALL SELECT y+1 FROM j WHERE y<19)
@@ -137,9 +141,9 @@ describe("message search at scale", () => {
           yield* fixtureSql(config.dataDir, [
             {
               sql: `${numbers}, w(y) AS (SELECT 0 UNION ALL SELECT y+1 FROM w WHERE y<20)
-              INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at)
-              SELECT ?||'-v'||x||'-'||y,?||'-s'||x,y,'complete','human','The tide and lighthouse '||x,'verbatim','user_written',1,1 FROM n CROSS JOIN w ORDER BY x,y`,
-              params: [id, id]
+              INSERT INTO version_records(id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,authoring_fork_id)
+              SELECT ?||'-v'||x||'-'||y,?||'-s'||x,y,'complete','human','The tide and lighthouse '||x,'verbatim','user_written',1,1,? FROM n CROSS JOIN w ORDER BY x,y`,
+              params: [id, id, other.currentForkId]
             },
             {
               sql: `${numbers} INSERT INTO slots(id,chat_id,parent_slot_id,depth,selected_version_id,created_at,fork_id)
