@@ -6,7 +6,6 @@ import { serverWith } from "./server.ts"
 import { serverEnvironment } from "./serverEnvironment.ts"
 import * as CardSources from "./sources/CardSources.ts"
 import { cardexAdapter, cardSourceSetup } from "./sources/cardex.ts"
-import { fakeSavedMedia, fakeSavedMediaWanted } from "./dev/fakeSavedMedia.ts"
 
 /**
  * SIGTERM or SIGINT interrupts the server, and that's how it's meant to stop: exit 0, not
@@ -42,10 +41,21 @@ const server =
 
 /**
  * Browser tests and previews set `FAKE_SAVED_MEDIA=on`: saved card media is then a synthetic
- * file, never a download (dev/fakeSavedMedia.ts). Production's units never set it.
+ * file, never a download (dev/fakeSavedMedia.ts). Production's units never set it, and the
+ * image doesn't ship `src/dev` (ARCHITECTURE §12), so it's imported only when asked for.
  */
-const withMedia = fakeSavedMediaWanted(process.env[serverEnvironment.FAKE_SAVED_MEDIA])
-  ? fakeSavedMedia.pipe(Layer.provideMerge(server))
-  : server
+const withMedia =
+  process.env[serverEnvironment.FAKE_SAVED_MEDIA] === "on"
+    ? Layer.unwrap(
+        Effect.map(
+          Effect.tryPromise({
+            try: () => import("./dev/fakeSavedMedia.ts"),
+            catch: () =>
+              new Error("FAKE_SAVED_MEDIA=on needs the development files (src/dev), which this build doesn't include.")
+          }),
+          ({ fakeSavedMedia }) => fakeSavedMedia.pipe(Layer.provideMerge(server))
+        )
+      )
+    : server
 
 withMedia.pipe(Layer.provide(AppConfig.layer), Layer.launch, NodeRuntime.runMain({ teardown }))
