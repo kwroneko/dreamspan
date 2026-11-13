@@ -16,7 +16,7 @@ import {
   summaryWords
 } from "@rp/shared/lcmSettings.ts"
 import type { LcmSettingsView } from "@rp/shared/lcm.ts"
-import { type ReactNode, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, Input } from "../../ui/Field.tsx"
@@ -238,6 +238,19 @@ function Pair({
   // A value just saved, until the settings are read again: a maximum entered right after a
   // target is compared with that target, not the one shown before it.
   const saved = useRef<Partial<Record<string, { value: number; was: number }>>>({})
+  // Once the settings are read again the shown value is current: forget the saved one, so a later
+  // change by another control (Reset) that returns to the old value doesn't revive it.
+  const shownTarget = resolved[target],
+    shownMaximum = resolved[maximum]
+  useEffect(() => {
+    for (const [field, shownValue] of [
+      [target, shownTarget],
+      [maximum, shownMaximum]
+    ] as const) {
+      const own = saved.current[field]
+      if (own && shownValue !== own.was) delete saved.current[field]
+    }
+  }, [target, maximum, shownTarget, shownMaximum])
   const latest = (field: typeof target | typeof maximum) => {
     const own = saved.current[field]
     return own && resolved[field] === own.was ? own.value : resolved[field]

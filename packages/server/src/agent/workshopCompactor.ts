@@ -102,9 +102,18 @@ export const workshopCompactor: RunCompactor = {
         const layerTokens = layer.length ? (yield* count([{ role: "rpRequest", timestamp: 0 }, ...layer])) - fixed : 0
         return { total, layer: layerTokens, recent: (input.recentPrefix ?? 0) + total - fixed - layerTokens }
       })
+      // In-run summaries can't lower the prefix's own verbatim part. Between replies it grows
+      // up to the recent maximum before summarizing, so a prefix past the target moves the pair
+      // up with it, keeping its gap: the run then compacts in batches, not on every request.
+      const prefixRecent = input.recentPrefix ?? 0
+      const recentTarget = Math.max(settings.recentTarget ?? Infinity, prefixRecent)
+      const recentMax = Math.max(
+        settings.recentMax ?? Infinity,
+        prefixRecent + (settings.recentMax ?? Infinity) - (settings.recentTarget ?? 0)
+      )
       const fits = (m: { total: number; layer: number; recent: number }, target: boolean) =>
         m.total <= (target ? keep : trigger) &&
-        m.recent <= (target ? (settings.recentTarget ?? Infinity) : (settings.recentMax ?? Infinity)) &&
+        m.recent <= (target ? recentTarget : recentMax) &&
         m.layer <= (settings.layerMax ?? Infinity)
       if (fits(yield* measure(messages), false)) return messages
       // A fixed prefix cannot be replaced by a transcript summary. Never pay for an unusable one.
@@ -223,8 +232,9 @@ export const workshopCompactor: RunCompactor = {
             !compactionBoundaries(messages, active.at(-1)!.through).length)
         const from = condense ? 1 : (active.at(-1)?.through ?? 1)
         const boundaries = compactionBoundaries(messages, from)
-        // Keep the newest group where possible, but a huge completed group is still compactable.
-        const candidates = boundaries.length > 1 ? boundaries.slice(0, -1) : boundaries
+        // Keep the newest group (results the model hasn't read yet). Only the model's room can
+        // make a huge one compactable; the recent and summary limits never do.
+        const candidates = boundaries.length > 1 ? boundaries.slice(0, -1) : measured.total > trigger ? boundaries : []
         let lo = 0,
           hi = candidates.length - 1
         while (lo < hi) {
