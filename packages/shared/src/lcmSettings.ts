@@ -298,7 +298,7 @@ export const lcmMisfits = (
   if (recent.target < recent.maximum && (chunk < 1 || chunk * 2 > recent.maximum - recent.target))
     out.push({
       field: "leafInput",
-      message: `Two chunks (${n(chunk * 2)}) must fit between the recent target and maximum (${n(recent.maximum - recent.target)} apart); summarizing can't start.`
+      message: `Chunk size ${n(chunk)} needs a gap of at least ${n(chunk * 2)} tokens. The recent target and maximum are ${n(recent.maximum - recent.target)} apart.`
     })
   return out
 }

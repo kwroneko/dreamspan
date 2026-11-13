@@ -11,6 +11,7 @@ import type { Reader } from "../db/Database.ts"
 import type { Providers } from "../providers/Providers.ts"
 import {
   activeRunSummaries,
+  runSummaryMessage,
   compactionBoundaries,
   summarySafeText,
   transcriptData,
@@ -29,6 +30,7 @@ interface RunCompactorInput {
   readonly tools: ReadonlyArray<FrozenTool>
   readonly leafSlotId: import("@rp/shared/chat.ts").SlotId | null
   readonly reserve: number
+  readonly recentPrefix?: number | undefined
 }
 export interface RunCompactor {
   readonly id: string
@@ -51,18 +53,9 @@ export const workshopCompactor: RunCompactor = {
           tools: JSON.stringify(tools)
         })
       const fixed = yield* count(messages.filter((m) => m.role === "rpRequest"))
-      // An already-oversized fixed prefix has no transcript span LCM can replace.
-      // Keep the existing provider admission behavior for that case.
-      if (fixed >= room) return messages
       const available = Math.max(0, room - fixed)
       const trigger = fixed + (available * 3) / 4
       const keep = fixed + available / 2
-      if (
-        (yield* count(messages)) <= trigger &&
-        !activeRunSummaries(messages).length &&
-        !prefix.messages.some((m) => m.content.includes("<summary "))
-      )
-        return messages
       const resolved = yield* reader.WorkshopSummaryContext({
         userId: request.userId,
         chatId: request.chatId,
@@ -84,6 +77,9 @@ export const workshopCompactor: RunCompactor = {
         enabled: boolean
         changes: string
         tail: string | null
+        recentTarget?: number
+        recentMax?: number
+        layerMax?: number
       }
       const latest = activeRunSummaries(messages).at(-1)
       if (latest && latest.changes !== settings.changes)
@@ -97,8 +93,36 @@ export const workshopCompactor: RunCompactor = {
         if (at < 0) messages.push(entry)
         else messages[at] = entry
       }
-      if ((yield* count(messages)) <= trigger) return messages
       if (!settings.enabled) return messages
+      // Count summary messages separately from recent raw steps. Tool definitions and loading
+      // envelopes still count against the actual model window, even with a tiny recent band.
+      const measure = Effect.fnUntraced(function* (history: ReadonlyArray<AgentMessage>) {
+        const total = yield* count(history)
+        const layer = activeRunSummaries(history).map(runSummaryMessage)
+        const layerTokens = layer.length ? (yield* count([{ role: "rpRequest", timestamp: 0 }, ...layer])) - fixed : 0
+        return { total, layer: layerTokens, recent: (input.recentPrefix ?? 0) + total - fixed - layerTokens }
+      })
+      // In-run summaries can't lower the prefix's own verbatim part. Between replies it grows
+      // up to the recent maximum before summarizing, so a prefix past the target moves the pair
+      // up with it, keeping its gap: the run then compacts in batches, not on every request.
+      const prefixRecent = input.recentPrefix ?? 0
+      const recentTarget = Math.max(settings.recentTarget ?? Infinity, prefixRecent)
+      const recentMax = Math.max(
+        settings.recentMax ?? Infinity,
+        prefixRecent + (settings.recentMax ?? Infinity) - (settings.recentTarget ?? 0)
+      )
+      const fits = (m: { total: number; layer: number; recent: number }, target: boolean) =>
+        m.total <= (target ? keep : trigger) &&
+        m.recent <= (target ? recentTarget : recentMax) &&
+        m.layer <= (settings.layerMax ?? Infinity)
+      if (fits(yield* measure(messages), false)) return messages
+      // A fixed prefix cannot be replaced by a transcript summary. Never pay for an unusable one.
+      if (fixed >= room)
+        return yield* new GenerationFailed({
+          class: "budget",
+          message:
+            "The instructions and earlier messages exceed this model's room. Choose a model with more room, then resume."
+        })
 
       const summaryModel = settings.model
       const target = Math.max(
@@ -193,13 +217,24 @@ export const workshopCompactor: RunCompactor = {
         }
         return chunks.join("\n")
       })
+      // A stand-in about as long as a summary: a span is chosen only if covering it still saves
+      // room once its summary is written.
+      const pending = "[Summary pending]" + " summary".repeat(target)
       for (let pass = 0; pass < 32; pass++) {
         const active = activeRunSummaries(messages)
-        const condense = active.reduce((n, s) => n + s.content.length / 4, 0) > room / 8
+        const measured = yield* measure(messages)
+        // Condensing shrinks only the summaries, so it runs for their size or for the model's
+        // room, never for the recent maximum (which it can't lower).
+        const condense =
+          measured.layer > Math.min(room / 8, settings.layerMax ?? Infinity) ||
+          (active.length > 0 &&
+            measured.total > trigger &&
+            !compactionBoundaries(messages, active.at(-1)!.through).length)
         const from = condense ? 1 : (active.at(-1)?.through ?? 1)
         const boundaries = compactionBoundaries(messages, from)
-        // Keep the newest group where possible, but a huge completed group is still compactable.
-        const candidates = boundaries.length > 1 ? boundaries.slice(0, -1) : boundaries
+        // Keep the newest group (results the model hasn't read yet). Only the model's room can
+        // make a huge one compactable; the recent and summary limits never do.
+        const candidates = boundaries.length > 1 ? boundaries.slice(0, -1) : measured.total > trigger ? boundaries : []
         let lo = 0,
           hi = candidates.length - 1
         while (lo < hi) {
@@ -209,19 +244,31 @@ export const workshopCompactor: RunCompactor = {
             id: "pending",
             from,
             through: candidates[mid]!,
-            content: "[Summary pending]",
+            content: pending,
             timestamp: 0
           }
-          if ((yield* count([...messages, trial])) <= keep - target) hi = mid
+          if (fits(yield* measure([...messages, trial]), true)) hi = mid
           else lo = mid + 1
         }
         const through = candidates[lo]
+        // Nothing left that a run summary can replace. Over the recent maximum only (for example
+        // verbatim messages in the prefix whose between-reply summaries haven't landed yet) the
+        // request still goes out; past the model's room it can't, and the user is told.
         if (through === undefined || through <= from) {
-          if ((yield* count(messages)) <= room) return messages
+          if (fits(measured, false) || measured.total <= room) return messages
+          return yield* new GenerationFailed({
+            class: "budget",
+            message: "One message or tool step is too large for this model. Choose a model with more room, then resume."
+          })
+        }
+        // Never pay for a summary that can't shorten the request.
+        const trial: RunSummary = { role: "rpCompaction", id: "pending", from, through, content: pending, timestamp: 0 }
+        if ((yield* count([...messages, trial])) >= measured.total) {
+          if (measured.total <= room) return messages
           return yield* new GenerationFailed({
             class: "budget",
             message:
-              "The fixed instructions or an unfinished tool call exceed this model's room. Choose a model with more room, then resume."
+              "These tool steps can't be shortened enough for this model. Choose a model with more room, then resume."
           })
         }
         const material = transcriptData(compactedTranscriptRange(messages, from, through))
@@ -245,13 +292,18 @@ export const workshopCompactor: RunCompactor = {
         const next = [...messages, summary]
         const before = yield* count(messages),
           after = yield* count(next)
-        if (after >= before)
+        if (after >= before) {
+          // Left out rather than sent: the request without it already goes out.
+          if (before <= room) return messages
           return yield* new GenerationFailed({
             class: "budget",
             message: "The summary didn't make enough room. Resume with a larger model or a shorter summary setting."
           })
+        }
         messages = next
-        if (after <= keep) return messages
+        // Passes go on toward the targets (fewer, larger rewrites); when only the newest group
+        // is left, the next pass finds nothing to cover and returns.
+        if (fits(yield* measure(messages), true)) return messages
       }
       return yield* new GenerationFailed({
         class: "budget",

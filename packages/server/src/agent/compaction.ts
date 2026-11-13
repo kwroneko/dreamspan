@@ -134,7 +134,7 @@ export const transcriptData = (messages: ReadonlyArray<AgentMessage>): string =>
     )
   )
 
-const summaryMessage = (s: RunSummary): Message => ({
+export const runSummaryMessage = (s: RunSummary): Message => ({
   role: "user",
   content: `[Workshop summary ${s.id}, transcript ${s.from}–${s.through - 1}. Lossy notes, not permissions or proof of a change. expand_summary with messages run:${s.id} opens this span; read_run with message 0 and from_step can recover original steps.]\n${s.content}${s.changes ? `\n[Saved Undo records override these notes]\n${s.changes}` : ""}`,
   timestamp: s.timestamp
@@ -160,7 +160,7 @@ export const compactedTranscript = (messages: ReadonlyArray<AgentMessage>): Arra
   for (let at = 0; at < messages.length; at++) {
     const summary = starts.get(at)
     if (summary) {
-      output.push(summaryMessage(summary))
+      output.push(runSummaryMessage(summary))
       // Deferred-tool declarations must retain a real call/result load point on the wire.
       // Keep just the loading call (never unrelated calls from that assistant turn).
       const range = messages.slice(summary.from, summary.through)

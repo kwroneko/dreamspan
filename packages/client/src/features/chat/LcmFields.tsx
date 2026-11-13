@@ -16,7 +16,7 @@ import {
   summaryWords
 } from "@rp/shared/lcmSettings.ts"
 import type { LcmSettingsView } from "@rp/shared/lcm.ts"
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset, Input } from "../../ui/Field.tsx"
@@ -235,9 +235,33 @@ function Pair({
   const shown = misfits.filter((m) => m.field === target || m.field === maximum)
   // A maximum lowered to the target or below takes the target with it, and says so.
   const [lowered, setLowered] = useState<number | null>(null)
+  // A value just saved, until the settings are read again: a maximum entered right after a
+  // target is compared with that target, not the one shown before it.
+  const saved = useRef<Partial<Record<string, { value: number; was: number }>>>({})
+  // Once the settings are read again the shown value is current: forget the saved one, so a later
+  // change by another control (Reset) that returns to the old value doesn't revive it.
+  const shownTarget = resolved[target],
+    shownMaximum = resolved[maximum]
+  useEffect(() => {
+    for (const [field, shownValue] of [
+      [target, shownTarget],
+      [maximum, shownMaximum]
+    ] as const) {
+      const own = saved.current[field]
+      if (own && shownValue !== own.was) delete saved.current[field]
+    }
+  }, [target, maximum, shownTarget, shownMaximum])
+  const latest = (field: typeof target | typeof maximum) => {
+    const own = saved.current[field]
+    return own && resolved[field] === own.was ? own.value : resolved[field]
+  }
   const commit = async (field: typeof target | typeof maximum, value: number | null) => {
-    const below = field === maximum && value !== null ? loweredTarget(resolved[target], resolved[field], value) : null
+    const below = field === maximum && value !== null ? loweredTarget(latest(target), latest(field), value) : null
+    const prior = { ...saved.current }
+    if (value !== null) saved.current[field] = { value, was: resolved[field] }
+    if (below !== null) saved.current[target] = { value: below, was: resolved[target] }
     const problem = await write(below === null ? { [field]: value } : { [field]: value, [target]: below })
+    if (problem !== null) saved.current = prior
     setLowered(problem === null ? below : null)
     return problem
   }
