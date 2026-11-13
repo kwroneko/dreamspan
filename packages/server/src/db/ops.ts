@@ -4208,6 +4208,8 @@ export class ReadOps extends RpcGroup.make(
         rows: Schema.Array(
           Schema.Struct({
             ordinal: Schema.Int,
+            sourceVersionId: Schema.NullOr(Schema.String),
+            sourceJoin: Schema.NullOr(Schema.Boolean),
             kind: Schema.Literals(["message", "summary"]),
             name: Schema.String,
             side: Schema.Literals(["user", "assistant"]),

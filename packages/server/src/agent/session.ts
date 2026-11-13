@@ -391,6 +391,14 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)
       })
+      const prepareTool = (tool: RolloutTool<never>, toolCallId: string) =>
+        Effect.gen(function* () {
+          const hook = tool.snapshot
+          if (!hook || cache.has(`snapshot:${hook.key}`)) return
+          const ctx = context(toolCallId)
+          yield* hook.prepare(ctx, generation.agentToolState?.[hook.key])
+          cache.set(`snapshot:${hook.key}`, true)
+        })
       /** Calls waiting for the user, with what each will do: shown in their steps. */
       const waiting = new Map<string, ApprovalPrompt>()
       const waitingChanged = (toolCallId: string, prompt: ApprovalPrompt | null) => {
@@ -451,7 +459,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                   )
               : permitted
           // A stop interrupts the tool; its result says so, and a resume runs the call again.
-          const exit = await runPromise(Effect.exit(execute), {
+          const exit = await runPromise(Effect.exit(prepareTool(tool, toolCallId).pipe(Effect.andThen(execute))), {
             signal
           }).catch(() => undefined)
           if (signal?.aborted || exit === undefined || Exit.isFailure(exit))

@@ -2,6 +2,7 @@
 // open a summary, search the summaries. All causal: the path read ends at the message before
 // the one being generated, in the generation's fork, with each message as that fork shows it.
 // A join is read row by row, as the messages and summaries it brought (spec/THREADS.md §11).
+import { createHash } from "node:crypto"
 import { Type } from "@earendil-works/pi-ai"
 import type { EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
@@ -15,6 +16,11 @@ import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 /** One message as the tools show it: its number on the path (from 1), who wrote it, its text. */
 interface PathMessage {
   readonly n: number
+  /** Immutable row identity, used only to derive a private address. */
+  readonly unverifiable?: boolean
+  readonly story?: number
+  readonly key?: string
+  readonly address?: string
   readonly speaker: string
   readonly content: string
   /**
@@ -68,7 +74,7 @@ interface PathRead {
   readonly missed: ReadonlySet<number>
   /** The view applied; null: everything read. */
   readonly view: View | null
-  /** Joined character reads remain refused until position metadata can follow the view. */
+  /** This view needs private addresses; summary tools retain their uniform refusal. */
   readonly restrictedJoin: boolean
   /** The joins' summaries it knew. */
   readonly joined: ReadonlyArray<JoinedSummary>
@@ -147,6 +153,7 @@ const joinsOn = (context: ToolContext, entries: ReadonlyArray<PathEntry>) =>
  */
 const joinRows = (
   n: number,
+  key: string,
   content: string,
   join: JoinRead,
   knows: (knowers: ReadonlyArray<string>) => boolean
@@ -170,6 +177,12 @@ const joinRows = (
   const seen = viewedJoin(content, join.title, sent, knows)
   if (seen.rows.length === 0 && seen.partial) return { messages: [], summaries: [] }
   const at = new Map(join.rows.map((row) => [row.ordinal, row]))
+  let story = 0
+  const stories = new Map<number, number>()
+  for (const row of join.rows) {
+    if (row.kind === "message" && row.sourceJoin !== false) story++
+    stories.set(row.ordinal, story)
+  }
   const number = (position: number | null | undefined) => (position == null ? null : position + 1)
   const messages = seen.rows.flatMap((row): Array<PathMessage> => {
     if (row.included !== "verbatim") return []
@@ -177,6 +190,9 @@ const joinRows = (
     return [
       {
         n,
+        key: stored.sourceVersionId ?? `${key}:${row.ordinal}`,
+        story: stories.get(row.ordinal)!,
+        unverifiable: row.kind === "message" && stored.sourceJoin !== false,
         speaker: row.name,
         content: row.content,
         joined: {
@@ -202,6 +218,9 @@ const joinRows = (
         ? [
             {
               n,
+              key: row.sourceVersionId ?? `${key}:${row.ordinal}`,
+              story: stories.get(row.ordinal)!,
+              unverifiable: row.sourceJoin !== false,
               speaker: row.name,
               content: row.content,
               joined: { title: join.title, from: position, to: position, summary: false }
@@ -265,8 +284,10 @@ const pathRead = (context: ToolContext) =>
           ? { missed: new Set<number>(), away: new Set<number>(), stretches: new Set<number>() }
           : yield* missedBy(context, entries, view)
       const joined: Array<JoinedSummary> = []
+      let story = 0
       const messages = entries.flatMap((entry): Array<PathMessage> => {
         const { version } = entry
+        if (joins.has(entry.slotId)) story++
         const n = numberOf(entry)
         if (
           entry.contextExcluded ||
@@ -276,11 +297,12 @@ const pathRead = (context: ToolContext) =>
         )
           return []
         const join = joins.get(entry.slotId)
-        if (join === undefined) return missed.has(n) ? [] : [name({ ...version, n })]
+        if (join === undefined) return missed.has(n) ? [] : [{ ...name({ ...version, n }), key: version.id, story }]
         if (away.has(n)) return []
         const applies = view !== null && (!view.stretch || stretches.has(n))
         const read = joinRows(
           n,
+          `${entry.slotId}:${version.id}`,
           version.content,
           join,
           applies ? (knowers) => view.identities.some((id) => knowers.includes(id)) : () => true
@@ -384,6 +406,7 @@ const excerpt = (text: string, words: ReadonlyArray<string>, size = 240) => {
 
 /** Where a message is: its number, and a joined row's place in its thread or chat. */
 const place = (m: PathMessage) => {
+  if (m.address) return `Message ${m.address} (view #${m.n})`
   if (!m.joined) return `Message ${m.n}`
   const { title, from, to, summary } = m.joined
   if (summary) return `Message ${m.n} (${title}, summary of #${from ?? "?"}–${to ?? "?"})`
@@ -405,25 +428,127 @@ export const safely = <E>(tool: string, run: Effect.Effect<ToolOutput, E>): Effe
 
 const JOINED_READ_REFUSAL = "History tools are unavailable for this separate thread view."
 
+/** The same answer for missed, stale and nonexistent private addresses and queries. */
+const PRIVATE_EMPTY = "No earlier messages match."
+type Address = number | string
+
+/** Only projected rows are persisted: no source positions, missed ids or counts. */
+interface PrivateHistory {
+  readonly refused?: boolean
+  readonly messages: ReadonlyArray<PathMessage>
+}
+const PRIVATE_KEY = "history.private"
+const digest = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 24)
+
+/**
+ * One sequence of the view's known rows. Numbers advance across known rows, preserving a
+ * bounded absence only between two known positions in the same storyline. A join starts a
+ * new storyline: its unseen prefix/suffix and the destination's other line cost no numbers.
+ * Each address commits to known row identities before it, never to unseen rows or positions.
+ */
+const privateHistory = (context: ToolContext) =>
+  cached(
+    context,
+    PRIVATE_KEY,
+    Effect.gen(function* () {
+      const read = yield* pathRead(context)
+      if (!read.restrictedJoin) return null
+      if (read.messages.some((m) => m.unverifiable) || read.joined.some((s) => s.messages.some((m) => m.unverifiable)))
+        return { messages: [], refused: true } satisfies PrivateHistory
+      let prefix = digest(JSON.stringify(read.view!.identities.toSorted()))
+      let n = 0
+      let previous: { group: string; position: number } | undefined
+      let section = 0
+      let join: number | undefined
+      const messages: Array<PathMessage> = []
+      const add = (row: PathMessage, group: string, position: number) => {
+        n += previous?.group === group ? Math.max(1, position - previous.position) : 1
+        prefix = digest(JSON.stringify([prefix, row.key]))
+        messages.push({ n, address: `v${prefix}`, speaker: row.speaker, content: row.content })
+        previous = { group, position }
+      }
+      for (const row of read.messages) {
+        if (!row.joined) {
+          if (join !== undefined) {
+            section++
+            join = undefined
+          }
+          add(row, `path:${row.story}`, row.n)
+          continue
+        }
+        if (join !== row.n) {
+          section++
+          join = row.n
+        }
+        const group = `join:${section}`
+        if (row.joined.summary) {
+          // Frozen originals of a readable summary share exactly the message address space.
+          const summary = read.joined.find(
+            (s) => s.at === row.n && s.from === row.joined!.from && s.to === row.joined!.to
+          )
+          for (const message of summary?.messages ?? [])
+            add(message, `${group}:${message.story}`, message.joined!.from!)
+        } else add(row, `${group}:${row.story}`, row.joined.from ?? (previous?.position ?? 0) + 1)
+      }
+      return { messages } satisfies PrivateHistory
+    })
+  )
+
+/** Registered with the tools, so replacing/disabling them also replaces their snapshot hook. */
+const historySnapshot = {
+  key: PRIVATE_KEY,
+  prepare: (context: ToolContext, frozen: unknown) =>
+    Effect.gen(function* () {
+      if (frozen !== undefined) {
+        context.cache.set(PRIVATE_KEY, frozen)
+        return frozen
+      }
+      if (context.viewers === null || context.leafSlotId === null) return undefined
+      // SearchChat's null contract identifies paths needing projection. Keep ordinary indexed
+      // replies from materializing their complete history just to prepare an unused read tool.
+      const indexed = yield* context.reader.SearchChat({
+        userId: context.userId,
+        chatId: context.chatId,
+        forkId: context.forkId,
+        leafSlotId: context.leafSlotId,
+        tokens: [],
+        before: null,
+        limit: 1,
+        viewers: null
+      })
+      if (indexed !== null) return undefined
+      return (yield* privateHistory(context)) ?? undefined
+    })
+}
+
+const privateIndex = (read: PrivateHistory, address: Address) =>
+  typeof address === "string"
+    ? read.messages.findIndex((m) => m.address === address)
+    : read.messages.findIndex((m) => m.n === address)
+
+const addressParameter = (description: string) =>
+  Type.Union([Type.Integer({ minimum: 1 }), Type.String({ pattern: "^v[a-f0-9]{24}$" })], { description })
+
 const tokensOf = (text: string) => Math.ceil(text.length / 4)
 
 const searchChat: RolloutTool<{
   readonly query: string
   readonly speaker?: string
   readonly limit?: number
-  readonly before_message?: number
+  readonly before_message?: Address
 }> = {
   id: "search_chat",
   label: "Searched the chat",
   explanation: "Search the chat's earlier messages",
   effect: "read",
+  snapshot: historySnapshot,
   description:
-    "Searches the story's earlier messages for words, newest first, and returns short excerpts with their message numbers. A message another thread or chat brought in when it was joined is named by its number there too, as “Message 55 (At the docks #47)”. Use it to find when something happened or was said, then read_messages to read the passage. Don't use it for what's already in front of you.",
+    "Searches the story's earlier messages for words, newest first, and returns short excerpts with their message addresses. In a private joined view, copy the v… address exactly into read_messages or before_message; it names only a row you know. Other views use message numbers. A message another thread or chat brought in when it was joined is named by its number there too, as “Message 55 (At the docks #47)”. Use it to find when something happened or was said, then read_messages to read the passage. Don't use it for what's already in front of you.",
   parameters: Type.Object({
     query: Type.String({ description: "Words that must all appear, case aside." }),
     speaker: Type.Optional(Type.String({ description: "Only messages by this character." })),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Most results (8)." })),
-    before_message: Type.Optional(Type.Integer({ minimum: 1, description: "Only messages before this number." }))
+    before_message: Type.Optional(addressParameter("Only messages before this address."))
   }),
   summarize: ({ query }) => query,
   execute: (context, { query, speaker, limit = 8, before_message }) =>
@@ -433,11 +558,30 @@ const searchChat: RolloutTool<{
         const words = wordsOf(query)
         if (words.length === 0) return { text: "Give some words to search for.", isError: true }
         const who = speaker?.trim().toLowerCase()
+        const indexed =
+          context.cache.has(PRIVATE_KEY) && context.cache.get(PRIVATE_KEY) !== null
+            ? null
+            : yield* searched(context, words, typeof before_message === "number" ? before_message : undefined)
+        const privateRead = indexed === null ? yield* privateHistory(context) : null
+        if (privateRead !== null) {
+          if (privateRead.refused) return { text: JOINED_READ_REFUSAL, isError: true }
+          const before =
+            before_message === undefined ? privateRead.messages.length : privateIndex(privateRead, before_message)
+          if (before < 0) return { text: PRIVATE_EMPTY }
+          const hits = privateRead.messages
+            .slice(0, before)
+            .toReversed()
+            .filter((m) => (!who || m.speaker.toLowerCase() === who) && matches(m.content, words))
+            .slice(0, Math.min(limit, 20))
+          return {
+            text: hits.length
+              ? hits.map((m) => `${place(m)}, ${m.speaker}: ${excerpt(m.content, words)}`).join("\n")
+              : PRIVATE_EMPTY
+          }
+        }
+        if (typeof before_message === "string") return { text: PRIVATE_EMPTY }
         // The indexed reader returns null for every chat containing a merge. Keep ordinary
         // no-merge searches indexed; a joined view must pass the same guard before any output.
-        const indexed = yield* searched(context, words, before_message)
-        if (indexed === null && (yield* pathRead(context)).restrictedJoin)
-          return { text: JOINED_READ_REFUSAL, isError: true }
         const found = indexed ?? (yield* pathMessages(context)).toReversed()
         const hits = found
           .filter(
@@ -461,26 +605,36 @@ const searchChat: RolloutTool<{
     )
 }
 
-const readMessages: RolloutTool<{ readonly from: number; readonly count?: number; readonly joined_from?: number }> = {
+const readMessages: RolloutTool<{ readonly from: Address; readonly count?: number; readonly joined_from?: Address }> = {
   id: "read_messages",
   label: "Read earlier messages",
   explanation: "Read earlier messages in full",
   effect: "read",
+  snapshot: historySnapshot,
   description:
-    "Reads earlier messages of the story verbatim, from a message number on. Use it after search_chat or expand_summary to read a passage in full. A joined thread or chat is one message holding its messages: to start inside it, give its number in joined_from (47 for “Message 55 (At the docks #47)”).",
+    "Reads earlier messages of the story verbatim, from an address on. In a private joined view copy the exact v… address returned by search_chat; numbers there refer only to your view, and from: 1 starts at your first known row. Rows there have no joined_from offset; unavailable and stale addresses have the same answer. Use it after search_chat or expand_summary to read a passage in full. A joined thread or chat is one message holding its messages: to start inside it, give its number in joined_from (47 for “Message 55 (At the docks #47)”).",
   parameters: Type.Object({
-    from: Type.Integer({ minimum: 1, description: "The first message's number." }),
+    from: addressParameter("The first message address, or 1 for the start."),
     count: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "How many (5, at most 20)." })),
     joined_from: Type.Optional(
-      Type.Integer({ minimum: 1, description: "In a join at message `from`: the number there to start at." })
+      addressParameter("In a whole-thread numbered join at `from`: the source number there to start at.")
     )
   }),
-  summarize: ({ from, count = 5 }) => `Messages ${from}–${from + count - 1}`,
+  summarize: ({ from, count = 5 }) =>
+    typeof from === "number" ? `Messages ${from}–${from + count - 1}` : `From ${from}`,
   execute: (context, { from, count = 5, joined_from }) =>
     safely(
       "read_messages",
       Effect.gen(function* () {
-        if ((yield* pathRead(context)).restrictedJoin) return { text: JOINED_READ_REFUSAL, isError: true }
+        const privateRead = yield* privateHistory(context)
+        if (privateRead !== null) {
+          if (privateRead.refused) return { text: JOINED_READ_REFUSAL, isError: true }
+          const at = privateIndex(privateRead, from)
+          if (at < 0 || joined_from !== undefined) return { text: PRIVATE_EMPTY }
+          const rows = privateRead.messages.slice(at, at + Math.min(count, 20))
+          return { text: rows.length ? rows.map(line).join("\n\n") : PRIVATE_EMPTY }
+        }
+        if (typeof from === "string" || typeof joined_from === "string") return { text: PRIVATE_EMPTY }
         const messages = yield* pathMessages(context)
         const last = messages.at(-1)?.n ?? 0
         const read = messages
@@ -615,8 +769,9 @@ const expandSummary: RolloutTool<{
   label: "Opened a summary",
   explanation: "Open a summary for more detail",
   effect: "read",
+  snapshot: historySnapshot,
   description:
-    "Opens a summary in your context, named by the messages it covers (its from and to): a first-level summary gives its messages, a higher one the summaries it condenses. A summary a joined thread or chat brought is named by its messages there, with its name in joined. Use it when a summary leaves out a detail you need.",
+    "Opens a summary in your context, named by the messages it covers (its from and to): a first-level summary gives its messages, a higher one the summaries it condenses. A summary a joined thread or chat brought is named by its messages there, with its name in joined. This tool is unavailable in a private joined view; use search_chat and read_messages instead. Use it when a summary leaves out a detail you need.",
   parameters: Type.Object({
     messages: Type.String({ description: "The range the summary covers, as “120–180”." }),
     joined: Type.Optional(
@@ -629,7 +784,7 @@ const expandSummary: RolloutTool<{
     safely(
       "expand_summary",
       Effect.gen(function* () {
-        if ((yield* pathRead(context)).restrictedJoin) return { text: JOINED_READ_REFUSAL, isError: true }
+        if ((yield* privateHistory(context)) !== null) return { text: JOINED_READ_REFUSAL, isError: true }
         const wanted = range(messages)
         if (!wanted) return { text: "Name the summary by its messages, as “120–180”.", isError: true }
         const tree = yield* summaryTree(context)
@@ -681,8 +836,9 @@ const searchSummaries: RolloutTool<{ readonly query: string; readonly limit?: nu
   label: "Searched the summaries",
   explanation: "Search the summaries",
   effect: "read",
+  snapshot: historySnapshot,
   description:
-    "Searches the summaries of earlier parts of the story for words, and returns which messages each match covers; a joined thread's or chat's summary is named by its messages there. Use it to find roughly when something happened, then expand_summary or read_messages.",
+    "Searches the summaries of earlier parts of the story for words, and returns which messages each match covers; a joined thread's or chat's summary is named by its messages there. This tool is unavailable in a private joined view; use search_chat and read_messages instead. Use it to find roughly when something happened, then expand_summary or read_messages.",
   parameters: Type.Object({
     query: Type.String({ description: "Words that must all appear, case aside." }),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Most results (5)." }))
@@ -692,7 +848,7 @@ const searchSummaries: RolloutTool<{ readonly query: string; readonly limit?: nu
     safely(
       "search_summaries",
       Effect.gen(function* () {
-        if ((yield* pathRead(context)).restrictedJoin) return { text: JOINED_READ_REFUSAL, isError: true }
+        if ((yield* privateHistory(context)) !== null) return { text: JOINED_READ_REFUSAL, isError: true }
         const words = wordsOf(query)
         if (words.length === 0) return { text: "Give some words to search for.", isError: true }
         const tree = yield* summaryTree(context)

@@ -236,32 +236,42 @@ it.live(
       assert.notInclude(built.snapshot, "The Lantern at night, line 2999.")
       // The agent's search as Wren's reply runs it (TH8): the path, the join's 3,000 rows, her knowledge.
       const snapshot = JSON.parse(built.snapshot) as ContextSnapshot
-      const search = (query: string) =>
-        Effect.suspend(() =>
-          historyTools
-            .find((tool) => tool.id === "search_chat")!
-            .execute(
-              {
-                userId: h.userId,
-                chatId,
-                forkId: placeholder.forkId as ForkId,
-                slotId: placeholder.slotId,
-                versionId: placeholder.version.id,
-                leafSlotId,
-                viewers: generationOf(snapshot).viewers,
-                rolloutId: "test",
-                toolCallId: "test",
-                cache: new Map(),
-                reader: h.reader,
-                writer: h.writer
-              } satisfies ToolContext,
-              { query } as never
-            )
-        )
+      const context = (): ToolContext => ({
+        userId: h.userId,
+        chatId,
+        forkId: placeholder.forkId as ForkId,
+        slotId: placeholder.slotId,
+        versionId: placeholder.version.id,
+        leafSlotId,
+        viewers: generationOf(snapshot).viewers,
+        rolloutId: "test",
+        toolCallId: "test",
+        cache: new Map(),
+        reader: h.reader,
+        writer: h.writer
+      })
+      const searchTool = historyTools.find((tool) => tool.id === "search_chat")!
+      const readTool = historyTools.find((tool) => tool.id === "read_messages")!
+      const search = (query: string) => Effect.suspend(() => searchTool.execute(context(), { query } as never))
       const found = yield* time("search_chat for Wren", search("docks night 2999"))
-      assert.isTrue(found.isError)
-      assert.include(found.text, "History tools are unavailable")
-      assert.strictEqual((yield* search("Lantern night 2999")).text, found.text)
+      assert.include(found.text, "The docks at night, line 2999.")
+      assert.notMatch(found.text, /At the docks #|Message [0-9]/)
+      assert.strictEqual((yield* search("Lantern night 2999")).text, "No earlier messages match.")
+
+      const address = /Message (v[a-f0-9]{24})/.exec(found.text)![1]!
+      const read = yield* time(
+        "read_messages for Wren, cold",
+        Effect.suspend(() => readTool.execute(context(), { from: address, count: 20 } as never))
+      )
+      assert.include(read.text, "The docks at night, line 2999.")
+      assert.notInclude(read.text, "The Lantern at night")
+      const warm = context()
+      const state = yield* time("prepare private history snapshot", searchTool.snapshot!.prepare(warm, undefined))
+      process.stdout.write(
+        `THREAD_TOOLS_SNAPSHOT ${JSON.stringify({ bytes: Buffer.byteLength(JSON.stringify(state)), messages: (state as { messages: ReadonlyArray<unknown> }).messages.length })}\n`
+      )
+      yield* time("read_messages for Wren, cached", readTool.execute(warm, { from: address, count: 20 } as never))
+      yield* time("search_chat for Wren, cached", searchTool.execute(warm, { query: "docks night 2999" } as never))
 
       process.stdout.write(`THREAD_SUMMARIES_SCALE ${JSON.stringify(samples)}\n`)
       const ms = (operation: string) => samples.find((s) => s.operation === operation)!.ms
@@ -270,6 +280,8 @@ it.live(
       assert.isBelow(ms("GetLcmState for Wren"), 500)
       assert.isBelow(ms("AssembleContext for Wren"), 3_000)
       assert.isBelow(ms("search_chat for Wren"), 3_000)
+      assert.isBelow(ms("read_messages for Wren, cold"), 3_000)
+      assert.isBelow(ms("read_messages for Wren, cached"), 100)
     }).pipe(Effect.scoped, Effect.provide(server.layer))
   },
   600_000

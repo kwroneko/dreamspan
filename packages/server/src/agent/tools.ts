@@ -7,7 +7,7 @@ import type { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { Type, type TSchema } from "@earendil-works/pi-ai"
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import type { Effect } from "effect"
+import { Effect } from "effect"
 import type { Reader, Writer } from "../db/Database.ts"
 
 /**
@@ -68,6 +68,13 @@ export interface RolloutTool<A = never> {
   readonly parameters: TSchema
   /** The step's one-line title from its arguments: “lighthouse”. */
   readonly summarize?: (args: A) => string
+  /** Optional state frozen before a result is returned; shared keys prepare once per run.
+   * The generator persists it in the existing snapshot and the session restores it on Resume/step edit.
+   * undefined means this tool needs no frozen state for this view. */
+  readonly snapshot?: {
+    readonly key: string
+    readonly prepare: (context: ToolContext, frozen: unknown) => Effect.Effect<unknown, unknown>
+  }
   /**
    * What the call will do, for its approval (spec/WORKSHOP.md §3.4), worked out by the server from
    * the real arguments and the items they name: the target's own name, an edit's fields before
@@ -79,6 +86,21 @@ export interface RolloutTool<A = never> {
   ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes">, unknown>
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
+
+/** Prepare registered projections before StartRollout freezes its snapshot. */
+export const prepareToolSnapshots = (tools: ReadonlyArray<RolloutTool<never>>, context: ToolContext) =>
+  Effect.gen(function* () {
+    const state: Record<string, unknown> = {}
+    const seen = new Set<string>()
+    for (const tool of tools) {
+      const hook = tool.snapshot
+      if (!hook || seen.has(hook.key)) continue
+      seen.add(hook.key)
+      const value = yield* hook.prepare(context, undefined)
+      if (value !== undefined) state[hook.key] = value
+    }
+    return state
+  })
 
 /**
  * Operations only the user may run (spec/WORKSHOP.md §3.2: the agent can't give itself

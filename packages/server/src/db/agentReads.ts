@@ -364,15 +364,20 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           content: string
           included: "verbatim" | "summarized" | "left_out"
           knowers: string
+          source_join: number | null
+          source_version_id: string | null
           source_from: number | null
           source_to: number | null
         }>`SELECT mm.merge_id, mm.ordinal, mm.kind, mm.speaker_name, mm.side, mm.speaker_entity_id, mm.content,
-            mm.included, mm.source_from, mm.source_to,
+            mm.included, mm.source_version_id, mm.source_from, mm.source_to,
+            CASE WHEN source_v.id IS NULL THEN NULL ELSE nested.slot_id IS NOT NULL END AS source_join,
             coalesce(mm.knowers_json, (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c
               WHERE c.value ->> 'from' <> 'destination')) AS knowers
           FROM json_each(${JSON.stringify(joins.map((j) => j.id))}) asked
           CROSS JOIN chat_merges m ON m.id = asked.value
           CROSS JOIN chat_merge_messages mm ON mm.merge_id = m.id
+          LEFT JOIN versions source_v ON source_v.id = mm.source_version_id
+          LEFT JOIN chat_merges nested ON nested.slot_id = source_v.slot_id
           ORDER BY mm.merge_id, mm.ordinal`
         return joins.map((join) => ({
           slotId: join.slot_id,
@@ -382,6 +387,8 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
             .filter((row) => row.merge_id === join.id)
             .map((row) => ({
               ordinal: row.ordinal,
+              sourceVersionId: row.source_version_id,
+              sourceJoin: row.source_join === null ? null : row.source_join === 1,
               kind: row.kind,
               name: row.speaker_name,
               side: row.side,

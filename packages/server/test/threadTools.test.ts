@@ -12,7 +12,7 @@ import type { ToolContext } from "../src/agent/tools.ts"
 import { historyTools } from "../src/agent/tools/history.ts"
 import { eventually, finished } from "./support/generation.ts"
 import { completionChunks, sse } from "./support/mockProvider.ts"
-import { completeFixture } from "./support/lcmFixtures.ts"
+import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
 import { runStory, type ThreadStory } from "./support/threadStory.ts"
 
 /** The history tools as a reply by `speaker` at the tip of `fork` runs them, reading as its view. */
@@ -69,7 +69,7 @@ const toolsFor = (t: ThreadStory, fork: ForkId, speaker: EntityId) =>
     }
     const run = (id: string, args: object) =>
       Effect.map(historyTools.find((tool) => tool.id === id)!.execute(context, args as never), (out) => out.text)
-    return { viewers: context.viewers, run }
+    return { viewers: context.viewers, run, context, snapshot }
   })
 
 /** A message's number (from 1) on `fork`'s display path, found by its text. */
@@ -98,21 +98,30 @@ const play = (t: ThreadStory) =>
   })
 
 const NONE = "No earlier messages match"
+const PRIVATE_EMPTY = "No earlier messages match."
+const addressOf = (text: string) => {
+  const address = /Message (v[a-f0-9]{24})/.exec(text)?.[1]
+  assert.isDefined(address, text)
+  return address!
+}
 const REFUSAL = "History tools are unavailable for this separate thread view."
-const expectRefused = (tools: Effect.Success<ReturnType<typeof toolsFor>>) =>
+const expectPrivateBoundary = (tools: Effect.Success<ReturnType<typeof toolsFor>>) =>
   Effect.gen(function* () {
+    const empty = yield* tools.run("search_chat", { query: "NONEXISTENTSYNTHETIC" })
+    assert.strictEqual(empty, PRIVATE_EMPTY)
+    for (const args of [{ from: 999999 }, { from: 1, joined_from: 999999 }, { from: "v000000000000000000000000" }])
+      assert.strictEqual(yield* tools.run("read_messages", args), empty)
     for (const [id, args] of [
-      ["read_messages", { from: 1, count: 20 }],
-      ["read_messages", { from: 999999, joined_from: 999999 }],
-      ["search_chat", { query: "MISSEDSOURCE" }],
       ["search_summaries", { query: "MISSEDSOURCE" }],
-      ["expand_summary", { messages: "1–999999", joined: "At the docks" }]
+      ["search_summaries", { query: "NONEXISTENTSYNTHETIC" }],
+      ["expand_summary", { messages: "1–999999", joined: "At the docks" }],
+      ["expand_summary", { messages: "999999", joined: "nonexistent" }]
     ] as const)
       assert.strictEqual(yield* tools.run(id, args), REFUSAL)
   })
 
 describe("the agent's read tools across threads", () => {
-  it.live("separate joins refuse character reads while whole-path personas and narrators read the rows", () =>
+  it.live("separate joins offer private character addresses while personas and narrators keep source numbers", () =>
     runStory(
       null,
       (t) =>
@@ -134,7 +143,10 @@ describe("the agent's read tools across threads", () => {
             expectedRowVersion: slot.entry.rowVersion,
             body: { _tag: "Write", speaker: t.mira, content: "Mira mends a torn sail." }
           })
-          for (const speaker of [t.mira, t.wren, t.quill]) yield* expectRefused(yield* toolsFor(t, t.F, speaker))
+          const ownLine = yield* toolsFor(t, t.F, t.wren)
+          assert.include(yield* ownLine.run("read_messages", { from: crates, count: 1 }), "Wren counts the crates")
+          for (const speaker of [t.mira, t.wren, t.quill])
+            yield* expectPrivateBoundary(yield* toolsFor(t, t.F, speaker))
           for (const speaker of [t.nara!, t.tobin]) {
             const whole = yield* toolsFor(t, t.F, speaker)
             assert.isNull(whole.viewers)
@@ -194,7 +206,7 @@ describe("the agent's read tools across threads", () => {
           for (const result of results)
             assert.notInclude(result.content.replaceAll("“MISSEDTHREADSECRET”", "“query”"), "MISSEDTHREADSECRET")
           assert.isTrue(results.some((r) => r.content === REFUSAL))
-          assert.isFalse(results.some((r) => r.content.includes("KNOWNDOCKS")))
+          assert.isTrue(results.some((r) => r.content.includes("KNOWNDOCKS")))
           for (const body of bodies) assert.deepStrictEqual(body.tools, bodies[0]!.tools)
           for (const name of ["read_run", "list_threads", "history_search"]) {
             assert.isTrue(
@@ -206,6 +218,95 @@ describe("the agent's read tools across threads", () => {
               name
             )
           }
+          // Freeze before returning the first address, then carry it through a step edit.
+          const original = results.find((r) => r.content.includes("KNOWNDOCKS"))!.content
+          const knownAddress = addressOf(original.split("\n").find((l) => l.includes("KNOWNDOCKS"))!)
+          const material = yield* t.reader.RolloutMaterial({ userId: t.userId, versionId: started.entry.version.id })
+          const saved = JSON.parse(material.snapshot) as ContextSnapshot
+          const pinned = JSON.stringify(saved.agentToolState)
+          assert.include(pinned, "KNOWNDOCKS")
+          assert.notInclude(pinned, "MISSEDTHREADSECRET")
+          const pathBefore = yield* t.reader.ReadPath({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.F,
+            leafSlotId: J.slotId,
+            range: { _tag: "Bottom" },
+            limit: 20
+          })
+          const anchor = pathBefore.entries.at(-2)!.slotId
+          const slot = yield* t.reader.GetSlot({ userId: t.userId, slotId: anchor, forkId: t.F })
+          yield* t.writer.InsertMessage({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.F,
+            anchorSlotId: anchor,
+            expectedRowVersion: slot.entry.rowVersion,
+            body: { _tag: "Write", speaker: t.wren, content: "NEWKNOWN before the old join" }
+          })
+          const live = yield* toolsFor(t, t.F, t.wren)
+          assert.strictEqual(yield* live.run("read_messages", { from: knownAddress, count: 1 }), PRIVATE_EMPTY)
+          const current = yield* t.reader.GetSlot({ userId: t.userId, slotId: started.entry.slotId, forkId: t.F })
+          const resumed = yield* t.api.ResumeFromStep({
+            versionId: started.entry.version.id,
+            forkId: t.F,
+            expectedRowVersion: current.entry.rowVersion,
+            step: 0,
+            edit: { kind: "arguments", arguments: { from: knownAddress, count: 1 } }
+          })
+          yield* eventually(() => finished(t.events, resumed.version.id) !== undefined)
+          const resumedMaterial = yield* t.reader.RolloutMaterial({ userId: t.userId, versionId: resumed.version.id })
+          const transcript = JSON.parse(resumedMaterial.transcript!) as Array<{
+            role: string
+            content?: Array<{ text?: string }>
+          }>
+          const firstResult = transcript.find((m) => m.role === "toolResult")!
+          assert.include(JSON.stringify(firstResult), knownAddress)
+          assert.include(JSON.stringify(firstResult), "KNOWNDOCKS")
+          assert.notInclude(JSON.stringify(firstResult), "NEWKNOWN")
+          assert.deepStrictEqual(
+            (JSON.parse(resumedMaterial.snapshot) as ContextSnapshot).agentToolState,
+            saved.agentToolState
+          )
+          const rebuilt = yield* t.reader.RebuildContext({ userId: t.userId, snapshot: material.snapshot })
+          assert.strictEqual(rebuilt._tag, "Rebuilt")
+          if (rebuilt._tag === "Rebuilt") {
+            const rebuiltSnapshot = JSON.parse(rebuilt.snapshot) as ContextSnapshot
+            assert.deepStrictEqual(rebuiltSnapshot.agentToolState, saved.agentToolState)
+            const replay = { ...live.context, cache: new Map<string, unknown>() }
+            const tool = historyTools.find((tool) => tool.id === "read_messages")!
+            yield* tool.snapshot!.prepare(replay, generationOf(rebuiltSnapshot).agentToolState?.[tool.snapshot!.key])
+            const result = yield* tool.execute(replay, { from: knownAddress, count: 1 } as never)
+            assert.include(result.text, "KNOWNDOCKS")
+            assert.notInclude(result.text, "NEWKNOWN")
+          }
+          // Synthetic crash immediately before that same read's result was flushed.
+          const turns = JSON.parse(resumedMaterial.transcript!) as Array<{ role: string }>
+          const firstCall = turns.findIndex((m) => m.role === "assistant")
+          yield* fixtureSql(t.dataDir, [
+            { sql: "UPDATE rollouts SET status = 'interrupted' WHERE id = ?", params: [resumedMaterial.rolloutId] },
+            {
+              sql: "UPDATE rollout_payloads SET transcript_json = ? WHERE rollout_id = ?",
+              params: [JSON.stringify(turns.slice(0, firstCall + 1)), resumedMaterial.rolloutId]
+            }
+          ])
+          const interrupted = yield* t.reader.GetSlot({ userId: t.userId, slotId: resumed.slotId, forkId: t.F })
+          const continued = yield* t.api.ResumeVersion({
+            versionId: resumed.version.id,
+            forkId: t.F,
+            expectedRowVersion: interrupted.entry.rowVersion
+          })
+          yield* eventually(() => finished(t.events, continued.version.id) !== undefined)
+          const continuedMaterial = yield* t.reader.RolloutMaterial({
+            userId: t.userId,
+            versionId: continued.version.id
+          })
+          const continuedResult = (JSON.parse(continuedMaterial.transcript!) as Array<{ role: string }>).find(
+            (m) => m.role === "toolResult"
+          )!
+          assert.include(JSON.stringify(continuedResult), knownAddress)
+          assert.include(JSON.stringify(continuedResult), "KNOWNDOCKS")
+          assert.notInclude(JSON.stringify(continuedResult), "NEWKNOWN")
         }),
       {
         respond: (request, res) => {
@@ -306,9 +407,9 @@ describe("the agent's read tools across threads", () => {
             const mira = yield* toolsFor(t, fork, t.mira)
             const text = yield* mira.run("read_messages", { from: 1, count: 20 })
             assert.notInclude(text, "MISSEDDOCKS")
-            if (known) assert.strictEqual(text, REFUSAL)
+            if (known) assert.include(text, "KNOWNSOURCE")
             else assert.notInclude(text, "KNOWNSOURCE")
-            assert.include(yield* mira.run("search_chat", { query: "MISSEDDOCKS" }), known ? REFUSAL : NONE)
+            assert.include(yield* mira.run("search_chat", { query: "MISSEDDOCKS" }), known ? PRIVATE_EMPTY : NONE)
           })
         yield* check(before, false)
         yield* check(t.F, true)
@@ -332,7 +433,7 @@ describe("the agent's read tools across threads", () => {
         yield* t.append(t.D, t.wren, "KNOWNREJOIN")
         const second = (yield* t.join(t.F, [t.D])).entries[0]!
         const mira = yield* toolsFor(t, t.F, t.mira)
-        yield* expectRefused(mira)
+        yield* expectPrivateBoundary(mira)
         yield* t.api.DeleteMessage({ slotId: second.slotId, forkId: t.F })
         const deleted = yield* t.api.DeleteMessage({ slotId: J.slotId, forkId: t.F })
         yield* check(t.F, false)
@@ -363,7 +464,202 @@ describe("the agent's read tools across threads", () => {
         yield* t.join(t.F, [t.D], null, "separate")
         const mira = yield* toolsFor(t, t.F, t.mira)
         const result = yield* mira.run("search_chat", { query: "KNOWNSOURCE" })
+        assert.include(result, "KNOWNSOURCE", "a known joined row must be usable")
+        const address = addressOf(result)
+        assert.include(yield* mira.run("read_messages", { from: address, count: 1 }), "KNOWNSOURCE")
+        assert.strictEqual(yield* mira.run("search_chat", { query: "MISSEDSOURCE" }), PRIVATE_EMPTY)
+        assert.strictEqual(yield* mira.run("search_chat", { query: "NEVEREXISTED" }), PRIVATE_EMPTY)
+        assert.strictEqual(
+          yield* mira.run("search_chat", { query: "KNOWNSOURCE", before_message: address }),
+          PRIVATE_EMPTY
+        )
         assert.notMatch(result, /At the docks #\d+/, "source numbering discloses positions of the missed rows")
+      })
+    )
+  )
+
+  it.live("addresses survive re-joins and missed insertions, but a known insertion invalidates only its suffix", () =>
+    runStory(null, (t) =>
+      Effect.gen(function* () {
+        const lantern = yield* t.append(t.F, t.mira, "DESTINATIONPRIVATE")
+        yield* t.append(t.D, t.wren, "SOURCEKNOWN")
+        yield* t.join(t.F, [t.D], null, "separate")
+        const before = yield* toolsFor(t, t.F, t.wren)
+        const result = yield* before.run("search_chat", { query: "SOURCEKNOWN" })
+        const address = addressOf(result)
+        yield* t.append(t.D, t.wren, "NEWREJOINKNOWN")
+        yield* t.join(t.F, [t.D], null, "separate")
+        const rejoined = yield* toolsFor(t, t.F, t.wren)
+        assert.strictEqual(yield* rejoined.run("search_chat", { query: "SOURCEKNOWN" }), result)
+        const insert = (anchor: SlotId, speaker: EntityId, content: string) =>
+          Effect.gen(function* () {
+            const slot = yield* t.reader.GetSlot({ userId: t.userId, slotId: anchor, forkId: t.F })
+            return yield* t.writer.InsertMessage({
+              userId: t.userId,
+              chatId: t.chatId,
+              forkId: t.F,
+              anchorSlotId: anchor,
+              expectedRowVersion: slot.entry.rowVersion,
+              body: { _tag: "Write", speaker, content }
+            })
+          })
+        yield* insert(lantern.slotId, t.mira, "MISSEDINSERT")
+        const missed = yield* toolsFor(t, t.F, t.wren)
+        assert.strictEqual(yield* missed.run("search_chat", { query: "SOURCEKNOWN" }), result)
+        assert.strictEqual(yield* missed.run("search_chat", { query: "MISSEDINSERT" }), PRIVATE_EMPTY)
+        yield* insert(lantern.slotId, t.wren, "KNOWNINSERT")
+        const changed = yield* toolsFor(t, t.F, t.wren)
+        assert.strictEqual(yield* changed.run("read_messages", { from: address }), PRIVATE_EMPTY)
+        assert.notStrictEqual(addressOf(yield* changed.run("search_chat", { query: "SOURCEKNOWN" })), address)
+        // A running projection keeps its old address and contents until it finishes.
+        assert.include(yield* before.run("read_messages", { from: address, count: 1 }), "SOURCEKNOWN")
+        assert.notInclude(yield* changed.run("read_messages", { from: 1, count: 20 }), "MISSEDINSERT")
+      })
+    )
+  )
+
+  it.live("a joined view counts an absence only between known rows of that same storyline", () =>
+    runStory("separate", (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "DESTINATIONKNOWN")
+        const prefix = yield* t.append(t.D, t.wren, "MISSEDPREFIX")
+        const presence = (slot: SlotId, away: boolean) =>
+          t.writer.AddStateEvent({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.D,
+            slotId: slot,
+            versionId: null,
+            scope: null,
+            data: { key: "away.set", value: { entity: t.mira, away } }
+          })
+        yield* presence(prefix.slotId, false)
+        const a = yield* t.append(t.D, t.wren, "KNOWNFIRST")
+        yield* presence(a.slotId, true)
+        yield* t.append(t.D, t.wren, "MISSEDMIDDLEONE")
+        const lastMissed = yield* t.append(t.D, t.wren, "MISSEDMIDDLETWO")
+        yield* presence(lastMissed.slotId, false)
+        yield* t.append(t.D, t.wren, "KNOWNLAST")
+        yield* t.join(t.F, [t.D])
+        const tools = yield* toolsFor(t, t.F, t.mira)
+        const first = yield* tools.run("search_chat", { query: "KNOWNFIRST" })
+        const last = yield* tools.run("search_chat", { query: "KNOWNLAST" })
+        const n = (text: string) => Number(/view #(\d+)/.exec(text)![1])
+        assert.strictEqual(yield* tools.run("read_messages", { from: n(first) + 1, count: 1 }), PRIVATE_EMPTY)
+        assert.strictEqual(n(last) - n(first), 3, "two missed messages inside her own storyline keep their gap")
+        const read = yield* tools.run("read_messages", { from: addressOf(first), count: 2 })
+        assert.include(read, "KNOWNLAST")
+        for (const sentinel of ["MISSEDPREFIX", "MISSEDMIDDLEONE", "MISSEDMIDDLETWO"])
+          assert.strictEqual(yield* tools.run("search_chat", { query: sentinel }), PRIVATE_EMPTY)
+        assert.notMatch(read, /At the docks #|joined at message|source_|created_at|ordinal/)
+      })
+    )
+  )
+
+  it.live("nested sets, each join's choice and Context switches share the result boundary", () =>
+    runStory(null, (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "DESTKNOWN")
+        const head = yield* t.append(t.D, t.wren, "DOCKSOWN")
+        const row = yield* t.reader.GetSlot({ userId: t.userId, slotId: head.slotId, forkId: t.D })
+        const nested = yield* t.api.StartThreads({
+          chatId: t.chatId,
+          forkId: t.D,
+          slotId: head.slotId,
+          expectedRowVersion: row.entry.rowVersion,
+          threads: [
+            { name: "On the pier", cast: [t.wren], writesAs: null },
+            { name: "Under the pier", cast: [t.pell], writesAs: null }
+          ]
+        })
+        const under = nested.forkIds[1]!
+        yield* t.append(t.D, t.wren, "PIERKNOWN")
+        yield* t.append(under, t.pell, "NESTEDSECRET")
+        yield* t.join(t.D, [under], null, "separate")
+        const sourceTools = yield* toolsFor(t, t.D, t.wren)
+        const sourceAddress = addressOf(yield* sourceTools.run("search_chat", { query: "PIERKNOWN" }))
+        yield* t.join(t.F, [t.D], null, "separate")
+        const wren = yield* toolsFor(t, t.F, t.wren)
+        assert.include(yield* wren.run("search_chat", { query: "PIERKNOWN" }), sourceAddress)
+        assert.include(yield* wren.run("read_messages", { from: sourceAddress, count: 1 }), "PIERKNOWN")
+        assert.strictEqual(yield* wren.run("search_chat", { query: "NESTEDSECRET" }), PRIVATE_EMPTY)
+        assert.notInclude(yield* wren.run("read_messages", { from: 1, count: 20 }), "NESTEDSECRET")
+        yield* t.append(t.U, t.pell, "TOGETHERKNOWN")
+        yield* t.join(t.F, [t.U], null, "together")
+        const check = (shared: boolean) =>
+          Effect.gen(function* () {
+            const mira = yield* toolsFor(t, t.F, t.mira)
+            const result = yield* mira.run("search_chat", { query: "TOGETHERKNOWN" })
+            if (shared) assert.include(result, "TOGETHERKNOWN")
+            else assert.strictEqual(result, PRIVATE_EMPTY)
+            assert.strictEqual(yield* mira.run("search_chat", { query: "PIERKNOWN" }), PRIVATE_EMPTY)
+            yield* expectPrivateBoundary(mira)
+          })
+        yield* check(true)
+        const tip = (yield* t.reader.ReadPath({
+          userId: t.userId,
+          chatId: t.chatId,
+          forkId: t.F,
+          leafSlotId: null,
+          range: { _tag: "Bottom" },
+          limit: 1
+        })).entries[0]!.slotId
+        for (const value of ["separate", "shared"] as const) {
+          yield* t.writer.AddStateEvent({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: t.F,
+            slotId: tip,
+            versionId: null,
+            scope: null,
+            data: { key: "context.per_speaker", value }
+          })
+          yield* check(value === "shared")
+        }
+      })
+    )
+  )
+
+  it.live("a frozen nested-row fixture keeps a uniform refusal for embedded source ranges", () =>
+    runStory(null, (t) =>
+      Effect.gen(function* () {
+        yield* t.append(t.F, t.mira, "DESTINATION")
+        yield* t.append(t.D, t.wren, "KNOWNDOCKS")
+        yield* t.join(t.F, [t.D], null, "separate")
+        const tools = yield* toolsFor(t, t.F, t.wren)
+        // Current thread joins omit joins from their frozen source rows. Model a future or
+        // legacy frozen compound row explicitly: its nested provenance must fail closed.
+        const context: ToolContext = {
+          ...tools.context,
+          reader: {
+            ...t.reader,
+            JoinRows: ((input) =>
+              t.reader.JoinRows(input).pipe(
+                Effect.map((joins) =>
+                  joins.map((join) => ({
+                    ...join,
+                    rows: join.rows.map((row) => ({
+                      ...row,
+                      sourceJoin: row.kind === "message" ? true : row.sourceJoin
+                    }))
+                  }))
+                )
+              )) as ToolContext["reader"]["JoinRows"]
+          }
+        }
+        for (const [id, args] of [
+          ["read_messages", { from: 1 }],
+          ["read_messages", { from: 999999 }],
+          ["search_chat", { query: "KNOWNDOCKS" }],
+          ["search_chat", { query: "MISSEDSOURCE" }],
+          ["search_chat", { query: "NONEXISTENT" }],
+          ["search_summaries", { query: "KNOWNDOCKS" }],
+          ["expand_summary", { messages: "1–99" }]
+        ] as const) {
+          const result = yield* historyTools.find((tool) => tool.id === id)!.execute(context, args as never)
+          assert.strictEqual(result.text, REFUSAL)
+          assert.isTrue(result.isError)
+        }
       })
     )
   )
@@ -379,7 +675,7 @@ describe("the agent's read tools across threads", () => {
         assert.notInclude(yield* t.contextFor(t.F, t.wren), "UPSTAIRS-SENTINEL")
         const wren = yield* toolsFor(t, t.F, t.wren)
         assert.notInclude(yield* wren.run("read_messages", { from: 1, count: 20 }), "UPSTAIRS-SENTINEL")
-        assert.strictEqual(yield* wren.run("search_chat", { query: "UPSTAIRS-SENTINEL" }), REFUSAL)
+        assert.strictEqual(yield* wren.run("search_chat", { query: "UPSTAIRS-SENTINEL" }), PRIVATE_EMPTY)
       })
     )
   )
@@ -404,7 +700,7 @@ describe("the agent's read tools across threads", () => {
     )
   )
 
-  it.live("a whole-path persona opens joined summaries while character reads stay refused", () =>
+  it.live("a whole-path persona opens joined summaries while private summary tools stay refused", () =>
     runStory(null, (t) =>
       Effect.gen(function* () {
         yield* t.append(t.F, t.mira, "Mira stokes the fire at the Lantern.")
@@ -470,12 +766,12 @@ describe("the agent's read tools across threads", () => {
         assert.strictEqual(listedForMira, REFUSAL)
         // Only the shared summary before the threads parted.
         assert.strictEqual(openedForMira, REFUSAL)
-        yield* expectRefused(mira)
+        yield* expectPrivateBoundary(mira)
       })
     )
   )
 
-  it.live("separate contexts also refuse joined character reads", () =>
+  it.live("separate contexts also offer only known joined rows", () =>
     runStory("separate", (t) =>
       Effect.gen(function* () {
         yield* t.append(t.F, t.mira, "LANTERNSECRET")
@@ -483,8 +779,8 @@ describe("the agent's read tools across threads", () => {
         const before = yield* toolsFor(t, t.D, t.wren)
         assert.include(yield* before.run("read_messages", { from: 1, count: 20 }), "DOCKSSECRET")
         yield* t.join(t.F, [t.D])
-        yield* expectRefused(yield* toolsFor(t, t.F, t.wren))
-        yield* expectRefused(yield* toolsFor(t, t.F, t.mira))
+        yield* expectPrivateBoundary(yield* toolsFor(t, t.F, t.wren))
+        yield* expectPrivateBoundary(yield* toolsFor(t, t.F, t.mira))
         const whole = yield* toolsFor(t, t.F, t.tobin)
         assert.include(yield* whole.run("read_messages", { from: 1, count: 20 }), "DOCKSSECRET")
       })
