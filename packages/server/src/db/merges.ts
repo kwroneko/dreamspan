@@ -577,8 +577,18 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     // Hash the actual preview and frozen rows, including full texts and speaker names.
     // Text length alone misses same-length edits and swipes made while the dialog is open.
     const digest = createHash("sha256")
-      // The position as resolved: a join below an earlier one of the same write previews the same.
-      .update(JSON.stringify([{ ...request, at: atId }, source.tip_slot_id, sourceEnd, previewFields, rows]))
+      // The request field by field, whatever order its keys came in, with the position as
+      // resolved: a join below an earlier one of the same write previews the same.
+      .update(
+        JSON.stringify([
+          [request.chatId, request.forkId, atId, request.source.chatId, request.source.forkId],
+          [request.start === undefined ? "absent" : request.start, request.includeLeftOut],
+          source.tip_slot_id,
+          sourceEnd,
+          previewFields,
+          rows
+        ])
+      )
       .digest("base64url")
     const preview = new ChatMergePreview({ ...previewFields, digest })
     return {
@@ -822,52 +832,66 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
         return results
       })
 
-    return {
-      MergeChat: ({ userId, title, framing, digest, threads, then = [], ...request }) =>
-        Effect.gen(function* () {
-          const now = Date.now()
-          const joins = [{ forkId: request.source.forkId, title, framing, digest }, ...then]
-          if (new Set(joins.map((join) => join.forkId)).size !== joins.length)
-            return yield* refused("Each thread can be joined once at a time.")
-          const slots: Array<string> = []
-          let at: SlotId | null = request.at
-          let place: { parent: { id: string; depth: number }; append: boolean } | null = null
-          // Several threads joined at once (spec/THREADS.md §7.1): each planned at the same
-          // position, as its preview was, and written below the one before.
-          for (const join of joins) {
-            const plan = yield* mergePlan(sql, userId, {
-              ...request,
-              at,
-              source: { chatId: request.chatId, forkId: join.forkId },
-              ...(join === joins[0] ? { source: request.source } : {})
-            })
-            if (plan.preview.digest !== join.digest) return yield* new MergeChanged({ preview: plan.preview })
-            if (threads && plan.splitId === null)
-              return yield* refused(`“${plan.preview.sourceTitle}” isn't another thread of this branch.`)
-            at = plan.at.id as SlotId
-            const target: { parent: { id: string; depth: number }; append: boolean } = place ?? {
-              parent: plan.at,
-              append: plan.append
-            }
-            const slotId: string = yield* writeMerge(
-              userId,
-              plan,
-              join.title,
-              join.framing,
-              target.parent,
-              target.append,
-              now
-            )
-            slots.push(slotId)
-            place = { parent: { id: slotId, depth: target.parent.depth + 1 }, append: target.append }
+    /**
+     * Writes each of `joins` as previewed, all planned at `request.at` and each below the one
+     * before (several threads joined at once are consecutive J's, spec/THREADS.md §7.1). With
+     * `threads`, every source must be another thread of this branch.
+     */
+    const merged = (
+      userId: UserId,
+      request: Omit<MergeRequest, "source">,
+      joins: ReadonlyArray<{
+        readonly source: MergeRequest["source"]
+        readonly title: string
+        readonly framing: string | null
+        readonly digest: string
+      }>,
+      threads: boolean
+    ) =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        if (new Set(joins.map((join) => `${join.source.chatId}/${join.source.forkId}`)).size !== joins.length)
+          return yield* refused("Each thread can be joined once at a time.")
+        const slots: Array<string> = []
+        let at: SlotId | null = request.at
+        let place: { parent: { id: string; depth: number }; append: boolean } | null = null
+        for (const join of joins) {
+          const plan = yield* mergePlan(sql, userId, { ...request, at, source: join.source })
+          if (plan.preview.digest !== join.digest) return yield* new MergeChanged({ preview: plan.preview })
+          if (threads && plan.splitId === null)
+            return yield* refused(`“${plan.preview.sourceTitle}” isn't another thread of this branch.`)
+          at = plan.at.id as SlotId
+          const target: { parent: { id: string; depth: number }; append: boolean } = place ?? {
+            parent: plan.at,
+            append: plan.append
           }
-          const [first, ...rest] = yield* finish(request.forkId, request.chatId, slots, now)
-          return rest.length === 0
-            ? first!
-            : new MergeResult({
-                ...first!,
-                then: rest.map((result) => ({ slotId: result.slotId, position: result.position }))
-              })
-        }).pipe(transaction(sql, "MergeChat"))
+          const slotId: string = yield* writeMerge(
+            userId,
+            plan,
+            join.title,
+            join.framing,
+            target.parent,
+            target.append,
+            now
+          )
+          slots.push(slotId)
+          place = { parent: { id: slotId, depth: target.parent.depth + 1 }, append: target.append }
+        }
+        return yield* finish(request.forkId, request.chatId, slots, now)
+      })
+
+    return {
+      MergeChat: ({ userId, title, framing, digest, ...request }) =>
+        Effect.map(
+          merged(userId, request, [{ source: request.source, title, framing, digest }], false),
+          (results) => results[0]!
+        ).pipe(transaction(sql, "MergeChat")),
+      JoinThreads: ({ userId, joins, ...request }) =>
+        merged(
+          userId,
+          request,
+          joins.map(({ forkId, ...join }) => ({ source: { chatId: request.chatId, forkId }, ...join })),
+          true
+        ).pipe(transaction(sql, "JoinThreads"))
     } satisfies Partial<WriteHandlers>
   })

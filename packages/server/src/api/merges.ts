@@ -41,37 +41,25 @@ export const makeMergeHandlers = Effect.gen(function* () {
       return new MergedChat({ entry: placed, chat: result.chat })
     }).pipe(Effect.uninterruptible, internal("MergeChat"))
 
-  // "Join threads" (spec/THREADS.md §7.1): the merge write with every source another thread of
-  // this branch, the first below `at`, the others each below the one before, in one transaction.
-  const join = ({ joins, ...input }: JoinThreadsInput) =>
+  // "Join threads" (spec/THREADS.md §7.1): every source another thread of this branch, the first
+  // below `at`, the others each below the one before, in one transaction.
+  const join = (input: JoinThreadsInput) =>
     Effect.gen(function* () {
       const id = yield* userId
-      const [first, ...then] = joins
-      const result = yield* writer.MergeChat({
-        userId: id,
-        chatId: input.chatId,
-        forkId: input.forkId,
-        at: input.at,
-        source: { chatId: input.chatId, forkId: first!.forkId },
-        includeLeftOut: input.includeLeftOut,
-        title: first!.title,
-        framing: first!.framing,
-        digest: first!.digest,
-        threads: true,
-        ...(then.length > 0 ? { then } : {})
-      })
+      const results = yield* writer.JoinThreads({ userId: id, ...input })
       const entries: Array<PathEntry> = []
-      for (const placed of [{ slotId: result.slotId, position: result.position }, ...(result.then ?? [])]) {
-        const { entry } = yield* reader.GetSlot({ userId: id, slotId: placed.slotId, forkId: result.forkId })
+      for (const placed of results) {
+        const { entry } = yield* reader.GetSlot({ userId: id, slotId: placed.slotId, forkId: placed.forkId })
         const shown = new PathEntry({ ...entry, position: placed.position })
         entries.push(shown)
         hub.publish(input.chatId, { _tag: "Slot", entry: shown })
       }
-      hub.publish(input.chatId, { _tag: "Chat", chat: result.chat })
+      const chat = results.at(-1)!.chat
+      hub.publish(input.chatId, { _tag: "Chat", chat })
       // The cast gained the threads' characters back; a summary covering the position is stale now.
       hub.publish(input.chatId, { _tag: "State" })
       hub.publish(input.chatId, { _tag: "Lcm" })
-      return new JoinedThreads({ entries, chat: result.chat })
+      return new JoinedThreads({ entries, chat })
     }).pipe(Effect.uninterruptible, internal("JoinThreads"))
 
   yield* commands.register(
