@@ -50,6 +50,7 @@ import type { ComposerSource } from "./composerDraft.ts"
 import { type Copy, copiesOf, pendingOf } from "../editor/backup.ts"
 import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf } from "./messageDraft.ts"
 import { beforeReply, chatStateChanged } from "./replyHooks.ts"
+import { guardReply } from "./replyGuards.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -207,10 +208,11 @@ export class ChatSession {
   private disposed = false
   /** Bumped by every read that replaces the window, so an older read's reply is dropped. */
   private generation = 0
+  /** Changes only when leaving a fork, including away and back while a read waits. */
+  private forkGeneration = 0
   private paging = false
-  /** Reads in flight, and the events received since the first of them started (below). */
-  private reads = 0
-  private missed: Array<Replayable> = []
+  /** Each in-flight read owns only the events received during that read. */
+  private readonly readEvents = new Set<Array<Replayable>>()
 
   /** Stable chat identity, available while its view is still loading. */
   readonly chatId: ChatId
@@ -663,6 +665,7 @@ export class ChatSession {
 
   dispose() {
     this.disposed = true
+    this.forkGeneration++
     viewsOf.get(this.chatId)?.delete(this)
     this.positionGeneration++
     this.castBatch = null
@@ -729,20 +732,21 @@ export class ChatSession {
   }
 
   /**
-   * Runs a read and applies what it returns. The server may answer it from before an
-   * event that arrived meanwhile and was already applied: the reply would then undo it.
-   * So the events received while reads are in flight are applied again once each lands;
-   * applying one twice changes nothing (by row version).
+   * A read may return state older than events already received. Replay only the events
+   * received during THIS read, removing its buffer before replay: an event may need a
+   * fresh read (another fork's slot, an unplaced insertion), but that read must not
+   * inherit the event that started it. Keeping one buffer until all reads were idle
+   * fed replayed events into their own reads forever.
    */
   private async reading(read: () => Promise<void>) {
-    this.reads++
+    const events: Array<Replayable> = []
+    const forkGeneration = this.forkGeneration
+    this.readEvents.add(events)
     try {
       await read()
     } finally {
-      this.reads--
-      const missed = this.missed
-      if (this.reads === 0) this.missed = []
-      if (!this.disposed) for (const event of missed) this.applyState(event)
+      this.readEvents.delete(events)
+      if (!this.disposed && forkGeneration === this.forkGeneration) for (const event of events) this.applyState(event)
     }
   }
 
@@ -1003,6 +1007,7 @@ export class ChatSession {
 
   /** Shows another fork (null: the chat's current one), at a message or at its bottom. */
   showFork(fork: ForkId | null, anchor: SlotId | null) {
+    this.forkGeneration++
     this.requestedFork = fork
     this.update({ forkId: fork, leafSlotId: null, entries: [], loading: true })
     // Position subscribers can read synchronously when notified: they must see the new fork.
@@ -1123,10 +1128,10 @@ export class ChatSession {
       // falls through
       case "Slot":
         this.update({ pathRevision: this.view.pathRevision + 1 })
-        if (this.reads > 0) this.missed.push(event)
+        for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
       case "Chat":
-        if (this.reads > 0) this.missed.push(event)
+        for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
       case "Reload":
         return this.reload()
@@ -1228,7 +1233,8 @@ export class ChatSession {
     const { entries } = this.view
     const index = entries.findIndex((e) => e.slotId === entry.slotId)
     // Another fork's choices (its selection, its row version) aren't this one's: a slot shown
-    // here is read again as this fork shows it.
+    // here is read again as this fork shows it. A replay also needs this: a stale window
+    // can land after the first refresh, or load a slot not shown when the event arrived.
     if (
       entry.shownForkId !== undefined &&
       this.view.forkId !== null &&
@@ -1694,6 +1700,16 @@ export class ChatSession {
    * this slot's guidance explicitly (the guidance editor's box, guidanceEdit.tsx).
    */
   async regenerate(entry: PathEntry): Promise<Outcome<unknown>> {
+    // A guard may hold it back (a reply that changed things outside the chat warns first).
+    const go = await guardReply({
+      chatId: this.chatId,
+      kind: this.view.chat?.kind,
+      versionId: entry.version.id,
+      // A message of a several-message run without steps of its own may still have later ones'.
+      hasSteps: (entry.version.steps?.count ?? 0) > 0 || entry.version.agent === true,
+      action: "regenerate"
+    })
+    if (!go) return { ok: true, value: null }
     await beforeReply()
     const direction = this.guidance({ slotId: entry.slotId, kind: "version" })
     return this.slotWrite(entry.slotId, (client) =>
@@ -2067,9 +2083,15 @@ export class ChatSession {
   }
 
   private refreshSlot(slotId: SlotId) {
+    const forkGeneration = this.forkGeneration
+    const forkId = this.view.forkId
     return this.reading(async () => {
       const window = await this.read({ _tag: "Around", slot: slotId }, 1)
+      if (this.disposed || forkGeneration !== this.forkGeneration || forkId !== this.view.forkId) return
       const entry = window?.entries.find((e) => e.slotId === slotId)
+      // A missing fork can make read() fall back to the current one. That snapshot
+      // cannot repair this fork, and passing it to applySlot would read again forever.
+      if (entry?.shownForkId !== undefined && forkId !== null && entry.shownForkId !== forkId) return
       if (entry) this.applySlot(entry)
     })
   }

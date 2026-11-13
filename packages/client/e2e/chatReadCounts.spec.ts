@@ -3,7 +3,9 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, test } from "@playwright/test"
+import { AppApi } from "@rp/shared/api.ts"
 import { Effect } from "effect"
+import { RpcSchema } from "effect/rpc"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
@@ -107,6 +109,11 @@ test("chat navigation shares reads and still refreshes after writes", async ({ p
     })
   )
   const requests: Array<{ tag: string; payload: Record<string, unknown>; at: number }> = []
+  // Shell updates use Watch*, not Subscribe*: streams stay open for the page's lifetime
+  // (ARCHITECTURE §12, Incremental shell updates). Count them, but don't await their Exit.
+  const streams = new Set<string>(
+    [...AppApi.requests.values()].filter((rpc) => RpcSchema.isStreamSchema(rpc.successSchema)).map((rpc) => rpc._tag)
+  )
   const pending = new Set<string>()
   let last = 0
   page.on("websocket", (socket) => {
@@ -124,7 +131,7 @@ test("chat navigation shares reads and still refreshes after writes", async ({ p
       for (const line of payload.toString().split("\n").filter(Boolean)) {
         const message = JSON.parse(line) as { _tag: string; tag: string; id: string; payload: Record<string, unknown> }
         if (message._tag === "Request") {
-          if (!message.tag.startsWith("Subscribe")) pending.add(message.id)
+          if (!streams.has(message.tag)) pending.add(message.id)
           requests.push({ tag: message.tag, payload: message.payload, at: Date.now() })
           last = Date.now()
         }

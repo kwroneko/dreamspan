@@ -247,9 +247,9 @@ export class Generations extends Context.Service<
               status
             })
           }
-          if (status === "complete" && entry.text.trim() !== "")
+          if (!request.replyOnly && status === "complete" && entry.text.trim() !== "")
             yield* Effect.forkIn(markIfRefused(request, entry.text), scope)
-          if (status === "complete" && Option.isSome(decisions))
+          if (!request.replyOnly && status === "complete" && Option.isSome(decisions))
             yield* Effect.forkIn(
               decisions.value
                 .afterReply({
@@ -268,7 +268,7 @@ export class Generations extends Context.Service<
                 ),
               scope
             )
-          if (status === "complete")
+          if (!request.replyOnly && status === "complete")
             yield* summaries.afterReply({
               userId: request.userId,
               chatId: request.chatId,

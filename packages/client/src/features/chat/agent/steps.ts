@@ -46,7 +46,7 @@ export const stepsView = (
 }
 
 /** One tool step's state as an icon and words, for its row. */
-export const statusText = { running: "Running", done: "Done", error: "Failed" } as const
+export const statusText = { running: "Running", waiting: "Waiting for you", done: "Done", error: "Failed" } as const
 
 /**
  * Whether the element is open: what the user chose for this version, while that choice is for the

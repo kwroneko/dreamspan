@@ -1193,6 +1193,28 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         "NotFound"
       )
   },
+  SetWorkshopGrant: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetWorkshopGrant({ chatId: owner.chat.chatId, capability: "library.write", mode: "allow" }),
+        "NotFound"
+      )
+  },
+  AnswerToolApproval: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.AnswerToolApproval({
+          rolloutId: owner.chat.rolloutId,
+          toolCallId: "call_1",
+          digest: "0".repeat(64),
+          answer: "allow"
+        }),
+        "NotFound"
+      )
+  },
+  ListVersionEffects: {
+    probe: (actor, owner) => refused(actor.api.ListVersionEffects({ versionId: owner.chat.versionId }), "NotFound")
+  },
   CreateWorkshop: { createOnly: "creates a workshop and its private defaults for the caller" },
   CreateChat: { createOnly: "starts an empty chat for the caller" },
   GetChat: { probe: (actor, owner) => refused(actor.api.GetChat({ chatId: owner.chat.chatId }), "NotFound") },
@@ -2942,6 +2964,12 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
       )
   },
   SourceTags: { probe: (actor) => refused(actor.api.SourceTags({ sourceId: "cardex", prefix: "f" }), "NotFound") },
+  SourceFamily: {
+    probe: (actor) => refused(actor.api.SourceFamily({ sourceId: "cardex", remoteId: "x" }), "NotFound")
+  },
+  SourceCreator: {
+    probe: (actor) => refused(actor.api.SourceCreator({ sourceId: "cardex", creator: "chub/x" }), "NotFound")
+  },
   SourceCard: { probe: (actor) => refused(actor.api.SourceCard({ sourceId: "cardex", remoteId: "x" }), "NotFound") },
   SourceCardForChat: {
     probe: (actor) => refused(actor.api.SourceCardForChat({ sourceId: "cardex", remoteId: "x" }), "NotFound")
@@ -4530,6 +4558,73 @@ const storage: Record<
     ),
   ListRolloutEffects: (reader, actor, owner) =>
     refused(reader.ListRolloutEffects({ userId: actor.user.id, chatId: owner.chat.chatId }), "NotFound"),
+  WorkshopGrants: (reader, actor, owner) =>
+    refused(reader.WorkshopGrants({ userId: actor.user.id, chatId: owner.chat.chatId, now: 0 }), "NotFound"),
+  ToolApprovalFor: (reader, actor, owner) =>
+    refused(
+      reader.ToolApprovalFor({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        toolCallId: "call_1",
+        digest: "0".repeat(64)
+      }),
+      "NotFound"
+    ),
+  VersionEffects: (reader, actor, owner) =>
+    refused(reader.VersionEffects({ userId: actor.user.id, versionId: owner.chat.versionId }), "NotFound"),
+  SetWorkshopGrant: (_reader, actor, owner, writer) =>
+    refused(
+      writer.SetWorkshopGrant({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        capability: "library.write",
+        mode: "allow"
+      }),
+      "NotFound"
+    ),
+  RequestToolApproval: (_reader, actor, owner, writer) =>
+    refused(
+      writer.RequestToolApproval({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        toolCallId: "call_1",
+        digest: "0".repeat(64),
+        capability: "library.write",
+        prompt: {
+          rolloutId: owner.chat.rolloutId,
+          toolCallId: "call_1",
+          digest: "0".repeat(64),
+          capability: "library.write",
+          capabilityLabel: "Planted",
+          title: "Planted",
+          rows: [],
+          uncertain: false
+        }
+      }),
+      "NotFound"
+    ),
+  AnswerToolApproval: (_reader, actor, owner, writer) =>
+    refused(
+      writer.AnswerToolApproval({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        toolCallId: "call_1",
+        digest: "0".repeat(64),
+        answer: "allow",
+        note: null
+      }),
+      "NotFound"
+    ),
+  SettleToolApproval: (_reader, actor, owner, writer) =>
+    refused(
+      writer.SettleToolApproval({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        toolCallId: "call_1",
+        status: "used"
+      }),
+      "NotFound"
+    ),
   RolloutToolReceipt: (reader, actor, owner) =>
     refused(
       reader.RolloutToolReceipt({ userId: actor.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "call_1" }),

@@ -144,7 +144,8 @@ for (const kind of ["openrouter", "openai-responses", "google"] as const)
         connection: { kind, baseUrl: mock.url, apiKey: "synthetic-key" },
         modelKey:
           kind === "google" ? "gemini-2.5-pro" : kind === "openrouter" ? "anthropic/claude-sonnet-4" : "mock-model",
-        model: { cacheBreakpoints: "explicit" }
+        model: { cacheBreakpoints: "explicit" },
+        preset: { openai_max_context: 32768 }
       })
       const chat = yield* api.CreateWorkshop({})
       const events: Array<ChatEvent> = []

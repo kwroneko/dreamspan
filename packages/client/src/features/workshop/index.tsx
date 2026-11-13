@@ -1,11 +1,23 @@
-// Workshop chats in the client (spec/WORKSHOP.md W2), registered as a plugin would: the kind's
-// look, its start card on the Chats page, and the capability chip in the composer's strip.
+// Workshop chats in the client (spec/WORKSHOP.md W2, W4), registered as a plugin would: the kind's
+// look, its start card on the Chats page, the capability chip in the composer's strip, the Changes
+// tab, each change's Undo and Open under its step, and the warning before a new version of a reply
+// that changed things outside the chat.
+import { lazy, Suspense } from "react"
+import { stepActions } from "../chat/agent/stepActions.ts"
 import { chatStartSections } from "../chat/ChatsPage.tsx"
 import { composerControls } from "../chat/composerControls.tsx"
 import { chatKindLooks, kindShows } from "../chat/kindLooks.ts"
+import { chatPanels, lazyPanel, type PanelProps } from "../chat/panels.tsx"
+import { replyGuards } from "../chat/replyGuards.ts"
+import { appTools } from "../shell.tsx"
 import { CapabilityChip } from "./CapabilityChip.tsx"
+import { CHANGES } from "./effects.ts"
 import { CAPABILITY_CHIP, workshopLook } from "./kinds.ts"
+import { askBeforeReply } from "./regenerateWarning.ts"
+import { StepEffects } from "./StepEffects.tsx"
 import { WorkshopStartCard } from "./StartCard.tsx"
+
+const RegenerateWarning = lazy(() => import("./RegenerateWarning.tsx"))
 
 export const register = () => [
   chatKindLooks.register(workshopLook),
@@ -17,5 +29,32 @@ export const register = () => [
     placement: "strip",
     available: ({ view }) => kindShows(view.chat?.kind, CAPABILITY_CHIP),
     component: CapabilityChip
+  }),
+  chatPanels.register({
+    id: CHANGES,
+    label: "Changes",
+    description: "What the assistant changed outside this chat, each with Undo and Open.",
+    order: 92,
+    icon: "undo",
+    available: (view) => kindShows(view.chat?.kind, CHANGES),
+    component: lazyPanel(
+      () =>
+        import("./ChangesPanel.tsx").then((m) => ({
+          default: (props: PanelProps) => <m.ChangesPanel {...props} />
+        })),
+      "changes"
+    )
+  }),
+  // After the answer to a waiting call: what the call changed, once it's done.
+  stepActions.register({ id: "workshop.step-effects", order: 20, component: StepEffects }),
+  replyGuards.register({ id: "workshop.regenerate-warning", check: askBeforeReply }),
+  appTools.register({
+    id: "workshop.regenerate-warning",
+    order: 220,
+    component: () => (
+      <Suspense fallback={null}>
+        <RegenerateWarning />
+      </Suspense>
+    )
   })
 ]

@@ -200,6 +200,7 @@ function Editor({
   entry,
   caret,
   onCaretTaken,
+  onScrollIntoView,
   onSave,
   onSaveWith,
   offerSaves,
@@ -218,6 +219,7 @@ function Editor({
   /** Where the caret opens (a double-click's place in the text), else at the end. */
   caret?: number | undefined
   onCaretTaken: () => void
+  onScrollIntoView: () => void
   onSave: () => void
   onCancel: () => void
 }) {
@@ -266,7 +268,10 @@ function Editor({
       onFocus={() => {
         if (revealed.current) return
         revealed.current = true
-        actions.current?.scrollIntoView({ block: "nearest" })
+        if (actions.current) {
+          actions.current.scrollIntoView({ block: "nearest" })
+          onScrollIntoView()
+        }
       }}
       onSubmit={(event) => {
         event.preventDefault()
@@ -559,7 +564,8 @@ export const Message = memo(function Message({
   revealed,
   onReveal,
   branchFork,
-  onBranch
+  onBranch,
+  onScrollIntoView
 }: {
   entry: PathEntry
   session: ChatSession
@@ -573,6 +579,8 @@ export const Message = memo(function Message({
   branchFork: ForkId | null
   /** Switches to another of the alternate branches at this message. */
   onBranch: (entry: PathEntry, index: number) => void
+  /** Native scrolling precedes its scroll event; update the list before rows measure. */
+  onScrollIntoView: () => void
 }) {
   useRenderCount("rowRenders")
   const cast = useCast()
@@ -584,8 +592,11 @@ export const Message = memo(function Message({
   const footer = useRef<HTMLDivElement>(null)
   // A tap shows the actions at the end of the message, which may be past the screen's edge.
   useEffect(() => {
-    if (revealed) footer.current?.scrollIntoView({ block: "nearest" })
-  }, [revealed])
+    if (revealed && footer.current) {
+      footer.current.scrollIntoView({ block: "nearest" })
+      onScrollIntoView()
+    }
+  }, [revealed, onScrollIntoView])
   const generating = version.status === "generating"
   const report = (outcome: Outcome<unknown>) => setError(outcome.ok ? null : outcome.error)
   const { versions, position, load, replace } = useVersions(session, entry, report)
@@ -838,6 +849,7 @@ export const Message = memo(function Message({
       entry={entry}
       caret={editing === "edit" ? caretAt : undefined}
       onCaretTaken={caretTaken}
+      onScrollIntoView={onScrollIntoView}
       source={
         editor.target._tag === "Edit"
           ? [version, ...(versions ?? [])].find(

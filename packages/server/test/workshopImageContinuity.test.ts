@@ -18,7 +18,8 @@ for (const imageLimit of [1, 2])
       const api = yield* client()
       yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: mock.url },
-        model: { vision: true, maxImages: imageLimit }
+        model: { vision: true, maxImages: imageLimit },
+        preset: { openai_max_context: 32768 }
       })
       const chat = yield* api.CreateWorkshop({})
       const events: Array<ChatEvent> = []

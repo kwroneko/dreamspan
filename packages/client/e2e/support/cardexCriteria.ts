@@ -84,14 +84,25 @@ export function cardexCriteriaTests() {
             await suggestedCreators.getByRole("button").first().click()
             await expect(creator).toHaveValue(/^[a-z_]+\//)
             await clear()
+            // A long list of choices (every site) is the existing picker, with its search.
+            const pick = async (label: string, option: string) => {
+              await panel.getByRole("combobox", { name: label, exact: true }).click()
+              const list = page.getByRole("dialog", { name: `Choose: ${label.toLowerCase()}`, exact: true })
+              await list.getByPlaceholder("Search").fill(option)
+              await list.getByRole("option", { name: option, exact: true }).click()
+              await page.keyboard.press("Escape")
+              await expect(list).toBeHidden()
+            }
+            for (const label of ["Site", "Exclude sites"]) {
+              await pick(label, "Chub")
+              await check(`${label}: Chub`)
+            }
             // Each choice kind, including lists, has a chip and can be cleared again.
             for (const [group, option, chip] of [
               ["Rating", "Safe", "Rating: Safe"],
               ["Match", "Meaning", "Match: Meaning"],
-              ["Site", "Chub", "Site: Chub"],
               ["Search in", "Name", "Search in: Name"],
               ["Kind", "With a lorebook", "Kind: With a lorebook"],
-              ["Exclude sites", "Chub", "Exclude sites: Chub"],
               ["Cover", "Any", "Cover: Any"]
             ]) {
               await panel
@@ -105,11 +116,7 @@ export function cardexCriteriaTests() {
               ["Any of these creators", "chub/fable_forge,risuai/lumen"],
               ["Exclude creators", "chub/fable_forge"],
               ["Any of these tags", "fantasy|magic,adventure|mystery"],
-              ["Picture", "a".repeat(64)],
-              ["Added after", "2026-01-01"],
-              ["Added before", "2026-02-01"],
-              ["Created after", "2025-01-01"],
-              ["Created before", "2026-01-01"]
+              ["Picture", "a".repeat(64)]
             ]) {
               await panel.getByRole("textbox", { name: label!, exact: true }).fill(value!)
               await expect(chips).toContainText(label!)
@@ -121,6 +128,18 @@ export function cardexCriteriaTests() {
               }
               await clear()
             }
+            // Dates are date fields.
+            for (const [label, value] of [
+              ["Added after", "2026-01-01"],
+              ["Added before", "2026-02-01"],
+              ["Created after", "2025-01-01"],
+              ["Created before", "2026-01-01"]
+            ]) {
+              const date = panel.getByLabel(label!, { exact: true })
+              await expect(date).toHaveAttribute("type", "date")
+              await date.fill(value!)
+              await check(`${label}: ${value}`)
+            }
             await panel.getByRole("spinbutton", { name: "Tokens: at least (tokens)", exact: true }).fill("100")
             await panel.getByRole("spinbutton", { name: "Tokens: at most (tokens)", exact: true }).fill("2000")
             await check("Tokens 100–2,000")
@@ -129,19 +148,13 @@ export function cardexCriteriaTests() {
               await check(label)
             }
             await expect(panel.getByRole("switch", { name: "Chub verified", exact: true })).toBeDisabled()
-            await panel
-              .getByRole("group", { name: "Site", exact: true })
-              .getByRole("button", { name: "Chub", exact: true })
-              .click()
+            await pick("Site", "Chub")
             await panel.getByRole("switch", { name: "Chub verified", exact: true }).click()
             await panel.getByRole("switch", { name: "Chub recommended", exact: true }).click()
             await expect(chips).toContainText("Chub verified")
             await expect(chips).toContainText("Chub recommended")
             // Changing to another site removes incompatible marks, rather than asking a refused query.
-            await panel
-              .getByRole("group", { name: "Site", exact: true })
-              .getByRole("button", { name: "RisuRealm", exact: true })
-              .click()
+            await pick("Site", "RisuRealm")
             await expect(chips).not.toContainText("Chub verified")
             await clear()
             const tags = panel.getByRole("textbox", { name: "Tags", exact: true })
@@ -152,8 +165,8 @@ export function cardexCriteriaTests() {
             await chips.getByRole("button", { name: "Not fantasy", exact: true }).click()
             await expect(chips).toHaveCount(0)
             // Audit the expanded panel through its full height, also in the narrow sidebar.
-            for (const label of ["Tags", "Picture", "Created before"]) {
-              await panel.getByRole("textbox", { name: label, exact: true }).scrollIntoViewIfNeeded()
+            for (const label of ["Tags", "Site", "Picture", "Created before"]) {
+              await panel.getByLabel(label, { exact: true }).first().scrollIntoViewIfNeeded()
               await expectLayout(page, info, `cardex-panel-${place}-${label}-${width}-${theme}`, {
                 scope: place === "home" ? "main" : "[data-shell-list]"
               })
@@ -253,6 +266,73 @@ export function cardexCriteriaTests() {
             await expectLayout(page, info, `cardex-sort-${place}-${width}-${theme}`, {
               scope: place === "home" ? "main" : "[data-shell-list]"
             })
+            // Every filter type survives one combined URL, reload, a second tab and history.
+            const allFilters = {
+              nsfw: "only",
+              mode: "fts",
+              tokens: { min: 100, max: 9000 },
+              exclude_forks: true,
+              source: ["chub"],
+              author: "chub/fable_forge",
+              fields: ["name", "character"],
+              kind: "character_lorebook",
+              not_source: ["risuai", "janitorai"],
+              any_tags: "fantasy|magic,adventure|mystery",
+              has_cover: "false",
+              any_author: "chub/fable_forge,risuai/lumen",
+              not_author: "chub/lumen,risuai/fable_forge",
+              picture: "a".repeat(64),
+              added_after: "2025-01-01",
+              added_before: "2027-01-01",
+              created_after: "2024-01-01",
+              created_before: "2027-01-01",
+              deleted_from_source: true,
+              deleted_from_any_source: true,
+              chub_verified: true,
+              chub_recommended: true
+            }
+            const prefix = place === "home" ? "" : "side"
+            const key = (name: string) => (prefix ? prefix + name[0]!.toUpperCase() + name.slice(1) : name)
+            const revealSidebar = async (target: typeof page) => {
+              if (place !== "sidebar" || width !== 390) return
+              await expect(
+                target
+                  .getByRole("button", { name: /^(Chats and menu|Close the menu)$/ })
+                  .filter({ visible: true })
+                  .first()
+              ).toBeVisible()
+              await showAppNavigation(target)
+            }
+            const combined = new URL(page.url())
+            combined.searchParams.set(key("sf"), JSON.stringify(allFilters))
+            combined.searchParams.set(key("stags"), JSON.stringify(["magic"]))
+            combined.searchParams.set(key("sxtags"), JSON.stringify(["horror"]))
+            await page.goto(combined.href)
+            await revealSidebar(page)
+            const expectFilters = async (target: typeof page) => {
+              await expect(target.locator('[aria-label="Filters set"]').filter({ visible: true })).toContainText(
+                "Created before: 2027-01-01"
+              )
+              const restored = new URL(target.url())
+              expect(JSON.parse(restored.searchParams.get(key("sf"))!)).toEqual(allFilters)
+              expect(JSON.parse(restored.searchParams.get(key("stags"))!)).toEqual(["magic"])
+              expect(JSON.parse(restored.searchParams.get(key("sxtags"))!)).toEqual(["horror"])
+            }
+            await expectFilters(page)
+            await page.reload()
+            await revealSidebar(page)
+            await expectFilters(page)
+            const tab = await page.context().newPage()
+            await tab.setViewportSize({ width, height: 900 })
+            await tab.goto(page.url())
+            await revealSidebar(tab)
+            await expectFilters(tab)
+            await tab.close()
+            await page.goBack()
+            await expect(page).not.toHaveURL(combined.href)
+            await page.goForward()
+            await revealSidebar(page)
+            await expectFilters(page)
           } finally {
             await server.stop()
           }

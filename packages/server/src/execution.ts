@@ -1,5 +1,8 @@
+import { makeOperationTools, type OperationRuntime } from "./agent/operations.ts"
+import { builtinOperationExposures } from "./agent/exposures/builtins.ts"
 import { rolloutEffectClasses } from "./agent/effects.ts"
-import { workshopCapabilities } from "./agent/capabilities.ts"
+import { outsideEffect } from "./agent/effects.ts"
+import { capabilityDefaults, workshopCapabilities } from "./agent/capabilities.ts"
 import { libraryEditCard, setupTools } from "./agent/tools/setup.ts"
 import { chatKinds, type ChatKindProfile } from "@rp/shared/chatKinds.ts"
 import { workshopMode } from "./agent/workshop.ts"
@@ -48,7 +51,12 @@ export class ExecutionRegistry extends Context.Service<
     /** The tools an agent turn may offer, with their effect classes (spec/AGENTIC.md §4). */
     readonly effectClasses: typeof rolloutEffectClasses
     readonly workshopCapabilities: typeof workshopCapabilities
+    /** The one table of capability defaults (WORKSHOP §10 question 1). */
+    readonly capabilityDefaults: typeof capabilityDefaults
     readonly rolloutTools: Registry<RolloutTool<never>>
+    readonly operationTools: ReturnType<typeof makeOperationTools>["operationTools"]
+    readonly operationTool: ReturnType<typeof makeOperationTools>["operationTool"]
+    readonly operationRuntime: OperationRuntime
     readonly kindTools: Registry<{ readonly id: string; readonly tool: RolloutTool<never> }>
   }
 >()("rp/ExecutionRegistry") {
@@ -60,10 +68,39 @@ export class ExecutionRegistry extends Context.Service<
       yield* replyStrategies.register(agentReplyStrategy)
       const orchestrationModes = makeRegistry<OrchestrationMode>()
       yield* orchestrationModes.register(defaultMode)
-      yield* orchestrationModes.register(workshopMode)
-      const kindTools = makeRegistry<{ readonly id: string; readonly tool: RolloutTool<never> }>()
+      const operationRuntime: OperationRuntime = {}
+      const { operationTools, operationTool } = makeOperationTools(
+        { workshopCapabilities, capabilityDefaults },
+        operationRuntime
+      )
+      for (const entry of builtinOperationExposures) yield* operationTools.register(entry)
+      yield* orchestrationModes.register({
+        ...workshopMode,
+        plan: (input) => {
+          const plan = workshopMode.plan(input)
+          return { ...plan, tools: [...new Set([...plan.tools, ...operationTools.list().map((e) => e.id)])] }
+        }
+      })
+      const validate = (tool: RolloutTool<never>) => {
+        if (
+          (outsideEffect(tool.effect) && !tool.capability) ||
+          (tool.capability && !workshopCapabilities.get(tool.capability))
+        )
+          throw new Error(`Tool ${tool.id} needs a registered capability.`)
+      }
+      const variants = makeRegistry<{ readonly id: string; readonly tool: RolloutTool<never> }>()
+      const kindTools = {
+        ...variants,
+        register: (entry: { readonly id: string; readonly tool: RolloutTool<never> }) =>
+          Effect.sync(() => validate(entry.tool)).pipe(Effect.andThen(variants.register(entry)))
+      }
       yield* kindTools.register({ id: "workshop:edit_card", tool: libraryEditCard })
-      const rolloutTools = makeRegistry<RolloutTool<never>>()
+      const catalog = makeRegistry<RolloutTool<never>>()
+      const rolloutTools = {
+        ...catalog,
+        register: (tool: RolloutTool<never>) =>
+          Effect.sync(() => validate(tool)).pipe(Effect.andThen(catalog.register(tool)))
+      }
       for (const tool of [
         ...historyTools,
         ...libraryTools,
@@ -101,7 +138,11 @@ export class ExecutionRegistry extends Context.Service<
         rolloutTools,
         effectClasses: rolloutEffectClasses,
         workshopCapabilities,
-        kindTools
+        capabilityDefaults,
+        kindTools,
+        operationTools,
+        operationTool,
+        operationRuntime
       }
     })
   )
@@ -117,7 +158,8 @@ export const executionRegistry = Effect.gen(function* () {
 
 /** A kind may replace an ambiguous public tool name without changing story semantics. */
 export const toolForKind = (registry: ExecutionRegistry["Service"], kind: string, name: string) => {
-  const common = registry.rolloutTools.get(name)
+  const exposure = registry.chatKinds.get(kind)?.allowsOutside ? registry.operationTools.get(name) : undefined
+  const common = exposure ? registry.operationTool(exposure) : registry.rolloutTools.get(name)
   const variant = registry.kindTools.get(`${kind}:${name}`)?.tool
   const tool = common?.kindOverrides?.includes(kind) ? variant : (variant ?? common)
   if (!tool || registry.chatKinds.get(kind)?.allowsOutside || !tool.capability) return tool

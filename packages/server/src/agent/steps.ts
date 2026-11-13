@@ -131,6 +131,31 @@ export const placedSteps = (
   return steps
 }
 
+/**
+ * The calls a version's message and the run's later messages made, by id, with each one's result
+ * text (null without one): the changes listed for that message's steps and its regenerate warning
+ * (spec/WORKSHOP.md §3.6). Earlier messages' calls, and a carried run's history before this turn,
+ * are left out. A call sits where its result is, else at its turn. Without `versionId`, every call.
+ */
+export const callsFrom = (messages: ReadonlyArray<AgentMessage>, versionId?: string): Map<string, string | null> => {
+  const after = versionId === undefined ? -1 : messageBounds(messages, versionId, true).after
+  const calls = new Map<string, string | null>()
+  messages.forEach((m, index) => {
+    if (m.role !== "assistant") return
+    const results = new Map<string, { readonly at: number; readonly text: string }>()
+    for (let next = index + 1; next < messages.length && messages[next]!.role !== "assistant"; next++) {
+      const r = messages[next]!
+      if (r.role === "toolResult") results.set(r.toolCallId, { at: next, text: resultText(r.content) })
+    }
+    for (const part of m.content) {
+      const result = part.type === "toolCall" ? results.get(part.id) : undefined
+      if (part.type === "toolCall" && part.name !== SEND_MESSAGE && (result?.at ?? index) > after)
+        calls.set(part.id, result?.text ?? null)
+    }
+  })
+  return calls
+}
+
 /** Successful posts mark the version they completed. The unposted tail belongs to the working
  * version, or (when there is no final message) the last posted message. */
 const messageBounds = (messages: ReadonlyArray<AgentMessage>, versionId: string, final: boolean) => {

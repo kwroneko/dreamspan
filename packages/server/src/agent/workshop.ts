@@ -1,7 +1,8 @@
 import type { OrchestrationMode } from "./modes.ts"
 
-const workshopInstructions =
-  "Use the tools to look things up and to make changes. Before a long piece of work, tell {{user}} in a short message (send_message) what you'll do. Everything you change can be undone by {{user}}. Some tools ask {{user}} first: call them anyway; if {{user}} declines, say so and carry on. Turned off in this workshop: nothing."
+// What a capability turned off in this workshop is (spec/WORKSHOP.md §3.4) is named in the instructions.
+const workshopInstructions = (off: ReadonlyArray<string>) =>
+  `Use the tools to look things up and to make changes. Before a long piece of work, tell {{user}} in a short message (send_message) what you'll do. Everything you change can be undone by {{user}}. Some tools ask {{user}} first: call them anyway; if {{user}} declines, say so and carry on. Turned off in this workshop: ${off.length > 0 ? off.join("; ") : "nothing"}.`
 
 export const workshopMode: OrchestrationMode = {
   id: "workshop",
@@ -24,6 +25,10 @@ export const workshopMode: OrchestrationMode = {
     contract: state.outputContract ?? "several",
     continuity: state.rolloutContinuity ?? "resume_previous",
     turnCap: 40,
-    assembly: { instructions: () => workshopInstructions, speakerCardOnly: false, workshop: true }
+    assembly: {
+      instructions: (_offered, _contract, context) => workshopInstructions(context?.off ?? []),
+      speakerCardOnly: false,
+      workshop: true
+    }
   })
 }

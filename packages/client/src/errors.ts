@@ -18,6 +18,7 @@ import { EditConflict, EditRefused, InvalidDocument } from "@rp/shared/editorApi
 import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
 import { MergeChanged, MergeRefused } from "@rp/shared/mergeApi.ts"
 import { NotResumable } from "@rp/shared/agent.ts"
+import { ApprovalRefused, EffectUndoRefused, GrantRefused } from "@rp/shared/workshopApi.ts"
 import { Cause } from "effect"
 import { RpcClientError } from "effect/rpc"
 
@@ -98,6 +99,10 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof MergeRefused) return make("MergeRefused", sentence(error.message))
   if (error instanceof MergeChanged)
     return make("MergeChanged", "One of the chats changed while this was open. Check what merging brings now.")
+  // Workshops: the server's reason, said for the user.
+  if (error instanceof EffectUndoRefused) return make("EffectUndoRefused", sentence(error.message))
+  if (error instanceof ApprovalRefused) return make("ApprovalRefused", sentence(error.message))
+  if (error instanceof GrantRefused) return make("GrantRefused", sentence(error.message))
   // Editors
   if (error instanceof InvalidDocument) {
     return make("InvalidDocument", "These changes wouldn't make a valid document:", null, error.problems)

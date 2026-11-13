@@ -95,6 +95,11 @@ export const previousRun = Effect.fnUntraced(function* (
     return { reason: "The model or connection settings changed, so this request was put together again." } as const
   if (!isDeepStrictEqual(snapshot.inputs.preset, fresh.inputs.preset))
     return { reason: "The preset changed, so this request was put together again." } as const
+  // A capability turned on or off changes what the instructions say the assistant may do.
+  if (snapshot.agentAssembly?.instructions !== fresh.agentAssembly?.instructions)
+    return {
+      reason: "What the assistant may do here changed, so this request was put together again."
+    } as const
   if (stored.effectsReason) return { reason: stored.effectsReason } as const
   const transcript = JSON.parse(stored.transcript) as Array<AgentMessage>
   const posts = transcript.flatMap((m) =>

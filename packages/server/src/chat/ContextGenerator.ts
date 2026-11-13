@@ -32,6 +32,7 @@ import { foldState } from "@rp/shared/state.ts"
 import { planTurn } from "../agent/modes.ts"
 import type { OutputContract } from "../agent/modes.ts"
 import { type FrozenTool, frozenTool, sendMessageDefinition, severalMessageDefinition } from "../agent/tools.ts"
+import { makePermit, offeredByGrants } from "../agent/approvals.ts"
 import { DecisionEngine } from "../decision/engine.ts"
 import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
 
@@ -192,6 +193,14 @@ export const layer = Layer.effect(
             offered: frozen.tools,
             reader,
             writer,
+            permit: makePermit({
+              registries: execution,
+              reader,
+              writer,
+              userId: request.userId,
+              chatId: request.chatId,
+              rolloutId
+            }),
             onState: () => hub.publish(request.chatId, { _tag: "State" }),
             resume: {
               transcript: resume.transcript,
@@ -223,32 +232,34 @@ export const layer = Layer.effect(
             .GetSlot({ userId, slotId, forkId })
             .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("GetSlot")))
           const parent = slot.entry.parentSlotId
-          const partialBatch = parent
-            ? yield* summaries.beforeReply({
-                userId,
-                chatId,
-                leafSlotId: parent,
-                ...(forkId === null ? {} : { forkId })
-              })
-            : false
+          const partialBatch =
+            parent && !request.replyOnly
+              ? yield* summaries.beforeReply({
+                  userId,
+                  chatId,
+                  leafSlotId: parent,
+                  ...(forkId === null ? {} : { forkId })
+                })
+              : false
           // The registered planner combines the chat settings at this point (spec/AGENTIC.md §6).
           const events = yield* reader
             .StateEventsAt({ userId, chatId, slotId: parent, forkId })
             .pipe(Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("StateEventsAt")))
           // Points that act before the reply is written (spec/AGENTIC.md §7): "Who replies next" may
           // give a reply Auto picked another speaker, which every tab hears before its first word.
-          const changed = Option.isSome(decisions)
-            ? yield* decisions.value.beforeReply({
-                userId,
-                chatId,
-                slotId,
-                versionId,
-                forkId,
-                parentSlotId: parent,
-                version: slot.entry.version,
-                events
-              })
-            : false
+          const changed =
+            !request.replyOnly && Option.isSome(decisions)
+              ? yield* decisions.value.beforeReply({
+                  userId,
+                  chatId,
+                  slotId,
+                  versionId,
+                  forkId,
+                  parentSlotId: parent,
+                  version: slot.entry.version,
+                  events
+                })
+              : false
           // A reply the decision model was to choose a speaker for shows none until it's chosen:
           // when it wasn't (nothing to ask, no sure answer, no point to ask it), Auto's pick stands.
           const settled =
@@ -288,11 +299,13 @@ export const layer = Layer.effect(
             ? { ...planned.plan, strategy: "reply", tools: [], contract: "final_text" as const }
             : planned.plan
           const agentic = plan.strategy !== "reply"
-          const tools = plan.tools.flatMap((id) => {
+          const candidates = plan.tools.flatMap((id) => {
             const tool = toolForKind(execution, chat.kind, id)
             // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
             return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
           })
+          // A capability turned off in the workshop isn't offered (spec/WORKSHOP.md §3.4).
+          const { tools, off } = yield* offeredByGrants({ registries: execution, reader, userId, chatId }, candidates)
           let stepSummaries: Readonly<Record<string, string>> | undefined
           const assemblyNow = Date.now()
           const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>
@@ -315,7 +328,8 @@ export const layer = Layer.effect(
                         instructions:
                           plan.assembly?.instructions(
                             tools.map((t) => t.id),
-                            plan.contract
+                            plan.contract,
+                            { off }
                           ) ?? "",
                         speakerCardOnly: plan.assembly?.speakerCardOnly ?? false,
                         ...(plan.assembly?.workshop ? { workshop: true } : {}),
@@ -363,7 +377,12 @@ export const layer = Layer.effect(
           // Lorebook entries the keys left out but that ask a decision model (spec/AGENTIC.md §7):
           // only when the user turned the point on for a connection. A yes is assembled in, and
           // frozen in the snapshot.
-          if (assembled.loreDecision && Option.isSome(decisions) && decisions.value.points.get("lore")) {
+          if (
+            !request.replyOnly &&
+            assembled.loreDecision &&
+            Option.isSome(decisions) &&
+            decisions.value.points.get("lore")
+          ) {
             const outcome = yield* decisions.value.evaluate<LoreInput, ReadonlyArray<LoreAdmission>>(
               "lore",
               assembled.loreDecision,
@@ -569,6 +588,7 @@ export const layer = Layer.effect(
                     tools,
                     reader,
                     writer,
+                    permit: makePermit({ registries: execution, reader, writer, userId, chatId, rolloutId }),
                     onState: () => hub.publish(chatId, { _tag: "State" })
                   }
                 }

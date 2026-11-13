@@ -1,3 +1,4 @@
+import { OperationCall } from "../agent/operations.ts"
 import { regenerateSeveral } from "./agent.ts"
 // Chat RPC handlers (@rp/shared/chatApi.ts). Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
@@ -201,11 +202,28 @@ export const makeChatHandlers = Effect.gen(function* () {
       // Its sender asks for the reply next: the estimate waits for it, off its path.
       if (params.kind === "message" && !params.noReply) warmth.expectReply(params.chatId)
       if (params.kind === "generate") {
+        const operation = yield* OperationCall
+        const proof = (
+          operation?.expected as
+            | {
+                proof?: {
+                  chat?: {
+                    model?: {
+                      connection: import("@rp/shared/providers.ts").ConnectionId
+                      model: import("@rp/shared/providers.ts").ModelId
+                    }
+                  }
+                }
+              }
+            | undefined
+        )?.proof?.chat
         yield* generations.start({
           userId: user,
           chatId: params.chatId,
           slotId: result.slotId,
           versionId: result.version.id,
+          ...(proof?.model ? { model: proof.model } : {}),
+          ...(operation ? { replyOnly: true } : {}),
           forkId: result.forkId
         })
       }

@@ -1,6 +1,4 @@
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
-import { EffectKey, EffectList, RolloutEffect, RolloutEffectRecord, EffectUndoRefused } from "@rp/shared/workshopApi.ts"
-
 import { MessageCursor, MessageQuery, MessageSearchPage } from "@rp/shared/messageSearch.ts"
 import {
   LibraryChoice,
@@ -12,6 +10,17 @@ import {
   LibrarySkipped,
   LibraryUndoResult
 } from "@rp/shared/libraryReplace.ts"
+import {
+  ApprovalAnswer,
+  ApprovalRefused,
+  CapabilityMode,
+  EffectKey,
+  EffectList,
+  RolloutEffect,
+  RolloutEffectRecord,
+  EffectUndoRefused
+} from "@rp/shared/workshopApi.ts"
+import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
 import { SetSplitChatFields, SplitChats } from "@rp/shared/splitChat.ts"
 import { EditRefused, LibraryLabel } from "@rp/shared/editorApi.ts"
@@ -498,6 +507,7 @@ const AdoptFields = {
   sourceId: Schema.String,
   remoteId: Schema.String,
   /** The source's version id, and the SHA-256 of the file as the source gave it. */
+  locator: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2048))),
   remoteVersion: Schema.String,
   file: Schema.Struct({
     label: Schema.String,
@@ -567,7 +577,7 @@ const LibraryReplacePlan = Schema.Struct({
   skipped: Schema.Array(LibrarySkipped)
 })
 
-export class WriteOps extends RpcGroup.make(
+export class WriteOpsChat extends RpcGroup.make(
   /**
    * Merges another chat's fork into `forkId` below `at` (spec/CHAT-MERGE.md §8): recomputes the
    * preview and refuses with the new one when its digest changed (`MergeChanged`), then writes
@@ -1711,7 +1721,10 @@ export class WriteOps extends RpcGroup.make(
     },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
-  }),
+  })
+) {}
+
+export class WriteOpsLibrary extends RpcGroup.make(
   // --- Library import (ARCHITECTURE.md §11). The file was parsed in a format worker;
   // documents cross as JSON text, which costs the main thread a copy, not a walk.
   /**
@@ -1761,7 +1774,15 @@ export class WriteOps extends RpcGroup.make(
        * card's notes and favourite stay as they are.
        */
       stageMerge: Schema.optionalKey(Schema.Boolean),
-      replace: Schema.optionalKey(Schema.Struct({ expectedHeadRevisionId: Schema.String }))
+      replace: Schema.optionalKey(Schema.Struct({ expectedHeadRevisionId: Schema.String })),
+      /**
+       * Card-source identities named in Sources (§3.7), found locally by the registered adapter.
+       * These are unverified hints (empty remote_version); only a trusted matching file hash
+       * can confirm a hint, mark the card as held or enable update tracking.
+       */
+      recognized: Schema.optionalKey(
+        Schema.Array(Schema.Struct({ sourceId: Schema.String, remoteId: Schema.String })).check(Schema.isMaxLength(40))
+      )
     },
     success: LibraryImport,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
@@ -1783,20 +1804,49 @@ export class WriteOps extends RpcGroup.make(
    * newer version; spec/CARD-SOURCES.md §3.8): each becomes the origin's `seen_version`, null
    * when it's the version the user has. A version already recorded writes nothing.
    */
+  /** Binds an imported file only after its bytes match a trusted archive response. */
+  Rpc.make("RecognizeRemoteCards", {
+    payload: {
+      userId: UserId,
+      sourceId: Schema.String,
+      items: Schema.Array(
+        Schema.Struct({
+          remoteId: Schema.String,
+          version: Schema.String,
+          sha256: Schema.String,
+          locator: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2048)))
+        })
+      ).check(Schema.isMaxLength(100))
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
   Rpc.make("NoteRemoteVersions", {
     payload: {
       userId: UserId,
       sourceId: Schema.String,
-      items: Schema.Array(Schema.Struct({ remoteId: Schema.String, version: Schema.String })).check(
-        Schema.isMaxLength(200)
-      )
+      items: Schema.Array(
+        Schema.Struct({
+          remoteId: Schema.String,
+          version: Schema.String,
+          currentId: Schema.optionalKey(Schema.String),
+          locator: Schema.optionalKey(Schema.String)
+        })
+      ).check(Schema.isMaxLength(200))
     },
     success: Schema.Struct({ noted: Schema.Int }),
     error: StorageError
   }),
   /** The source's version the user took into their card (Review and merge, Replace): the origin's `remote_version`. */
   Rpc.make("TakeRemoteVersion", {
-    payload: { userId: UserId, entityId: EntityId, version: Schema.String },
+    payload: {
+      userId: UserId,
+      entityId: EntityId,
+      version: Schema.String,
+      currentId: Schema.optionalKey(Schema.String),
+      locator: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      sha256: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -1806,7 +1856,14 @@ export class WriteOps extends RpcGroup.make(
    * first card, in one transaction.
    */
   Rpc.make("AdoptRemoteVersionAsCard", {
-    payload: { userId: UserId, entityId: EntityId, version: Schema.String, file: AdoptFields.file },
+    payload: {
+      userId: UserId,
+      entityId: EntityId,
+      version: Schema.String,
+      file: AdoptFields.file,
+      currentId: Schema.optionalKey(Schema.String),
+      locator: Schema.optionalKey(Schema.NullOr(Schema.String))
+    },
     success: Schema.Struct({ entityId: EntityId, refId: RefId }),
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
@@ -1938,16 +1995,33 @@ export class WriteOps extends RpcGroup.make(
       toolCallId: Schema.String,
       result: Schema.String,
       isError: Schema.optionalKey(Schema.Boolean),
+      completeOperation: Schema.optionalKey(Schema.Boolean),
       effects: Schema.optionalKey(Schema.Array(RolloutEffectRecord))
     },
     success: Schema.String,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("RunWorkshopOperation", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      capability: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expected: Schema.Unknown,
+      operation: Schema.String,
+      payload: Schema.Unknown
+    },
+    success: Schema.Unknown,
+    error: Schema.Union([NotFound, EffectUndoRefused, InvalidDocument, StaleWrite, StorageError])
   }),
   Rpc.make("AgentCreateEntity", {
     payload: {
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       kind: EntityKind,
       label: LibraryLabel,
       doc: Doc,
@@ -1961,6 +2035,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       refId: RefId,
       expectedRowVersion: Schema.Int,
       doc: Doc
@@ -1973,6 +2049,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       refId: RefId,
       name: Schema.String.check(Schema.isMinLength(1)),
       nickname: Schema.String,
@@ -1997,6 +2075,8 @@ export class WriteOps extends RpcGroup.make(
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
+      approvalDigest: Schema.optionalKey(Schema.String),
+      expectedRefs: Schema.optionalKey(Schema.Array(Schema.Struct({ refId: RefId, rowVersion: Schema.Int }))),
       cards: StartChatFields.cards,
       persona: StartChatFields.persona,
       greeters: StartChatFields.greeters,
@@ -2011,6 +2091,54 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, ...EffectKey },
     success: RolloutEffect,
     error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
+  // --- Workshop grants and approvals (workshopGrants.ts; spec/WORKSHOP.md §3.4). Never reached
+  // by a tool: the session gives tools a writer without these (agent/tools.ts).
+  /** The owner's choice for a capability in a workshop; null removes it (the default holds). */
+  Rpc.make("SetWorkshopGrant", {
+    payload: { userId: UserId, chatId: ChatId, capability: Schema.String, mode: Schema.NullOr(CapabilityMode) },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A tool call starts waiting for the user: its approval row, pending. */
+  Rpc.make("RequestToolApproval", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      digest: Schema.String,
+      capability: Schema.String,
+      prompt: ApprovalPrompt
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ApprovalRefused, StorageError])
+  }),
+  /**
+   * The user's answer, only for a pending approval of that exact call (rollout, id, digest) in
+   * the user's own chat. `allow_chat` writes the workshop's grant for the capability with it.
+   */
+  Rpc.make("AnswerToolApproval", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      digest: Schema.String,
+      answer: ApprovalAnswer,
+      note: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ApprovalRefused, StorageError])
+  }),
+  /** An approval ends without an answer (`cancelled`, a stop) or an allowed call starts (`used`). */
+  Rpc.make("SettleToolApproval", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      status: Schema.Literals(["cancelled", "used"])
+    },
+    success: Schema.Boolean,
+    error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("CreateWorkshop", {
     payload: { userId: UserId, title: Schema.optionalKey(Schema.String) },
@@ -3084,6 +3212,9 @@ export class WriteOps extends RpcGroup.make(
   })
 ) {}
 
+/** Every write operation. Database.ts types the writer's client from the two halves. */
+export class WriteOps extends WriteOpsChat.merge(WriteOpsLibrary) {}
+
 export class ReadOps extends RpcGroup.make(
   /** What a merge would bring (spec/CHAT-MERGE.md §3), as `MergeChat` computes it. */
   Rpc.make("PreviewChatMerge", {
@@ -4115,6 +4246,44 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(RolloutEffect),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A workshop's grants (workshopGrants.ts): capability → mode, expired ones left out. */
+  Rpc.make("WorkshopGrants", {
+    payload: { userId: UserId, chatId: ChatId, now: Schema.Number },
+    success: Schema.Array(Schema.Struct({ capability: Schema.String, mode: CapabilityMode })),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The approval of a call, in its rollout or the runs it was resumed from, with the same
+   * arguments: what a resume needs to know whether the call can have run.
+   */
+  Rpc.make("ToolApprovalFor", {
+    payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String, digest: Schema.String },
+    success: Schema.NullOr(
+      Schema.Struct({
+        rolloutId: Schema.String,
+        status: Schema.Literals(["pending", "allowed", "denied", "cancelled", "used"]),
+        note: Schema.NullOr(Schema.String)
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The effects a version's run made: its own calls, kept calls of the runs it resumed included. */
+  Rpc.make("VersionEffects", {
+    payload: { userId: UserId, versionId: Schema.String },
+    success: Schema.Array(RolloutEffect),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("WorkshopOperationInfo", {
+    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId) },
+    success: Schema.Struct({
+      user: User,
+      settings: Schema.Array(
+        Schema.Struct({ key: Schema.String, description: Schema.String, value: Schema.Unknown, revision: Schema.Int })
+      ),
+      proof: Schema.Unknown
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("RolloutToolReceipt", {
     payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String },
     success: Schema.NullOr(Schema.Struct({ text: Schema.String, isError: Schema.Boolean })),
@@ -4327,6 +4496,14 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(Draft),
     error: StorageError
   }),
+  /**
+   * Every user's source cards with unsaved edits (active `remote_card` drafts): the cache keeps
+   * their files past their age while the edits wait (spec/CARD-SOURCES.md §4.1).
+   */
+  Rpc.make("EditedRemoteCards", {
+    success: Schema.Array(Schema.Struct({ userId: UserId, sourceId: Schema.String, remoteId: Schema.String })),
+    error: StorageError
+  }),
   Rpc.make("HeldRemoteCards", {
     payload: {
       userId: UserId,
@@ -4345,8 +4522,10 @@ export class ReadOps extends RpcGroup.make(
         remoteVersion: Schema.NullOr(Schema.String),
         /** The newest version the source reported, when it isn't that one. */
         seenVersion: Schema.NullOr(Schema.String),
-        /** Found by its origin row, which records versions (not by its file's hash). */
-        tracked: Schema.Boolean
+        /** Found by a confirmed origin row, which records versions (not an unverified Sources hint). */
+        tracked: Schema.Boolean,
+        currentRemoteId: Schema.String,
+        locator: Schema.NullOr(Schema.String)
       })
     ),
     error: StorageError
@@ -4359,7 +4538,12 @@ export class ReadOps extends RpcGroup.make(
         sourceId: Schema.String,
         remoteId: Schema.String,
         remoteVersion: Schema.String,
-        seenVersion: Schema.NullOr(Schema.String)
+        currentRemoteId: Schema.String,
+        locator: Schema.NullOr(Schema.String),
+        seenRemoteId: Schema.NullOr(Schema.String),
+        seenVersion: Schema.NullOr(Schema.String),
+        /** An imported file confirmed by its archive hash, rather than added from the source. */
+        recognized: Schema.Boolean
       })
     ),
     error: StorageError

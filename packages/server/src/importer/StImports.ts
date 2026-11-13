@@ -36,6 +36,7 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import { CardSources } from "../sources/CardSources.ts"
 import { Formats } from "./Formats.ts"
 import { MediaHolds } from "./MediaHolds.ts"
 import { prepareAvatarThumbnails } from "./prepareThumbnails.ts"
@@ -306,6 +307,7 @@ export class StImports extends Context.Service<
       const formats = yield* Formats
       const reader = yield* Reader
       const writer = yield* Writer
+      const sources = yield* CardSources
       const { holding } = yield* MediaHolds
       const hub = yield* ChatHub
       const sessions = new Map<string, Session>()
@@ -419,12 +421,12 @@ export class StImports extends Context.Service<
         Effect.gen(function* () {
           const { report } = session
           report.file(path, parsed.report)
-          const library = parsed.library
-          if (library === null) {
+          if (parsed.library === null) {
             report.count(countAs, "failed")
             const error = parsed.report.issues.find((i) => i.level === "error")
             return { outcome: result("failed", error?.message ?? ""), entity: null, created: false, note: null }
           }
+          const { links, ...library } = parsed.library
           const earlier = session.library.get(path)
           if (earlier?.binned) {
             report.count(countAs, "skipped")
@@ -455,9 +457,11 @@ export class StImports extends Context.Service<
               yield* Effect.forEach(parsed.media, (file) => storeMedia(config.dataDir, file.sha256, file.bytes), {
                 discard: true
               })
+              const recognized = links ? sources.recognize(links) : []
               return yield* writer.ImportFile({
                 userId: user.id,
                 intoRefId: (earlier ?? (unchanged ? same : undefined))?.refId ?? null,
+                ...(recognized.length ? { recognized } : {}),
                 ...(attaching ? { presetLorebooks } : {}),
                 ...(createdAt === undefined ? {} : { createdAt }),
                 modifiedAt: modifiedAt ?? session.importedAt,

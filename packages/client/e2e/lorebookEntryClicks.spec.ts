@@ -5,6 +5,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 
@@ -169,6 +170,12 @@ for (const view of ["side panel", "large editor"])
           await scope.getByRole("searchbox").focus()
           await setOpen(later, "Entry 1", expanded)
           await setOpen(earlier, "Harbour", true)
+          // The lazy prompt editor changes this row's height when it mounts (701e7783).
+          // Measure the later click only once the earlier row shows its actual content.
+          await expectTextBox(
+            earlier.getByRole("textbox", { name: "Entry content", exact: true }),
+            "Boats at the quay."
+          )
           await earlier.getByText("harbour, quay", { exact: true }).click()
           await expect(keys(earlier)).toBeFocused()
           const target = expanded

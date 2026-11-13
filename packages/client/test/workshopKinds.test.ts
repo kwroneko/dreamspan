@@ -22,7 +22,13 @@ import { panelTabs } from "../src/features/chat/panels.tsx"
 import { registerComposerControls } from "../src/features/chat/registerComposerControls.tsx"
 import { registerPanels } from "../src/features/chat/registerPanels.tsx"
 import type { ChatView } from "../src/features/chat/session.ts"
-import { chipLabel, chipText, modeText, type WorkshopCapability } from "../src/features/workshop/capabilities.ts"
+import {
+  chipLabel,
+  chipText,
+  choicesOf,
+  modeText,
+  type WorkshopCapability
+} from "../src/features/workshop/capabilities.ts"
 import { register as registerWorkshop } from "../src/features/workshop/index.tsx"
 
 vi.hoisted(() => {
@@ -91,7 +97,12 @@ describe("chat kind looks", () => {
     const tabs = (kind: string) => panelTabs(viewOf(kind), null).map((tab) => tab.value)
     expect(tabs("rp")).toContain("summaries")
     expect(tabs("workshop")).not.toContain("summaries")
-    expect(tabs("workshop")).toEqual(tabs("rp").filter((tab) => tab !== "summaries"))
+    // It adds its Changes tab, which a story chat doesn't have.
+    expect(tabs("rp")).not.toContain("workshop.changes")
+    expect(tabs("workshop").filter((tab) => tab !== "workshop.changes")).toEqual(
+      tabs("rp").filter((tab) => tab !== "summaries")
+    )
+    expect(tabs("workshop")).toContain("workshop.changes")
     expect(summarizes(chatOf("workshop"))).toBe(false)
     expect(summarizes(null)).toBe(true)
     expect(mergesInto(chatOf("workshop"))).toBe(false)
@@ -160,16 +171,25 @@ describe("the capability chip", () => {
     label: id,
     explanation: "Synthetic.",
     mode,
+    defaultMode: mode,
+    modes: always ? [mode] : ["allow", "ask", "off"],
+    chosen: false,
     ...(always ? { always } : {})
   })
 
-  it("counts what's allowed and what asks first, leaving out a count of none", () => {
+  it("counts what's allowed, what asks first and what's off, leaving out a count of none", () => {
     const read = capability("library.read", "allow", true)
     expect(chipText([read])).toBe("Can: 1")
     expect(chipLabel([read])).toBe("What the assistant may do: 1 allowed")
     const several = [read, capability("a", "allow"), capability("b", "ask"), capability("c", "off")]
-    expect(chipText(several)).toBe("Can: 2 · Asks: 1")
-    expect(chipLabel(several)).toBe("What the assistant may do: 2 allowed, 1 asking first")
-    expect(several.map(modeText)).toEqual(["Always allowed", "Allowed", "Asks first", "Off"])
+    expect(chipText(several)).toBe("Can: 2 · Asks: 1 · Off: 1")
+    expect(chipLabel(several)).toBe("What the assistant may do: 2 allowed, 1 asking first, 1 off")
+    expect(several.map(modeText)).toEqual(["Always allowed", "Allowed", "Ask first", "Off"])
+  })
+
+  it("offers a capability's choices as Off, Ask first, Allowed, whatever order the server lists them in", () => {
+    expect(choicesOf({ ...capability("x", "ask"), modes: ["allow", "off", "ask"] })).toEqual(["off", "ask", "allow"])
+    expect(choicesOf({ ...capability("x", "ask"), modes: ["ask", "off"] })).toEqual(["off", "ask"])
+    expect(choicesOf(capability("library.read", "allow", true))).toEqual(["allow"])
   })
 })

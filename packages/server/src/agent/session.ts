@@ -24,6 +24,8 @@ import type { Providers, ProviderError } from "../providers/Providers.ts"
 import type { AgentPlan } from "./modes.ts"
 import { countSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
 import { danglingCalls } from "./resume.ts"
+import type { ApprovalPrompt } from "@rp/shared/agent.ts"
+import type { PermitInput, PermitResult } from "./approvals.ts"
 import {
   budgetResult,
   type FrozenTool,
@@ -31,7 +33,8 @@ import {
   sendMessageDefinition,
   severalMessageDefinition,
   type RolloutTool,
-  type ToolOutput
+  type ToolOutput,
+  toolWriter
 } from "./tools.ts"
 import { rolloutRequest } from "./wire.ts"
 import { liveSuffix } from "./messages.ts"
@@ -54,6 +57,11 @@ export interface AgentRun {
     readonly continuation?: string
     readonly historical?: number
   }
+  /**
+   * Whether a call may run now (approvals.ts): its capability's standing, asking the user first
+   * where it says so. Absent: every offered call runs.
+   */
+  readonly permit?: (input: PermitInput) => Effect.Effect<PermitResult>
 }
 
 export interface AgentStrategyInput {
@@ -380,8 +388,16 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         leafSlotId: generation.leafSlotId as import("@rp/shared/chat.ts").SlotId | null,
         viewers: generation.viewers,
         reader: run.reader,
-        writer
+        // Tools never reach what only the user may do: grants and approvals.
+        writer: toolWriter(writer)
       })
+      /** Calls waiting for the user, with what each will do: shown in their steps. */
+      const waiting = new Map<string, ApprovalPrompt>()
+      const waitingChanged = (toolCallId: string, prompt: ApprovalPrompt | null) => {
+        if (prompt) waiting.set(toolCallId, prompt)
+        else waiting.delete(toolCallId)
+        showSteps(false)
+      }
       const agentTools: Array<AgentTool> = tools.map((tool) => ({
         name: tool.id,
         label: tool.label,
@@ -396,6 +412,34 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               details: null,
               isError: true
             }
+          const dangling = seed !== undefined && danglingCalls(seed).some((call) => call.id === toolCallId)
+          // The capability's standing decides, asking the user first where it says so; without
+          // a permit, a dangling call with outside effects may already have happened.
+          const permitted: Effect.Effect<ToolOutput> = run.permit
+            ? run
+                .permit({
+                  tool,
+                  context: context(toolCallId),
+                  args: params,
+                  dangling,
+                  onWaiting: (prompt) => waitingChanged(toolCallId, prompt)
+                })
+                .pipe(
+                  Effect.flatMap((permit) =>
+                    permit.run
+                      ? tool.execute(
+                          {
+                            ...context(toolCallId),
+                            ...(permit.approvalDigest ? { approvalDigest: permit.approvalDigest } : {})
+                          },
+                          params as never
+                        )
+                      : Effect.succeed<ToolOutput>({ text: permit.text, isError: true })
+                  )
+                )
+            : outsideEffect(tool.effect) && dangling
+              ? Effect.succeed<ToolOutput>({ text: UNCERTAIN_EFFECT, isError: true })
+              : tool.execute(context(toolCallId), params as never)
           // A committed call's receipt takes precedence over validation against its own
           // changed state (a note may now exist, or its old passage may already be gone).
           const execute =
@@ -403,17 +447,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               ? run.reader
                   .RolloutToolReceipt({ userId: request.userId, rolloutId, toolCallId })
                   .pipe(
-                    Effect.flatMap((receipt) =>
-                      receipt !== null
-                        ? Effect.succeed<ToolOutput>(receipt)
-                        : outsideEffect(tool.effect) &&
-                            seed &&
-                            danglingCalls(seed).some((call) => call.id === toolCallId)
-                          ? Effect.succeed<ToolOutput>({ text: UNCERTAIN_EFFECT, isError: true })
-                          : tool.execute(context(toolCallId), params as never)
-                    )
+                    Effect.flatMap((receipt) => (receipt !== null ? Effect.succeed<ToolOutput>(receipt) : permitted))
                   )
-              : tool.execute(context(toolCallId), params as never)
+              : permitted
           // A stop interrupts the tool; its result says so, and a resume runs the call again.
           const exit = await runPromise(Effect.exit(execute), {
             signal
@@ -578,7 +614,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               )
           : []
         for (const id of [...new Set([...posted, working.versionId])]) {
-          const steps = stepsOf(agent.state.messages, frozen, final, several ? id : undefined)
+          // A call waiting for the user shows as waiting, with what it asks.
+          const steps = stepsOf(agent.state.messages, frozen, final, several ? id : undefined).map((step) => {
+            const approval = step.kind === "tool" ? waiting.get(step.id) : undefined
+            return approval && step.kind === "tool" ? { ...step, status: "waiting" as const, approval } : step
+          })
           const json = JSON.stringify(steps)
           if (json === shown.get(id)) continue
           shown.set(id, json)

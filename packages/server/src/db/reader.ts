@@ -27,6 +27,7 @@ import { makeInspectorReadHandlers } from "./inspectorReads.ts"
 import { makeAgentReadHandlers } from "./agentReads.ts"
 import { makeMessageSearchHandlers } from "./messageSearch.ts"
 import { makeLibraryReplaceReadHandlers } from "./libraryReplace.ts"
+import { makeWorkshopGrantReadHandlers } from "./workshopGrants.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
 import { makeReadHandlers } from "./reads.ts"
@@ -62,7 +63,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               makeMergeReadHandlers,
               makeAgentReadHandlers,
               makeMessageSearchHandlers,
-              makeLibraryReplaceReadHandlers
+              makeLibraryReplaceReadHandlers,
+              makeWorkshopGrantReadHandlers
             ]),
             ([
               history,
@@ -82,7 +84,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               merges,
               agent,
               messageSearch,
-              libraryReplace
+              libraryReplace,
+              grants
             ]) =>
               ReadOps.of(
                 stateModuleHandlers(
@@ -105,7 +108,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                       ...merges,
                       ...agent,
                       ...messageSearch,
-                      ...libraryReplace
+                      ...libraryReplace,
+                      ...grants
                     })
                   )
                 )

@@ -56,7 +56,12 @@ export class ParsedFile extends Schema.Class<ParsedFile>("ParsedFile")({
       schemaVersion: Schema.Int,
       noteDocJson: Schema.NullOr(Schema.String),
       /** A card's other notes, without their owner. */
-      notesDocJson: Schema.optionalKey(Schema.Array(Schema.String))
+      notesDocJson: Schema.optionalKey(Schema.Array(Schema.String)),
+      /**
+       * Where the card says it came from: its CCv3 `source` entries and the page URL each of its
+       * extensions names (`extensions.<name>.url`), for card sources to recognize (§3.7).
+       */
+      links: Schema.optionalKey(Schema.Array(Schema.String))
     })
   ),
   media: Schema.Array(ParsedMedia)

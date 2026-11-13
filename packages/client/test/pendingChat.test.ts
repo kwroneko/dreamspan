@@ -45,7 +45,7 @@ it("refreshes a pending chat's cards before selecting a newly created persona", 
   const snapshots: Array<ReturnType<typeof pending.snapshot>> = []
   pending.subscribe(() => snapshots.push(pending.snapshot()))
 
-  expect(await pending.listCards()).toEqual({ ok: true, value: [keeper] })
+  expect(await pending.listCards()).toEqual({ ok: true, value: [host, keeper] })
   expect(pending.cards).toEqual([keeper])
   expect(pending.view()).not.toBe(before)
   expect(snapshots).toHaveLength(1)
@@ -57,4 +57,44 @@ it("refreshes a pending chat's cards before selecting a newly created persona", 
   expect(pending.view().cast?.macroNames.user).toBe("keeper")
   expect(pending.view(snapshots[0]!).cast?.playedByMe).toEqual([])
   expect(pending.view(pending.snapshot()).cast?.playedByMe).toEqual([keeper.entityId])
+})
+
+it("keeps a joined character available to play as after refreshing the persona picker", async () => {
+  const host = card("host")
+  const guest = card("guest")
+  const keeper = card("keeper", true)
+  const greeter = (card: CastCard) =>
+    new CardForChat({
+      card,
+      greetings: ["Hello."],
+      groupGreetings: ["Hello, everyone."],
+      description: "",
+      personality: "",
+      scenario: ""
+    })
+  const client = ((method: string) => {
+    if (method === "ListCards") return Effect.succeed([host, guest, keeper])
+    expect(method).toBe("GetCardForChat")
+    return Effect.succeed(greeter(guest))
+  }) as unknown as AppClient["Service"]
+  const call: Caller = async (execute) => ({ ok: true, value: await Effect.runPromise(execute(client)) })
+  const pending = new PendingChat([guest, keeper], [greeter(host)], null, call)
+  await pending.join(guest.entityId)
+  pending.setReplier(guest.entityId)
+  pending.pick(0, 1)
+
+  expect(await pending.listCards()).toEqual({ ok: true, value: [host, guest, keeper] })
+  // Adding and playing have different choices: the add list still excludes members.
+  expect(pending.cards).toEqual([keeper])
+  expect(pending.snapshot()).toMatchObject({ persona: null, replier: guest.entityId, picks: [1, 0] })
+  pending.setPersona(guest.entityId)
+  expect(pending.view().cast?.playedByMe).toEqual([guest.entityId])
+  expect(pending.view().cast?.participants).toEqual([host.entityId, guest.entityId])
+  expect(pending.view().cast?.macroNames).toEqual({ user: "guest", char: "host" })
+  expect(await pending.listCards()).toEqual({ ok: true, value: [host, guest, keeper] })
+  expect(pending.playing()).toEqual(guest)
+  pending.setPersona(null)
+  pending.remove(guest.entityId)
+  await pending.listCards()
+  expect(pending.cards).toEqual([guest, keeper])
 })

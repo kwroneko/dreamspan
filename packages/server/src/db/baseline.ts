@@ -407,12 +407,16 @@ export const baseline: ReadonlyArray<string> = [
     source_id TEXT NOT NULL,
     remote_id TEXT NOT NULL,
     remote_version TEXT NOT NULL,
+    current_remote_id TEXT,
+    remote_locator TEXT,
     seen_version TEXT,
+    seen_remote_id TEXT,
     remote_sha256 TEXT NOT NULL,
     recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized')),
     created_at INTEGER NOT NULL
   ) STRICT`,
   `CREATE UNIQUE INDEX card_origins_remote ON card_origins(owner_user_id, source_id, remote_id)`,
+  `CREATE INDEX card_origins_current ON card_origins(owner_user_id, source_id, current_remote_id)`,
   // The same file imported from disk (§3.7's third check; the join to entities adds the owner).
   `CREATE INDEX entity_refs_source_hash ON entity_refs(source_hash) WHERE source_hash IS NOT NULL`,
   `CREATE TRIGGER entity_refs_head_same_entity
@@ -795,6 +799,57 @@ export const baseline: ReadonlyArray<string> = [
     created_at INTEGER NOT NULL,
     PRIMARY KEY (rollout_id, branch_no)
   ) STRICT, WITHOUT ROWID`,
+  // What the assistant may do in each workshop (spec/WORKSHOP.md §3.4): one row a workshop,
+  // capability and target (empty for the whole capability; a plugin id, say, for P3's trust),
+  // written only by the owner's own RPC, never by a tool. No row: the registered default.
+  `CREATE TABLE workshop_grants (
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    capability TEXT NOT NULL CHECK (length(capability) BETWEEN 1 AND 200),
+    target TEXT NOT NULL DEFAULT '' CHECK (length(target) <= 200),
+    owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL CHECK (mode IN ('off', 'ask', 'allow')),
+    expires_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    CHECK (expires_at IS NULL OR expires_at > updated_at),
+    PRIMARY KEY (chat_id, capability, target)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX workshop_grants_owner ON workshop_grants(owner_user_id)`,
+  `CREATE TRIGGER workshop_grants_owner BEFORE INSERT ON workshop_grants BEGIN
+    SELECT RAISE(ABORT, 'grant must belong to the workshop owner') WHERE NOT EXISTS (
+      SELECT 1 FROM chats c WHERE c.id = NEW.chat_id AND c.owner_user_id = NEW.owner_user_id
+    );
+  END`,
+  `CREATE TRIGGER workshop_grants_identity BEFORE UPDATE ON workshop_grants BEGIN
+    SELECT RAISE(ABORT, 'grant identity is immutable') WHERE NEW.chat_id <> OLD.chat_id
+      OR NEW.capability <> OLD.capability OR NEW.target <> OLD.target OR NEW.owner_user_id <> OLD.owner_user_id;
+  END`,
+  // A tool call that asked the user first (§3.4), bound to its rollout, call id and arguments'
+  // digest: pending while it waits, then allowed, declined or cancelled (a stop), and used once
+  // an allowed call starts. A resume reads it to know whether the call can have run.
+  `CREATE TABLE tool_approvals (
+    rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,
+    tool_call_id TEXT NOT NULL,
+    digest TEXT NOT NULL,
+    capability TEXT NOT NULL,
+    prompt_json TEXT NOT NULL CHECK (json_valid(prompt_json) AND json_type(prompt_json) = 'object'),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'allowed', 'denied', 'cancelled', 'used')),
+    answer TEXT CHECK (answer IS NULL OR answer IN ('allow', 'allow_chat', 'deny')),
+    note TEXT,
+    created_at INTEGER NOT NULL,
+    answered_at INTEGER,
+    CHECK ((answer IS NULL) = (answered_at IS NULL)),
+    CHECK (status NOT IN ('allowed', 'denied', 'used') OR answer IS NOT NULL),
+    PRIMARY KEY (rollout_id, tool_call_id)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX tool_approvals_call ON tool_approvals(tool_call_id, rollout_id)`,
+  `CREATE TRIGGER tool_approvals_identity BEFORE UPDATE ON tool_approvals BEGIN
+    SELECT RAISE(ABORT, 'approval identity is immutable') WHERE NEW.rollout_id <> OLD.rollout_id
+      OR NEW.tool_call_id <> OLD.tool_call_id OR NEW.digest <> OLD.digest OR NEW.capability <> OLD.capability
+      OR NEW.created_at <> OLD.created_at;
+    SELECT RAISE(ABORT, 'an answered approval is final') WHERE OLD.answer IS NOT NULL
+      AND (NEW.answer IS NOT OLD.answer OR NEW.answered_at IS NOT OLD.answered_at OR NEW.note IS NOT OLD.note
+        OR NOT (NEW.status = OLD.status OR (OLD.status = 'allowed' AND NEW.status = 'used')));
+  END`,
   `CREATE TABLE changeset_groups (
     id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL,
     origin TEXT NOT NULL, created_at INTEGER NOT NULL

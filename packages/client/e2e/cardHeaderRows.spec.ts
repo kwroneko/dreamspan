@@ -107,30 +107,40 @@ async function structure(header: Locator, panel = true, allowWrap = false) {
         left: svg.x + (3 / 24) * svg.width,
         boxLeft: icon.parentElement!.getBoundingClientRect().x,
         textLeft: row("nickname").x,
+        pressed: icon.closest("button")!.getAttribute("aria-pressed") === "true",
         heights: [row("nickname").height, row("usage").height, row("persona").height]
       }
     })
-    expect(rhythm.left).toBeCloseTo(
-      rhythm.textLeft +
-        ((await header.getByRole("button", { name: "Persona", exact: true }).getAttribute("aria-pressed")) === "true"
-          ? 10
-          : 0),
-      0
-    )
+    expect(rhythm.left).toBeCloseTo(rhythm.textLeft + (rhythm.pressed ? 10 : 0), 0)
     expect(rhythm.boxLeft).toBeCloseTo(rhythm.textLeft, 0)
     expect(rhythm.heights[0]).toBe(28)
     expect(rhythm.heights[1]).toBe(16)
     expect(rhythm.heights[2]).toBeGreaterThanOrEqual(28)
     const toggle = header.getByRole("button", { name: "Persona", exact: true })
-    const bounds = (await toggle.boundingBox())!
-    const nickname = (await header.locator('[data-card-header-row="nickname"]').boundingBox())!
-    const counts = (await header.locator('[data-card-header-row="usage"]').boundingBox())!
+    await expect(toggle).toBeVisible()
+    // A late layout change can move the button between individual boundingBox calls.
+    // Compare all related geometry and state from the same browser frame.
+    const boxes = await header.evaluate((root) => {
+      const box = (element: Element) => {
+        const { x, y, width, height } = element.getBoundingClientRect()
+        return { x, y, width, height }
+      }
+      const button = root.querySelector('[data-card-header-row="persona"] button')!
+      return {
+        bounds: box(button),
+        nickname: box(root.querySelector('[data-card-header-row="nickname"]')!),
+        counts: box(root.querySelector('[data-card-header-row="usage"]')!),
+        portraitBottom: root.querySelector("[data-card-header-portrait]")!.getBoundingClientRect().bottom,
+        pressed: button.getAttribute("aria-pressed") === "true"
+      }
+    })
+    const { bounds, nickname, counts } = boxes
     expect(bounds.y - nickname.y - nickname.height).toBeGreaterThanOrEqual(4)
     expect(counts.y - bounds.y - bounds.height).toBeGreaterThanOrEqual(4)
     expect(bounds.y + bounds.height / 2).toBeCloseTo((nickname.y + nickname.height + counts.y) / 2, 0)
-    if (!allowWrap) expect(counts.y + counts.height).toBeCloseTo(geometry.portrait.bottom, 0)
+    if (!allowWrap) expect(counts.y + counts.height).toBeCloseTo(boxes.portraitBottom, 0)
     expect(bounds.height).toBe(28)
-    expect(bounds.width).toBe((await toggle.getAttribute("aria-pressed")) === "true" ? 88 : 32)
+    expect(bounds.width).toBe(boxes.pressed ? 88 : 32)
   }
 }
 

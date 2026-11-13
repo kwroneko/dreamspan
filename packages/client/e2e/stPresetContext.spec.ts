@@ -11,8 +11,10 @@ import { presetChip, presetName } from "./support/strip.ts"
 
 const server = serverPerFile(withAdmin)
 
-for (const chars of [14_000, 20_000]) {
-  test(`explains a refused request with a ${chars / 4}-token card and restores it with the model's context size`, async ({
+// o200k fitting (53ff6407, DESIGN §4) counts repeated x text at eight characters
+// per token: keep the newest-message and fixed-prefix refusal scenarios distinct.
+for (const chars of [28_000, 40_000]) {
+  test(`explains a refused request with a ${chars}-character card and restores it with the model's context size`, async ({
     page
   }) => {
     test.setTimeout(120_000)
@@ -83,13 +85,13 @@ for (const chars of [14_000, 20_000]) {
     )
     // daaa81f refuses dropping the newest message rather than sending empty history.
     expect(next.historyStart).toBeNull()
-    expect(next.assemblyError).toMatch(chars === 14_000 ? /newest message/ : /fixed context.*maximum context size/)
+    expect(next.assemblyError).toMatch(chars === 28_000 ? /newest message/ : /fixed context.*maximum context size/)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chat.id}`)
     const explanation = page.getByRole("status").filter({ hasText: "aren’t sent to the model: the model’s context" })
     // A budget refusal is a calm notice naming each number's source; the history note doesn't repeat it.
     const refusal = page.getByRole("status").filter({ hasText: "The next reply doesn't fit the context size" })
-    if (chars === 20_000) {
+    if (chars === 40_000) {
       await expect(refusal).toContainText(
         `take ~${next.budget!.nonHistoryTokens.toLocaleString()} tokens and the reply reserves 300 (the model's response length): more than the context size of 4,095 tokens (the model's context size setting)`
       )
