@@ -27,11 +27,14 @@ export const ui = Object.freeze({ Button: PluginButton, IconButton: PluginIconBu
 function usePluginAction() {
   const action = useAction()
   return {
-    ...action,
-    run: (tag: string, payload: unknown) =>
-      action.run((client) =>
+    pending: action.pending,
+    error: action.error === null ? null : { message: action.error.message },
+    run: async (tag: string, payload: unknown) => {
+      const result = await action.run((client) =>
         (client as unknown as (tag: string, payload: unknown) => Effect.Effect<unknown, unknown>)(tag, payload)
       )
+      return result.ok ? { ok: true, value: result.value } : { ok: false }
+    }
   }
 }
 /** @public Browser plugin RPC facade. */

@@ -63,25 +63,28 @@ test("startup with no plugins and ten checked modules", async ({ browser }, info
       ok: true
     })
   }
-  const context = await browser.newContext()
-  let ten
-  try {
-    const page = await context.newPage()
-    await watchReady(page)
-    await apiLogin(context.request, current(), ADMIN.handle, ADMIN.password)
-    await page.goto(`${current().url}/settings/account`)
-    await expect(page.getByRole("heading", { name: "Account", level: 1, exact: true })).toBeVisible()
-    for (let i = 0; i < 10; i++) await expect(page.getByText(`startup-${i} loaded`, { exact: true })).toBeVisible()
-    ten = {
-      readyMs: await readReady(page),
-      modules: await page.evaluate(
-        () => performance.getEntriesByType("resource").filter((e) => e.name.endsWith("/client.mjs")).length
-      )
+  const ten: Array<{ readyMs: number; modules: number }> = []
+  for (let sample = 0; sample < 5; sample++) {
+    const context = await browser.newContext()
+    try {
+      const page = await context.newPage()
+      await watchReady(page)
+      await apiLogin(context.request, current(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${current().url}/settings/account`)
+      await expect(page.getByRole("heading", { name: "Account", level: 1, exact: true })).toBeVisible()
+      for (let i = 0; i < 10; i++) await expect(page.getByText(`startup-${i} loaded`, { exact: true })).toBeVisible()
+      const measured = {
+        readyMs: await readReady(page),
+        modules: await page.evaluate(
+          () => performance.getEntriesByType("resource").filter((e) => e.name.endsWith("/client.mjs")).length
+        )
+      }
+      ten.push(measured)
+      expect(measured.modules).toBe(10)
+      await expect(page.getByRole("status", { name: "Plugins" })).toHaveCount(0)
+    } finally {
+      await context.close()
     }
-    expect(ten.modules).toBe(10)
-    await expect(page.getByRole("status", { name: "Plugins" })).toHaveCount(0)
-  } finally {
-    await context.close()
   }
   const measurements = { before, empty, ten }
   console.log(`PLUGIN_STARTUP ${JSON.stringify(measurements)}`)

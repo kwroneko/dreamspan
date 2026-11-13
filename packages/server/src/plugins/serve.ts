@@ -22,6 +22,9 @@ export const pluginRoutes = Layer.unwrap(
       const request = yield* HttpServerRequest.HttpServerRequest
       const session = yield* Effect.option(accounts.resolve(request.headers))
       if (Option.isNone(session)) return HttpServerResponse.empty({ status: 401, headers })
+      // A persistent worker could answer later navigations without consulting
+      // the current pin or account. These routes serve page modules only.
+      if (request.headers["service-worker"] !== undefined) return missing()
       // Never decode asset paths: percent escapes and any noncanonical spelling fail closed.
       const path = request.url.split("?")[0]!
       if (path === "/plugins/client.json") {

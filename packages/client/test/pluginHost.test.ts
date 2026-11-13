@@ -59,9 +59,12 @@ it("maps only declared typed surfaces to the app's single registry instances and
 it("refuses undeclared, unsupported, cross-plugin and undeclared built-in replacement handles", () => {
   dom()
   const a = clientPluginHost(fixture("first", ["appBanners"]))
-  const b = clientPluginHost(fixture("second", ["appBanners"]))
+  const other = fixture("second", ["appBanners"])
+  const b = clientPluginHost({ ...other, manifest: { ...other.manifest, replaces: ["appBanners:shared"] } })
   expect(a.host.registries.composerControls).toBeUndefined()
   a.host.registries.appBanners!.register({ id: "shared", order: 0, component: () => null })
+  expect(a.host.registries.appBanners!.list().find((entry) => entry.id === "shared")).toEqual({ id: "shared" })
+  expect("get" in a.host.registries.appBanners!).toBe(false)
   expect(() => b.host.registries.appBanners!.register({ id: "shared", order: 0, component: () => null })).toThrow(
     "owned"
   )
@@ -120,4 +123,58 @@ it("keeps host recovery registrations outside plugin replacements", () => {
     })
   ).toThrow("cannot be replaced")
   scope.close()
+})
+
+it("captures registration ids so a caller's later edits cannot leave another entry claimed", () => {
+  dom()
+  const first = clientPluginHost(fixture("mutable-first", ["appBanners"]))
+  const second = clientPluginHost(fixture("mutable-second", ["appBanners"]))
+  const entry = { id: "original.entry", order: 0, component: () => null }
+  const stop = first.host.registries.appBanners!.register(entry)
+  entry.id = "edited.entry"
+  stop()
+  try {
+    expect(() => second.host.registries.appBanners!.register({ ...entry, id: "original.entry" })).not.toThrow()
+  } finally {
+    first.close()
+    second.close()
+  }
+})
+
+it("rejects route URL collisions across different registration names", () => {
+  dom()
+  const a = clientPluginHost(fixture("url-first", ["routes"]))
+  const b = clientPluginHost(fixture("url-second", ["routes"]))
+  try {
+    a.host.registries.routes!.register({ id: "url.first", path: "/extensions/same", component: () => null })
+    expect(() =>
+      b.host.registries.routes!.register({ id: "url.second", path: "/extensions/same", component: () => null })
+    ).toThrow("already")
+    for (const path of ["/extensions/same/", "/extensions//same", "/extensions/same//child"])
+      expect(() => b.host.registries.routes!.register({ id: "url.noncanonical", path, component: () => null })).toThrow(
+        "path"
+      )
+  } finally {
+    a.close()
+    b.close()
+  }
+})
+
+it("refuses layout replacement through the extension-page adapter", () => {
+  dom()
+  const stop = routes.register({ id: "layout.fixture", parent: "root", component: () => null })
+  const p = fixture("layout-replacement", ["routes"])
+  const scope = clientPluginHost({ ...p, manifest: { ...p.manifest, replaces: ["routes:layout.fixture"] } })
+  try {
+    expect(() =>
+      scope.host.registries.routes!.register({
+        id: "layout.fixture",
+        path: "/extensions/layout",
+        component: () => null
+      })
+    ).toThrow("layout")
+  } finally {
+    scope.close()
+    stop()
+  }
 })

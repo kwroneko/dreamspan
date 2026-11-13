@@ -16,32 +16,41 @@ const failures = [
   "event",
   "effect",
   "async-event",
+  "unhandled",
+  "early-event",
+  "infinite-render",
   "never",
   "never-import",
   "never-render"
 ] as const
 const component = (kind: string) =>
-  kind === "never-render"
-    ? "() => { use(pending); return <p>Never visible</p> }"
-    : kind === "render"
-      ? '() => { throw new Error("synthetic render") }'
-      : kind === "effect"
-        ? '() => { useEffect(() => { throw new Error("synthetic effect") }, []); return <p>Never visible</p> }'
-        : kind === "event"
-          ? '() => <button title="Tests a failed plugin action" onClick={() => { throw new Error("synthetic event") }}>Break event</button>'
-          : kind === "async-event"
-            ? '() => <ui.Button hint="Tests a failed asynchronous plugin action" onClick={async () => { throw new Error("synthetic async event") }}>Break event</ui.Button>'
-            : "() => <p>Failed registration should disappear</p>"
+  kind === "infinite-render"
+    ? "() => { const [n, set] = useState(0); useLayoutEffect(() => set(n + 1)); return <p>Loop {n}</p> }"
+    : kind === "unhandled"
+      ? '() => <button title="Tests an uncaught rejection" onClick={() => { void Promise.reject(new Error("synthetic internal rejection")) }}>Break event</button>'
+      : kind === "never-render"
+        ? "() => { use(pending); return <p>Never visible</p> }"
+        : kind === "render"
+          ? '() => { throw new Error("synthetic render") }'
+          : kind === "effect"
+            ? '() => { useEffect(() => { throw new Error("synthetic effect") }, []); return <p>Never visible</p> }'
+            : kind === "event"
+              ? '() => <button title="Tests a failed plugin action" onClick={() => { throw new Error("synthetic event") }}>Break event</button>'
+              : kind === "async-event"
+                ? '() => <ui.Button hint="Tests a failed asynchronous plugin action" onClick={async () => { throw new Error("synthetic async event") }}>Break event</ui.Button>'
+                : "() => <p>Failed registration should disappear</p>"
 for (const kind of failures) {
   test(`${kind} failure leaves the app usable and reports once`, async ({ page }) => {
     const id = `failure-${kind}`
-    const body = `import { ui, use, useEffect, type Activate } from "@rp/plugin-api/client";
+    const body = `import { ui, use, useEffect, useLayoutEffect, useState, type Activate } from "@rp/plugin-api/client";
 const pending = new Promise<void>(() => {});
 ${kind === "import" ? 'throw new Error("synthetic import")' : kind === "never-import" ? "await new Promise(() => {});" : ""}
 export const activate: Activate = ${
       kind === "never"
         ? "async () => { await new Promise(() => {}) }"
-        : `host => {
+        : kind === "early-event"
+          ? 'async host => { host.registries.appBanners!.register({ id: "early-event.banner", order: 0, component: () => <p>Must be removed</p> }); setTimeout(() => { throw new Error("synthetic early failure") }, 10); await new Promise(resolve => setTimeout(resolve, 200)); }'
+          : `host => {
  host.registries.appBanners!.register({ id: "${id}.banner", order: 0, component: ${component(kind)} });
  ${kind === "registration" ? 'throw new Error("synthetic registration")' : ""}
 }`
@@ -54,21 +63,131 @@ export const activate: Activate = ${
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/settings/account`)
     await expect(page.getByRole("heading", { name: "Account", level: 1, exact: true })).toBeVisible()
-    if (kind === "event" || kind === "async-event") await page.getByRole("button", { name: "Break event" }).click()
+    if (kind === "event" || kind === "async-event" || kind === "unhandled")
+      await page.getByRole("button", { name: "Break event" }).click()
     await expect(page.getByRole("status", { name: "Plugins" })).toContainText(id)
     const part =
-      kind === "render" || kind === "effect" || kind === "async-event" || kind === "never-render"
+      kind === "render" ||
+      kind === "effect" ||
+      kind === "async-event" ||
+      kind === "never-render" ||
+      kind === "infinite-render"
         ? `${id}.banner`
-        : kind === "event"
+        : kind === "event" || kind === "unhandled" || kind === "early-event"
           ? "event"
           : "load"
     await expect(page.locator(`[data-plugin-error="${part}"]`)).toHaveCount(1)
-    const message = `${id}${kind === "render" || kind === "effect" || kind === "async-event" || kind === "never-render" ? " had a problem. One part is hidden." : " failed and is off here."}`
+    const message = `${id}${kind === "render" || kind === "effect" || kind === "async-event" || kind === "never-render" || kind === "infinite-render" ? " had a problem. One part is hidden." : " failed and is off here."}`
     await expect(page.getByText(message, { exact: true })).toHaveCount(1)
     await expect(page.getByText("Failed registration should disappear")).toHaveCount(0)
+    await expect(page.getByText("Must be removed")).toHaveCount(0)
+    await expect(page.getByRole("status", { name: "Plugins" })).not.toContainText(
+      /synthetic (internal|early|render|effect)/
+    )
+    await expect(page.getByRole("button", { name: "Open without plugins", exact: true })).toBeVisible()
     await admin((api) => api.DisablePlugin({ scope: "instance", id }))
   })
 }
+
+test("plugin recovery stays visible on login and unknown deep links", async ({ page }) => {
+  const id = "recovery-routes"
+  const commit = await admin((api) =>
+    api.CreatePlugin({
+      scope: "instance",
+      id,
+      files: pluginFiles(id, 'throw new Error("synthetic internal path"); export const activate = () => undefined;', [])
+    })
+  )
+  expect(await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
+    ok: true
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  try {
+    for (const path of ["/login", "/extensions/unknown"]) {
+      await page.goto(server().url + path)
+      await expect(page.getByRole("button", { name: "Open without plugins", exact: true })).toBeVisible()
+    }
+  } finally {
+    await admin((api) => api.DisablePlugin({ scope: "instance", id }))
+  }
+})
+
+test("distinct route ids cannot collide on the same URL and prevent startup", async ({ page }) => {
+  const ids = ["duplicate-route-first", "duplicate-route-second"]
+  for (const id of ids) {
+    const source = `import {type Activate} from "@rp/plugin-api/client"; export const activate: Activate = host => {host.registries.routes!.register({id:"${id}",path:"/extensions/duplicate",component:()=> <p>${id}</p>})}`
+    const commit = await admin((api) =>
+      api.CreatePlugin({ scope: "instance", id, files: pluginFiles(id, source, ["routes"]) })
+    )
+    expect(await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
+      ok: true
+    })
+  }
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  try {
+    await page.goto(`${server().url}/settings/account`)
+    await expect(page.getByRole("heading", { name: "Account", level: 1, exact: true })).toBeVisible()
+    await expect(page.locator('[data-plugin-error="load"]')).toHaveCount(1)
+  } finally {
+    for (const id of ids) await admin((api) => api.DisablePlugin({ scope: "instance", id }))
+  }
+})
+
+test("a regular user can recover without being offered an admin-only disable", async ({ page }) => {
+  const id = "admin-recovery"
+  const commit = await admin((api) =>
+    api.CreatePlugin({
+      scope: "instance",
+      id,
+      files: pluginFiles(id, 'export const activate = () => { throw new Error("synthetic private detail") };', [])
+    })
+  )
+  expect(await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
+    ok: true
+  })
+  await admin((api) =>
+    api.CreateUser({
+      handle: "recovery-user",
+      displayName: "Recovery user",
+      role: "user",
+      password: "synthetic-recovery-password"
+    })
+  )
+  await apiLogin(page.request, server(), "recovery-user", "synthetic-recovery-password")
+  try {
+    await page.goto(`${server().url}/settings/account`)
+    await expect(page.getByRole("status", { name: "Plugins" })).toContainText(id)
+    await expect(page.getByRole("button", { name: "Turn it off", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Open without plugins", exact: true })).toBeVisible()
+  } finally {
+    await admin((api) => api.DisablePlugin({ scope: "instance", id }))
+  }
+})
+
+test("reports once for each registry entry even when their local ids match", async ({ page }) => {
+  const id = "same-local-id"
+  const source = `import {type Activate} from "@rp/plugin-api/client";
+const Broken = () => {throw new Error("synthetic internal entry detail")};
+export const activate: Activate = host => {
+host.registries.appBanners!.register({id:"same.local",order:0,component:Broken});
+host.registries.routes!.register({id:"same.local",path:"/extensions/double-failure",component:Broken});
+}`
+  const commit = await admin((api) =>
+    api.CreatePlugin({ scope: "instance", id, files: pluginFiles(id, source, ["appBanners", "routes"]) })
+  )
+  expect(await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
+    ok: true
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  try {
+    await page.goto(`${server().url}/extensions/double-failure`)
+    await expect(page.locator('[data-plugin-error="same.local"]')).toHaveCount(2)
+    await page.getByRole("link", { name: "Library", exact: true }).first().click()
+    await expect(page.locator('[data-plugin-error="same.local"]')).toHaveCount(2)
+  } finally {
+    await admin((api) => api.DisablePlugin({ scope: "instance", id }))
+  }
+})
 test("two plugins claiming the same slot name preserve the first and undo the failed plugin", async ({ page }) => {
   for (const id of ["claim-first", "claim-second"]) {
     const body = `import { type Activate } from "@rp/plugin-api/client"; export const activate: Activate = host => { host.registries.appBanners!.register({ id: "shared.banner", order: 0, component: () => <p>${id} owns this</p> }) };`
@@ -103,6 +222,17 @@ test("failure and reload banners fit at 1440 and 390 in both themes", async ({ p
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
       await expectLayout(page, info, `plugin banners ${width} ${theme}`)
+    }
+  page.on("dialog", (dialog) => void dialog.accept())
+  await page.getByRole("button", { name: "Details", exact: true }).click()
+  const details = page.getByRole("dialog", { name: "Plugin problem" })
+  await expect(details).toBeVisible()
+  await expect(details.getByRole("button", { name: "Open without plugins", exact: true })).toBeVisible()
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const) {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: theme })
+      await expectLayout(page, info, `plugin details ${width} ${theme}`)
     }
 })
 

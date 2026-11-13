@@ -147,6 +147,20 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    fs: {
+      // Keep Vite's sensitive-file defaults and deny the plugin data tree too.
+      // With DATA_DIR=./data it falls inside Vite's workspace allowlist; only
+      // the authenticated /plugins proxy may serve its checked, enabled bundle.
+      deny: [
+        ".env",
+        ".env.*",
+        "*.{crt,pem,key,p12,pfx,cer,der}",
+        ".npmrc",
+        ".yarnrc.yml",
+        "**/.git/**",
+        "**/plugins/**"
+      ]
+    },
     proxy: {
       "/rpc": { target: server.replace(/^http/, "ws"), ws: true },
       "/auth": { target: server },

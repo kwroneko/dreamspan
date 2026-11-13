@@ -1,14 +1,16 @@
 import { expect, test, type Page } from "@playwright/test"
-import { writeFile } from "node:fs/promises"
+import { writeFile, readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { asUser } from "./support/rpc.ts"
+import { ADMIN, apiLogin, serverPerFile, startServer, withAdmin } from "./support/server.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { pluginFiles } from "./support/plugin.ts"
 import { openPanel, closePanel } from "./support/panel.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 
-const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400" })
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "20", FAKE_GENERATOR_TOKENS: "400" })
+let adminCookie: Promise<string> | undefined
+const admin = async <A>(use: Parameters<typeof withCookie<A>>[2]) =>
+  withCookie(server(), await (adminCookie ??= loginCookie(server(), ADMIN.handle, ADMIN.password)), use)
 let chat = ""
 let commit = ""
 const id = "dice-fixture"
@@ -62,10 +64,19 @@ for (const width of [1440, 390])
       ).toBe(true)
       await page.getByLabel("Message", { exact: true }).fill("Kept draft ")
       await page.getByRole("button", { name: `Roll ${id}` }).click()
+      await expect(page.getByRole("button", { name: `Roll ${id}` })).toHaveAttribute(
+        "data-plugin-context",
+        "busy,compact,draft,ready"
+      )
+      await expect(page.getByRole("button", { name: `Roll ${id}` })).toHaveAttribute("data-plugin-draft", "append")
       await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Kept draft 🎲 20")
       await expectLayout(page, info, "plugin composer")
       await openPanel(page, id)
       await expect(page.getByText(`Plugin panel for ${chat}`)).toBeVisible()
+      await expect(page.getByText(`Plugin panel for ${chat}`)).toHaveAttribute(
+        "data-plugin-panel-context",
+        "active,chatId,forkId"
+      )
       await expectLayout(page, info, "plugin panel")
       await page.reload()
       await expect(page.getByText(`Plugin panel for ${chat}`)).toBeVisible()
@@ -87,6 +98,17 @@ test("safe-start URL survives deep links, panel choices and navigation", async (
   await page.getByRole("link", { name: "Library", exact: true }).first().click()
   await expect(page).toHaveURL(/plugins=off/)
   expect(loads).toEqual([])
+  for (const path of [
+    "/login",
+    "/settings/account",
+    "/extensions/unknown",
+    `/chats/${chat}?panel=${encodeURIComponent(`/plugins/instance/${id}/${commit}/client.mjs`)}`
+  ]) {
+    await page.goto(`${server().url}${path}${path.includes("?") ? "&" : "?"}plugins=off`)
+    await expect(page.getByRole("main").first()).toBeVisible()
+    await expect(page.getByRole("button", { name: `Roll ${id}` })).toHaveCount(0)
+    expect(loads).toEqual([])
+  }
 })
 test("other tabs offer reload; live disable removes an open panel and focused control without losing drafts", async ({
   page,
@@ -150,6 +172,19 @@ test("assets require authentication, ownership, enabled pin and checked exact pa
   const response = await page.request.get(server().url + path)
   expect(response.status()).toBe(200)
   expect(response.headers()["cache-control"]).toBe("no-store, private")
+  expect(response.headers()["content-type"]).toContain("text/javascript")
+  expect(response.headers()["x-content-type-options"]).toBe("nosniff")
+  expect(response.headers()["cross-origin-resource-policy"]).toBe("same-origin")
+  expect((await page.request.get(server().url + path, { headers: { "service-worker": "script" } })).status()).toBe(404)
+  const head = await page.request.head(server().url + path)
+  expect(head.status()).toBe(200)
+  expect((await head.body()).length).toBe(0)
+  expect(head.headers()["cache-control"]).toBe("no-store, private")
+  const ranged = await page.request.get(server().url + path, { headers: { range: "bytes=0-1" } })
+  expect(ranged.status()).toBe(200)
+  expect(await ranged.body()).toEqual(await response.body())
+  for (const suffix of ["/", "/check.json", "/client.mjs.map", "/font.woff2", "/image.png", "/theme.css"])
+    expect((await page.request.get(server().url + path.replace("/client.mjs", suffix))).status()).toBe(404)
   const anonymous = await playwright.request.newContext()
   expect((await anonymous.get(server().url + path)).status()).toBe(401)
   await anonymous.dispose()
@@ -162,7 +197,12 @@ test("assets require authentication, ownership, enabled pin and checked exact pa
   ])
     expect((await page.request.get(server().url + bad)).status()).toBe(404)
   await admin((api) => api.DisablePlugin({ scope: "instance", id }))
-  expect((await page.request.get(server().url + path)).status()).toBe(404)
+  const disabled = await page.request.get(server().url + path, {
+    headers: { "if-none-match": '"synthetic"', "if-modified-since": new Date().toUTCString() }
+  })
+  expect(disabled.status()).toBe(404)
+  expect(disabled.headers()["cache-control"]).toBe("no-store, private")
+  expect((await page.request.head(server().url + path)).status()).toBe(404)
   await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))
   await writeFile(
     join(server().dataDir, "plugins/instance", id, "client.tsx"),
@@ -170,6 +210,14 @@ test("assets require authentication, ownership, enabled pin and checked exact pa
   )
   expect((await page.request.get(server().url + path)).status()).toBe(404)
   await writeFile(join(server().dataDir, "plugins/instance", id, "client.tsx"), pluginFiles(id)["client.tsx"])
+  const output = join(server().dataDir, "plugins/.builds/instance", id, commit, "client.mjs")
+  const checked = await readFile(output)
+  try {
+    await writeFile(output, Buffer.alloc(16 * 1024 * 1024 + 1, 32))
+    expect((await page.request.get(server().url + path)).status()).toBe(404)
+  } finally {
+    await writeFile(output, checked)
+  }
 })
 
 test("user assets stay private across accounts and rollback cannot revive a stale cached revision", async ({
@@ -200,9 +248,11 @@ test("user assets stay private across accounts and rollback cannot revive a stal
     (await admin((api) => api.ListClientPlugins())).some((plugin) => plugin.scope === "user" && plugin.id === id)
   ).toBe(true)
   expect(
-    (await asUser(server(), "plugin-reader", "synthetic-reader-password", (api) => api.ListClientPlugins())).some(
-      (plugin) => plugin.scope === "user" && plugin.id === id
-    )
+    (
+      await withCookie(server(), await loginCookie(server(), "plugin-reader", "synthetic-reader-password"), (api) =>
+        api.ListClientPlugins()
+      )
+    ).some((plugin) => plugin.scope === "user" && plugin.id === id)
   ).toBe(false)
   // Instance code is explicitly enabled for every authenticated account.
   expect((await other.get(`${server().url}/plugins/instance/dice-fixture/${commit}/client.mjs`)).status()).toBe(200)
@@ -256,4 +306,119 @@ test("routes load before the router, live controls apply while routes request re
   await sync(page)
   await expect(page.getByText("Synthetic plugin route", { exact: true })).toHaveCount(0)
   await expect(page.getByRole("status", { name: "Plugins" })).toContainText("Reload to apply")
+})
+
+test("live changes preserve a draft and an already streaming reply", async ({ page }) => {
+  const connection = await admin((api) =>
+    api.CreateConnection({
+      kind: "openai-chat",
+      apiKey: null,
+      settings: {
+        name: "Synthetic plugin stream",
+        baseUrl: "http://127.0.0.1:9/v1",
+        compat: {},
+        cacheTtlS: null,
+        maxConcurrent: null,
+        presetOverrideRefId: null
+      }
+    })
+  )
+  const model = await admin((api) => api.AddUserModel({ connectionId: connection.id, key: "gpt-4o", overrides: {} }))
+  await admin((api) =>
+    api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: model.id }, preset: null } })
+  )
+  const streamChat = await admin((api) => api.CreateChat({ title: "Synthetic plugin stream" }))
+  const sent = await admin((api) =>
+    api.SendMessage({
+      chatId: streamChat.id,
+      parentSlotId: null,
+      branch: false,
+      content: "Synthetic stream",
+      reply: false
+    })
+  )
+  if (sent._tag !== "Posted") throw new Error("Synthetic seed was queued")
+  await admin((api) => api.Generate({ chatId: streamChat.id, parentSlotId: sent.entry.slotId, branch: false }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${streamChat.id}`)
+  const stop = page.getByRole("button", { name: "Stop", exact: true }).first()
+  await expect(stop).toBeVisible()
+  const draft = page.getByLabel("Message", { exact: true })
+  await draft.fill("Keep this during the reply")
+  await page.getByRole("button", { name: `Roll ${id}` }).focus()
+  await admin((api) => api.DisablePlugin({ scope: "instance", id }))
+  await sync(page)
+  await expect(draft).toHaveValue("Keep this during the reply")
+  await expect(draft).toBeFocused()
+  await expect(stop).toBeVisible()
+  expect(await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
+    ok: true
+  })
+  await sync(page)
+  await expect(page.getByRole("button", { name: `Roll ${id}` })).toBeVisible()
+  await expect(draft).toHaveValue("Keep this during the reply")
+  await expect(stop).toBeVisible()
+  await stop.click()
+})
+
+test("plugin assets cannot install persistent service workers", async ({ page }) => {
+  const id = "worker-cache"
+  const commit = await admin((api) =>
+    api.CreatePlugin({ scope: "instance", id, files: pluginFiles(id, "export const activate = () => undefined;", []) })
+  )
+  expect(await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
+    ok: true
+  })
+  await open(page)
+  try {
+    const result = await page.evaluate(async (url) => {
+      try {
+        const registration = await navigator.serviceWorker.register(url, { type: "module" })
+        await registration.unregister()
+        return { status: "registered", reason: "" }
+      } catch (error) {
+        return { status: "denied", reason: String(error) }
+      }
+    }, `/plugins/instance/${id}/${commit}/client.mjs`)
+    console.log("SERVICE_WORKER_REGISTRATION", result)
+    expect(result.status).toBe("denied")
+  } finally {
+    await admin((api) => api.DisablePlugin({ scope: "instance", id }))
+  }
+})
+
+test("local sessions cannot install plugin service workers either", async ({ browser }) => {
+  const local = await startServer()
+  const context = await browser.newContext()
+  const id = "local-worker-cache"
+  const api = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(local, "", use)
+  try {
+    const commit = await api((client) =>
+      client.CreatePlugin({
+        scope: "instance",
+        id,
+        files: pluginFiles(id, "export const activate = () => undefined;", [])
+      })
+    )
+    expect(await api((client) => client.EnablePlugin({ scope: "instance", id, commit, consent: true }))).toMatchObject({
+      ok: true
+    })
+    const page = await context.newPage()
+    await page.goto(local.url + "/settings/account")
+    await expect(page.getByRole("heading", { name: "Account", level: 1, exact: true })).toBeVisible()
+    const result = await page.evaluate(async (url) => {
+      try {
+        const registration = await navigator.serviceWorker.register(url, { type: "module" })
+        await registration.unregister()
+        return { status: "registered", reason: "" }
+      } catch (error) {
+        return { status: "denied", reason: String(error) }
+      }
+    }, `/plugins/instance/${id}/${commit}/client.mjs`)
+    console.log("LOCAL_SERVICE_WORKER_REGISTRATION", result)
+    expect(result.status).toBe("denied")
+  } finally {
+    await context.close()
+    await local.stop()
+  }
 })

@@ -1,5 +1,7 @@
 // Full-trust page code. Deadlines recover cooperative async failures, not synchronous loops.
-import { useSyncExternalStore, type ComponentType } from "react"
+import { useState, useSyncExternalStore, type ComponentType } from "react"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
 import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
 import type {
   Activate,
@@ -14,10 +16,12 @@ import { composerControls } from "./features/chat/composerControls.tsx"
 import { chatPanels } from "./features/chat/panels.tsx"
 import { appBanners } from "./features/shell.tsx"
 import { shellSearchKeys } from "./features/workbench/kinds.ts"
-import { routes } from "./routes.tsx"
+import { fullPath, routes } from "./routes.tsx"
 import { userNoticeReceivers } from "./features/noticeContributions.tsx"
 import { Button } from "./ui/Button.tsx"
+import { Popover } from "./ui/Popover.tsx"
 import { useAction } from "./actions.tsx"
+import { sessionAtom } from "./session.ts"
 import { flushOpenEditors } from "./features/editor/openEditors.ts"
 import { installPluginSync } from "./pluginLifecycle.ts"
 import { pluginComponent } from "./pluginBoundary.tsx"
@@ -40,8 +44,8 @@ const changed = () => {
 }
 const keyOf = (p: ClientPlugin) => `${p.scope}/${p.id}`
 const clientPluginUrl = (p: ClientPlugin) => `/plugins/${p.scope}/${p.id}/${p.commit}/client.mjs`
-const report = (p: ClientPlugin, entry: string) => {
-  const key = `${keyOf(p)}/${p.commit}/${entry}`
+const report = (p: ClientPlugin, entry: string, registry = "host") => {
+  const key = `${keyOf(p)}/${p.commit}/${registry}/${entry}`
   if (snapshot.errors.some((e) => e.key === key)) return
   snapshot = {
     ...snapshot,
@@ -120,6 +124,7 @@ export const clientPluginHost = (p: ClientPlugin) => {
   ): ClientRegistry<A> =>
     Object.freeze({
       register: (entry: A) => {
+        const id = entry.id
         if (!live) throw new Error("Plugin is off")
         if (reserved(name, entry.id)) throw new Error("The plugin host cannot be replaced")
         if (!/^[a-z][a-zA-Z0-9._/-]{0,99}$/.test(entry.id)) throw new Error("Invalid entry id")
@@ -128,7 +133,7 @@ export const clientPluginHost = (p: ClientPlugin) => {
         if (registry.get(entry.id) && claims.get(claim) !== key && !p.manifest.replaces.includes(claim))
           throw new Error("Replacement must be declared")
         const converted = convert(entry, () => {
-          if (live) report(p, entry.id)
+          if (live) report(p, id, name)
         })
         claims.set(claim, key)
         const stop = registry.register(converted)
@@ -201,7 +206,13 @@ export const clientPluginHost = (p: ClientPlugin) => {
           "routes",
           routes,
           (entry, fail) => {
-            if (!/^\/extensions\/[a-z][a-z0-9/-]*$/.test(entry.path)) throw new Error("Unsupported route path")
+            if (!/^\/extensions\/[a-z][a-z0-9-]*(?:\/[a-z][a-z0-9-]*)*$/.test(entry.path))
+              throw new Error("Unsupported route path")
+            const previous = routes.get(entry.id)
+            if (previous && (previous.path === undefined || routes.list().some((other) => other.parent === entry.id)))
+              throw new Error("The extension-page adapter cannot replace a layout")
+            if (routes.list().some((other) => other.id !== entry.id && fullPath(other) === entry.path))
+              throw new Error("Plugin route path already registered")
             const Content = wrap(entry.component, fail)
             return { id: entry.id, parent: "app", path: entry.path, component: () => <Content /> }
           }
@@ -242,6 +253,10 @@ export const loadClientPlugin = async (
   load: (url: string) => Promise<{ activate: Activate }> = (url) => import(/* @vite-ignore */ url)
 ) => {
   const scope = clientPluginHost(p)
+  const current = { plugin: p, close: scope.close }
+  // Attribute errors during import/activation as well as after startup. A failed
+  // pending activation must never publish itself again when its Promise settles.
+  active.set(keyOf(p), current)
   try {
     await deadline(
       (async () => {
@@ -249,10 +264,12 @@ export const loadClientPlugin = async (
         await module.activate(scope.host)
       })()
     )
-    active.set(keyOf(p), { plugin: p, close: scope.close })
   } catch {
     scope.close()
-    report(p, "load")
+    if (active.get(keyOf(p)) === current) {
+      active.delete(keyOf(p))
+      report(p, "load")
+    }
   }
 }
 const readPlugins = async (): Promise<ReadonlyArray<ClientPlugin>> => {
@@ -320,8 +337,38 @@ async function reload(url?: string) {
   if (url) location.assign(url)
   else location.reload()
 }
+function FailureDetails({ part }: { readonly part: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      trigger="Details"
+      triggerLabel="Details"
+      title="Plugin problem"
+      hint="Explains what stopped working in this tab."
+    >
+      <p className="text-sm">
+        {part === "load"
+          ? "This plugin couldn't start and is off in this tab."
+          : part === "event"
+            ? "An action failed. This plugin is off in this tab."
+            : "One part couldn't be shown. The rest of the app is available."}{" "}
+        Ask a workshop to fix it.
+      </p>
+      <Button
+        hint="Saves your drafts and opens this page without plugins."
+        onClick={() => void reload(withoutPlugins(location.href))}
+      >
+        Open without plugins
+      </Button>
+    </Popover>
+  )
+}
 function PluginBanners() {
   const action = useAction()
+  const session = useAtomValue(sessionAtom)
+  const admin = AsyncResult.isSuccess(session) && session.value.user.role === "admin"
   const state = useSyncExternalStore(
     (listener) => {
       listeners.add(listener)
@@ -354,32 +401,31 @@ function PluginBanners() {
               ? " failed and is off here."
               : " had a problem. One part is hidden."}
           </span>
-          <Button
-            hint="Turns this plugin off for future visits."
-            onClick={async () => {
-              const result = await action.run((client) => client("DisablePlugin", { scope: error.scope, id: error.id }))
-              if (result.ok) {
-                await syncClientPlugins()
-                snapshot = {
-                  ...snapshot,
-                  errors: snapshot.errors.filter((e) => e.id !== error.id || e.scope !== error.scope)
+          {(error.scope === "user" || admin) && (
+            <Button
+              hint="Turns this plugin off for future visits."
+              pending={action.pending}
+              onClick={async () => {
+                const result = await action.run((client) =>
+                  client("DisablePlugin", { scope: error.scope, id: error.id })
+                )
+                if (result.ok) {
+                  await syncClientPlugins()
+                  snapshot = {
+                    ...snapshot,
+                    errors: snapshot.errors.filter((e) => e.id !== error.id || e.scope !== error.scope)
+                  }
+                  publish()
                 }
-                publish()
-              }
-            }}
-          >
-            Turn it off
-          </Button>
-          <Button
-            hint="Shows which part failed in this tab."
-            onClick={() => {
-              window.alert("This plugin failed in this tab. Turn it off, or ask a workshop to fix it.")
-            }}
-          >
-            Details
-          </Button>
+              }}
+            >
+              Turn it off
+            </Button>
+          )}
+          <FailureDetails part={error.part} />
         </div>
       ))}
+      {action.error && <p role="alert">Couldn't turn it off. Try again, or open without plugins.</p>}
       <Button
         hint="Saves your drafts and opens this page without plugins."
         onClick={() => void reload(withoutPlugins(location.href))}
@@ -400,15 +446,6 @@ export const startClientPlugins = async () => {
     }
   })
   if (pluginsOff(location.href)) return
-  try {
-    const plugins = await readPlugins()
-    knownPlugins = fingerprint(plugins)
-    await Promise.all(plugins.map((p) => loadClientPlugin(p)))
-  } catch {
-    changed()
-  }
-  window.addEventListener("rp:connected", checkChanges)
-  window.addEventListener("focus", checkChanges)
   const failure = (error: unknown, filename = "") => {
     const stack = (error instanceof Error ? (error.stack ?? "") : "") + filename
     for (const [key, current] of active)
@@ -420,4 +457,13 @@ export const startClientPlugins = async () => {
   }
   window.addEventListener("error", (event) => failure(event.error, event.filename))
   window.addEventListener("unhandledrejection", (event) => failure(event.reason))
+  try {
+    const plugins = await readPlugins()
+    knownPlugins = fingerprint(plugins)
+    await Promise.all(plugins.map((p) => loadClientPlugin(p)))
+  } catch {
+    changed()
+  }
+  window.addEventListener("rp:connected", checkChanges)
+  window.addEventListener("focus", checkChanges)
 }
