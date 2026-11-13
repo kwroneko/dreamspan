@@ -74,6 +74,8 @@ describe("where the workshop beside a story is offered", () => {
     expect(takesSideChat(null)).toBe(false)
     const tabs = (kind: string) => panelTabs(viewOf(kind), null).map((tab) => tab.value)
     expect(tabs("rp")).toContain(SIDE_CHAT_TAB)
+    // A chat not saved yet leaves it out: nothing can be beside it before the first send.
+    expect(panelTabs(viewOf("rp"), null).find((tab) => tab.value === SIDE_CHAT_TAB)?.descriptor.savedOnly).toBe(true)
     expect(tabs("workshop")).not.toContain(SIDE_CHAT_TAB)
     expect(panelHere(viewOf("workshop"), SIDE_CHAT_TAB)).toBeNull()
     const commands = (kind: string | null) => availableCommands(contextOf(kind)).map((command) => command.id)

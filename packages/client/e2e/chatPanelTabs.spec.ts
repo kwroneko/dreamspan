@@ -80,9 +80,17 @@ test("This chat leads with the chat's name, your persona and summaries; the rest
   expect(at("You")).toBeGreaterThan(-1)
   expect(at("You")).toBeLessThan(at("Summarize older messages"))
   expect(at("Summarize older messages")).toBeLessThan(at("Advanced: names in prompts"))
+  // The Context choice is one of This chat's settings, shown after the summaries and before
+  // the advanced parts; it's the only choice shown up front.
+  const context = tab.getByRole("radiogroup", { name: "Context", exact: true })
+  await expect(context).toBeVisible()
+  await expect(context.getByRole("radio")).toHaveCount(2)
+  await expect(tab.getByRole("radiogroup").filter({ visible: true })).toHaveCount(1)
+  expect(at("Summarize older messages")).toBeLessThan(at("One shared context"))
+  expect(at("One shared context")).toBeLessThan(at("Advanced: names in prompts"))
   // Collapsed: the names, the roles and the summary settings' fields aren't shown.
   await expect(tab.getByRole("region", { name: "Names in prompts" })).toBeHidden()
-  await expect(tab.getByRole("radiogroup")).toBeHidden()
+  await expect(tab.getByRole("radiogroup", { name: "Message roles", exact: true })).toBeHidden()
   await expect(tab.getByText("Recent messages kept as written")).toHaveCount(0)
   await tab.getByText("Advanced: names in prompts", { exact: true }).click()
   await expect(tab.getByRole("form", { name: "Your name in prompts" })).toBeVisible()
