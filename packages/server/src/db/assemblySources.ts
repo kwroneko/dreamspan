@@ -1062,6 +1062,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     : live
   return {
     layer: Layer.succeed(AssemblySources)(sources),
+    /** The sources themselves, for a source that stands in for some of them (`draftSources.ts`). */
+    service: sources,
     /** What the sources read; a replay's are the pins it was given. */
     pins: (): SourcePins =>
       replay?.pins ?? {

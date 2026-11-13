@@ -22,6 +22,7 @@ import { makeCoalescer, makeLimiter } from "../src/sources/limiter.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, outcome, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { fakeCardexAdapter, startFakeArchive } from "./support/fakeArchive.ts"
+import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
 const archive = await startFakeArchive({ cards: 120 })
 afterAll(() => archive.close())
@@ -381,6 +382,61 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       })
       assert.lengthOf(held, 0)
     })
+  )
+
+  it.effect(
+    "a chat not sent yet with a source's card previews its request, adding and sending nothing (DESIGN §2.1)",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client({ "Remote-User": "src-carol" })
+        const card = archive.cards[11]!
+        const placeholder = remoteEntityId("cardex", card.slug)
+        yield* api.SourceCardForChat({ sourceId: "cardex", remoteId: card.slug })
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((_request, res) =>
+              sse(res, completionChunks(["Hi."], { prompt_tokens: 10, completion_tokens: 1 }))
+            )
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        const connection = yield* api.CreateConnection({
+          kind: "openai-chat",
+          settings: {
+            name: "Mock",
+            baseUrl: `${mock.url}/v1`,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          },
+          apiKey: "sk-synthetic"
+        })
+        yield* api.SetTokenCounting({ connectionId: connection.id, via: connection.id })
+        const model = yield* api.AddUserModel({ connectionId: connection.id, key: "mock-model", overrides: {} })
+        yield* api.SetGenerationDefaults({
+          defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+        })
+        const library = yield* api.ListLibrary({ kind: "card" })
+        const hits = archive.hits()
+        const preview = yield* api.PreviewChat({
+          cards: [placeholder],
+          persona: null,
+          greeting: null,
+          greeters: [{ entityId: placeholder, greeting: 0 }],
+          first: { _tag: "Send", content: "Hello there", speakerEntityId: null },
+          replier: placeholder
+        })
+        const text = JSON.stringify(preview.request?.messages.map((m) => m.content))
+        assert.include(text, `${card.name} is a synthetic character`, "the card's description, as adding it stores it")
+        assert.include(text, "Hello there")
+        // The card came from the cache; nothing was added, made or sent to the model's provider.
+        assert.strictEqual(archive.hits(), hits)
+        assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), library.length)
+        assert.lengthOf(yield* api.ListChats({ limit: 10, before: null }), 0)
+        yield* Effect.promise(() => new Promise((done) => setTimeout(done, 500)))
+        assert.lengthOf(mock.requests(), 0)
+      }).pipe(Effect.scoped)
   )
 
   it.effect("a first send with a source's card adds the card and makes its chat together (§4.5)", () =>

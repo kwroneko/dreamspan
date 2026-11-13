@@ -160,7 +160,7 @@ import {
   ProxyMode
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
-import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
 import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
@@ -4276,6 +4276,26 @@ export class ReadOps extends RpcGroup.make(
       leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
     },
     success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The first request of a chat not made yet (DESIGN §2.1), assembled over `draftSources.ts`
+   * from what `StartChat` would write: nothing is written, and nothing leaves the worker.
+   */
+  Rpc.make("AssembleDraftChat", {
+    payload: {
+      userId: UserId,
+      cards: StartChatFields.cards,
+      persona: StartChatFields.persona,
+      greeters: StartChatFields.greeters,
+      first: FirstTurn,
+      replier: Schema.NullOr(EntityId),
+      remote: Schema.Array(
+        Schema.Struct({ entity: Schema.String, docJson: Schema.String, notes: Schema.Array(Schema.String) })
+      ),
+      now: Schema.Number
+    },
+    success: DraftChatPreview,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */

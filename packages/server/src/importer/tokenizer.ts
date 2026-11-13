@@ -37,18 +37,42 @@ const encoder = (encoding: LocalEncoding) => {
   return found
 }
 
+/**
+ * The length a whitespace run is counted in pieces of. Every tokenizer here merges one
+ * whitespace run in time quadratic in its length (tiktoken took 2.6 s for 65,536 spaces, so
+ * about 40 s for a greeting of 262,145); pieces keep it linear. A run that long is a few
+ * hundred tokens either way, and pieces change its count by at most one token each.
+ */
+const RUN_PIECE = 4096
+const LONG_RUN = new RegExp(`(\\s{${RUN_PIECE},})`)
+
+/** `count` over a text whose whitespace runs longer than RUN_PIECE are counted in pieces. */
+const runsInPieces =
+  (count: (text: string) => number) =>
+  (text: string): number => {
+    if (text.length <= RUN_PIECE) return count(text)
+    let total = 0
+    text.split(LONG_RUN).forEach((part, index) => {
+      if (part === "") return
+      // split() puts the captured runs at the odd indexes.
+      if (index % 2 === 0) total += count(part)
+      else for (let at = 0; at < part.length; at += RUN_PIECE) total += count(part.slice(at, at + RUN_PIECE))
+    })
+    return total
+  }
+
 /** Each text's token count. Special-token text ("<|endoftext|>") counts as ordinary text. */
 export const prepareTokenizer = async (encoding: LocalEncoding): Promise<(text: string) => number> => {
   if (encoding === "llama3") {
     const { default: tokenizer } = await import("llama3-tokenizer-js")
-    return (text) => (text === "" ? 0 : tokenizer.encode(text, { bos: false, eos: false }).length)
+    return runsInPieces((text) => (text === "" ? 0 : tokenizer.encode(text, { bos: false, eos: false }).length))
   }
   if (encoding !== "o200k_base" && encoding !== "cl100k_base") {
     const tokenizer = await hfEncoder(encoding)
-    return (text) => (text === "" ? 0 : tokenizer.encode(text, { add_special_tokens: false }).ids.length)
+    return runsInPieces((text) => (text === "" ? 0 : tokenizer.encode(text, { add_special_tokens: false }).ids.length))
   }
   const tiktoken = await encoder(encoding)
-  return (text) => (text === "" ? 0 : tiktoken.encode(text, [], []).length)
+  return runsInPieces((text) => (text === "" ? 0 : tiktoken.encode(text, [], []).length))
 }
 
 /** Batch counting and assembly use the same loaded tokenizer. */

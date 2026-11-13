@@ -90,6 +90,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   GetRevision: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetRolloutSteps: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetRunContext: "Not in W6's first exposures; use the bounded workshop read tools.",
+  PreviewChat: "A pending chat's own preview, read by its page; an agent works on saved chats.",
   GetRunTranscript: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetSession: "User-only security, consent, account, credential or network configuration.",
   GetShellCards: "Not in W6's first exposures; use the bounded workshop read tools.",

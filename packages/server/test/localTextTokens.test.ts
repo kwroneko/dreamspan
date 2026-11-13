@@ -41,6 +41,24 @@ describe("published local text tokenizers", () => {
     assert.deepStrictEqual(await countTokens("o200k_base", ["x".repeat(20_000)]), [2500])
   })
 
+  it("counts a quarter-million-space run in pieces, in about a second, within a token per piece", async () => {
+    const huge = `x${" ".repeat(262_145)}x`
+    for (const encoding of ["o200k_base", "llama3", "qwen3"] as const) {
+      const started = performance.now()
+      const [count] = await countTokens(encoding, [huge, `x${" ".repeat(4_000)}x`])
+      assert.isBelow(performance.now() - started, 10_000)
+      // 2,051 for each: 64 full pieces of 32 tokens, the rest and the two x's.
+      assert.approximately(count!, 2_052, 65)
+    }
+    // Shorter runs count whole: the same run counts the same in a short text and a long one.
+    const [short, long] = await countTokens("o200k_base", [
+      `a${" ".repeat(4_095)}b`,
+      `a${" ".repeat(4_095)}b ${"word ".repeat(1_000)}`
+    ])
+    const [words] = await countTokens("o200k_base", [` ${"word ".repeat(1_000)}`])
+    assert.strictEqual(long, short! + words!)
+  })
+
   it("Llama 3 matches Meta's llama/test_tokenizer.py encode and dialog examples, without BOS/EOS", async () => {
     // https://github.com/meta-llama/llama3/blob/main/llama/test_tokenizer.py
     assert.deepStrictEqual(

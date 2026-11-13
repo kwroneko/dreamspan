@@ -23,7 +23,7 @@ import { StImportApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
 import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
-import { InspectorApi } from "./inspectorApi.ts"
+import { DraftPreviewApi, InspectorApi } from "./inspectorApi.ts"
 import { User, UserAccount, UserId, UserRole } from "./domain.ts"
 import { TextSearchApi } from "./textSearchApi.ts"
 import { EditorApi, ForkMergeApi, GalleryApi, CardArchiveApi, PanelApprovalApi } from "./editorApi.ts"
@@ -442,6 +442,9 @@ export class AuthenticatedDecisionApi extends DecisionApi.middleware(Authenticat
 /** Text search across chats (textSearchApi.ts). */
 export class AuthenticatedTextSearchApi extends TextSearchApi.middleware(Authentication) {}
 
+/** The first request of a chat not sent yet (inspectorApi.ts). */
+export class AuthenticatedDraftPreviewApi extends DraftPreviewApi.middleware(Authentication) {}
+
 /** The providers a new connection starts from (providerApi.ts). */
 export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Authentication) {}
 
@@ -464,7 +467,8 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedChatContextsApi)
   .merge(AuthenticatedShellUpdatesApi)
   .merge(AuthenticatedProviderListApi)
-  .merge(AuthenticatedTextSearchApi) {}
+  .merge(AuthenticatedTextSearchApi)
+  .merge(AuthenticatedDraftPreviewApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

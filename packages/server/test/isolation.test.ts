@@ -2226,6 +2226,29 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  PreviewChat: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const send = (speakerEntityId: EntityId | null) => ({ _tag: "Send" as const, content: "hi", speakerEntityId })
+        const base = { persona: null, greeting: null, first: send(null) }
+        // Their card as the chat's card, the persona, the speaker, the replier, or a greeter.
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [owner.cardId] }), "NotFound")
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [actor.cardId], persona: owner.cardId }), "NotFound")
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [actor.cardId], first: send(owner.cardId) }), "NotFound")
+        yield* refused(actor.api.PreviewChat({ ...base, cards: [actor.cardId], replier: owner.cardId }), "NotFound")
+        yield* refused(
+          actor.api.PreviewChat({
+            ...base,
+            cards: [actor.cardId],
+            greeters: [{ entityId: owner.cardId, greeting: 0 }]
+          }),
+          "NotFound"
+        )
+        // Their own card previews.
+        const own = yield* actor.api.PreviewChat({ ...base, cards: [actor.cardId], replier: actor.cardId })
+        assert.isNotNull(own.budget)
+      })
+  },
   GetCast: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

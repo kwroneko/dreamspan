@@ -6,6 +6,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { CacheChip } from "./CacheIndicator.tsx"
+import { DraftContextChip } from "./draftRequest.tsx"
 import { nameOf, useCast } from "./cast.ts"
 import { ModelChip, PresetChip } from "./GenerationControls.tsx"
 import { GenerateIcon, SendIcon } from "./icons.tsx"
@@ -188,6 +189,13 @@ export const registerComposerControls = () => [
     order: 40,
     placement: "strip",
     component: ({ view, onSettings }) => <PresetChip session={null} view={view} onSettings={onSettings} />
+  }),
+  // Where the saved composer's cache chip is: the first request's size, and the request (DESIGN §2.1).
+  pendingComposerControls.register({
+    id: "pending.context",
+    order: 50,
+    placement: "strip",
+    component: DraftContextChip
   }),
   composerControls.register({
     id: "composer.model",
