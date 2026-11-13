@@ -259,7 +259,8 @@ export function workshopChatTests() {
           if (width === 390) await stopped.getByText("stopped", { exact: true }).click()
           else await showActions(stopped)
           const beforeResume = provider.bodies.length
-          const resume = stopped.getByRole("button", { name: "Resume", exact: true })
+          // A stopped reply also has Resume beside it (DESIGN §7.5); either carries it on.
+          const resume = stopped.getByRole("button", { name: "Resume", exact: true }).first()
           if (await resume.isVisible()) await resume.click()
           else await messageMenu(stopped, /^Resume/)
           await expect.poll(() => provider.bodies.length).toBeGreaterThan(beforeResume)
