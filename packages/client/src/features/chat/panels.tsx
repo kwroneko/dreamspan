@@ -110,7 +110,12 @@ export const isPanelTab = (value: unknown, view?: ChatView, snapshot = chatPanel
 export const panelTabs = (view: ChatView, selected: string | null, snapshot = chatPanels.snapshot()) =>
   [...snapshot.entries]
     .sort((a, b) => a.order - b.order)
-    .filter((entry) => !kindHides(view.chat?.kind, entry.id) && entry.available?.(view) !== false)
+    .filter(
+      (entry) =>
+        !(view.chat === null && entry.savedOnly) &&
+        !kindHides(view.chat?.kind, entry.id) &&
+        entry.available?.(view) !== false
+    )
     .flatMap((descriptor) =>
       (descriptor.tabs?.(view, selected) ?? [{ value: descriptor.id, label: descriptor.label }])
         .filter((tab) => resolvePanel(tab.value, snapshot) === descriptor)
@@ -126,14 +131,16 @@ export function usePanelTabs(view: ChatView, selected: string | null) {
 /**
  * The tab to show for one asked for: itself when this chat offers it. A family's tab this chat
  * doesn't offer (another chat's character, carried by a link's `?panel=` or this browser's
- * memory) opens the panel's default tab instead, as a pick in the sidebar does; null otherwise.
+ * memory), or a saved-only tab before the first send, opens the registered default instead;
+ * null otherwise.
  */
 export const panelHere = (view: ChatView, value: string | null, snapshot = chatPanels.snapshot()) => {
   if (value === null) return null
   const tabs = panelTabs(view, value, snapshot)
   if (tabs.some((tab) => tab.value === value)) return value
-  const family = resolvePanel(value, snapshot)?.matches !== undefined
-  return (family && tabs.find((tab) => tab.descriptor.default)?.value) || null
+  const descriptor = resolvePanel(value, snapshot)
+  const fallback = descriptor?.matches !== undefined || (view.chat === null && descriptor?.savedOnly)
+  return (fallback && tabs.find((tab) => tab.descriptor.default)?.value) || null
 }
 
 export const usePanelHere = (value: string | null, view: ChatView) =>

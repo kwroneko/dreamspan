@@ -1,3 +1,4 @@
+import { PresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { ChatExternalMedia } from "./externalMedia.tsx"
 import { SplitChatDivider } from "./SplitChatDivider.tsx"
 import { AwayRows } from "./AwayRows.tsx"
@@ -86,9 +87,6 @@ const Versions = deferred<Parameters<typeof import("./VersionControls.tsx").Vers
 )
 const LcmFields = deferred<Parameters<typeof import("./LcmFields.tsx").LcmFields>[0]>(() =>
   import("./LcmFields.tsx").then((m) => ({ default: m.LcmFields }))
-)
-const PresetWorkspace = deferred<Parameters<typeof import("../editor/PresetWorkspace.tsx").PresetWorkspace>[0]>(() =>
-  import("../editor/PresetWorkspace.tsx").then((m) => ({ default: m.PresetWorkspace }))
 )
 const BranchControl = deferred<Parameters<typeof import("./BranchControl.tsx").BranchControl>[0]>(() =>
   import("./BranchControl.tsx").then((m) => ({ default: m.BranchControl }))

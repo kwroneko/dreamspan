@@ -207,12 +207,7 @@ export function BoundScroll({ children }: { children: ReactNode }) {
 }
 
 /** An entry's editor, as a tab of its own: bound to the chat it's opened from (live.ts). */
-export const editorHref = (
-  ref: RefId,
-  focus: string | undefined,
-  chat: WorkspaceChat | undefined,
-  sourceId?: string
-) => {
+const editorHref = (ref: RefId, focus: string | undefined, chat: WorkspaceChat | undefined, sourceId?: string) => {
   const params = new URLSearchParams()
   if (focus) params.set("focus", focus)
   if (chat) {
