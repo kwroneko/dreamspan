@@ -673,6 +673,6 @@ export const layer = Layer.effect(
         })
       )
 
-    return Option.some({ generate, requiresModel: true })
+    return Option.some({ kind: "provider" as const, generate, requiresModel: true })
   })
 )
