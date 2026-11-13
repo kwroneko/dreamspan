@@ -77,7 +77,7 @@ export class ChatHub extends Context.Service<
      * Calls `listener` for each change published to a chat: every
      * event but streamed text and the cache estimate, which follows from the others.
      */
-    readonly listen: (listener: (chatId: ChatId) => void) => Effect.Effect<void, never, Scope.Scope>
+    readonly listen: (listener: (chatId: ChatId, event?: ChatEvent) => void) => Effect.Effect<void, never, Scope.Scope>
   }
 >()("rp/chat/ChatHub") {
   static readonly layer = ChatHub.layerWith({ backlog: BACKLOG })
@@ -88,7 +88,7 @@ export class ChatHub extends Context.Service<
       ChatHub,
       Effect.gen(function* () {
         const subscribers = new Map<ChatId, Set<Subscriber>>()
-        const listeners = new Set<(chatId: ChatId) => void>()
+        const listeners = new Set<(chatId: ChatId, event?: ChatEvent) => void>()
         const pending = new Map<ChatId, Array<ChatEvent>>()
         let timer: ReturnType<typeof setTimeout> | undefined
 
@@ -110,7 +110,7 @@ export class ChatHub extends Context.Service<
               event._tag !== "Section" &&
               event._tag !== "Cache"
             )
-              for (const listener of listeners) listener(chatId)
+              for (const listener of listeners) listener(chatId, event)
             if (!subscribers.has(chatId)) return
             const events = pending.get(chatId)
             if (events) events.push(event)

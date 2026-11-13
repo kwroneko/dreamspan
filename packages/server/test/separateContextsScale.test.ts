@@ -207,8 +207,54 @@ it.live(
       )
       assert.isFalse(knew)
 
-      // Undo of a scene check's away mark at 1,000 (unit C9): every version since that recorded
-      // Wren away (about 17,000, with their swipes) is corrected in one transaction.
+      // C9: one range overlay corrects 17,000+ shared swipes, without copying any messages.
+      // A peer made before the mark/correction retains its exact request, even at owner scale.
+      yield* event(slotAt(2_999), { key: "context.per_speaker", value: "separate" })
+      const peer = (yield* h.writer.CreateFork({ userId: h.userId, chatId, fromForkId: main, atSlotId: slotAt(2_999) }))
+        .fork.id
+      const peerRow = yield* h.writer.AppendMessage({
+        userId: h.userId,
+        chatId,
+        forkId: peer,
+        parentSlotId: slotAt(2_999),
+        branch: false,
+        commitDraft: null,
+        version: new NewVersion({
+          speakerEntityId: wren,
+          writer: "model",
+          content: "",
+          status: "generating",
+          macroMode: "verbatim",
+          origin: "generated"
+        })
+      })
+      const peerRequest = () =>
+        Effect.map(
+          h.reader.AssembleContext({
+            userId: h.userId,
+            chatId,
+            forkId: peer,
+            slotId: peerRow.slotId,
+            versionId: peerRow.version.id,
+            now: 1,
+            timeZone: "UTC",
+            frozen: null,
+            model: { connection: h.connection.id, model: wide.id }
+          }),
+          (built) => (JSON.parse(built.snapshot) as ContextSnapshot).request
+        )
+      const peerBefore = yield* peerRequest()
+      const shape = () =>
+        fixtureSql(
+          config.dataDir,
+          [
+            {
+              sql: "SELECT (SELECT count(*) FROM versions) AS versions, (SELECT count(*) FROM fork_overrides WHERE kind='presence_range') AS ranges, (SELECT sum(length(value_id)) FROM fork_overrides WHERE kind='presence_range') AS bytes, (SELECT count(*) FROM fork_overrides) AS overrides, (SELECT count(*) FROM fork_steps WHERE kind='presence_range') AS range_steps, (SELECT sum(length(target_id)+coalesce(length(override_id),0)+length(label)) FROM fork_steps WHERE kind='presence_range') AS range_step_bytes, (SELECT sum(length(before_json)+length(after_json)) FROM changeset_items WHERE after_json LIKE '%presenceCorrection%') AS correction_history_bytes"
+            }
+          ],
+          { readOnly: true }
+        )
+      const shapeBefore = yield* shape()
       const mark = yield* event(slotAt(1_000), {
         key: "away.set",
         value: { entity: wren, away: true, source: "decision" }
@@ -218,7 +264,43 @@ it.live(
       samples.push({ operation: "CorrectPresence", ms: performance.now() - undoStart })
       assert.isAbove(undone!.corrected.length, 10_000)
       yield* event(slotAt(2_999), { key: "context.per_speaker", value: "separate" })
-      assert.include(sentText(yield* assemble(wrenRow)), "line 1200.")
+      assert.include(sentText(yield* time("corrected separate: Wren", assemble(wrenRow))), "line 1200.")
+      assert.deepStrictEqual(yield* peerRequest(), peerBefore, "untouched peer request and cache prefix")
+      const shapeAfter = yield* shape()
+      assert.strictEqual(shapeAfter[0]![0]!.versions, shapeBefore[0]![0]!.versions, "no swipe copies")
+      assert.strictEqual(Number(shapeAfter[0]![0]!.ranges) - Number(shapeBefore[0]![0]!.ranges), 1)
+      assert.isBelow(
+        Number(shapeAfter[0]![0]!.bytes),
+        2_000,
+        "constant-size overlay for 3,000 messages and 20–50 swipes"
+      )
+      process.stdout.write(`BRANCH_CORRECTION_SHAPE ${JSON.stringify(shapeAfter[0]![0])}\n`)
+
+      // Accumulated corrections: 300 disjoint stretches on the same branch, with all
+      // 300 existing peers still present. Each range spans retained swipes without copies.
+      const marks = []
+      for (let i = 0; i < 300; i++)
+        marks.push(
+          yield* event(slotAt(100 + i * 8), {
+            key: "away.set",
+            value: { entity: wren, away: i % 2 === 0, source: "decision" }
+          })
+        )
+      const holds: number[] = []
+      for (const mark of marks) {
+        const start = performance.now()
+        assert.isNotNull(yield* h.writer.CorrectPresence({ userId: h.userId, chatId, forkId: main, eventId: mark.id }))
+        holds.push(performance.now() - start)
+      }
+      const accumulated = yield* shape()
+      assert.strictEqual(accumulated[0]![0]!.versions, shapeBefore[0]![0]!.versions)
+      assert.strictEqual(Number(accumulated[0]![0]!.ranges), 301)
+      assert.isBelow(Number(accumulated[0]![0]!.bytes), 100_000)
+      yield* time("301 corrections: separate Wren", assemble(wrenRow))
+      assert.deepStrictEqual(yield* peerRequest(), peerBefore)
+      process.stdout.write(
+        `ACCUMULATED_CORRECTIONS ${JSON.stringify({ ...accumulated[0]![0], medianMs: median(holds), maxMs: Math.max(...holds), totalMs: holds.reduce((a, b) => a + b, 0) })}\n`
+      )
 
       // C6: a second 3,000-message line, also with 20–50 swipes per position, frozen
       // into the owner-shape destination. Bring the older rows too, so projection reads
@@ -313,7 +395,7 @@ it.live(
       const ms = (operation: string) => samples.find((s) => s.operation === operation)!.ms
       assert.isBelow(ms("separate: Wren"), ms("shared: Wren") * 1.5 + 200, "the filter adds at most a bounded share")
       assert.isBelow(ms("knewThrough 3,000"), 1_000)
-      assert.isBelow(ms("CorrectPresence"), 10_000)
+      assert.isBelow(ms("CorrectPresence"), 1_000)
     }).pipe(Effect.scoped, Effect.provide(server.layer))
   },
   600_000

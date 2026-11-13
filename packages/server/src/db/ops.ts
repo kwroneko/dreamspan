@@ -593,18 +593,18 @@ export const StartChatResult = Schema.Struct({ ...AppendResult.fields, composer:
 
 /**
  * An entry a library-wide replace changes, as the reader worked it out (libraryReplace.ts): the
- * head and drafts it was read at, its unsaved changes applied (`checkpoint`, null without any)
- * and the document with the replacements in it.
+ * head it was read at and the document with the replacements in it. An entry with unsaved
+ * changes is never one.
  */
 export const LibraryReplaceEntry = Schema.Struct({
   refId: RefId,
   label: Schema.String,
   head: Schema.String,
   rowVersion: Schema.Int,
-  drafts: Schema.Array(Schema.Struct({ id: Schema.String, field: Schema.String, rowVersion: Schema.Int })),
-  checkpoint: Schema.NullOr(Doc),
   doc: Doc,
-  matches: Schema.Int
+  matches: Schema.Int,
+  /** Computed by the reader; only returned after this exact planned head commits. */
+  approvedScripts: Schema.Array(Schema.String)
 })
 export type LibraryReplaceEntry = typeof LibraryReplaceEntry.Type
 
@@ -2873,10 +2873,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
   }),
   /** A new revision on the head with an earlier revision's content. */
   /**
-   * A library-wide replace (libraryReplace.ts) as planned: per entry, its unsaved changes saved
-   * first as a revision of their own, then a `changeset` revision with the replacements, all
-   * under one changeset group (`editId`). An entry whose head, row version or drafts moved since
-   * the plan is left as it is, in `skipped` with the plan's own.
+   * A library-wide replace (libraryReplace.ts) as planned: one `changeset` revision per clean
+   * entry, under one changeset group (`editId`). Entries with unsaved changes or whose head or
+   * row version moved since the plan are skipped, alongside the plan's own skipped entries.
    */
   Rpc.make("ApplyLibraryReplace", {
     payload: {
@@ -3302,10 +3301,10 @@ export class WriteOpsLibrary extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
-   * Undo of an away mark the scene check set (spec/CHARACTER-CONTEXT.md §5, unit C9), in one
-   * transaction: the user's presence event replaces the decision's, and every version written
-   * since that recorded the character away for it is corrected to count it present
-   * (`db/decisions.ts`). Null when the event isn't a live away mark of the scene check.
+   * Undo of a departure or return the scene check set, in this fork only (C9 [D]). One
+   * transaction replaces the event and overlays recorded presence through the next presence
+   * mark or the displayed tip. Existing peers retain their rows, knowledge and summaries;
+   * children made later inherit the correction. Null unless this fork shows a live scene check.
    */
   Rpc.make("CorrectPresence", {
     payload: { userId: UserId, chatId: ChatId, forkId: ForkId, eventId: Schema.String },
@@ -3313,7 +3312,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
       Schema.Struct({
         /** The user's event that replaced the decision's. */
         eventId: Schema.String,
-        /** The versions whose presence record was corrected. */
+        /** The existing versions covered by this branch's correction. */
         corrected: Schema.Array(VersionId)
       })
     ),

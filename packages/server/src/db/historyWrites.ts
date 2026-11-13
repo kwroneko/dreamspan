@@ -385,7 +385,13 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
             conflicts.push(item.id)
             continue
           }
-          const presence = yield* undoPresenceCorrection(sql, chatId, item.target_id, after.presenceCorrectionGroup)
+          const presence = yield* undoPresenceCorrection(
+            sql,
+            chatId,
+            forkId,
+            item.target_id,
+            after.presenceCorrectionGroup
+          )
           if (presence !== null) {
             if (presence) undone++
             else conflicts.push(item.id)

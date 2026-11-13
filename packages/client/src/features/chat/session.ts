@@ -627,8 +627,19 @@ export class ChatSession {
     this.hellos = 0
     const subscribe = Effect.flatMap(Registry.getResult(this.registry, AppClient.runtime), (services) =>
       Context.get(services, AppClient)("SubscribeChat", { chatId: this.chatId }).pipe(
-        Stream.runForEach((batch) =>
+        Stream.runForEach((incoming) =>
           Effect.sync(() => {
+            const batch = incoming.filter(
+              (event) =>
+                !(
+                  ["State", "Reload", "Lcm"].includes(event._tag) &&
+                  "forkId" in event &&
+                  event.forkId !== undefined &&
+                  this.view.forkId !== null &&
+                  event.forkId !== this.view.forkId
+                )
+            )
+            if (batch.length === 0) return
             // A message shown with another version selected shows another path's notes: the ones
             // the model wrote belong to the reply that wrote them (DESIGN §7.3).
             if (
@@ -1106,6 +1117,14 @@ export class ChatSession {
     anchor: SlotId | null,
     initialContext = false
   ) {
+    if (
+      ["State", "Reload", "Lcm"].includes(event._tag) &&
+      "forkId" in event &&
+      event.forkId !== undefined &&
+      this.view.forkId !== null &&
+      event.forkId !== this.view.forkId
+    )
+      return
     switch (event._tag) {
       case "Hello": {
         for (const { versionId, text, waitingCache: waiting, reasoning, sections, steps } of event.live) {
@@ -1141,6 +1160,7 @@ export class ChatSession {
         for (const events of this.readEvents) events.push(event)
         return this.applyState(event)
       case "Reload":
+        if (event.forkId !== undefined) void this.refreshContext()
         return this.reload()
       case "Deleted":
         return this.update({ deleted: true })
@@ -1148,6 +1168,7 @@ export class ChatSession {
         this.queueEvents++
         return this.update({ queue: event.queue })
       case "State":
+        if (event.forkId !== undefined) void this.refreshContext()
         this.forgetPositions()
         this.scheduleLcm()
         chatStateChanged(this.chatId)

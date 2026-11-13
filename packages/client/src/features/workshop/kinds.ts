@@ -17,7 +17,9 @@ export const workshopLook: ChatKindLook = {
     // Who replies only links to the hidden Next picker.
     "settings.tools",
     "settings.agent-permissions",
-    "settings.who-replies"
+    "settings.who-replies",
+    // A workshop's cast is its assistant, so there is no cast to start a story chat with.
+    "chat.new-with-cast"
   ],
   // The capability chip, the Changes tab and the step rows’ Undo and Open (§2.5, §3.6).
   shows: [CAPABILITY_CHIP, "workshop.changes"]

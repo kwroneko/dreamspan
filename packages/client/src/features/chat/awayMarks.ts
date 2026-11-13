@@ -1,6 +1,6 @@
 // The timeline's away rows (spec/CHARACTER-CONTEXT.md §5, §9.2 unit CU3): "Wren left · scene
 // check" or "Wren is back · you" under the message where a character's away mark changed, with
-// Undo on the scene check's. The server lists every away mark on the branch's path in order
+// Undo on the scene check's, whether it said someone left or came back. The server lists every away mark on the branch's path in order
 // (`GetAwayMarks`); only the changes become rows, so a mark that repeats what holds already (the
 // user's own "back" an Undo writes in place of the scene check's, say) shows nothing. One read a
 // branch, leaf and state change, shared by every row on screen.
@@ -17,7 +17,7 @@ export interface AwayRow {
   readonly by: AwayMark["by"]
   /** The reply whose own tool set it (`by: "character"`): its speaker. */
   readonly setBy?: EntityId
-  /** Only the scene check's departure can be undone (writer `CorrectPresence`). */
+  /** Only the scene check's marks, "left" and "back", can be undone (writer `CorrectPresence`). */
   readonly undoable: boolean
 }
 
@@ -41,7 +41,7 @@ export const awayTransitions = (
       away: mark.away,
       by: mark.by,
       ...(mark.setBy ? { setBy: mark.setBy } : {}),
-      undoable: mark.by === "decision" && mark.away
+      undoable: mark.by === "decision"
     })
   }
   return rows
@@ -60,6 +60,14 @@ export const awayLabel = (row: AwayRow, name: (id: EntityId) => string) => {
           ? "own reply"
           : `${name(row.setBy)}'s reply`
   return `${what} · ${by}`
+}
+
+/** What Undo does, on hover: the opposite of what the scene check said. */
+export const undoExplanation = (row: AwayRow, name: (id: EntityId) => string) => {
+  const who = name(row.entityId)
+  return row.away
+    ? `${who} was there after all: on this branch, counted present until the next presence mark, so ${who}'s replies see the messages written since.`
+    : `${who} hadn't come back: on this branch, counted away until the next presence mark, so ${who} isn't picked to reply, and with separate contexts ${who}'s replies leave out the messages written since.`
 }
 
 /** What the row means, on hover: who decided, and what follows from it. */

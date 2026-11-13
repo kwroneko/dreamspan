@@ -253,6 +253,7 @@ interface OverrideValue {
     | "summary_rerun"
     | "summary_superseded"
     | "insert"
+    | "presence_range"
   readonly targetId: string
   readonly slotId: string | null
   readonly valueId: string | null

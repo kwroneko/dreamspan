@@ -1,26 +1,23 @@
 // Search and replace across the library, the writes (ARCHITECTURE §14.6 "Across the library"),
 // in the writer worker, each one transaction. A replace stores what the reader planned
-// (libraryReplace.ts): per entry, its unsaved changes saved first as a revision of their own (as
-// a reply cuts one of the live text it used), ending their drafts on it, then a `changeset`
-// revision with the replacements, under one changeset group; `library_edit_items` records each
-// entry's revisions before and after, so the whole replace is undone at once. An entry that moved
-// since the plan (its head, row version or drafts) is left as it is.
-import { keepsRegexApproval, withHtmlApprovals, withoutGrantedAgentEdits } from "@rp/shared/editing.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
+// (libraryReplace.ts): per entry, a `changeset` revision with the replacements, under one
+// changeset group; `library_edit_items` records each entry's revisions before and after, so the
+// whole replace is undone at once. An entry that moved since the plan, or has unsaved changes, is
+// left as it is.
+import { withHtmlApprovals, withoutGrantedAgentEdits } from "@rp/shared/editing.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { Doc } from "@rp/shared/library.ts"
-import type { LibrarySkipped } from "@rp/shared/libraryReplace.ts"
+import { LIBRARY_UNSAVED_REASON, type LibrarySkipped } from "@rp/shared/libraryReplace.ts"
 import { Effect } from "effect"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { NotFound, type LibraryReplaceEntry } from "./ops.ts"
-import { replacementConflict } from "./noteReplacementWrites.ts"
 import { transaction } from "./tx.ts"
 
 const CHANGED = "It changed since the search. Find again to include it."
 
 export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
-  const { sql, lib, drafts } = steps
+  const { sql, lib } = steps
 
   /** A revision of `doc` on the ref's head, which becomes its head; null when it changes nothing. */
   const write = (
@@ -65,6 +62,7 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
         const originRef = JSON.stringify({ libraryEdit: groupId })
         let changed = 0
         let matches = 0
+        const approvedScripts: Array<{ refId: LibraryReplaceEntry["refId"]; label: string; name: string }> = []
         for (const entry of entries) {
           const skip = (reason: string) => skipped.push({ refId: entry.refId, label: entry.label, reason })
           const ref = yield* lib
@@ -78,78 +76,30 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
             skip(CHANGED)
             continue
           }
-          // The drafts it was read with, and no others since.
+          // An entry that gained unsaved changes since the plan is skipped, as the plan skips one with some.
           const [active] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM drafts WHERE user_id = ${userId}
             AND target_kind = 'entity_field' AND target_id = ${ref.id} AND status = 'active'`
-          const rows = []
-          for (const planned of entry.drafts) {
-            const row = yield* drafts.find(
-              userId,
-              new DraftKey({ targetKind: "entity_field", targetId: ref.id, field: planned.field })
-            )
-            if (
-              row === null ||
-              row.id !== planned.id ||
-              row.status !== "active" ||
-              row.row_version !== planned.rowVersion
-            )
-              break
-            rows.push(row)
-          }
-          if (rows.length !== entry.drafts.length || active!.n !== rows.length) {
-            skip(CHANGED)
+          if (active!.n > 0) {
+            skip(LIBRARY_UNSAVED_REASON)
             continue
-          }
-          // Drafts can hold invalid references until Save; the bulk checkpoint follows
-          // the same ownership and replacing-note checks as CommitEditorDrafts.
-          if (ref.kind === "note") {
-            const valid = yield* steps.checkReferences(userId, entry.doc).pipe(
-              Effect.as(true),
-              Effect.catchTag("NotFound", () => Effect.succeed(false))
-            )
-            const head = yield* lib.loadDoc(ref.head_revision_id)
-            const conflict = valid
-              ? yield* replacementConflict(sql, userId, ref.entity_id, entry.doc, undefined, head).pipe(
-                  Effect.catchTag("NotFound", () =>
-                    Effect.succeed("Its unsaved changes can no longer be saved. Open its editor to resolve them.")
-                  )
-                )
-              : null
-            if (!valid || conflict !== null) {
-              skip(
-                conflict ??
-                  "Its unsaved changes name something outside your library. Save or revert them in its editor."
-              )
-              continue
-            }
           }
           if (changed === 0)
             yield* sql`INSERT INTO changeset_groups (id, owner_user_id, title, origin, created_at)
               VALUES (${groupId}, ${userId}, ${title}, 'user', ${Date.now()})`
-          // Its unsaved changes are saved first, as their own revision, ending their drafts on it.
-          let head = ref.head_revision_id
-          if (entry.checkpoint !== null) {
-            const saved = yield* write(
-              ref,
-              entry.checkpoint,
-              "user",
-              null,
-              "Unsaved changes, saved before a search and replace across the library"
-            )
-            if (saved !== null) head = saved
-            for (const row of rows) yield* drafts.end(row, "committed", head)
-          }
-          const after = yield* write({ ...ref, head_revision_id: head }, entry.doc, "changeset", originRef, title)
+          const head = ref.head_revision_id
+          const after = yield* write(ref, entry.doc, "changeset", originRef, title)
           if (after === null) {
             skip("Nothing in it changes.")
             continue
           }
           yield* sql`INSERT INTO library_edit_items (group_id, ref_id, before_revision_id, after_revision_id, matches)
             VALUES (${groupId}, ${ref.id}, ${head}, ${after}, ${entry.matches})`
+          for (const name of entry.approvedScripts)
+            approvedScripts.push({ refId: entry.refId, label: entry.label, name })
           changed++
           matches += entry.matches
         }
-        return { editId: changed > 0 ? groupId : null, entries: changed, matches, skipped }
+        return { editId: changed > 0 ? groupId : null, entries: changed, matches, skipped, approvedScripts }
       }).pipe(transaction(sql, "ApplyLibraryReplace")),
 
     UndoLibraryEdit: ({ userId, editId }: { readonly userId: UserId; readonly editId: string }) =>
@@ -186,12 +136,10 @@ export const makeLibraryReplaceWrites = (steps: LibrarySteps) => {
             continue
           }
           const head = yield* lib.loadDoc(ref.head_revision_id)
-          let before = withHtmlApprovals(
+          const before = withHtmlApprovals(
             head,
             withoutGrantedAgentEdits(ref.kind, head, yield* lib.loadDoc(item.before_revision_id))
           )
-          if (before.regex_approved === true && !keepsRegexApproval(head, before))
-            before = { ...before, regex_approved: false }
           const id = yield* write(ref, before, "changeset", originRef, `Undid: ${group.title}`)
           yield* sql`UPDATE library_edit_items SET undone_by_revision_id = ${id ?? item.before_revision_id}
             WHERE id = ${item.id}`

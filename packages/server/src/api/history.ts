@@ -5,7 +5,7 @@ import { HistoryRejected } from "@rp/shared/historyApi.ts"
 import type { HistoryCursor, HistoryEdit } from "@rp/shared/historyApi.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { Effect, Schema } from "effect"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
@@ -16,14 +16,14 @@ export const makeHistoryHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const hub = yield* ChatHub
   const warmth = yield* CacheWarmth
-  const changed = (chatIds: ReadonlyArray<ChatId>) =>
+  const changed = (chatIds: ReadonlyArray<ChatId>, forkId?: ForkId) =>
     Effect.gen(function* () {
       const user = yield* CurrentUser
       for (const chatId of new Set(chatIds)) {
-        hub.publish(chatId, { _tag: "Reload" })
-        hub.publish(chatId, { _tag: "Lcm" })
+        hub.publish(chatId, { _tag: "Reload", ...(forkId ? { forkId } : {}) })
+        hub.publish(chatId, { _tag: "Lcm", ...(forkId ? { forkId } : {}) })
       }
-      yield* warmth.refreshUser(user.id)
+      if (forkId === undefined) yield* warmth.refreshUser(user.id)
     })
   const commands = yield* Commands
   const rename = (params: typeof RenameHistoryInput.Type) =>
@@ -130,7 +130,7 @@ export const makeHistoryHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const user = yield* CurrentUser
         const result = yield* writer.UndoHistoryEdit({ ...params, userId: user.id })
-        yield* changed([params.chatId])
+        yield* changed([params.chatId], params.forkId)
         return result
       }).pipe(internal("UndoHistoryEdit"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
