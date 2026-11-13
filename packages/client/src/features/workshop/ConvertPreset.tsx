@@ -4,34 +4,37 @@
 import type { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { type ConversionChoice, conversionItems, workshopPieces } from "@rp/shared/workshopPreset.ts"
 import { useNavigate } from "@tanstack/react-router"
-import { type FormEvent, useMemo, useState } from "react"
+import { type FormEvent, useMemo } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { usePlaceParam } from "../../usePlaceParam.ts"
 import { type EditorStore, useEditorState } from "../editor/store.ts"
+import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 
 const HINT =
   "Makes a new workshop preset from this one's saved version. You choose which story pieces to keep; this preset doesn't change."
 
 export function ConvertPresetButton({ store, compact }: { store: EditorStore; compact: boolean }) {
   const snapshot = useEditorState(store).snapshot
-  const [open, setOpen] = useState(false)
+  const [place, setPlace] = usePlaceParam("convertPreset", "")
   if (!snapshot || snapshot.ref.kind !== "preset") return null
+  const target = `${compact ? "panel" : "editor"}:${snapshot.ref.id}`
   return (
     <>
-      <Button className="h-8! px-2!" aria-label="Convert to workshop" hint={HINT} onClick={() => setOpen(true)}>
+      <Button className="h-8! px-2!" aria-label="Convert to workshop" hint={HINT} onClick={() => setPlace(target)}>
         <Icon name="tool" />
         <span className={compact ? "@max-[30rem]:hidden" : ""}>Convert to workshop</span>
       </Button>
-      {open && (
+      {place === target && (
         <ConvertDialog
           refId={snapshot.ref.id}
           label={snapshot.ref.label}
           doc={snapshot.doc as PresetDoc}
-          onClose={() => setOpen(false)}
+          onClose={() => setPlace("")}
         />
       )}
     </>
@@ -52,31 +55,44 @@ function ConvertDialog({
   const navigate = useNavigate()
   const action = useAction()
   const items = useMemo(() => conversionItems(doc), [doc])
-  const [name, setName] = useState(`${label} (workshop)`)
-  const [instructions, setInstructions] = useState("")
-  const [choices, setChoices] = useState<Record<string, ConversionChoice>>(() =>
-    Object.fromEntries(
-      items.map((item) => [item.identifier, { identifier: item.identifier, keep: item.kind === "review" }])
-    )
+  const draft = useUserDraft(
+    `workshop-convert:${refId}`,
+    "Workshop preset",
+    JSON.stringify({
+      name: `${label} (workshop)`,
+      instructions: doc.prompts.find((p) => p.identifier === "workspaceInstructions")?.content ?? "",
+      choices: Object.fromEntries(
+        items.map((item) => [item.identifier, { identifier: item.identifier, keep: item.kind === "review" }])
+      )
+    })
   )
+  const values = JSON.parse(draft.text) as {
+    name: string
+    instructions: string
+    choices: Record<string, ConversionChoice>
+  }
+  const { name, instructions, choices } = values
+  const edit = (change: Partial<typeof values>) => draft.setText(JSON.stringify({ ...values, ...change }))
   const set = (identifier: string, change: Partial<ConversionChoice>) =>
-    setChoices((all) => ({ ...all, [identifier]: { ...all[identifier]!, ...change } }))
+    edit({ choices: { ...choices, [identifier]: { ...choices[identifier]!, ...change } } })
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    const result = await action.run(
-      (client) =>
-        client("ConvertPresetToWorkshop", {
-          refId: refId as never,
-          label: name.trim(),
-          choices: Object.values(choices),
-          instructions
-        }),
-      ["library"]
-    )
-    if (result.ok) {
-      onClose()
-      await navigate({ to: "/library/$refId", params: { refId: result.value.id } })
-    }
+    if (action.pending || !draft.ready) return
+    await draft.commit(draft.text, async () => {
+      const result = await action.run(
+        (client) =>
+          client("ConvertPresetToWorkshop", {
+            refId: refId as never,
+            label: name.trim(),
+            choices: Object.values(choices),
+            instructions
+          }),
+        ["library"]
+      )
+      if (!result.ok) return false
+      await navigate({ to: "/library/$refId", params: { refId: result.value.id }, search: {} })
+      return true
+    })
   }
   return (
     <Dialog
@@ -88,12 +104,17 @@ function ConvertDialog({
     >
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
         <Field label="Name">
-          <Input value={name} onChange={(event) => setName(event.currentTarget.value)} maxLength={200} required />
+          <Input
+            value={name}
+            onChange={(event) => edit({ name: event.currentTarget.value })}
+            maxLength={200}
+            required
+          />
         </Field>
         {items.length > 0 && (
           <ul className="flex flex-col gap-3" aria-label="Pieces to keep or drop">
             {items.map((item) => {
-              const choice = choices[item.identifier]!
+              const choice = choices[item.identifier] ?? { identifier: item.identifier, keep: item.kind === "review" }
               return (
                 <li key={item.identifier} className="flex flex-col gap-2 rounded-md border border-border p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -128,7 +149,7 @@ function ConvertDialog({
           <Textarea
             value={instructions}
             placeholder="How you like the assistant to work, such as how cards should be written."
-            onChange={(event) => setInstructions(event.currentTarget.value)}
+            onChange={(event) => edit({ instructions: event.currentTarget.value })}
           />
         </Field>
         <p className="text-sm text-muted">
@@ -140,6 +161,7 @@ function ConvertDialog({
           , filled in as the app gets them.
         </p>
         <ErrorAlert error={action.error} />
+        <UserDraftStatus draft={draft} />
         <DialogActions>
           <Button hint="Closes this dialog without making a preset." onClick={onClose}>
             Cancel
@@ -149,7 +171,7 @@ function ConvertDialog({
             type="submit"
             variant="primary"
             pending={action.pending}
-            disabled={!name.trim()}
+            disabled={!name.trim() || !draft.ready}
           >
             Make preset
           </Button>

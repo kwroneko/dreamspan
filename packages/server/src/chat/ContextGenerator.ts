@@ -455,7 +455,8 @@ export const layer = Layer.effect(
               // (spec/WORKSHOP-CONTEXT.md §2.2): the prefix and everything before them stay cached.
               let elided = 0
               const room = budget ? budget.maximum - budget.responseReserve : Number.POSITIVE_INFINITY
-              if (count > room * ELIDE_TRIGGER) {
+              let needsRebuild = count > room * ELIDE_TRIGGER
+              if (needsRebuild) {
                 const compacted = yield* elideCarried({
                   reader,
                   request,
@@ -469,6 +470,7 @@ export const layer = Layer.effect(
                   seed = [...compacted.transcript, ...additions]
                   count = compacted.count
                   elided = compacted.elided
+                  needsRebuild = false
                 }
               }
               // Provider image limits apply to the entire request. Hydrating the prefix
@@ -481,7 +483,7 @@ export const layer = Layer.effect(
                 snapshot.inputs.model?.vision !== false &&
                 additions.some((message) => message.role === "rpUser" && (message.message.images?.length ?? 0) > 0) &&
                 imageCount > (snapshot.inputs.model?.maxImages ?? DEFAULT_MAX_IMAGES)
-              if (imageOverflow || (budget && count > budget.maximum - budget.responseReserve)) {
+              if (imageOverflow || needsRebuild || (budget && count > budget.maximum - budget.responseReserve)) {
                 seed = undefined
                 continuity = {
                   path: baseline,

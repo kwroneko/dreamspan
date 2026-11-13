@@ -86,6 +86,22 @@ describe("workshop preset conversion", () => {
     expect(twice.prompts).toHaveLength(once.prompts.length)
   })
 
+  it("applies replacement instructions when converting an existing workshop preset", () => {
+    const once = convertToWorkshop(story, [], "Keep the old instructions.")
+    const twice = convertToWorkshop(once, [], "Use the new instructions.")
+    expect(twice.prompts.find((p) => p.identifier === "workspaceInstructions")?.content).toBe(
+      "Use the new instructions."
+    )
+    expect(twice.order.find((p) => p.identifier === "workspaceInstructions")?.enabled).toBe(true)
+    expect(once.prompts.find((p) => p.identifier === "workspaceInstructions")?.content).toBe(
+      "Keep the old instructions."
+    )
+    const cleared = convertToWorkshop(once, [], "")
+    expect(cleared.prompts.find((p) => p.identifier === "workspaceInstructions")?.content).toBe("")
+    expect(cleared.order.find((p) => p.identifier === "workspaceInstructions")?.enabled).toBe(false)
+    expect(convertToWorkshop(once, []).prompts).toEqual(once.prompts)
+  })
+
   it("puts the pieces first when there is neither a main prompt nor a card", () => {
     const converted = convertToWorkshop(
       { prompts: [prompt("chatHistory", "", true)], order: [{ identifier: "chatHistory", enabled: true }] },

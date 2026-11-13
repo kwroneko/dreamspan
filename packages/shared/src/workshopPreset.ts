@@ -116,7 +116,7 @@ export interface ConversionChoice {
 export const convertToWorkshop = <D extends Pick<PresetDoc, "prompts" | "order">>(
   doc: D,
   choices: ReadonlyArray<ConversionChoice>,
-  instructions = ""
+  instructions?: string
 ): D => {
   const items = new Map(conversionItems(doc).map((i) => [i.identifier, i]))
   const chosen = new Map(choices.map((c) => [c.identifier, c]))
@@ -127,10 +127,19 @@ export const convertToWorkshop = <D extends Pick<PresetDoc, "prompts" | "order">
   }
   const prompts = doc.prompts.flatMap((p) => {
     if (!keeps(p.identifier)) return []
-    const content = chosen.get(p.identifier)?.content
+    const content =
+      p.identifier === "workspaceInstructions" && instructions !== undefined
+        ? instructions.trim()
+        : chosen.get(p.identifier)?.content
     return [content === undefined || p.marker ? p : { ...p, content }]
   })
-  const order: Array<PromptOrderEntry> = doc.order.filter((e) => keeps(e.identifier))
+  const order: Array<PromptOrderEntry> = doc.order
+    .filter((e) => keeps(e.identifier))
+    .map((e) =>
+      e.identifier === "workspaceInstructions" && instructions !== undefined
+        ? { ...e, enabled: instructions.trim() !== "" }
+        : e
+    )
   const added = workshopPieces().filter((p) => !prompts.some((q) => q.identifier === p.prompt.identifier))
   // After the card, else after main, else first.
   const anchor = Math.max(
@@ -144,7 +153,7 @@ export const convertToWorkshop = <D extends Pick<PresetDoc, "prompts" | "order">
     0,
     ...added.map((p) => ({
       identifier: p.prompt.identifier,
-      enabled: p.prompt.identifier === "workspaceInstructions" && instructions.trim() !== ""
+      enabled: p.prompt.identifier === "workspaceInstructions" && (instructions?.trim() ?? "") !== ""
     }))
   )
   return {
@@ -152,7 +161,9 @@ export const convertToWorkshop = <D extends Pick<PresetDoc, "prompts" | "order">
     prompts: [
       ...prompts,
       ...added.map((p) =>
-        p.prompt.identifier === "workspaceInstructions" ? { ...p.prompt, content: instructions.trim() } : p.prompt
+        p.prompt.identifier === "workspaceInstructions"
+          ? { ...p.prompt, content: instructions?.trim() ?? "" }
+          : p.prompt
       )
     ],
     order

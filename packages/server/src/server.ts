@@ -47,6 +47,7 @@ import {
   AuthenticatedCardSourcesApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
+  AuthenticatedWorkshopPresetApi,
   AuthenticatedShellUpdatesApi,
   CurrentUser,
   Health
@@ -67,6 +68,7 @@ import { makeChatEventHandlers, makeChatHandlers, makeMessageVersionHandlers } f
 import { makeChatSetupHandlers } from "./api/chatSetup.ts"
 import {
   makeEditorHandlers,
+  makeWorkshopPresetHandlers,
   makeGalleryHandlers,
   makePanelApprovalHandlers,
   makeForkMergeHandlers,
@@ -173,6 +175,7 @@ const CoreHandlers = AppCoreApi.toLayer(
 
 const HandlerLayers = Layer.mergeAll(
   CoreHandlers,
+  AuthenticatedWorkshopPresetApi.toLayer(makeWorkshopPresetHandlers),
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
   AuthenticatedShellUpdatesApi.toLayer(
     Effect.map(makeChatSetupHandlers, ({ WatchShellCards, WatchShellForks }) => ({

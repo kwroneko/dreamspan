@@ -4,7 +4,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionId } from "@rp/shared/providers.ts"
 import { NewVersion } from "@rp/shared/chat.ts"
 import { promptPreset } from "@rp/shared/docs/preset.ts"
-import { DEFAULT_SAMPLERS } from "@rp/shared/modelSettings.ts"
+import { DEFAULT_SAMPLERS, withModelSettings } from "@rp/shared/modelSettings.ts"
 import * as Database from "../src/db/Database.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { importPromptPreset, importStSettings, exportPromptPreset } from "../src/formats/presetSettings.ts"
@@ -31,6 +31,20 @@ const file = JSON.stringify({
 })
 
 describe("separate ST preset import surfaces", () => {
+  it("uses model windows on every compatibility seed and preserves deliberate small settings", () => {
+    const legacy = importStPreset(file).document!
+    for (const context of [null, 200_000]) {
+      assert.strictEqual(withModelSettings(legacy, {}, context, null).samplers.openai_max_context, context ?? 128_000)
+      for (const chosen of [4095, 4096, 16_384])
+        assert.strictEqual(
+          withModelSettings(legacy, { samplers: { openai_max_context: chosen } }, context, null).samplers
+            .openai_max_context,
+          chosen
+        )
+    }
+    const absent = importStSettings('{"temperature":0.5}', "model")
+    assert.isUndefined(absent.model?.samplers?.openai_max_context)
+  })
   it("imports prompt text and reports ignored settings without keeping model or connection data", () => {
     const imported = importPromptPreset(file)
     assert.ok(imported.document)

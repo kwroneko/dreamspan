@@ -21,8 +21,7 @@ const workshopDefaultsAtom = AppClient.query(
   }
 )
 
-const WORKSHOP_PERSONA_HINT =
-  "New workshops start with this persona. Your stories' default persona doesn't change."
+const WORKSHOP_PERSONA_HINT = "New workshops start with this persona. Your stories' default persona doesn't change."
 const CLEAR_HINT = "New workshops start with no persona. Your stories' default persona doesn't change."
 
 function WorkshopPersonaAction({ entityId }: CardSurfaceContext) {

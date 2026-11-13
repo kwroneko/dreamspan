@@ -20,6 +20,29 @@ const stateOf = (api: Api, chat: Chat) =>
   })
 
 describe("workshop card and persona", () => {
+  it.live("rolls back first-workshop seeds on failure and never recreates a deleted persona", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const me = yield* api.Whoami()
+      const missing = "00000000-0000-7000-8000-000000000000" as EntityId
+      assert.strictEqual(yield* outcome(api.CreateWorkshop({ card: missing })), "NotFound")
+      assert.isEmpty(yield* api.ListLibrary({ kind: "card" }))
+      assert.isEmpty(yield* api.ListLibrary({ kind: "preset" }))
+      assert.isNull((yield* api.GetWorkshopDefaults({})).persona)
+      const first = yield* api.CreateWorkshop({})
+      const persona = (yield* api.GetWorkshopDefaults({})).persona!
+      assert.deepStrictEqual((yield* stateOf(api, first)).playedByMe, [persona])
+      yield* (yield* Writer).DeleteEntity({ userId: me.id, entityId: persona as EntityId })
+      for (let n = 0; n < 2; n++) {
+        const next = yield* api.CreateWorkshop({})
+        assert.isEmpty((yield* stateOf(api, next)).playedByMe)
+        assert.isNull((yield* api.GetWorkshopDefaults({})).persona)
+        assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), 1)
+      }
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("keeps the workshop persona and the story default persona independent both ways", () => {
     const config = testConfig()
     return Effect.gen(function* () {

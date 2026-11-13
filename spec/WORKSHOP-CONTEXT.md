@@ -65,6 +65,8 @@ For a turn whose previous run can be carried (the W5 checks pass), with `room` =
 2. **Elide** past ¾: older tool results in the carried transcript are replaced, oldest first, by a marker, until the count is at most **½ of `room`** (the hysteresis LCM's keep/trigger use, LCM.md §2.6). The calls, their arguments, the assistant's text and reasoning, and `send_message` results stay. The last turn's results are never elided. The new rollout stores the elided transcript, so the next turns carry it unchanged and read it from cache.
 3. **Build fresh** when eliding can't reach ½ (the conversation itself, not its tool results, outgrew the window): the built fallback, the preset, the card, the summary layer when summaries are on (§2.4), the timeline's messages and one line of steps per message (`workshop-step-summaries`, now naming the message's number, §3.2). The rollout after it carries on from that new base.
 
+**Built review correction (review-workctx1):** The selected model's tokenizer checks replacement batches, including the final half-window admission. A character estimate cannot accept a carry above that target. A request above the trigger with no eligible older results also builds fresh. These implementation details are obsolete as a proposal; see ARCHITECTURE §16, "Context review".
+
 Cache: stage 1 breaks nothing. Stage 2 breaks the cache once, from the first elided result on; everything before it (the preset, the card, the history and the transcript up to there) stays a cache read. Stage 3 breaks it once after the preset and card. With ½ as the target, the next break comes after another ¼ of the window of new work. Example with a 200,000 window and a 50,000 reserve: room 150,000; carry to 112,500, elide to 75,000, so about 37,500 tokens of tool traffic between cache breaks.
 
 The marker, model-facing: `[Result left out to save room. read_run with message 12 and call "toolu_01…" shows it again.]`. The inspector's request line says "Older tool results were left out to make room (9 results); the rest was carried on from the previous turn's run", with the parent link.
@@ -159,6 +161,8 @@ The pieces are ordinary prompt entries a preset can move, turn off or leave out 
 - The workshop pieces (§4.2) are added after the card, off, except Workspace instructions when the user writes some in the dialog.
 - "Make preset" creates it (`ConvertPresetToWorkshop`, origin `user`) and opens it in the editor. Converting a converted preset adds nothing twice.
 
+**Built review correction (review-workctx1):** Converting an existing workshop preset applies the supplied replacement workspace instructions, including explicitly clearing them. The dialog opens with the source's instructions. Its open state is in the URL and its form edits are private user drafts, in both editors, so reload restores the work. See ARCHITECTURE §16, "Context review"; this subset is obsolete as an implementation proposal.
+
 ## 5. Stored data
 
 No new tables or columns: elided transcripts are ordinary `rollouts.transcript` values, the continuity record in the snapshot gains `elided` (a count), and `read_run` reads existing rollouts. The user setting `workshop.defaults` gains an optional `persona` (absent: never chosen; null: none). No baseline change.
@@ -170,10 +174,8 @@ No new tables or columns: elided transcripts are ordinary `rollouts.transcript` 
 
 ## 7. Open questions
 
-## 7. Open questions
-
 1. **Should story agent replies offer `read_run` by default?** Example: a story with tools on, where the narrator looked up a lorebook entry three replies ago; with `read_run` it can read that lookup again instead of searching again. Adding it changes every story agent request's tool list (one more definition, about 150 tokens, read from cache). **Recommendation:** not by default; it's in the chat's Tools list for those who want it.
 2. **Should workshop summaries include each message's steps?** Example: "Created the card Mara Quill; started the chat The Skerry Light" in the summarized text makes the summary say what was done, not only what was said, at the cost of reading each message's run when summarizing. **Recommendation:** yes, in a later unit; today a summary covers the messages, and `read_run` reaches the steps.
 3. **Are ¾ and ½ of the room the right trigger and target?** Example: with a 200,000-token window, carrying until 112,500 and eliding to 75,000 breaks the cache about every 37,500 tokens of tool traffic; ⅞ and ¾ would break it half as often but leave a turn only 18,750 tokens of runway before the provider refuses. **Recommendation:** ¾ and ½, as LCM's trigger and keep.
-4. **Should the first workshop make a workshop persona, or start with none?** Example: a user named "local" opens the first workshop; today a persona card "local" appears in the persona folder and the workshop plays it, so the assistant can say "local" instead of "User". Starting with none adds nothing to the library but the assistant then calls them "User". **Recommendation:** make one, as built; clearing it is one menu item and it is never made again.
-5. **Should an imported ST preset's 4,095 be dropped only when it is exactly that number?** Example: a preset exported from ST untouched has 4,095 and is dropped, so a 200k model keeps 200k; one where the user set 4,096 keeps 4,096. Dropping every small value would override users who chose a small window on purpose (a local model). **Recommendation:** exactly 4,095, as built.
+4. **Resolved [D], owner's review brief, 2026-11-12:** The first workshop creates its persona in the same transaction; it is never recreated after clearing or deletion. Its selection is independent of the RP default in both directions. Built; obsolete as an implementation proposal.
+5. **Resolved [D], owner's review brief, 2026-11-12:** Only an exact imported ST preset context of 4,095 is dropped. Other values, and deliberate model settings including 4,095, are retained. Built; obsolete as an implementation proposal.

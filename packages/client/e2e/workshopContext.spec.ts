@@ -100,11 +100,17 @@ for (const width of [1440, 390])
       await convert.click()
       const dialog = page.getByRole("dialog", { name: "Convert to a workshop preset" })
       await expect(dialog).toBeVisible()
+      await page.reload()
+      await expect(dialog).toBeVisible()
       const name = dialog.getByLabel("Name", { exact: true })
       await expect(name).toHaveValue("Harbor preset (workshop)")
       const label = `Harbor workshop ${width} ${theme}`
       await name.fill(label)
       await dialog.getByLabel("Workspace instructions").fill("Ask before renaming cards.")
+      await page.reload()
+      await expect(dialog).toBeVisible()
+      await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(label)
+      await expect(dialog.getByLabel("Workspace instructions")).toHaveValue("Ask before renaming cards.")
       const pieces = dialog.getByRole("list", { name: "Pieces to keep or drop" })
       if (await pieces.count()) {
         const first = pieces.getByRole("listitem").first()
@@ -118,7 +124,28 @@ for (const width of [1440, 390])
       await expect(page).not.toHaveURL(new RegExp(`/library/${seeded.presetId}$`))
       await expect(page.getByText(label).first()).toBeVisible()
       const made = await admin((api) => api.ListLibrary({ kind: "preset" }))
-      expect(made.some((ref) => ref.label === label)).toBe(true)
+      const workshop = made.find((ref) => ref.label === label)!
+      expect(workshop).toBeTruthy()
+
+      // The side editor offers the same conversion, including replacing existing instructions.
+      await page.goto(`${server().url}/chats/${seeded.chatId}?editor=${workshop.id}`)
+      await page.getByRole("button", { name: "Convert to workshop", exact: true }).click()
+      await expect(dialog).toBeVisible()
+      await expect(dialog.getByLabel("Workspace instructions")).toHaveValue("Ask before renaming cards.")
+      await dialog.getByLabel("Workspace instructions").fill("Keep a short change log.")
+      await page.reload()
+      await expect(dialog).toBeVisible()
+      await expect(dialog.getByLabel("Workspace instructions")).toHaveValue("Keep a short change log.")
+      await shot("panel-convert-dialog")
+      await expectLayout(page, info, `workctx-panel-convert-${width}-${theme}`)
+      await dialog.getByRole("button", { name: "Make preset", exact: true }).click()
+      await expect(dialog).toBeHidden()
+      const copies = await admin((api) => api.ListLibrary({ kind: "preset" }))
+      const copy = copies.find((ref) => ref.label === `${label} (workshop)`)!
+      const saved = await admin((api) => api.OpenEditor({ refId: copy.id }))
+      expect(JSON.stringify(saved.doc)).toContain("Keep a short change log.")
+      const original = await admin((api) => api.OpenEditor({ refId: workshop.id }))
+      expect(JSON.stringify(original.doc)).toContain("Ask before renaming cards.")
 
       // The workshop persona from a persona's menu; the story default stays as it was.
       const persona = await admin((api) =>

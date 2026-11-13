@@ -236,8 +236,8 @@ const numberResults = Effect.fnUntraced(function* (
 
 /**
  * Leaves out a carried transcript's older tool results, oldest first, never the last turn's or
- * a post's, until the local estimate reaches the target; `recount` measures the result with the
- * model's tokenizer. Null: nothing could be left out.
+ * a post's, until the model's tokenizer reaches the target. Null: the protected material
+ * cannot fit the target, so build fresh. Counting batches keeps long transcripts bounded.
  */
 export const elideCarried = <E>(input: {
   readonly reader: Reader["Service"]
@@ -261,15 +261,24 @@ export const elideCarried = <E>(input: {
     if (candidates.length === 0) return null
     const numbers = yield* numberResults(input.reader, input.request, input.path, results)
     const next = transcript.slice()
-    let saved = 0
+    let measured = count
     let elided = 0
+    let pending = 0
+    let batch = 1
     for (const { index, call } of candidates) {
-      if (count - saved <= room * ELIDE_TARGET) break
       const message = next[index] as AgentMessage & { role: "toolResult" }
       const marker = elisionMarker(numbers.get(index) ?? null, call)
-      saved += Math.max(0, Math.ceil((textOf(message.content).length - marker.length) / 4))
+      if (textOf(message.content).length <= marker.length) continue
       next[index] = { ...message, content: [{ type: "text", text: marker }] }
       elided++
+      pending++
+      if (pending >= batch) {
+        measured = yield* input.recount(next)
+        if (measured <= room * ELIDE_TARGET) return { transcript: next, count: measured, elided }
+        pending = 0
+        batch *= 2
+      }
     }
-    return { transcript: next, count: yield* input.recount(next), elided }
+    if (pending > 0) measured = yield* input.recount(next)
+    return elided > 0 && measured <= room * ELIDE_TARGET ? { transcript: next, count: measured, elided } : null
   })
