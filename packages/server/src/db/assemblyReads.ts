@@ -1,4 +1,5 @@
 import { makeExternalMediaReadHandlers } from "./externalMedia.ts"
+import { makeSavedMediaReadHandlers } from "./savedMedia.ts"
 import type { ContinuousSnapshot } from "../agent/continuity.ts"
 import { prepareTextTokens } from "../assembler/textTokens.ts"
 import { tokensOf } from "../assembler/st.ts"
@@ -60,6 +61,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
     ...(yield* makeExternalMediaReadHandlers),
+    ...(yield* makeSavedMediaReadHandlers),
     ...(yield* makeSourcePrefsReadHandlers),
     ...(yield* makeCardOriginReadHandlers),
     ...(yield* makeTokenCountingReadHandlers),

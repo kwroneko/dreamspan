@@ -12,6 +12,7 @@ import { Socket } from "effect/socket"
 import { PasswordCost } from "../../src/auth/passwords.ts"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
 import { serverWith } from "../../src/server.ts"
+import { SavedMedia } from "../../src/api/savedMedia.ts"
 import { testBundles, testWorkerMode } from "./bundles.ts"
 import { tempDir } from "./tempDir.ts"
 
@@ -64,7 +65,10 @@ export const serverLayer = (
   /** The card sources: the fake archive's adapter for cardSources.test.ts. */
   sources?: Parameters<typeof serverWith>[4]
 ) =>
-  serverWith(generator ?? ContextGenerator.layer, summaries, undefined, undefined, sources).pipe(
+  // Saved card media never reaches the internet from a test: its transport is off unless a
+  // test registers its own (savedMedia.test.ts).
+  Layer.effectDiscard(Effect.flatMap(SavedMedia, (saved) => saved.fetchers.disable("media.saved"))).pipe(
+    Layer.provideMerge(serverWith(generator ?? ContextGenerator.layer, summaries, undefined, undefined, sources)),
     Layer.provide([Layer.succeed(AppConfig)(config), testPasswordCost, testBundles])
   )
 

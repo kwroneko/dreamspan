@@ -1,4 +1,5 @@
 import { ExternalMediaPrefs } from "@rp/shared/externalMedia.ts"
+import { MediaHosts } from "@rp/shared/savedMedia.ts"
 // All settings use this registry and writer; feature handlers keep their ownership checks.
 import { Effect, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -32,6 +33,7 @@ const definitions: ReadonlyArray<SettingDefinition> = [
     })
   },
   { id: "media.external", scope: "user", schema: ExternalMediaPrefs },
+  { id: "media.saved.hosts", scope: "user", schema: MediaHosts },
   { id: "display", scope: "user", schema: DisplayPrefs, agent: { description: "How chats are displayed." } },
   { id: "notices", scope: "user", schema: Schema.Record(Schema.String, Schema.Array(Schema.String)) },
   {

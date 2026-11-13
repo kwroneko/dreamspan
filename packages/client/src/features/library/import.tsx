@@ -21,6 +21,7 @@ import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
 import { uploadFile, type UploadOutcome } from "./files.ts"
 import { ImportReportView } from "./report.tsx"
+import { askMediaApproval } from "../savedMedia/approval.ts"
 
 interface Upload {
   readonly id: number
@@ -107,6 +108,7 @@ export function ImportPage() {
     )
     setUploads((list) => [...added.toReversed(), ...list])
     // One at a time: the server parses a few files at once, and holds the rest back.
+    const imported: RefId[] = []
     for (const upload of added) {
       if (upload.status === "done") continue
       update(upload.id, { status: "uploading" })
@@ -118,7 +120,10 @@ export function ImportPage() {
         registry.refresh(sessionAtom)
         return
       }
+      if (outcome._tag === "Done" && outcome.result.library) imported.push(outcome.result.library.ref.id)
     }
+    // One question for the whole batch: the new sites its media is on (spec/SAVED-MEDIA.md §3.2).
+    askMediaApproval(imported)
   }
 
   return (

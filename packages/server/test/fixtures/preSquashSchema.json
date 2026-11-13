@@ -542,6 +542,12 @@
     },
     {
       "type": "index",
+      "name": "revision_media_media",
+      "tbl_name": "revision_media",
+      "sql": "CREATE INDEX revision_media_media ON revision_media(media)"
+    },
+    {
+      "type": "index",
       "name": "rollout_effects_call",
       "tbl_name": "rollout_effects",
       "sql": "CREATE INDEX rollout_effects_call ON rollout_effects(tool_call_id, rollout_id)"
@@ -593,6 +599,36 @@
       "name": "rollouts_slot",
       "tbl_name": "rollouts",
       "sql": "CREATE INDEX rollouts_slot ON rollouts(slot_id) WHERE slot_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "saved_media_media",
+      "tbl_name": "saved_media",
+      "sql": "CREATE INDEX saved_media_media ON saved_media(media_id) WHERE media_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "saved_media_owner_host",
+      "tbl_name": "saved_media",
+      "sql": "CREATE INDEX saved_media_owner_host ON saved_media(owner_user_id, host, state)"
+    },
+    {
+      "type": "index",
+      "name": "saved_media_scans_owner",
+      "tbl_name": "saved_media_scans",
+      "sql": "CREATE INDEX saved_media_scans_owner ON saved_media_scans(owner_user_id, queued_at)"
+    },
+    {
+      "type": "index",
+      "name": "saved_media_scans_queued",
+      "tbl_name": "saved_media_scans",
+      "sql": "CREATE INDEX saved_media_scans_queued ON saved_media_scans(queued_at)"
+    },
+    {
+      "type": "index",
+      "name": "saved_media_state",
+      "tbl_name": "saved_media",
+      "sql": "CREATE INDEX saved_media_state ON saved_media(state, updated_at) WHERE state = 'pending'"
     },
     {
       "type": "index",
@@ -1298,6 +1334,12 @@
     },
     {
       "type": "table",
+      "name": "revision_media",
+      "tbl_name": "revision_media",
+      "sql": "CREATE TABLE revision_media ( revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, media INTEGER NOT NULL REFERENCES saved_media(id) ON DELETE CASCADE, PRIMARY KEY (revision_id, media) ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
       "name": "rollout_branches",
       "tbl_name": "rollout_branches",
       "sql": "CREATE TABLE rollout_branches ( rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE, branch_no INTEGER NOT NULL CHECK (branch_no >= 1), parent_branch_no INTEGER NOT NULL DEFAULT 0, fork_index INTEGER NOT NULL, reason TEXT NOT NULL, messages_json TEXT NOT NULL CHECK (json_valid(messages_json)), created_at INTEGER NOT NULL, PRIMARY KEY (rollout_id, branch_no) ) STRICT, WITHOUT ROWID"
@@ -1325,6 +1367,18 @@
       "name": "rollouts",
       "tbl_name": "rollouts",
       "sql": "CREATE TABLE rollouts ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, kind TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('created', 'running', 'completed', 'stopped', 'failed', 'interrupted', 'discarded')), slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, parent_rollout_id TEXT REFERENCES rollouts(id), role TEXT NOT NULL, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), request_class TEXT NOT NULL CHECK (request_class IN ('interactive', 'idle', 'background')), -- Provider-reported usage, rolled up. NULL means unknown, not zero (as in reference-harness). llm_requests INTEGER, usage_input_tokens INTEGER, usage_output_tokens INTEGER, usage_cache_read_tokens INTEGER, usage_cache_write_tokens INTEGER, usage_cost REAL, cache_observed_json TEXT CHECK (cache_observed_json IS NULL OR json_valid(cache_observed_json)), error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, updated_at INTEGER NOT NULL, completed_at INTEGER , context_issues_json TEXT CHECK (context_issues_json IS NULL OR json_valid(context_issues_json)), history_start_slot_id TEXT, history_start_depth INTEGER, history_depth INTEGER, fork_id TEXT, -- Agent rollouts (spec/AGENTIC.md §9): tool calls so far, and the orchestration mode it ran in. step_count INTEGER NOT NULL DEFAULT 0 CHECK (step_count >= 0), mode TEXT) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "saved_media",
+      "tbl_name": "saved_media",
+      "sql": "CREATE TABLE saved_media ( id INTEGER PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), url TEXT NOT NULL CHECK (length(url) <= 8192), host TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('image', 'audio', 'video', 'font')), state TEXT NOT NULL CHECK (state IN ('approval', 'pending', 'saved', 'failed', 'declined')), media_id TEXT REFERENCES media_assets(id), reason TEXT, once INTEGER NOT NULL DEFAULT 0 CHECK (once IN (0, 1)), updated_at INTEGER NOT NULL, UNIQUE (owner_user_id, url), CHECK ((state = 'saved') = (media_id IS NOT NULL)) ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "saved_media_scans",
+      "tbl_name": "saved_media_scans",
+      "sql": "CREATE TABLE saved_media_scans ( revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE, owner_user_id TEXT NOT NULL REFERENCES users(id), queued_at INTEGER NOT NULL ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "table",
@@ -2321,6 +2375,18 @@
       "name": "rollouts_slot_id_same_chat_update",
       "tbl_name": "rollouts",
       "sql": "CREATE TRIGGER rollouts_slot_id_same_chat_update BEFORE UPDATE OF slot_id, chat_id ON rollouts WHEN NEW.slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'rollouts.slot_id must be in the same chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "saved_media_owner_fixed",
+      "tbl_name": "saved_media",
+      "sql": "CREATE TRIGGER saved_media_owner_fixed BEFORE UPDATE OF owner_user_id, url ON saved_media WHEN NEW.owner_user_id IS NOT OLD.owner_user_id OR NEW.url IS NOT OLD.url BEGIN SELECT RAISE(ABORT, 'saved_media never changes owner or address'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "saved_media_scans_queue",
+      "tbl_name": "entity_revisions",
+      "sql": "CREATE TRIGGER saved_media_scans_queue AFTER INSERT ON entity_revisions WHEN instr(NEW.doc_json, '//') > 0 BEGIN INSERT INTO saved_media_scans (revision_id, owner_user_id, queued_at) SELECT NEW.id, owner_user_id, NEW.created_at FROM entities WHERE id = NEW.entity_id; END"
     },
     {
       "type": "trigger",

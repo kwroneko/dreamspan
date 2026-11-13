@@ -33,6 +33,13 @@ it.live("classifies every RPC and registered command; a new unclassified operati
       "SetHtmlApproval",
       "SetTokenCounting",
       "SetExternalMedia",
+      "ChangeMediaHosts",
+      "DecideMediaApproval",
+      "GetMediaHosts",
+      "GetSavedMediaStatus",
+      "ListMediaApproval",
+      "LookupSavedMedia",
+      "RetrySavedMedia",
       "PurgeBinItem"
     ]
     for (const tag of protectedTags) {

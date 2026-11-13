@@ -1,5 +1,6 @@
 import { ExternalMedia, externalMediaRoute, makeExternalMediaHandlers } from "./api/externalMedia.ts"
-import { AuthenticatedExternalMediaApi } from "@rp/shared/api.ts"
+import { AuthenticatedExternalMediaApi, AuthenticatedSavedMediaApi } from "@rp/shared/api.ts"
+import { makeSavedMediaHandlers, SavedMedia, savedMediaRoute } from "./api/savedMedia.ts"
 import { operationWriter, installOperationRuntime } from "./agent/operations.ts"
 import { makeWorkshopHandlers } from "./api/workshop.ts"
 import {
@@ -197,6 +198,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),
   AuthenticatedExternalMediaApi.toLayer(makeExternalMediaHandlers),
+  AuthenticatedSavedMediaApi.toLayer(makeSavedMediaHandlers),
 
   AuthenticatedTextSearchApi.toLayer(makeTextSearchHandlers),
   AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
@@ -438,7 +440,7 @@ const RequestGuard = HttpRouter.middleware(
               })
           : (response: HttpServerResponse.HttpServerResponse) =>
               // The frame page sets its own, with its nonce.
-              (path === FRAME_PANEL || path === "/media/external") &&
+              (path === FRAME_PANEL || path === "/media/external" || path.startsWith("/media/saved/")) &&
               response.headers["content-security-policy"] !== undefined
                 ? response
                 : HttpServerResponse.setHeader(response, "content-security-policy", policy)
@@ -687,6 +689,7 @@ export const serverWith = <E>(
       ImportRoutes.layer,
       SourceImageRoute,
       externalMediaRoute,
+      savedMediaRoute,
       SourceNewerFileRoute,
       StaticRoutes,
       InterruptedRequests,
@@ -722,6 +725,8 @@ export const serverWith = <E>(
     Layer.provideMerge(Notices.layer),
     Layer.provideMerge(sources),
     Layer.provideMerge(ExternalMedia.layer),
+    // Saved card media (spec/SAVED-MEDIA.md): its task downloads between writer transactions.
+    Layer.provideMerge(SavedMedia.layer),
     // One set of held files for uploads, the ST folder import and adopting a source's cards.
     Layer.provideMerge(MediaHolds.layer),
     Layer.provide(ProvidersLive),

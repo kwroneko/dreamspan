@@ -1411,6 +1411,52 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       ])
   },
+  // Saved card media: each account's saved files, sites and waiting files are its own.
+  LookupSavedMedia: {
+    probe: (actor) =>
+      Effect.map(actor.api.LookupSavedMedia({ urls: ["https://cardex.zip/i/none.png"] }), (found) =>
+        assert.deepStrictEqual(found, [])
+      )
+  },
+  GetSavedMediaStatus: {
+    probe: (actor, owner) => refused(actor.api.GetSavedMediaStatus({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  RetrySavedMedia: {
+    probe: (actor, owner) => refused(actor.api.RetrySavedMedia({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  ListMediaApproval: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.ListMediaApproval({ refIds: [owner.editor.cardRefId, owner.refId] }), (hosts) =>
+        assert.deepStrictEqual(hosts, [])
+      )
+  },
+  DecideMediaApproval: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* owner.api.GetMediaHosts()
+        yield* actor.api.DecideMediaApproval({
+          refIds: [owner.editor.cardRefId],
+          decisions: [{ host: "isolation.test", choice: "approve" }]
+        })
+        assert.deepStrictEqual(yield* owner.api.GetMediaHosts(), theirs)
+      })
+  },
+  GetMediaHosts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetMediaHosts()
+        yield* owner.api.ChangeMediaHosts({ add: { host: "owner-only.test", subdomains: false } })
+        assert.deepStrictEqual(yield* actor.api.GetMediaHosts(), before)
+      })
+  },
+  ChangeMediaHosts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* owner.api.GetMediaHosts()
+        yield* actor.api.ChangeMediaHosts({ remove: "cardex.zip" })
+        assert.deepStrictEqual(yield* owner.api.GetMediaHosts(), theirs)
+      })
+  },
   GetDisplayPrefs: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

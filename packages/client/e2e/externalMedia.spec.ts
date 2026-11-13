@@ -2,6 +2,7 @@
 // media responses are intercepted at the app route; server tests exercise the actual proxy.
 import { expect, test } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { SYNTHETIC_TTF } from "./support/syntheticFont.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
@@ -33,7 +34,8 @@ for (const width of [1440, 390])
               first_mes:
                 'A synthetic map.\n\n<img class="map" alt="Synthetic map" src="https://media.invalid/map.png" width="80" height="80">\n\n<style>.tile{background-image:url("https://media.invalid/tile.png");width:40px;height:40px}</style><div class="tile"></div>' +
                 '<span src="/media/external?url=inert-attribute"></span><style>.literal{--address:"/media/external?url=inert-style";content:\'url("/media/external?url=inert-content")\'}</style><span class="literal"></span>' +
-                '<style>:is([data-probe="yes"] *) .tile{background-image:url("https://media.invalid/yes.png")} :is([data-probe="no"] *) .tile{background-image:url("https://media.invalid/no.png")} @media (width:0px){.absent{background:url("https://media.invalid/never.png")}}</style>' +
+                '<style>:is([data-probe="yes"] *) .tile{background-image:url("https://media.invalid/yes.png")} :is([data-probe="no"] *) .tile{background-image:url("https://media.invalid/no.png")} @media (max-width:200px){.state{--media-hit:yes;background:url("https://media.invalid/never.png")}}</style>' +
+                '<style>.door:checked ~ .state{background:url(https://media.invalid/checked.png)} .state:hover{background:url(https://media.invalid/hover.png)} :has(.door:checked) .state{border-image-source:url(https://media.invalid/has.png)} [data-choice="yes"]{background:url(https://media.invalid/attribute.png)} .box{container-type:inline-size;width:160px;max-width:100%} @container (min-width:200px){.state{--container-hit:yes;background:url(https://media.invalid/container.png)}} @keyframes probe{from{background:url(https://media.invalid/animation.png)}to{background:url(https://media.invalid/animation-end.png)}} .state{width:40px;height:40px;animation:probe 1s infinite;background-image:image-set(url(https://media.invalid/image-set.png) 1x)} @font-face{font-family:Synth;src:url(https://media.invalid/glyph.ttf);unicode-range:U+0041} .glyph{font-family:Synth}</style><div class="box"><input class="door" type="checkbox"><div class="state" data-choice="no"></div><span class="glyph">B</span></div>' +
                 "\n\n<div>" +
                 Array.from(
                   { length: 80 },
@@ -73,10 +75,12 @@ for (const width of [1440, 390])
         }
         await route.fulfill({
           status: 200,
-          body: pixel,
-          contentType: "image/png",
+          body: new URL(address).searchParams.get("url")?.endsWith(".ttf")
+            ? Buffer.from(SYNTHETIC_TTF.split(",")[1]!, "base64")
+            : pixel,
+          contentType: new URL(address).searchParams.get("url")?.endsWith(".ttf") ? "font/ttf" : "image/png",
           headers: {
-            "cache-control": "no-store",
+            "cache-control": "no-store, no-cache, must-revalidate",
             "x-content-type-options": "nosniff",
             "cross-origin-resource-policy": "same-origin",
             "content-disposition": "attachment",
@@ -123,13 +127,63 @@ for (const width of [1440, 390])
         )
         .toBe(true)
       // Both state branches, and a rule that cannot match, fetch before any selector does.
-      for (const name of ["yes", "no", "never"])
+      for (const name of [
+        "yes",
+        "no",
+        "never",
+        "checked",
+        "hover",
+        "has",
+        "attribute",
+        "container",
+        "animation",
+        "animation-end",
+        "glyph"
+      ])
         await expect
           .poll(() =>
-            requests.some((request) => new URL(request).searchParams.get("url") === `https://media.invalid/${name}.png`)
+            requests.some(
+              (request) =>
+                new URL(request).searchParams.get("url") ===
+                `https://media.invalid/${name}.${name === "glyph" ? "ttf" : "png"}`
+            )
           )
           .toBe(true)
+      // All accepted URLs finish their 429 retry before any state change. Unsupported
+      // image-set is dropped, including its URL; the font is fetched even without its glyph.
+      await expect.poll(() => [...attempts.values()].every((count) => count === 2)).toBe(true)
+      expect(requests.some((request) => request.includes("image-set.png"))).toBe(false)
+      const beforeStates = [...requests]
       const addresses = [...new Set(requests)].sort()
+      await article.locator("input.custom-door").check()
+      await article.locator(".custom-state").hover()
+      await article.locator(".custom-state").evaluate((element) => element.setAttribute("data-choice", "yes"))
+      await article.locator(".custom-glyph").evaluate((element) => {
+        element.textContent = "A"
+      })
+      await article.locator(".custom-box").evaluate((element) => {
+        ;(element as HTMLElement).style.width = "400px"
+      })
+      await expect
+        .poll(() =>
+          article
+            .locator(".custom-state")
+            .evaluate((element) => getComputedStyle(element).getPropertyValue("--container-hit").trim())
+        )
+        .toBe("yes")
+      await page.setViewportSize({ width: 100, height: 900 })
+      await expect
+        .poll(() =>
+          article
+            .locator(".custom-state")
+            .evaluate((element) => getComputedStyle(element).getPropertyValue("--media-hit").trim())
+        )
+        .toBe("yes")
+      await page.emulateMedia({ media: "print" })
+      await page.waitForTimeout(1500) // spans animation iterations and lazy font selection
+      expect(requests).toEqual(beforeStates)
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ media: "screen" })
       await page.evaluate(async () => {
         document.documentElement.dataset.probe = "yes"
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
