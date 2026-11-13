@@ -1,6 +1,7 @@
 // One change a workshop run made outside the chat (spec/WORKSHOP.md §3.6), with Undo and Open: in
 // its step's row and in the Changes tab. Undo is refused once the item changed since (an edit by
 // hand, say); the reason shows with Open beside it, to look at its history first.
+import { storyScopeText, type StoryScope } from "@rp/shared/branchNaming.ts"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { useAction } from "../../actions.tsx"
@@ -38,7 +39,11 @@ export function EffectRow({ effect, when = false }: { effect: RolloutEffect; whe
   return (
     <div data-effect={effectId(current)} data-effect-kind={current.kind} className="flex flex-col gap-1 text-xs">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{current.title}</span>
+        <span className="min-w-0 font-medium [overflow-wrap:anywhere]">
+          {current.undo?.storyScope
+            ? `${String(current.undo.scopeTitle)} · ${storyScopeText(current.undo.storyScope as StoryScope)}`
+            : current.title}
+        </span>
         {state && <Badge>{state}</Badge>}
         {when && <span className="text-muted">{new Date(current.createdAt).toLocaleString()}</span>}
         <span className="ml-auto flex shrink-0 flex-wrap gap-1">

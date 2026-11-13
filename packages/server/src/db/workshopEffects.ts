@@ -627,6 +627,10 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                 for (const chatId of chatTargets) {
                   storyPosition = yield* checkStoryWrite(sql, input.userId, input.rolloutId, chatId, storyAt)
                   if (storyPosition) {
+                    if (input.operation === "AddStateEvent" || input.operation === "AddStateEvents") {
+                      value.displayEnd = false
+                      ;(payload as Record<string, unknown>).displayEnd = false
+                    }
                     if ("forkId" in value && value.forkId !== storyAt!.forkId)
                       return yield* refuseOperation("This change names another story branch.")
                     for (const field of ["slotId", "parentSlotId", "leaf"])
@@ -793,10 +797,21 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       targetKind: policy!.targetKind,
                       targetId: policy!.target(value as never, after as never),
                       title: storyPosition
-                        ? `${policy!.label} · ${storyPosition.label} (${storyAt!.forkId}) · from message ${storyPosition.upTo}`
+                        ? `${policy!.label} · ${storyPosition.label} · from message ${storyPosition.upTo}`
                         : policy!.label,
                       undo: {
                         operation: input.operation,
+                        ...(storyPosition
+                          ? {
+                              storyScope: {
+                                branch: storyPosition.naming,
+                                first: storyPosition.upTo,
+                                last: storyPosition.upTo,
+                                from: true
+                              },
+                              scopeTitle: policy!.label
+                            }
+                          : {}),
                         input: value,
                         prior: before,
                         next: after,

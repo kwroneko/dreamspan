@@ -42,6 +42,7 @@ const listLibrary: RolloutTool<{
   readonly limit?: number
 }> = {
   id: "list_library",
+  storyRead: "library",
   label: "Looked in your library",
   explanation: "Find cards, presets, lorebooks and notes in your library.",
   effect: "read",
@@ -75,6 +76,7 @@ const listLibrary: RolloutTool<{
 
 const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Record<string, unknown>>> => ({
   id: `read_${kind}`,
+  storyRead: "library",
   label: `Read a ${kind}`,
   explanation: `Read a ${kind} from your library.`,
   effect: "read",

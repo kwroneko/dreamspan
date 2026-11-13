@@ -23,6 +23,7 @@ import {
 import { useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
+import { ChangesPanel } from "./ChangesPanel.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
@@ -210,6 +211,7 @@ function SideChatHeader({
 }) {
   const open = useOpenOwn()
   const href = `/chats/${shown.id}`
+  const [panel, setPanel] = usePlaceParam(chatPlaceKey(SIDE_CHAT_SCOPE, "panel"), "")
   return (
     <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-2">
       <KindBadge kind={shown.kind} />
@@ -248,6 +250,19 @@ function SideChatHeader({
           New workshop
         </MenuItem>
       </Menu>
+      <Button
+        variant="ghost"
+        className="shrink-0 px-2 text-xs"
+        aria-pressed={panel === "workshop.changes"}
+        hint={
+          panel === "workshop.changes"
+            ? "Returns to this workshop’s conversation."
+            : "Shows what this workshop changed, with Undo."
+        }
+        onClick={() => setPanel(panel === "workshop.changes" ? "" : "workshop.changes")}
+      >
+        Changes
+      </Button>
       <IconLink
         label="Open in its own tab"
         hint="Opens this workshop in a tab of its own, with its settings and panels."
@@ -381,6 +396,8 @@ function SideChatSurface({
     },
     [open, session.id]
   )
+  const [sidePanel] = usePlaceParam(chatPlaceKey(SIDE_CHAT_SCOPE, "panel"), "")
+  const changes = sidePanel === "workshop.changes"
   const problem = error ?? view.error ?? branchError
   return (
     <ChatPlaceScope value={SIDE_CHAT_SCOPE}>
@@ -406,7 +423,11 @@ function SideChatSurface({
                 <Alert tone="danger">{problem}</Alert>
               </div>
             )}
-            {view.loading ? (
+            {changes ? (
+              <div className="min-h-0 flex-1 overflow-y-auto p-3" data-side-chat-changes="">
+                <ChangesPanel session={session} view={view} active />
+              </div>
+            ) : view.loading ? (
               <SkeletonMessages onRetry={() => void session.open(null)} />
             ) : (
               <MessageList
@@ -422,8 +443,12 @@ function SideChatSurface({
                 onOpenSummaries={noSummaries}
               />
             )}
-            <SlotOutlet slot={chatComposerNotes} props={{ view }} />
-            <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: openPanel }} />
+            {!changes && (
+              <>
+                <SlotOutlet slot={chatComposerNotes} props={{ view }} />
+                <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: openPanel }} />
+              </>
+            )}
             <SlotOutlet slot={chatOverlays} props={{ session, view }} />
           </div>
         </CastContext>

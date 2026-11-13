@@ -10,7 +10,7 @@ import { makeRegistry } from "@rp/shared/registry.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { runCommand, makeCommand, type Command } from "../commands.ts"
 import type { Registry } from "../registry.ts"
-import type { RolloutTool, ToolContext, ToolOutput } from "./tools.ts"
+import type { RolloutTool, ToolContext, ToolOutput, WorkshopStoryRead } from "./tools.ts"
 import { budgetResult, ToolInputRefused } from "./tools.ts"
 import type { CapabilityRegistries } from "./capabilities.ts"
 
@@ -38,6 +38,7 @@ export interface OperationRuntime {
   ) => Effect.Effect<unknown, unknown>
 }
 export interface OperationExposure {
+  readonly storyRead?: WorkshopStoryRead
   readonly id: string
   readonly operation: { readonly rpc: string } | { readonly command: string }
   readonly capability: string
@@ -159,6 +160,7 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
                 storyAt?: import("@rp/shared/chat.ts").StoryAt
                 upTo?: number
                 branchLabel?: string
+                branchNaming?: import("@rp/shared/branchNaming.ts").BranchNaming
                 chats?: ReadonlyArray<{ id: string; title: string }>
               }
             | undefined
@@ -171,10 +173,15 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
           if (proof?.storyAt)
             rows.unshift({
               label: "Story position",
-              value: `Branch “${proof.branchLabel ?? "Unnamed branch"}” (${proof.storyAt.forkId}); through message ${proof.upTo ?? 0}`
+              value: `Branch “${proof.branchLabel}”; through message ${proof.upTo ?? 0}`
             })
           if (proof?.chat) rows.unshift({ label: "chat", value: proof.chat.title })
-          const position = proof?.storyAt ? { storyAt: proof.storyAt } : {}
+          const position = proof?.storyAt
+            ? {
+                storyAt: proof.storyAt,
+                storyScope: { branch: proof.branchNaming!, first: proof.upTo!, last: proof.upTo!, from: true }
+              }
+            : {}
           if (entry.capability === "generate" && proof?.chat?.model) {
             const connection = yield* ctx.reader.GetConnection({
               userId: ctx.userId,

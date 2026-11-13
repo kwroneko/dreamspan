@@ -180,6 +180,7 @@ const refPolicy = (id: string): OperationPolicy =>
       })
   })
 type StateInput = {
+  displayEnd?: boolean
   chatId: ChatId
   slotId: SlotId | null
   forkId: ForkId | null
@@ -272,7 +273,7 @@ const statePolicy = (id: string): OperationPolicy =>
           chatId: input.chatId,
           forkId: input.forkId,
           slotId: input.slotId,
-          displayEnd: true,
+          displayEnd: input.displayEnd !== false,
           data
         })
         return {}

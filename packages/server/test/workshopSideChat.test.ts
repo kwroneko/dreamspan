@@ -11,7 +11,6 @@ import { foldState } from "@rp/shared/state.ts"
 import { Effect, Stream } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { storyTools } from "../src/agent/tools/history.ts"
-import { runTools } from "../src/agent/tools/runs.ts"
 import { type ToolContext, type RolloutTool, toolWriter } from "../src/agent/tools.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import { client, login, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
@@ -64,7 +63,7 @@ const text = (body: Body) =>
  * One provider for both chats: a story request gets a plain reply; a side chat's turn reads the
  * story (read_story, then search_story for "flooded"), then answers.
  */
-const provider = (hold: () => boolean = () => false) =>
+const provider = (hold: () => boolean = () => false, cast = false) =>
   startMockProvider((request, res) => {
     const body = request.body as Body
     if (!toolNames(body).includes("read_story")) return sse(res, completionChunks(["Story reply."], {}))
@@ -76,7 +75,9 @@ const provider = (hold: () => boolean = () => false) =>
         ? call("read_story", {}, "call_read")
         : done === 1
           ? call("search_story", { query: "flooded" }, "call_search")
-          : completionChunks(["You took the other road."], {})
+          : done === 2 && cast
+            ? call("get_cast", { chat: "Ledger" }, "call_cast")
+            : completionChunks(["You took the other road."], {})
     )
   })
 
@@ -373,7 +374,7 @@ describe("side chat", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
-        Effect.promise(() => provider()),
+        Effect.promise(() => provider(() => false, true)),
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
@@ -386,7 +387,9 @@ describe("side chat", () => {
       const first = yield* storyOf(api, workshop)
       yield* turn(api, workshop, "What happened so far?", undefined, first)
       const leaf = (yield* api.GetChat({ chatId: workshop.id })).activeLeafSlotId
-      const readRun = runTools.find((t) => t.id === "read_run")! as RolloutTool<Record<string, unknown>>
+      const readRun = toolForKind(yield* ExecutionRegistry, "workshop", "read_run")! as RolloutTool<
+        Record<string, unknown>
+      >
       const stepsAt = (at: StoryAt | undefined) =>
         Effect.gen(function* () {
           const context = { ...(yield* contextFor(userId, workshop, at)), leafSlotId: leaf }
@@ -396,12 +399,14 @@ describe("side chat", () => {
       const same = yield* stepsAt(first)
       assert.include(same, "read_story")
       assert.include(same, "Late again")
+      assert.include(same, "get_cast")
+      assert.include(same, first.leafSlotId!)
       // The story moves on: neither the new position nor the old one (its story changed) gets them.
       yield* posted(
         api.SendMessage({
           chatId: story.chat.id,
           parentSlotId: first.leafSlotId,
-          branch: false,
+          branch: true,
           content: "A later message."
         })
       )
@@ -409,6 +414,8 @@ describe("side chat", () => {
         const withheld = yield* stepsAt(at)
         assert.include(withheld, "read_story")
         assert.notInclude(withheld, "Late again")
+        assert.include(withheld, "get_cast")
+        assert.notInclude(withheld, first.leafSlotId!)
         assert.include(withheld, "read it again with read_story")
       }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -981,3 +988,27 @@ const normalize = (input: unknown) => {
   }
   return walk(input)
 }
+
+it.effect("sidechat2: every registered workshop tool declares how it reads story facts", () =>
+  Effect.gen(function* () {
+    const registry = yield* ExecutionRegistry
+    const state = foldState([])
+    const plan = registry.orchestrationModes
+      .get("workshop")!
+      .plan({ kind: "workshop", state: { ...state, workshopAttached: "synthetic-story" } })
+    const check = () => {
+      for (const id of plan.tools)
+        assert.isDefined(
+          toolForKind(registry, "workshop", id)?.storyRead,
+          `${id} must declare how it reads the tab's position (or why it cannot read the story)`
+        )
+    }
+    check()
+    // An added operation without a declaration fails this guard, even when its effect is read.
+    const exposed = registry.operationTools.get("get_cast")!
+    const undeclared = { ...exposed }
+    delete undeclared.storyRead
+    yield* registry.operationTools.register(undeclared)
+    assert.throws(check, /get_cast must declare/)
+  }).pipe(Effect.scoped, Effect.provide(ExecutionRegistry.layer))
+)

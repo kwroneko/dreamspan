@@ -397,3 +397,99 @@ export function workshopSideChatTests() {
         })
   })
 }
+
+/** The side header opens the existing Changes panel without leaving the story. */
+export function workshopSideChatChangesTests() {
+  test.describe("side chat Changes", () => {
+    const server = serverPerFile(withAdmin)
+    useSideChatProvider(server, {
+      calls: [
+        {
+          name: "rewrite_messages",
+          arguments: {
+            chat: "Changes story",
+            title: "Shorten the opening",
+            messages: [{ message: 1, text: "A shorter opening." }]
+          }
+        },
+        { name: "change_chat", arguments: { chat: "Changes story", change: { _tag: "AgentEnabled", on: true } } }
+      ]
+    })
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const)
+        test(`branch and range, Undo and Undo all at ${width} ${theme}`, async ({ page }, info) => {
+          test.setTimeout(120_000)
+          // No provider request is needed for the story fixture.
+          const { story, workshop, original, sibling } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            Effect.gen(function* () {
+              const story = yield* api.CreateChat({ title: "Changes story" })
+              const first = yield* api.SendMessage({
+                chatId: story.id,
+                parentSlotId: null,
+                branch: false,
+                content: "ALPHA opening."
+              })
+              if (first._tag !== "Posted") return yield* Effect.die("unexpected queue")
+              const original = (yield* api.GetChat({ chatId: story.id })).currentForkId!
+              const second = yield* api.SendMessage({
+                chatId: story.id,
+                parentSlotId: null,
+                branch: true,
+                content: "BRAVO opening."
+              })
+              if (second._tag !== "Posted") return yield* Effect.die("unexpected queue")
+              const sibling = (yield* api.GetChat({ chatId: story.id })).currentForkId!
+              const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+              return { story, workshop, original, sibling }
+            })
+          )
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+          await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+          await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+          await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+          await page.goto(`${server().url}/chats/${story.id}?fork=${original}&panel=workshop&workshop=${workshop.id}`)
+          const side = sidePanel(page).locator(`[data-side-chat="${workshop.id}"]`)
+          await side.getByLabel("Message", { exact: true }).fill("Shorten the opening and enable tools.")
+          await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          await expect(side.locator('[data-steps-panel="done"]')).toHaveCount(1, { timeout: 60_000 })
+          await expect(side.locator("[data-approval]")).toHaveCount(0)
+          await side.getByRole("button", { name: "Changes", exact: true }).click()
+          const changes = side.locator("[data-side-chat-changes]")
+          await expect(changes).toContainText("Original")
+          await expect(changes).toContainText("messages 1–1")
+          await expect(changes).not.toContainText(original)
+          await expectLayout(page, info, `side-changes-${width}-${theme}`, { scope: "[data-side-chat]" })
+          if (shots) {
+            mkdirSync(shots, { recursive: true })
+            await page.screenshot({ path: resolve(shots, `side-changes-${width}-${theme}.png`), fullPage: true })
+          }
+          await page.reload()
+          await expect(changes).toContainText("messages 1–1")
+          await changes
+            .locator('[data-effect-kind="chat.change"]')
+            .getByRole("button", { name: "Undo", exact: true })
+            .click()
+          await expect(changes.locator('[data-effect-kind="chat.change"]')).toContainText("Undone")
+          await changes.getByRole("button", { name: "Undo all of this reply", exact: true }).click()
+          await expect(changes.locator('[data-effect-kind="changeset.apply"]')).toContainText("Undone")
+          await expectLayout(page, info, `side-changes-undone-${width}-${theme}`, { scope: "[data-side-chat]" })
+          const texts = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            Effect.gen(function* () {
+              const read = (forkId: typeof original) =>
+                api.ReadPath({ chatId: story.id, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+              return [
+                (yield* read(original)).entries[0]!.version.content,
+                (yield* read(sibling)).entries[0]!.version.content
+              ]
+            })
+          )
+          expect(texts).toEqual(["ALPHA opening.", "BRAVO opening."])
+          await side.getByRole("button", { name: "Changes", exact: true }).click()
+          await expect(side.getByLabel("Message", { exact: true })).toBeVisible()
+          // Avoid ambiguous titles in the next synthetic fixture.
+          await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            api.RenameChat({ chatId: story.id, name: `Finished ${width} ${theme}` })
+          )
+        })
+  })
+}

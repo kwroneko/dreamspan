@@ -95,7 +95,7 @@ const fixture = (dataDir: string) =>
       path
     }
   })
-const beside = (dataDir: string, atEnd = false) =>
+const beside = (dataDir: string, atEnd = false, onSibling = false) =>
   Effect.gen(function* () {
     const f = yield* fixture(dataDir)
     const sibling = (yield* f.writer.CreateFork({
@@ -127,7 +127,11 @@ const beside = (dataDir: string, atEnd = false) =>
       forkId: side.currentForkId,
       leafSlotId: side.activeLeafSlotId,
       cache: new Map<string, unknown>(),
-      storyAt: { chatId: f.chat.id, forkId: f.forkId, leafSlotId: (atEnd ? f.entries.at(-1)! : f.entries[4]!).slotId }
+      storyAt: {
+        chatId: f.chat.id,
+        forkId: onSibling ? sibling.id : f.forkId,
+        leafSlotId: (atEnd ? f.entries.at(-1)! : f.entries[4]!).slotId
+      }
     }
     yield* fixtureSql(dataDir, [
       {
@@ -314,7 +318,7 @@ describe("workshop chat rewrites", () => {
       assert.strictEqual((yield* read(f.forkId, f.entries[3]!.slotId)).preset, before.preset)
       assert.strictEqual((yield* read(f.sibling.id, f.entries[4]!.slotId)).preset, before.preset)
       let effect = (yield* f.api.ListRolloutEffects({ chatId: f.side.id }))[0]!
-      assert.include(effect.title, f.forkId)
+      assert.include(effect.title, "Original")
       yield* f.api.UndoRolloutEffect(effect)
       assert.strictEqual((yield* read(f.forkId, f.entries[4]!.slotId)).preset, before.preset)
       const notes = (forkId: typeof f.forkId, slotId: SlotId) =>
@@ -417,7 +421,7 @@ describe("workshop chat rewrites", () => {
         10
       )
       const effect = (yield* f.api.ListRolloutEffects({ chatId: f.side.id }))[0]!
-      assert.include(effect.title, f.forkId)
+      assert.include(effect.title, "Original")
       yield* f.api.UndoRolloutEffect(effect)
       assert.lengthOf((yield* f.path()).entries, 10)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -447,7 +451,7 @@ describe("workshop chat rewrites", () => {
         }
       }).pipe(Effect.forkScoped)
       yield* eventually(() => waiting !== null)
-      assert.include(JSON.stringify(waiting), "messages 1–5")
+      assert.include(JSON.stringify(waiting), "messages 1–1")
       assert.strictEqual(
         yield* outcome(
           f.api.AnswerToolApproval({ ...waiting!, storyAt: { ...ctx.storyAt, forkId: f.sibling.id }, answer: "allow" })
@@ -547,7 +551,7 @@ describe("workshop chat rewrites", () => {
         })
         assert.strictEqual(newest.entries[0]!.version.content, "NEWEST sentinel")
         const effect = (yield* f.api.ListRolloutEffects({ chatId: side.id }))[0]!
-        assert.include(effect.title, f.forkId)
+        assert.include(effect.title, "Original")
         yield* f.api.UndoRolloutEffect(effect)
         assert.include((yield* f.path()).entries[0]!.version.content, "Aria ")
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -1706,4 +1710,288 @@ describe("side-chat write positions under review", () => {
       assert.deepStrictEqual(yield* enabled(f.sibling.id), [])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
+})
+
+it.live("sidechat2: setup at a structural tip stays before an inserted tail, including cast reads and undo", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* beside(config.dataDir, true)
+    const tip = f.entries.at(-1)!.slotId
+    const slot = yield* f.reader.GetSlot({ userId: f.userId, slotId: tip, forkId: f.forkId })
+    const inserted = yield* f.writer.InsertMessage({
+      userId: f.userId,
+      chatId: f.chat.id,
+      forkId: f.forkId,
+      anchorSlotId: tip,
+      expectedRowVersion: slot.entry.rowVersion,
+      body: { _tag: "Write", speaker: null, content: "UNSEEN INSERTED TAIL" }
+    })
+    const preset = yield* f.api.CreatePreset({ label: "Tail preset" })
+    yield* f.writer.AddStateEvent({
+      userId: f.userId,
+      chatId: f.chat.id,
+      forkId: f.forkId,
+      slotId: inserted.slotId,
+      versionId: null,
+      scope: null,
+      data: { key: "preset.binding", value: { ref: preset.id } }
+    })
+    // Ordinary GetCast intentionally reads the display end. The side tool must read the exact tip.
+    assert.strictEqual((yield* f.api.GetCast({ chatId: f.chat.id, forkId: f.forkId, slotId: tip })).preset, preset.id)
+    const cast = yield* f.run("get_cast", { chat: f.chat.id })
+    assert.isUndefined(cast.isError, cast.text)
+    assert.notInclude(cast.text, preset.id)
+    const result = yield* f.run("change_chat", { chat: f.chat.id, change: { _tag: "AgentEnabled", on: true } })
+    assert.isUndefined(result.isError, result.text)
+    const enabledAt = (slotId: SlotId) =>
+      f.reader
+        .StateEventsAt({ userId: f.userId, chatId: f.chat.id, forkId: f.forkId, slotId })
+        .pipe(Effect.map((events) => events.filter((e) => e.data.key === "agent.enabled").map((e) => e.data.value)))
+    assert.deepStrictEqual(yield* enabledAt(tip), [{ on: true }])
+    const effect = (yield* f.api.ListRolloutEffects({ chatId: f.side.id }))[0]!
+    yield* f.api.UndoRolloutEffect(effect)
+    assert.deepStrictEqual((yield* enabledAt(tip)).at(-1), { on: false })
+    assert.deepStrictEqual((yield* enabledAt(inserted.slotId)).at(-1), { on: false })
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("sidechat2: get_cast reads all branch settings at either tab's position, never a later setting", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* beside(config.dataDir)
+    const first = yield* f.api.CreatePreset({ label: "ALPHA setup sentinel" })
+    const second = yield* f.api.CreatePreset({ label: "BRAVO setup sentinel" })
+    const alpha = yield* f.api.CreateCard({ label: "ALPHA cast sentinel", name: "ALPHA cast sentinel" })
+    const bravo = yield* f.api.CreateCard({ label: "BRAVO cast sentinel", name: "BRAVO cast sentinel" })
+    const book = yield* f.api.CreateLorebook({ label: "Branch book sentinel" })
+    for (const [forkId, preset, on] of [
+      [f.forkId, first, true],
+      [f.sibling.id, second, false]
+    ] as const) {
+      yield* f.writer.AddStateEvents({
+        userId: f.userId,
+        chatId: f.chat.id,
+        forkId,
+        slotId: f.entries[3]!.slotId,
+        data: [
+          { key: "participant.join", value: { entity: on ? alpha.entityId : bravo.entityId } },
+          { key: "presence.set", value: { entity: on ? alpha.entityId : bravo.entityId, present: on } },
+          { key: "away.set", value: { entity: on ? alpha.entityId : bravo.entityId, away: !on } },
+          { key: "lorebook.attach", value: { ref: book.id } },
+          ...(!on ? [{ key: "lorebook.detach" as const, value: { ref: book.id } }] : []),
+          { key: "lorebook.below_history", value: { on } },
+          { key: "preset.binding", value: { ref: preset.id } },
+          { key: "agent.enabled", value: { on } },
+          { key: "agent.tools", value: { tools: on ? ["read_messages"] : [] } },
+          { key: "cards.rotation", value: { on } }
+        ]
+      })
+    }
+    for (const [forkId, expected, excluded] of [
+      [f.forkId, first, second],
+      [f.sibling.id, second, first]
+    ] as const) {
+      const ctx = { ...f.context, cache: new Map<string, unknown>(), storyAt: { ...f.context.storyAt, forkId } }
+      const cast = yield* f.tool("get_cast").execute(ctx, { chat: f.chat.id } as never)
+      assert.isUndefined(cast.isError, cast.text)
+      assert.deepStrictEqual(
+        JSON.parse(cast.text),
+        JSON.parse(JSON.stringify(yield* f.api.GetCast({ chatId: f.chat.id, forkId, slotId: ctx.storyAt.leafSlotId })))
+      )
+      assert.include(cast.text, expected.id)
+      assert.include(cast.text, forkId === f.forkId ? "ALPHA cast sentinel" : "BRAVO cast sentinel")
+      assert.notInclude(cast.text, forkId === f.forkId ? "BRAVO cast sentinel" : "ALPHA cast sentinel")
+      assert.notInclude(cast.text, excluded.id)
+      const { storyAt: _storyAt, ...unpositioned } = ctx
+      const missing = yield* f.tool("get_cast").execute(unpositioned, { chat: f.chat.id } as never)
+      assert.isTrue(missing.isError)
+      assert.notInclude(missing.text, expected.id)
+    }
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live("sidechat2: every attached-story reader follows two branch sentinels and refuses unpositioned reads", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* beside(config.dataDir)
+    const original = (yield* f.api.ListForks({ chatId: f.chat.id })).find((fork) => fork.id === f.forkId)!
+    yield* f.writer.AddSelectedVersion({
+      userId: f.userId,
+      forkId: f.forkId,
+      slotId: f.entries[0]!.slotId,
+      version: said("ALPHA sentinel"),
+      expectedRowVersion: (yield* f.reader.GetSlot({
+        userId: f.userId,
+        slotId: f.entries[0]!.slotId,
+        forkId: original.id
+      })).entry.rowVersion,
+      commitDraft: null
+    })
+    const summary = yield* completeFixture(
+      config.dataDir,
+      f.writer,
+      f.userId,
+      f.chat.id,
+      [{ slotId: f.entries[0]!.slotId, versionId: f.entries[0]!.version.id, amendCount: 0 }],
+      [],
+      " ALPHA summary sentinel"
+    )
+    yield* f.api.EditSummary({
+      summaryId: summary.id,
+      forkId: f.sibling.id,
+      content: "BRAVO summary sentinel",
+      expectedRowVersion: summary.rowVersion,
+      commitDraft: null
+    })
+    const readers = [
+      ["read_story", { from: 1, count: 1 }, false],
+      ["search_story", { query: "sentinel", limit: 20 }, false],
+      ["open_story_summary", { messages: "1–1" }, false],
+      ["search_story_summaries", { query: "sentinel" }, true],
+      ["read_chat", { chat: f.chat.id, from: 1, count: 1 }, false],
+      ["search_chats", { chat: f.chat.id, query: "sentinel" }, false]
+    ] as const
+    for (const [forkId, expected, excluded, summaryExpected, summaryExcluded] of [
+      [f.forkId, "ALPHA sentinel", "NEWEST sentinel", "ALPHA summary sentinel", "BRAVO summary sentinel"],
+      [f.sibling.id, "NEWEST sentinel", "ALPHA sentinel", "BRAVO summary sentinel", "ALPHA summary sentinel"]
+    ] as const) {
+      const ctx = { ...f.context, cache: new Map<string, unknown>(), storyAt: { ...f.context.storyAt, forkId } }
+      for (const [id, args, isSummary] of readers) {
+        const result = yield* f.tool(id).execute(ctx, args as never)
+        assert.isUndefined(result.isError, `${id}: ${result.text}`)
+        assert.include(result.text, isSummary ? summaryExpected : expected, id)
+        assert.notInclude(result.text, isSummary ? summaryExcluded : excluded, id)
+        const { storyAt: _storyAt, ...unpositioned } = ctx
+        const missing = yield* f.tool(id).execute(unpositioned, args as never)
+        assert.isTrue(missing.isError, `${id}: no position must refuse`)
+      }
+      for (const [id, args] of [
+        ["list_chats", {}],
+        [
+          "history_search",
+          {
+            chatId: f.chat.id,
+            forkId,
+            search: {
+              pairs: [{ find: "sentinel", replace: "x" }],
+              regex: false,
+              wholeWord: false,
+              matchCase: false,
+              preserveCase: false,
+              messages: true,
+              swipes: true,
+              summaries: true
+            }
+          }
+        ]
+      ] as const) {
+        const refused = yield* f.tool(id).execute(ctx, args as never)
+        assert.isTrue(refused.isError, id)
+        assert.notInclude(refused.text, expected, id)
+        assert.notInclude(refused.text, excluded, id)
+      }
+    }
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live(
+  "sidechat2: default rewrites run without asking and name an unnamed branch and the actual message range",
+  () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* beside(config.dataDir, false, true)
+      const ctx = {
+        ...f.context,
+        toolCallId: "default-policy",
+        storyAt: { ...f.context.storyAt, forkId: f.sibling.id }
+      }
+      const args = { chat: f.chat.id, title: "Shorten the opening", messages: [{ message: 1, text: "Shorter." }] }
+      let asked = false
+      const permission = yield* makePermit({
+        registries: f.registry,
+        reader: f.reader,
+        writer: f.writer,
+        userId: f.userId,
+        chatId: f.side.id,
+        rolloutId: ctx.rolloutId
+      })({
+        tool: f.tool("rewrite_messages"),
+        context: ctx,
+        args,
+        dangling: false,
+        onWaiting: () => {
+          asked = true
+        }
+      })
+      assert.isTrue(permission.run)
+      assert.isFalse(asked)
+      const description = yield* f.tool("rewrite_messages").describe!(ctx, args as never)
+      assert.strictEqual(description.storyScope!.first, 1)
+      assert.strictEqual(description.storyScope!.last, 1)
+      assert.include(description.rows.find((r) => r.label === "Scope")!.value, "Split ")
+      assert.notInclude(description.rows.find((r) => r.label === "Scope")!.value, ctx.storyAt.forkId)
+      const result = yield* f.tool("rewrite_messages").execute(ctx, args as never)
+      assert.isUndefined(result.isError, result.text)
+      const effect = (yield* f.api.ListRolloutEffects({ chatId: f.side.id }))[0]!
+      assert.include(effect.title, "Split ")
+      assert.include(effect.title, "messages 1–1")
+      assert.notInclude(effect.title, ctx.storyAt.forkId)
+      assert.deepStrictEqual(effect.undo?.storyScope, description.storyScope)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  }
+)
+
+it.live("sidechat2: a departed card speaking only after the tab's position is excluded on both branches", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const f = yield* beside(config.dataDir)
+    const former = yield* f.api.CreateCard({ label: "UNSEEN FUTURE SPEAKER", name: "UNSEEN FUTURE SPEAKER" })
+    const unshown = yield* f.api.CreateCard({ label: "UNSHOWN SWIPE SPEAKER", name: "UNSHOWN SWIPE SPEAKER" })
+    for (const forkId of [f.forkId, f.sibling.id])
+      yield* f.writer.AddStateEvents({
+        userId: f.userId,
+        chatId: f.chat.id,
+        forkId,
+        slotId: f.entries[0]!.slotId,
+        data: [
+          { key: "participant.join", value: { entity: unshown.entityId } },
+          { key: "participant.leave", value: { entity: unshown.entityId } },
+          { key: "participant.join", value: { entity: former.entityId } },
+          { key: "participant.leave", value: { entity: former.entityId } }
+        ]
+      })
+    yield* f.writer.AddVersion({
+      userId: f.userId,
+      slotId: f.entries[1]!.slotId,
+      forkId: f.forkId,
+      version: new NewVersion({ ...said("Unselected speech."), speakerEntityId: unshown.entityId }),
+      select: false,
+      commitDraft: null
+    })
+    yield* f.writer.AppendMessage({
+      userId: f.userId,
+      chatId: f.chat.id,
+      forkId: f.forkId,
+      parentSlotId: f.entries.at(-1)!.slotId,
+      branch: false,
+      version: new NewVersion({ ...said("Future speech."), speakerEntityId: former.entityId }),
+      commitDraft: null
+    })
+    // The ordinary UI cast still includes a departed speaker from the full branch.
+    assert.include(
+      (yield* f.api.GetCast({ chatId: f.chat.id, forkId: f.forkId, slotId: f.context.storyAt.leafSlotId })).cards.map(
+        (c) => c.entityId
+      ),
+      former.entityId
+    )
+    for (const forkId of [f.forkId, f.sibling.id]) {
+      const result = yield* f
+        .tool("get_cast")
+        .execute({ ...f.context, storyAt: { ...f.context.storyAt, forkId } }, { chat: f.chat.id } as never)
+      assert.isUndefined(result.isError, result.text)
+      assert.notInclude(result.text, "UNSEEN FUTURE SPEAKER")
+      assert.notInclude(result.text, former.entityId)
+      assert.notInclude(result.text, unshown.entityId)
+    }
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })

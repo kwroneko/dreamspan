@@ -7,7 +7,11 @@ import { workshopChatTests } from "./support/workshopChat.ts"
 import { workshopApprovalTests } from "./support/workshopApprovals.ts"
 import { workshopChangesTests } from "./support/workshopChanges.ts"
 import { cardSourceUpdateTests } from "./support/cardSourceUpdates.ts"
-import { workshopSideChatTests, workshopSideChatEffectsTests } from "./support/workshopSideChat.ts"
+import {
+  workshopSideChatTests,
+  workshopSideChatEffectsTests,
+  workshopSideChatChangesTests
+} from "./support/workshopSideChat.ts"
 import { googleConnectionTests } from "./support/googleConnection.ts"
 import { agentResumeTests } from "./support/agentResumeFlows.ts"
 import { cardexCriteriaTests } from "./support/cardexCriteria.ts"
@@ -64,6 +68,7 @@ if (process.env.LAYOUT_AUDIT_WORKSHOP_ONLY === "1") {
   workshopChangesTests()
   workshopSideChatTests()
   workshopSideChatEffectsTests()
+  workshopSideChatChangesTests()
 }
 if (process.env.LAYOUT_AUDIT_DISPATCHER_ONLY === "1") dispatcherConnectionTests()
 if (process.env.LAYOUT_AUDIT_RESUME_ONLY === "1") agentResumeTests()

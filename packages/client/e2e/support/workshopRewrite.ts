@@ -233,7 +233,8 @@ function sideWriteTests() {
             await side.getByLabel("Message", { exact: true }).fill("Change the first message here.")
             await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
             const approval = side.locator("[data-approval]")
-            await expect(approval).toContainText(fixture.original)
+            await expect(approval).toContainText("Branch “Original”")
+            await expect(approval).not.toContainText(fixture.original)
             await expect(approval).toContainText("messages 1–1")
             await expect(approval).toContainText("OLDER sentinel")
             await expect(approval).not.toContainText("NEWER sentinel")
@@ -249,7 +250,9 @@ function sideWriteTests() {
             await page.goto(`${server().url}/chats/${workshop.id}`)
             await openPanel(page, "Changes")
             const effect = page.locator('[data-effect-kind="changeset.apply"]')
-            await expect(effect).toContainText(fixture.original)
+            await expect(effect).toContainText("Branch “Original”")
+            await expect(effect).toContainText("messages 1–1")
+            await expect(effect).not.toContainText(fixture.original)
             await expectLayout(page, info, `side-write-effect-${width}-${theme}`)
             const read = (forkId: typeof fixture.original) =>
               admin((api) =>

@@ -4079,7 +4079,9 @@ export class ReadOps extends RpcGroup.make(
             Schema.Struct({
               forkId: Schema.NullOr(ForkId),
               slotId: Schema.NullOr(SlotId),
-              active: Schema.Array(EntityId)
+              active: Schema.Array(EntityId),
+              /** Restrict historical membership to slotId, including inserted display positions. */
+              through: Schema.optionalKey(Schema.Boolean)
             })
           )
         })

@@ -10,6 +10,7 @@ export type WriteChat = Chat & {
   readonly storyTarget?: StoryAt
   readonly upTo?: number
   readonly branchLabel?: string
+  readonly branchNaming?: import("@rp/shared/branchNaming.ts").BranchNaming
 }
 export const storyWriteChat = Effect.fnUntraced(function* (ctx: ToolContext, chat: Chat) {
   const attached = yield* attachedStory(ctx)
@@ -24,6 +25,7 @@ export const storyWriteChat = Effect.fnUntraced(function* (ctx: ToolContext, cha
     activeLeafSlotId: place.context.leafSlotId,
     storyTarget: ctx.storyAt!,
     upTo: place.place.upTo,
-    branchLabel: place.place.branch ?? "Unnamed branch"
+    branchLabel: place.place.branch!,
+    branchNaming: place.place.naming!
   } satisfies WriteChat
 })

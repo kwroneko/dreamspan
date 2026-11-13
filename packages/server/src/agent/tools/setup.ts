@@ -135,6 +135,7 @@ interface CreateArgs {
 }
 const createCard: RolloutTool<CreateArgs> = {
   id: "create_card",
+  storyRead: "library",
   label: "Created the card",
   titleField: "name",
   explanation: "Create an ordinary card in your library.",
@@ -217,6 +218,7 @@ const editCard: RolloutTool<{
   readonly changes: CardChanges
 }> = {
   id: "edit_card",
+  storyRead: "library",
   label: "Edited the card",
   titleField: "card",
   explanation: "Edit the saved library card, leaving drafts and history intact.",
@@ -285,6 +287,7 @@ const cloneCard: RolloutTool<{
   readonly version?: string
 }> = {
   id: "clone_card",
+  storyRead: "library",
   label: "Cloned the card",
   titleField: "name",
   explanation: "Fork a card into an ordinary card of its own.",
@@ -331,6 +334,7 @@ const startChat: RolloutTool<{
   readonly model?: string
 }> = {
   id: "start_chat",
+  storyRead: "library",
   label: "Started the chat",
   titleField: "title",
   explanation: "Set up a story chat with greetings, without requesting a reply.",
@@ -454,6 +458,7 @@ const editLibraryDocument = (kind: "preset" | "lorebook", schema: Schema.Top): R
     })
   return {
     id: `edit_${kind}`,
+    storyRead: "library",
     label: `Edited the ${kind}`,
     titleField: kind,
     explanation: `Edit a saved ${kind}, keeping unsaved drafts and history.`,

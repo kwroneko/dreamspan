@@ -11,7 +11,7 @@ import { storyReadStamp } from "../continuity.ts"
 import { placedSteps } from "../steps.ts"
 import { attachedStory } from "../storyReadScope.ts"
 import type { FrozenTool, RolloutTool, ToolContext } from "../tools.ts"
-import { historyTools, safely, STORY_TOOLS } from "./history.ts"
+import { historyTools, safely } from "./history.ts"
 
 const tokensOf = (text: string) => Math.ceil(text.length / 4)
 
@@ -68,8 +68,6 @@ const messageSteps = (context: ToolContext, entry: PathEntry) =>
     }
   })
 
-/** Tools whose results, in a side chat, are the story's text (the general readers only read it there). */
-const STORY_READS: ReadonlyArray<string> = [...STORY_TOOLS, "read_chat", "search_chats"]
 const STORY_WITHHELD =
   "(Story text from another position or an older version of the story: read it again with read_story or search_story, which read it where the user's tab shows it now.)"
 
@@ -97,6 +95,7 @@ const readRun: RolloutTool<{
   readonly max_tokens?: number
 }> = {
   id: "read_run",
+  storyRead: "conversation",
   label: "Read earlier steps",
   explanation: "Read the tool calls and results behind an earlier message",
   effect: "read",
@@ -130,10 +129,16 @@ const readRun: RolloutTool<{
         const run = yield* messageSteps(context, entry)
         if (run === null || run.steps.length === 0)
           return { text: `Message ${message} was written without tool calls.` }
-        const stands = run.steps.some((s) => STORY_READS.includes(s.tool)) ? yield* storyReadsStand(context, run) : true
+        // All positioned results count, including casts, setup results and plugin readers.
+        // Without a declaration, withhold rather than replaying an unpositioned story fact.
+        const readsStory = (id: string) => {
+          const mode = context.storyReadOf?.(id)
+          return mode === undefined || mode === "positioned"
+        }
+        const stands = run.steps.some((s) => readsStory(s.tool)) ? yield* storyReadsStand(context, run) : true
         const steps = stands
           ? run.steps
-          : run.steps.map((s) => (STORY_READS.includes(s.tool) ? { ...s, result: STORY_WITHHELD } : s))
+          : run.steps.map((s) => (readsStory(s.tool) ? { ...s, result: STORY_WITHHELD } : s))
         const words = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean)
         const chosen = steps.filter(
           (s) =>
@@ -198,5 +203,7 @@ const WORKSHOP_WORDING: Readonly<Record<string, { readonly description: string; 
 /** `workshop:<id>` variants (`kindTools`): same execution, workshop wording. */
 export const workshopHistoryVariants = historyTools.flatMap((tool) => {
   const wording = WORKSHOP_WORDING[tool.id]
-  return wording ? [{ id: `workshop:${tool.id}`, tool: { ...tool, ...wording } }] : []
+  return wording
+    ? [{ id: `workshop:${tool.id}`, tool: { ...tool, ...wording, storyRead: "conversation" as const } }]
+    : []
 })
