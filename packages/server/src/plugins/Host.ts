@@ -31,7 +31,7 @@ import { makePluginAuthoring } from "../agent/tools/plugins.ts"
 import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
 import { repoTask } from "./repoTask.ts"
 import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
-import { builtinCopies, builtinCopy, missingBuiltinAdapter } from "./builtins.ts"
+import { builtinCopies, builtinCopy, missingBuiltinAdapter, unavailableDisplayBodies } from "./builtins.ts"
 
 type Target = { readonly scope: "instance" | "user"; readonly id: string }
 type Version = Target & { readonly commit: string; readonly expectedRevision?: number }
@@ -441,6 +441,7 @@ export class PluginHost extends Context.Service<
                 .filter((v) => v.pin && !v.pin.suspended && v.manifest?.replaces.includes(`${p.registry}:${p.id}`))
                 .map(({ scope, id }) => ({ scope, id }))
             }))
+            parts.push(...unavailableDisplayBodies)
             for (const tool of execution.rolloutTools.list()) {
               if (parts.some((p) => p.registry === "rolloutTools" && p.id === tool.id) || !tool.source) continue
               parts.push({

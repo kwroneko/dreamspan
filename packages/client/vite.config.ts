@@ -101,6 +101,11 @@ export default defineConfig({
     {
       name: "plugin-host-development",
       configureServer(dev) {
+        dev.middlewares.use("/plugin-display.mjs", (_request, response) => {
+          response.setHeader("content-type", "text/javascript; charset=utf-8")
+          response.setHeader("cache-control", "no-store")
+          response.end('export * from "/src/pluginDisplay.ts";')
+        })
         dev.middlewares.use("/plugin-host.mjs", (_request, response) => {
           response.setHeader("content-type", "text/javascript; charset=utf-8")
           response.setHeader("cache-control", "no-store")

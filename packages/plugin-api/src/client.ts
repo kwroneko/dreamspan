@@ -41,6 +41,19 @@ export { React }
 export { jsx, jsxs } from "react/jsx-runtime"
 export { default } from "react"
 
+export type {
+  DisplayRegistryV1,
+  DisplayTransformV1,
+  DisplayScriptListV1,
+  DisplayInputV1,
+  DisplayResultV1,
+  DisplayListContextV1,
+  TimelineTransformV1,
+  TimelineInputV1,
+  TimelineRowV1
+} from "./display.ts"
+import type { DisplayRegistryV1, DisplayTransformV1, DisplayScriptListV1, TimelineTransformV1 } from "./display.ts"
+
 export interface DraftControl {
   /** Appends to the current draft, including its normal browser backup and server saving. */
   readonly append: (text: string) => void
@@ -101,6 +114,9 @@ export interface ClientHost {
     readonly routes?: ClientRegistry<RouteEntry>
     readonly appBanners?: ClientRegistry<BannerEntry>
     readonly noticeChannels?: ClientRegistry<NoticeChannelEntry>
+    readonly timelineTransforms?: DisplayRegistryV1<TimelineTransformV1>
+    readonly displayTransforms?: DisplayRegistryV1<DisplayTransformV1>
+    readonly displayScriptLists?: DisplayRegistryV1<DisplayScriptListV1>
   }
   /** Owns cleanup such as subscriptions. Runs even when activation fails or times out. */
   readonly onDispose: (dispose: () => void) => void

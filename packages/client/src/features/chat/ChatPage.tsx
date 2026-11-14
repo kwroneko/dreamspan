@@ -1,6 +1,6 @@
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { useSummariesOfUrl } from "./SummaryViewer.tsx"
-import { messageRows, useTimelineInputs, useTimelineTransforms } from "./timelineContributions.tsx"
+import { useTransformedRows, useTimelineInputs, useTimelineTransforms } from "./timelineContributions.tsx"
 import { lcmCursor, positionOf } from "./position.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import {
@@ -195,17 +195,11 @@ export function MessageList({
   const transforms = useTimelineTransforms()
   // A transform's own inputs (the threads' sets) changed: the rows are made again.
   const inputs = useTimelineInputs()
-  const rows = useMemo(
-    () =>
-      [...transforms.entries]
-        .sort((a, b) => a.order - b.order)
-        .reduce(
-          (rows, entry) => entry.transform(rows, { view, lcm, summaries, divider, historyDivider }),
-          messageRows(entries)
-        ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `inputs` stands for what the transforms read themselves
-    [transforms, view, lcm, summaries, divider, historyDivider, entries, inputs]
+  const timelineContext = useMemo(
+    () => ({ view, lcm, summaries, divider, historyDivider }),
+    [view, lcm, summaries, divider, historyDivider]
   )
+  const rows = useTransformedRows(entries, transforms.entries, timelineContext, inputs)
   const rowCount = rows.length
   /** The row an entry is shown at. */
   const rowOf = (entry: number) =>

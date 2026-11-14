@@ -44,11 +44,13 @@ const ENTRIES = [join(root, command[1]!), ...workers.map(([, source]) => join(se
 const pluginEntries = Object.values(
   JSON.parse(readFileSync(join(root, "packages/plugin-api/package.json"), "utf8")).exports as Record<string, string>
 ).map((source) => join(root, "packages/plugin-api", source))
-const clientEntries = objectStrings(join(root, "packages/client/vite.config.ts"), "input").flatMap(([, source]) => {
-  if (!source.endsWith(".html")) return [join(root, "packages/client", source)]
-  const html = readFileSync(join(root, "packages/client", source), "utf8")
-  return [...html.matchAll(/<script[^>]+src="([^"?]+)"/g)].map((match) => join(root, "packages/client", match[1]!))
-})
+const clientEntries = ["vite.config.ts", "vite.display.config.ts"]
+  .flatMap((config) => objectStrings(join(root, "packages/client", config), "input"))
+  .flatMap(([, source]) => {
+    if (!source.endsWith(".html")) return [join(root, "packages/client", source)]
+    const html = readFileSync(join(root, "packages/client", source), "utf8")
+    return [...html.matchAll(/<script[^>]+src="([^"?]+)"/g)].map((match) => join(root, "packages/client", match[1]!))
+  })
 
 /** `.dockerignore`'s patterns, in order, as matchers on a repository-relative path (`!` re-includes). */
 const dockerIgnore = (text: string) =>
@@ -232,6 +234,8 @@ const copied = (path: string, built = false) => copiedBy(path, built)
 // are absent from the image and both loaders turn a missing module into a plain startup error.
 const developmentImports = new Set(["./dev/fakeCardSource.ts", "./dev/fakeSavedMedia.ts"])
 const computedReviews: Record<string, string> = {
+  "packages/client/src/displayPlugin.worker.ts: import(/* @vite-ignore */ job.url)":
+    "Only canonical same-origin enabled-commit client URLs from the parent host; the worker independently validates their entire path. Content, source files, queries, hashes and off-origin URLs cannot select code. The existing authenticated asset gate rechecks the approved pin and bytes.",
   "packages/client/src/plugins.tsx: import(/* @vite-ignore */ url)":
     "Canonical same-origin checked client module URLs built only from authenticated enabled-commit descriptors; no content or arbitrary caller import path.",
   "packages/server/src/plugins/Host.ts: import(server!)":
@@ -266,7 +270,7 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
     expressions: [
       "readdir(join(root, p), { withFileTypes: true })",
       'readFile(join(root, p), "utf8")',
-      'readFile(join(root, "packages/plugin-api/src", doc.side + ".ts"), "utf8")',
+      'readFile( join(root, "packages/plugin-api/src", (topic === "displayRules" ? "display" : doc.side) + ".ts"), "utf8" )',
       'readFile( join( root, topic === "stateKeys" ? "packages/shared/src/state.ts" : topic === "macroContext" ? "packages/shared/src/macros/context.ts" : "packages/shared/src/macros/registry.ts" ), "utf8" )'
     ]
   },
@@ -284,7 +288,9 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
   "packages/server/src/plugins/serve.ts": {
     reason:
       "The Vite build manifest shipped with the configured client dist; facade points only to a validated assets filename.",
-    expressions: ['readFile(join(config.clientDist, ".vite/manifest.json"), "utf8")']
+    expressions: [
+      'readFile( join( config.clientDist, path === "/plugin-display.mjs" ? ".vite/display-manifest.json" : ".vite/manifest.json" ), "utf8" )'
+    ]
   },
   "packages/server/src/plugins/repoTask.ts": {
     reason:

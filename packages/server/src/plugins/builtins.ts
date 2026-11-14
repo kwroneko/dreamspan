@@ -104,7 +104,57 @@ const noteCopies = ["list_notes", "switch_note"].map((id, i) => ({
   surfaces: ["server:rolloutTools", "server:notes"],
   imports: { "packages/plugin-api/src/server.ts": "@rp/plugin-api/server" }
 }))
-export const builtinCopies = [...baseCopies, reverseCopy, ...macroCopies, ...historyCopies, ...noteCopies]
+const displayCopies = [
+  ["timelineTransforms", "timeline.merges", "Merged chat rows", "timelineParts.ts", "mergeTimeline"],
+  ["timelineTransforms", "timeline.history-budget", "History budget divider", "timelineParts.ts", "historyTimeline"],
+  ["timelineTransforms", "timeline.lcm", "Summary rows and divider", "timelineParts.ts", "lcmTimeline"],
+  ["timelineTransforms", "timeline.threads", "Parallel thread dividers", "timelineParts.ts", "threadsTimeline"],
+  ["displayTransforms", "display.macros", "Display macros", "displayParts.ts", "macroDisplayPart"],
+  ["displayTransforms", "display.regex", "Display regex", "displayParts.ts", "regexDisplayPart"],
+  [
+    "displayScriptLists",
+    "display-regex.global",
+    "Global display scripts",
+    "displayListParts.ts",
+    "globalDisplayScripts"
+  ],
+  [
+    "displayScriptLists",
+    "display-regex.preset",
+    "Preset display scripts",
+    "displayListParts.ts",
+    "presetDisplayScripts"
+  ],
+  [
+    "displayScriptLists",
+    "display-regex.character",
+    "Character display scripts",
+    "displayListParts.ts",
+    "characterDisplayScripts"
+  ]
+].map(([registry, id, label, file, entry]) => ({
+  registry: registry!,
+  id: id!,
+  label: label!,
+  entry: entry!,
+  side: "client" as const,
+  path: `packages/client/src/features/chat/${file}`,
+  files: [`packages/client/src/features/chat/${file}`],
+  surfaces: [`client:${registry}`],
+  imports: {
+    "packages/plugin-api/src/display.ts": "@rp/plugin-api/display",
+    "packages/client/src/features/chat/macros.ts": "@rp/plugin-api/display",
+    "packages/client/src/features/chat/displayRegex.ts": "@rp/plugin-api/display"
+  }
+}))
+export const builtinCopies = [
+  ...baseCopies,
+  reverseCopy,
+  ...macroCopies,
+  ...historyCopies,
+  ...noteCopies,
+  ...displayCopies
+]
 export const builtinCopy = (registry: string, id: string) =>
   builtinCopies.find((p) => p.registry === registry && p.id === id)
 
@@ -141,3 +191,19 @@ export const builtinCopyListing = (parts: ReadonlyArray<typeof import("@rp/share
         : []
     })
   )
+
+/** Rendering controls keep their own registrations while data policies become copyable. */
+export const unavailableDisplayBodies = [
+  ["merge", "Merged chat rendering"],
+  ["history", "History budget notice"],
+  ["lcm-boundary", "Summary boundary rendering"],
+  ["summary", "Summary rendering"],
+  ["threads", "Thread divider rendering"]
+].map(([id, label]) => ({
+  registry: "timelineBodies",
+  id: id!,
+  label: label!,
+  copyable: false,
+  reason: "Not yet: needs support for changing the message and summary controls.",
+  replacedBy: []
+}))

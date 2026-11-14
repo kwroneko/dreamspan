@@ -1,6 +1,44 @@
 /** Supported, typed adapters only. Examples are compiled and exercised by the host/browser suites. */
 export const pluginDocumentation = [
   {
+    topic: "displayTransforms",
+    side: "client",
+    types: ["ClientHost", "ClientRegistry"],
+    description:
+      "Browser-only DisplayTransformV1 (read displayRules for fields). Text stages run in order on streaming and finished text. A worker enforces 50 ms per call; a throw, invalid output or timeout restores the original for that call and turns this plugin off in the tab. Output goes through the existing sanitiser and content sandbox. Model requests, stored text, editing and copying stay unchanged. Display plugins use only display surfaces; import pure helpers from @rp/plugin-api/display, client only for types.",
+    example: `import type {Activate} from "@rp/plugin-api/client"
+export const activate:Activate=host=>{ host.registries.displayTransforms!.register({api:1,id:"example.display",order:90,transform:input=>({text:input.text+" (display only)",issues:[]})}) }`
+  },
+  {
+    topic: "displayScriptLists",
+    side: "client",
+    types: ["ClientHost", "ClientRegistry"],
+    description:
+      "Browser-only DisplayScriptListV1 (read displayRules for fields). Lists receive only global and approved preset/card scripts. Lists run by order before text transforms; scope, placement, display-only and depth checks remain in the regex runner. Same worker, deadline and restoration as displayTransforms.",
+    example: `import type {Activate} from "@rp/plugin-api/client"
+export const activate:Activate=host=>{ host.registries.displayScriptLists!.register({api:1,id:"example.scripts",order:90,scripts:input=>input.character}) }`
+  },
+  {
+    topic: "timelineTransforms",
+    side: "client",
+    types: ["ClientHost", "ClientRegistry"],
+    description:
+      "Browser-only TimelineTransformV1 (read displayRules for fields). Receives plain row, summary-range, thread and divider data. Returns rows using host-owned bodies or literal text; never React, sessions or model-request services. Host keeps paging, scrolling and link anchoring. Original rows show while waiting. Same 50 ms deadline and restoration as text rules, at most 2000 rows. Display plugins cannot mix page controls or server code.",
+    example: `import type {Activate} from "@rp/plugin-api/client"
+export const activate:Activate=host=>{ host.registries.timelineTransforms!.register({api:1,id:"example.rows",order:90,transform:input=>[...input.rows,{key:"example-notice",estimate:40,from:Infinity,to:-1,body:{kind:"text",text:"A display-only notice"}}]}) }`
+  },
+  {
+    topic: "displayRules",
+    side: "client",
+    types: [],
+    surfaces: ["client:displayTransforms"],
+    description:
+      "The versioned text, script-list and timeline field contracts. Import their types and pure helpers from @rp/plugin-api/display. These callbacks run in a browser worker; no session, credentials or RPC is supplied. Full-trust browser consent still applies.",
+    example: `import type {Activate} from "@rp/plugin-api/client"
+import {expandForDisplay} from "@rp/plugin-api/display"
+export const activate:Activate=host=>{host.registries.displayTransforms!.register({api:1,id:"example.names",order:10,transform:input=>({text:expandForDisplay(input.text,input.version.macroMode,input.names,input.card,input.version.frozenMacros??{}).text,issues:[]})})}`
+  },
+  {
     topic: "composerControls",
     side: "client",
     types: ["DraftControl", "ComposerContext", "ComposerEntry", "ClientRegistry", "ClientHost", "ButtonProps"],

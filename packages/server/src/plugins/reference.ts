@@ -88,21 +88,27 @@ export const pluginApiDocs = async (topic?: string) => {
     })
   const doc = pluginDocumentation.find((d) => d.topic === topic)
   if (!doc) throw new Error("Unknown API topic; read the index")
-  const source = await readFile(join(root, "packages/plugin-api/src", doc.side + ".ts"), "utf8")
-  let types = doc.types
-    .map((name) => {
-      const start = source.indexOf("interface " + name)
-      if (start < 0) return ""
-      const open = source.indexOf("{", start)
-      let depth = 1,
-        end = open + 1
-      for (; end < source.length && depth; end++) {
-        if (source[end] === "{") depth++
-        if (source[end] === "}") depth--
-      }
-      return source.slice(start, end)
-    })
-    .join("\n")
+  const source = await readFile(
+    join(root, "packages/plugin-api/src", (topic === "displayRules" ? "display" : doc.side) + ".ts"),
+    "utf8"
+  )
+  let types =
+    topic === "displayRules"
+      ? source
+      : doc.types
+          .map((name) => {
+            const start = source.indexOf("interface " + name)
+            if (start < 0) return ""
+            const open = source.indexOf("{", start)
+            let depth = 1,
+              end = open + 1
+            for (; end < source.length && depth; end++) {
+              if (source[end] === "{") depth++
+              if (source[end] === "}") depth--
+            }
+            return source.slice(start, end)
+          })
+          .join("\n")
   if (topic === "stateKeys" || topic === "macros" || topic === "macroContext") {
     const extra = await readFile(
       join(

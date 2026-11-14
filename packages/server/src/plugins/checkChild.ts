@@ -91,6 +91,19 @@ try {
     )
       throw new Error("Unknown surface")
   }
+  if (
+    manifest.surfaces.some(
+      (s) => s === "client:displayTransforms" || s === "client:displayScriptLists" || s === "client:timelineTransforms"
+    ) &&
+    (manifest.server ||
+      manifest.worker ||
+      manifest.surfaces.some(
+        (s) => !["client:displayTransforms", "client:displayScriptLists", "client:timelineTransforms"].includes(s)
+      ))
+  ) {
+    message = "Display rules run only in the browser and need a separate plugin from page controls."
+    throw new Error("Mixed display plugin")
+  }
   const sources: Array<string> = []
   const visit = async (dir: string) => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -147,6 +160,7 @@ try {
         "@rp/plugin-api/server": [api("server")],
         "@rp/plugin-api/worker": [api("worker")],
         "@rp/plugin-api/client": [api("client")],
+        "@rp/plugin-api/display": [api("display")],
         react: [join(root, "node_modules/@types/react/index.d.ts")],
         "react/jsx-runtime": [join(root, "node_modules/@types/react/jsx-runtime.d.ts")]
       }
@@ -165,6 +179,7 @@ try {
             "@rp/plugin-api/server",
             "@rp/plugin-api/worker",
             "@rp/plugin-api/client",
+            "@rp/plugin-api/display",
             "react",
             "react/jsx-runtime",
             ...(test ? ["node:test", "node:assert/strict"] : [])
@@ -221,6 +236,8 @@ try {
             resolveId(source, importer) {
               if (importer === "\0rolldown/runtime.js" && source === "node:module")
                 return { id: source, external: true }
+              if (side === "client" && source === "@rp/plugin-api/display")
+                return { id: "/plugin-display.mjs", external: true }
               if (
                 side === "client" &&
                 ["@rp/plugin-api/client", "react", "react/jsx-runtime", "react/jsx-dev-runtime"].includes(source)

@@ -1,5 +1,7 @@
 # Plugins: threat model and structure
 
+**Built browser display-rule copies (adapters2, 2026-11-14; obsolete as an implementation proposal):** text transforms, approved script lists and timeline row policies now have typed browser-only v1 contracts, finite source copies and worker deadlines. This is the display subset of PLUGINS §§3–5/8 and WORKSHOP §§5.3/5.7; ARCHITECTURE §17 records the boundary and restoration behavior. Remaining action/composer adapters and other registries retain their previous status. Proposed details remain Proposed.
+
 **Built fixes1114 (2026-11-14; obsolete as an implementation proposal):** coordinator ruling: the enabled version is the checked build of its approved commit. New working-tree or committed work keeps that build running until explicit replacement approval or Turn off. Altered approved Git objects/build files remain faults. See ARCHITECTURE §17. This settles this enabled-version behavior only; other Proposed/Open decisions are unchanged.
 
 

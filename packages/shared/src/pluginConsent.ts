@@ -7,6 +7,12 @@ const surfaces: Readonly<Record<string, string>> = {
   "client:chatPanels": "Adds panels beside your chats.",
   "client:routes": "Adds pages to the app. Reload to use changed pages.",
   "client:appBanners": "Adds notices across the app.",
+  "client:timelineTransforms":
+    "Changes the displayed message rows and summary dividers. Model requests stay as written.",
+  "client:displayTransforms":
+    "Changes how message text looks, including streaming replies. Stored text and model requests stay as written.",
+  "client:displayScriptLists":
+    "Changes which approved regex scripts run on displayed text. Stored text and model requests stay as written.",
   "client:noticeChannels": "Changes optional reply sounds and alerts.",
   "server:notes": "Reads visible notes and switches only notes the assistant may change.",
   "server:history": "Reads only earlier messages and summaries visible to the current character.",

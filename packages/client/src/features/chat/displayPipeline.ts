@@ -3,7 +3,8 @@ import type { DisplayPrefs } from "@rp/shared/chatApi.ts"
 import type { RegexScript } from "@rp/shared/docs/preset.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { makeRegistry } from "../../registry.ts"
-import { expandForDisplay, type DisplayNames } from "./macros.ts"
+import type { DisplayNames } from "./macros.ts"
+import { macroDisplayPart } from "./displayParts.ts"
 
 export interface DisplayInput {
   readonly text: string
@@ -15,6 +16,7 @@ export interface DisplayInput {
   /** ST's placement: 1 user input, 2 AI output, 6 reasoning. */
   readonly placement: 1 | 2 | 6
   readonly depth: number | null
+  readonly streaming?: boolean
 }
 export interface DisplayResult {
   readonly text: string
@@ -23,6 +25,10 @@ export interface DisplayResult {
 export const displayTransforms = makeRegistry<{
   readonly id: string
   readonly order: number
+  readonly source?: string
+  readonly replacement?: string
+  /** Worker rules need the positional fields even when the built-in switches are off. */
+  readonly needsContext?: boolean
   readonly transform: (input: DisplayInput) => Promise<DisplayResult> | DisplayResult
 }>()
 
@@ -45,14 +51,4 @@ export const applyDisplayTransforms = async (
   return { text, issues }
 }
 
-export const macroDisplay = (input: DisplayInput): DisplayResult => {
-  const result = expandForDisplay(
-    input.text,
-    input.version.macroMode,
-    input.names,
-    input.card,
-    input.version.frozenMacros ?? {},
-    input.version.writer === "model" && input.prefs.outputMacros
-  )
-  return { text: result.text, issues: result.issue ? [result.issue] : [] }
-}
+export const macroDisplay = macroDisplayPart.transform

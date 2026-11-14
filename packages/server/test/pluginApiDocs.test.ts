@@ -1,4 +1,6 @@
 import { expect, it } from "vitest"
+import ts from "typescript"
+import { fileURLToPath } from "node:url"
 import { pluginDocumentation } from "../../plugin-api/src/docs.ts"
 import { saveFiles } from "../src/plugins/repo.ts"
 import { checkPlugin } from "../src/plugins/check.ts"
@@ -28,3 +30,22 @@ for (const doc of pluginDocumentation)
     const commit = await saveFiles(dir, "", "example", files, true, "Docs recipe")
     expect(await checkPlugin(dir, "", "example", commit)).toMatchObject({ ok: true, step: "ready" })
   }, 30000)
+
+it("browser declarations do not pull Effect, app renderers or server/schema implementations into every check", () => {
+  const client = fileURLToPath(new URL("../../plugin-api/src/client.ts", import.meta.url))
+  const program = ts.createProgram([client], {
+    target: ts.ScriptTarget.ES2024,
+    module: ts.ModuleKind.Preserve,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noEmit: true,
+    skipLibCheck: true,
+    allowImportingTsExtensions: true,
+    jsx: ts.JsxEmit.ReactJSX,
+    types: ["node"]
+  })
+  const implementations = program
+    .getSourceFiles()
+    .map((file) => file.fileName.replaceAll("\\", "/"))
+    .filter((file) => /packages\/(?:client|server|shared)\/src\/|node_modules\/effect\//.test(file))
+  expect(implementations).toEqual([])
+})

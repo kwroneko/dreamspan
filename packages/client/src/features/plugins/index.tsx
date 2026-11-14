@@ -150,13 +150,17 @@ function BuiltinParts() {
                   {
                     noticeChannels: "Sounds and alerts",
                     rolloutTools: "Story tools",
-                    macros: "Prompt macros"
+                    macros: "Prompt macros",
+                    displayTransforms: "Display rules",
+                    displayScriptLists: "Display script lists",
+                    timelineTransforms: "Timeline rules",
+                    timelineBodies: "Timeline rendering"
                   } as Record<string, string>
                 )[registry] ?? registry
               return (
                 <section key={registry} aria-label={title} className="flex min-w-0 flex-col gap-2">
                   <h3 className="text-sm font-medium">{title}</h3>
-                  {group.length > 8 && (
+                  {(group.length > 8 || registry.startsWith("display") || registry === "timelineTransforms") && (
                     <Field label={`Search ${title.toLowerCase()}`}>
                       <Input
                         type="search"

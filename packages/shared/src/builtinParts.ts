@@ -14,6 +14,24 @@ for (const part of macroParts)
       }
 for (const id of ["search_chat", "read_messages", "expand_summary", "search_summaries", "list_notes", "switch_note"])
   parts[`rolloutTools:${id}`] = { side: "server", label: id }
+for (const [registry, entries] of Object.entries({
+  timelineTransforms: [
+    ["timeline.merges", "Merged chat rows"],
+    ["timeline.history-budget", "History budget divider"],
+    ["timeline.lcm", "Summary rows and divider"],
+    ["timeline.threads", "Parallel thread dividers"]
+  ],
+  displayTransforms: [
+    ["display.macros", "Display macros"],
+    ["display.regex", "Display regex"]
+  ],
+  displayScriptLists: [
+    ["display-regex.global", "Global display scripts"],
+    ["display-regex.preset", "Preset display scripts"],
+    ["display-regex.character", "Character display scripts"]
+  ]
+}))
+  for (const [id, label] of entries) parts[`${registry}:${id}`] = { side: "client", label: label! }
 export const builtinReplacement = (key: string) => (Object.hasOwn(parts, key) ? parts[key] : undefined)
 
 /** A repository-safe suggestion, including the comment macro's symbolic name. */

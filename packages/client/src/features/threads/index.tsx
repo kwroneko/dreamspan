@@ -13,7 +13,13 @@ import { messageDetails } from "../chat/messageDetails.tsx"
 import { AlsoIn, copyDeleteActions, SaveInAll } from "./copies.tsx"
 import { chatNoteActions, chatOverlays } from "../chat/presentation.tsx"
 import type { ChatSession, ChatView } from "../chat/session.ts"
-import { timelineTransforms } from "../chat/timelineContributions.tsx"
+import { threadsTimeline } from "../chat/timelineParts.ts"
+import {
+  timelineTransforms,
+  timelinePart,
+  timelineDataSources,
+  timelineBodies
+} from "../chat/timelineContributions.tsx"
 import { AlsoChangeNote } from "./AlsoChangeNote.tsx"
 import { JOIN_HINT, JoinThreadsCommandDialog, JoinThreadsHereDialog, joinOffered } from "./JoinThreadsDialog.tsx"
 import { listedAsBranch, ownThread, splitNumber, threadName } from "./model.ts"
@@ -109,29 +115,21 @@ export const register = () => [
     listed: (fork, { shown }) => listedAsBranch(fork, shown),
     Section: ThreadsSection
   }),
-  timelineTransforms.register({
-    id: "timeline.threads",
-    order: 30,
-    transform: (rows, { view }) => {
-      let result = rows
-      for (const set of setsOf(view)) {
-        const at = result.findIndex((row) => row.entry?.slotId === set.slotId)
-        if (at < 0) continue
-        result = [
-          ...result.slice(0, at + 1),
-          {
-            key: `threads-${set.splitId}`,
-            estimate: 48,
-            from: Infinity,
-            to: -1,
-            render: ({ session }) => <ThreadsTimelineRow session={session} set={set} />
-          },
-          ...result.slice(at + 1)
-        ]
-      }
-      return result
+  timelineDataSources.register({
+    id: "threads",
+    source: import.meta.url,
+    threads: (view) => setsOf(view).map((set) => ({ splitId: set.splitId, slotId: set.slotId }))
+  }),
+  timelineBodies.register({
+    id: "threads",
+    source: import.meta.url,
+    row: (body, context, fields) => {
+      const set = setsOf(context.view).find((set) => set.splitId === body.ref)
+      if (!set) throw new Error("Unknown thread")
+      return { ...fields, render: ({ session }) => <ThreadsTimelineRow session={session} set={set} /> }
     }
   }),
+  timelineTransforms.register(timelinePart(threadsTimeline)),
   chatNoteActions.register({ id: "threads.also-change", order: 10, component: AlsoChangeNote }),
   // Sending to several threads (§6): the strip's chip, and the send it takes over once one is ticked.
   composerControls.register({ id: "composer.threads", order: 35, placement: "strip", component: SendToThreadsChip }),
