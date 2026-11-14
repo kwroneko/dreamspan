@@ -510,6 +510,22 @@ export const makeReadHandlers = Effect.gen(function* () {
         return rows.map(toVersion)
       }).pipe(query("ListVersions")),
 
+    ExportVersions: ({ userId, chatId, forkId, slotIds }) =>
+      Effect.gen(function* () {
+        const fork = (yield* liveFork(yield* ownedChat(userId, chatId), forkId)).id
+        return yield* Effect.forEach(slotIds, (slotId) =>
+          Effect.map(
+            sql<VersionRow>`
+              SELECT ${sql.literal(shownVersionColumns)} FROM versions o ${shownJoin(sql, fork)}
+              JOIN slots s ON s.id = o.slot_id
+              WHERE o.slot_id = ${slotId} AND s.chat_id = ${chatId} AND o.fork_id IS NULL
+                AND NOT ${versionDeletedIn(sql, fork, "o")} AND NOT ${slotDeletedIn(sql, fork, "s")}
+              ORDER BY o.ordinal`,
+            (rows) => ({ slotId, versions: rows.map(toVersion) })
+          )
+        )
+      }).pipe(query("ExportVersions")),
+
     StateEventsAt: ({ userId, chatId, slotId, forkId, leafSlotId, displayEnd }) =>
       Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)

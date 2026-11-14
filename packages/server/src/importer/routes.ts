@@ -19,7 +19,12 @@ import { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { SummaryDraftSave } from "@rp/shared/lcm.ts"
 import { MessageDraftSave, messageDraftKey } from "@rp/shared/chatApi.ts"
 import { parseField } from "@rp/shared/editing.ts"
-import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore } from "effect"
+import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore, Stream } from "effect"
+import { ChatId, ForkId } from "@rp/shared/chatPosition.ts"
+import { chatExport } from "./chatExport.ts"
+import { libraryArchive, type RenderRef } from "./libraryArchive.ts"
+import { zipStream } from "../formats/zipStream.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import { NodeHttpServerRequest } from "@effect/platform-node"
 import { HttpIncomingMessage, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"
@@ -113,6 +118,14 @@ const authenticated = <A, E, R>(accounts: Accounts["Service"], handle: Effect.Ef
   })
 
 const ExportRequest = Schema.Struct({ refId: RefId, format: ExportFormatSchema })
+
+const ChatExportRequest = Schema.Struct({
+  chatId: ChatId,
+  /** The branch to export; null: the one the chat opens on. */
+  forkId: Schema.NullOr(ForkId),
+  scope: Schema.Literals(["branch", "all"]),
+  format: Schema.Literals(["jsonl", "txt"])
+})
 
 const LeavingDrafts = Schema.Struct({
   drafts: Schema.Array(EditorDraftSave).check(Schema.isMaxLength(500)),
@@ -446,6 +459,111 @@ export const layer = Layer.unwrap(
       }),
       Effect.catch((error) =>
         Effect.logError("an export failed", error).pipe(Effect.as(jsonError(500, "the export failed")))
+      )
+    )
+
+    // "Export this chat" (ARCHITECTURE.md §13b): written as it's read, so it holds no permit
+    // of the file routes'; one at a time per user, from its first byte to its last.
+    const chatExports = new Set<string>()
+    /** A file written as it's read, holding the user's one export until its last byte. */
+    const streamed = (
+      userId: string,
+      file: { fileName: string; contentType: string; files: number; body: AsyncIterable<Uint8Array> }
+    ) => {
+      chatExports.add(userId)
+      const body = Stream.fromAsyncIterable(file.body, (error) => error).pipe(
+        Stream.tapError((error) => Effect.logError("an export failed while it was sent", error)),
+        Stream.ensuring(Effect.sync(() => chatExports.delete(userId)))
+      )
+      const dot = file.fileName.lastIndexOf(".")
+      return HttpServerResponse.stream(body, {
+        contentType: file.contentType,
+        headers: {
+          "content-disposition": disposition(file.fileName.slice(0, dot), file.fileName.slice(dot + 1)),
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "x-export-files": String(file.files)
+        }
+      })
+    }
+    const exportChat = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      if (!request.headers["content-type"]?.startsWith("application/json")) {
+        return jsonError(415, "expected application/json")
+      }
+      const input = yield* HttpServerRequest.schemaBodyJson(ChatExportRequest).pipe(
+        Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.kibibytes(4)),
+        Effect.option
+      )
+      if (Option.isNone(input)) return jsonError(400, "expected a chatId, a forkId, a scope and a format")
+      if (chatExports.has(user.id)) {
+        return jsonError(503, "another of your exports is still running; try again once it's done")
+      }
+      return streamed(user.id, yield* chatExport(reader, user.id, input.value))
+    }).pipe(
+      Effect.catchTags({
+        NotFound: () => Effect.succeed(jsonError(404, "there's no such chat")),
+        ExportNotOffered: () => Effect.succeed(jsonError(400, "this chat can't be exported in that format"))
+      }),
+      Effect.catch((error) =>
+        Effect.logError("a chat export failed", error).pipe(Effect.as(jsonError(500, "the export failed")))
+      )
+    )
+
+    /**
+     * One library entry as an archive's file: a card as a PNG with its avatar (no embedded
+     * assets), a lorebook or preset as ST's JSON. Null, logged, when it can't be written.
+     */
+    const renderRef =
+      (userId: UserId): RenderRef =>
+      (refId, format) =>
+        Effect.gen(function* () {
+          const source = yield* reader.ExportSource({ userId, refId })
+          const exporter = (yield* formats.listExports).find((entry) => entry.id === format)
+          if (!exporter || exporter.kind !== source.kind) return null
+          const avatar =
+            exporter.media !== "none" && source.avatar && source.avatar.byteSize <= MAX_EXPORT_FILE_BYTES
+              ? source.avatar
+              : null
+          const bytes = avatar ? yield* readMedia(config.dataDir, avatar.path) : undefined
+          return yield* exports.withPermits(1)(
+            formats.export({
+              format,
+              expectedFormat: exporter,
+              docJson: source.docJson,
+              noteDocJson: source.noteDocJson,
+              notesDocJson: source.notesDocJson,
+              avatar: avatar && bytes ? { bytes, mime: avatar.mime } : null,
+              assets: []
+            })
+          )
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("a library entry was left out of the archive", error).pipe(Effect.as(null))
+          )
+        )
+
+    // The whole library in ST's folder layout (ARCHITECTURE.md §13b), as the chat export.
+    const exportLibrary = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      if (!request.headers["content-type"]?.startsWith("application/json")) {
+        return jsonError(415, "expected application/json")
+      }
+      if (chatExports.has(user.id)) {
+        return jsonError(503, "another of your exports is still running; try again once it's done")
+      }
+      const archive = yield* libraryArchive(reader, user.id, renderRef(user.id))
+      return streamed(user.id, {
+        fileName: `Library ${new Date().toISOString().slice(0, 10)}.zip`,
+        contentType: "application/zip",
+        files: archive.counts.cards + archive.counts.personas + archive.counts.lorebooks + archive.counts.presets,
+        body: zipStream(archive.entries())
+      })
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logError("a library export failed", error).pipe(Effect.as(jsonError(500, "the export failed")))
       )
     )
 
@@ -890,6 +1008,8 @@ export const layer = Layer.unwrap(
       HttpRouter.add("GET", "/library/media", authenticated(accounts, mediaFile)),
       HttpRouter.add("POST", "/library/import", authenticated(accounts, importFile)),
       HttpRouter.add("POST", "/library/export", authenticated(accounts, exportFile)),
+      HttpRouter.add("POST", "/library/chat-export", authenticated(accounts, exportChat)),
+      HttpRouter.add("POST", "/library/archive", authenticated(accounts, exportLibrary)),
       HttpRouter.add("POST", "/st-import/file", authenticated(accounts, stImportFile)),
       Layer.effectDiscard(Effect.forkScoped(Effect.repeat(sweep, Schedule.spaced("1 hour"))))
     )

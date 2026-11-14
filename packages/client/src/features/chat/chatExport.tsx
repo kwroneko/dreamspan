@@ -1,77 +1,70 @@
-// ⋯ Export (registered as `chat.export`): the branch shown as a file, read a page at a time
-// from its first message to its last. Plain text reads like ST's .txt export ("Name: text");
-// SillyTavern's .jsonl has its header line and one line per message, the version shown only,
-// which ST and this app's importer both open.
-import type { PathEntry } from "@rp/shared/chat.ts"
-import { useState } from "react"
-import type { AppError } from "../../errors.ts"
-import { ErrorAlert } from "../../actions.tsx"
+// ⋯ Export (registered as `chat.export`): the branch shown, or every branch, as a file the
+// server writes while it reads the chat (ARCHITECTURE.md §13b). SillyTavern's .jsonl carries
+// every version of each message, which one is shown, hidden messages and reasoning; plain
+// text reads like ST's .txt export ("Name: text").
+import { formatByteSize } from "@rp/shared/byteSize.ts"
+import { useRef, useState } from "react"
+import { Alert } from "../../ui/Surface.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { downloadChatExport } from "../library/files.ts"
 import type { ChatCommandDialogProps } from "./commands.tsx"
 import { chatDisplayName } from "./chatTitle.ts"
-import { type ExportFormat, exportFormats, exportText } from "./chatExportText.ts"
-import type { ChatSession, ChatView } from "./session.ts"
+import { type ExportFormat, exportFormats } from "./chatExportText.ts"
 
-type Format = ExportFormat
-const PAGE = 500
+type Scope = "branch" | "all"
 
-/** Every message of the fork shown, first to last. */
-async function readAll(session: ChatSession, view: ChatView, onProgress: (n: number) => void) {
-  const all: Array<PathEntry> = []
-  if (view.leafSlotId === null) return { ok: true as const, value: all }
-  let range: { _tag: "Bottom" } | { _tag: "Older"; from: PathEntry["slotId"] } = { _tag: "Bottom" }
-  for (;;) {
-    const page = await session.call((client) =>
-      client("ReadPath", { chatId: session.id, forkId: view.forkId, leafSlotId: view.leafSlotId, range, limit: PAGE })
-    )
-    if (!page.ok) return page
-    all.unshift(...page.value.entries)
-    onProgress(all.length)
-    if (page.value.older === null) return { ok: true as const, value: all }
-    range = { _tag: "Older", from: page.value.older }
-  }
-}
-
-const download = (text: string, name: string, type: string) => {
-  const url = URL.createObjectURL(new Blob([text], { type }))
-  const link = document.createElement("a")
-  link.href = url
-  link.download = name
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
+/** What the file can't hold, so nobody expects it back from a re-import. */
+const leftOut = (format: ExportFormat, scope: Scope) =>
+  format === "txt"
+    ? "Only the version each message shows, without hidden-message marks, reasoning or pictures."
+    : `Not in the file: pictures, notes, summaries, edit history, deleted messages, and which versions are hidden or starred.${
+        scope === "all" ? " Branch names become “Branch #1”, “Branch #2”…" : ""
+      }`
 
 export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
   const { session, view } = context
   const formats = exportFormats(view)
-  const [format, setFormat] = useState<Format>(formats[0] ?? "txt")
-  const [read, setRead] = useState<number | null>(null)
-  const [error, setError] = useState<AppError | null>(null)
+  const [format, setFormat] = useState<ExportFormat>(formats[0] ?? "txt")
+  const [scope, setScope] = useState<Scope>("branch")
+  const [received, setReceived] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const abort = useRef<AbortController | null>(null)
+  const running = received !== null
+
   const run = async () => {
     setError(null)
-    setRead(0)
-    const result = await readAll(session, view, setRead)
-    setRead(null)
-    if (!result.ok) return setError(result.error)
+    setReceived(0)
+    const controller = new AbortController()
+    abort.current = controller
     const base =
       chatDisplayName(view)
         .replace(/[\\/:*?"<>|]+/g, " ")
         .trim() || "chat"
-    download(
-      exportText(view, result.value, format),
-      `${base}.${format}`,
-      format === "txt" ? "text/plain" : "application/jsonl"
+    const result = await downloadChatExport(
+      { chatId: session.id, forkId: view.forkId, scope, format },
+      `${base}.${scope === "all" ? "zip" : format}`,
+      setReceived,
+      controller.signal
     )
+    abort.current = null
+    setReceived(null)
+    if (result === "aborted") return
+    if (result !== null) return setError(result)
     onClose()
   }
+  const cancel = () => {
+    if (abort.current) abort.current.abort()
+    else onClose()
+  }
+
   return (
     <Dialog
       open
-      onOpenChange={(open) => !open && read === null && onClose()}
+      onOpenChange={(open) => !open && !running && onClose()}
       title="Export this chat"
-      description="The branch shown, from its first message to its last, with the version each message shows."
+      description="Every message from the first to the last, as a file to keep or open in SillyTavern."
     >
       <Segmented
         label="Format"
@@ -82,26 +75,43 @@ export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
           ...(value === "jsonl"
             ? {
                 label: "SillyTavern (.jsonl)",
-                description: "A chat file that SillyTavern, and this app's import, can open."
+                description: "Every version of each message, which one is shown, hidden messages and reasoning."
               }
             : { label: "Plain text (.txt)", description: "Easy to read: each message as “Name: text”." })
         }))}
       />
-      <ErrorAlert error={error} />
-      {read !== null && (
+      <Segmented
+        label="Branches"
+        value={scope}
+        onValueChange={setScope}
+        options={[
+          { value: "branch", label: "This branch", description: "The branch shown, as one file." },
+          {
+            value: "all",
+            label: "Every branch",
+            description: "A .zip with a file for each branch, linked the way SillyTavern links branches."
+          }
+        ]}
+      />
+      <p className="text-sm text-muted">{leftOut(format, scope)}</p>
+      {error !== null && <Alert tone="danger">{error}</Alert>}
+      {running && (
         <p role="status" className="text-sm text-muted">
-          Read {read.toLocaleString()} messages…
+          Received {formatByteSize(received)}…
         </p>
       )}
       <DialogActions>
-        <Button hint="Closes this dialog without applying changes." onClick={onClose} disabled={read !== null}>
-          Cancel
+        <Button
+          hint={running ? "Stops the export; nothing is downloaded." : "Closes this dialog without exporting."}
+          onClick={cancel}
+        >
+          {running ? "Stop" : "Cancel"}
         </Button>
         <Button
-          hint="Exports the chat with the selected options."
+          hint="Downloads the file with the options above."
           variant="primary"
           disabled={!formats.includes(format)}
-          pending={read !== null}
+          pending={running}
           onClick={() => void run()}
         >
           Export

@@ -54,6 +54,76 @@ const fileName = (disposition: string | null, fallback: string) => {
   return disposition?.match(/filename="([^"]+)"/)?.[1] ?? fallback
 }
 
+/** Hands bytes to the browser as a download named `name`. */
+const save = (blob: Blob, name: string) => {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = name
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
+export interface ChatExportRequest {
+  readonly chatId: string
+  readonly forkId: string | null
+  readonly scope: "branch" | "all"
+  readonly format: "jsonl" | "txt"
+}
+
+/**
+ * Downloads a chat export (ARCHITECTURE.md §13b), which the server writes as it reads the
+ * chat; `onProgress` gets the bytes received so far. Resolves to an error sentence, null
+ * once the download started, or "aborted" when `signal` stopped it.
+ */
+export const downloadChatExport = (
+  request: ChatExportRequest,
+  fallbackName: string,
+  onProgress: (bytes: number) => void,
+  signal: AbortSignal
+) => streamedDownload("/library/chat-export", request, "export the chat", fallbackName, onProgress, signal)
+
+/** The whole library as one .zip (ARCHITECTURE.md §13b), as `downloadChatExport`. */
+export const downloadLibraryArchive = (onProgress: (bytes: number) => void, signal: AbortSignal) =>
+  streamedDownload("/library/archive", {}, "export the library", "Library.zip", onProgress, signal)
+
+const streamedDownload = async (
+  path: string,
+  request: unknown,
+  what: string,
+  fallbackName: string,
+  onProgress: (bytes: number) => void,
+  signal: AbortSignal
+): Promise<string | null | "aborted"> => {
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+      signal
+    })
+    if (!response.ok) return failure(response, what)
+    const parts: Array<Uint8Array<ArrayBuffer>> = []
+    let received = 0
+    const reader = response.body!.getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      parts.push(value)
+      received += value.byteLength
+      onProgress(received)
+    }
+    save(
+      new Blob(parts, { type: response.headers.get("content-type") ?? "application/octet-stream" }),
+      fileName(response.headers.get("content-disposition"), fallbackName)
+    )
+    return null
+  } catch {
+    if (signal.aborted) return "aborted"
+    return "The export stopped before it was done. Check that the server is running, and try again."
+  }
+}
+
 /** Downloads a ref as a file. Resolves to an error sentence, or null once the download started. */
 export const downloadExport = async (refId: RefId, format: ExportFormat, label: string): Promise<string | null> => {
   let response: Response
