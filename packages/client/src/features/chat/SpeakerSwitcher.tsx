@@ -8,6 +8,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 // Members / Personas / All cards, opening on Personas: a library of hundreds of cards is
 // filtered in memory and only the first rows are drawn.
 import { CardSurface } from "../cardForks/surfaces.tsx"
+import { CardVersion } from "./CardVersion.tsx"
 import { useDefaultPersona } from "../characters/defaultPersona.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
@@ -147,6 +148,7 @@ function CardOptions({
               />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate">{card.name}</span>
+                <CardVersion card={card} truncate />
               </span>
               {/* Played as the persona, a character card joins the chat; a persona takes the
                   place of the one played until now, so it isn't said to add anyone. */}
@@ -208,6 +210,7 @@ function SectionRow({
       <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="md" />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="[overflow-wrap:anywhere]">{card.name}</span>
+        <CardVersion card={card} />
       </span>
       {away && <span className="shrink-0 text-xs text-muted">away</span>}
       {(played || card.persona) && <PersonaBadge played={played} />}
