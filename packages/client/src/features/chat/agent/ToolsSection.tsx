@@ -10,16 +10,21 @@ type SendPresence = "off" | "optional" | "required"
 
 /** What the setting does, when, and one example. */
 const PRESENT_ABOUT =
-  "Let each reply say which characters are there for it, from the next reply on this branch. Anyone it leaves out is marked away starting with that message, and is back once a reply names them again. Example: Wren's reply has Mira walk out and names only Wren and Tobin, so Mira is away until a later reply names her. Your own character and a narrator never change this way."
+  "Requires Separate contexts. Let each reply say which characters are there for it, from the next reply on this branch. Anyone it leaves out is marked away starting with that message, and is back once a reply names them again. Example: Wren's reply has Mira walk out and names only Wren and Tobin, so Mira is away until a later reply names her. Your own character and a narrator never change this way."
 
 export function ToolsSection({ session }: { session: ChatSession }) {
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
   const { tools: available, error: readError } = useReplyTools(session)
   const [writeError, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  const error = writeError ?? readError
   if (cast === null) return null
   const on = cast.agentEnabled === true
+  const error =
+    writeError ??
+    readError ??
+    (on && cast.sendPresence !== undefined && (cast.contextPerSpeaker ?? "shared") === "shared"
+      ? "Choose Separate contexts before asking replies to say who's in the scene. One shared context lets every character read the whole chat."
+      : null)
   const tools = cast.agentTools ?? available?.defaultTools ?? []
   const write = async (change: CastChange) => {
     setPending(true)

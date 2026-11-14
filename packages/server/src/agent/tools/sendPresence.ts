@@ -13,7 +13,7 @@ import type { ToolContext } from "../tools.ts"
  */
 export const declarePresence = (context: ToolContext, names: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const { participants } = foldState(
+    const { participants, playedByMe } = foldState(
       yield* context.reader.StateEventsAt({
         userId: context.userId,
         chatId: context.chatId,
@@ -21,19 +21,25 @@ export const declarePresence = (context: ToolContext, names: ReadonlyArray<strin
         forkId: context.forkId
       })
     )
-    const cards = participants.length
-      ? yield* context.reader.CastCards({ userId: context.userId, entityIds: participants as Array<EntityId> })
+    const known = [...new Set([...participants, ...playedByMe])]
+    const cards = known.length
+      ? yield* context.reader.CastCards({ userId: context.userId, entityIds: known as Array<EntityId> })
       : []
     const called = (name: string) => {
       const wanted = name.trim().toLowerCase()
-      return cards.find((c) => [c.modelName, c.name].some((n) => n?.trim().toLowerCase() === wanted))
+      return cards.filter((c) => [c.modelName, c.name].some((n) => n?.trim().toLowerCase() === wanted))
     }
-    const unknown = names.filter((name) => !called(name))
+    const unknown = names.filter((name) => called(name).length === 0)
     if (unknown.length)
       return `No character called ${unknown.map((name) => `“${name}”`).join(", ")} is in the chat. In it: ${
         cards.map((c) => c.modelName ?? c.name).join(", ") || "nobody"
       }. Send the message again with \`present\` naming only them.`
-    const present = [...new Set(names.map((name) => called(name)!.entityId))]
+    if (names.some((name) => called(name).length > 1))
+      return "More than one character has that name. Send again naming only characters whose names are unique."
+    // A separately stored user persona is a valid name, but cannot change the frozen cast.
+    const present = [...new Set(names.map((name) => called(name)[0]!.entityId))].filter((id) =>
+      participants.includes(id)
+    )
     yield* context.writer.DeclareRolloutPresence({
       userId: context.userId,
       rolloutId: context.rolloutId,

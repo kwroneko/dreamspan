@@ -22,7 +22,11 @@ const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server
 
 test.beforeAll(async () => {
   cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
-  provider = await startProvider({ reply: "*nods* The tide is turning.", holdAfterText: false })
+  provider = await startProvider({
+    reply: "*nods* The tide is turning.",
+    holdAfterText: false,
+    respectOutputLimit: true
+  })
   for (const name of ["Mira", "Wren", "Ash"]) {
     const response = await fetch(`${server().url}/library/import?name=${name}.json`, {
       method: "POST",
@@ -182,6 +186,9 @@ test("the token limit ends a run before its replies run out", async ({ page }) =
   await start(page, 5, 10)
   await expect(row(page)).toContainText("Stopped after 2 of 5: the token limit was reached.", { timeout: 30_000 })
   await expect(messages(page)).toHaveCount(3)
+  const requests = provider.completions.slice(before) as ReadonlyArray<Record<string, unknown>>
+  expect(requests[0]!["max_tokens"] ?? requests[0]!["max_completion_tokens"]).toBe(10)
+  expect(requests[1]!["max_tokens"] ?? requests[1]!["max_completion_tokens"]).toBe(4)
   await staysAt(before + 2)
   await expect(row(page).getByRole("button", { name: "Continue", exact: true })).toHaveCount(0)
 })
@@ -234,4 +241,131 @@ test("a run belongs to its tab: a reload ends it", async ({ page }) => {
   provider.release()
   await expect(messages(page).last().getByText("The tide is turning.")).toBeVisible()
   await staysAt(before + 1)
+})
+
+for (const change of ["earlier edit", "branch switch", "navigation"] as const)
+  test(`an auto run ends on ${change}, even with its own reply still running`, async ({ page }) => {
+    const chatId = await chatOf(["Mira", "Wren", "Ash"])
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(messages(page)).toHaveCount(1)
+    const before = provider.completions.length
+    provider.hold()
+    await start(page, 5)
+    await expect.poll(() => provider.completions.length).toBe(before + 1)
+    if (change === "earlier edit") {
+      await admin((api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.GetChat({ chatId })
+          const path = yield* api.ReadPath({
+            chatId,
+            forkId: chat.currentForkId,
+            leafSlotId: null,
+            range: { _tag: "Bottom" },
+            limit: 10
+          })
+          const first = path.entries[0]!
+          yield* api.AmendVersion({
+            versionId: first.version.id,
+            forkId: chat.currentForkId,
+            content: "The user edits an earlier line.",
+            expectedRowVersion: first.version.rowVersion
+          })
+        })
+      )
+      await expect(row(page)).toHaveAttribute("data-auto-run", "moved")
+    } else if (change === "branch switch") {
+      const branch = await admin((api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.GetChat({ chatId })
+          return yield* api.CreateFork({ chatId, fromForkId: chat.currentForkId, atSlotId: chat.activeLeafSlotId })
+        })
+      )
+      await page.goto(`${server().url}/chats/${chatId}?fork=${branch.fork.id}`)
+    } else await page.goto(server().url)
+    provider.release()
+    await staysAt(before + 1)
+  })
+
+test("a draft blocks Start and two tabs cannot queue auto replies", async ({ page, context }) => {
+  const chatId = await chatOf(["Mira", "Wren", "Ash"])
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(messages(page)).toHaveCount(1)
+  const before = provider.completions.length
+  await box(page).fill("An unsent draft.")
+  await chip(page).click()
+  await expect(dialog(page).getByRole("button", { name: "Start", exact: true })).toBeDisabled()
+  expect(provider.completions.length).toBe(before)
+  await dialog(page).getByRole("button", { name: "Cancel", exact: true }).click()
+  await box(page).fill("")
+  const other = await context.newPage()
+  await other.goto(`${server().url}/chats/${chatId}`)
+  await expect(messages(other)).toHaveCount(1)
+  provider.hold()
+  await start(page, 5)
+  await expect.poll(() => provider.completions.length).toBe(before + 1)
+  const rejected = await admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.GetChat({ chatId })
+      return yield* Effect.flip(
+        api.Generate({
+          chatId,
+          forkId: chat.currentForkId,
+          parentSlotId: chat.activeLeafSlotId,
+          branch: false,
+          immediate: true
+        })
+      )
+    })
+  )
+  expect(rejected._tag).toBe("LeafMoved")
+  await row(page).getByRole("button", { name: "Stop", exact: true }).click()
+  provider.release()
+  await staysAt(before + 1)
+  await expect(messages(other)).toHaveCount(2)
+  await other.close()
+})
+
+test("the unsent Auto dialog and bounds survive reload without starting a run", async ({ page }) => {
+  const chatId = await chatOf(["Mira", "Wren", "Ash"])
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(messages(page)).toHaveCount(1)
+  const before = provider.completions.length
+  await chip(page).click()
+  await dialog(page).getByLabel("Replies", { exact: true }).fill("3")
+  await dialog(page).getByLabel("Token limit (optional)", { exact: true }).fill("20")
+  await page.reload()
+  await expect(dialog(page)).toBeVisible()
+  await expect(dialog(page).getByLabel("Replies", { exact: true })).toHaveValue("3")
+  await expect(dialog(page).getByLabel("Token limit (optional)", { exact: true })).toHaveValue("20")
+  await expect(row(page)).toHaveCount(0)
+  await staysAt(before)
+})
+
+test("changing the account's chosen model ends an auto run", async ({ page }) => {
+  const chatId = await chatOf(["Mira", "Wren", "Ash"])
+  const defaults = await admin((api) => api.GetGenerationDefaults())
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(messages(page)).toHaveCount(1)
+  await expect(chip(page)).toBeVisible()
+  const before = provider.completions.length
+  provider.hold()
+  await start(page, 5)
+  await expect.poll(() => provider.completions.length).toBe(before + 1)
+  try {
+    await admin((api) =>
+      Effect.gen(function* () {
+        const model = (yield* api.ListModels({ connectionId: defaults.model!.connection, includeHidden: false })).find(
+          (model) => model.key === "fake-large"
+        )!
+        yield* api.SetGenerationDefaults({
+          defaults: { ...defaults, model: { connection: model.connectionId, model: model.id } }
+        })
+      })
+    )
+    await expect(row(page)).toHaveAttribute("data-auto-run", "moved")
+    provider.release()
+    await staysAt(before + 1)
+  } finally {
+    await admin((api) => api.SetGenerationDefaults({ defaults }))
+  }
 })

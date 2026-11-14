@@ -22,6 +22,7 @@ export interface GenerationRequest {
   /** "Retry with…": generates with this model instead of the chat's. */
   readonly model?: { readonly connection: ConnectionId; readonly model: ModelId }
   /** An approved workshop send permits this reply only, without auxiliary provider workflows. */
+  readonly outputBudget?: { remaining: number }
   readonly replyOnly?: boolean
   /**
    * A side chat's request (spec/WORKSHOP.md §4): where its story tools read the story, as the

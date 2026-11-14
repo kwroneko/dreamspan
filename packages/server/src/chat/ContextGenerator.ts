@@ -321,6 +321,12 @@ export const layer = Layer.effect(
           const plan = plainTurn
             ? { ...planned.plan, strategy: "reply", tools: [], contract: "final_text" as const }
             : planned.plan
+          if (plan.sendPresence && plan.contract !== "final_text" && (state.contextPerSpeaker ?? "shared") === "shared")
+            return yield* new GenerationFailed({
+              class: "context_view",
+              message:
+                "Replies that say who's in the scene need Separate contexts. Choose Separate contexts, or set Who's in the scene to Replies don't say."
+            })
           const agentic = plan.strategy !== "reply"
           const candidates = plan.tools.flatMap((id) => {
             const tool = toolForKind(execution, chat.kind, id)

@@ -171,12 +171,14 @@ export const makeChatHandlers = Effect.gen(function* () {
       /** The reply's speaker and the round's are Auto's picks, which the decision model may change. */
       readonly autoPick?: boolean | undefined
       readonly composer: { readonly draftId: string; readonly session: number } | undefined
+      readonly outputLimit?: number | undefined
+      readonly immediate?: boolean | undefined
       /** A side chat's story position, for its reply now or when the queue posts it. */
       readonly storyAt?: StoryAt | undefined
     }
   ) =>
     Effect.gen(function* () {
-      const { composer, round, autoPick, storyAt, ...send } = params
+      const { composer, round, autoPick, storyAt, outputLimit, immediate, ...send } = params
       // What the user sends goes through the scripts first, as ST's sendMessageAsUser.
       const written =
         params.kind === "message"
@@ -192,6 +194,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       const outcome = yield* writer.SendOrQueue({
         userId: user,
         ...send,
+        ...(immediate || outputLimit !== undefined ? { immediate: true } : {}),
         content: written.content,
         ...(written.rewrite ? { rewrite: written.rewrite } : {}),
         ...(round === undefined || round.length === 0 ? {} : { round }),
@@ -234,6 +237,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           chatId: params.chatId,
           slotId: result.slotId,
           versionId: result.version.id,
+          ...(outputLimit === undefined ? {} : { outputBudget: { remaining: outputLimit } }),
           ...(proof?.model ? { model: proof.model } : {}),
           ...(operation ? { replyOnly: true } : {}),
           ...(storyAt === undefined ? {} : { storyAt }),
@@ -368,7 +372,9 @@ export const makeChatHandlers = Effect.gen(function* () {
       round,
       autoPick,
       composer,
-      storyAt
+      storyAt,
+      outputLimit,
+      immediate
     }) =>
       Effect.gen(function* () {
         yield* needGenerator
@@ -386,7 +392,9 @@ export const makeChatHandlers = Effect.gen(function* () {
           round,
           autoPick,
           composer,
-          storyAt
+          storyAt,
+          outputLimit,
+          immediate
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
 

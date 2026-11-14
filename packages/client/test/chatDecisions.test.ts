@@ -38,9 +38,9 @@ describe("this chat's Decisions setting", () => {
     ])
   })
 
-  it("writes the whole list, in the points' order, without ids nothing registers", () => {
+  it("writes the whole list, in the points' order, preserving unavailable plugin ids", () => {
     expect(withDecision(points, [], "next", false)).toEqual(["next"])
-    expect(withDecision(points, ["next", "gone"], "lore", false)).toEqual(["lore", "next"])
+    expect(withDecision(points, ["next", "gone"], "lore", false)).toEqual(["lore", "next", "gone"])
     expect(withDecision(points, ["lore", "next"], "next", true)).toEqual(["lore"])
     expect(withDecision(points, ["next"], "next", true)).toEqual([])
   })

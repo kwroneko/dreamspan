@@ -82,8 +82,9 @@ export const defaultMode: OrchestrationMode = {
     if (state.agentEnabled !== true) return { strategy: "reply", tools: [], contract: "final_text", turnCap: 1 }
     const chosen = state.outputContract === "several" ? "both" : (state.outputContract ?? "both")
     // Who is present can only be said through the tool: a chat that requires it asks for the
-    // reply through the tool, and one that takes final text alone has no tool to say it with.
-    const sendPresence = chosen === "final_text" ? undefined : state.sendPresence
+    // reply through the tool even when the older output preference was final text.
+    const sendPresence =
+      state.sendPresence === "required" ? "required" : chosen === "final_text" ? undefined : state.sendPresence
     return {
       strategy: "agent",
       tools: state.agentTools ?? DEFAULT_TOOLS,

@@ -470,7 +470,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       rewrite,
       round,
       autoPick,
-      storyAt
+      storyAt,
+      immediate
     }: SendInput) =>
       Effect.gen(function* () {
         yield* graph.ownedChat(userId, chatId)
@@ -501,6 +502,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           // A deleted anchor can remain the tip to retain its gap. Nothing waits on its
           // hidden generation: afterReply withdraws entries whose reply was deleted.
           if (parent.status === "generating" && !parent.deleted) {
+            if (immediate) return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
             const at = Date.now()
             // A branch queued onto a reply still being written waits in a fork of its own.
             if (branch && parentSlotId !== fork.tip_slot_id) {

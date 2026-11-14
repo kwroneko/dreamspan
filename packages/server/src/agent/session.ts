@@ -392,6 +392,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               inspection: { request: generation.request, model, display: generation.inspection },
               options: {
                 ...(prefix.cacheRetention ? { cacheRetention: prefix.cacheRetention } : {}),
+                ...(request.outputBudget ? { outputBudget: request.outputBudget } : {}),
                 ...(prefix.temperature !== undefined ? { temperature: prefix.temperature } : {}),
                 ...(prefix.maxTokens !== undefined ? { maxTokens: prefix.maxTokens } : {}),
                 ...(prefix.reasoning ? { reasoning: prefix.reasoning } : {}),

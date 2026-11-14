@@ -22,6 +22,7 @@ export type AutoStop =
   | "error"
   | "uncounted"
   | "left"
+  | "disconnected"
 
 export interface Tip {
   readonly slotId: SlotId
@@ -34,7 +35,8 @@ export interface AutoRun {
   /** How many replies it may ask for, and how many finished. */
   readonly turns: number
   readonly done: number
-  /** Stop once about this many tokens were written; null: no such bound. */
+  readonly asked: number
+  /** Hard ceiling on reported output across reply requests; null: no token bound. */
   readonly tokenLimit: number | null
   readonly tokens: number
   /** Requests its replies made, as the usage ledger counted them. */
@@ -55,7 +57,7 @@ export interface Seen {
   readonly forkId: string | null
   /** The messages shown reach the chat's end and aren't being read again. */
   readonly atLeaf: boolean
-  readonly leaf: (Tip & { readonly status: string }) | null
+  readonly leaf: (Tip & { readonly status: string; readonly empty?: boolean }) | null
   readonly hasText: boolean
   readonly queued: number
   /** Auto's pick for the next reply. */
@@ -83,6 +85,7 @@ export const newRun = (forkId: string | null, turns: number, tokenLimit: number 
   forkId,
   turns,
   done: 0,
+  asked: 0,
   tokenLimit,
   tokens: 0,
   requests: 0,
@@ -104,6 +107,8 @@ export const stepOf = (run: AutoRun, seen: Seen): Step => {
   if (seen.forkId !== run.forkId) return { do: "stop", why: "branch" }
   if (seen.hasText) return { do: "stop", why: "typed" }
   if (seen.queued > 0) return { do: "stop", why: "queued" }
+  if (seen.picked) return { do: "stop", why: "picked" }
+  if (seen.approval) return { do: "stop", why: "approval" }
   if (run.pending !== null || !seen.atLeaf) return { do: "wait" }
   if (run.waiting !== null) {
     if (!same(seen.leaf, run.waiting)) return { do: "stop", why: "moved" }
@@ -111,6 +116,7 @@ export const stepOf = (run: AutoRun, seen: Seen): Step => {
       case "generating":
         return seen.approval ? { do: "stop", why: "approval" } : { do: "wait" }
       case "complete":
+        if (seen.leaf!.empty) return { do: "stop", why: "failed" }
         return { do: "count", versionId: run.waiting.versionId }
       case "stopped":
         return { do: "stop", why: "stopped" }
@@ -120,7 +126,7 @@ export const stepOf = (run: AutoRun, seen: Seen): Step => {
   }
   if (!same(seen.leaf, run.tip) || (seen.leaf !== null && seen.leaf.status !== "complete"))
     return { do: "stop", why: "moved" }
-  if (run.done >= run.turns) return { do: "stop", why: "done" }
+  if (run.asked >= run.turns) return { do: "stop", why: "done" }
   if (run.tokenLimit !== null && run.tokens >= run.tokenLimit) return { do: "stop", why: "tokens" }
   // Who replies next isn't known while the composer is still reading it.
   if (!seen.ready || seen.busy) return { do: "wait" }
@@ -130,11 +136,14 @@ export const stepOf = (run: AutoRun, seen: Seen): Step => {
 }
 
 export const stopped = (run: AutoRun, why: AutoStop, error?: string): AutoRun =>
-  run.stop !== null ? run : { ...run, stop: why, pending: null, ...(error === undefined ? {} : { error }) }
+  run.stop !== null ? run : { ...run, stop: why, ...(error === undefined ? {} : { error }) }
 
-export const starting = (run: AutoRun): AutoRun => ({ ...run, pending: "start" })
-export const started = (run: AutoRun, reply: Tip): AutoRun =>
-  run.stop !== null ? run : { ...run, pending: null, waiting: reply }
+export const starting = (run: AutoRun): AutoRun => ({ ...run, asked: run.asked + 1, pending: "start" })
+export const started = (run: AutoRun, reply: Tip): AutoRun => ({
+  ...run,
+  pending: null,
+  waiting: reply
+})
 export const counting = (run: AutoRun): AutoRun => ({ ...run, pending: "count" })
 /** A reply finished: it's the tip the next turn must find, and its usage counts toward the bounds. */
 export const counted = (run: AutoRun, usage: { readonly tokens: number; readonly requests: number }): AutoRun => ({
@@ -162,7 +171,9 @@ export const canResume = (run: AutoRun) =>
   run.stop !== null &&
   run.stop !== "done" &&
   run.stop !== "tokens" &&
-  run.done < run.turns &&
+  run.asked < run.turns &&
+  run.pending === null &&
+  run.waiting === null &&
   (run.tokenLimit === null || run.tokens < run.tokenLimit)
 
 const replies = (count: number) => (count === 1 ? "1 reply" : `${count} replies`)
@@ -199,6 +210,8 @@ export const stopText = (run: AutoRun): string => {
       return `Stopped ${progress}: a tool is waiting for your approval.`
     case "uncounted":
       return `Stopped ${progress}: the last reply's token count couldn't be read.`
+    case "disconnected":
+      return `Stopped ${progress}: the connection was lost.`
     case "left":
       return `Stopped ${progress}: you left the chat or branch.`
     case "error":
@@ -251,6 +264,7 @@ export const parseBounds = (turns: string, tokens: string) => {
   const limit = tokens.trim() === "" ? null : /^\d+$/.test(tokens.trim()) ? Number(tokens.trim()) : NaN
   return {
     turns: Number.isInteger(count) && count >= 1 && count <= MAX_TURNS ? count : null,
-    tokenLimit: limit === null ? null : Number.isInteger(limit) && limit >= 1 ? limit : undefined
+    tokenLimit:
+      limit === null ? null : Number.isSafeInteger(limit) && limit >= 1 && limit <= 2147483647 ? limit : undefined
   }
 }

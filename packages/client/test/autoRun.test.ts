@@ -53,6 +53,20 @@ describe("auto replies: what a run does next", () => {
     expect(stepOf(run(), seen(null))).toEqual({ do: "stop", why: "moved" })
   })
 
+  it("a manual pick ends a run even while its request is pending", () => {
+    expect(stepOf(starting(run()), seen(tip("s1"), "complete", { picked: true }))).toEqual({
+      do: "stop",
+      why: "picked"
+    })
+  })
+
+  it("an approval ends a run while it is pending, before a render can miss the waiting step", () => {
+    expect(stepOf(starting(run()), seen(tip("s1"), "complete", { approval: true }))).toEqual({
+      do: "stop",
+      why: "approval"
+    })
+  })
+
   it("waits, sending nothing, while the chat is loading or a request of its own is out", () => {
     expect(stepOf(run(), seen(tip("s1"), "complete", { ready: false }))).toEqual({ do: "wait" })
     expect(stepOf(run(), seen(tip("s1"), "complete", { busy: true }))).toEqual({ do: "wait" })
@@ -71,6 +85,10 @@ describe("auto replies: what a run does next", () => {
     expect(stepOf(now, seen(tip("s2"), "generating"))).toEqual({ do: "wait" })
     expect(stepOf(now, seen(tip("s2"), "generating", { approval: true }))).toEqual({ do: "stop", why: "approval" })
     expect(stepOf(now, seen(tip("s2"), "complete"))).toEqual({ do: "count", versionId: "s2-v1" })
+    expect(stepOf(now, { ...seen(tip("s2")), leaf: { ...tip("s2"), status: "complete", empty: true } })).toEqual({
+      do: "stop",
+      why: "failed"
+    })
     expect(stepOf(now, seen(tip("s2"), "failed"))).toEqual({ do: "stop", why: "failed" })
     expect(stepOf(now, seen(tip("s2"), "interrupted"))).toEqual({ do: "stop", why: "failed" })
     expect(stepOf(now, seen(tip("s2"), "stopped"))).toEqual({ do: "stop", why: "stopped" })
@@ -96,8 +114,9 @@ describe("auto replies: what a run does next", () => {
     expect(ended.stop).toBe("typed")
     expect(stepOf(ended, seen(tip("s2")))).toEqual({ do: "wait" })
     // A reply posted after the stop isn't taken up.
-    expect(started(ended, tip("s3")).waiting).toEqual(tip("s2"))
-    expect(canResume(ended)).toBe(true)
+    expect(started(ended, tip("s3")).waiting).toEqual(tip("s3"))
+    expect(canResume(ended)).toBe(false)
+    expect(canResume(counted(ended, { tokens: 5, requests: 1 }))).toBe(true)
     const again = resumed(ended, tip("s2"))
     expect(again).toMatchObject({ stop: null, done: 0, turns: 3, waiting: null, tip: tip("s2") })
     expect(again.id).not.toBe(ended.id)
@@ -105,6 +124,14 @@ describe("auto replies: what a run does next", () => {
     const done = stopped(counted(writing(run(1), "s2"), { tokens: 5, requests: 1 }), "done")
     expect(canResume(done)).toBe(false)
     expect(canResume(stopped(counted(writing(run(5, 10), "s2"), { tokens: 50, requests: 1 }), "tokens"))).toBe(false)
+  })
+
+  it("a lost acknowledgement never replenishes the stated reply allowance", () => {
+    const pending = starting(run(1, 10))
+    expect(pending.asked).toBe(1)
+    const lost = stopped(pending, "error", "Connection lost")
+    expect(canResume(lost)).toBe(false)
+    expect(stepOf(lost, seen(tip("s1")))).toEqual({ do: "wait" })
   })
 
   it("says why it ended, briefly", () => {

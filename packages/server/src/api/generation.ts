@@ -34,7 +34,7 @@ export const makeGenerationHandlers = Effect.gen(function* () {
         // Open chats' image estimates are made again: a provider chosen now counts their images.
         writer
           .SetTokenCounting({ userId: user.id, connectionId, via })
-          .pipe(Effect.tap(() => warmth.refreshUser(user.id)))
+          .pipe(Effect.tap(() => warmth.refreshUser(user.id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], serverError("SetTokenCounting"))),
     GetGenerationDefaults: () =>
       Effect.flatMap(CurrentUser, (user) => reader.GetGenerationDefaults({ userId: user.id })).pipe(
@@ -42,11 +42,15 @@ export const makeGenerationHandlers = Effect.gen(function* () {
       ),
     SetGenerationDefaults: ({ defaults }) =>
       Effect.flatMap(CurrentUser, (user) =>
-        writer.SetGenerationDefaults({ userId: user.id, defaults }).pipe(Effect.tap(() => warmth.refreshUser(user.id)))
+        writer
+          .SetGenerationDefaults({ userId: user.id, defaults })
+          .pipe(Effect.tap(() => warmth.refreshUser(user.id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], serverError("SetGenerationDefaults"))),
     ChangeGenerationDefaults: ({ change }) =>
       Effect.flatMap(CurrentUser, (user) =>
-        writer.ChangeGenerationDefaults({ userId: user.id, change }).pipe(Effect.tap(() => warmth.refreshUser(user.id)))
+        writer
+          .ChangeGenerationDefaults({ userId: user.id, change })
+          .pipe(Effect.tap(() => warmth.refreshUser(user.id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], serverError("ChangeGenerationDefaults")))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
 })

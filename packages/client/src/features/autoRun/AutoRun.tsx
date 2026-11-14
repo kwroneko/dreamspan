@@ -3,8 +3,11 @@
 // Stop. The row is also the run's driver: it is the only thing that starts a reply, and it only
 // does while it is on screen in the tab that started the run.
 import { useAtomValue } from "@effect/atom-react"
+import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { VersionId } from "@rp/shared/chat.ts"
-import { useEffect, useId, useState, useSyncExternalStore } from "react"
+import { useEffect, useId, useRef, useSyncExternalStore } from "react"
+import { usePlaceParam } from "../../usePlaceParam.ts"
+import { useChatPlaceKey } from "../chat/chatPlace.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
@@ -33,6 +36,28 @@ import {
   type Tip
 } from "./run.ts"
 
+const externalEvent = (event: ChatEvent, run: AutoRun): boolean => {
+  const own = run.waiting ?? run.tip
+  switch (event._tag) {
+    case "Slot":
+      return event.entry.slotId !== own?.slotId || event.entry.version.id !== own?.versionId
+    case "Version":
+      return event.version.id !== own?.versionId
+    case "Chat":
+      return event.chat.activeLeafSlotId !== own?.slotId
+    case "Queue":
+      return event.queue.length > 0
+    case "State":
+    case "Lcm":
+    case "Reload":
+    case "Deleted":
+    case "ComposerChoice":
+      return true
+    default:
+      return false
+  }
+}
+
 const NO_VERSION = "" as VersionId
 
 const useRun = (session: ChatSession) => {
@@ -46,7 +71,13 @@ const tipOf = (context: ComposerControlContext): Tip | null =>
 const seenOf = (context: ComposerControlContext, approval: boolean): Seen => ({
   forkId: context.view.forkId,
   atLeaf: context.view.newer === null && !context.view.loading,
-  leaf: context.leaf ? { ...tipOf(context)!, status: context.leaf.version.status } : null,
+  leaf: context.leaf
+    ? {
+        ...tipOf(context)!,
+        status: context.leaf.version.status,
+        empty: context.leaf.version.content.trim() === "" && !context.leaf.version.images?.length
+      }
+    : null,
   hasText: context.hasText,
   queued: context.view.queue.length,
   replier: context.replier,
@@ -76,7 +107,10 @@ const readUsage = async (session: ChatSession, versionId: VersionId) => {
   for (let attempt = 0; attempt < 5; attempt++) {
     const outcome = await session.call((client) => client("GetVersionMetrics", { versionIds: [versionId] }))
     const metrics = outcome.ok ? outcome.value.find((m) => m.versionId === versionId) : undefined
-    if (metrics && !metrics.running) return { tokens: metrics.output, requests: metrics.requests }
+    if (metrics && !metrics.running)
+      return metrics.outputUnknown > 0 || metrics.estimated
+        ? null
+        : { tokens: metrics.output, requests: metrics.requests }
     await new Promise((resolve) => setTimeout(resolve, 1000))
   }
   return null
@@ -85,7 +119,7 @@ const readUsage = async (session: ChatSession, versionId: VersionId) => {
 /** The strip's chip, after ▶: opens the dialog. */
 export function AutoRunChip(context: ComposerControlContext) {
   const [run] = useRun(context.session)
-  const [open, setOpen] = useState(false)
+  const [place, setPlace] = usePlaceParam(useChatPlaceKey("autoReplies"), "")
   const running = run !== null && run.stop === null
   return (
     <>
@@ -101,22 +135,38 @@ export function AutoRunChip(context: ComposerControlContext) {
           type="button"
           focusableWhenDisabled
           disabled={running}
-          onClick={() => setOpen(true)}
+          onClick={() => setPlace("5:")}
           className={chipClass()}
         >
           <Icon name="play" size={12} />
           Auto…
         </Button>
       </Tooltip>
-      {open && <AutoRunDialog context={context} onClose={() => setOpen(false)} />}
+      {place !== "" && (
+        <AutoRunDialog
+          context={context}
+          value={place}
+          onChange={(value) => setPlace(value, true)}
+          onClose={() => setPlace("", true)}
+        />
+      )}
     </>
   )
 }
 
-function AutoRunDialog({ context, onClose }: { context: ComposerControlContext; onClose: () => void }) {
+function AutoRunDialog({
+  context,
+  value,
+  onChange,
+  onClose
+}: {
+  context: ComposerControlContext
+  value: string
+  onChange: (value: string) => void
+  onClose: () => void
+}) {
   const [, store] = useRun(context.session)
-  const [turns, setTurns] = useState("5")
-  const [tokens, setTokens] = useState("")
+  const [turns = "5", tokens = ""] = value.split(":")
   const form = useId()
   const bounds = parseBounds(turns, tokens)
   const problem = blocked(context)
@@ -154,12 +204,12 @@ function AutoRunDialog({ context, onClose }: { context: ComposerControlContext; 
             step={1}
             required
             value={turns}
-            onChange={(event) => setTurns(event.currentTarget.value)}
+            onChange={(event) => onChange(`${event.currentTarget.value}:${tokens}`)}
           />
         </Field>
         <Field
           label="Token limit (optional)"
-          description="It also stops once the replies add up to about this many tokens written."
+          description="Maximum output tokens across replies and their tool calls. Decisions and summaries are separate."
           error={bounds.tokenLimit === undefined ? "A whole number, or leave it empty." : null}
         >
           <Input
@@ -168,7 +218,7 @@ function AutoRunDialog({ context, onClose }: { context: ComposerControlContext; 
             min={1}
             step={1}
             value={tokens}
-            onChange={(event) => setTokens(event.currentTarget.value)}
+            onChange={(event) => onChange(`${turns}:${event.currentTarget.value}`)}
           />
         </Field>
         <p data-auto-sends className="text-sm">
@@ -212,12 +262,69 @@ export function AutoRunRow(context: ComposerControlContext) {
   const approval =
     run?.waiting != null && (steps ?? []).some((step) => step.kind === "tool" && step.status === "waiting")
   const seen = seenOf(context, approval)
+  const current = useRef(context)
+  useEffect(() => {
+    current.current = context
+  })
+  const pendingEvents = useRef<ChatEvent[]>([])
+
+  // Events outside the last message count too: editing an earlier line must end the run.
+  // During Generate, buffer events until its returned identities identify its own writes.
+  useEffect(
+    () =>
+      session.subscribeActivity((event) => {
+        const now = store.get()
+        if (!now || now.stop !== null) return
+        if (event === null || event._tag === "Hello") {
+          store.update(now.id, (r) => stopped(r, "disconnected"))
+          return
+        }
+        if (event._tag === "Steps" && event.steps.some((step) => step.kind === "tool" && step.status === "waiting")) {
+          store.update(now.id, (r) => stopped(r, "approval"))
+          return
+        }
+        if (event._tag === "Cache") {
+          const previous = session.snapshot().history
+          if (
+            previous &&
+            (JSON.stringify(previous.budget?.origins?.model) !== JSON.stringify(event.budget?.origins?.model) ||
+              JSON.stringify(previous.model) !== JSON.stringify(event.model))
+          ) {
+            store.update(now.id, (r) => stopped(r, "moved"))
+            return
+          }
+        }
+        if (now.pending === "start") {
+          pendingEvents.current.push(event)
+          return
+        }
+        if (externalEvent(event, now)) store.update(now.id, (r) => stopped(r, "moved"))
+      }),
+    [session, store]
+  )
 
   // The run's one driver. It reads the run from the store, never from this render, so a step
   // already taken (a request that's out) isn't taken twice.
   useEffect(() => {
     const now = store.get()
-    if (now === null || now.stop !== null) return
+    if (now === null) return
+    if (now.stop !== null) {
+      // A reply already sent still consumes both bounds, even when typing ended the run.
+      if (
+        now.waiting &&
+        now.pending === null &&
+        context.leaf?.version.id === now.waiting.versionId &&
+        context.leaf.version.status !== "generating"
+      ) {
+        store.update(now.id, counting)
+        void readUsage(session, now.waiting.versionId).then((usage) =>
+          store.update(now.id, (r) =>
+            usage ? counted(r, usage) : { ...r, pending: null, waiting: null, asked: r.turns }
+          )
+        )
+      }
+      return
+    }
     const step = stepOf(now, seen)
     if (step.do === "wait") return
     if (step.do === "stop") {
@@ -228,17 +335,16 @@ export function AutoRunRow(context: ComposerControlContext) {
       store.update(now.id, counting)
       void readUsage(session, step.versionId).then((usage) =>
         store.update(now.id, (r) =>
-          r.stop !== null
-            ? r
-            : usage !== null
-              ? counted(r, usage)
-              : r.tokenLimit === null
-                ? counted(r, { tokens: 0, requests: 0 })
-                : stopped(r, "uncounted")
+          usage !== null
+            ? counted(r, usage)
+            : r.tokenLimit === null
+              ? counted(r, { tokens: 0, requests: 0 })
+              : { ...stopped(r, "uncounted"), pending: null, waiting: null, asked: r.turns }
         )
       )
       return
     }
+    pendingEvents.current = []
     store.update(now.id, starting)
     // Exactly ▶ Reply now's request for one reply: Auto's pick, no round after it.
     void session
@@ -248,13 +354,23 @@ export function AutoRunRow(context: ComposerControlContext) {
         "",
         undefined,
         [],
-        context.reply.decides === true && context.reply.picked === null
+        context.reply.decides === true && context.reply.picked === null,
+        {
+          allowed: () =>
+            store.get()?.id === now.id &&
+            store.get()?.stop === null &&
+            !pendingEvents.current.some((event) => externalEvent(event, now)) &&
+            stepOf({ ...now, pending: null }, seenOf(current.current, false)).do === "start",
+          ...(now.tokenLimit === null ? {} : { outputLimit: now.tokenLimit - now.tokens })
+        }
       )
       .then((outcome) => {
         if (!outcome.ok) {
-          store.update(now.id, (r) =>
-            outcome.error.tag === "LeafMoved" ? stopped(r, "moved") : stopped(r, "error", outcome.error.message)
-          )
+          store.update(now.id, (r) => ({
+            ...(outcome.error.tag === "LeafMoved" ? stopped(r, "moved") : stopped(r, "error", outcome.error.message)),
+            pending: null,
+            asked: r.tokenLimit === null ? r.asked : r.turns
+          }))
           return
         }
         if (outcome.value._tag !== "Posted") {
@@ -263,7 +379,10 @@ export function AutoRunRow(context: ComposerControlContext) {
           return
         }
         const reply = { slotId: outcome.value.entry.slotId, versionId: outcome.value.entry.version.id }
-        const after = store.update(now.id, (r) => started(r, reply))
+        const after = store.update(now.id, (r) => {
+          const next = started(r, reply)
+          return pendingEvents.current.some((event) => externalEvent(event, next)) ? stopped(next, "moved") : next
+        })
         // Stopped (or dismissed) while the request was out: the reply it started is stopped too.
         if (after === null || after.stop !== null) void session.stop(reply.versionId)
       })
@@ -277,12 +396,24 @@ export function AutoRunRow(context: ComposerControlContext) {
     [store]
   )
 
+  useEffect(() => {
+    const leave = () => {
+      const now = store.get()
+      if (now) store.update(now.id, (r) => stopped(r, "left"))
+    }
+    window.addEventListener("pagehide", leave)
+    window.addEventListener("offline", leave)
+    return () => {
+      window.removeEventListener("pagehide", leave)
+      window.removeEventListener("offline", leave)
+    }
+  }, [store])
+
   if (run === null) return null
   const running = run.stop === null
   const stop = async (now: AutoRun) => {
     store.update(now.id, (r) => stopped(r, "you"))
-    if (now.waiting !== null && context.leaf?.version.id === now.waiting.versionId && context.leafGenerating)
-      report(await session.stop(now.waiting.versionId))
+    if (now.waiting !== null) report(await session.stop(now.waiting.versionId))
   }
   const problem = running ? null : blocked(context)
   const written = run.tokens > 0 ? ` About ${count(run.tokens)} tokens written.` : ""
@@ -313,7 +444,7 @@ export function AutoRunRow(context: ComposerControlContext) {
               <Tooltip
                 label={
                   problem ??
-                  `Carry on with the ${run.turns - run.done} left of ${run.turns}. The next reply is sent now.`
+                  `Carry on with the ${run.turns - run.asked} left of ${run.turns}. The next reply is sent now.`
                 }
               >
                 <Button

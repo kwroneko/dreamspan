@@ -59,8 +59,13 @@ const scriptedSends = (queue: Array<Sent>) => {
   let calls = 0
   return (request: Recorded, res: import("node:http").ServerResponse) => {
     const next = request.body?.tools ? queue.shift() : undefined
-    if (next) sse(res, sendCall(next, `call_${++calls}`))
-    else sse(res, completionChunks(["A plain reply."], { prompt_tokens: 80, completion_tokens: 3 }))
+    if (next) {
+      const chunks = sendCall(next, `call_${++calls}`)
+      const limit = Number(request.body?.["max_tokens"] ?? request.body?.["max_completion_tokens"] ?? 5)
+      const usage = chunks.at(-1)!.usage!
+      usage.completion_tokens = Math.min(5, limit)
+      sse(res, chunks)
+    } else sse(res, completionChunks(["A plain reply."], { prompt_tokens: 80, completion_tokens: 3 }))
   }
 }
 
@@ -91,7 +96,12 @@ const scene = (
   dataDir: string,
   mode: Mode | null,
   first: ReadonlyArray<Sent>,
-  options: { readonly characters?: ReadonlyArray<string>; readonly narrator?: string } = {}
+  options: {
+    readonly characters?: ReadonlyArray<string>
+    readonly narrator?: string
+    readonly contract?: "final_text"
+    readonly context?: "shared"
+  } = {}
 ) =>
   Effect.gen(function* () {
     const queue = [...first]
@@ -105,10 +115,11 @@ const scene = (
     const userId = (yield* api.Whoami()).id as UserId
     const names = options.characters ?? ["Wren", "Ash"]
     const state: Array<StateEventData> = [
-      { key: "context.per_speaker", value: "separate" },
+      { key: "context.per_speaker", value: options.context ?? "separate" },
       { key: "agent.enabled", value: { on: true } },
       { key: "agent.tools", value: { tools: [] } }
     ]
+    if (options.contract) state.push({ key: "output.contract", value: options.contract })
     if (mode) state.push({ key: "agent.send_presence", value: { mode } })
     const made = yield* generateReply(api, {
       connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
@@ -202,6 +213,7 @@ const scene = (
       away,
       stored,
       marks,
+      enqueue: (...sends: ReadonlyArray<Sent>) => queue.push(...sends),
       tip: () => tip
     }
   })
@@ -229,6 +241,132 @@ describe("send_message says who is present", () => {
       assert.deepStrictEqual(Object.keys(sendTool(never).parameters.properties), ["message"])
       assert.strictEqual(JSON.stringify(off), JSON.stringify(never))
     })
+  )
+
+  it.live("a named user persona and narrator leave their presence unchanged without a retry", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* scene(
+          dataDir,
+          "required",
+          [{ message: "Mira and Tobin wait with Nara.", present: ["Mira", "Tobin", "Nara"] }],
+          { characters: ["Wren", "Nara"], narrator: "Nara" }
+        )
+        assert.strictEqual(t.made.version.content, "Mira and Tobin wait with Nara.")
+        assert.strictEqual(t.bodies().length, 1)
+        assert.deepStrictEqual(t.stored(t.made.version.id).presence, {
+          away: [t.ids["Wren"]!],
+          narrators: [t.ids["Nara"]!]
+        })
+        assert.deepStrictEqual(yield* t.away(t.made.version.slotId), [t.ids["Wren"]!])
+      })
+    )
+  )
+
+  it.live("ambiguous names are refused before changing who can read the message", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* scene(
+          dataDir,
+          "required",
+          [
+            { message: "Ambiguous secret.", present: ["Mira", "Wren"] },
+            { message: "Mira alone.", present: ["Mira"] }
+          ],
+          { characters: ["Wren", "Wren"] }
+        )
+        assert.strictEqual(t.made.version.content, "Mira alone.")
+        assert.strictEqual(t.bodies().length, 2)
+        assert.include(String(t.bodies()[1]!.messages.at(-1)!.content), "More than one character")
+      })
+    )
+  )
+
+  it.live("an auto token bound caps the captured request after model and preset settings", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* scene(dataDir, "off", [{ message: "An ordinary reply." }])
+        const before = t.bodies().length
+        const { entry } = yield* posted(
+          t.api.Generate({
+            chatId: t.chatId,
+            forkId: t.forkId,
+            parentSlotId: t.tip(),
+            branch: false,
+            speakerEntityId: t.ids["Mira"]!,
+            outputLimit: 4
+          })
+        )
+        yield* eventually(() => finished(t.made.events, entry.version.id) !== undefined)
+        const body = t.bodies()[before]! as unknown as Record<string, unknown>
+        assert.strictEqual(body["max_tokens"] ?? body["max_completion_tokens"], 4)
+      })
+    )
+  )
+
+  it.live("tool rounds share one hard token ceiling and exhaustion sends no further request", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* scene(dataDir, "required", [{ message: "Mira waits.", present: ["Mira", "Wren", "Ash"] }])
+        const limited = (limit: number) =>
+          Effect.gen(function* () {
+            const before = t.bodies().length
+            const { entry } = yield* posted(
+              t.api.Generate({
+                chatId: t.chatId,
+                forkId: t.forkId,
+                parentSlotId: (yield* t.api.GetChat({ chatId: t.chatId })).activeLeafSlotId,
+                branch: false,
+                speakerEntityId: t.ids["Mira"]!,
+                outputLimit: limit,
+                immediate: true
+              })
+            )
+            yield* eventually(() => finished(t.made.events, entry.version.id) !== undefined)
+            return {
+              bodies: t.bodies().slice(before) as unknown as Array<Record<string, unknown>>,
+              version: finished(t.made.events, entry.version.id)!
+            }
+          })
+        t.enqueue({ message: "Wrong.", present: ["Nobody"] }, { message: "Correct.", present: ["Mira"] })
+        const enough = yield* limited(8)
+        assert.deepStrictEqual(
+          enough.bodies.map((body) => body["max_tokens"] ?? body["max_completion_tokens"]),
+          [8, 3]
+        )
+        assert.strictEqual(enough.version.content, "Correct.")
+        t.enqueue({ message: "Wrong again.", present: ["Nobody"] }, { message: "Never billed.", present: ["Mira"] })
+        const exhausted = yield* limited(4)
+        assert.strictEqual(exhausted.bodies.length, 1)
+        assert.strictEqual(exhausted.version.status, "failed")
+      })
+    )
+  )
+
+  it.live("must say still offers the required send tool when the old contract is final text", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* scene(dataDir, "required", [{ message: "Required via tool.", present: ["Mira"] }], {
+          contract: "final_text"
+        })
+        assert.strictEqual(t.made.version.content, "Required via tool.")
+        assert.deepStrictEqual(sendTool(t.bodies()[0]!).parameters.required, ["message", "present"])
+        assert.strictEqual(t.bodies().length, 1)
+      })
+    )
+  )
+
+  it.live("shared contexts refuse presence declarations before a character request can leak history", () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* scene(dataDir, "required", [{ message: "Never sent.", present: ["Mira"] }], {
+          context: "shared"
+        })
+        assert.strictEqual(t.made.version.status, "failed")
+        assert.strictEqual(t.bodies().length, 0)
+        assert.include(t.made.version.error!.message, "Separate contexts")
+      })
+    )
   )
 
   it.live("required: who a reply names is there for it; the others miss it until named again", () =>

@@ -187,6 +187,16 @@ export class ChatSession {
     highlight: null
   }
   private readonly listeners = new Set<() => void>()
+  private readonly activityListeners = new Set<(event: ChatEvent | null) => void>()
+  readonly subscribeActivity = (listener: (event: ChatEvent | null) => void) => {
+    this.activityListeners.add(listener)
+    return () => {
+      this.activityListeners.delete(listener)
+    }
+  }
+  private activity(event: ChatEvent | null) {
+    for (const listener of this.activityListeners) listener(event)
+  }
   private readonly versionListeners = new Set<(version: Version) => void>()
 
   /** Picker lists also hear changes to versions that aren't currently selected. */
@@ -662,6 +672,7 @@ export class ChatSession {
               )
             )
               this.chatsChanged(services as unknown as Context.Context<Reactivity.Reactivity>)
+            for (const event of batch) this.activity(event)
             this.receive(batch, anchor)
           })
         )
@@ -670,6 +681,7 @@ export class ChatSession {
     this.subscription = Effect.runFork(
       subscribe.pipe(
         // A dropped socket ends the stream: subscribe again, and its Hello reloads.
+        Effect.tapError(() => Effect.sync(() => this.activity(null))),
         Effect.retry({ schedule: Schedule.spaced("1 second"), while: (error) => !this.notFound(error) }),
         Effect.catchCause((cause) =>
           Effect.sync(() => {
@@ -1617,9 +1629,13 @@ export class ChatSession {
     /** Who replies after this one, in turn: the rest of the round (DESIGN §2.3). */
     round: ReadonlyArray<EntityId> = [],
     /** Auto picked `speaker` and the round, and "Who replies next" is on: the decision model chooses (DESIGN §2.3). */
-    autoPick = false
+    autoPick = false,
+    /** A tab-owned auto run rechecks its consent after asynchronous reply hooks. */
+    auto?: { readonly allowed: () => boolean; readonly outputLimit?: number }
   ): Promise<Outcome<SendResult>> {
     await beforeReply()
+    if (auto && !auto.allowed())
+      return { ok: false, error: { tag: "Cancelled", message: "Auto replies stopped.", problems: [], reason: null } }
     const result = await this.queueSnapshot(
       this.call((client) =>
         client("Generate", {
@@ -1631,6 +1647,9 @@ export class ChatSession {
           ...(direction.trim() === "" ? {} : { direction }),
           ...(round.length > 0 ? { round } : {}),
           ...(autoPick ? { autoPick } : {}),
+          ...(auto
+            ? { immediate: true, ...(auto.outputLimit === undefined ? {} : { outputLimit: auto.outputLimit }) }
+            : {}),
           ...(composer === undefined ? {} : { composer: commitOf(composer) }),
           ...this.replyExtras()
         })

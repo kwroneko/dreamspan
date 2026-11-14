@@ -116,6 +116,7 @@ export interface StreamRequest {
     readonly replyTool?: string
     readonly reasoning?: ThinkingLevel
     readonly maxTokens?: number
+    readonly outputBudget?: { remaining: number }
     readonly temperature?: number
     readonly sampling?: Readonly<Record<string, unknown>>
     readonly sessionId?: string
@@ -168,6 +169,7 @@ export type ProviderEvent =
       readonly message: AssistantMessage
       readonly toolArguments: Readonly<Record<string, string>>
       readonly counts: TokenCounts
+      readonly outputReported?: boolean
       readonly cost: Cost | null
     }
 
@@ -1323,7 +1325,17 @@ export const layer = (options: ProvidersOptions = {}) =>
                 }
               })
               .pipe(Effect.catch((e) => Effect.logError(`could not close ledger row ${requestId}`, e)))
-            return { counts, cost }
+            const raw = state.capture.rawUsage
+            const outputReported =
+              source === "reported" &&
+              raw !== null &&
+              [
+                raw["completion_tokens"],
+                raw["output_tokens"],
+                raw["candidatesTokenCount"],
+                raw["outputTokenCount"]
+              ].some((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
+            return { counts, cost, outputReported }
           })
 
         // Admission uses the final transformed wire payload, immediately before dispatch.
@@ -1645,7 +1657,10 @@ export const layer = (options: ProvidersOptions = {}) =>
                         mode: bindingMode
                       })
                     : { payload: limited, dropped: 0, reason: null }
-                  const final = bound.payload
+                  const budget = options.outputBudget
+                  if (budget && (!prepared.kind.limitOutput || budget.remaining < 1))
+                    throw new Error("The reply's token limit is exhausted or this provider cannot enforce it.")
+                  const final = budget ? prepared.kind.limitOutput!(bound.payload, budget.remaining) : bound.payload
                   state.binding = binding
                   state.sent = final
                   state.signed = {
@@ -1825,7 +1840,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         ).pipe(
           Effect.flatMap(({ message, error }) =>
             writeClose(message, error, request.context.messages).pipe(
-              Effect.map(({ counts, cost }): AttemptOutcome =>
+              Effect.map(({ counts, cost, outputReported }): AttemptOutcome =>
                 error
                   ? { ok: false, error, signed: state.signed }
                   : {
@@ -1836,6 +1851,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                         message: recordThinking(message),
                         toolArguments: toolArguments.argumentsById,
                         counts,
+                        outputReported: outputReported === true,
                         cost
                       }
                     }
@@ -1919,11 +1935,20 @@ export const layer = (options: ProvidersOptions = {}) =>
                 )
               )
               if (outcome.ok) {
+                if (request.options?.outputBudget) {
+                  const budget = request.options.outputBudget
+                  budget.remaining =
+                    !outcome.event.outputReported || outcome.event.counts.output === null
+                      ? 0
+                      : Math.max(0, budget.remaining - outcome.event.counts.output)
+                }
                 offer(outcome.event)
                 yield* Queue.end(queue)
                 return
               }
               const error = outcome.error
+              // A failed bounded request may already be billed. Never retry it automatically.
+              if (request.options?.outputBudget) return yield* error
               // Once: a refusal of signed thinking is sent again without any (the provider's
               // check is stricter than ours), and a model that needs the thinking of the turn
               // being continued gets what was left out (thinkingBinding.ts).

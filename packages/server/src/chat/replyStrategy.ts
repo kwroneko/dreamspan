@@ -40,6 +40,7 @@ export const defaultReplyStrategy: ReplyStrategy = {
             inspection: { request: generation.request, model, display: generation.inspection },
             options: {
               ...(model.settings?.cacheRetention ? { cacheRetention: model.settings.cacheRetention } : {}),
+              ...(request.outputBudget ? { outputBudget: request.outputBudget } : {}),
               ...(output.replyTool ? { replyTool: output.replyTool } : {}),
               ...(wire.temperature !== undefined ? { temperature: wire.temperature } : {}),
               ...(wire.maxTokens !== undefined ? { maxTokens: wire.maxTokens } : {}),

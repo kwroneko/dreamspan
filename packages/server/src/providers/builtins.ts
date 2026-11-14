@@ -1,3 +1,4 @@
+import { outputLimiters } from "./outputLimit.ts"
 import { userCostFormula } from "./userCosts.ts"
 import { openAICompletionsApi, openAIResponsesApi, anthropicMessagesApi, googleGenerativeAIApi } from "./sdk.ts"
 // The built-in provider kinds, request transforms and response observers, registered
@@ -120,7 +121,7 @@ export const builtinKinds: ReadonlyArray<ProviderKindEntry> = [
   bedrockOpenAIChatKind,
   // Decision models (spec/AGENTIC.md §7): asked only for the points a user turns on.
   systemOneKind
-]
+].map((entry) => ({ ...entry, ...(outputLimiters[entry.api] ? { limitOutput: outputLimiters[entry.api]! } : {}) }))
 
 /** The registry with every built-in registered for the layer's lifetime. */
 export const layer = Layer.effectDiscard(

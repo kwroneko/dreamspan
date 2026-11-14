@@ -610,6 +610,10 @@ export class ChatApi extends RpcGroup.make(
        * next", when the user turned it on, may choose another for each (DESIGN §2.3).
        */
       autoPick: Schema.optionalKey(Schema.Boolean),
+      /** Hard output-token ceiling for this reply, shared by its tool rounds. */
+      outputLimit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 2147483647 }))),
+      /** Auto must never enter the server's send queue. */
+      immediate: Schema.optionalKey(Schema.Boolean),
       composer: ComposerCommit,
       /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
       storyAt: StoryAtField

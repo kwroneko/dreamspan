@@ -36,6 +36,8 @@ export interface ProviderKindEntry {
   readonly defaultBaseUrl: string
   /** Whether a key is optional (local OpenAI-compatible servers often take none). */
   readonly keyOptional: boolean
+  /** Caps the final wire payload. Absent: bounded output is refused before sending. */
+  readonly limitOutput?: (payload: Record<string, unknown>, limit: number) => Record<string, unknown>
   /** Fetches the upstream's model list. */
   readonly listModels: (request: ListRequest) => Effect.Effect<ReadonlyArray<ListedModel>, ModelListError>
   /** Known models' facts (pi-ai's catalog for built-ins), loaded on first use. */

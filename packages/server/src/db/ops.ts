@@ -2472,6 +2472,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
       /** The fork it's sent in, as AppendMessage takes it. */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       parentSlotId: Schema.NullOr(SlotId),
+      immediate: Schema.optionalKey(Schema.Boolean),
       branch: Schema.Boolean,
       kind: Schema.Literals(["message", "generate"]),
       content: Schema.String,

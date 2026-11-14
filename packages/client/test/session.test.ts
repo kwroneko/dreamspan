@@ -113,6 +113,28 @@ const boundCast = (macroBindings: Record<string, string> = {}) =>
   })
 
 describe("ChatSession", () => {
+  it("Stop during a reply hook sends no Generate request", async () => {
+    const { replyHooks } = await import("../src/features/chat/replyHooks.ts")
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const remove = replyHooks.register({ id: "test.auto-consent", beforeReply: () => pending })
+    const { s, registry } = session()
+    const call = vi.spyOn(s, "call")
+    let allowed = true
+    try {
+      const result = s.generate(null, null, "", undefined, [], false, { allowed: () => allowed })
+      allowed = false
+      release()
+      expect(await result).toMatchObject({ ok: false, error: { tag: "Cancelled" } })
+      expect(call).not.toHaveBeenCalled()
+    } finally {
+      remove()
+      registry.dispose()
+    }
+  })
+
   it("ignores another branch's State, Reload and Lcm before refreshing positions or reads", () => {
     const { s, receive } = session()
     const internals = s as unknown as {

@@ -44,13 +44,16 @@ export const chatDecisionRows = (
     return available || offHere ? [{ point, available, on: available && !offHere }] : []
   })
 
-/** The chat's off-list after one switch moved; ids no point registers any more are dropped. */
+/** The chat's off-list after one switch moved; unavailable plugin ids keep their consent setting. */
 export const withDecision = (
   points: ReadonlyArray<DecisionPointInfo>,
   off: ReadonlyArray<string>,
   id: string,
   on: boolean
-): Array<string> => points.map((point) => point.id).filter((other) => (other === id ? !on : off.includes(other)))
+): Array<string> => [
+  ...points.map((point) => point.id).filter((other) => (other === id ? !on : off.includes(other))),
+  ...off.filter((other) => !points.some((point) => point.id === other) && other !== id)
+]
 
 export function ChatDecisions({ session }: { session: ChatSession }) {
   const cast: Cast | null = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
