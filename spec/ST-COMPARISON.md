@@ -249,7 +249,7 @@ This ranks the regressions found in the tasks above, not every optional ST exten
 
 23. **No move-up/down controls in message editing.** Offer explicit, recoverable repositioning if manual scene repair is supported. **Not addressed by R4.**
 
-24. **No selection/range workflow for deleting several messages.** Add selection and a recoverable batch delete. **Not addressed by R4.**
+24. **No selection/range workflow for deleting several messages.** Add selection and a recoverable batch delete. **Not addressed by R4. Built 2026-11-14 (msgactions1):** Select messages on a message's menu, ticks with Select range or Shift, and a confirmed Delete of up to 1,000 in the branch shown, with one Undo (ARCHITECTURE §3.11 "Several messages at once"). Moving messages (item 23) is not built.
 
 25. **An absent member's switch still says “is Present.”** State Present/Absent correctly and keep the control's action clear. **Not addressed by R4.**
 

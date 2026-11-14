@@ -5,7 +5,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { readSummary, SummaryReads } from "./lcmReads.ts"
 import { audienceScope, firstUnknownPosition, inputsKnown } from "./lcmAudience.ts"
-import { viewAt } from "./forkState.ts"
+import { slotDeletedIn, viewAt } from "./forkState.ts"
 
 import {
   followsInDisplay,
@@ -211,7 +211,8 @@ export const selectSummaryLayer = (
   chatId: string,
   leaf: string | null,
   partialBatch = false,
-  view?: LayerView
+  view?: LayerView,
+  excludeDeletedInputs = false
 ) =>
   Effect.gen(function* () {
     const [any] = yield* sql<{
@@ -272,6 +273,18 @@ export const selectSummaryLayer = (
         (summary.content === "" && !summary.fresh)
       )
         continue
+      // Planning still sees stale summaries so it can refresh them. A request must not
+      // reuse their text after a branch deletes any source, including below a condensation.
+      if (excludeDeletedInputs && !summary.fresh) {
+        const fork = yield* viewAt(sql, chatId, leaf)
+        const [deleted] = yield* sql`WITH RECURSIVE sources(id) AS (
+          SELECT ${summary.id}
+          UNION SELECT p.parent_id FROM summary_parents p JOIN sources s ON p.summary_id = s.id
+        ) SELECT 1 FROM sources source JOIN summary_inputs i ON i.summary_id = source.id
+          JOIN slots input ON input.id = i.slot_id
+          WHERE i.version_id IS NOT NULL AND ${slotDeletedIn(sql, fork, "input")} LIMIT 1`
+        if (deleted) continue
+      }
       // A stale one only when the view knew every message it was written from.
       if (
         view !== undefined &&
