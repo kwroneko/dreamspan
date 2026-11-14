@@ -210,7 +210,9 @@ export const forksShowing = (
   slotId: string,
   versionId: string | null,
   except: string | null,
-  liveOnly: boolean
+  liveOnly: boolean,
+  /** Stop at the first fork found: for a caller that only asks whether any fork shows it. */
+  first = false
 ) =>
   Effect.gen(function* () {
     const candidates = yield* sql<ForkRow>`
@@ -222,7 +224,11 @@ export const forksShowing = (
           AND ${versionDeletedIn(sql, sql.literal("f.id"), "o")}))
       ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
     const shown: Array<ForkRow> = []
-    for (const fork of candidates) if (yield* onForkPath(sql, chatId, fork, slotId)) shown.push(fork)
+    for (const fork of candidates) {
+      if (!(yield* onForkPath(sql, chatId, fork, slotId))) continue
+      shown.push(fork)
+      if (first) break
+    }
     return shown
   })
 

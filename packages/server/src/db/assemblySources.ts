@@ -519,7 +519,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           chatId,
           settings.summaryBefore ? settings.summaryBefore.slot : leaf,
           settings.partialBatch,
-          view
+          view,
+          true
         ).pipe(
           Effect.map((layer) =>
             settings.condense

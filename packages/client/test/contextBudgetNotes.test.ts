@@ -8,8 +8,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { registerPresentation } from "../src/features/chat/registerPresentation.tsx"
 import { chatComposerNotes, versionFailureActions } from "../src/features/chat/presentation.tsx"
 import { messageRows, timelineTransforms } from "../src/features/chat/timelineContributions.tsx"
-import type { ChatView } from "../src/features/chat/session.ts"
+import type { ChatSession, ChatView } from "../src/features/chat/session.ts"
 import { SlotOutlet } from "../src/slots.tsx"
+
+// The notes here read only the view.
+const noSession = {} as ChatSession
 
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
@@ -86,7 +89,10 @@ it("a budget refusal sits in the composer's column, names its sources and offers
     }
   } as unknown as ChatView
   const html = renderToStaticMarkup(
-    createElement(SlotOutlet<{ view: ChatView }>, { slot: chatComposerNotes, props: { view } })
+    createElement(SlotOutlet<{ view: ChatView; session: ChatSession }>, {
+      slot: chatComposerNotes,
+      props: { session: noSession, view }
+    })
   )
   expect(html).toContain("chat-column")
   // A calm notice in the warning tone, not an error.
@@ -100,7 +106,10 @@ it("a budget refusal sits in the composer's column, names its sources and offers
   const other = { history: { ...view.history, assemblyErrorReason: "no_model" } } as unknown as ChatView
   expect(
     renderToStaticMarkup(
-      createElement(SlotOutlet<{ view: ChatView }>, { slot: chatComposerNotes, props: { view: other } })
+      createElement(SlotOutlet<{ view: ChatView; session: ChatSession }>, {
+        slot: chatComposerNotes,
+        props: { session: noSession, view: other }
+      })
     )
   ).not.toContain("Set the context size")
 })
@@ -120,7 +129,10 @@ it("a refusal for the newest message never claims the fixed part overflows", () 
     }
   } as unknown as ChatView
   const html = renderToStaticMarkup(
-    createElement(SlotOutlet<{ view: ChatView }>, { slot: chatComposerNotes, props: { view } })
+    createElement(SlotOutlet<{ view: ChatView; session: ChatSession }>, {
+      slot: chatComposerNotes,
+      props: { session: noSession, view }
+    })
   )
   expect(html).toContain("The newest message needs about 31 tokens")
   expect(html).not.toContain("more than the")

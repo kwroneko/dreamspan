@@ -1994,6 +1994,14 @@ export class ChatSession {
     return this.call((client) => client("DeleteMessage", { slotId, forkId: this.view.forkId }))
   }
 
+  /**
+   * Deletes several messages of fork `forkId` as one change (selection/), each as deleteMessage
+   * would; nothing is deleted if one is gone. Their bin items, top down, are the Undo's.
+   */
+  deleteMessages(forkId: ForkId, slotIds: ReadonlyArray<SlotId>) {
+    return this.call((client) => client("DeleteMessages", { forkId, slotIds }))
+  }
+
   /** Deletes the swipe in the fork shown only. */
   deleteVersion(versionId: VersionId) {
     return this.call((client) => client("DeleteVersion", { versionId, forkId: this.view.forkId }))

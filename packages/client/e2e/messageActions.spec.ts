@@ -43,6 +43,7 @@ const DEFAULTS = {
   "message.join-thread": false,
   "message.visibility": false,
   "message.context": false,
+  "message.select": false,
   "message.delete-all": false
 }
 test.beforeEach(async () => {
@@ -102,6 +103,7 @@ const EVERY_REPLY_ACTION = [
   // generator's (inspector.spec.ts has it).
   "Copy text",
   "Copy link",
+  "Select messages",
   "Delete version",
   "Delete all versions"
 ]

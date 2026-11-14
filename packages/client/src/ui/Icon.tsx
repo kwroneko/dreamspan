@@ -114,6 +114,8 @@ const paths = {
   back: ["m12 19-7-7 7-7", "M19 12H5"],
   undo: ["M9 14 4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 0 11H11"],
   check: ["M20 6 9 17l-5-5"],
+  /** Picks several things to act on together: a ticked box beside two lines. */
+  select: ["M3 5h6v6H3z", "m4.5 8 1.5 1.5L8.5 6.5", "M13 8h8", "M3 15h6v6H3z", "M13 18h8"],
   /** Keeps this version (a floppy disk, the familiar save mark). */
   save: [
     "M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",

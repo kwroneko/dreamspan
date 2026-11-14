@@ -69,6 +69,8 @@ export interface MessageActionDescribeProps extends MessageActionProps {
 
 export interface MessageAction {
   readonly id: string
+  /** Built-in module provenance, following the other client registries. */
+  readonly source?: string
   /** Its place in the menu, and on the message among the pinned. */
   readonly order: number
   /** Actions of one group sit together in the menu; a separator falls between groups. */
