@@ -15,6 +15,7 @@ import {
   AuthenticatedStImportPlanApi,
   AuthenticatedChatMergeApi,
   AuthenticatedDecisionApi,
+  AuthenticatedThinkingApi,
   AuthenticatedProviderListApi,
   AuthenticatedSplitChatApi,
   AuthenticatedChatContextsApi,
@@ -32,6 +33,7 @@ import { ExecutionRegistry } from "./execution.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
 import { DecisionEngine } from "./decision/engine.ts"
 import { makeDecisionHandlers } from "./api/decisions.ts"
+import { makeThinkingHandlers } from "./api/thinking.ts"
 import { SummaryChecks } from "./lcm/OutputChecks.ts"
 import { Summarizer } from "./lcm/Summarizer.ts"
 import { makeLcmHandlers, makeSummaryRequestHandlers } from "./api/lcm.ts"
@@ -207,6 +209,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedWorkshopApi.toLayer(makeWorkshopHandlers),
   AuthenticatedPluginApi.toLayer(makePluginHandlers),
   AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
+  AuthenticatedThinkingApi.toLayer(makeThinkingHandlers),
   AuthenticatedForkMergeApi.toLayer(makeForkMergeHandlers),
   AuthenticatedCardArchiveApi.toLayer(makeCardArchiveHandlers),
   AuthenticatedCardSourcesApi.toLayer(makeCardSourceHandlers),

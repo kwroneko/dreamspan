@@ -101,7 +101,7 @@ import {
   Version,
   VersionId
 } from "@rp/shared/chat.ts"
-import { ContextIssue, StoryAtField, VersionError, VersionStatus } from "@rp/shared/chat.ts"
+import { ContextIssue, StoryAtField, ThinkingPart, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import { RecentRemote, SourcePrefs } from "@rp/shared/cardSources.ts"
 import {
   ForkNote,
@@ -2109,6 +2109,22 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, slotId: SlotId }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * Hides a live version's thinking (`part`) from the model in fork `forkId` (absent or null:
+   * the fork through its slot), or sends it again; one write, of that fork's only. The choice is
+   * on the message's own version, so a fork's copy of it shares it, as an image's does.
+   */
+  Rpc.make("SetThinkingHidden", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      part: ThinkingPart,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      hidden: Schema.Boolean
+    },
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, slotId: SlotId }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
   Rpc.make("MarkVersion", {
     payload: { userId: UserId, versionId: VersionId, mark: Schema.NullOr(Schema.Literals(["refused"])) },
@@ -3176,9 +3192,18 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** The sanitized SDK payload projection, recorded before HTTP; only the rollout's owner may write it. */
+  /**
+   * The sanitized SDK payload projection, recorded before HTTP; only the rollout's owner may
+   * write it. `issues`: notes the provider layer adds to the reply's (signed thinking left out),
+   * each added once.
+   */
   Rpc.make("RecordSentContext", {
-    payload: { userId: UserId, rolloutId: Schema.String, wire: Schema.String },
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      wire: Schema.String,
+      issues: Schema.optionalKey(Schema.Array(ContextIssue))
+    },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -4091,6 +4116,12 @@ export class ReadOps extends RpcGroup.make(
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A version's thinking choice on a branch, including an unselected swipe. */
+  Rpc.make("GetThinkingHidden", {
+    payload: { userId: UserId, versionId: VersionId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
+    success: Schema.Array(ThinkingPart),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Invalidates carried story tool results after edits, swipes, summary or speaker changes. */
   Rpc.make("StoryReadStamp", {
     payload: { userId: UserId, chatId: ChatId },
@@ -4493,7 +4524,7 @@ export class ReadOps extends RpcGroup.make(
    * (`SourcePins` in assembler/types.ts) rather than the chat as it is now (invariant 6).
    */
   Rpc.make("RebuildContext", {
-    payload: { userId: UserId, snapshot: Schema.String },
+    payload: { userId: UserId, snapshot: Schema.String, thinkingForkId: Schema.optionalKey(ForkId) },
     success: Schema.Union([
       Schema.Struct({ _tag: Schema.Literal("Rebuilt"), snapshot: Schema.String }),
       Schema.Struct({

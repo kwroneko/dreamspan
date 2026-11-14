@@ -27,6 +27,7 @@ import { bedrockOpenAIChatKind, bedrockOpenAIResponsesKind } from "./bedrockOpen
 import { vertexKind } from "./vertex.ts"
 import { builtinProviders } from "@rp/shared/providerDefinitions.ts"
 import { builtinShims } from "./shims.ts"
+import { builtinThinkingBindings } from "./thinkingBinding.ts"
 import { applyAnthropicToolLoading, applyResponsesToolLoading, applyRouterToolLoading } from "./toolLoading.ts"
 
 const completions = openAICompletionsApi()
@@ -129,6 +130,8 @@ export const layer = Layer.effectDiscard(
     for (const provider of builtinProviders) yield* registry.providers.register(provider)
     for (const entry of builtinKinds) yield* registry.kinds.register(entry)
     for (const shim of builtinShims) yield* registry.shims.register(shim)
+    // Signed reasoning goes back only into the conversation that wrote it (thinkingBinding.ts).
+    for (const binding of builtinThinkingBindings) yield* registry.thinkingBindings.register(binding)
     // Deferred tools (spec/TOOL-LOADING.md §4), first: the breakpoint transforms see the final tools.
     yield* registry.transforms.register({
       id: "anthropic-tool-loading",
