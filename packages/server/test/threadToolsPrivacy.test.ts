@@ -6,9 +6,17 @@ import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/
 import { Effect } from "effect"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
-import { historyContextV1, historyTools } from "../src/agent/tools/history.ts"
+import { historyContextV1, historyTools as originalHistoryTools } from "../src/agent/tools/history.ts"
 import { completeFixture } from "./support/lcmFixtures.ts"
 import { runStory, type ThreadStory } from "./support/threadStory.ts"
+
+// Every privacy regression runs through a registered editable policy, including Resume.
+import { copiedStoryTools } from "./support/copiedStoryTools.ts"
+const historyTools = originalHistoryTools.map((tool) => ({
+  ...tool,
+  execute: (context: ToolContext, args: never) =>
+    Effect.flatMap(copiedStoryTools, (tools) => tools.find((t) => t.id === tool.id)!.execute(context, args))
+}))
 
 /** The history tools as a reply by `speaker` at the tip of `fork` runs them, reading as its view. */
 const toolsFor = (t: ThreadStory, fork: ForkId, speaker: EntityId) =>

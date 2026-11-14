@@ -98,7 +98,26 @@ function BuiltinParts() {
   const admin = useSession().user.role === "admin"
   const action = useAction()
   const navigate = useNavigate()
-  const [queries, setQueries] = useState<Record<string, string>>({})
+  const search: { builtinSearch?: unknown } = useSearch({ strict: false })
+  const queries =
+    search.builtinSearch && typeof search.builtinSearch === "object" && !Array.isArray(search.builtinSearch)
+      ? (Object.fromEntries(
+          Object.entries(search.builtinSearch).filter((entry) => typeof entry[1] === "string")
+        ) as Record<string, string>)
+      : {}
+  const setQuery = (registry: string, value: string) => {
+    const next = { ...queries }
+    if (value) next[registry] = value
+    else delete next[registry]
+    void navigate({
+      to: ".",
+      search: (previous: Record<string, unknown>) => ({
+        ...previous,
+        builtinSearch: Object.keys(next).length ? next : undefined
+      }),
+      replace: true
+    })
+  }
   const busy = useRef(false)
   const copy = async (part: typeof BuiltinPart.Type) => {
     if (busy.current) return
@@ -142,7 +161,7 @@ function BuiltinParts() {
                       <Input
                         type="search"
                         value={queries[registry] ?? ""}
-                        onChange={(event) => setQueries({ ...queries, [registry]: event.currentTarget.value })}
+                        onChange={(event) => setQuery(registry, event.currentTarget.value)}
                       />
                     </Field>
                   )}
@@ -719,6 +738,7 @@ export const register = () => {
     id: "settings.plugins",
     parent: "settings",
     path: "plugins",
+    retainSearch: ["builtinSearch"],
     component: PluginsPage,
     nav: { label: "Plugins", order: 50, description: "Turn plugins on or off and manage their versions and data." }
   })
@@ -726,6 +746,7 @@ export const register = () => {
     id: "settings.plugins.detail",
     parent: "settings",
     path: "plugins/$pluginId",
+    retainSearch: ["builtinSearch"],
     component: PluginPage
   })
   appBanners.register({ id: "plugins.host.suspended", order: -90, component: SuspendedPlugins })

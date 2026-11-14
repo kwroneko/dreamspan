@@ -30,7 +30,11 @@ export type Activate = (host: WorkerHost) => Effect.Effect<void, unknown, Scope.
  * metadata only. random is the expansion's injected source; pick uses pickSeed, contentHash
  * and offset. volatile true freezes a value; clock freezes the observed time; accepts/work
  * validate and charge even frozen draws. All plugin macros also invalidate prefix reuse:
- * ambient randomness cannot be verified for full-trust closures. No settings or credentials.
+ * ambient randomness cannot be verified for full-trust closures. Handler and frozen text
+ * are limited to 262,144 characters; work/charge must be finite and nonnegative, accepts
+ * must return a boolean. Invalid results fail that assembly and suspend the plugin; later assemblies use the original.
+ * No settings or credentials are supplied. These handles guide honest plugins; approved
+ * server code retains ambient process/file/network access. The deadline is not a sandbox.
  */
 export type { MacroCall, MacroInfo, MacroContractV1, MacroContext, CardFields, ChatMessage } from "./macros.ts"
 export type { VarScope } from "@rp/shared/macros/variables.ts"

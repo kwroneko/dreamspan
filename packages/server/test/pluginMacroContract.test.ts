@@ -214,6 +214,77 @@ it("undeclared ambient randomness invalidates cache reuse even for frozen values
     )
   ))
 
+it("projects nested macro context before reading fields outside the contract", () =>
+  Effect.runSync(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup()
+        const unexpected = () => {
+          throw new Error("A private host field was read")
+        }
+        const names = { ...context.names }
+        const card = { ...context.card }
+        const message = { ...context.messages![0]! }
+        for (const [target, key] of [
+          [names, "settings"],
+          [card, "ownTurnNotes"],
+          [message, "otherBranch"]
+        ] as const)
+          Object.defineProperty(target, key, { enumerable: true, get: unexpected })
+        yield* registry.register(
+          adaptMacroV1(
+            { ...registry.get("char")!, handler: (call) => call.context.names.char },
+            () => true,
+            () => {
+              throw new PluginFault("private-field")
+            }
+          )
+        )
+        expect(run(registry, "{{char}}", { context: { ...context, names, card, messages: [message] } })).toMatchObject({
+          text: "Mira"
+        })
+      })
+    )
+  ))
+
+it("cached message projections stay detached and refresh changed fields, additions and deletions", () =>
+  Effect.runSync(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup()
+        const message: { text: string; fromUser: boolean; sentAt?: number } = { text: "first", fromUser: true }
+        const seen: Array<MacroContext> = []
+        yield* registry.register(
+          adaptMacroV1(
+            {
+              ...registry.get("char")!,
+              handler: (call) => {
+                seen.push(call.context)
+                expect(Object.isFrozen(call.context.messages![0])).toBe(true)
+                return call.context.messages![0]!.text
+              }
+            },
+            () => true,
+            () => {
+              throw new PluginFault("cache")
+            }
+          )
+        )
+        const read = () => run(registry, "{{char}}", { context: { ...context, messages: [message] } })
+        expect(read()).toMatchObject({ text: "first" })
+        message.text = "second"
+        message.sentAt = 2
+        expect(read()).toMatchObject({ text: "second" })
+        expect(seen[0]!.messages![0]).toEqual({ text: "first", fromUser: true })
+        expect(seen[1]!.messages![0]).toHaveProperty("sentAt", 2)
+        delete message.sentAt
+        read()
+        expect(seen[2]!.messages![0]).not.toHaveProperty("sentAt")
+        expect(seen[1]!.messages![0]).toHaveProperty("sentAt", 2)
+      })
+    )
+  ))
+
 it.each([
   () => {
     throw new Error("synthetic")
@@ -284,3 +355,43 @@ it("nested resolution attributes a fault to the failing plugin", () =>
       })
     )
   ))
+
+it.each([
+  { handler: () => "x".repeat(2_000_000) },
+  { handler: () => 42 },
+  { work: () => Number.NaN },
+  { work: () => -1 },
+  { volatile: true, accepts: () => "yes" },
+  {
+    handler: (call: Parameters<MacroEntry["handler"]>[0]) => {
+      call.charge(Number.NaN)
+      return "bad"
+    }
+  }
+])("invalid plugin text and budget results fail for suspension (%j)", (change) =>
+  Effect.runSync(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup()
+        let faults = 0
+        yield* registry.register({ ...registry.get("char")!, volatile: true })
+        const first = run(registry, "{{char}}")
+        if (first._tag !== "Expanded") throw new Error("expansion failed")
+        yield* registry.register(
+          adaptMacroV1(
+            { ...registry.get("char")!, ...change } as MacroEntry,
+            () => true,
+            () => {
+              faults++
+              throw new PluginFault("invalid-result")
+            }
+          )
+        )
+        expect(() => run(registry, "{{char}}", { frozen: "accepts" in change ? first.frozen : {} })).toThrow(
+          "rp-plugin-fault:invalid-result"
+        )
+        expect(faults).toBe(1)
+      })
+    )
+  )
+)

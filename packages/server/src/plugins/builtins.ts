@@ -111,18 +111,18 @@ export const builtinCopy = (registry: string, id: string) =>
 /** Missing domain adapters, rather than pretending a structural descriptor is copyable. */
 export const missingBuiltinAdapter = (id: string): string => {
   if (["search_story", "read_story", "open_story_summary", "search_story_summaries"].includes(id))
-    return "Not yet: needs the story position, quoted results and ask-first adapter."
-  if (id === "read_run") return "Not yet: needs the run transcript and compacted-step visibility adapter."
+    return "Not yet: needs support for choosing the story position and asking before reading it."
+  if (id === "read_run") return "Not yet: needs support for reading earlier assistant steps."
   if (["write_note", "edit_note"].includes(id))
-    return "Not yet: needs note creation and revision checks, permissions and reversible receipts."
+    return "Not yet: needs support for safely creating, editing and undoing note changes."
   if (["edit_card", "edit_card_note"].includes(id))
-    return "Not yet: needs card-note permissions, revision snapshots and reversible receipts."
-  if (id === "lookup_lore") return "Not yet: needs the causal lore activation and entry-visibility adapter."
+    return "Not yet: needs support for card-note permissions and undoing changes."
+  if (id === "lookup_lore") return "Not yet: needs support for looking up lore the character can know."
   if (id.startsWith("plugin_") || id === "app_source")
-    return "Not yet: needs confined repositories, role checks, exact-version consent and Undo."
+    return "Not yet: needs support for checking saved code, approving versions and undoing changes."
   if (id.startsWith("read_") || id === "list_library")
-    return "Not yet: needs owned library reads and document rendering."
-  return "Not yet: needs owned library or chat changes, approval snapshots, receipts and Undo."
+    return "Not yet: needs support for reading your saved library items."
+  return "Not yet: needs support for approvals and undoing saved changes."
 }
 
 /** Keep every supported identity inside the existing tool-result budget. */

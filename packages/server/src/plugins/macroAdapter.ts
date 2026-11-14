@@ -3,16 +3,52 @@ import { isMacroLimit } from "@rp/shared/macros/expand.ts"
 // API v1's cooperative call boundary. VM timeout bounds synchronous callbacks, not trust.
 import { Script } from "node:vm"
 import type { MacroCall, MacroEntry, MacroVariablesV1 } from "@rp/shared/macros/registry.ts"
+import type { ChatMessage } from "@rp/shared/macros/context.ts"
 
 const invoke = new Script("invoke()", { filename: "plugin-macro" })
+// Bound plugin-produced text before it can enter assembly or a frozen draw.
+const MAX_MACRO_TEXT = 262_144
+const workSize = (size: number) => {
+  if (!Number.isFinite(size) || size < 0) throw new Error("Invalid macro work")
+  return size
+}
 const copy = <A>(value: A): A => {
   if (Array.isArray(value)) return Object.freeze(value.map(copy)) as A
   if (value !== null && typeof value === "object")
     return Object.freeze(Object.fromEntries(Object.entries(value).map(([k, v]) => [k, copy(v)]))) as A
   return value
 }
+const selected = (value: object, keys: ReadonlyArray<string>) =>
+  Object.freeze(
+    Object.fromEntries(
+      keys.filter((k) => Object.hasOwn(value, k)).map((k) => [k, copy((value as Record<string, unknown>)[k])])
+    )
+  )
+const MESSAGE_FIELDS = ["text", "fromUser", "system", "sentAt", "versions", "selectedVersion"] as const
+// Each entry owns its cache. Compare all allowed fields so host edits never reuse stale data.
+const messageProjection = () => {
+  const rows = new WeakMap<ChatMessage, Readonly<Record<string, unknown>>>()
+  return (message: ChatMessage) => {
+    const previous = rows.get(message)
+    if (
+      previous &&
+      MESSAGE_FIELDS.every((key) => {
+        const own = Object.hasOwn(message, key)
+        return own === Object.hasOwn(previous, key) && (!own || message[key] === previous[key])
+      })
+    )
+      return previous
+    const row = selected(message, MESSAGE_FIELDS)
+    rows.set(message, row)
+    return row
+  }
+}
 /** Explicit fields, never spread a future assembler context into a stable plugin contract. */
-const macroCallV1 = (call: MacroCall, enabled: () => boolean): MacroCall => {
+const macroCallV1 = (
+  call: MacroCall,
+  enabled: () => boolean,
+  message: ReturnType<typeof messageProjection>
+): MacroCall => {
   const live = () => {
     if (!enabled()) throw new Error("Plugin is disabled")
   }
@@ -34,11 +70,8 @@ const macroCallV1 = (call: MacroCall, enabled: () => boolean): MacroCall => {
     })
   const context: Record<string, unknown> = {}
   for (const key of [
-    "names",
     "variables",
-    "card",
     "collapseNewlines",
-    "messages",
     "firstIncludedMessageId",
     "firstDisplayedMessageId",
     "now",
@@ -57,12 +90,6 @@ const macroCallV1 = (call: MacroCall, enabled: () => boolean): MacroCall => {
     "pickSeed"
   ] as const)
     if (call.context[key] !== undefined) context[key] = copy(call.context[key])
-  const selected = (value: object, keys: ReadonlyArray<string>) =>
-    Object.freeze(
-      Object.fromEntries(
-        keys.filter((k) => Object.hasOwn(value, k)).map((k) => [k, copy((value as Record<string, unknown>)[k])])
-      )
-    )
   context.names = selected(call.context.names, ["user", "char", "group", "groupNotMuted", "notChar"])
   if (call.context.card)
     context.card = selected(call.context.card, [
@@ -81,12 +108,7 @@ const macroCallV1 = (call: MacroCall, enabled: () => boolean): MacroCall => {
       "joinedVolatile",
       "joined"
     ])
-  if (call.context.messages)
-    context.messages = Object.freeze(
-      call.context.messages.map((m) =>
-        selected(m, ["text", "fromUser", "system", "sentAt", "versions", "selectedVersion"])
-      )
-    )
+  if (call.context.messages) context.messages = Object.freeze(call.context.messages.map(message))
   return Object.freeze({
     name: call.name,
     args: copy(call.args),
@@ -105,19 +127,23 @@ const macroCallV1 = (call: MacroCall, enabled: () => boolean): MacroCall => {
     macrosIn: method((text: string) => copy(call.macrosIn(text))),
     random: method(call.random),
     once: method(call.once),
-    charge: method(call.charge),
+    charge: method((size: number) => call.charge(workSize(size))),
     markVolatile: method(call.markVolatile),
     variables: Object.freeze({ local: variables(call.variables.local), global: variables(call.variables.global) })
   })
 }
 export const adaptMacroV1 = (entry: MacroEntry, enabled: () => boolean, fail: () => void): MacroEntry => {
   const saved = copy(entry)
+  const message = messageProjection()
   const wrap =
     <A>(fn: (call: MacroCall, ...args: string[]) => A) =>
     (call: MacroCall, ...args: string[]): A => {
       if (!enabled()) throw new Error("Plugin is disabled")
       try {
-        return invoke.runInNewContext({ invoke: () => fn(macroCallV1(call, enabled), ...args) }, { timeout: 100 }) as A
+        return invoke.runInNewContext(
+          { invoke: () => fn(macroCallV1(call, enabled, message), ...args) },
+          { timeout: 100 }
+        ) as A
       } catch (error) {
         if (isMacroLimit(error) || Predicate.isTagged(error, "PluginFault")) throw error
         fail()
@@ -129,10 +155,15 @@ export const adaptMacroV1 = (entry: MacroEntry, enabled: () => boolean, fail: ()
     cacheVolatile: true,
     handler: wrap((call) => {
       const text = saved.handler(call)
-      if (typeof text !== "string") throw new Error("Macro text required")
+      if (typeof text !== "string" || text.length > MAX_MACRO_TEXT) throw new Error("Invalid macro text")
       return text
     }),
-    ...(saved.accepts ? { accepts: wrap(saved.accepts) } : {}),
-    ...(saved.work ? { work: wrap(saved.work) } : {})
+    accepts: wrap((call, value) => {
+      if (value!.length > MAX_MACRO_TEXT) throw new Error("Invalid frozen macro text")
+      const accepted = saved.accepts ? saved.accepts(call, value!) : true
+      if (typeof accepted !== "boolean") throw new Error("Invalid macro acceptance")
+      return accepted
+    }),
+    ...(saved.work ? { work: wrap((call) => workSize(saved.work!(call))) } : {})
   })
 }

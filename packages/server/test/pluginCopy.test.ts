@@ -23,6 +23,7 @@ import { declaredHandles } from "../src/plugins/handles.ts"
 import { PluginManifest } from "@rp/shared/plugins.ts"
 import { Schema } from "effect"
 import { pluginConsent, pluginAccessGrows } from "@rp/shared/pluginConsent.ts"
+import { makeRegistry } from "@rp/shared/registry.ts"
 
 it("all built-in tools, including generated tools, declare shipped source; only allowlisted adapters copy", async () => {
   await Effect.runPromise(
@@ -40,6 +41,46 @@ it("all built-in tools, including generated tools, declare shipped source; only 
     "adapter"
   )
 })
+
+it("every unavailable story tool refuses both declared replacement and disable", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const execution = yield* installPluginToolDefinitions
+        const unavailable = execution.rolloutTools
+          .list()
+          .filter((tool) => !builtinCopies.some((part) => part.registry === "rolloutTools" && part.id === tool.id))
+        expect(unavailable).toHaveLength(35)
+        for (const original of unavailable) {
+          expect(builtinReplacement(`rolloutTools:${original.id}`)).toBeUndefined()
+          const registry = makeRegistry([original])
+          const handles = declaredHandles(
+            {
+              id: "unavailable-copy",
+              name: "Unavailable copy",
+              api: 1,
+              server: "server.ts",
+              worker: null,
+              client: null,
+              surfaces: ["server:rolloutTools"],
+              replaces: [`rolloutTools:${original.id}`],
+              overrides: [],
+              network: false,
+              base: null
+            },
+            "server",
+            { rolloutTools: registry },
+            yield* Effect.scope,
+            new Map(),
+            () => {}
+          ) as { rolloutTools: typeof registry }
+          expect(Exit.isFailure(yield* Effect.exit(handles.rolloutTools.register(original))), original.id).toBe(true)
+          expect(Exit.isFailure(yield* Effect.exit(handles.rolloutTools.disable(original.id))), original.id).toBe(true)
+          expect(registry.get(original.id)).toBe(original)
+        }
+      }).pipe(Effect.provide(ExecutionRegistry.layer))
+    )
+  ))
 
 it.each(builtinCopies)("copies exact declared source for $registry/$id", async (part) => {
   expect(builtinCopyStem(part.id)).toMatch(/^[a-z][a-z0-9-]{0,41}$/)

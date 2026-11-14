@@ -368,6 +368,56 @@ it("startup keeps the earliest replacement and visibly suspends a later conflict
   )
 }, 150000)
 
+it.each([
+  ["oversized text", '"x".repeat(2_000_000)'],
+  ["non-string text", "42 as unknown as string"],
+  ["a synchronous loop", "(() => { while (true) {} })()"]
+])(
+  "a copied macro returning %s suspends visibly and sends only original text",
+  async (_name, body) => {
+    const config = testConfig()
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const api = yield* client()
+          const made = yield* api.CopyBuiltin({ registry: "macros", id: "reverse", pluginId: "invalid-macro" })
+          const path = "src/part/reverse.ts"
+          const source = yield* Effect.promise(() =>
+            readFile(join(pluginFolder(config.dataDir, "", made.id), path), "utf8")
+          )
+          const commit = yield* api.CommitPlugin({
+            ...made,
+            files: { [path]: source.replace('Array.from(call.args[0]!).reverse().join("")', body) },
+            message: "Synthetic invalid result"
+          })
+          expect(yield* api.EnablePlugin({ ...made, commit, consent: true })).toMatchObject({ ok: true })
+          const mock = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startMockProvider((_request, res) => sse(res, completionChunks(["Synthetic reply."], {})))
+            ),
+            (m) => Effect.promise(() => m.close())
+          )
+          const generate = () =>
+            generateReply(api, {
+              connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+              model: {},
+              greeting: "Macro:{{reverse::abc}}"
+            })
+          yield* generate().pipe(Effect.exit)
+          // A preflight/LCM assembly can fail first, restoring the original before
+          // the reply assembles. Either way no invalid expansion reaches the provider.
+          expect(mock.requests().length).toBeLessThanOrEqual(1)
+          for (const request of mock.requests()) expect(JSON.stringify(request.body)).toContain("Macro:cba")
+          expect((yield* api.GetPlugin(made)).pin?.suspended).toBeDefined()
+          yield* generate()
+          expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Macro:cba")
+        }).pipe(Effect.provide(serverLayer(config)))
+      )
+    )
+  },
+  90000
+)
+
 for (const [id, entry, args] of [
   ["search_chat", "searchChat", { query: "Synthetic" }],
   ["read_messages", "readMessages", { from: 1 }],
