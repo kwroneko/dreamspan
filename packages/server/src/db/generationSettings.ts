@@ -61,7 +61,8 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
       (yield* ownedModel(sql, userId, model.connection, model.model))
     const presetOk = typeof preset === "string" && (yield* ownedPreset(sql, userId, preset))
     const stored = (yield* setting(sql, userId, DEFAULT_LCM)) as GenerationDefaults["lcm"] | null
-    // A model that is gone reads as none, like the default model.
+    // Keep the configured summary destination visible so it can be replaced or cleared.
+    // Summary resolution skips unavailable choices; replies and the failure fallback retain their behavior.
     const usable = (choice: { connection?: unknown; model?: unknown } | null | undefined) =>
       typeof choice?.connection === "string" && typeof choice.model === "string"
         ? ownedModel(sql, userId, choice.connection, choice.model)
@@ -70,7 +71,7 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
     const lcm = stored
       ? {
           ...rest,
-          ...((yield* usable(summarizer)) ? { summarizer } : {}),
+          ...(summarizer ? { summarizer } : {}),
           ...((yield* usable(fallback)) ? { fallback } : {})
         }
       : null

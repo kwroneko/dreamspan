@@ -242,11 +242,14 @@ export function SummaryDefaults({
     <Card>
       <CardHeader title="Summaries" />
       <section aria-label="Models for summaries" className="flex flex-col gap-4">
-        <Field label="Summary model" about="Writes the summaries in chats that don't choose their own.">
+        <Field
+          label="Summary model"
+          about="Writes summaries unless a chat chooses its own. If unavailable, uses the chat's model."
+        >
           <ModelSelect
             ariaLabel="Summary model"
             items={items.filter((item) => item.value !== NONE)}
-            value={defaults ? choice(defaults.lcm?.summarizer) : null}
+            value={defaults?.lcm?.summarizer ? choice(defaults.lcm.summarizer) : null}
             placeholder={SAME_AS_CHAT}
             onValueChange={(value) => void change({ summarizer: parseModelValue(value) })}
             clear={{

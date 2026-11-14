@@ -6,9 +6,10 @@
 // while the message is on screen, never stored. The counter `k/n` opens it: a popover on a
 // wide screen, a sheet on a phone.
 import { positionOf } from "./position.ts"
+import { Atom } from "effect/reactivity"
 import { useAtomValue } from "@effect/atom-react"
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
-import { type ReactNode, useDeferredValue, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
 import { Input } from "../../ui/Field.tsx"
@@ -37,10 +38,11 @@ export const useNarrow = () => useSyncExternalStore(subscribeNarrow, () => match
 const fullTime = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" })
 
 /** A version's text as plain words: Markdown's marks would only take room in two lines. */
-const plain = (text: string) =>
+export const plain = (text: string) =>
   text
     .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\[\]]*)\]\([^()]*\)/g, "$1")
+    .replace(/\s+/g, " ")
     .replace(/(^|\s)\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?(?=\s|$)/g, " ")
     .replace(/[*_`~|]+/g, "")
     .replace(/\s+/g, " ")
@@ -96,7 +98,7 @@ export const arrange = (
   const written = (a: Version, b: Version) => order.get(a.id)! - order.get(b.id)!
   const by: Record<VersionSort, (a: Version, b: Version) => number> = {
     written,
-    newest: (a, b) => b.createdAt - a.createdAt || written(b, a),
+    newest: (a, b) => b.createdAt - a.createdAt || written(a, b),
     longest: (a, b) => textOf(b).length - textOf(a).length || written(a, b),
     shortest: (a, b) => textOf(a).length - textOf(b).length || written(a, b),
     starred: (a, b) => Number(b.starred) - Number(a.starred) || written(a, b)
@@ -269,6 +271,22 @@ function PickerBody({
   view: PickerView
   onView: (view: PickerView) => void
 }) {
+  // Subscribe here as well as in rows: a filtered-out streaming row must enter the results
+  // when its new text matches, and length sorts must follow that same visible text.
+  const live = useAtomValue(
+    useMemo(
+      () =>
+        Atom.make(
+          (get) =>
+            new Map(
+              (versions ?? [])
+                .filter((v) => v.status === "generating")
+                .map((v) => [v.id, get(liveText(v.id)) ?? v.content])
+            )
+        ),
+      [versions]
+    )
+  )
   const [filter, setFilter] = useState<"all" | "starred">("all")
   // Typing stays quick with fifty long versions: the list follows a moment behind.
   const query = useDeferredValue(view.query)
@@ -290,7 +308,9 @@ function PickerBody({
   const numbers = new Map(versions.map((v, i) => [v.id, i + 1]))
   const numberOf = (id: Version["id"]) => numbers.get(id)
   const starred = versions.filter((v) => v.starred).length
-  const wanted = arrange(versions, needle, view.sort).filter((v) => filter === "all" || v.starred)
+  const wanted = arrange(versions, needle, view.sort, (v) => live.get(v.id) ?? v.content).filter(
+    (v) => filter === "all" || v.starred
+  )
   const shown = wanted.filter((v) => !v.hidden)
   const hidden = wanted.filter((v) => v.hidden)
   const comparing = ticked !== null

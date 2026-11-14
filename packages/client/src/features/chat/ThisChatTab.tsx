@@ -271,7 +271,8 @@ function SummaryModel({ session, account }: { session: ChatSession; account: Lcm
   )
   const [error, setError] = useState<AppError | null>(null)
   const accountLabel = fromAccount
-    ? (models.find((m) => m.value === modelValue(fromAccount.connection, fromAccount.model))?.label ?? "…")
+    ? (models.find((m) => m.value === modelValue(fromAccount.connection, fromAccount.model))?.label ??
+      "Model unavailable")
     : null
   const choose = (model: ReturnType<typeof parseModelValue> | null) =>
     session.changeCast({ _tag: "SummaryModel", model }).then((outcome) => setError(outcome.ok ? null : outcome.error))
@@ -279,7 +280,7 @@ function SummaryModel({ session, account }: { session: ChatSession; account: Lcm
   return (
     <Field
       label="Summary model"
-      about="Writes this chat's summaries from here on. A cheaper model can keep costs down."
+      about="Writes summaries from here on, on this branch. If unavailable, uses the account choice, then the chat's model."
       error={error?.message}
     >
       <ModelSelect

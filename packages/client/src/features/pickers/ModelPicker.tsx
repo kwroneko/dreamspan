@@ -206,11 +206,11 @@ export function ModelSelect({
   return (
     <ModelPickerPopover
       selection={selection}
-      trigger={<span className="truncate">{current?.label ?? placeholder}</span>}
+      trigger={<span className="truncate">{current?.label ?? (value ? "Model unavailable" : placeholder)}</span>}
       triggerLabel={ariaLabel}
       hint="Choose a model from your connections"
       side="bottom"
-      {...(clear && current
+      {...(clear && value
         ? {
             footer: (close: () => void) => (
               <PickerFooterButton

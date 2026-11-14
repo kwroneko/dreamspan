@@ -1,3 +1,5 @@
+import { planningContext, summaryChunkRoom } from "./lcmModelBudget.ts"
+import { resolveSummaryModel } from "../assembler/summaryModel.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { workshopTranscript } from "./workshopTranscript.ts"
 import { prepareTextTokens } from "../assembler/textTokens.ts"
@@ -30,7 +32,7 @@ import { lcmPath } from "./lcmPath.ts"
 import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { query } from "./tx.ts"
 import { readDefaults } from "./generationSettings.ts"
-import { chunkSize, lcmMisfits, resolveLcm, summaryModelBinding } from "@rp/shared/lcmSettings.ts"
+import { chunkSize, lcmMisfits, resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
 
 /** The speed of the model's last requests, for how long the work takes; null without any. */
@@ -216,9 +218,10 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           ...base,
           events: (at) => Effect.map(base.events(at), (read) => [...read, forced])
         })
-        const bound = summaryModelBinding(state.modelBindings, (yield* readDefaults(sql, userId)).lcm)
         const narrator = state.modelBindings["narrator"] ?? state.modelBindings[""] ?? null
-        const model = yield* base.model(bound).pipe(Effect.catchTag("AssemblyFailed", () => Effect.succeed(null)))
+        const { model } = yield* resolveSummaryModel(base, state.modelBindings).pipe(
+          Effect.catchTag("AssemblyFailed", () => Effect.succeed({ model: null }))
+        )
         const narrating = yield* base
           .model(narrator)
           .pipe(Effect.catchTag("AssemblyFailed", () => Effect.succeed(null)))
@@ -259,10 +262,9 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           const blocked = { ...none, blocked: "no_model" as const }
           return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null, ...noted }
         }
-        const built = yield* assembler
-          .assemble({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random })
-          .pipe(Effect.provide(layer))
-          .pipe(Effect.catchTag("AssemblyFailed", (error: AssemblyFailed) => Effect.succeed(error)))
+        const built = yield* planningContext(assembler, layer, model).pipe(
+          Effect.catchTag("AssemblyFailed", (error: AssemblyFailed) => Effect.succeed(error))
+        )
         const info = {
           connection: model.connectionId as never,
           model: model.modelId as never,
@@ -276,7 +278,10 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         }
         const settings = resolveLcm(state.lcm, (yield* readDefaults(sql, userId)).lcm)
         const recent = built.lcm?.recentBudget ?? { target: 0, maximum: 0 }
-        const leafInput = chunkSize(settings.leafInput, recent)
+        const leafInput = Math.min(
+          chunkSize(settings.leafInput, recent),
+          yield* summaryChunkRoom({ sql, assembler, layer, model, reply: built, settings, chatId })
+        )
         if (leafInput < 1 || leafInput * 2 > recent.maximum - recent.target) {
           const blocked = blockedWith("runway")
           return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null, ...noted }

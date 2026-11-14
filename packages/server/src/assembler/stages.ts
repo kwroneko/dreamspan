@@ -1,3 +1,4 @@
+import { resolveSummaryModel } from "./summaryModel.ts"
 import { prepareTextTokens } from "./textTokens.ts"
 import { mergeLayoutStage } from "./merges.ts"
 import { gapLinesStage } from "./gapLines.ts"
@@ -5,7 +6,7 @@ import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { DEFAULT_RESPONSE, withModelSettings } from "@rp/shared/modelSettings.ts"
-import { fitPair, resolveLcm, summaryMacroPrompts, summaryModelBinding } from "@rp/shared/lcmSettings.ts"
+import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
 import { charDefinitions, newestMessage, ownTurnNotes, presetOrder, withMain } from "@rp/shared/presetOrder.ts"
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
 import { conditionOf, triggersFor } from "@rp/shared/presetConditions.ts"
@@ -240,11 +241,16 @@ const modelStage: AssemblerStage = {
       const sources = yield* AssemblySources
       const bindings = need(assembly, "state").modelBindings
       // A summary is written with the summary model: the chat's own, else the account's, else the chat's.
-      assembly.model = yield* sources.model(
-        assembly.request.summarizing
-          ? summaryModelBinding(bindings, sources.lcmDefaults ? yield* sources.lcmDefaults() : null)
-          : (bindings[""] ?? null)
-      )
+      if (assembly.request.summarizing) {
+        const resolved = yield* resolveSummaryModel(sources, bindings)
+        assembly.model = resolved.model
+        if (resolved.unavailable)
+          assembly.issues.push({
+            kind: "summary_model_unavailable",
+            message:
+              "A chosen summary model is unavailable. This summary uses the next available account or chat model."
+          })
+      } else assembly.model = yield* sources.model(bindings[""] ?? null)
       return assembly
     })
 }

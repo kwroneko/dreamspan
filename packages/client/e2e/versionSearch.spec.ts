@@ -9,7 +9,7 @@ import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const filler = "The tide turns and the waves keep coming over the old stones. ".repeat(60)
+const filler = "The tide turns and the waves keep coming over the old stones. ".repeat(340)
 let chatId = ""
 
 test.beforeAll(async () => {
@@ -20,7 +20,7 @@ test.beforeAll(async () => {
         chatId: chat.id,
         parentSlotId: null,
         branch: false,
-        content: `Version 1. ${filler}`,
+        content: `Version 1. ${"[".repeat(20000)}`,
         reply: false
       })
       if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
@@ -29,9 +29,11 @@ test.beforeAll(async () => {
       for (let n = 2; n <= 50; n++) {
         // Version 12 is the shortest; 30 and 41 mention a zeppelin.
         const content =
-          n === 12
-            ? "Version 12, short."
-            : `Version ${n}. ${filler}${n === 30 || n === 41 ? " Then a zeppelin drifts over the harbour." : ""}`
+          n === 2
+            ? `Version 2. ${" ".repeat(20000)}`
+            : n === 12
+              ? "Version 12, short."
+              : `Version ${n}. ${filler}${n === 30 || n === 41 ? " Then a zeppelin drifts over the harbour. <img src=x onerror=alert(1)>" : ""}`
         const entry = yield* api.WriteVersion({ slotId, content, expectedRowVersion: rowVersion })
         rowVersion = entry.rowVersion
       }
@@ -65,6 +67,34 @@ for (const width of [1440, 390])
 
       // The filter: one shown, one hidden, the word marked; the starred filter narrows it.
       const field = picker.getByRole("searchbox", { name: "Find in versions", exact: true })
+      await page.evaluate(() => {
+        const durations: number[] = []
+        const observer = new PerformanceObserver((list) => durations.push(...list.getEntries().map((e) => e.duration)))
+        observer.observe({ entryTypes: ["longtask"] })
+        Object.assign(window, { versionSearchTiming: { durations, observer } })
+      })
+      const latency: number[] = []
+      // Measure input-to-paint with the full megabyte of swipes, rather than just arrange().
+      for (const text of ["z", "ze", "zep", "zepp", "zeppe", "zeppelin", "", "waves", ""]) {
+        const started = performance.now()
+        await field.fill(text)
+        await field.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+        latency.push(performance.now() - started)
+      }
+      await info.attach("typing-latency-ms", { body: JSON.stringify(latency), contentType: "application/json" })
+      expect(Math.max(...latency)).toBeLessThan(500)
+      const longTasks = await page.evaluate(() => {
+        const timing = (
+          window as unknown as { versionSearchTiming: { durations: number[]; observer: PerformanceObserver } }
+        ).versionSearchTiming
+        timing.observer.disconnect()
+        return timing.durations
+      })
+      await info.attach("main-thread-long-tasks-ms", {
+        body: JSON.stringify(longTasks),
+        contentType: "application/json"
+      })
+      expect(Math.max(0, ...longTasks)).toBeLessThan(150)
       await field.fill("Zeppelin")
       await expect(rows(page, "Versions")).toHaveCount(1)
       await expect(rows(page, "Versions").first()).toContainText("#41")
@@ -99,6 +129,12 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `version-search-${width}-${theme}`, { scope: '[role="dialog"]' })
       await page.screenshot({ path: info.outputPath(`picker-${width}-${theme}.png`) })
 
+      await field.fill("<img")
+      await expect(rows(page, "Versions")).toHaveCount(1)
+      await expect(rows(page, "Versions").locator("mark")).toHaveText("<img")
+      await expect(rows(page, "Versions").locator("img")).toHaveCount(0)
+      await field.fill("version")
+
       // Compare still works on the sorted, filtered list.
       await picker.getByRole("button", { name: "Compare", exact: true }).click()
       await picker.getByRole("checkbox", { name: "Compare version 50", exact: true }).click()
@@ -116,4 +152,19 @@ for (const width of [1440, 390])
       await picker.getByRole("button", { name: /^Version 12,/ }).click()
       await expect(picker).toHaveCount(0)
       await expect(message).toContainText("Version 12, short.")
+      // Keyboard activation selects the version identified by the filtered/sorted row, too.
+      await message.getByRole("button", { name: /choose a version/ }).click()
+      await field.fill("Version 41.")
+      const selected = picker.getByRole("button", { name: /^Version 41,/ })
+      await selected.focus()
+      await page.keyboard.press("Enter")
+      await expect(picker).toHaveCount(0)
+      await expect(
+        message.getByRole("group", { name: "Versions", exact: true }).getByRole("button", { name: /^Version 41 of 50/ })
+      ).toBeVisible()
+      // A reload mounts a new picker with its initial search and ordering.
+      await page.reload()
+      await message.getByRole("button", { name: /choose a version/ }).click()
+      await expect(field).toHaveValue("")
+      await expect(picker.getByRole("button", { name: "Sort versions: Order written", exact: true })).toBeVisible()
     })

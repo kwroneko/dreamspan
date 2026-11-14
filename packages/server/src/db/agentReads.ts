@@ -1,3 +1,4 @@
+import { resolveSummaryModel } from "../assembler/summaryModel.ts"
 import { lcmPath } from "./lcmPath.ts"
 import { CALL_TOOL, dispatcherMessages } from "../agent/dispatcher.ts"
 import { recoveredOperationText } from "./operationReceipts.ts"
@@ -39,7 +40,7 @@ import { knowsSql, readKnowers } from "./knowers.ts"
 import { threadStretches } from "./threadStretches.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
-import { resolveLcm, summaryModelBinding } from "@rp/shared/lcmSettings.ts"
+import { resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { AssemblySources } from "../assembler/pipeline.ts"
 import { inFork } from "./forkState.ts"
@@ -112,7 +113,7 @@ const transcriptEntries = (
       return [
         {
           role: "app",
-          text: `Summarized transcript ${m.from}–${m.through - 1}. Original steps remain available.\n${m.content}`
+          text: `Summarized transcript ${m.from}–${m.through - 1}${m.model ? ` with ${m.model}` : " (model not recorded)"}. Original steps remain available.\n${m.content}`
         }
       ]
     if (m.role === "rpUser") {
@@ -611,7 +612,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const state = foldState((yield* base.events(leafSlotId)).map((e) => e.event))
         const account = yield* base.lcmDefaults!()
         const settings = resolveLcm(state.lcm, account)
-        const model = yield* base.model(summaryModelBinding(state.modelBindings, account))
+        const { model } = yield* resolveSummaryModel(base, state.modelBindings)
         const candidates = yield* sql<{
           rollout: string
           call: string

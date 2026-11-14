@@ -36,7 +36,18 @@ const fixture = (
     ...extra
   ],
   modelAsked: asked,
-  lcmDefaults
+  lcmDefaults,
+  model: {
+    connectionId: "conn",
+    modelId: "model",
+    kind: "openai-chat",
+    api: "openai-completions",
+    key: "synthetic",
+    prefill: "none",
+    cacheBreakpoints: "none",
+    context: 128000,
+    presetOverride: null
+  }
 })
 
 const asked = (extra: ReadonlyArray<ReturnType<typeof binding>>, defaults: LcmDefaults | null, summarizing: boolean) =>
@@ -65,3 +76,40 @@ it("the summary model's order of choice", () => {
   assert.deepStrictEqual(summaryModelBinding({ "": chatModel }, {} as LcmDefaults), chatModel)
   assert.strictEqual(summaryModelBinding({}, null), null)
 })
+
+it.effect("unavailable summary choices fall through only on a missing model, and report it", () =>
+  Effect.gen(function* () {
+    const { resolveSummaryModel } = yield* Effect.promise(() => import("../src/assembler/summaryModel.ts"))
+    const { AssemblyFailed } = yield* Effect.promise(() => import("../src/assembler/types.ts"))
+    const calls: unknown[] = []
+    const model = fixture([], null, []).model!
+    const sources = {
+      lcmDefaults: () => Effect.succeed({ summarizer: accountSummary }),
+      model: (binding: unknown) => {
+        calls.push(binding)
+        return binding === ownSummary
+          ? Effect.fail(new AssemblyFailed({ reason: "no_model", message: "Gone" }))
+          : Effect.succeed(model)
+      }
+    } as unknown as import("../src/assembler/pipeline.ts").AssemblySources["Service"]
+    const resolved = yield* resolveSummaryModel(sources, { summarizer: ownSummary, "": chatModel })
+    assert.deepStrictEqual(calls, [ownSummary, accountSummary])
+    assert.isTrue(resolved.unavailable)
+    assert.strictEqual(resolved.model, model)
+    const failed = yield* resolveSummaryModel(
+      { ...sources, model: () => Effect.fail(new AssemblyFailed({ reason: "budget", message: "Synthetic failure" })) },
+      { summarizer: ownSummary }
+    ).pipe(Effect.flip)
+    assert.strictEqual(failed._tag, "AssemblyFailed")
+  })
+)
+
+it.effect("summary choices leave the complete reply request bytes unchanged", () =>
+  Effect.gen(function* () {
+    const plain = yield* assembleFixture(fixture([], null, []))
+    const chosen = yield* assembleFixture(
+      fixture([binding("summarizer", ownSummary)], { summarizer: accountSummary } as LcmDefaults, [])
+    )
+    assert.strictEqual(JSON.stringify(chosen.request), JSON.stringify(plain.request))
+  })
+)

@@ -16,3 +16,7 @@ export function CardVersion({ card, truncate = false }: { card: CastCard; trunca
     </span>
   )
 }
+
+/** A compact choice keeps the real display name and standard card version together. */
+export const cardChoiceLabel = (card: Pick<CastCard, "name" | "subtitle">) =>
+  card.subtitle?.trim() ? `${card.name} · ${card.subtitle.trim()}` : card.name

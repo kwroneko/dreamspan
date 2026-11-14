@@ -8,6 +8,8 @@ export interface RunSummary {
   readonly from: number
   readonly through: number
   readonly content: string
+  /** The model that actually wrote this summary; absent in older transcripts. */
+  readonly model?: string
   /** Server-read Undo state, independent of generated notes. */
   readonly changes?: string
   readonly timestamp: number

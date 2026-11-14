@@ -2617,6 +2617,14 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           "NotFound"
         )
         // Their card, connection or preset into the actor's own chat.
+        for (const model of [
+          { connection: owner.connectionId, model: owner.modelId },
+          { connection: actor.connectionId, model: owner.modelId }
+        ])
+          yield* refused(
+            actor.api.ChangeCast({ chatId: actor.chat.chatId, slotId: null, change: { _tag: "SummaryModel", model } }),
+            "NotFound"
+          )
         yield* refused(
           actor.api.ChangeCast({ chatId: actor.chat.chatId, slotId: null, change: join(owner.cardId) }),
           "NotFound"

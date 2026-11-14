@@ -95,8 +95,46 @@ for (const width of [1440, 390])
         (await openSummarySettings(page)).getByRole("button", { name: "This chat's summary model", exact: true })
       ).toContainText("Account default: Local · cheap-model")
 
+      // A deleted choice remains visible and can still be cleared.
+      const gone = await rpc((api) =>
+        Effect.gen(function* () {
+          const c = yield* api.CreateConnection({
+            kind: "openai-chat",
+            settings: {
+              name: "Gone",
+              baseUrl: "http://127.0.0.1:9/v1",
+              compat: {},
+              cacheTtlS: null,
+              maxConcurrent: null,
+              presetOverrideRefId: null
+            }
+          })
+          const m = yield* api.AddUserModel({ connectionId: c.id, key: "gone-model", overrides: {} })
+          const shown = yield* api.GetChat({ chatId })
+          yield* api.ChangeCast({
+            chatId,
+            slotId: shown.activeLeafSlotId,
+            change: { _tag: "SummaryModel", model: { connection: c.id, model: m.id } }
+          })
+          yield* api.ChangeGenerationDefaults({ change: { summarizer: { connection: c.id, model: m.id } } })
+          yield* api.DeleteConnection({ connectionId: c.id })
+          return c.id
+        })
+      )
+      expect(gone).toBeTruthy()
+      await page.reload()
+      await openSummarySettings(page)
+      await expect(own).toContainText("Model unavailable")
+      await own.click()
+      await page.getByRole("button", { name: "Use the account default", exact: true }).click()
+      await expect(own).toContainText("Account default: Model unavailable")
+      await expectLayout(page, info, `summary-model-unavailable-${width}-${theme}`, {
+        scope: 'section[aria-label="Summary settings"]'
+      })
+
       // Taking the account's off: summaries follow each chat's model again.
       await page.goto(`${server().url}/settings/chats`)
+      await expect(account).toContainText("Model unavailable")
       await account.click()
       await page.getByRole("button", { name: "Same as the chat's model", exact: true }).click()
       await expect(account).toContainText("Same as the chat's model")

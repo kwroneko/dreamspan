@@ -128,6 +128,7 @@ function CardOptions({
               data-index={index}
               role="option"
               aria-label={card.name}
+              aria-description={card.subtitle?.trim() ? `Version: ${card.subtitle.trim()}` : undefined}
               aria-selected={index === active}
               aria-current={card.entityId === current || undefined}
               aria-posinset={index + 1}
@@ -200,6 +201,7 @@ function SectionRow({
       id={`${id}-${index}`}
       role="option"
       aria-label={card.name}
+      aria-description={card.subtitle?.trim() ? `Version: ${card.subtitle.trim()}` : undefined}
       aria-selected={active}
       aria-current={current || undefined}
       onPointerDown={(event) => event.preventDefault()}
