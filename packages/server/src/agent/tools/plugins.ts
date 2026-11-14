@@ -61,7 +61,15 @@ const commitField = Type.String({ pattern: "^[a-f0-9]{40}$" })
 const edit = Type.Object({ old_str: str(), new_str: str() })
 type Args = Record<string, unknown>
 type Target = { scope: "user" | "instance"; id: string }
-type Prepared = { target: Target; commit: string; revision: number; head: string; before: string | null; name: string }
+type Prepared = {
+  target: Target
+  commit: string
+  digest: string
+  revision: number
+  head: string
+  before: string | null
+  name: string
+}
 const targetOf = (value: unknown): Target => {
   if (typeof value !== "string") throw new ToolInputRefused("Name a plugin repository.")
   const scope = value.startsWith("instance:") ? "instance" : "user"
@@ -173,6 +181,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
         const prepared: Prepared = {
           target,
           commit: selected.commit,
+          digest: argsDigest({ tool: "plugin_enable", capability: "plugins.apply", args }),
           revision: details.revision,
           head: snapshot.head!,
           before: details.pin?.commit ?? null,
@@ -224,8 +233,8 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           })
         ).pipe(
           Effect.catchCause((cause) => {
-            const error = cause.reasons.find((r) => r._tag === "Fail")
-            const value = error?._tag === "Fail" ? error.error : undefined
+            const error = cause.reasons.find((r) => r._tag === "Fail" || r._tag === "Die")
+            const value = error?._tag === "Fail" ? error.error : error?._tag === "Die" ? error.defect : undefined
             const text =
               value instanceof ToolInputRefused ||
               value instanceof PluginRejected ||
@@ -257,7 +266,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
       actor.role !== "admin"
         ? Effect.fail(refused("Only an admin can read app source."))
         : Effect.map(
-            attempt(() => appSource(args)),
+            attempt(() => appSource(args, dataDir)),
             (t) => ({ text: data(t) })
           ),
     { adminOnly: true }
@@ -473,7 +482,14 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
         const digest = argsDigest({ tool: "plugin_enable", capability: "plugins.apply", args })
         if (ctx.approvalDigest !== digest) return yield* refused("This exact call needs your approval.")
         const prepared = ctx.cache.get(preparedKey(ctx)) as Prepared | undefined
-        if (!prepared || prepared.commit !== args.commit || prepared.target.id !== targetOf(args.plugin).id)
+        const target = targetOf(args.plugin)
+        if (
+          !prepared ||
+          prepared.digest !== digest ||
+          prepared.commit !== args.commit ||
+          prepared.target.id !== target.id ||
+          prepared.target.scope !== target.scope
+        )
           return yield* refused("Review this exact version again.")
         const owner = ownerOf(actor, prepared.target),
           last = checked.get(checkKey(owner, prepared.target.id))
@@ -499,6 +515,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
       }),
     {
       approval: "always",
+      adminOnly: true,
       describe: (ctx, args) =>
         describeEnable(ctx, args).pipe(
           Effect.mapError(
@@ -535,7 +552,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           })
         ])
       }),
-    { approval: "rollback" }
+    { approval: "rollback", adminOnly: true }
   )
   // Locked details without reentering host.get (the caller already owns the lifecycle lock).
   function hostDetails(actor: User, target: Target): Effect.Effect<typeof PluginDetails.Type, unknown> {

@@ -13,9 +13,13 @@ import { Reader, Writer } from "../src/db/Database.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { type ToolContext, toolWriter } from "../src/agent/tools.ts"
 import { appSource, pluginApiDocs } from "../src/plugins/reference.ts"
-import { writeFile } from "node:fs/promises"
+import { writeFile, cp, mkdir } from "node:fs/promises"
 import { join } from "node:path"
-import { pluginFolder } from "../src/plugins/repo.ts"
+import { fileURLToPath } from "node:url"
+import { pluginFolder, saveFiles } from "../src/plugins/repo.ts"
+import { checkPlugin } from "../src/plugins/check.ts"
+import { createServer } from "node:http"
+import { argsDigest } from "../src/agent/approvals.ts"
 interface Body {
   messages: Array<{ role: string; content?: string }>
   tools?: Array<{ function: { name: string } }>
@@ -441,8 +445,10 @@ it.live(
       assert.notInclude(results.join("\n"), '"step":"probe"')
       assert.notInclude(results.join("\n"), '"step":"tests"')
       assert.include(results.join("\n"), "Server code needs an admin")
-      assert.include(results.join("\n"), "An admin turns plugins on")
+      assert.include(results.join("\n"), "Tool plugin_enable not found")
       assert.isTrue(offers.every((o) => !o.includes('"name":"app_source"')))
+      assert.isTrue(offers.every((o) => !o.includes('"name":"plugin_enable"')))
+      assert.isTrue(offers.every((o) => !o.includes('"name":"plugin_rollback"')))
       assert.isNull((yield* api.GetPlugin({ scope: "user", id: "regular-dice" })).pin)
       assert.isFalse(
         events.some((e) => e._tag === "Steps" && e.steps.some((s) => s.kind === "tool" && s.status === "waiting"))
@@ -636,3 +642,162 @@ it.live(
   },
   60000
 )
+
+for (const stage of ["probe", "tests"] as const)
+  it(`authoring ${stage} cannot contact even a loopback listener before consent`, async () => {
+    let requests = 0
+    const listener = createServer((_req, res) => {
+      requests++
+      res.end("synthetic response")
+    })
+    await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve))
+    try {
+      const address = listener.address() as { port: number }
+      const dataDir = testConfig().dataDir
+      const id = `network-${stage}`
+      const fetch = `await fetch("http://127.0.0.1:${address.port}/synthetic")`
+      const files = {
+        "rp-plugin.json": JSON.stringify({
+          id,
+          name: "Network attack",
+          api: 1,
+          client: null,
+          server: "server.ts",
+          worker: null,
+          surfaces: [],
+          overrides: [],
+          replaces: [],
+          base: null,
+          network: false
+        }),
+        "server.ts": `${stage === "probe" ? fetch + ";" : ""}
+          import { Effect, type Activate } from "@rp/plugin-api/server";
+          export const activate: Activate = () => Effect.void;`,
+        ...(stage === "tests"
+          ? { "test/attack.test.ts": `import test from "node:test"; test("network", async () => { ${fetch}; });` }
+          : {})
+      }
+      const commit = await saveFiles(dataDir, "", id, files, true, "Synthetic network attack")
+      const report = await checkPlugin(dataDir, "", id, commit, { working: true, admin: true })
+      assert.strictEqual(requests, 0, "Unapproved code reached the network")
+      assert.isFalse(report.ok)
+      assert.strictEqual(report.step, stage)
+    } finally {
+      await new Promise<void>((resolve, reject) => listener.close((e) => (e ? reject(e) : resolve())))
+    }
+  }, 60000)
+
+it.live("a disabled plugin host offers no plugin capability or definitions", () => {
+  const config = testConfig({ plugins: false })
+  return Effect.gen(function* () {
+    const api = yield* client()
+    const execution = yield* ExecutionRegistry
+    const chat = yield* api.CreateWorkshop({})
+    assert.isFalse((yield* api.ListWorkshopCapabilities({ chatId: chat.id })).some((c) => c.id.startsWith("plugins.")))
+    assert.isFalse(execution.rolloutTools.list().some((t) => t.id.startsWith("plugin_") || t.id === "app_source"))
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+})
+
+it.live(
+  "duplicate call ids cannot transfer user consent to an identical instance version",
+  () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client(),
+        me = yield* api.Whoami(),
+        reader = yield* Reader,
+        writer = yield* Writer,
+        execution = yield* ExecutionRegistry
+      const chat = yield* api.CreateWorkshop({})
+      const rolloutId = `scope-${chat.id}`
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "INSERT INTO rollouts(id,chat_id,kind,status,role,request_class,created_at,updated_at) VALUES (?,?,'workshop','running','assistant','interactive',1,1)",
+          params: [rolloutId, chat.id]
+        }
+      ])
+      const id = "same-scope-id"
+      const commit = yield* api.CreatePlugin({
+        scope: "user",
+        id,
+        files: {
+          "rp-plugin.json": JSON.stringify({
+            id,
+            name: "Scope fixture",
+            api: 1,
+            server: null,
+            worker: null,
+            client: "client.ts",
+            surfaces: [],
+            overrides: [],
+            replaces: [],
+            base: null,
+            network: false
+          }),
+          "client.ts": "export const activate=()=>{}"
+        }
+      })
+      yield* Effect.promise(async () => {
+        await mkdir(join(config.dataDir, "plugins/instance"), { recursive: true })
+        await cp(pluginFolder(config.dataDir, me.id, id), pluginFolder(config.dataDir, "", id), { recursive: true })
+      })
+      const context: ToolContext = {
+        userId: me.id,
+        chatId: chat.id,
+        forkId: chat.currentForkId,
+        slotId: chat.activeLeafSlotId!,
+        versionId: "unused" as ToolContext["versionId"],
+        rolloutId,
+        toolCallId: "duplicate",
+        leafSlotId: null,
+        viewers: null,
+        reader,
+        writer: toolWriter(writer),
+        cache: new Map()
+      }
+      const check = execution.rolloutTools.get("plugin_check")!
+      for (const plugin of [id, "instance:" + id])
+        assert.isNotTrue(
+          (yield* check.execute({ ...context, toolCallId: "check-" + plugin }, { plugin } as never)).isError
+        )
+      const tool = execution.rolloutTools.get("plugin_enable")!
+      const args = { plugin: id, commit }
+      const described = yield* tool.describe!(context, args as never)
+      const digest = argsDigest({ tool: "plugin_enable", capability: "plugins.apply", args })
+      yield* writer.RequestToolApproval({
+        userId: me.id,
+        rolloutId,
+        toolCallId: "duplicate",
+        digest,
+        capability: "plugins.apply",
+        prompt: {
+          ...described,
+          rolloutId,
+          toolCallId: "duplicate",
+          digest,
+          capability: "plugins.apply",
+          capabilityLabel: "Turn plugins on",
+          uncertain: false
+        }
+      })
+      // A second model call with the same id describes the instance, before the duplicate waiter refuses it.
+      yield* tool.describe!(context, { plugin: "instance:" + id, commit } as never)
+      yield* api.AnswerToolApproval({ rolloutId, toolCallId: "duplicate", digest, answer: "allow" })
+      assert.isTrue(
+        yield* writer.SettleToolApproval({ userId: me.id, rolloutId, toolCallId: "duplicate", status: "used" })
+      )
+      const result = yield* tool.execute({ ...context, approvalDigest: digest }, args as never)
+      assert.isTrue(result.isError, "An approval for a private plugin applied the instance-wide plugin")
+      assert.isNull((yield* api.GetPlugin({ scope: "instance", id })).pin)
+      assert.isNull((yield* api.GetPlugin({ scope: "user", id })).pin)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  },
+  90000
+)
+
+it("app_source excludes a configured data volume even beneath a source directory", async () => {
+  const sourceRoot = fileURLToPath(new URL("../src/agent", import.meta.url))
+  await expect(appSource({ path: "packages/server/src/agent/tools/plugins.ts" }, sourceRoot)).rejects.toThrow()
+  const index = await appSource({}, sourceRoot)
+  assert.notInclude(index, '"packages/server/src/agent/')
+})

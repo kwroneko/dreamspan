@@ -274,14 +274,22 @@ export const createAuthorRepo = async (
     .then((t) => JSON.parse(t) as { key: string; digest: string; timestamp: number; commit?: string })
     .catch(() => undefined)
   if (!intent) {
-    if ((await readdir(folder)).length) throw new Error("Plugin already exists")
-    await git.init({ fs, dir: folder, defaultBranch: "main" })
+    const entries = await readdir(folder)
+    // An empty metadata directory is the only state before the creation intent.
+    if (
+      entries.length &&
+      !(entries.length === 1 && entries[0] === ".git" && !(await readdir(join(folder, ".git"))).length)
+    )
+      throw new Error("Plugin already exists")
+    await confined(dataDir, join(folder, ".git"), true)
     intent = { key, digest: hash(files), timestamp: Math.floor(Date.now() / 1000) }
     await writeFile(marker, JSON.stringify(intent), { flag: "wx", mode: 0o600 })
   }
   await safeGit(folder)
   if (intent.key !== key || intent.digest !== hash(files)) throw new Error("Plugin already exists")
   if (intent.commit) return { text: `Created ${id} at ${intent.commit}. Nothing was enabled.`, commit: intent.commit }
+  // Initialization is idempotent. The intent must survive a crash before HEAD/config exist.
+  await git.init({ fs, dir: folder, defaultBranch: "main" })
   await replaceTree(dataDir, folder, {}, files)
   for (const path of Object.keys(files)) await git.add({ fs, dir: folder, filepath: path })
   const commit = await git.commit({

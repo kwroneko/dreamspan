@@ -585,7 +585,7 @@ export class PluginHost extends Context.Service<
         rollback,
         dirty
       })
-      for (const tool of authoring.tools) yield* execution.rolloutTools.register(tool)
+      if (config.plugins) for (const tool of authoring.tools) yield* execution.rolloutTools.register(tool)
       if (config.plugins) {
         const users = yield* reader.ListUsers()
         const pins = yield* reader.AllPluginPins()

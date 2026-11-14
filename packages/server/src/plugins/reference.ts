@@ -1,7 +1,7 @@
 // Shipped source only; no caller-selected root, filesystem search, config, data or environment.
 import { readFile, readdir, lstat } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
 import { pluginDocumentation } from "../../../plugin-api/src/docs.ts"
 import { budgetResult } from "../agent/tools.ts"
 import { confined, validPath } from "./repo.ts"
@@ -14,16 +14,26 @@ const sourceFiles = [
 ]
 const safeSource = (p: string) =>
   /\.(?:ts|tsx)$/.test(p) && !/(?:config|secret|credential|environment|\.test\.)/i.test(p)
-export const appSource = async (input: { path?: string; query?: string; from?: number; count?: number }) => {
-  const files = [...sourceFiles]
+export const appSource = async (
+  input: { path?: string; query?: string; from?: number; count?: number },
+  dataDir?: string
+) => {
+  const dataRoot = dataDir ? resolve(dataDir) : undefined
+  const inData = (p: string) => dataRoot !== undefined && (p === dataRoot || p.startsWith(dataRoot + sep))
+  const files = sourceFiles.filter((p) => !inData(join(root, p)))
   const visit = async (p: string, depth: number) => {
+    if (inData(join(root, p))) return
     if (depth > 8 || files.length > 256) throw new Error("Source index limit exceeded")
     await confined(root, join(root, p))
     for (const e of await readdir(join(root, p), { withFileTypes: true })) {
       if (e.isSymbolicLink()) continue
       const path = p + "/" + e.name
+      if (inData(join(root, path))) continue
       if (e.isDirectory()) await visit(path, depth + 1)
-      else if (e.isFile() && safeSource(path)) files.push(path)
+      else if (e.isFile() && safeSource(path)) {
+        if (files.length >= 256) throw new Error("Source index limit exceeded")
+        files.push(path)
+      }
     }
   }
   for (const p of sourceRoots) await visit(p, 0)

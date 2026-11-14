@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { writeFile, symlink, link, mkdir, readFile } from "node:fs/promises"
+import { writeFile, symlink, link, mkdir, readFile, rm } from "node:fs/promises"
 import { join } from "node:path"
-import { authorRepo } from "../src/plugins/authorRepo.ts"
+import { authorRepo, createAuthorRepo } from "../src/plugins/authorRepo.ts"
 import { saveFiles, pluginFolder, limits } from "../src/plugins/repo.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -141,4 +141,19 @@ it("recovers interrupted file and commit journals without duplicating a version"
   delete data.result
   await writeFile(commitJournal, JSON.stringify(data))
   expect((await authorRepo(dir, "", "fixture", commitRequest)).commit).toBe(committed.commit)
+})
+
+it("recovers creation after its intent but before Git initialization", async () => {
+  const dir = tempDir("plugin-create-gap")
+  const files = { "a.ts": "synthetic source" }
+  const first = await createAuthorRepo(dir, "", "new-plugin", files, "same-call")
+  const folder = pluginFolder(dir, "", "new-plugin")
+  const marker = join(folder, ".git/rp-create")
+  const pending = JSON.parse(await readFile(marker, "utf8"))
+  delete pending.commit
+  await writeFile(marker, JSON.stringify(pending))
+  for (const path of [".git/HEAD", ".git/config", ".git/refs", "a.ts"])
+    await rm(join(folder, path), { recursive: true, force: true })
+  expect((await createAuthorRepo(dir, "", "new-plugin", files, "same-call")).commit).toBe(first.commit)
+  expect((await authorRepo(dir, "", "new-plugin", { action: "checkpoint" })).head).toBe(first.commit)
 })

@@ -267,11 +267,12 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
   },
   "packages/server/src/plugins/authorRepo.ts": {
     reason:
-      "Private operation journals and creation markers inside validated plugin Git metadata; no caller-selected journal paths, links or source execution. Directory listing only detects an existing repository.",
+      "Private operation journals and creation markers inside validated plugin Git metadata; no caller-selected journal paths, links or source execution. Directory listings detect an existing repository or its empty pre-intent metadata directory.",
     expressions: [
       'readFile(file, "utf8")',
       'readFile(join(journals, request.undo + ".json"), "utf8")',
       'readFile(marker, "utf8")',
+      'readdir(join(folder, ".git"))',
       "readdir(folder)"
     ]
   },

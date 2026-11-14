@@ -6,14 +6,15 @@ import { dirname } from "node:path"
 const [target, encoded] = process.argv.slice(2) as [string, string]
 const { args, options } = JSON.parse(encoded) as {
   args: string[]
-  options: { timeout?: number; memory?: number; permissions?: string[] }
+  options: { timeout?: number; memory?: number; permissions?: string[]; networkFilter?: string }
 }
 const finish = (result: { ok: boolean; output: string }) => {
   if (process.connected) process.send?.({ result }, () => process.disconnect())
 }
 const child = spawn(
-  process.execPath,
+  options.networkFilter ? "/usr/bin/setpriv" : process.execPath,
   [
+    ...(options.networkFilter ? ["--no-new-privs", "--seccomp-filter", options.networkFilter, process.execPath] : []),
     `--max-old-space-size=${options.memory ?? 768}`,
     "--disable-warning=ExperimentalWarning",
     ...(options.permissions ?? []),

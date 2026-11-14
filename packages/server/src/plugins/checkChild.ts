@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 // Entry for a bounded build child; never imported by the HTTP process.
 import { writeFile, readdir, readFile, lstat } from "node:fs/promises"
 import { join, resolve } from "node:path"
@@ -7,6 +7,7 @@ import ts from "typescript"
 import { build } from "rolldown"
 import { snapshot } from "./repo.ts"
 import { runPluginChild } from "./process.ts"
+import { checkNetworkFilter } from "./checkNetwork.ts"
 import { CLIENT_PLUGIN_SURFACES } from "@rp/shared/pluginClient.ts"
 import type { PluginReport } from "@rp/shared/plugins.ts"
 
@@ -230,11 +231,16 @@ try {
     step = "probe"
     message = "Plugin import, activation or declared registrations failed"
     if (actorRole !== "regular") {
+      // Created by the trusted compiler, never selected or supplied by plugin source.
+      // Failure to install it fails the check; there is no network-capable fallback.
+      const networkFilter = join(folder, `.network-${randomUUID()}.bpf`)
+      await writeFile(networkFilter, checkNetworkFilter(), { flag: "wx", mode: 0o600 })
       const probe = await runPluginChild(
         new URL("./probeChild.ts", import.meta.url),
         [folder, JSON.stringify(manifest)],
         {
           permissions,
+          networkFilter,
           timeout: 15_000,
           memory: 256
         }
@@ -269,7 +275,12 @@ try {
             }
           ]
         })
-        const tested = await runPluginChild(pathToFileURL(output), [], { permissions, timeout: 10_000, memory: 256 })
+        const tested = await runPluginChild(pathToFileURL(output), [], {
+          permissions,
+          networkFilter,
+          timeout: 10_000,
+          memory: 256
+        })
         if (!tested.ok) throw new Error("Test failed")
       }
     }
