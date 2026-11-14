@@ -1,8 +1,8 @@
 // The re-import preview (ARCHITECTURE.md §13 "Re-import preview"): before an ST folder import
 // writes anything, what it would do to the chats already here. Worked out on the server by a
-// dry run of the import's own matcher over the folder's chat files, read-only; the import the
-// user then confirms is refused if the chats changed since (`StImportPlanChanged`), and the
-// preview is worked out again.
+// dry run of the import's own matcher over the folder's chat files, read-only. The import the
+// user then confirms is held to it file by file: a file whose chat or bytes changed since is
+// not imported, and the report says so (`ST_CHANGED_SINCE_CHECK`).
 import { Schema } from "effect"
 import { ChatId } from "./chat.ts"
 
@@ -99,10 +99,20 @@ export class StImportPlan extends Schema.Class<StImportPlan>("StImportPlan")({
   error: Schema.NullOr(Schema.String)
 }) {}
 
-/** The chats changed after the preview: the import didn't start, and the preview is worked out again. */
+/**
+ * The check can't be held to: it isn't finished, or the folder chosen isn't the one checked,
+ * so the import didn't start. In the writer, a file's chat or its messages changed since the
+ * check, so nothing of that file was written.
+ */
 export class StImportPlanChanged extends Schema.TaggedError<StImportPlanChanged>()("StImportPlanChanged", {
   message: Schema.String
 }) {}
+
+/**
+ * The report's issue code of a file a confirmed import didn't take: its chat or its bytes
+ * changed since the check, so what it would do isn't what the check showed.
+ */
+export const ST_CHANGED_SINCE_CHECK = "st.changed_since_check"
 
 /** Changed messages one file's detail list holds, and one page of it. */
 export const PLAN_MESSAGES_HELD = 500

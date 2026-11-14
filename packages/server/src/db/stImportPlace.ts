@@ -600,7 +600,8 @@ export const placeStMessages = <E>(
     } satisfies Placed
   })
 
-const newEvent = (index: number, branchFrom: boolean): PlaceEvent => ({
+/** A message placed as new; `branchFrom`: the first where messages are already there. */
+export const newEvent = (index: number, branchFrom: boolean): PlaceEvent => ({
   index,
   outcome: "new",
   addedVersions: 0,

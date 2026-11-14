@@ -10,6 +10,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { assert, layer } from "@effect/vitest"
+import { ST_CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
 import { Effect } from "effect"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { card, message, writeStBranchFamily } from "./support/stFolder.ts"
@@ -82,17 +83,36 @@ layer(serverLayer(testConfig({ dbReaders: 2 })), { excludeTestServices: true, ti
           const planMs = Date.now() - started
           clearInterval(sampler)
           const planPeak = peak
-          // The concurrent send must invalidate admission. Check again before confirmation.
-          const stale = yield* api
+          // The message sent during the check changed the chat: that check can't be imported.
+          const during = yield* api
             .StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } })
             .pipe(Effect.flip)
-          assert.strictEqual(stale._tag, "StImportPlanChanged")
-          const refreshed = yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })
-          for (;;) {
-            done = yield* api.GetStImportPlan({ planId: refreshed.plan.planId })
-            if (done.status !== "running") break
-            yield* Effect.sleep(100)
-          }
+          assert.strictEqual(during._tag, "StImportPlanChanged")
+          const check = Effect.gen(function* () {
+            const { plan: started } = yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })
+            for (;;) {
+              const read = yield* api.GetStImportPlan({ planId: started.planId })
+              if (read.status !== "running") return read
+              yield* Effect.sleep(100)
+            }
+          })
+          // A message sent after a check: every file of the chat is refused, nothing written.
+          const before = yield* check
+          const leaf = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId
+          yield* api.SendMessage({ chatId: chat.id, parentSlotId: leaf, branch: false, content: "Sent after the check." })
+          const staleStarted = Date.now()
+          const stale = yield* jobEnded(
+            api,
+            (yield* api.StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: before.planId, skip: [] } }))
+              .importId,
+            60 * 60_000
+          )
+          const staleMs = Date.now() - staleStarted
+          assert.strictEqual(
+            (stale.report?.issues ?? []).filter((issue) => issue.code === ST_CHANGED_SINCE_CHECK).length,
+            family.files.length
+          )
+          done = yield* check
           // The import the preview was for, of the same folder: it matches every message too.
           const reimportStarted = Date.now()
           const { importId } = yield* api.StartStPathImport({
@@ -103,6 +123,20 @@ layer(serverLayer(testConfig({ dbReaders: 2 })), { excludeTestServices: true, ti
           const again = yield* jobEnded(api, importId, 60 * 60_000)
           const reimportMs = Date.now() - reimportStarted
           assert.strictEqual(again.job.status, "complete")
+          assert.deepStrictEqual(
+            (again.report?.issues ?? []).filter((issue) => issue.code === ST_CHANGED_SINCE_CHECK),
+            []
+          )
+          // The same folder again without a check, every message matched as before: what a
+          // re-import costs when nothing holds it to a check.
+          const plainStarted = Date.now()
+          const plain = yield* jobEnded(
+            api,
+            (yield* api.StartStPathImport({ path: root, prefix: PREFIX })).importId,
+            60 * 60_000
+          )
+          const plainReimportMs = Date.now() - plainStarted
+          assert.strictEqual(plain.job.status, "complete")
           const measured = {
             files: family.files.length,
             folderMB: Math.round(family.bytes / MB),
@@ -114,6 +148,8 @@ layer(serverLayer(testConfig({ dbReaders: 2 })), { excludeTestServices: true, ti
             sendMs,
             readMs,
             reimportMs,
+            staleMs,
+            plainReimportMs,
             rssBeforeMB: Math.round(before / MB),
             rssPeakMB: Math.round(planPeak / MB),
             rssGrowthMB: Math.round((planPeak - before) / MB)

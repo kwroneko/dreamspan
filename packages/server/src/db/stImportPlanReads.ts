@@ -1,11 +1,10 @@
 // The re-import preview's reads (ARCHITECTURE.md §13 "Re-import preview"), in a reader
-// worker: a dry run of the ST import's matcher over one batch of a chat file, and the stamp
-// the import is checked against when the user confirms. The matcher is the writer's own
-// (`placeStMessages`); here its writes only count, so what the preview shows is what the
-// writer decides, with nothing stored.
+// worker: a dry run of the ST import's matcher over one batch of a chat file, and the stamps
+// the confirmed import is checked against chat by chat. The matcher is the writer's own
+// (`placeStMessages`), and so is the count of what it did (`planCounter`); here its writes
+// only count, so what the preview shows is what the writer decides, with nothing stored.
 import type { ChatId } from "@rp/shared/chat.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
-import { PLAN_TEXT_CHARS, type StPlanCounts, StPlanMessage } from "@rp/shared/stReimportPlan.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps, ST_CHAT_RECORD } from "./ops.ts"
@@ -14,7 +13,6 @@ import {
   claimedPayload,
   type OverlaySlot,
   type OverlayVersion,
-  type PlaceEvent,
   type PlaceOverlay,
   placeHash,
   type PlaceWrites,
@@ -22,16 +20,11 @@ import {
   type RecordPayload,
   StPlacedMessages
 } from "./stImportPlace.ts"
-import { stImportPlanStamp } from "./stImportPlanStamp.ts"
+import { planCounter } from "./stImportPlanCount.ts"
+import { stImportChatStamps } from "./stImportPlanStamp.ts"
 import { query } from "./tx.ts"
 
 const VIRTUAL = "virtual:"
-
-/** The start of a message's text for a detail row, on one line. */
-const excerpt = (text: string) => {
-  const line = text.replace(/\s+/g, " ").trim()
-  return line.length > PLAN_TEXT_CHARS ? `${line.slice(0, PLAN_TEXT_CHARS - 1)}…` : line
-}
 
 export const makeStImportPlanReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -141,54 +134,7 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
             }),
           bulk: null
         }
-        const counts: { -readonly [K in keyof StPlanCounts]: number } = {
-          unchanged: 0,
-          newMessages: 0,
-          newSwipes: 0,
-          selected: 0,
-          kept: 0,
-          branches: 0
-        }
-        const details: Array<StPlanMessage> = []
-        let changed = 0
-        const observe = (event: PlaceEvent) => {
-          const message = messages[event.index]!
-          let change: StPlanMessage["change"] | null
-          let kept: StPlanMessage["kept"] = null
-          if (event.outcome === "new") {
-            counts.newMessages++
-            if (event.branchFrom) counts.branches++
-            change = event.branchFrom ? "branch" : "new"
-          } else {
-            kept =
-              event.deleted || event.placeholder
-                ? "deleted"
-                : event.differs
-                  ? event.hiddenDiffers
-                    ? "hidden"
-                    : "choice"
-                  : null
-            counts.newSwipes += event.addedVersions
-            if (event.selected) counts.selected++
-            if (kept !== null) counts.kept++
-            change = event.addedVersions > 0 ? "swipes" : event.selected ? "selected" : kept !== null ? "kept" : null
-            if (change === null) counts.unchanged++
-          }
-          if (change === null) return
-          changed++
-          if (details.length >= input.detailLimit) return
-          const chosen = message.selected < message.versions.length ? message.selected : 0
-          details.push(
-            new StPlanMessage({
-              index: input.firstIndex + event.index,
-              change,
-              swipes: event.addedVersions,
-              kept,
-              user: message.user,
-              text: excerpt(message.versions[chosen]!.content)
-            })
-          )
-        }
+        const counter = planCounter(messages, input.firstIndex, input.detailLimit, input.digest)
         const placed = yield* placeStMessages(
           sql,
           {
@@ -202,7 +148,7 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
             overlay
           },
           counting,
-          observe
+          counter.observe
         )
         const last = placed.slotIds.at(-1)
         const depth = (parent?.depth ?? -1) + messages.length
@@ -216,18 +162,19 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
                 : { ...input.parent, virtual: input.parent.id.startsWith(VIRTUAL) }
               : { id: last, depth, virtual: last.startsWith(VIRTUAL) },
           matching: placed.matching,
-          counts,
+          counts: counter.counts,
           carry: {
             keepTip: placed.keepTip,
             branchDeleted: placed.branchDeleted,
             last: last === undefined || last.startsWith(VIRTUAL) ? (payload.last ?? null) : last
           },
-          messages: details,
-          changed,
-          written: input.track ? JSON.stringify({ slots, versions, selects } satisfies PlaceOverlay) : null
+          messages: counter.details,
+          changed: counter.changed(),
+          written: input.track ? JSON.stringify({ slots, versions, selects } satisfies PlaceOverlay) : null,
+          digest: counter.digest()
         }
       }).pipe(query("StImportPlanBatch")),
-    StImportPlanStamp: ({ userId, chatIds }) => stImportPlanStamp(sql, userId, chatIds).pipe(query("StImportPlanStamp"))
+    StImportPlanStamp: ({ userId }) => stImportChatStamps(sql, userId).pipe(query("StImportPlanStamp"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers
 })

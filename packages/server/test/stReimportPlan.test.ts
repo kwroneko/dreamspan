@@ -9,7 +9,7 @@ import { Worker } from "node:worker_threads"
 import { databaseFile } from "../src/db/connection.ts"
 import { assert, layer } from "@effect/vitest"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
-import type { StImportPlan } from "@rp/shared/stReimportPlan.ts"
+import { ST_CHANGED_SINCE_CHECK, type StImportPlan } from "@rp/shared/stReimportPlan.ts"
 import { Effect } from "effect"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { card, header, jsonl, message } from "./support/stFolder.ts"
@@ -198,13 +198,25 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.deepStrictEqual(yield* stImportGraph(config.dataDir, main.id), before)
       assert.deepStrictEqual(yield* api.GetChat({ chatId: main.id }), chatBefore)
 
-      // A change here after the preview: the import it confirms is refused, nothing written.
+      // A change here after the preview: the files of that chat aren't imported, and the report
+      // says so; nothing of them is written. The new chat, which the change doesn't touch, is.
       yield* api.SetMessageHidden({ slotId: entries[2]!.slotId, hidden: true })
-      const refused = yield* api
-        .StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } })
-        .pipe(Effect.flip)
-      assert.strictEqual(refused._tag, "StImportPlanChanged")
-      assert.strictEqual((yield* stImportGraph(config.dataDir, main.id)).length, before.length)
+      const hidden = yield* stImportGraph(config.dataDir, main.id)
+      const held = yield* jobEnded(
+        api,
+        (yield* api.StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } }))
+          .importId
+      )
+      assert.strictEqual(held.job.status, "complete")
+      assert.deepStrictEqual(
+        (held.report?.issues ?? [])
+          .filter((issue) => issue.code === ST_CHANGED_SINCE_CHECK)
+          .map((issue) => issue.path)
+          .sort(),
+        ["chats/Alice/Late.jsonl", "chats/Alice/Main.jsonl", "chats/Alice/Side.jsonl"]
+      )
+      assert.deepStrictEqual(yield* stImportGraph(config.dataDir, main.id), hidden)
+      assert.isDefined(yield* chatByTitle(api, "New"))
       yield* api.SetMessageHidden({ slotId: entries[2]!.slotId, hidden: false })
 
       // Worked out again, then imported: the import does what it showed.
@@ -212,10 +224,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         api,
         (yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })).plan.planId
       )
-      assert.deepStrictEqual(
-        again.files.map((entry) => ({ ...entry.counts })),
-        plan.files.map((entry) => ({ ...entry.counts }))
-      )
+      const ofMain = (shown: StImportPlan) =>
+        shown.files.filter((entry) => entry.chatId === main.id).map((entry) => [entry.path, { ...entry.counts }])
+      assert.deepStrictEqual(ofMain(again), ofMain(plan))
       const { importId } = yield* api.StartStPathImport({
         path: root,
         prefix: PREFIX,
@@ -301,7 +312,6 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         ]
       })
       assert.deepStrictEqual(wanted, ["chats/Cy/Up.jsonl"])
-      assert.strictEqual(plan.newChats, 1)
       const port = yield* serverPort
       const response = yield* Effect.promise(() =>
         fetch(
@@ -312,6 +322,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual(response.status, 200)
       assert.deepStrictEqual(yield* Effect.promise(() => response.json()), { outcome: "done" })
       const done = yield* planEnded(api, plan.planId)
+      // Counted as the check reaches it, in the import's order.
+      assert.strictEqual(done.newChats, 1)
       assert.deepStrictEqual(
         { ...done.files[0]!.counts },
         { unchanged: 4, newMessages: 8, newSwipes: 0, selected: 0, kept: 0, branches: 0 }
@@ -394,7 +406,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const api = yield* client()
       const userId = (yield* api.Whoami()).id
       const reader = yield* Reader
-      const input = { userId, chatIds: [] }
+      const input = { userId }
       const before = yield* reader.StImportPlanStamp(input)
       yield* fixtureSql(config.dataDir, [
         {
@@ -403,7 +415,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         }
       ])
       const after = yield* reader.StImportPlanStamp(input)
-      assert.notStrictEqual(after, before)
+      assert.notDeepEqual(after, before)
     })
   )
   it.effect("refuses changed bytes even when file size and modification time are restored", () =>
@@ -424,11 +436,19 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       )
       writeFileSync(join(root, source), new TextDecoder().decode(files.get(source)!).replaceAll("m2", "n2"))
       utimesSync(join(root, source), modified, modified)
-      const result = yield* api
-        .StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } })
-        .pipe(Effect.result)
-      if (result._tag === "Success") yield* jobEnded(api, result.success.importId)
-      assert.strictEqual(result._tag, "Failure")
+      const chat = (yield* chatByTitle(api, "Bytes"))!
+      const graph = yield* stImportGraph(config.dataDir, chat.id)
+      // The import reads the file once, and holds the bytes it parses to the bytes checked.
+      const done = yield* jobEnded(
+        api,
+        (yield* api.StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } }))
+          .importId
+      )
+      assert.deepStrictEqual(
+        (done.report?.issues ?? []).filter((issue) => issue.code === ST_CHANGED_SINCE_CHECK).map((issue) => issue.path),
+        ["chats/Bytes/Bytes.jsonl"]
+      )
+      assert.deepStrictEqual(yield* stImportGraph(config.dataDir, chat.id), graph)
     })
   )
   it.effect("keeps predicted selections independent between existing parent and child forks", () =>

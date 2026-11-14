@@ -325,11 +325,13 @@ function PlanCheck({
       planId = started.value.plan.planId
       setPlan(started.value.plan)
       const id = planId
-      // A picked folder's files the preview needs, one after another, in the import's order.
-      const wanted = new Set(started.value.wanted)
-      for (const entry of sends) {
+      // A picked folder's files the preview needs, one after another, in the order it asks:
+      // the import's, with a branch after the files it's mapped by.
+      const byPath = new Map(sends.map((entry) => [entry.path, entry]))
+      for (const path of started.value.wanted) {
         if (!live) return
-        if (!wanted.has(entry.path)) continue
+        const entry = byPath.get(path)
+        if (entry === undefined) return fail("The check asked for a file that isn't in the folder.")
         let answer = await sendStPlanFile(id, entry, () => {})
         if (answer._tag === "Done" && answer.result.outcome === "restart")
           answer = await sendStPlanFile(id, entry, () => {})

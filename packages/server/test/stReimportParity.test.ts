@@ -23,6 +23,13 @@ const turns = (count: number) =>
 const chat = (lines: ReadonlyArray<unknown>, parent?: string) =>
   jsonl([header(parent ? { main_chat: parent } : {}), ...lines])
 const snapshots: unknown[] = []
+/**
+ * With ST_REIMPORT_PARITY_CONFIRMED=1, every import is checked first and held to the check
+ * (the re-import preview): the state it leaves must be what the unconfirmed import leaves.
+ */
+const checked = process.env.ST_REIMPORT_PARITY_CONFIRMED === "1"
+const reimport = (files: ReadonlyMap<string, Uint8Array>, options: { partBytes?: number } = {}) =>
+  importStFolder(files, { ...options, ...(checked ? { checked } : {}) })
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "10 minutes" })(
   "ST master differential state",
@@ -37,7 +44,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "10 minutes" })
           config.dataDir,
           [
             {
-              sql: "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%' ORDER BY name"
+              // What a confirmed import holds while it reads a file is gone once it's written.
+              sql: "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%' AND name <> 'st_import_stage' ORDER BY name"
             }
           ],
           { readOnly: true }
@@ -114,9 +122,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "10 minutes" })
             snapshots.push({ label, rows: normalize(rows) })
           })
         // Existing import corpus includes groups, notes, hidden runs, summaries and missing links.
-        yield* importStFolder(stFolder())
+        yield* reimport(stFolder())
         yield* capture("corpus")
-        yield* importStFolder(stFolder(), { partBytes: 600 })
+        yield* reimport(stFolder(), { partBytes: 600 })
         yield* capture("corpus replay")
         const files = new Map([
           ["characters/Alice.png", card("Alice", "Synthetic greeting.")],
@@ -127,7 +135,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "10 minutes" })
           ["chats/Alice/Long.jsonl", largeChat(1001)],
           ["chats/Alice/Malformed.jsonl", new TextEncoder().encode("{bad json\nnull\n")]
         ])
-        yield* importStFolder(files, { partBytes: 8192 })
+        yield* reimport(files, { partBytes: 8192 })
         yield* capture("duplicate orphan branches malformed long")
         const main = (yield* api.ListChats({ limit: 100, before: null })).find((c) => c.title === "Parity")!
         const entries = (yield* api.ReadPath({
@@ -161,9 +169,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "10 minutes" })
         files.set("chats/Alice/Parity.jsonl", chat(later))
         files.set("chats/Alice/Renamed.jsonl", chat(later))
         files.set("chats/Alice/Late.jsonl", chat([...later.slice(0, 207), ...turns(3)], "Parity"))
-        yield* importStFolder(files, { partBytes: 8192 })
+        yield* reimport(files, { partBytes: 8192 })
         yield* capture("edited reordered renamed late branch")
-        yield* importStFolder(files, { partBytes: 8192 })
+        yield* reimport(files, { partBytes: 8192 })
         yield* capture("adversarial replay")
         if (process.env.ST_REIMPORT_PARITY_OUT)
           writeFileSync(process.env.ST_REIMPORT_PARITY_OUT, JSON.stringify(snapshots, null, 1))

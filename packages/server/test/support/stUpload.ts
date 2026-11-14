@@ -89,10 +89,54 @@ export const sendStFile = (
     return answer
   })
 
+/**
+ * A browser's re-import check of chat files, in the order the import sends them: the files
+ * listed, those it asks for sent in its order, to the end. The check's id, once it's done.
+ */
+export const checkUpload = (
+  api: Api,
+  chats: ReadonlyArray<{ readonly path: string; readonly bytes: Uint8Array; readonly mainChat: string | null }>
+) =>
+  Effect.gen(function* () {
+    const { plan, wanted } = yield* api.StartStImportPlan({
+      files: chats.map((chat) => ({
+        path: chat.path,
+        size: chat.bytes.byteLength,
+        modifiedMs: null,
+        mainChat: chat.mainChat
+      }))
+    })
+    const port = yield* serverPort
+    const byPath = new Map(chats.map((chat) => [chat.path, chat.bytes]))
+    for (const path of wanted) {
+      const response = yield* Effect.promise(() =>
+        fetch(
+          `http://127.0.0.1:${port}/st-import/plan-file?${new URLSearchParams({ plan: plan.planId, path, part: "0", last: "1" })}`,
+          { method: "POST", headers: { "content-type": "application/octet-stream" }, body: byPath.get(path)! }
+        )
+      )
+      if (response.status !== 200) throw new Error(`${path}: ${response.status}`)
+    }
+    const deadline = Date.now() + 120_000
+    for (;;) {
+      const read = yield* api.GetStImportPlan({ planId: plan.planId })
+      if (read.status === "done") return plan.planId
+      if (read.status !== "running") throw new Error(`the check ended ${read.status}: ${read.error}`)
+      if (Date.now() > deadline) throw new Error("the check is still running")
+      yield* Effect.sleep(20)
+    }
+  })
+
 /** Imports the folder's user `prefix` (one of `findStRoots`), returning each file's answer. */
 export const importStFolder = (
   files: ReadonlyMap<string, Uint8Array>,
-  options: { prefix?: string; partBytes?: number; modifiedAt?: ReadonlyMap<string, number> } = {}
+  options: {
+    prefix?: string
+    partBytes?: number
+    modifiedAt?: ReadonlyMap<string, number>
+    /** Checked first (the re-import preview), and imported held to the check, as the client does. */
+    checked?: boolean
+  } = {}
 ) =>
   Effect.gen(function* () {
     const roots = findStRoots([...files.keys()])
@@ -104,9 +148,6 @@ export const importStFolder = (
       return file === null ? [] : [{ path: relative, file, bytes }]
     })
     const api = yield* client()
-    const { importId } = yield* api.StartStImport({
-      unsupported: mine.filter((f) => f.file.kind === "unsupported").map((f) => f.path)
-    })
     const ordered = mine
       .filter((f) => f.file.kind !== "unsupported")
       .sort(
@@ -137,6 +178,11 @@ export const importStFolder = (
       const at = options.modifiedAt?.get(prefix + path)
       return at === undefined ? {} : { modifiedAt: String(at) }
     }
+    const plan = options.checked ? yield* checkUpload(api, chats) : undefined
+    const { importId } = yield* api.StartStImport({
+      unsupported: mine.filter((f) => f.file.kind === "unsupported").map((f) => f.path),
+      ...(plan === undefined ? {} : { plan: { planId: plan, skip: [] } })
+    })
     const answers = new Map<string, StFileResult>()
     const deferred: typeof ordered = []
     for (const file of ordered) {

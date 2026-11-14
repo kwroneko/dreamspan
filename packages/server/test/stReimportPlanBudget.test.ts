@@ -40,11 +40,12 @@ it.effect("counts nested virtual swipe versions toward the preview memory budget
     carry: { keepTip: false, branchDeleted: false, last: null },
     messages: [],
     changed: 4,
+    digest: "",
     written
   }
   const reader = new Proxy({} as Reader["Service"], {
     get(_, key) {
-      if (key === "StImportPlanStamp") return () => Effect.succeed("stamp")
+      if (key === "StImportPlanStamp") return () => Effect.succeed({ [chatId]: "stamp" })
       if (key === "StImportSources")
         return () =>
           Effect.succeed({

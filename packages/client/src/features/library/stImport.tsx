@@ -19,7 +19,8 @@ import type {
   StLinkChoice,
   StPlanChoice
 } from "@rp/shared/stImportApi.ts"
-import { type StSentKind, stPlan, stPlanKinds } from "@rp/shared/stPlan.ts"
+import { type StSentKind, stPlan, stPlanKinds, stSendRounds } from "@rp/shared/stPlan.ts"
+import { ST_CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { Context, Effect } from "effect"
 import { AsyncResult, AtomRegistry } from "effect/reactivity"
@@ -152,7 +153,6 @@ const sendUpload = async (
 ) => {
   window.addEventListener("beforeunload", warnBeforeLeaving)
   const lost: Array<{ path: string; message: string }> = []
-  let deferred: Array<StFolderFile> = []
   const send = async (entry: StFolderFile, extra: StExtra) => {
     const answer = await sendStFile(importId, entry, extra, () => {})
     // The server lost the chat's earlier parts (it restarted): once more from the start.
@@ -160,10 +160,13 @@ const sendUpload = async (
       ? sendStFile(importId, entry, extra, () => {})
       : answer
   }
-  const sendAll = async (entries: ReadonlyArray<StFolderFile>, extra: StExtra) => {
-    for (const entry of entries) {
+  // The rounds a path import and the re-import preview go by too (`stSendRounds`).
+  const sendAll = async () => {
+    const rounds = stSendRounds(files)
+    for (let step = rounds.next(); !step.done; ) {
+      const { entry, orphan } = step.value
       if (stoppedUploads.has(importId)) return false
-      const answer = await send(entry, extra)
+      const answer = await send(entry, orphan ? { orphan: true } : {})
       if (answer._tag === "Unauthorized") {
         registry.refresh(sessionAtom)
         return false
@@ -171,22 +174,12 @@ const sendUpload = async (
       // Cancelled, or another import started: the server takes no more of it.
       if (answer._tag === "Gone") return false
       if (answer._tag === "Failed") lost.push({ path: entry.path, message: answer.message })
-      if (answer._tag === "Done" && answer.result.outcome === "deferred") deferred.push(entry)
+      step = rounds.next(answer._tag === "Done" && answer.result.outcome === "deferred")
     }
     return true
   }
   try {
-    let going = await sendAll(files, {})
-    while (going && deferred.length > 0) {
-      const waiting = deferred
-      deferred = []
-      going = await sendAll(waiting, {})
-      if (going && deferred.length === waiting.length) {
-        const orphans = deferred
-        deferred = []
-        going = await sendAll(orphans, { orphan: true })
-      }
-    }
+    const going = await sendAll()
     if (going) await call(registry, (client) => client("FinishStImport", { importId, notSent: lost.slice(0, 2000) }))
   } finally {
     window.removeEventListener("beforeunload", warnBeforeLeaving)
@@ -318,6 +311,7 @@ function ReportActions({
 }) {
   const action = useAction()
   const registry = useContext(RegistryContext)
+  const navigate = useNavigate()
   const choose = async (path: string, card: EntityId | "none") => {
     if (job.mode === "upload") {
       const error = await linkUploaded(job.id, path, card)
@@ -331,7 +325,9 @@ function ReportActions({
     if (!linked.ok) return linked.error.message
     return linked.value.outcome === "failed" ? linked.value.message || "The chat couldn't be imported." : null
   }
-  const count = report.links.length + report.hiddenRuns.length
+  // Files the confirmed check no longer described: nothing of them went in.
+  const refused = report.issues.filter((issue) => issue.code === ST_CHANGED_SINCE_CHECK)
+  const count = report.links.length + report.hiddenRuns.length + refused.length
   if (count === 0) return null
   const unhide = ({ chatId, throughSlotId }: StHiddenRun) =>
     void action.run((client) => client("UnhideImportedRun", { chatId, throughSlotId, importId: job.id }), AFTER_ACTION)
@@ -339,6 +335,35 @@ function ReportActions({
     <Card>
       <CardHeader title={`Needs your action (${count})`} />
       <ErrorAlert error={action.error} />
+      {refused.length > 0 && (
+        <div className="mb-3 border-b border-border pb-3 last:mb-0 last:border-b-0 last:pb-0">
+          <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted">
+              {refused.length === 1 ? "This chat changed" : "These chats changed"} after the check, so{" "}
+              {refused.length === 1 ? "it wasn't" : "they weren't"} imported.
+            </p>
+            <Button
+              className="self-start sm:self-auto"
+              disabled={job.status === "running"}
+              hint={
+                job.mode === "path"
+                  ? "Checks the folder again, so you can import what changed."
+                  : "Opens the import form: choose the folder again to check it."
+              }
+              onClick={() => void navigate({ to: "/import/st", search: { job: job.id, again: job.id } })}
+            >
+              Check again
+            </Button>
+          </div>
+          <ul aria-label="Not imported" className="flex flex-col gap-1">
+            {refused.map((issue) => (
+              <li key={issue.path} className="text-sm [overflow-wrap:anywhere]">
+                {issue.path}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {report.links.length > 0 && (
         <div>
           {linkNote && <p className="mb-3 text-sm text-muted">{linkNote}</p>}
@@ -645,7 +670,7 @@ type Chosen =
   | { readonly _tag: "Path"; readonly root: string; readonly files: ReadonlyArray<StFolderEntry> }
   | { readonly _tag: "Picked"; readonly files: ReadonlyArray<StFound> }
 
-function StartForm({ open, close }: StImportSectionProps & { close: (() => void) | null }) {
+function StartForm({ open, close, again }: StImportSectionProps & { close: (() => void) | null }) {
   const registry = useContext(RegistryContext)
   const action = useAction()
   const admin = useSession().user.role === "admin"
@@ -681,10 +706,10 @@ function StartForm({ open, close }: StImportSectionProps & { close: (() => void)
     setPrefix(users.length === 1 ? users[0]!.prefix : null)
   }
 
-  const scan = async () => {
+  const scan = async (path = folderPath.trim()) => {
     setScanning(true)
     const scanned = await action
-      .run((client) => client("ScanStFolder", { path: folderPath.trim() }))
+      .run((client) => client("ScanStFolder", { path }))
       .finally(() => setScanning(false))
     if (!scanned.ok) return
     try {
@@ -698,6 +723,18 @@ function StartForm({ open, close }: StImportSectionProps & { close: (() => void)
     // The browser shows a typed folder once it's known to be one.
     if (scanned.value.root !== browsed) setBrowsed(scanned.value.root)
   }
+
+  // "Check again" in a report: that import's folder, read again and checked, once.
+  const againJob = AsyncResult.isSuccess(jobs) ? jobs.value.find((job) => job.id === again) : undefined
+  const againPath = admin && againJob?.mode === "path" ? againJob.source : null
+  const checkedAgain = useRef<string | null>(null)
+  useEffect(() => {
+    if (againPath === null || checkedAgain.current === again) return
+    checkedAgain.current = again
+    setFolderPath(againPath)
+    void scan(againPath)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per report asking
+  }, [again, againPath])
 
   const plan = useMemo(
     () => (prefix === null || chosen === null ? null : stPlan<{ path: string; size: number }>(chosen.files, prefix)),
@@ -911,10 +948,19 @@ function StartSection(props: StImportSectionProps) {
   const jobs = useAtomValue(stImportsAtom)
   const hasJobs = AsyncResult.isSuccess(jobs) && jobs.value.length > 0
   const [expanded, setExpanded] = useState(false)
-  const open = !hasJobs || expanded
+  // Opened by "Check again" in a report too, until it's closed.
+  const open = !hasJobs || expanded || props.again !== null
+  const top = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (props.again !== null) top.current?.scrollIntoView({ block: "start" })
+  }, [props.again])
+  const collapse = () => {
+    setExpanded(false)
+    if (props.again !== null) props.open(props.opened)
+  }
   if (!AsyncResult.isSuccess(jobs)) return null
   return (
-    <section className="flex flex-col gap-3">
+    <section ref={top} className="flex scroll-mt-4 flex-col gap-3">
       <h2 className="text-base font-semibold">Start another import</h2>
       {hasJobs && (
         <Button
@@ -922,7 +968,7 @@ function StartSection(props: StImportSectionProps) {
           aria-pressed={open}
           className="self-start"
           hint="Opens the ST folder import form."
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => (open ? collapse() : setExpanded(true))}
         >
           Import ST data again
         </Button>
@@ -931,7 +977,7 @@ function StartSection(props: StImportSectionProps) {
         <div className="flex flex-col gap-4">
           <StartForm
             {...props}
-            close={hasJobs ? () => setExpanded(false) : null}
+            close={hasJobs ? collapse : null}
             open={(id) => {
               setExpanded(false)
               props.open(id)
@@ -1036,8 +1082,9 @@ export const stImportSectionEntries = [
 export function StImportPage() {
   useTitle("Import ST data")
   const navigate = useNavigate()
-  const search: { job?: unknown } = useSearch({ strict: false })
+  const search: { job?: unknown; again?: unknown } = useSearch({ strict: false })
   const opened = typeof search.job === "string" && search.job !== "" ? search.job : null
+  const again = typeof search.again === "string" && search.again !== "" ? search.again : null
   const open = (importId: string | null) =>
     void navigate({ to: "/import/st", search: importId === null ? {} : { job: importId } })
   return (
@@ -1052,7 +1099,7 @@ export function StImportPage() {
           </Tooltip>
         </header>
       </CenterHeaderContent>
-      <SlotOutlet slot={stImportSections} props={{ opened, open }} />
+      <SlotOutlet slot={stImportSections} props={{ opened, open, again }} />
     </div>
   )
 }

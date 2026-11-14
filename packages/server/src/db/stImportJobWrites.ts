@@ -63,6 +63,8 @@ export const makeStImportJobWriteHandlers = Effect.gen(function* () {
         const rows = yield* sql`UPDATE st_import_jobs SET status = 'interrupted', finished_at = ${at},
             updated_at = ${at}, current_file = NULL, error = ${error}
           WHERE status = 'running' RETURNING id`
+        // What a confirmed re-import held for the file it was reading goes with its run.
+        yield* sql`DELETE FROM st_import_stage`
         return rows.length
       }).pipe(transaction(sql, "StImportJobsInterrupted")),
 

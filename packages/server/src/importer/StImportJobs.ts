@@ -25,7 +25,7 @@ import {
   type StImportStatus,
   StNotSent
 } from "@rp/shared/stImportApi.ts"
-import { type StPlanned, stPlan } from "@rp/shared/stPlan.ts"
+import { type StPlanned, stPlan, stSendRounds } from "@rp/shared/stPlan.ts"
 import type { StFolderEntry, StPlanChoice } from "@rp/shared/stImportApi.ts"
 import { Cause, Context, Effect, Exit, Layer, Option, Schedule, Schema, Semaphore, type Types } from "effect"
 import { Notices } from "../chat/Notices.ts"
@@ -362,11 +362,14 @@ export class StImportJobs extends Context.Service<
       /** The whole plan, in order: deferred branches again until none goes in, then on their own. */
       const runPath = (live: Live, root: string, files: ReadonlyArray<StPlanned<StFolderEntry>>) =>
         Effect.gen(function* () {
-          let deferred: Array<StPlanned<StFolderEntry>> = []
+          // The rounds the re-import preview routes files by too (`stSendRounds`).
+          const rounds = stSendRounds(files)
+          let step = rounds.next()
           /** False once the import ended under it: another run took over, or it was cancelled. */
-          const sendAll = (entries: ReadonlyArray<StPlanned<StFolderEntry>>, orphan: boolean) =>
+          const sendAll = () =>
             Effect.gen(function* () {
-              for (const entry of entries) {
+              while (!step.done) {
+                const { entry, orphan } = step.value
                 if (live.cancelled || live.ended) return false
                 live.currentFile = entry.path
                 const sent = yield* sendWithRestart(
@@ -391,8 +394,8 @@ export class StImportJobs extends Context.Service<
                 )
                 if (sent._tag === "Gone") return false
                 if (sent._tag === "Done" && sent.result.outcome === "deferred") {
-                  deferred.push(entry)
                   live.bytesDone = live.bytesBase
+                  step = rounds.next(true)
                   continue
                 }
                 if (sent._tag === "NotSent") notSent(live, entry.path, sent.message)
@@ -400,21 +403,11 @@ export class StImportJobs extends Context.Service<
                 live.bytesBase += entry.size
                 live.bytesDone = live.bytesBase
                 yield* tick(live)
+                step = rounds.next(false)
               }
               return true
             })
-          let going = yield* sendAll(files, false)
-          while (going && deferred.length > 0) {
-            const waiting = deferred
-            deferred = []
-            going = yield* sendAll(waiting, false)
-            if (going && deferred.length === waiting.length) {
-              const orphans = deferred
-              deferred = []
-              going = yield* sendAll(orphans, true)
-            }
-          }
-          return going
+          return yield* sendAll()
         }).pipe(
           Effect.onExit((exit) =>
             Exit.isSuccess(exit)
@@ -447,7 +440,8 @@ export class StImportJobs extends Context.Service<
             return yield* new StFolderUnreadable({ message: "That ST user's folder has nothing the import reads." })
           // The preview the user confirmed, checked against the folder as it is now; the files
           // they chose to skip don't go.
-          const expect = choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, entries, root)
+          const expect =
+            choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, entries, root, choice.skip)
           const skip = new Set(choice?.skip ?? [])
           const files = all.filter((file) => !skip.has(file.path))
           return yield* starting.withPermits(1)(
@@ -480,7 +474,8 @@ export class StImportJobs extends Context.Service<
         starting.withPermits(1)(
           Effect.gen(function* () {
             // The browser leaves out the files the user chose to skip.
-            const expect = choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, null, null)
+            const expect =
+              choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, null, null, choice.skip)
             yield* busy(user)
             yield* supersede(user)
             const importId = yield* imports.start(user, unsupported, expect)
@@ -605,7 +600,7 @@ export class StImportJobs extends Context.Service<
       /** A run that knows the folder again, for linking a chat of an import whose run is gone. */
       const rebuild = (user: User, root: string, card: EntityId | "none") =>
         Effect.gen(function* () {
-          const helper = yield* imports.start(user, []).pipe(Effect.catchTag("StImportPlanChanged", Effect.die))
+          const helper = yield* imports.start(user, [])
           const scanned = yield* scanStFolder(root)
           const cards = new Set(card === "none" ? [] : imports.sourcesOf(user, helper, card))
           // What a chat links to: the settings, personas, lorebooks, presets, groups, and the chosen card.

@@ -1,7 +1,7 @@
 // The re-import preview (ARCHITECTURE.md §13 "Re-import preview"): choosing an ST folder whose
 // chats are already here shows, before anything is written, what importing does to each of
-// them; a file can be skipped, and an import confirmed after the chats changed is refused and
-// checked again. Every file here is made up.
+// them; a file can be skipped, and a file whose chat changed after the check is refused, its
+// chat left as it was, and the report offers to check again. Every file here is made up.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -153,7 +153,8 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `st-reimport-preview-${width}-${theme}`)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 
-      // A change here after the check: the import is refused and the chats are checked again.
+      // A change here after the check: the file is refused, nothing of it written, and the
+      // report offers to check the folder again.
       await admin((api) =>
         Effect.gen(function* () {
           const path = yield* api.ReadPath({
@@ -166,12 +167,26 @@ for (const width of [1440, 390])
         })
       )
       await page.getByRole("button", { name: "Import", exact: true }).click()
-      await expect(page.getByText("Your chats changed since this check", { exact: false })).toBeVisible()
+      const refused = page.getByRole("list", { name: "Not imported" })
+      await expect(refused).toContainText(`${main}.jsonl`)
+      await expect(page.getByText("This chat changed after the check, so it wasn't imported.")).toBeVisible()
+      expect(
+        await admin((api) =>
+          Effect.map(
+            api.ReadPath({ chatId: chatId as ChatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 }),
+            (path) => path.entries.length
+          )
+        )
+      ).toBe(10)
+      await expectLayout(page, info, `st-reimport-refused-${width}-${theme}`)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+      await page.getByRole("button", { name: "Check again" }).click()
       await expect(mainRow).toContainText("2 messages kept as you left them")
       await expect(sideRow.getByRole("button", { name: "Skip" })).toHaveAttribute("aria-pressed", "false")
       await sideRow.getByRole("button", { name: "Skip" }).click()
       await page.getByRole("button", { name: "Import", exact: true }).click()
-      await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats")
+      await expect(page.getByRole("list", { name: "Imported" }).first()).toContainText("Chats")
+      await expect(refused).toHaveCount(0)
 
       const after = await admin((api) =>
         Effect.gen(function* () {

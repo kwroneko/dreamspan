@@ -368,6 +368,19 @@ export const baseline: ReadonlyArray<string> = [
   ) STRICT`,
   `CREATE INDEX st_import_jobs_owner ON st_import_jobs(owner_user_id, started_at)`,
   `CREATE INDEX st_import_jobs_running ON st_import_jobs(status) WHERE status = 'running'`,
+  // A confirmed re-import's parsed batches of the chat file it's reading (ARCHITECTURE.md §13
+  // "Re-import preview"), held until the file's last part is in and matches the check: then
+  // they go into the chat in one transaction (`StImportCommitChat`), or none of them does.
+  // Never outlives its run: cleared at the user's next run, and at startup.
+  `CREATE TABLE st_import_stage (
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    import_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    batch_json TEXT NOT NULL CHECK (json_valid(batch_json)),
+    PRIMARY KEY (import_id, path, seq)
+  ) STRICT`,
+  `CREATE INDEX st_import_stage_owner ON st_import_stage(owner_user_id)`,
   `CREATE TABLE entities (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL REFERENCES users(id),

@@ -46,13 +46,9 @@ import { storeMedia } from "./mediaFiles.ts"
 import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from "./ops.ts"
 import { Report } from "./stReport.ts"
 import { stChatTarget } from "./stChatTarget.ts"
-import { StImportPlanChanged } from "@rp/shared/stReimportPlan.ts"
-
-/** A re-import preview the user confirmed: the chats it read, and their stamp then. */
-export interface StPlanExpect {
-  readonly chatIds: ReadonlyArray<string>
-  readonly stamp: string
-}
+import { stepWriteProgress, stFinishAt, stIndexSlot, type StStagedBatch } from "../db/stImportProgress.ts"
+import { stBytesHash, type StPlanExpect, type StPlanExpectFile, stPartsHash } from "./stPlanExpect.ts"
+import { ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
 import {
   type CardInfo,
   chatStateChange,
@@ -101,8 +97,6 @@ export const removeOldStaging = (dataDir: string) =>
     ),
     Effect.catch((error) => Effect.logWarning("removing DATA_DIR/st-staging failed", error))
   )
-
-const hash = (text: string) => createHash("sha256").update(text).digest("hex")
 
 /** What a chat request names besides its path. */
 export interface ChatRequest {
@@ -209,9 +203,20 @@ interface ChatProgress {
   readonly spoke: Set<EntityId>
   selectedPersona: EntityId | null
   readonly partHashes: Array<string>
+  /** A confirmed re-import's hash of the bytes taken (`stBytesHash`), compared with the check's. */
+  content: ReturnType<typeof stBytesHash> | null
   added: number
   updated: number
   differing: number
+  /**
+   * Held to the confirmed re-import check: nothing of it is written until its last part is in
+   * and matches the bytes checked; then all of it goes in one transaction (`StImportCommitChat`).
+   */
+  exact: StPlanExpectFile | null
+  /** Its batches waiting in the writer for that transaction. */
+  staged: number
+  /** The record of the parent its header names, which claiming its own record takes. */
+  claimParent: string | undefined
 }
 
 interface Session extends FolderContext {
@@ -243,6 +248,10 @@ interface Session extends FolderContext {
   /** ST's global World Info books attached to its selected preset: the preset's name and theirs. */
   globalAttached: { readonly preset: string; readonly books: ReadonlyArray<string> } | null
   chat: ChatProgress | null
+  /** The confirmed re-import check this run is held to (ARCHITECTURE.md §13), if any. */
+  readonly exact: StPlanExpect | null
+  /** Each chat's stamp as the check read it, then as this run's own writes left it. */
+  readonly stamps: Map<string, string>
 }
 
 type StGroup = NonNullable<Link["group"]>
@@ -290,13 +299,13 @@ export class StImports extends Context.Service<
   {
     /**
      * Starts the user's import run. `expect`: the re-import preview the user confirmed, which
-     * refuses the run (`StImportPlanChanged`) if the chats changed since.
+     * the run is held to file by file: a file whose chat or bytes changed since is refused.
      */
     readonly start: (
       user: User,
       unsupported: ReadonlyArray<string>,
       expect?: StPlanExpect
-    ) => Effect.Effect<string, ServerError | StImportPlanChanged>
+    ) => Effect.Effect<string, ServerError>
     readonly report: (user: User, importId: string) => Effect.Effect<StImportReport, NotFound>
     /** One uploaded file, or one part of a chat file. */
     readonly file: (
@@ -367,7 +376,9 @@ export class StImports extends Context.Service<
             records: new Map(),
             missingWorlds: new Set(),
             globalAttached: null,
-            chat: null
+            chat: null,
+            exact: expect ?? null,
+            stamps: new Map(expect?.stamps ?? [])
           }
           for (const entry of sources.library) {
             session.library.set(entry.sourcePath, entry)
@@ -399,11 +410,7 @@ export class StImports extends Context.Service<
             }
           }
           // Every run before it is over: none of them writes any more (ARCHITECTURE.md §13).
-          yield* writer.StImportBegin({
-            userId: user.id,
-            importId: session.id,
-            ...(expect === undefined ? {} : { expect })
-          })
+          yield* writer.StImportBegin({ userId: user.id, importId: session.id })
           sessions.set(user.id, session)
           return session.id
         })
@@ -769,24 +776,29 @@ export class StImports extends Context.Service<
         })
 
       /** The chat's record and, for a new one, the chat itself: once it has a user message. */
+      /** What a chat file's record and chat start with. */
+      const startFields = (progress: ChatProgress) => ({
+        title: progress.title,
+        ...(progress.link.group?.arrival === undefined
+          ? {}
+          : {
+              groupId: progress.link.group.id,
+              arrival:
+                progress.link.group.arrival.basis > 1 && progress.header?.createdAt != null
+                  ? { at: progress.header.createdAt, basis: 1 as const }
+                  : progress.link.group.arrival
+            }),
+        // When ST started it: its header's date, else its first message's (never its last's).
+        createdAt: progress.header?.createdAt ?? progress.firstAt ?? progress.lastAt ?? Date.now()
+      })
+
       const startChat = (session: Session, user: User, progress: ChatProgress) =>
         Effect.gen(function* () {
           const target = yield* writer.StImportStartChat({
             userId: user.id,
             source: progress.path,
             ...(progress.fork === null ? {} : { parentRecordId: progress.fork.parentRecordId }),
-            title: progress.title,
-            ...(progress.link.group?.arrival === undefined
-              ? {}
-              : {
-                  groupId: progress.link.group.id,
-                  arrival:
-                    progress.link.group.arrival.basis > 1 && progress.header?.createdAt != null
-                      ? { at: progress.header.createdAt, basis: 1 as const }
-                      : progress.link.group.arrival
-                }),
-            // When ST started it: its header's date, else its first message's (never its last's).
-            createdAt: progress.header?.createdAt ?? progress.firstAt ?? progress.lastAt ?? Date.now(),
+            ...startFields(progress),
             chatId: progress.into,
             lease: session.id
           })
@@ -804,6 +816,46 @@ export class StImports extends Context.Service<
             firstAdded: null
           })
           return target
+        })
+
+      /** A batch's messages and what they name, as the writer takes them. */
+      const batchFields = (
+        session: Session,
+        batch: Batch,
+        speakers: ReadonlyMap<string, EntityId | null>
+      ): StStagedBatch => ({
+        messagesJson: batch.messagesJson,
+        ...(batch.hashes === undefined ? {} : { hashes: batch.hashes }),
+        // Only this batch's, so the map is sent once per speaker, not once per batch.
+        speakers: Object.fromEntries(batch.speakers.map((key) => [key, speakers.get(key) ?? null])),
+        arrivalRefs: Object.fromEntries(
+          batch.speakers.flatMap((key) => {
+            const entity = speakers.get(key)
+            const ref = entity == null ? undefined : session.arrivalRefs.get(entity)
+            return ref === undefined ? [] : [[key, ref]]
+          })
+        )
+      })
+
+      const groupFields = (progress: ChatProgress) =>
+        progress.link.group?.arrival === undefined
+          ? {}
+          : { groupArrival: progress.link.group.arrival, groupId: progress.link.group.id }
+
+      /** A confirmed re-import's batch, held in the writer until its file is written whole. */
+      const stageBatch = (
+        session: Session,
+        user: User,
+        progress: ChatProgress,
+        batch: Batch,
+        speakers: ReadonlyMap<string, EntityId | null>
+      ) =>
+        writer.StImportStage({
+          userId: user.id,
+          lease: session.id,
+          path: progress.path,
+          seq: progress.staged++,
+          batchJson: JSON.stringify(batchFields(session, batch, speakers))
         })
 
       const writeBatch = (
@@ -824,205 +876,291 @@ export class StImports extends Context.Service<
             strict: progress.branch,
             parentSlotId: progress.cursor,
             matching: progress.matching,
-            messagesJson: batch.messagesJson,
-            ...(batch.hashes === undefined ? {} : { hashes: batch.hashes }),
-            ...(progress.link.group?.arrival === undefined
-              ? {}
-              : { groupArrival: progress.link.group.arrival, groupId: progress.link.group.id }),
-            // Only this batch's, so the map is sent once per speaker, not once per batch.
-            speakers: Object.fromEntries(batch.speakers.map((key) => [key, speakers.get(key) ?? null])),
-            arrivalRefs: Object.fromEntries(
-              batch.speakers.flatMap((key) => {
-                const entity = speakers.get(key)
-                const ref = entity == null ? undefined : session.arrivalRefs.get(entity)
-                return ref === undefined ? [] : [[key, ref]]
-              })
-            )
+            ...batchFields(session, batch, speakers),
+            ...groupFields(progress)
           })
-          if (written.added > 0 && progress.firstAdded === null) {
-            progress.firstAdded = written.slotIds[written.slotIds.length - written.added]!
+          if (stepWriteProgress(progress, written, progress.prevEnd, progress.hiddenRun, progress.summaries)) {
             // As the record now says, for this run sending the chat again from its start.
             const cached = session.records.get(progress.path)
             if (cached !== undefined && !cached.complete) {
               session.records.set(progress.path, { ...cached, firstAdded: cached.firstAdded ?? progress.firstAdded })
             }
           }
-          for (const slotId of written.slotIds) {
-            if (progress.atEnd && progress.afterEnd === null) progress.afterEnd = slotId
-            progress.atEnd = slotId === progress.prevEnd
-          }
-          progress.firstSlot ??= written.slotIds[0] ?? null
-          for (const summary of progress.summaries) {
-            const at = summary.index - progress.written
-            if (at >= 0 && at < written.slotIds.length) summary.slot = written.slotIds[at]!
-          }
-          const lastHidden = progress.hiddenRun - 1
-          if (lastHidden >= progress.written && lastHidden < progress.written + written.slotIds.length) {
-            progress.throughSlot = written.slotIds[lastHidden - progress.written]!
-          }
-          progress.written += written.slotIds.length
-          progress.cursor = written.slotIds.at(-1) ?? progress.cursor
-          progress.matching = written.matching
-          progress.added += written.added
-          progress.updated += written.updated
-          progress.differing += written.differing
         })
+
+      /** What the file's chat state becomes, from what the file says and the slots it went to. */
+      const stateChangeOf = (session: Session, progress: ChatProgress) =>
+        chatStateChange(
+          session,
+          {
+            link: progress.link,
+            header: progress.header,
+            spoke: progress.spoke,
+            selectedPersona: progress.selectedPersona,
+            summaries: progress.summaries,
+            messages: progress.index,
+            run: { length: progress.hiddenRun, firstSlot: progress.firstSlot, throughSlot: progress.throughSlot }
+          },
+          progress.prevState,
+          progress.isNew
+        )
+      type StateChange = ReturnType<typeof stateChangeOf>
+
+      /** What the report says of a finished file; `applies`: its state went in. */
+      const finishIssues = (session: Session, progress: ChatProgress, change: StateChange, applies: boolean) => {
+        const { report } = session
+        for (const name of change.missingWorlds) {
+          if (session.missingWorlds.has(name)) continue
+          session.missingWorlds.add(name)
+          report.issue(
+            progress.path,
+            "warning",
+            "st.world_missing",
+            `The lorebook “${shownText(name)}” wasn't in the folder, so it isn't attached to the chats that name it.`
+          )
+        }
+        if (change.summaryOnLast) {
+          report.issue(
+            progress.path,
+            "info",
+            "st.summary_on_last",
+            "A summary on the chat's last message was left as ST leaves it: unused."
+          )
+        }
+        if (change.summaryIndex !== null && session.settings === null) {
+          report.issue(
+            progress.path,
+            "info",
+            "st.summary_defaults",
+            "settings.json wasn't imported first, so the summary is placed as ST places it by default."
+          )
+        }
+        if (change.replacedAuthorNote) {
+          report.issue(
+            progress.path,
+            "info",
+            "st.character_note_replaced",
+            "ST sent the character's own author's note in place of this chat's; both are kept here, at the default author's note's place."
+          )
+        }
+        if (change.ridersElsewhere !== null) {
+          report.issue(
+            progress.path,
+            "warning",
+            "st.author_note_riders",
+            "ST put a persona's description, a character's own author's note or lorebook entries at these chats' own author's note. Here they're where ST's default author's note is, the same place in every chat, so they may land elsewhere in the prompt than in ST.",
+            change.ridersElsewhere
+          )
+        }
+        if (change.summaryTrimmed) {
+          report.issue(
+            progress.path,
+            "info",
+            "st.summary_history",
+            "Only the latest of the chat's earlier summaries are kept as the summary's history."
+          )
+        }
+        if (progress.differing > 0) {
+          report.issue(
+            progress.path,
+            "info",
+            "st.differing",
+            `${progress.differing} messages are shown or hidden differently here than in ST; they were left as they are here.`
+          )
+        }
+        if (!applies && JSON.stringify(change.state) !== JSON.stringify(progress.prevState)) {
+          report.issue(
+            progress.path,
+            "info",
+            "st.state_unchanged",
+            "The chat's settings changed in ST, but it brought no new message to attach the change to."
+          )
+        }
+      }
+
+      /** The finish's notes, each dated as the file or the settings it came from. */
+      const datedNotes = (session: Session, progress: ChatProgress, change: StateChange) =>
+        change.notes.map((note) => ({
+          ...note,
+          modifiedAt:
+            note.kind === "author_note" && progress.header?.authorNote == null
+              ? (session.settingsModifiedAt ?? progress.modifiedAt)
+              : progress.modifiedAt
+        }))
+
+      /** After the file's finish is stored: the record as the run now knows it, and the report. */
+      const finished = (
+        session: Session,
+        progress: ChatProgress,
+        target: Target,
+        change: StateChange,
+        applies: boolean,
+        notes: Readonly<Record<string, EntityId>>
+      ) => {
+        const { report } = session
+        session.records.set(progress.path, {
+          ...target,
+          complete: true,
+          binned: false,
+          merged: progress.branch,
+          state: applies ? change.state : progress.prevState,
+          notes,
+          end: progress.cursor,
+          firstAdded: null
+        })
+        // Open tabs read the chat again: it changed under them.
+        if (!progress.isNew) hub.publish(target.chatId, { _tag: "Reload" })
+        if (change.summaryIndex !== null) report.summaries++
+        // Offered once, for the chat the import made.
+        if (progress.hiddenRun >= HIDDEN_RUN_MIN && progress.throughSlot !== null && progress.isNew) {
+          const covered = change.summaryIndex === null ? null : change.summaryIndex >= progress.hiddenRun - 1
+          if (covered === false) {
+            report.issue(
+              progress.path,
+              "info",
+              "st.summary_partial",
+              `The summary was made at message ${change.summaryIndex}, before the last of the ${progress.hiddenRun} hidden messages, so it doesn't cover them all.`
+            )
+          }
+          report.offer(
+            new StHiddenRun({
+              chatId: target.chatId,
+              title: progress.title,
+              hidden: progress.hiddenRun,
+              throughSlotId: progress.throughSlot,
+              summaryCovers: covered
+            })
+          )
+        }
+        return progress.isNew ? "added" : applies || progress.updated > 0 ? "updated" : "unchanged"
+      }
 
       /** Writes the chat's state and makes it active, once its last part is in. */
       const finishChat = (session: Session, user: User, progress: ChatProgress, target: Target) =>
         Effect.gen(function* () {
-          const { report } = session
-          const run = { length: progress.hiddenRun, firstSlot: progress.firstSlot, throughSlot: progress.throughSlot }
-          const change = chatStateChange(
-            session,
-            {
-              link: progress.link,
-              header: progress.header,
-              spoke: progress.spoke,
-              selectedPersona: progress.selectedPersona,
-              summaries: progress.summaries,
-              messages: progress.index,
-              run
-            },
-            progress.prevState,
-            progress.isNew
-          )
-          for (const name of change.missingWorlds) {
-            if (session.missingWorlds.has(name)) continue
-            session.missingWorlds.add(name)
-            report.issue(
-              progress.path,
-              "warning",
-              "st.world_missing",
-              `The lorebook “${shownText(name)}” wasn't in the folder, so it isn't attached to the chats that name it.`
-            )
-          }
-          if (change.summaryOnLast) {
-            report.issue(
-              progress.path,
-              "info",
-              "st.summary_on_last",
-              "A summary on the chat's last message was left as ST leaves it: unused."
-            )
-          }
-          if (change.summaryIndex !== null && session.settings === null) {
-            report.issue(
-              progress.path,
-              "info",
-              "st.summary_defaults",
-              "settings.json wasn't imported first, so the summary is placed as ST places it by default."
-            )
-          }
-          if (change.replacedAuthorNote) {
-            report.issue(
-              progress.path,
-              "info",
-              "st.character_note_replaced",
-              "ST sent the character's own author's note in place of this chat's; both are kept here, at the default author's note's place."
-            )
-          }
-          if (change.ridersElsewhere !== null) {
-            report.issue(
-              progress.path,
-              "warning",
-              "st.author_note_riders",
-              "ST put a persona's description, a character's own author's note or lorebook entries at these chats' own author's note. Here they're where ST's default author's note is, the same place in every chat, so they may land elsewhere in the prompt than in ST.",
-              change.ridersElsewhere
-            )
-          }
-          if (change.summaryTrimmed) {
-            report.issue(
-              progress.path,
-              "info",
-              "st.summary_history",
-              "Only the latest of the chat's earlier summaries are kept as the summary's history."
-            )
-          }
-          if (progress.differing > 0) {
-            report.issue(
-              progress.path,
-              "info",
-              "st.differing",
-              `${progress.differing} messages are shown or hidden differently here than in ST; they were left as they are here.`
-            )
-          }
-          // A new chat's state goes at its start. A chat merged into gets what changed from
-          // the first message past where this file last ended (which an interrupted run may
-          // have written), else from where an unfinished run of it went its own way, else
-          // from its first new message.
-          const position = progress.isNew ? null : (progress.afterEnd ?? progress.resumeAt ?? progress.firstAdded)
-          const applies = progress.isNew || position !== null || (progress.branch && progress.prevEnd === null)
-          if (!applies && JSON.stringify(change.state) !== JSON.stringify(progress.prevState)) {
-            report.issue(
-              progress.path,
-              "info",
-              "st.state_unchanged",
-              "The chat's settings changed in ST, but it brought no new message to attach the change to."
-            )
-          }
-          // The writer moves it only if it's unset or still where this file last ended.
-          const leaf = progress.cursor === null || progress.branch || !applies ? null : progress.cursor
-          const finished = yield* writer.StImportFinishChat({
+          const change = stateChangeOf(session, progress)
+          const { position, applies, leaf } = stFinishAt(progress)
+          finishIssues(session, progress, change, applies)
+          const stored = yield* writer.StImportFinishChat({
             lease: session.id,
             userId: user.id,
             chatId: target.chatId,
             recordId: target.recordId,
             position,
             events: applies ? change.events : [],
-            notes: applies
-              ? change.notes.map((note) => ({
-                  ...note,
-                  modifiedAt:
-                    note.kind === "author_note" && progress.header?.authorNote == null
-                      ? (session.settingsModifiedAt ?? progress.modifiedAt)
-                      : progress.modifiedAt
-                }))
-              : [],
+            notes: applies ? datedNotes(session, progress, change) : [],
             removedNotes: applies ? change.removedNotes : [],
             previousNotes: progress.prevNotes,
             leaf,
             end: progress.cursor,
             lastMessageAt: progress.lastMessageAt,
-            sha256: hash(progress.partHashes.join("")),
+            sha256: stPartsHash(progress.partHashes),
             stateJson: JSON.stringify(applies ? change.state : progress.prevState),
             fork: progress.fork,
             stCurrent: progress.stCurrent
           })
-          session.records.set(progress.path, {
-            ...target,
-            complete: true,
-            binned: false,
-            merged: progress.branch,
-            state: applies ? change.state : progress.prevState,
-            notes: finished.notes,
-            end: progress.cursor,
-            firstAdded: null
+          return finished(session, progress, target, change, applies, stored.notes)
+        })
+
+      /**
+       * A file of a confirmed re-import not imported, as the report says: what it would do now
+       * isn't what the check showed. Nothing of it was written; what the writer held goes.
+       */
+      const refuse = (session: Session, user: User, path: string, countAs: string, staged: boolean) =>
+        Effect.gen(function* () {
+          if (staged)
+            yield* writer
+              .StImportStage({ userId: user.id, lease: session.id, path, seq: 0, batchJson: null })
+              .pipe(Effect.catch(() => Effect.void))
+          session.report.issue(path, "warning", CHANGED_SINCE_CHECK, "Changed since the check. Not imported.")
+          session.report.count(countAs, "skipped")
+          return result("skipped", "Changed since the check. Not imported.")
+        })
+
+      /**
+       * A confirmed re-import's file, once its last part is in and matches the bytes checked:
+       * all of it in one transaction (`StImportCommitChat`), which writes nothing unless its
+       * chat is as the check read it (or as this run's own writes left it) and its messages
+       * place as the check showed.
+       */
+      const commitChat = (session: Session, user: User, progress: ChatProgress, exact: StPlanExpectFile) =>
+        Effect.gen(function* () {
+          const stamp = session.stamps.get(exact.chatId)
+          if (stamp === undefined) return null
+          // The finish names the slots of the file's messages by their places in it; the
+          // transaction takes the slots they go to.
+          for (const summary of progress.summaries)
+            if (summary.index < progress.index) summary.slot = stIndexSlot(summary.index)
+          progress.firstSlot = progress.index > 0 ? stIndexSlot(0) : null
+          progress.throughSlot = progress.hiddenRun > 0 ? stIndexSlot(progress.hiddenRun - 1) : null
+          const change = stateChangeOf(session, progress)
+          const own = progress.target
+          const committed = yield* writer.StImportCommitChat({
+            userId: user.id,
+            lease: session.id,
+            path: progress.path,
+            chatId: exact.chatId as ChatId,
+            stamp,
+            claim:
+              own === null
+                ? null
+                : {
+                    recordId: own.recordId,
+                    ...(progress.claimParent === undefined ? {} : { parentRecordId: progress.claimParent })
+                  },
+            start:
+              own === null && progress.fork !== null
+                ? { parentRecordId: progress.fork.parentRecordId, ...startFields(progress) }
+                : null,
+            batches: progress.staged,
+            advanceLeaf: progress.isNew,
+            strict: progress.branch,
+            matching: progress.matching,
+            ...groupFields(progress),
+            finish: {
+              isNew: progress.isNew,
+              branch: progress.branch,
+              prevEnd: progress.prevEnd,
+              resumeAt: progress.resumeAt,
+              hiddenRun: progress.hiddenRun,
+              events: change.events,
+              notes: datedNotes(session, progress, change),
+              previousNotes: progress.prevNotes,
+              removedNotes: change.removedNotes,
+              lastMessageAt: progress.lastMessageAt,
+              sha256: stPartsHash(progress.partHashes),
+              stateJson: JSON.stringify(change.state),
+              prevStateJson: JSON.stringify(progress.prevState),
+              fork: progress.fork,
+              stCurrent: progress.stCurrent
+            },
+            slotsAt: progress.summaries.filter((s) => s.index < progress.index).map((s) => s.index),
+            expect: exact.uncertain ? null : { counts: exact.counts, digest: exact.digest, keepsTip: exact.keepsTip }
           })
-          // Open tabs read the chat again: it changed under them.
-          if (!progress.isNew) hub.publish(target.chatId, { _tag: "Reload" })
-          if (change.summaryIndex !== null) report.summaries++
-          // Offered once, for the chat the import made.
-          if (progress.hiddenRun >= HIDDEN_RUN_MIN && progress.throughSlot !== null && progress.isNew) {
-            const covered = change.summaryIndex === null ? null : change.summaryIndex >= progress.hiddenRun - 1
-            if (covered === false) {
-              report.issue(
-                progress.path,
-                "info",
-                "st.summary_partial",
-                `The summary was made at message ${change.summaryIndex}, before the last of the ${progress.hiddenRun} hidden messages, so it doesn't cover them all.`
-              )
-            }
-            report.offer(
-              new StHiddenRun({
-                chatId: target.chatId,
-                title: progress.title,
-                hidden: progress.hiddenRun,
-                throughSlotId: progress.throughSlot,
-                summaryCovers: covered
-              })
+          progress.staged = 0
+          Object.assign(progress, committed.progress)
+          for (const summary of progress.summaries) {
+            const slot = committed.slots[summary.index]
+            if (slot === undefined) delete summary.slot
+            else summary.slot = slot
+          }
+          session.stamps.set(exact.chatId, committed.stamp)
+          const target: Target = { chatId: committed.chatId, recordId: committed.recordId }
+          progress.target = target
+          if (own === null) session.report.chat(progress.path, target.chatId)
+          if (progress.userTurns === 0) {
+            session.report.issue(
+              progress.path,
+              "info",
+              "st.no_user_turn",
+              "This chat has no message of yours; it was imported all the same."
             )
           }
-          return progress.isNew ? "added" : applies || progress.updated > 0 ? "updated" : "unchanged"
+          // The report as the finish's own writes worked it out, with the slots they went to.
+          const stored = stateChangeOf(session, progress)
+          const { applies } = stFinishAt(progress)
+          finishIssues(session, progress, stored, applies)
+          return finished(session, progress, target, stored, applies, committed.notes)
         })
 
       /** Reads a chat's first part: what it's linked to, and where its messages go. */
@@ -1167,10 +1305,27 @@ export class StImports extends Context.Service<
           spoke: new Set(),
           selectedPersona: defaultPersona(session, header),
           partHashes: [],
+          content: null,
           added: 0,
           updated: 0,
-          differing: 0
+          differing: 0,
+          exact: null,
+          staged: 0,
+          claimParent: undefined
         }
+      }
+
+      /**
+       * Whether a confirmed re-import takes the file where it's going now: where the check
+       * mapped it, a file the check read; a chat of its own, one it didn't.
+       */
+      const sameRoute = (exact: StPlanExpect, progress: ChatProgress, expected: StPlanExpectFile | undefined) => {
+        const own = progress.target
+        if (expected === undefined)
+          return own === null && (progress.into === null || !exact.stamps.has(progress.into))
+        return own === null
+          ? expected.recordId === null && progress.into === expected.chatId && progress.fork !== null
+          : own.recordId === expected.recordId && own.chatId === expected.chatId
       }
 
       const chatFile = (
@@ -1187,6 +1342,10 @@ export class StImports extends Context.Service<
           else if (session.chat === null || session.chat.path !== path || session.chat.nextPart !== request.part) {
             return result("restart", "Send the chat again from its start.")
           }
+          // Held to the check: its bytes hashed as they come, before the parse takes them.
+          const content =
+            session.exact === null ? null : request.part === 0 ? stBytesHash() : (session.chat?.content ?? null)
+          content?.update(bytes)
           const part = yield* formats.st.chatPart({
             bytes,
             first: request.part === 0,
@@ -1201,13 +1360,25 @@ export class StImports extends Context.Service<
             return result("failed", part.report.issues.find((i) => i.level === "error")!.message)
           }
           if (session.chat === null) {
+            // A confirmed re-import takes only the files the check listed, where it mapped them.
+            const exact = session.exact
+            const expected = exact?.files.get(path)
+            if (exact !== null) {
+              if (exact.skip.has(path)) {
+                report.count(file.kind, "skipped")
+                return result("skipped", "Skipped.")
+              }
+              if (!exact.listed.has(path) || (expected !== undefined && session.records.get(path)?.binned))
+                return yield* refuse(session, user, path, file.kind, false)
+            }
             // A file imported before: this run takes its record over, as the record is now.
             const cached = session.records.get(path)
-            if (cached !== undefined && !cached.binned) {
-              const parentRecordId =
-                part.header?.mainChat == null
-                  ? undefined
-                  : session.records.get(stParentPath(file, part.header.mainChat))?.recordId
+            const parentRecordId =
+              part.header?.mainChat == null
+                ? undefined
+                : session.records.get(stParentPath(file, part.header.mainChat))?.recordId
+            // A confirmed re-import's file takes it over only as it writes the file, in one go.
+            if (cached !== undefined && !cached.binned && exact === null) {
               const claimed = yield* writer.StImportClaim({
                 userId: user.id,
                 recordId: cached.recordId,
@@ -1218,6 +1389,12 @@ export class StImports extends Context.Service<
             }
             const begun = beginChat(session, path, file, part, request)
             if (begun instanceof StFileResult) return begun
+            if (exact !== null) {
+              if (!sameRoute(exact, begun, expected)) return yield* refuse(session, user, path, file.kind, false)
+              begun.exact = expected ?? null
+              begun.claimParent = parentRecordId
+              begun.content = content
+            }
             session.chat = begun
           }
           const progress = session.chat
@@ -1249,6 +1426,12 @@ export class StImports extends Context.Service<
           if (part.userTurns > 0)
             progress.selectedPersona =
               part.lastUserSpeaker === null ? null : (speakers.get(part.lastUserSpeaker) ?? null)
+          const exact = progress.exact
+          // The bytes the check read, or nothing of the file goes in.
+          if (exact !== null && request.last && progress.content?.digest("hex") !== exact.sha256) {
+            yield* dropChat(session)
+            return yield* refuse(session, user, path, file.kind, progress.staged > 0)
+          }
           if (!progress.decided) {
             if (progress.index <= 1 && !request.last) {
               progress.pending.push(...part.batches.map((batch) => ({ batch, speakers })))
@@ -1261,6 +1444,23 @@ export class StImports extends Context.Service<
               return result("skipped", progress.index === 0 ? "no messages" : "only a greeting")
             }
             progress.decided = true
+          }
+          if (exact !== null) {
+            for (const held of progress.pending.splice(0))
+              yield* stageBatch(session, user, progress, held.batch, held.speakers)
+            for (const batch of part.batches) yield* stageBatch(session, user, progress, batch, speakers)
+            if (!request.last) return result("continue")
+            const outcome = yield* commitChat(session, user, progress, exact).pipe(
+              Effect.catchTags({
+                StImportPlanChanged: () => Effect.succeed(null),
+                ImportLeaseLost: () => Effect.succeed(null),
+                NotFound: () => Effect.succeed(null)
+              })
+            )
+            yield* dropChat(session)
+            if (outcome === null) return yield* refuse(session, user, path, file.kind, progress.staged > 0)
+            report.count(file.kind, outcome)
+            return result(outcome)
           }
           const target = progress.target ?? (yield* startChat(session, user, progress))
           for (const held of progress.pending.splice(0)) {
@@ -1528,12 +1728,10 @@ export class StImports extends Context.Service<
       return StImports.of({
         start: (user, unsupported, expect) =>
           start(user, unsupported, expect).pipe(
-            Effect.catch((error): Effect.Effect<never, ServerError | StImportPlanChanged> =>
-              error instanceof StImportPlanChanged
-                ? Effect.fail(error)
-                : Effect.logError("starting an ST import failed", error).pipe(
-                    Effect.andThen(Effect.fail(new ServerError({ message: "The import couldn't start." })))
-                  )
+            Effect.catch((error) =>
+              Effect.logError("starting an ST import failed", error).pipe(
+                Effect.andThen(Effect.fail(new ServerError({ message: "The import couldn't start." })))
+              )
             )
           ),
         report: (user, importId) =>

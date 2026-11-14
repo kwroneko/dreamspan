@@ -4637,6 +4637,55 @@ const storage: Record<
         "NotFound"
       )
     }),
+  StImportStage: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportStage({ userId: actor.user.id, lease: importId, path: "chats/A/B.jsonl", seq: 0, batchJson: null }),
+        "ImportLeaseLost"
+      )
+    }),
+  StImportCommitChat: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const commit = (lease: string) =>
+        writer.StImportCommitChat({
+          userId: actor.user.id,
+          lease,
+          path: "chats/A/B.jsonl",
+          chatId: owner.chat.chatId,
+          stamp: "",
+          claim: { recordId: owner.importRecordId },
+          start: null,
+          batches: 0,
+          advanceLeaf: false,
+          strict: false,
+          matching: true,
+          finish: {
+            isNew: false,
+            branch: false,
+            prevEnd: null,
+            resumeAt: null,
+            hiddenRun: 0,
+            events: [],
+            notes: [],
+            previousNotes: {},
+            removedNotes: [],
+            lastMessageAt: null,
+            sha256: "",
+            stateJson: "null",
+            prevStateJson: "null",
+            fork: null,
+            stCurrent: true
+          },
+          slotsAt: [],
+          expect: null
+        })
+      const theirs = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(commit(theirs.importId), "ImportLeaseLost")
+      // Another account's chat has no stamp the actor can hold.
+      const mine = yield* actor.api.StartStImport({ unsupported: [] })
+      yield* refused(commit(mine.importId), "StImportPlanChanged")
+    }),
   StImportSummarySettings: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })

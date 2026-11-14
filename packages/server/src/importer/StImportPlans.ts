@@ -1,33 +1,35 @@
 // The re-import preview (ARCHITECTURE.md §13 "Re-import preview"): before an ST folder import
-// writes anything, a dry run over the folder's chat files that already have chats here, by
+// writes anything, a dry run over the folder's chat files that go into chats already here, by
 // the import's own parts: the same format worker parse (`Formats.st.chatPart`), the same
-// mapping of a file to its chat (`stChatTarget`), and per batch the writer's matcher run in a
-// reader worker with writes that only count (`StImportPlanBatch`). Nothing is written.
+// rounds and mapping of a file to its chat (`stSendRounds`, `stChatTarget`), and per batch the
+// writer's matcher run in a reader worker with writes that only count (`StImportPlanBatch`).
+// Nothing is written.
 //
 // A preview is held in memory, one per user, until an hour after it was last read or the
 // user's next. A folder named by its path is read here, part by part, in a fiber the user can
 // cancel; a folder picked in a browser sends the files the preview asks for over HTTP
-// (`POST /st-import/plan-file`), part by part, as an import does. Memory stays bounded: one
-// part (at most 8 MiB) at a time, and at most `PLAN_MESSAGES_HELD` changed messages per file,
-// `MAX_HELD` in all.
+// (`POST /st-import/plan-file`), part by part and in the order asked, as an import does.
+// Memory stays bounded: one part (at most 8 MiB) at a time, and at most `PLAN_MESSAGES_HELD`
+// changed messages per file, `MAX_HELD` in all.
 //
-// The import writes a folder's files one after another, so a later file sees what earlier
-// ones wrote to its chat (a branch file, the messages its parent file adds). For a chat more
-// than one file goes into, the preview keeps what the earlier files would write
+// Files are mapped as the import maps them, one after another: a branch file whose parent is
+// a new branch of a chat here goes into that chat too, once its parent would have a record
+// (`RouteRecord`, made for the parent as the import's `StImportStartChat` would). For a chat
+// more than one file goes into, the preview keeps what the earlier files would write
 // (`PlaceOverlay`) and passes it to each batch, so the later file matches it too.
 //
-// The stamp of the chats it reads (`StImportPlanStamp`) is taken before the first file is
-// read. The import the user confirms passes it to `StImportBegin`, which takes it again in
-// its transaction and refuses to start if anything changed since: the plan shown is never
-// admitted against a changed starting snapshot. This is not a lock over later import batches.
-import { createHash, type Hash } from "node:crypto"
+// Each chat's stamp (`StImportPlanStamp`) is read before the first file is mapped, and again
+// once the last is read: a chat that changed in between fails the check. The import the user
+// confirms is held to it file by file (`StImports`, `StImportCommitChat`): a file whose chat
+// moved off its stamp, or whose bytes aren't the ones read here (`stBytesHash`), isn't
+// imported, and the report says so.
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { classifyStPath, stParentPath } from "@rp/shared/stFolder.ts"
 import type { StFolderEntry } from "@rp/shared/stImportApi.ts"
-import { orderStBranches, stPlan } from "@rp/shared/stPlan.ts"
+import { orderStBranches, stPlan, stSendRounds } from "@rp/shared/stPlan.ts"
 import {
   emptyPlanCounts,
   PLAN_MESSAGES_HELD,
@@ -35,6 +37,7 @@ import {
   type StPlanCounts,
   StImportPlan,
   StImportPlanChanged,
+  stPlanAffectedBySkip,
   StPlanFile,
   type StPlanMessage,
   type StPlanTarget
@@ -42,11 +45,12 @@ import {
 import { Context, Effect, Fiber, Layer, Schedule, Semaphore } from "effect"
 import { Reader } from "../db/Database.ts"
 import type { OverlaySlot, OverlayVersion, PlaceOverlay } from "../db/stImportPlace.ts"
+import { emptyDigest } from "../db/stImportPlanCount.ts"
 import { sourceTime } from "../formats/sourceTime.ts"
 import { Formats } from "./Formats.ts"
 import { stChatTarget, type StChatRecordView } from "./stChatTarget.ts"
 import { readStFolderFile } from "./stFolderDisk.ts"
-import type { StPlanExpect } from "./StImports.ts"
+import { stBytesHash, type StPlanExpect, type StPlanExpectFile } from "./stPlanExpect.ts"
 
 /** A preview not read for this long is forgotten. */
 const IDLE_MS = 60 * 60 * 1000
@@ -88,12 +92,28 @@ export const stFolderPlanFiles = (
   return { plan, root, files, entries }
 }
 
+/**
+ * A chat file's record as the import would have it by the time it reaches a file: the
+ * records stored, and those its earlier files would make. A new branch of a chat here gets
+ * one on a fork of its parent's (`StImportStartChat`), which the preview can't read: its
+ * batches are read as its parent's real record's (`readAs`), seeing the selections of the
+ * forks it inherits from (`lineage`, its own first).
+ */
+interface RouteRecord extends StChatRecordView {
+  readonly forkId: string
+  readonly readAs: string
+  readonly lineage: ReadonlyArray<string>
+}
+
 interface FileState {
   readonly entry: StPlanEntry
   readonly target: StPlanTarget
+  /** Its own record (existing, unfinished), or its parent's (a branch). */
   readonly recordId: string
+  /** The stored record its batches are read as. */
+  readonly readAs: string
   readonly forkId: string
-  readonly inheritedForkId: string | null
+  readonly lineage: ReadonlyArray<string>
   /** The record is the parent file's: the file is a new branch in its chat. */
   readonly branch: boolean
   /** Matched as a branch merged into another file's chat (`StImportMessages.strict`). */
@@ -117,7 +137,8 @@ interface FileState {
   carry: { readonly keepTip: boolean; readonly branchDeleted: boolean; readonly last: string | null } | null
   /** Its chat's overlay sizes before the file, to take back if it's read again. */
   overlayMark: readonly [number, number, number] | null
-  digest: Hash | null
+  content: ReturnType<typeof stBytesHash>
+  digest: string
   sha256: string | null
 }
 
@@ -130,27 +151,38 @@ interface Overlay {
   json: string | null
 }
 
+type Step = IteratorResult<{ readonly entry: StPlanEntry; readonly orphan: boolean }, void>
+
 interface Plan {
   readonly id: string
   readonly user: User
   readonly mode: "path" | "upload"
   readonly root: string | null
   readonly entries: ReadonlyArray<StPlanEntry>
-  readonly files: ReadonlyArray<FileState>
-  readonly byPath: ReadonlyMap<string, FileState>
-  readonly newChats: number
-  readonly bytesTotal: number
-  readonly chatIds: ReadonlyArray<string>
-  readonly stamp: string
+  /** The files that go into chats here, as they're mapped. */
+  readonly files: Array<FileState>
+  readonly byPath: Map<string, FileState>
+  /** Where each file went when last mapped: read here, or not (new, in the bin, deferred for good). */
+  readonly routed: Map<string, "read" | "other">
+  /** Each chat's stamp before the first file was mapped. */
+  readonly stamps: Readonly<Record<string, string>>
+  readonly records: Map<string, RouteRecord>
+  readonly rounds: Generator<{ readonly entry: StPlanEntry; readonly orphan: boolean }, void, boolean | undefined>
+  step: Step
+  /** The file being read, whose route waits on it. */
+  reading: FileState | null
+  newChats: number
+  /** The files expected to be read, as mapped before any was: the total until all are. */
+  expected: number
+  bytesTotal: number
   /**
-   * By chat, for a chat more than one of the files goes into: what the files before would
+   * By chat, for a chat more than one of the files may go into: what the files before would
    * write to it, which a later file's dry run matches as the import would (`PlaceOverlay`).
    */
   readonly overlays: Map<string, Overlay>
   overlayItems: number
   batches: number
   status: StImportPlan["status"]
-  filesDone: number
   bytesDone: number
   currentFile: string | null
   error: string | null
@@ -161,13 +193,52 @@ interface Plan {
 
 const counting = () => ({ ...emptyPlanCounts })
 
+const chatPath = (entry: StPlanEntry) => {
+  const kind = classifyStPath(entry.path)
+  if (kind === null || (kind.kind !== "chat" && kind.kind !== "group_chat")) return null
+  return { parentPath: entry.mainChat === null ? null : stParentPath(kind, entry.mainChat) }
+}
+
+/** A record of a file the import would make, going into `chatId`. */
+const madeRecord = (path: string, chatId: string, merged: boolean, from: RouteRecord | null, forkId: string) => ({
+  recordId: `virtual:${path}`,
+  chatId,
+  complete: false,
+  binned: false,
+  merged,
+  forkId,
+  readAs: from?.readAs ?? "",
+  lineage: from === null ? [] : [forkId, ...from.lineage]
+})
+
+/**
+ * Where the rounds take each file: read (a chat here), or not. `outcome` says whether a file
+ * read makes or keeps a record, which its branches' mapping turns on.
+ */
+const route = (
+  records: Map<string, RouteRecord>,
+  stamps: Readonly<Record<string, string>>,
+  step: { readonly entry: StPlanEntry; readonly orphan: boolean }
+) => {
+  const path = chatPath(step.entry)
+  if (path === null) return { _tag: "other" as const }
+  const target = stChatTarget(records, step.entry.path, path.parentPath, step.orphan)
+  if (target._tag === "deferred") return { _tag: "deferred" as const }
+  if (target._tag === "bin") return { _tag: "bin" as const, own: target.own, parentPath: path.parentPath }
+  if (target.own !== undefined && stamps[target.own.chatId] !== undefined)
+    return { _tag: "own" as const, own: target.own, branch: target.branch, parentPath: path.parentPath }
+  if (target.into !== undefined && stamps[target.into.chatId] !== undefined)
+    return { _tag: "into" as const, into: target.into, parentPath: path.parentPath }
+  return { _tag: "new" as const, into: target.into }
+}
+
 export class StImportPlans extends Context.Service<
   StImportPlans,
   {
     /**
      * Works out a new preview for the user, ending their earlier one: for a folder at `root`
      * (`mode: path`) it reads the files itself; for a browser's (`upload`), `wanted` names the
-     * files it needs sent, in order.
+     * files it needs sent, in the order to send them.
      */
     readonly start: (
       user: User,
@@ -193,15 +264,16 @@ export class StImportPlans extends Context.Service<
       last: boolean
     ) => Effect.Effect<"continue" | "done" | "restart", NotFound>
     /**
-     * The finished preview the user confirmed: what `StImportBegin` checks. For a folder read
-     * by its path, `entries` are its chat files as read now: a file changed, added or gone
-     * since the preview makes it out of date.
+     * The finished preview the user confirmed, with the files they skip: what the import is
+     * held to (`StPlanExpect`). For a folder read by its path, `entries` are its chat files as
+     * read now: a file added, gone or changed in size or date since makes it out of date.
      */
     readonly confirm: (
       user: User,
       planId: string,
       entries: ReadonlyArray<StPlanEntry> | null,
-      root: string | null
+      root: string | null,
+      skip: ReadonlyArray<string>
     ) => Effect.Effect<StPlanExpect, StImportPlanChanged>
   }
 >()("rp/importer/StImportPlans") {
@@ -226,8 +298,8 @@ export class StImportPlans extends Context.Service<
         new StImportPlan({
           planId: plan.id,
           status: plan.status,
-          filesTotal: plan.files.length,
-          filesDone: plan.filesDone,
+          filesTotal: Math.max(plan.files.length, plan.expected),
+          filesDone: plan.files.filter((file) => file.status === "done" || file.status === "failed").length,
           bytesTotal: plan.bytesTotal,
           bytesDone: plan.bytesDone,
           currentFile: plan.currentFile,
@@ -251,7 +323,15 @@ export class StImportPlans extends Context.Service<
           error: plan.error
         })
 
-      /** A file is done: its counts stand; the preview is done with its last. */
+      const fail = (plan: Plan, error: string) => {
+        if (plan.status !== "running") return
+        plan.status = "failed"
+        plan.error = error
+        plan.currentFile = null
+        plan.overlays.clear()
+      }
+
+      /** A file is read: its counts stand, and the rounds go on past it. */
       const settle = (plan: Plan, file: FileState, status: "done" | "failed", error: string | null = null) => {
         if (file.status === "done" || file.status === "failed") return
         // A chat of one message, not the user's, or of none: the import skips it (DESIGN §1.4).
@@ -264,14 +344,152 @@ export class StImportPlans extends Context.Service<
         }
         file.status = status
         file.error = error
-        plan.filesDone++
-        if (plan.filesDone === plan.files.length && plan.status === "running") {
-          plan.status = plan.files.some((entry) => entry.status === "failed") ? "failed" : "done"
-          if (plan.status === "failed")
-            plan.error = "Some chats could not be checked. Check the folder again before importing."
-          plan.currentFile = null
-          plan.overlays.clear()
+        // A new branch the import takes gets its record from its first messages on.
+        if (status === "done" && file.target === "branch") {
+          const parent = plan.records.get(file.parentPath ?? "")
+          if (parent !== undefined)
+            plan.records.set(file.entry.path, {
+              ...madeRecord(file.entry.path, file.chatId, true, parent, file.forkId),
+              readAs: file.readAs
+            })
         }
+        if (plan.reading === file) {
+          plan.reading = null
+          plan.step = plan.rounds.next(false)
+        }
+      }
+
+      /** Each chat's stamp again, once every file is read: a chat that moved fails the check. */
+      const verify = (plan: Plan) =>
+        Effect.gen(function* () {
+          const now = yield* reader.StImportPlanStamp({ userId: plan.user.id })
+          if (plan.status !== "running") return
+          const moved = plan.files.some(
+            (file) => file.target !== "bin" && file.target !== "greeting" && now[file.chatId] !== plan.stamps[file.chatId]
+          )
+          plan.currentFile = null
+          plan.expected = plan.files.length
+          if (moved) return fail(plan, "Your chats changed while they were being checked. Check the folder again.")
+          if (plan.files.some((entry) => entry.status === "failed"))
+            return fail(plan, "Some chats could not be checked. Check the folder again before importing.")
+          plan.status = "done"
+          plan.overlays.clear()
+        })
+
+      /**
+       * Takes the rounds on to the next file to read (`plan.reading`), mapping each file before
+       * it as the import would; at their end, the check is done.
+       */
+      const drive = (plan: Plan) =>
+        Effect.gen(function* () {
+          while (plan.status === "running" && plan.reading === null) {
+            const step = plan.step
+            if (step.done) return yield* verify(plan)
+            const { entry } = step.value
+            const routed = route(plan.records, plan.stamps, step.value)
+            if (routed._tag === "deferred") {
+              plan.step = plan.rounds.next(true)
+              continue
+            }
+            if (routed._tag === "other" || routed._tag === "new" || routed._tag === "bin") {
+              plan.routed.set(entry.path, "other")
+              if (routed._tag === "new") {
+                if (routed.into === undefined) plan.newChats++
+                // What the import makes of it, which a branch of it goes into.
+                plan.records.set(
+                  entry.path,
+                  madeRecord(entry.path, routed.into?.chatId ?? `new:${entry.path}`, routed.into !== undefined, null, "")
+                )
+              }
+              if (routed._tag === "bin" && !plan.byPath.has(entry.path)) {
+                const file = fileState(plan, entry, routed.parentPath, {
+                  target: "bin",
+                  recordId: routed.own.recordId,
+                  readAs: routed.own.readAs,
+                  forkId: routed.own.forkId,
+                  lineage: routed.own.lineage,
+                  branch: false,
+                  strict: false,
+                  chatId: routed.own.chatId as ChatId
+                })
+                file.status = "done"
+              }
+              plan.step = plan.rounds.next(false)
+              continue
+            }
+            plan.routed.set(entry.path, "read")
+            const previous = plan.byPath.get(entry.path)
+            if (previous !== undefined) {
+              // Read already (a branch sent again on its own maps as it did).
+              plan.step = plan.rounds.next(false)
+              continue
+            }
+            plan.reading =
+              routed._tag === "own"
+                ? fileState(plan, entry, routed.parentPath, {
+                    target: routed.own.complete ? "existing" : "unfinished",
+                    recordId: routed.own.recordId,
+                    readAs: routed.own.readAs,
+                    forkId: routed.own.forkId,
+                    lineage: routed.own.lineage,
+                    branch: false,
+                    strict: routed.branch,
+                    chatId: routed.own.chatId as ChatId
+                  })
+                : fileState(plan, entry, routed.parentPath, {
+                    target: "branch",
+                    recordId: routed.into.recordId,
+                    readAs: routed.into.readAs,
+                    forkId: `preview-fork:${entry.path}`,
+                    lineage: [`preview-fork:${entry.path}`, ...routed.into.lineage],
+                    branch: true,
+                    strict: true,
+                    chatId: routed.into.chatId as ChatId
+                  })
+          }
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("an ST re-import preview failed", cause).pipe(
+              Effect.andThen(Effect.sync(() => fail(plan, "The check failed on the server. Try again.")))
+            )
+          )
+        )
+
+      const fileState = (
+        plan: Plan,
+        entry: StPlanEntry,
+        parentPath: string | null,
+        mapped: Pick<
+          FileState,
+          "target" | "recordId" | "readAs" | "forkId" | "lineage" | "branch" | "strict" | "chatId"
+        >
+      ) => {
+        const file: FileState = {
+          entry,
+          parentPath,
+          ...mapped,
+          chatTitle: "",
+          status: "waiting",
+          counts: counting(),
+          keepsTip: false,
+          messages: [],
+          moreMessages: 0,
+          error: null,
+          nextPart: 0,
+          index: 0,
+          userTurns: 0,
+          lastAt: null,
+          cursor: null,
+          matching: true,
+          carry: null,
+          overlayMark: null,
+          content: stBytesHash(),
+          digest: emptyDigest,
+          sha256: null
+        }
+        plan.files.push(file)
+        plan.byPath.set(entry.path, file)
+        return file
       }
 
       /** One part of a file through the dry run: parse, then each batch through the matcher. */
@@ -279,7 +497,8 @@ export class StImportPlans extends Context.Service<
         Effect.gen(function* () {
           if (index === 0) {
             Object.assign(file, {
-              digest: createHash("sha256"),
+              content: stBytesHash(),
+              digest: emptyDigest,
               sha256: null,
               nextPart: 0,
               index: 0,
@@ -309,7 +528,9 @@ export class StImportPlans extends Context.Service<
           } else if (file.nextPart !== index) return "restart" as const
           file.status = "checking"
           plan.currentFile = file.entry.path
-          file.digest?.update(bytes)
+          // Hashed as the import hashes the bytes it takes (`stBytesHash`), before the parse
+          // takes them.
+          file.content.update(bytes)
           const parsed = yield* formats.st.chatPart({
             bytes,
             first: index === 0,
@@ -334,14 +555,13 @@ export class StImportPlans extends Context.Service<
               overlay.json = JSON.stringify({
                 slots: overlay.slots,
                 versions: overlay.versions,
-                selects: overlay.selects.filter(
-                  (selection) => selection.forkId === file.forkId || selection.forkId === file.inheritedForkId
-                )
+                // The selections of the forks the file's own inherits, as the import would.
+                selects: overlay.selects.filter((selection) => file.lineage.includes(selection.forkId))
               })
             }
             const planned = yield* reader.StImportPlanBatch({
               userId: plan.user.id,
-              recordId: file.recordId,
+              recordId: file.readAs,
               branch: file.branch,
               parent: file.cursor,
               matching: file.matching,
@@ -352,7 +572,8 @@ export class StImportPlans extends Context.Service<
               detailLimit: Math.max(0, Math.min(PLAN_MESSAGES_HELD - file.messages.length, MAX_HELD - plan.held)),
               overlayJson: overlay === undefined || pending === 0 ? null : overlay.json,
               virtualPrefix: `virtual:${plan.batches++}:`,
-              track: overlay !== undefined
+              track: overlay !== undefined,
+              digest: file.digest
             })
             if (overlay !== undefined && planned.written !== null) {
               const written = JSON.parse(planned.written) as PlaceOverlay
@@ -361,9 +582,7 @@ export class StImportPlans extends Context.Service<
                 written.versions.length +
                 written.selects.length
               if (plan.overlayItems > MAX_OVERLAY_ITEMS) {
-                plan.status = "failed"
-                plan.error = "These chats have too many shared changes to check together. Check a smaller folder."
-                plan.overlays.clear()
+                fail(plan, "These chats have too many shared changes to check together. Check a smaller folder.")
                 return "done" as const
               }
               overlay.slots.push(...written.slots)
@@ -377,6 +596,7 @@ export class StImportPlans extends Context.Service<
             file.matching = planned.matching
             file.carry = planned.carry
             file.keepsTip = planned.carry.keepTip
+            file.digest = planned.digest
             for (const key of Object.keys(planned.counts) as Array<keyof StPlanCounts>)
               file.counts[key] += planned.counts[key]
             file.messages.push(...planned.messages)
@@ -386,8 +606,7 @@ export class StImportPlans extends Context.Service<
           }
           file.nextPart = index + 1
           if (last) {
-            file.sha256 = file.digest?.digest("hex") ?? null
-            file.digest = null
+            file.sha256 = file.content.digest("hex")
             settle(plan, file, "done")
             return "done" as const
           }
@@ -403,16 +622,16 @@ export class StImportPlans extends Context.Service<
                 Effect.as("done" as const)
               )
             return Effect.sync(() => settle(plan, file, "failed", message)).pipe(Effect.as("done" as const))
-          })
+          }),
+          Effect.tap(() => (plan.reading === null ? drive(plan) : Effect.void))
         )
 
       /** A folder read by its path: each file part by part, in the import's order. */
       const runPath = (plan: Plan, root: string) =>
         Effect.gen(function* () {
-          let base = 0
-          for (const file of plan.files) {
-            if (plan.status !== "running") return
-            if (file.status !== "waiting") continue
+          yield* drive(plan)
+          while (plan.status === "running" && plan.reading !== null) {
+            const file = plan.reading
             let start = 0
             for (let index = 0; ; index++) {
               const read = yield* readStFolderFile(
@@ -424,109 +643,35 @@ export class StImportPlans extends Context.Service<
               ).pipe(Effect.result)
               if (read._tag === "Failure") {
                 settle(plan, file, "failed", read.failure.message)
+                yield* drive(plan)
                 break
               }
               start = read.success.next
-              plan.bytesDone = base + Math.min(start, file.entry.size)
+              plan.bytesDone += read.success.bytes.byteLength
               const outcome = yield* part(plan, file, read.success.bytes, index, read.success.last)
               if (outcome !== "continue") break
             }
-            base += file.entry.size
-            plan.bytesDone = base
           }
         }).pipe(
           Effect.catchCause((cause) =>
             plan.status !== "running"
               ? Effect.void
               : Effect.logError("an ST re-import preview failed", cause).pipe(
-                  Effect.andThen(
-                    Effect.sync(() => {
-                      plan.status = "failed"
-                      plan.error = "The check failed on the server. Try again."
-                    })
-                  )
+                  Effect.andThen(Effect.sync(() => fail(plan, "The check failed on the server. Try again.")))
                 )
           )
         )
 
-      /** Which of the folder's chat files go into chats here, as the import maps them. */
-      const mapped = (
-        records: ReadonlyMap<string, StChatRecordView & { readonly forkId: string }>,
-        entries: ReadonlyArray<StPlanEntry>
-      ) => {
-        const files: Array<FileState> = []
-        let newChats = 0
-        for (const entry of entries) {
-          const kind = classifyStPath(entry.path)
-          if (kind === null || (kind.kind !== "chat" && kind.kind !== "group_chat")) continue
-          const parentPath = entry.mainChat === null ? null : stParentPath(kind, entry.mainChat)
-          // A branch whose parent isn't here yet is planned as the import ends up taking it:
-          // with its parent's chat if the parent is in this folder and new, a new chat too.
-          const target = stChatTarget(records, entry.path, parentPath, true)
-          const base = {
-            entry,
-            parentPath,
-            chatTitle: "",
-            status: "waiting" as const,
-            counts: counting(),
-            keepsTip: false,
-            messages: [],
-            moreMessages: 0,
-            error: null,
-            nextPart: 0,
-            index: 0,
-            userTurns: 0,
-            lastAt: null,
-            cursor: null,
-            matching: true,
-            carry: null,
-            overlayMark: null,
-            digest: null,
-            sha256: null
-          }
-          if (target._tag === "bin") {
-            files.push({
-              ...base,
-              target: "bin",
-              recordId: target.own.recordId,
-              forkId: target.own.forkId,
-              inheritedForkId: null,
-              branch: false,
-              strict: false,
-              chatId: target.own.chatId as ChatId,
-              status: "done"
-            })
-          } else if (target._tag === "chat" && target.own !== undefined) {
-            files.push({
-              ...base,
-              target: target.own.complete ? "existing" : "unfinished",
-              recordId: target.own.recordId,
-              forkId: target.own.forkId,
-              inheritedForkId: null,
-              branch: false,
-              strict: target.branch,
-              chatId: target.own.chatId as ChatId
-            })
-          } else if (target._tag === "chat" && target.into !== undefined) {
-            files.push({
-              ...base,
-              target: "branch",
-              recordId: target.into.recordId,
-              forkId: `preview-fork:${entry.path}`,
-              inheritedForkId: target.into.forkId,
-              branch: true,
-              strict: true,
-              chatId: target.into.chatId as ChatId
-            })
-          } else newChats++
-        }
-        return { files, newChats }
-      }
-
       const recordsOf = (user: User) =>
         Effect.map(
           reader.StImportSources({ userId: user.id }),
-          (sources) => new Map(sources.chats.map((record) => [record.source, record]))
+          (sources) =>
+            new Map<string, RouteRecord>(
+              sources.chats.map((record) => [
+                record.source,
+                { ...record, readAs: record.recordId, lineage: [record.forkId] }
+              ])
+            )
         )
 
       const end = (user: User) => {
@@ -536,6 +681,46 @@ export class StImportPlans extends Context.Service<
         return old?.fiber == null ? Effect.void : Fiber.interrupt(old.fiber)
       }
 
+      /**
+       * The files the rounds would read, in order, if every file read makes its record: what a
+       * browser is asked to send, and the chats more than one of them goes into.
+       */
+      const foresee = (
+        records: ReadonlyMap<string, RouteRecord>,
+        stamps: Readonly<Record<string, string>>,
+        entries: ReadonlyArray<StPlanEntry>
+      ) => {
+        const ahead = new Map(records)
+        const read: Array<StPlanEntry> = []
+        const chats = new Map<string, number>()
+        const rounds = stSendRounds(entries)
+        for (let step = rounds.next(); !step.done; ) {
+          const { entry } = step.value
+          const routed = route(ahead, stamps, step.value)
+          if (routed._tag === "deferred") {
+            step = rounds.next(true)
+            continue
+          }
+          if (routed._tag === "new")
+            ahead.set(
+              entry.path,
+              madeRecord(entry.path, routed.into?.chatId ?? `new:${entry.path}`, routed.into !== undefined, null, "")
+            )
+          if ((routed._tag === "own" || routed._tag === "into") && !read.includes(entry)) {
+            read.push(entry)
+            const chatId = routed._tag === "own" ? routed.own.chatId : routed.into.chatId
+            chats.set(chatId, (chats.get(chatId) ?? 0) + 1)
+            if (routed._tag === "into")
+              ahead.set(entry.path, {
+                ...madeRecord(entry.path, chatId, true, routed.into, `preview-fork:${entry.path}`),
+                readAs: routed.into.readAs
+              })
+          }
+          step = rounds.next(false)
+        }
+        return { read, shared: [...chats].filter(([, n]) => n > 1).map(([chatId]) => chatId) }
+      }
+
       const start = (
         user: User,
         input: { readonly mode: "path"; readonly root: string } | { readonly mode: "upload" },
@@ -543,37 +728,37 @@ export class StImportPlans extends Context.Service<
       ) =>
         Effect.gen(function* () {
           yield* end(user)
-          // Stamp before mapping: a concurrent change during mapping cannot be blessed.
-          const stamp = yield* reader.StImportPlanStamp({ userId: user.id, chatIds: [] })
-          const { files, newChats } = mapped(yield* recordsOf(user), entries)
-          const chatIds = [...new Set(files.map((file) => file.chatId))]
-          const sharing = new Map<string, number>()
-          for (const file of files)
-            if (file.status === "waiting") sharing.set(file.chatId, (sharing.get(file.chatId) ?? 0) + 1)
-          // Before any file is read: a change after this makes the confirmed import refuse.
+          // Stamps before mapping: a change after this fails the check or the file's import.
+          const stamps = yield* reader.StImportPlanStamp({ userId: user.id })
+          const records = yield* recordsOf(user)
+          const chats = entries.filter((entry) => chatPath(entry) !== null)
+          const ahead = foresee(records, stamps, chats)
+          const rounds = stSendRounds(chats)
           const plan: Plan = {
             id: uuidv7(),
             user,
             mode: input.mode,
             root: input.mode === "path" ? input.root : null,
             entries,
-            files,
-            byPath: new Map(files.map((file) => [file.entry.path, file])),
-            newChats,
-            bytesTotal: files.reduce((sum, file) => sum + (file.status === "waiting" ? file.entry.size : 0), 0),
-            chatIds,
-            stamp,
+            files: [],
+            byPath: new Map(),
+            routed: new Map(),
+            stamps,
+            records,
+            rounds,
+            step: rounds.next(),
+            reading: null,
+            newChats: 0,
+            expected: ahead.read.length,
+            bytesTotal: ahead.read.reduce((sum, entry) => sum + entry.size, 0),
             overlays: new Map(
-              [...sharing].flatMap(([chatId, n]) =>
-                n > 1
-                  ? [[chatId, { slots: [], versions: [], selects: [], json: null, jsonFork: null } as Overlay] as const]
-                  : []
+              ahead.shared.map(
+                (chatId) => [chatId, { slots: [], versions: [], selects: [], json: null, jsonFork: null } as Overlay] as const
               )
             ),
             overlayItems: 0,
             batches: 0,
             status: "running",
-            filesDone: files.filter((file) => file.status === "done").length,
             bytesDone: 0,
             currentFile: null,
             error: null,
@@ -581,13 +766,12 @@ export class StImportPlans extends Context.Service<
             touched: Date.now(),
             fiber: null
           }
-          if (plan.filesDone === files.length) plan.status = "done"
           plans.set(user.id, plan)
-          if (input.mode === "path" && plan.status === "running")
-            plan.fiber = yield* Effect.forkIn(runPath(plan, input.root), scope)
+          if (input.mode === "path") plan.fiber = yield* Effect.forkIn(runPath(plan, input.root), scope)
+          else yield* drive(plan)
           return {
             plan: snapshot(plan),
-            wanted: input.mode === "upload" ? files.filter((f) => f.status === "waiting").map((f) => f.entry.path) : []
+            wanted: input.mode === "upload" ? ahead.read.map((entry) => entry.path) : []
           }
         })
 
@@ -632,15 +816,24 @@ export class StImportPlans extends Context.Service<
         file: (user, planId, path, bytes, index, last) =>
           Effect.gen(function* () {
             const plan = yield* planOf(user, planId)
-            const file = plan.byPath.get(path)
-            if (plan.mode !== "upload" || plan.status !== "running" || file === undefined)
+            if (plan.mode !== "upload" || plan.status !== "running")
               return yield* new NotFound({ entity: "import preview file", id: path })
-            if (file.status === "done" || file.status === "failed") return "done" as const
+            const file = plan.byPath.get(path)
+            // Mapped elsewhere once the files before it were read (a parent that turned out
+            // to hold only a greeting), or read already: nothing more of it is needed.
+            if (file === undefined ? plan.routed.get(path) === "other" : file.status === "done" || file.status === "failed")
+              return "done" as const
+            if (file === undefined || plan.reading !== file) {
+              // Sent out of the order asked: the files before it weren't.
+              if (plan.reading !== null) settle(plan, plan.reading, "failed", "It wasn't sent.")
+              fail(plan, "The files weren't sent in the order asked. Check the folder again.")
+              return "done" as const
+            }
             const outcome = yield* part(plan, file, bytes, index, last)
             plan.bytesDone += bytes.byteLength
             return outcome
           }),
-        confirm: (user, planId, entries, root) =>
+        confirm: (user, planId, entries, root, skip) =>
           Effect.gen(function* () {
             const changed = (message: string) => new StImportPlanChanged({ message })
             const plan = plans.get(user.id)
@@ -667,33 +860,39 @@ export class StImportPlans extends Context.Service<
                   )
                 })
               if (!same) return yield* changed("The folder changed since this check. Check it again before importing.")
-              // Metadata alone cannot establish equality (mtime can be restored). Hash the
-              // same line-bounded reads, without retaining file bodies or parsing them again.
-              for (const file of plan.files) {
-                if (file.sha256 === null) continue
-                const hash = createHash("sha256")
-                let start = 0
-                for (;;) {
-                  const read = yield* readStFolderFile(
-                    root!,
-                    file.entry.path,
-                    { size: file.entry.size, modifiedMs: file.entry.modifiedMs ?? 0 },
-                    start,
-                    true
-                  ).pipe(
-                    Effect.mapError(() =>
-                      changed("The folder changed since this check. Check it again before importing.")
-                    )
-                  )
-                  hash.update(read.bytes)
-                  start = read.next
-                  if (read.last) break
-                }
-                if (hash.digest("hex") !== file.sha256)
-                  return yield* changed("The folder changed since this check. Check it again before importing.")
-              }
             }
-            return { chatIds: plan.chatIds, stamp: plan.stamp }
+            // What each file read may do. Its bytes are checked as the import reads them, and
+            // its chat in the transaction that writes it: no second read of the folder here.
+            const skipped = new Set(skip)
+            const affected = stPlanAffectedBySkip(
+              plan.files.map((file) => ({ path: file.entry.path, chatId: file.chatId })),
+              skipped
+            )
+            const files = new Map<string, StPlanExpectFile>()
+            for (const file of plan.files) {
+              if (file.status !== "done" || file.sha256 === null) continue
+              // A file of a greeting only is held to its bytes too: the import skips it as well.
+              if (file.target === "bin") continue
+              files.set(file.entry.path, {
+                path: file.entry.path,
+                target: file.target,
+                chatId: file.chatId,
+                recordId: file.branch ? null : file.recordId,
+                parentPath: file.parentPath,
+                sha256: file.sha256,
+                counts: { ...file.counts },
+                digest: file.digest,
+                keepsTip: file.keepsTip,
+                uncertain: affected.has(file.entry.path)
+              })
+            }
+            return {
+              planId: plan.id,
+              files,
+              listed: new Map(plan.entries.map((entry) => [entry.path, entry.size])),
+              stamps: new Map(Object.entries(plan.stamps)),
+              skip: skipped
+            } satisfies StPlanExpect
           })
       })
     })

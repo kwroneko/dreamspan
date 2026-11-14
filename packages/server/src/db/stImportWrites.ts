@@ -43,9 +43,22 @@ import { docHash, searchText } from "./documents.ts"
 import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImportNote, WriteOps } from "./ops.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 import { transaction } from "./tx.ts"
-import { stImportPlanStamp } from "./stImportPlanStamp.ts"
+import { stImportChatStamp } from "./stImportPlanStamp.ts"
+import { addCounts, emptyCounts, emptyDigest, planCounter, sameCounts } from "./stImportPlanCount.ts"
+import {
+  emptyWriteProgress,
+  resolveStNote,
+  stepWriteProgress,
+  stFinishAt,
+  type StStagedBatch,
+  stStateHash
+} from "./stImportProgress.ts"
+import { newEvent, type PlaceEvent } from "./stImportPlace.ts"
 import { StImportPlanChanged } from "@rp/shared/stReimportPlan.ts"
 import { DEFAULT_PERSONA, DEFAULT_PRESET, newChatLcmSettings, ownedPersona, ownedPreset } from "./generationSettings.ts"
+
+type Handlers = Parameters<typeof WriteOps.of>[0]
+type Payload<K extends keyof Handlers> = Parameters<Handlers[K]>[0]
 
 /** State changed locally stays local, including the inverse of an imported switch. */
 const stateTargets = (data: StateEventData): ReadonlyArray<string> => {
@@ -294,6 +307,453 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       )
     )
 
+  /** The record and, unless it goes into `into`, the chat of a chat file's first import. */
+  /** `once`: refused (`ImportLeaseLost`) if the file has a record already, as a confirmed write is. */
+  const startChat = (
+    { userId, source, title, createdAt, chatId: into, lease, parentRecordId, arrival, groupId }: Payload<"StImportStartChat">,
+    once = false
+  ) =>
+    Effect.gen(function* () {
+      const recordId = uuidv7()
+      yield* current(userId, lease, recordId)
+      const at = Date.now()
+      let chatId: string
+      if (into !== null) {
+        chatId = (yield* ownedChat(userId, into)).id
+      } else {
+        chatId = uuidv7()
+        yield* sql`INSERT INTO chats ${sql.insert({
+          id: chatId,
+          owner_user_id: userId,
+          kind: "rp",
+          // Visible from its first message, as unfinished until its import finishes.
+          status: "active",
+          title: unfinishedTitle(title),
+          created_at: createdAt
+        })}`
+        yield* sql`INSERT INTO state_events ${sql.insert({
+          id: uuidv7(),
+          chat_id: chatId,
+          slot_id: null,
+          version_id: null,
+          seq: 0,
+          key: "lcm.settings",
+          // The account default copied, off until the user turns it on (DESIGN §8.1).
+          value_json: JSON.stringify(yield* newChatLcmSettings(sql, userId, false)),
+          origin: "import",
+          created_at: at
+        })}`
+      }
+      if (groupId !== undefined)
+        yield* sql`UPDATE chats SET st_group_id = ${groupId} WHERE id = ${chatId} AND owner_user_id = ${userId}`
+      if (arrival !== undefined) yield* recordChatArrival(sql, userId, chatId, arrival)
+      // An earlier record of this file whose chat was deleted for good names nothing now.
+      yield* sql`DELETE FROM jobs WHERE owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD}
+        AND json_extract(payload_json, '$.source') = ${source}
+        AND NOT EXISTS (SELECT 1 FROM chats c WHERE c.id = json_extract(payload_json, '$.chatId'))`
+      // One record a file: a confirmed write that found none takes the file only if none was made since.
+      if (once) {
+        const [taken] = yield* sql<{ id: string }>`SELECT id FROM jobs WHERE owner_user_id = ${userId}
+          AND kind = ${ST_CHAT_RECORD} AND json_extract(payload_json, '$.source') = ${source} LIMIT 1`
+        if (taken !== undefined) return yield* new ImportLeaseLost({ recordId: taken.id })
+      }
+      const parentPayload = parentRecordId === undefined ? null : yield* record(userId, parentRecordId)
+      if (parentPayload !== null && parentPayload.chatId !== chatId)
+        return yield* new NotFound({ entity: "import record", id: parentRecordId! })
+      const [currentFork] =
+        yield* sql<ForkRow>`SELECT f.* FROM forks f JOIN chats c ON c.current_fork_id = f.id WHERE c.id = ${chatId}`
+      const parent = parentPayload === null ? currentFork : yield* recordFork(parentPayload)
+      const fork =
+        into === null
+          ? parent!
+          : yield* insertFork(sql, {
+              chatId,
+              parent: parent!,
+              baseSlotId: null,
+              tipSlotId: null,
+              at
+            })
+      const payload: RecordPayload = { source, chatId, forkId: fork.id, merged: into !== null, title, lease }
+      yield* sql`INSERT INTO jobs ${sql.insert({
+        id: recordId,
+        owner_user_id: userId,
+        kind: ST_CHAT_RECORD,
+        status: "processing",
+        payload_json: JSON.stringify(payload),
+        created_at: at,
+        updated_at: at
+      })}`
+      return { chatId: chatId as ChatId, recordId }
+    })
+
+  /** When the batch's cards, and the chat, first showed up: from its messages' dates. */
+  const arrivalsOf = (messages: ReadonlyArray<StPlacedMessage>, arrivalRefs: Readonly<Record<string, string>> | undefined) => {
+    const arrivals = new Map<string, number>()
+    for (const message of messages) {
+      if (message.arrivalAt == null) continue
+      const ref = message.speaker === null ? undefined : arrivalRefs?.[message.speaker]
+      if (ref !== undefined) arrivals.set(ref, Math.min(arrivals.get(ref) ?? Infinity, message.arrivalAt))
+    }
+    const firstAt = messages.reduce<number | null>(
+      (first, message) => (message.arrivalAt == null ? first : Math.min(first ?? Infinity, message.arrivalAt)),
+      null
+    )
+    return { arrivals, firstAt }
+  }
+
+  /**
+   * One batch of a chat file into its chat, inside the caller's transaction: `cached`, the
+   * prefix the trie already matched; `prepared`, the batch's slots made ready for a bulk
+   * insert; `inserted`, all of it inserted so (`matching` off). `observe` hears what the matcher
+   * did with each message, as the re-import preview counts it.
+   */
+  const placeBatch = (
+    input: Omit<Payload<"StImportMessages">, "messagesJson" | "hashes">,
+    messages: ReadonlyArray<StPlacedMessage>,
+    cached: ReadonlyArray<SlotId>,
+    prepared: ReturnType<typeof prepareStMessageBatch> | null,
+    observe: (event: PlaceEvent) => void,
+    onInvalidate: () => void
+  ) =>
+    Effect.gen(function* () {
+      const batch = input.matching ? null : prepared
+      const { arrivals, firstAt } = arrivalsOf(messages, input.arrivalRefs)
+      const { userId, chatId, speakers } = input
+      yield* ownedChat(userId, chatId)
+      const payload = yield* leased(userId, input.recordId, chatId, input.lease)
+      const fileFork = yield* recordFork(payload)
+      const previousTip = yield* relocatedEnd(fileFork, payload.advanced ?? payload.end ?? payload.last ?? null)
+      // Every speaker must be one of the user's live cards.
+      const named = [...new Set(Object.values(speakers).filter((id): id is EntityId => id !== null))]
+      for (const entity of named) {
+        const [row] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM entities
+        WHERE id = ${entity} AND owner_user_id = ${userId} AND kind = 'card' AND deleted_at IS NULL`
+        if (row?.n !== 1) return yield* new NotFound({ entity: "entity", id: entity })
+      }
+      let parent: { id: string; depth: number } | null =
+        input.parentSlotId === null ? null : yield* ownedSlot(chatId, input.parentSlotId)
+      if (input.groupId !== undefined)
+        yield* sql`UPDATE chats SET st_group_id = ${input.groupId} WHERE id = ${chatId} AND owner_user_id = ${userId}`
+      if (input.groupArrival !== undefined) yield* recordChatArrival(sql, userId, chatId, input.groupArrival)
+      for (const [ref, at] of arrivals) yield* recordCardArrival(sql, userId, ref, { at, basis: 1 })
+      if (firstAt !== null) yield* recordChatArrival(sql, userId, chatId, { at: firstAt, basis: 1 })
+      let firstAdded: string | null = null
+      let added = 0
+      const slotIds: Array<SlotId> = [...cached]
+      if (cached.length > 0) parent = yield* ownedSlot(chatId, cached.at(-1)!)
+      if (batch !== null) {
+        yield* insertStMessageBatch(sql, batch, {
+          chatId,
+          forkId: fileFork.id,
+          parentId: parent?.id ?? null,
+          depth: parent === null ? 0 : parent.depth + 1
+        })
+        firstAdded = batch.slotIds[0] ?? null
+        slotIds.push(...batch.slotIds)
+        added = batch.slotIds.length
+        for (const index of batch.slotIds.keys()) observe(newEvent(index, false))
+      }
+      // The matcher (stImportPlace.ts), with writes that store. The re-import preview
+      // runs the same matcher with writes that only count.
+      const insertVersion = (slotId: string, ordinal: number, version: StPlacedVersion, message: StPlacedMessage) =>
+        sql<{ id: string }>`INSERT INTO version_records ${sql.insert({
+          id: uuidv7(),
+          slot_id: slotId,
+          authoring_fork_id: fileFork.id,
+          ordinal,
+          status: "complete",
+          speaker_entity_id: message.speaker === null ? null : (speakers[message.speaker] ?? null),
+          writer: message.user ? "human" : "model",
+          content: version.content,
+          macro_mode: "verbatim",
+          origin: "imported",
+          reasoning: version.reasoning,
+          reply_sections: version.sections ? JSON.stringify(version.sections) : null,
+          ...recordedColumns(version.generation),
+          created_at: version.at,
+          updated_at: version.at
+        })} RETURNING id`.pipe(Effect.map(([row]) => row!.id))
+      const rest = batch === null ? messages.slice(cached.length) : []
+      const placed = yield* placeStMessages(
+        sql,
+        {
+          chatId,
+          fileFork,
+          payload,
+          parent,
+          messages: rest,
+          matching: input.matching,
+          strict: input.strict
+        },
+        {
+          copy: (source, parentId) => forkImportSlot(sql, source, parentId, fileFork.id),
+          addVersion: insertVersion,
+          select: (slotId, versionId, shown) =>
+            Effect.andThen(
+              recordHistoryReduction(sql, slotId, shown.content, null, fileFork.id),
+              writeSelect(sql, { id: fileFork.id, chatId }, slotId, versionId, "import")
+            ),
+          newSlot: (message, chosen, under, depth) =>
+            Effect.gen(function* () {
+              const slotId = uuidv7()
+              let selected = ""
+              for (const [ordinal, version] of message.versions.entries()) {
+                const id = yield* insertVersion(slotId, ordinal, version, message)
+                if (ordinal === chosen) selected = id
+              }
+              yield* sql`INSERT INTO slots ${sql.insert({
+                id: slotId,
+                chat_id: chatId,
+                fork_id: fileFork.id,
+                parent_slot_id: under?.id ?? null,
+                depth,
+                selected_version_id: selected,
+                context_excluded: message.hidden ? 1 : 0,
+                created_at: message.versions[chosen]!.at
+              })}`
+              return slotId
+            }),
+          bulk:
+            prepared === null
+              ? null
+              : (under) =>
+                  Effect.as(
+                    insertStMessageBatch(sql, prepared, {
+                      chatId,
+                      forkId: fileFork.id,
+                      parentId: under?.id ?? null,
+                      depth: under === null ? 0 : under.depth + 1
+                    }),
+                    prepared.slotIds
+                  )
+        },
+        // Indices among the messages given: the trie's matched prefix comes first.
+        (event) => observe({ ...event, index: event.index + cached.length })
+      ).pipe(
+        // A batch that fails part way rolls back; its cached prefix is dropped all the same.
+        Effect.onError(() => Effect.sync(onInvalidate))
+      )
+      if (placed.invalidatesPrefix) onInvalidate()
+      firstAdded ??= placed.firstAdded
+      added += placed.added
+      slotIds.push(...placed.slotIds)
+      const { branchDeleted, keepTip, matching, updated, differing } = placed
+      // The import is alive (the sweep goes by a record's last activity), and where the
+      // file first went its own way is kept, for a run that resumes this one.
+      // A new chat's leaf follows its messages, so a chat whose import stops shows them,
+      // unless the user moved it: only from unset, or where the import last put it.
+      let advanced = payload.advanced ?? null
+      const tip = slotIds.length === 0 ? undefined : yield* relocatedEnd(fileFork, slotIds.at(-1)!)
+      if (
+        (input.advanceLeaf || payload.end == null || added > 0 || payload.advanced != null) &&
+        !branchDeleted &&
+        !keepTip &&
+        tip !== undefined &&
+        fileFork.deleted_at === null &&
+        (fileFork.tip_slot_id === null || fileFork.tip_slot_id === previousTip)
+      ) {
+        yield* sql`UPDATE forks SET tip_slot_id = ${tip}, row_version = row_version + 1 WHERE id = ${fileFork.id}`
+        advanced = tip
+      }
+      const progress: RecordPayload = {
+        ...payload,
+        forkId: fileFork.id,
+        firstAdded: payload.firstAdded ?? firstAdded,
+        advanced,
+        branchDeleted,
+        keepTip,
+        forkPrior: payload.forkPrior ?? null,
+        last: slotIds.at(-1) ?? payload.last ?? null
+      }
+      yield* sql`UPDATE jobs SET updated_at = ${Date.now()}, payload_json = ${JSON.stringify(progress)}
+        WHERE id = ${input.recordId}`
+      return { slotIds, matching, added, updated, differing, keepTip }
+    })
+
+  /** A chat file's finish (`StImportFinishChat`), inside the caller's transaction. */
+  const finishChat = (input: Payload<"StImportFinishChat">) =>
+    Effect.gen(function* () {
+      const { userId, chatId } = input
+      yield* ownedChat(userId, chatId)
+      const payload = yield* leased(userId, input.recordId, chatId, input.lease)
+      const fileFork = yield* recordFork(payload)
+      if (input.position !== null) yield* ownedSlot(chatId, input.position)
+      const target = input.leaf === null ? null : yield* ownedSlot(chatId, input.leaf)
+      if (input.end !== null) yield* ownedSlot(chatId, input.end)
+      // Include dormant positional choices too: a later restore or swipe must retain
+      // them. The lineage and suppression rules keep other forks' choices out.
+      const local = yield* sql<{ key: StateEventData["key"]; value_json: string }>`
+        ${pathEvents(sql, chatId, fileFork.tip_slot_id)}
+        SELECT e.key, e.value_json FROM path_events e WHERE e.origin <> 'import'
+          AND e.scope IS NULL AND ${eventApplies(sql, fileFork.id, "e")}`
+      const localTargets = new Set(
+        local.flatMap((e) => stateTargets({ key: e.key, value: JSON.parse(e.value_json) } as StateEventData))
+      )
+      const keepNote = Effect.fnUntraced(function* (id: string | undefined) {
+        if (id === undefined) return false
+        if (localTargets.has(`note:${id}`)) return true
+        const [row] = yield* sql<{ changed: number }>`SELECT e.deleted_at IS NOT NULL OR EXISTS (
+          SELECT 1 FROM entity_refs r JOIN entity_revisions h ON h.id = r.head_revision_id
+          WHERE r.entity_id = e.id AND h.origin <> 'import'
+        ) AS changed FROM entities e WHERE e.id = ${id}`
+        return row?.changed === 1
+      })
+      const notes: Record<string, EntityId> = {
+        ...input.previousNotes,
+        ...(payload.notes as Record<string, EntityId> | undefined)
+      }
+      for (const note of input.notes) {
+        const replaced = notes[note.kind]
+        if (yield* keepNote(replaced)) continue
+        if (replaced !== undefined) {
+          // The chat already has this ST note, from the file's parent or an earlier import of
+          // it: its new text is a revision of that note bound in this file's fork from here,
+          // as an edit there is (DESIGN §3.4), so each fork shows its own file's text and
+          // the chat has one such note. A new note here showed up in every fork, switched off
+          // in all but this one (owner, 2026-11-01).
+          const [ref] = yield* sql<{ head_revision_id: string }>`
+            SELECT head_revision_id FROM entity_refs WHERE entity_id = ${replaced}`
+          const revision = yield* insertNoteRevisions(
+            replaced,
+            chatId,
+            payload.source,
+            note,
+            ref!.head_revision_id,
+            Date.now()
+          )
+          yield* insertEvent(
+            userId,
+            chatId,
+            input.position,
+            { key: "note.binding", value: { note: replaced, revision: revision as never } },
+            fileFork.id
+          )
+          yield* insertEvent(
+            userId,
+            chatId,
+            input.position,
+            { key: note.activate ? "note.activate" : "note.deactivate", value: { note: replaced } },
+            fileFork.id
+          )
+          continue
+        }
+        const entity = yield* insertNote(userId, chatId, payload.source, note)
+        if (note.activate) {
+          yield* insertEvent(
+            userId,
+            chatId,
+            input.position,
+            { key: "note.activate", value: { note: entity } },
+            fileFork.id
+          )
+        }
+        notes[note.kind] = entity
+      }
+      // A note the file no longer has (an emptied author's note) stops applying.
+      for (const kind of input.removedNotes) {
+        const gone = notes[kind]
+        if (gone === undefined) continue
+        if (yield* keepNote(gone)) continue
+        yield* insertEvent(
+          userId,
+          chatId,
+          input.position,
+          { key: "note.deactivate", value: { note: gone } },
+          fileFork.id
+        )
+        delete notes[kind]
+      }
+      for (const event of input.events)
+        if (!stateTargets(event).some((target) => localTargets.has(target)))
+          yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
+      // ST records a file's cast separately from its versions. Pin that imported cast
+      // once; a later re-import or a local cast change must not rewrite old participation.
+      const importedCast = foldState(input.events.map((data) => ({ scope: null, data }))).participants
+      yield* sql`${pathSegments(sql, chatId, input.end, null)}
+        UPDATE version_records SET cast_json = ${JSON.stringify(importedCast)}
+        WHERE origin = 'imported' AND cast_json IS NULL AND slot_id IN (
+          SELECT s.id FROM segments g CROSS JOIN slots s
+          WHERE s.chat_id = ${chatId} AND s.chain_id = g.chain_id AND s.depth BETWEEN g.lo AND g.hi
+        )`
+      // Advance only this file's fork, preserving a continuation made locally.
+      if (
+        fileFork.deleted_at === null &&
+        !payload.keepTip &&
+        target?.deleted_at === null &&
+        (fileFork.tip_slot_id === null ||
+          fileFork.tip_slot_id === (yield* relocatedEnd(fileFork, payload.advanced ?? payload.end ?? null)))
+      )
+        yield* sql`UPDATE forks SET tip_slot_id = ${input.leaf}, row_version = row_version + 1 WHERE id = ${fileFork.id} AND tip_slot_id IS NOT ${input.leaf}`
+      if (!payload.merged && payload.title !== undefined)
+        yield* sql`UPDATE chats SET title = ${payload.title} WHERE id = ${chatId} AND title = ${unfinishedTitle(payload.title)}`
+      yield* sql`UPDATE chats SET status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+        last_message_at = max(coalesce(last_message_at, 0), coalesce(${input.lastMessageAt}, 0)), row_version = row_version + 1
+        WHERE id = ${chatId}`
+      const updated: RecordPayload = {
+        ...payload,
+        forkId: fileFork.id,
+        stCurrent: input.stCurrent === true,
+        ...(input.fork === null ? {} : { parentRecordId: input.fork.parentRecordId }),
+        sha256: input.sha256,
+        state: input.stateJson,
+        notes,
+        end: input.end,
+        firstAdded: null,
+        advanced: null,
+        lease: null,
+        forkPrior: null,
+        prior: null,
+        keepTip: false
+      }
+      yield* sql`UPDATE jobs SET status = 'complete', payload_json = ${JSON.stringify(updated)}, updated_at = ${Date.now()}
+        WHERE id = ${input.recordId}`
+      yield* openOnStCurrent(userId, chatId, input.stCurrent === true ? fileFork.id : null)
+      // The shell's summaries of the finished chat, last, at the stamps this write left.
+      yield* refreshChatSummaries(sql, userId, chatId)
+      return { notes }
+    })
+
+  /** Makes `lease` the run that may write a recorded file's chat (`StImportClaim`). */
+  const claim = ({ userId, recordId, lease, parentRecordId }: Payload<"StImportClaim">) =>
+    Effect.gen(function* () {
+      const [row] = yield* sql<{ status: string; payload_json: string; deleted_at: number | null }>`
+        SELECT j.status, j.payload_json, coalesce(c.deleted_at, f.deleted_at) AS deleted_at FROM jobs j
+        JOIN chats c ON c.id = json_extract(j.payload_json, '$.chatId') AND c.owner_user_id = ${userId}
+        LEFT JOIN forks f ON f.id = json_extract(j.payload_json, '$.forkId')
+        WHERE j.id = ${recordId} AND j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}`
+      if (!row) return yield* new NotFound({ entity: "import record", id: recordId })
+      // A run that's over takes nothing; the current one takes its own lease, or one of a
+      // run that's over, whatever the record's state.
+      yield* current(userId, lease, recordId)
+      const payload = JSON.parse(row.payload_json) as RecordPayload
+      const prior = payload.last ?? payload.end ?? null
+      const fileFork = yield* recordFork(payload)
+      const parentId = parentRecordId ?? payload.parentRecordId
+      if (parentRecordId !== undefined) yield* record(userId, parentRecordId)
+      yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({
+        ...payload,
+        lease,
+        prior,
+        forkId: fileFork.id,
+        ...(parentId === undefined ? {} : { parentRecordId: parentId }),
+        branchDeleted: false
+      })}, updated_at = ${Date.now()}
+        WHERE id = ${recordId}`
+      return {
+        forkId: fileFork.id as ForkId,
+        recordId,
+        source: payload.source,
+        chatId: payload.chatId as ChatId,
+        complete: row.status === "complete",
+        binned: row.deleted_at !== null,
+        stateJson: payload.state ?? "null",
+        notes: (payload.notes ?? {}) as Record<string, EntityId>,
+        end: (payload.end ?? null) as SlotId | null,
+        merged: payload.merged ?? false,
+        firstAdded: (payload.firstAdded ?? null) as SlotId | null
+      }
+    })
+
   const handlers = {
     StImportDefaultPersona: ({ userId, importId, entityId }) =>
       Effect.gen(function* () {
@@ -325,14 +785,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         if (stored.tail === undefined) yield* putUserSetting(sql, userId, "generation.lcm", { ...stored, tail: prompt })
       }).pipe(transaction(sql, "StImportSummarySettings")),
 
-    StImportBegin: ({ userId, importId, expect }) =>
+    StImportBegin: ({ userId, importId }) =>
       Effect.gen(function* () {
-        // The re-import preview the user confirmed: refused, before anything is written, when
-        // the chats it was worked out against changed since (stImportPlanStamp.ts).
-        if (expect !== undefined && (yield* stImportPlanStamp(sql, userId, expect.chatIds)) !== expect.stamp)
-          return yield* new StImportPlanChanged({
-            message: "Your chats changed since this check, so it was worked out again. Look it over, then import."
-          })
         const at = Date.now()
         const payload = JSON.stringify({ importId })
         const updated = yield* sql`UPDATE jobs SET payload_json = ${payload}, updated_at = ${at}
@@ -348,79 +802,16 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             updated_at: at
           })}`
         }
+        // What the runs before held for a confirmed re-import goes with them.
+        yield* sql`DELETE FROM st_import_stage WHERE owner_user_id = ${userId}`
       }).pipe(transaction(sql, "StImportBegin")),
 
-    StImportStartChat: ({ userId, source, title, createdAt, chatId: into, lease, parentRecordId, arrival, groupId }) =>
-      Effect.gen(function* () {
-        const recordId = uuidv7()
-        yield* current(userId, lease, recordId)
-        const at = Date.now()
-        let chatId: string
-        if (into !== null) {
-          chatId = (yield* ownedChat(userId, into)).id
-        } else {
-          chatId = uuidv7()
-          yield* sql`INSERT INTO chats ${sql.insert({
-            id: chatId,
-            owner_user_id: userId,
-            kind: "rp",
-            // Visible from its first message, as unfinished until its import finishes.
-            status: "active",
-            title: unfinishedTitle(title),
-            created_at: createdAt
-          })}`
-          yield* sql`INSERT INTO state_events ${sql.insert({
-            id: uuidv7(),
-            chat_id: chatId,
-            slot_id: null,
-            version_id: null,
-            seq: 0,
-            key: "lcm.settings",
-            // The account default copied, off until the user turns it on (DESIGN §8.1).
-            value_json: JSON.stringify(yield* newChatLcmSettings(sql, userId, false)),
-            origin: "import",
-            created_at: at
-          })}`
-        }
-        if (groupId !== undefined)
-          yield* sql`UPDATE chats SET st_group_id = ${groupId} WHERE id = ${chatId} AND owner_user_id = ${userId}`
-        if (arrival !== undefined) yield* recordChatArrival(sql, userId, chatId, arrival)
-        // An earlier record of this file whose chat was deleted for good names nothing now.
-        yield* sql`DELETE FROM jobs WHERE owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD}
-          AND json_extract(payload_json, '$.source') = ${source}
-          AND NOT EXISTS (SELECT 1 FROM chats c WHERE c.id = json_extract(payload_json, '$.chatId'))`
-        const parentPayload = parentRecordId === undefined ? null : yield* record(userId, parentRecordId)
-        if (parentPayload !== null && parentPayload.chatId !== chatId)
-          return yield* new NotFound({ entity: "import record", id: parentRecordId! })
-        const [currentFork] =
-          yield* sql<ForkRow>`SELECT f.* FROM forks f JOIN chats c ON c.current_fork_id = f.id WHERE c.id = ${chatId}`
-        const parent = parentPayload === null ? currentFork : yield* recordFork(parentPayload)
-        const fork =
-          into === null
-            ? parent!
-            : yield* insertFork(sql, {
-                chatId,
-                parent: parent!,
-                baseSlotId: null,
-                tipSlotId: null,
-                at
-              })
-        const payload: RecordPayload = { source, chatId, forkId: fork.id, merged: into !== null, title, lease }
-        yield* sql`INSERT INTO jobs ${sql.insert({
-          id: recordId,
-          owner_user_id: userId,
-          kind: ST_CHAT_RECORD,
-          status: "processing",
-          payload_json: JSON.stringify(payload),
-          created_at: at,
-          updated_at: at
-        })}`
-        return { chatId: chatId as ChatId, recordId }
-      }).pipe(
+    StImportStartChat: (input) =>
+      startChat(input).pipe(
         transaction(sql, "StImportStartChat"),
         Effect.tap((target) =>
           Effect.sync(() => {
-            if (into === null) prefix.created(target.chatId)
+            if (input.chatId === null) prefix.created(target.chatId)
           })
         )
       ),
@@ -438,171 +829,17 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           !input.matching || (input.hashes !== undefined && prefix.fresh(input.chatId))
             ? prepareStMessageBatch(messages.slice(cached.length), input.speakers)
             : null
-        const batch = input.matching ? null : prepared
-        const arrivals = new Map<string, number>()
-        for (const message of messages) {
-          if (message.arrivalAt == null) continue
-          const ref = message.speaker === null ? undefined : input.arrivalRefs?.[message.speaker]
-          if (ref !== undefined) arrivals.set(ref, Math.min(arrivals.get(ref) ?? Infinity, message.arrivalAt))
-        }
-        const firstAt = messages.reduce<number | null>(
-          (first, message) => (message.arrivalAt == null ? first : Math.min(first ?? Infinity, message.arrivalAt)),
-          null
-        )
         let invalidatesPrefix = false
-        const result = yield* Effect.gen(function* () {
-          const { userId, chatId, speakers } = input
-          yield* ownedChat(userId, chatId)
-          const payload = yield* leased(userId, input.recordId, chatId, input.lease)
-          const fileFork = yield* recordFork(payload)
-          const previousTip = yield* relocatedEnd(fileFork, payload.advanced ?? payload.end ?? payload.last ?? null)
-          // Every speaker must be one of the user's live cards.
-          const named = [...new Set(Object.values(speakers).filter((id): id is EntityId => id !== null))]
-          for (const entity of named) {
-            const [row] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM entities
-            WHERE id = ${entity} AND owner_user_id = ${userId} AND kind = 'card' AND deleted_at IS NULL`
-            if (row?.n !== 1) return yield* new NotFound({ entity: "entity", id: entity })
+        const result = yield* placeBatch(
+          input,
+          messages,
+          cached,
+          prepared,
+          () => {},
+          () => {
+            invalidatesPrefix = true
           }
-          let parent: { id: string; depth: number } | null =
-            input.parentSlotId === null ? null : yield* ownedSlot(chatId, input.parentSlotId)
-          if (input.groupId !== undefined)
-            yield* sql`UPDATE chats SET st_group_id = ${input.groupId} WHERE id = ${chatId} AND owner_user_id = ${userId}`
-          if (input.groupArrival !== undefined) yield* recordChatArrival(sql, userId, chatId, input.groupArrival)
-          for (const [ref, at] of arrivals) yield* recordCardArrival(sql, userId, ref, { at, basis: 1 })
-          if (firstAt !== null) yield* recordChatArrival(sql, userId, chatId, { at: firstAt, basis: 1 })
-          let firstAdded: string | null = null
-          let added = 0
-          const slotIds: Array<SlotId> = [...cached]
-          if (cached.length > 0) parent = yield* ownedSlot(chatId, cached.at(-1)!)
-          if (batch !== null) {
-            yield* insertStMessageBatch(sql, batch, {
-              chatId,
-              forkId: fileFork.id,
-              parentId: parent?.id ?? null,
-              depth: parent === null ? 0 : parent.depth + 1
-            })
-            firstAdded = batch.slotIds[0] ?? null
-            slotIds.push(...batch.slotIds)
-            added = batch.slotIds.length
-          }
-          // The matcher (stImportPlace.ts), with writes that store. The re-import preview
-          // runs the same matcher with writes that only count.
-          const insertVersion = (slotId: string, ordinal: number, version: StPlacedVersion, message: StPlacedMessage) =>
-            sql<{ id: string }>`INSERT INTO version_records ${sql.insert({
-              id: uuidv7(),
-              slot_id: slotId,
-              authoring_fork_id: fileFork.id,
-              ordinal,
-              status: "complete",
-              speaker_entity_id: message.speaker === null ? null : (speakers[message.speaker] ?? null),
-              writer: message.user ? "human" : "model",
-              content: version.content,
-              macro_mode: "verbatim",
-              origin: "imported",
-              reasoning: version.reasoning,
-              reply_sections: version.sections ? JSON.stringify(version.sections) : null,
-              ...recordedColumns(version.generation),
-              created_at: version.at,
-              updated_at: version.at
-            })} RETURNING id`.pipe(Effect.map(([row]) => row!.id))
-          const placed = yield* placeStMessages(
-            sql,
-            {
-              chatId,
-              fileFork,
-              payload,
-              parent,
-              messages: batch === null ? messages.slice(cached.length) : [],
-              matching: input.matching,
-              strict: input.strict
-            },
-            {
-              copy: (source, parentId) => forkImportSlot(sql, source, parentId, fileFork.id),
-              addVersion: insertVersion,
-              select: (slotId, versionId, shown) =>
-                Effect.andThen(
-                  recordHistoryReduction(sql, slotId, shown.content, null, fileFork.id),
-                  writeSelect(sql, { id: fileFork.id, chatId }, slotId, versionId, "import")
-                ),
-              newSlot: (message, chosen, under, depth) =>
-                Effect.gen(function* () {
-                  const slotId = uuidv7()
-                  let selected = ""
-                  for (const [ordinal, version] of message.versions.entries()) {
-                    const id = yield* insertVersion(slotId, ordinal, version, message)
-                    if (ordinal === chosen) selected = id
-                  }
-                  yield* sql`INSERT INTO slots ${sql.insert({
-                    id: slotId,
-                    chat_id: chatId,
-                    fork_id: fileFork.id,
-                    parent_slot_id: under?.id ?? null,
-                    depth,
-                    selected_version_id: selected,
-                    context_excluded: message.hidden ? 1 : 0,
-                    created_at: message.versions[chosen]!.at
-                  })}`
-                  return slotId
-                }),
-              bulk:
-                prepared === null
-                  ? null
-                  : (under) =>
-                      Effect.as(
-                        insertStMessageBatch(sql, prepared, {
-                          chatId,
-                          forkId: fileFork.id,
-                          parentId: under?.id ?? null,
-                          depth: under === null ? 0 : under.depth + 1
-                        }),
-                        prepared.slotIds
-                      )
-            },
-            () => {}
-          ).pipe(
-            // A batch that fails part way rolls back; its cached prefix is dropped all the same.
-            Effect.onError(() =>
-              Effect.sync(() => {
-                invalidatesPrefix = true
-              })
-            )
-          )
-          invalidatesPrefix = placed.invalidatesPrefix
-          firstAdded ??= placed.firstAdded
-          added += placed.added
-          slotIds.push(...placed.slotIds)
-          const { branchDeleted, keepTip, matching, updated, differing } = placed
-          // The import is alive (the sweep goes by a record's last activity), and where the
-          // file first went its own way is kept, for a run that resumes this one.
-          // A new chat's leaf follows its messages, so a chat whose import stops shows them,
-          // unless the user moved it: only from unset, or where the import last put it.
-          let advanced = payload.advanced ?? null
-          const tip = slotIds.length === 0 ? undefined : yield* relocatedEnd(fileFork, slotIds.at(-1)!)
-          if (
-            (input.advanceLeaf || payload.end == null || added > 0 || payload.advanced != null) &&
-            !branchDeleted &&
-            !keepTip &&
-            tip !== undefined &&
-            fileFork.deleted_at === null &&
-            (fileFork.tip_slot_id === null || fileFork.tip_slot_id === previousTip)
-          ) {
-            yield* sql`UPDATE forks SET tip_slot_id = ${tip}, row_version = row_version + 1 WHERE id = ${fileFork.id}`
-            advanced = tip
-          }
-          const progress: RecordPayload = {
-            ...payload,
-            forkId: fileFork.id,
-            firstAdded: payload.firstAdded ?? firstAdded,
-            advanced,
-            branchDeleted,
-            keepTip,
-            forkPrior: payload.forkPrior ?? null,
-            last: slotIds.at(-1) ?? payload.last ?? null
-          }
-          yield* sql`UPDATE jobs SET updated_at = ${Date.now()}, payload_json = ${JSON.stringify(progress)}
-            WHERE id = ${input.recordId}`
-          return { slotIds, matching, added, updated, differing }
-        }).pipe(
+        ).pipe(
           transaction(sql, "StImportMessages"),
           // Keep cache work outside the transaction, including when the request is
           // interrupted after committing or a later statement rolls the batch back.
@@ -613,150 +850,129 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           )
         )
         prefix.remember(input.chatId, input.parentSlotId, messages, input.hashes, input.speakers, result.slotIds)
-        return result
+        const { slotIds, matching, added, updated, differing } = result
+        return { slotIds, matching, added, updated, differing }
       }),
 
-    StImportFinishChat: (input) =>
+    StImportFinishChat: (input) => finishChat(input).pipe(transaction(sql, "StImportFinishChat")),
+
+    StImportStage: ({ userId, lease, path, seq, batchJson }) =>
       Effect.gen(function* () {
-        const { userId, chatId } = input
-        yield* ownedChat(userId, chatId)
-        const payload = yield* leased(userId, input.recordId, chatId, input.lease)
-        const fileFork = yield* recordFork(payload)
-        if (input.position !== null) yield* ownedSlot(chatId, input.position)
-        const target = input.leaf === null ? null : yield* ownedSlot(chatId, input.leaf)
-        if (input.end !== null) yield* ownedSlot(chatId, input.end)
-        // Include dormant positional choices too: a later restore or swipe must retain
-        // them. The lineage and suppression rules keep other forks' choices out.
-        const local = yield* sql<{ key: StateEventData["key"]; value_json: string }>`
-          ${pathEvents(sql, chatId, fileFork.tip_slot_id)}
-          SELECT e.key, e.value_json FROM path_events e WHERE e.origin <> 'import'
-            AND e.scope IS NULL AND ${eventApplies(sql, fileFork.id, "e")}`
-        const localTargets = new Set(
-          local.flatMap((e) => stateTargets({ key: e.key, value: JSON.parse(e.value_json) } as StateEventData))
-        )
-        const keepNote = Effect.fnUntraced(function* (id: string | undefined) {
-          if (id === undefined) return false
-          if (localTargets.has(`note:${id}`)) return true
-          const [row] = yield* sql<{ changed: number }>`SELECT e.deleted_at IS NOT NULL OR EXISTS (
-            SELECT 1 FROM entity_refs r JOIN entity_revisions h ON h.id = r.head_revision_id
-            WHERE r.entity_id = e.id AND h.origin <> 'import'
-          ) AS changed FROM entities e WHERE e.id = ${id}`
-          return row?.changed === 1
-        })
-        const notes: Record<string, EntityId> = {
-          ...input.previousNotes,
-          ...(payload.notes as Record<string, EntityId> | undefined)
+        yield* current(userId, lease, path)
+        if (batchJson === null || seq === 0)
+          yield* sql`DELETE FROM st_import_stage WHERE import_id = ${lease} AND path = ${path}`
+        if (batchJson !== null)
+          yield* sql`INSERT INTO st_import_stage ${sql.insert({
+            owner_user_id: userId,
+            import_id: lease,
+            path,
+            seq,
+            batch_json: batchJson
+          })}`
+      }).pipe(transaction(sql, "StImportStage")),
+
+    StImportCommitChat: (input) =>
+      Effect.gen(function* () {
+        const { userId, lease, path, finish } = input
+        const changed = () =>
+          new StImportPlanChanged({ message: "Changed since the check. Not imported." })
+        yield* current(userId, lease, path)
+        // The chat as the check read it, or as this run's own writes left it: else nothing.
+        if ((yield* stImportChatStamp(sql, userId, input.chatId)) !== input.stamp) return yield* changed()
+        const recordId =
+          input.claim !== null
+            ? (yield* claim({ userId, lease, ...input.claim })).recordId
+            : input.start !== null
+              ? (yield* startChat({ userId, lease, source: path, chatId: input.chatId, ...input.start }, true)).recordId
+              : yield* Effect.die(new Error("a commit names neither a record nor a start"))
+        const staged = yield* sql<{ batch_json: string }>`SELECT batch_json FROM st_import_stage
+          WHERE import_id = ${lease} AND path = ${path} ORDER BY seq`
+        if (staged.length !== input.batches) return yield* changed()
+        const progress = emptyWriteProgress(input.matching)
+        const slotIds: Array<SlotId> = []
+        const counts = emptyCounts()
+        let digest = emptyDigest
+        let keepsTip = false
+        for (const row of staged) {
+          const batch = JSON.parse(row.batch_json) as StStagedBatch
+          const messages = yield* Schema.decodeEffect(StPlacedMessages)(batch.messagesJson).pipe(Effect.orDie)
+          const counter = planCounter(messages, progress.written, 0, digest)
+          const written = yield* placeBatch(
+            {
+              userId,
+              chatId: input.chatId,
+              recordId,
+              lease,
+              advanceLeaf: input.advanceLeaf,
+              strict: input.strict,
+              parentSlotId: progress.cursor,
+              matching: progress.matching,
+              speakers: batch.speakers,
+              ...(batch.arrivalRefs === undefined ? {} : { arrivalRefs: batch.arrivalRefs }),
+              ...(input.groupArrival === undefined ? {} : { groupArrival: input.groupArrival }),
+              ...(input.groupId === undefined ? {} : { groupId: input.groupId })
+            },
+            messages,
+            [],
+            progress.matching ? null : prepareStMessageBatch(messages, batch.speakers),
+            counter.observe,
+            () => {}
+          )
+          stepWriteProgress(progress, written, finish.prevEnd, finish.hiddenRun, [])
+          slotIds.push(...written.slotIds)
+          addCounts(counts, counter.counts)
+          digest = counter.digest()
+          keepsTip = written.keepTip
         }
-        for (const note of input.notes) {
-          const replaced = notes[note.kind]
-          if (yield* keepNote(replaced)) continue
-          if (replaced !== undefined) {
-            // The chat already has this ST note, from the file's parent or an earlier import of
-            // it: its new text is a revision of that note bound in this file's fork from here,
-            // as an edit there is (DESIGN §3.4), so each fork shows its own file's text and
-            // the chat has one such note. A new note here showed up in every fork, switched off
-            // in all but this one (owner, 2026-11-01).
-            const [ref] = yield* sql<{ head_revision_id: string }>`
-              SELECT head_revision_id FROM entity_refs WHERE entity_id = ${replaced}`
-            const revision = yield* insertNoteRevisions(
-              replaced,
-              chatId,
-              payload.source,
-              note,
-              ref!.head_revision_id,
-              Date.now()
-            )
-            yield* insertEvent(
-              userId,
-              chatId,
-              input.position,
-              { key: "note.binding", value: { note: replaced, revision: revision as never } },
-              fileFork.id
-            )
-            yield* insertEvent(
-              userId,
-              chatId,
-              input.position,
-              { key: note.activate ? "note.activate" : "note.deactivate", value: { note: replaced } },
-              fileFork.id
-            )
+        // Placed as the check showed, message by message, or not at all.
+        if (
+          input.expect !== null &&
+          (!sameCounts(counts, input.expect.counts) || digest !== input.expect.digest || keepsTip !== input.expect.keepsTip)
+        )
+          return yield* changed()
+        const { position, applies, leaf } = stFinishAt({ ...finish, ...progress })
+        // The state, with the summary named by the slots its messages went to.
+        const state = JSON.parse(finish.stateJson) as Record<string, unknown> | null
+        const prevState = JSON.parse(finish.prevStateJson) as Record<string, unknown> | null
+        const notes: Array<StImportNote> = []
+        for (const note of finish.notes) {
+          if (note.kind !== "imported_summary") {
+            notes.push(note)
             continue
           }
-          const entity = yield* insertNote(userId, chatId, payload.source, note)
-          if (note.activate) {
-            yield* insertEvent(
-              userId,
-              chatId,
-              input.position,
-              { key: "note.activate", value: { note: entity } },
-              fileFork.id
-            )
-          }
-          notes[note.kind] = entity
+          const resolved = resolveStNote(note, slotIds)
+          const { modifiedAt: _dated, ...mapped } = resolved
+          const summary = stStateHash(mapped)
+          if (state !== null) state.summary = summary
+          if (summary !== prevState?.summary) notes.push(resolved)
         }
-        // A note the file no longer has (an emptied author's note) stops applying.
-        for (const kind of input.removedNotes) {
-          const gone = notes[kind]
-          if (gone === undefined) continue
-          if (yield* keepNote(gone)) continue
-          yield* insertEvent(
-            userId,
-            chatId,
-            input.position,
-            { key: "note.deactivate", value: { note: gone } },
-            fileFork.id
-          )
-          delete notes[kind]
+        const finished = yield* finishChat({
+          userId,
+          chatId: input.chatId,
+          recordId,
+          lease,
+          position,
+          events: applies ? finish.events : [],
+          notes: applies ? notes : [],
+          removedNotes: applies ? finish.removedNotes : [],
+          previousNotes: finish.previousNotes,
+          leaf,
+          end: progress.cursor,
+          lastMessageAt: finish.lastMessageAt,
+          sha256: finish.sha256,
+          stateJson: applies ? JSON.stringify(state) : finish.prevStateJson,
+          fork: finish.fork,
+          stCurrent: finish.stCurrent
+        })
+        yield* sql`DELETE FROM st_import_stage WHERE import_id = ${lease} AND path = ${path}`
+        const stamp = yield* stImportChatStamp(sql, userId, input.chatId)
+        const slots: Record<string, SlotId> = {}
+        for (const index of input.slotsAt) {
+          const slot = slotIds[index]
+          if (slot !== undefined) slots[index] = slot
         }
-        for (const event of input.events)
-          if (!stateTargets(event).some((target) => localTargets.has(target)))
-            yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
-        // ST records a file's cast separately from its versions. Pin that imported cast
-        // once; a later re-import or a local cast change must not rewrite old participation.
-        const importedCast = foldState(input.events.map((data) => ({ scope: null, data }))).participants
-        yield* sql`${pathSegments(sql, chatId, input.end, null)}
-          UPDATE version_records SET cast_json = ${JSON.stringify(importedCast)}
-          WHERE origin = 'imported' AND cast_json IS NULL AND slot_id IN (
-            SELECT s.id FROM segments g CROSS JOIN slots s
-            WHERE s.chat_id = ${chatId} AND s.chain_id = g.chain_id AND s.depth BETWEEN g.lo AND g.hi
-          )`
-        // Advance only this file's fork, preserving a continuation made locally.
-        if (
-          fileFork.deleted_at === null &&
-          !payload.keepTip &&
-          target?.deleted_at === null &&
-          (fileFork.tip_slot_id === null ||
-            fileFork.tip_slot_id === (yield* relocatedEnd(fileFork, payload.advanced ?? payload.end ?? null)))
-        )
-          yield* sql`UPDATE forks SET tip_slot_id = ${input.leaf}, row_version = row_version + 1 WHERE id = ${fileFork.id} AND tip_slot_id IS NOT ${input.leaf}`
-        if (!payload.merged && payload.title !== undefined)
-          yield* sql`UPDATE chats SET title = ${payload.title} WHERE id = ${chatId} AND title = ${unfinishedTitle(payload.title)}`
-        yield* sql`UPDATE chats SET status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
-          last_message_at = max(coalesce(last_message_at, 0), coalesce(${input.lastMessageAt}, 0)), row_version = row_version + 1
-          WHERE id = ${chatId}`
-        const updated: RecordPayload = {
-          ...payload,
-          forkId: fileFork.id,
-          stCurrent: input.stCurrent === true,
-          ...(input.fork === null ? {} : { parentRecordId: input.fork.parentRecordId }),
-          sha256: input.sha256,
-          state: input.stateJson,
-          notes,
-          end: input.end,
-          firstAdded: null,
-          advanced: null,
-          lease: null,
-          forkPrior: null,
-          prior: null,
-          keepTip: false
-        }
-        yield* sql`UPDATE jobs SET status = 'complete', payload_json = ${JSON.stringify(updated)}, updated_at = ${Date.now()}
-          WHERE id = ${input.recordId}`
-        yield* openOnStCurrent(userId, chatId, input.stCurrent === true ? fileFork.id : null)
-        // The shell's summaries of the finished chat, last, at the stamps this write left.
-        yield* refreshChatSummaries(sql, userId, chatId)
-        return { notes }
-      }).pipe(transaction(sql, "StImportFinishChat")),
+        return { chatId: input.chatId, recordId, stamp: stamp!, progress: { ...progress }, slots, notes: finished.notes }
+      }).pipe(transaction(sql, "StImportCommitChat")),
 
     // The import's hidden messages up to a slot shown again, in the fork through it (a `hide`
     // row of its own, spec/FORK-INDEPENDENCE-DELTA.md §2.4): other forks keep their hides.
@@ -782,45 +998,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         return { unhidden: rows.length }
       }).pipe(inFork(sql, chatId, forkId, throughSlotId), transaction(sql, "StImportUnhide")),
 
-    StImportClaim: ({ userId, recordId, lease, parentRecordId }) =>
-      Effect.gen(function* () {
-        const [row] = yield* sql<{ status: string; payload_json: string; deleted_at: number | null }>`
-          SELECT j.status, j.payload_json, coalesce(c.deleted_at, f.deleted_at) AS deleted_at FROM jobs j
-          JOIN chats c ON c.id = json_extract(j.payload_json, '$.chatId') AND c.owner_user_id = ${userId}
-          LEFT JOIN forks f ON f.id = json_extract(j.payload_json, '$.forkId')
-          WHERE j.id = ${recordId} AND j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}`
-        if (!row) return yield* new NotFound({ entity: "import record", id: recordId })
-        // A run that's over takes nothing; the current one takes its own lease, or one of a
-        // run that's over, whatever the record's state.
-        yield* current(userId, lease, recordId)
-        const payload = JSON.parse(row.payload_json) as RecordPayload
-        const prior = payload.last ?? payload.end ?? null
-        const fileFork = yield* recordFork(payload)
-        const parentId = parentRecordId ?? payload.parentRecordId
-        if (parentRecordId !== undefined) yield* record(userId, parentRecordId)
-        yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({
-          ...payload,
-          lease,
-          prior,
-          forkId: fileFork.id,
-          ...(parentId === undefined ? {} : { parentRecordId: parentId }),
-          branchDeleted: false
-        })}, updated_at = ${Date.now()}
-          WHERE id = ${recordId}`
-        return {
-          forkId: fileFork.id as ForkId,
-          recordId,
-          source: payload.source,
-          chatId: payload.chatId as ChatId,
-          complete: row.status === "complete",
-          binned: row.deleted_at !== null,
-          stateJson: payload.state ?? "null",
-          notes: (payload.notes ?? {}) as Record<string, EntityId>,
-          end: (payload.end ?? null) as SlotId | null,
-          merged: payload.merged ?? false,
-          firstAdded: (payload.firstAdded ?? null) as SlotId | null
-        }
-      }).pipe(transaction(sql, "StImportClaim"))
+    StImportClaim: (input) => claim(input).pipe(transaction(sql, "StImportClaim"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   return handlers
 })
