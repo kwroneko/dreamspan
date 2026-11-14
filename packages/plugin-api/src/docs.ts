@@ -61,11 +61,23 @@ export const activate:Activate=host=>host.registries.rolloutTools!.register(tool
   {
     topic: "rolloutTools",
     side: "server",
-    types: ["PluginToolContext", "PluginTool"],
+    types: ["PluginToolContext", "PluginTool", "StoryToolV1", "HistoryContextV1", "NotesContextV1", "NoteToolV1"],
     description:
-      "server:rolloutTools. Data-only call context, no database/service/credential handles. Tools with outside effects need a registered capability. Server code has full access, including stored keys and network; handles are not containment.",
+      "server:rolloutTools. StoryToolV1 uses server:history for causal viewer-filtered messages/summaries; NoteToolV1 uses server:notes for speaker-filtered notes and validated switches. The host retains the original effect/capability/approval/snapshot and receipt/Undo rules. Other tools use data-only call context, no database/service/credential handles. Tools with outside effects need a registered capability. Server code has full access, including stored keys and network; handles are not containment.",
     example: `import { Effect, type Activate } from "@rp/plugin-api/server"
 export const activate: Activate = host => host.registries.rolloutTools!.register({ id: "example_read", label: "Read example", description: "Returns a constant example.", effect: "read", parameters: { type: "object", properties: {}, additionalProperties: false }, execute: () => Effect.succeed({ text: "Example" }) })`
+  },
+  {
+    topic: "storyTools",
+    side: "server",
+    types: ["StoryToolV1", "HistoryContextV1"],
+    surfaces: ["server:rolloutTools", "server:history"],
+    replaces: ["rolloutTools:read_messages"],
+    description:
+      "Editable history policy. Host snapshots preserve private addresses across Resume. Reads cannot choose a branch or viewer; results cannot invent effects or receipts. Read-only tools need no Undo; state tools retain branch-local version effects. Ask-first and capabilities are fixed by the host.",
+    example: `import {Effect,type StoryToolV1,type Activate} from "@rp/plugin-api/server"
+const tool:StoryToolV1={id:"read_messages",label:"Read earlier messages",description:"Reads known earlier messages",effect:"read",parameters:{type:"object",properties:{}},execute:context=>Effect.map(context.messages,rows=>({text:rows.map(r=>r.content).join("\\n")}))}
+export const activate:Activate=host=>host.registries.rolloutTools!.register(tool)`
   },
   {
     topic: "stateKeys",
@@ -79,11 +91,21 @@ export const activate: Activate = host => host.registries.stateKeys!.register({ 
   {
     topic: "macros",
     side: "worker",
-    types: ["WorkerHost"],
+    types: ["WorkerHost", "MacroContractV1", "MacroCall", "MacroContext"],
     description:
-      "worker:macros. Constant/data-only value macros through registerMacro; resolver callbacks and services are not passed through this adapter.",
+      "worker:macros. MacroContractV1 (the v1 MacroSpec) provides causal data (see macroContext for field types), resolve/expandTemplate, metadata lookup, budgeted work, variable overlays, once and injected random. volatile:true freezes draws; clock freezes time; pick uses chat/text/offset. All copied macros conservatively mark their segment as changing, reducing prompt cache reuse even without declared volatility. Text (including frozen draws) is capped at 262,144 characters; accepts returns boolean and work/charge must be finite and nonnegative. Invalid results, a throw or the 100ms synchronous deadline fail that assembly and suspend the plugin; later assemblies use the original, including a reply after a failed preflight. Retained calls refuse after Turn off. No settings, credentials or other-branch queries are supplied. Approved server code still has ambient process/file/network access; this contract and its deadline are not a sandbox.",
     example: `import { registerMacro, type Activate } from "@rp/plugin-api/worker"
-export const activate: Activate = host => registerMacro(host.registries.macros!, { kind: "value", name: "example", handler: () => "Example" })`
+export const activate: Activate = host => registerMacro(host.registries.macros!, { kind: "value", name: "example", args: [{name:"text"}], handler: call => call.resolve(call.args[0]!).toUpperCase() })`
+  },
+  {
+    topic: "macroContext",
+    side: "worker",
+    types: ["MacroContext", "CardFields", "ChatMessage"],
+    surfaces: ["worker:macros"],
+    description:
+      "MacroContractV1 context fields. Read alongside macros for resolver, variables, work and freezing. Messages precede the expansion on the current visible path. No branch selector, settings, own-turn-note lookup or credentials are supplied. Variable methods affect only the current expansion overlay.",
+    example: `import {registerMacro,type Activate} from "@rp/plugin-api/worker"
+export const activate:Activate=host=>registerMacro(host.registries.macros!,{kind:"value",name:"example",handler:call=>call.context.names.char})`
   },
   {
     topic: "storage",

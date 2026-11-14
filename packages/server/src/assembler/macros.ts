@@ -203,6 +203,11 @@ export const makeMacroEnvironment = (
       context,
       frozen: { ...frozen, ...request.frozen[id] },
       random: request.random,
+      onReplacement: (macro, plugin) => {
+        const message = `{{${macro}}} replaced by ${plugin} (plugin).`
+        if (!assembly.issues.some((issue) => issue.kind === "plugin_replacement" && issue.message === message))
+          assembly.issues.push({ kind: "plugin_replacement", message })
+      },
       onVolatileRead: () => {
         readsVolatile = true
       },

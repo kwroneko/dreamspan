@@ -2,7 +2,7 @@
 // and state-macros.js at 06bde939). Card fields are expanded on first use and then reused for
 // the rest of the expansion, as ST's lazy card fields are.
 import type { CardFields } from "../context.ts"
-import type { MacroCall, MacroSpec } from "../registry.ts"
+import type { MacroCall, MacroContractV1 } from "../../../../plugin-api/src/macros.ts"
 
 type TextField = Exclude<keyof CardFields, "alternateGreetings" | "version" | "joined" | "joinedVolatile">
 
@@ -16,7 +16,7 @@ const expanded = (call: MacroCall, text: string | undefined, scope: string) => {
 
 export const cardField = (call: MacroCall, key: TextField) => expanded(call, call.context.card?.[key], `card.${key}`)
 
-const fieldMacro = (name: string, key: TextField, aliases?: ReadonlyArray<string>): MacroSpec => ({
+const fieldMacro = (name: string, key: TextField, aliases?: ReadonlyArray<string>): MacroContractV1 => ({
   source: import.meta.url,
   kind: "value",
   name,
@@ -53,7 +53,7 @@ const greeting = (call: MacroCall) => {
   return all[index - 1] ?? ""
 }
 
-export const characterMacros: ReadonlyArray<MacroSpec> = [
+export const characterMacros: ReadonlyArray<MacroContractV1> = [
   {
     source: import.meta.url,
     kind: "value",

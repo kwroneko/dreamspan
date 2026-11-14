@@ -103,12 +103,23 @@ export const pluginApiDocs = async (topic?: string) => {
       return source.slice(start, end)
     })
     .join("\n")
-  if (topic === "stateKeys" || topic === "macros") {
+  if (topic === "stateKeys" || topic === "macros" || topic === "macroContext") {
     const extra = await readFile(
-      join(root, topic === "stateKeys" ? "packages/shared/src/state.ts" : "packages/shared/src/macros/registry.ts"),
+      join(
+        root,
+        topic === "stateKeys"
+          ? "packages/shared/src/state.ts"
+          : topic === "macroContext"
+            ? "packages/shared/src/macros/context.ts"
+            : "packages/shared/src/macros/registry.ts"
+      ),
       "utf8"
     )
-    for (const name of topic === "stateKeys" ? ["PluginStateKey"] : ["MacroSpec", "MacroEntry", "DataMacroSpec"]) {
+    for (const name of topic === "stateKeys"
+      ? ["PluginStateKey"]
+      : topic === "macroContext"
+        ? ["MacroContext", "CardFields", "ChatMessage"]
+        : ["MacroCall", "MacroSpec", "MacroEntry", "DataMacroSpec"]) {
       const start = extra.indexOf("export interface " + name),
         open = extra.indexOf("{", start)
       let depth = 1,

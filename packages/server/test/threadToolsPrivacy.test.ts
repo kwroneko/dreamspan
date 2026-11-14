@@ -6,9 +6,17 @@ import { type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/
 import { Effect } from "effect"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
-import { historyTools } from "../src/agent/tools/history.ts"
+import { historyContextV1, historyTools as originalHistoryTools } from "../src/agent/tools/history.ts"
 import { completeFixture } from "./support/lcmFixtures.ts"
 import { runStory, type ThreadStory } from "./support/threadStory.ts"
+
+// Every privacy regression runs through a registered editable policy, including Resume.
+import { copiedStoryTools } from "./support/copiedStoryTools.ts"
+const historyTools = originalHistoryTools.map((tool) => ({
+  ...tool,
+  execute: (context: ToolContext, args: never) =>
+    Effect.flatMap(copiedStoryTools, (tools) => tools.find((t) => t.id === tool.id)!.execute(context, args))
+}))
 
 /** The history tools as a reply by `speaker` at the tip of `fork` runs them, reading as its view. */
 const toolsFor = (t: ThreadStory, fork: ForkId, speaker: EntityId) =>
@@ -695,3 +703,39 @@ describe("private addresses after a join", () => {
     )
   )
 })
+
+it.live("the plugin history contract cannot bypass private addresses, visibility or its causal leaf", () =>
+  runStory("separate", (t) =>
+    Effect.gen(function* () {
+      yield* t.append(t.F, t.mira, "MISSED-MIRA-SECRET")
+      yield* t.append(t.D, t.wren, "KNOWN-WREN-TEXT")
+      yield* t.append(t.U, t.pell, "OTHER-BRANCH-SECRET")
+      yield* t.join(t.F, [t.D])
+      const tools = yield* toolsFor(t, t.F, t.wren)
+      let enabled = true
+      const context = historyContextV1(tools.context, () => enabled)
+      yield* t.append(t.D, t.wren, "LATER-MESSAGE-SECRET")
+      const privateRead = yield* context.privateHistory
+      assert.isNotNull(privateRead)
+      const rows = yield* context.messages
+      assert.deepStrictEqual(rows, privateRead!.messages)
+      assert.strictEqual(yield* context.search(["SECRET"], undefined, true), null)
+      assert.deepStrictEqual(yield* context.summaries, [])
+      const text = JSON.stringify(rows)
+      assert.include(text, "KNOWN-WREN-TEXT")
+      for (const secret of ["MISSED-MIRA-SECRET", "OTHER-BRANCH-SECRET", "LATER-MESSAGE-SECRET"])
+        assert.notInclude(text, secret)
+      for (const row of rows) {
+        assert.match(row.address!, /^v[a-f0-9]{24}$/)
+        assert.notProperty(row, "key")
+        assert.notProperty(row, "rank")
+        assert.notProperty(row, "joined")
+      }
+      assert.notProperty(context, "reader")
+      assert.notProperty(context, "writer")
+      assert.notProperty(context, "forkId")
+      enabled = false
+      assert.isTrue((yield* Effect.exit(context.messages))._tag === "Failure")
+    })
+  )
+)

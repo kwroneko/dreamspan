@@ -1,7 +1,7 @@
 // ST's chat and time macros (public/scripts/macros/definitions/chat-macros.js and
 // time-macros.js at 06bde939), over the messages and clock in the context.
 import type { ChatMessage } from "../context.ts"
-import type { MacroCall, MacroSpec } from "../registry.ts"
+import type { MacroCall, MacroContractV1 } from "../../../../plugin-api/src/macros.ts"
 import { atOffset, formatMoment, humanize, inZone, MAX_FORMAT_GROWTH, parseMoment } from "../time.ts"
 
 /** The last message passing the filter. Each message looked at costs work. */
@@ -37,7 +37,7 @@ const idleDuration = (call: MacroCall) => {
   return "just now"
 }
 
-export const chatMacros: ReadonlyArray<MacroSpec> = [
+export const chatMacros: ReadonlyArray<MacroContractV1> = [
   {
     source: import.meta.url,
     kind: "value",

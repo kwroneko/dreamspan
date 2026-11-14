@@ -373,7 +373,11 @@ it("the data-only reverse macro copy checks, replaces worker assembly and restor
             model: {},
             greeting: "Macro:{{reverse::abc}}"
           })
-        yield* generate()
+        const replaced = yield* generate()
+        expect((yield* api.GetRunContext({ versionId: replaced.version.id })).issues).toContainEqual({
+          kind: "plugin_replacement",
+          message: "{{reverse}} replaced by Reverse text macro (editable) (plugin)."
+        })
         expect(requests.at(-1)).toContain("Macro:Edited cba")
         expect((yield* api.GetPlugin(made)).original).toMatchObject({ changed: false, available: true })
         const file = join(pluginFolder(config.dataDir, "", made.id), path)
@@ -404,10 +408,45 @@ it("the data-only reverse macro copy checks, replaces worker assembly and restor
         expect(detail.pin?.suspended).toBeDefined()
         yield* generate()
         expect(requests.at(-1)).toContain("Macro:cba")
+        // A fresh worker cannot reopen tampered bytes; restart verification suspends
+        // the approved pin and restores the built-in instead of running the sentinel.
+        const restored = yield* api.CommitPlugin({
+          ...made,
+          files: { [path]: source.replace("Array.from(call.args[0]!)", '"Edited " + Array.from(call.args[0]!)') },
+          message: "Restore copied macro source"
+        })
+        expect(yield* api.EnablePlugin({ ...made, commit: restored, consent: true })).toMatchObject({ ok: true })
+        yield* Effect.promise(() =>
+          writeFile(
+            join(config.dataDir, "plugins/.builds/instance", made.id, restored, "worker.mjs"),
+            'throw new Error("UNAPPROVED copied macro artifact");'
+          )
+        )
+        yield* generate()
+        expect(requests.at(-1)).toContain("Macro:Edited cba")
       }).pipe(Effect.provide(serverLayer(config)))
     )
   )
-}, 90000)
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const api = yield* client()
+        expect((yield* api.GetPlugin({ scope: "instance", id: "reverse-copy" })).pin?.suspended).toBeDefined()
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() => startMockProvider((_request, res) => sse(res, completionChunks(["Synthetic."], {})))),
+          (m) => Effect.promise(() => m.close())
+        )
+        yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          greeting: "Macro:{{reverse::abc}}"
+        })
+        expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Macro:cba")
+        expect(JSON.stringify(mock.requests())).not.toContain("UNAPPROVED")
+      }).pipe(Effect.provide(serverLayer(config)))
+    )
+  )
+}, 150000)
 
 it("startup keeps the earliest replacement and visibly suspends a later conflicting pin", async () => {
   const config = testConfig()
@@ -486,3 +525,174 @@ it("startup keeps the earliest replacement and visibly suspends a later conflict
     )
   )
 }, 150000)
+
+it.each([
+  ["oversized text", '"x".repeat(2_000_000)'],
+  ["non-string text", "42 as unknown as string"],
+  ["a synchronous loop", "(() => { while (true) {} })()"]
+])(
+  "a copied macro returning %s suspends visibly and sends only original text",
+  async (_name, body) => {
+    const config = testConfig()
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const api = yield* client()
+          const made = yield* api.CopyBuiltin({ registry: "macros", id: "reverse", pluginId: "invalid-macro" })
+          const path = "src/part/reverse.ts"
+          const source = yield* Effect.promise(() =>
+            readFile(join(pluginFolder(config.dataDir, "", made.id), path), "utf8")
+          )
+          const commit = yield* api.CommitPlugin({
+            ...made,
+            files: { [path]: source.replace('Array.from(call.args[0]!).reverse().join("")', body) },
+            message: "Synthetic invalid result"
+          })
+          expect(yield* api.EnablePlugin({ ...made, commit, consent: true })).toMatchObject({ ok: true })
+          const mock = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startMockProvider((_request, res) => sse(res, completionChunks(["Synthetic reply."], {})))
+            ),
+            (m) => Effect.promise(() => m.close())
+          )
+          const generate = () =>
+            generateReply(api, {
+              connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+              model: {},
+              greeting: "Macro:{{reverse::abc}}"
+            })
+          yield* generate().pipe(Effect.exit)
+          // A preflight/LCM assembly can fail first, restoring the original before
+          // the reply assembles. Either way no invalid expansion reaches the provider.
+          expect(mock.requests().length).toBeLessThanOrEqual(1)
+          for (const request of mock.requests()) expect(JSON.stringify(request.body)).toContain("Macro:cba")
+          expect((yield* api.GetPlugin(made)).pin?.suspended).toBeDefined()
+          yield* generate()
+          expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Macro:cba")
+        }).pipe(Effect.provide(serverLayer(config)))
+      )
+    )
+  },
+  90000
+)
+
+for (const [id, entry, args] of [
+  ["search_chat", "searchChat", { query: "Synthetic" }],
+  ["read_messages", "readMessages", { from: 1 }],
+  ["expand_summary", "expandSummary", { messages: "1–1" }],
+  ["search_summaries", "searchSummaries", { query: "Synthetic" }],
+  ["list_notes", "listNotes", {}],
+  ["switch_note", "switchNote", { note: "Synthetic", on: false }]
+] as const)
+  it(`copies, edits and runs ${id}, then restores exact request bytes`, async () => {
+    const config = testConfig()
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const api = yield* client(),
+            execution = yield* ExecutionRegistry
+          const original = execution.rolloutTools.get(id)!
+          const mock = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startMockProvider((request, res) => {
+                const done = ((request.body?.messages ?? []) as Array<{ role: string }>).some((m) => m.role === "tool")
+                sse(res, done ? chunks("send_message", { message: "Synthetic reply." }) : chunks(id, args))
+              })
+            ),
+            (m) => Effect.promise(() => m.close())
+          )
+          const generate = () =>
+            generateReply(api, {
+              connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+              model: {},
+              greeting: "Synthetic earlier text",
+              state: [
+                { key: "agent.enabled", value: { on: true } },
+                { key: "agent.tools", value: { tools: [id] } }
+              ]
+            })
+          yield* generate()
+          const before = mock.requests()[0]!.raw
+          const made = yield* api.CopyBuiltin({
+            registry: "rolloutTools",
+            id,
+            pluginId: `${id.replaceAll("_", "-")}-copy`
+          })
+          expect(made.report, JSON.stringify(made.report)).toMatchObject({ ok: true })
+          const source = `import {Effect,type Activate} from "@rp/plugin-api/server"
+import {${entry}} from "./part/${id.endsWith("notes") || id === "switch_note" ? "notesPart" : "historyPart"}.ts"
+const replacement:typeof ${entry}={...${entry},execute:(context,args)=>Effect.map(${entry}.execute(context,args),out=>({...out,text:"Copied: "+out.text}))}
+export const activate:Activate=host=>host.registries.rolloutTools!.register(replacement)`
+          const commit = yield* api.CommitPlugin({
+            ...made,
+            files: { "src/server.ts": source },
+            message: "Explain copied output"
+          })
+          expect(yield* api.EnablePlugin({ ...made, commit, consent: true })).toMatchObject({ ok: true })
+          const other = yield* api.CopyBuiltin({
+            registry: "rolloutTools",
+            id,
+            pluginId: `${id.replaceAll("_", "-")}-other`
+          })
+          expect(yield* api.EnablePlugin({ ...other, consent: true })).toMatchObject({
+            ok: false,
+            message: "Another enabled plugin already replaces this part. Turn it off first."
+          })
+          // Neither a dirty repository nor its newer committed source selects runtime bytes.
+          yield* Effect.promise(() =>
+            writeFile(
+              join(pluginFolder(config.dataDir, "", made.id), "src/server.ts"),
+              'throw new Error("UNAPPROVED story tool");'
+            )
+          )
+          yield* generate()
+          expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Copied: ")
+          yield* api.CommitPlugin({
+            ...made,
+            files: { "src/server.ts": 'throw new Error("UNAPPROVED newer story tool");' },
+            message: "Unapproved newer tool"
+          })
+          yield* generate()
+          expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Copied: ")
+          expect((yield* api.GetPlugin(made)).pin?.suspended).toBeUndefined()
+          expect(frozenTool(execution.rolloutTools.get(id)!).label).toContain("(plugin)")
+          yield* api.DisablePlugin(made)
+          expect(execution.rolloutTools.get(id)).toBe(original)
+          const at = mock.requests().length
+          yield* generate()
+          expect(mock.requests()[at]!.raw).toBe(before)
+          if (id === "read_messages") {
+            // Return HEAD to the approved tree only to re-enable the exact checked version.
+            yield* api.CommitPlugin({
+              ...made,
+              files: { "src/server.ts": source },
+              message: "Restore copied tool source"
+            })
+            const ready = yield* api.GetPlugin(made)
+            expect(yield* api.EnablePlugin({ ...made, commit: ready.commit!, consent: true })).toMatchObject({
+              ok: true
+            })
+            yield* Effect.promise(() =>
+              writeFile(
+                join(config.dataDir, "plugins/.builds/instance", made.id, ready.commit!, "server.mjs"),
+                'throw new Error("UNAPPROVED copied tool artifact");'
+              )
+            )
+            yield* generate()
+            expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Copied: ")
+          }
+        }).pipe(Effect.provide(serverLayer(config)))
+      )
+    )
+    if (id === "read_messages")
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const api = yield* client(),
+              execution = yield* ExecutionRegistry
+            expect((yield* api.GetPlugin({ scope: "instance", id: "read-messages-copy" })).pin?.suspended).toBeDefined()
+            expect(frozenTool(execution.rolloutTools.get(id)!).label).not.toContain("(plugin)")
+          }).pipe(Effect.provide(serverLayer(config)))
+        )
+      )
+  }, 180000)

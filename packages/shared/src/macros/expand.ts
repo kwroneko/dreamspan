@@ -99,6 +99,8 @@ class LimitReached {
   }
 }
 
+export const isMacroLimit = (error: unknown): boolean => error instanceof LimitReached
+
 export interface MacroLookup {
   readonly get: (id: string) => MacroEntry | undefined
 }
@@ -342,6 +344,7 @@ export type FrozenValues = Readonly<Record<string, string>>
 /** State shared by every evaluation in one expansion, nested ones included. */
 interface Run {
   readonly registry: MacroLookup
+  readonly onReplacement?: (macro: string, plugin: string) => void
   readonly onVolatileRead?: () => void
   readonly random: () => number
   readonly frozen: FrozenValues
@@ -540,7 +543,8 @@ class Expansion {
       variables: this.run.variables,
       charge: (size) => charge(this.run, size)
     }
-    if (entry.volatile && entry.changesPerReply !== false) this.run.onVolatileRead?.()
+    if (entry.replacement) this.run.onReplacement?.(entry.name, entry.replacement.name)
+    if (entry.cacheVolatile || (entry.volatile && entry.changesPerReply !== false)) this.run.onVolatileRead?.()
     const key = entry.volatile ? this.drawKey(entry, offset, text.slice(node.start, node.end)) : undefined
     const frozen = key !== undefined && Object.hasOwn(this.run.frozen, key) ? this.run.frozen[key] : undefined
     let value: string
@@ -701,6 +705,7 @@ export interface ExpandRequest {
   /** Observes variable reads, including nested templates and shorthand operations. */
   readonly onVariableRead?: () => void
   /** Observes evaluated random/clock macros, including nested card templates. */
+  readonly onReplacement?: (macro: string, plugin: string) => void
   readonly onVolatileRead?: () => void
 }
 
@@ -769,6 +774,7 @@ const evaluate = (
     new VariableScope(initial, scope, effects, refusedWrites, (size) => charge(run, size), options.onVariableRead)
   const run: Run = {
     registry: options.registry,
+    ...(options.onReplacement ? { onReplacement: options.onReplacement } : {}),
     ...(options.onVolatileRead ? { onVolatileRead: options.onVolatileRead } : {}),
     random: options.random,
     frozen: options.frozen ?? {},

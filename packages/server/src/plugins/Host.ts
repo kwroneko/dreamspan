@@ -31,7 +31,7 @@ import { makePluginAuthoring } from "../agent/tools/plugins.ts"
 import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
 import { repoTask } from "./repoTask.ts"
 import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
-import { builtinCopies, builtinCopy } from "./builtins.ts"
+import { builtinCopies, builtinCopy, missingBuiltinAdapter } from "./builtins.ts"
 
 type Target = { readonly scope: "instance" | "user"; readonly id: string }
 type Version = Target & { readonly commit: string; readonly expectedRevision?: number }
@@ -433,7 +433,10 @@ export class PluginHost extends Context.Service<
               id: p.id,
               label: p.label,
               copyable: true,
-              reason: "An editable copy starts off. Review it before turning it on.",
+              reason:
+                p.registry === "macros"
+                  ? "An editable copy starts off. Copied macros can reduce prompt cache reuse: their text is treated as changing on every reply."
+                  : "An editable copy starts off. Review it before turning it on.",
               replacedBy: plugins
                 .filter((v) => v.pin && !v.pin.suspended && v.manifest?.replaces.includes(`${p.registry}:${p.id}`))
                 .map(({ scope, id }) => ({ scope, id }))
@@ -445,7 +448,7 @@ export class PluginHost extends Context.Service<
                 id: tool.id,
                 label: tool.explanation ?? tool.label,
                 copyable: false,
-                reason: "This tool still needs an adapter for its app data and actions.",
+                reason: missingBuiltinAdapter(tool.id),
                 replacedBy: []
               })
             }

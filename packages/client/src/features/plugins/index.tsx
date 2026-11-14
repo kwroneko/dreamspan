@@ -1,3 +1,5 @@
+import { builtinCopyStem } from "@rp/shared/builtinParts.ts"
+import { Field, Input } from "../../ui/Field.tsx"
 import { RegistryContext } from "@effect/atom-react"
 import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { hasServerCode, pluginAccessGrows, pluginConsent, pluginSurfaces } from "@rp/shared/pluginConsent.ts"
@@ -96,17 +98,31 @@ function BuiltinParts() {
   const admin = useSession().user.role === "admin"
   const action = useAction()
   const navigate = useNavigate()
+  const search: { builtinSearch?: unknown } = useSearch({ strict: false })
+  const queries =
+    search.builtinSearch && typeof search.builtinSearch === "object" && !Array.isArray(search.builtinSearch)
+      ? (Object.fromEntries(
+          Object.entries(search.builtinSearch).filter((entry) => typeof entry[1] === "string")
+        ) as Record<string, string>)
+      : {}
+  const setQuery = (registry: string, value: string) => {
+    const next = { ...queries }
+    if (value) next[registry] = value
+    else delete next[registry]
+    void navigate({
+      to: ".",
+      search: (previous: Record<string, unknown>) => ({
+        ...previous,
+        builtinSearch: Object.keys(next).length ? next : undefined
+      }),
+      replace: true
+    })
+  }
   const busy = useRef(false)
   const copy = async (part: typeof BuiltinPart.Type) => {
     if (busy.current) return
     busy.current = true
-    const pluginId =
-      part.id
-        .replace(/^notifications\./, "")
-        .replaceAll("_", "-")
-        .slice(0, 42) +
-      "-copy-" +
-      uuid().slice(0, 8)
+    const pluginId = builtinCopyStem(part.id) + "-copy-" + uuid().slice(0, 8)
     const result = await action.run(
       (client) => client("CopyBuiltin", { registry: part.registry, id: part.id, pluginId }),
       [KEY]
@@ -124,33 +140,66 @@ function BuiltinParts() {
       <ErrorAlert error={action.error} />
       <AsyncView atom={builtinPartsAtom} loading="Reading built-in parts…">
         {(parts) => (
-          <ul className="flex min-w-0 flex-col divide-y divide-border">
-            {parts.map((part) => (
-              <li key={`${part.registry}:${part.id}`} className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium [overflow-wrap:anywhere]">{part.label}</span>
-                  {part.replacedBy.map((p) => (
-                    <span key={routeId(p)} className="flex min-w-0 flex-wrap items-center gap-2">
-                      <Badge>Replaced by</Badge>
-                      <DetailsLink plugin={{ ...p, commit: null, manifest: null, pin: null, report: null }} />
-                    </span>
-                  ))}
-                </div>
-                <p className="text-sm text-muted">{part.reason}</p>
-                {part.copyable && admin && (
-                  <div>
-                    <Button
-                      hint="Copies this built-in into a saved, checked plugin. It starts off."
-                      pending={action.pending}
-                      onClick={() => void copy(part)}
-                    >
-                      Make an editable copy
-                    </Button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+          <div className="flex min-w-0 flex-col gap-4">
+            {[...new Set(parts.map((part) => part.registry))].map((registry) => {
+              const group = parts.filter((part) => part.registry === registry)
+              const query = (queries[registry] ?? "").trim().toLowerCase()
+              const visible = group.filter((part) => `${part.label} ${part.id}`.toLowerCase().includes(query))
+              const title =
+                (
+                  {
+                    noticeChannels: "Sounds and alerts",
+                    rolloutTools: "Story tools",
+                    macros: "Prompt macros"
+                  } as Record<string, string>
+                )[registry] ?? registry
+              return (
+                <section key={registry} aria-label={title} className="flex min-w-0 flex-col gap-2">
+                  <h3 className="text-sm font-medium">{title}</h3>
+                  {group.length > 8 && (
+                    <Field label={`Search ${title.toLowerCase()}`}>
+                      <Input
+                        type="search"
+                        value={queries[registry] ?? ""}
+                        onChange={(event) => setQuery(registry, event.currentTarget.value)}
+                      />
+                    </Field>
+                  )}
+                  {visible.length === 0 && <p className="text-sm text-muted">No matching parts.</p>}
+                  <ul className="flex min-w-0 flex-col divide-y divide-border">
+                    {visible.map((part) => (
+                      <li
+                        key={`${part.registry}:${part.id}`}
+                        className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0"
+                      >
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium [overflow-wrap:anywhere]">{part.label}</span>
+                          {part.replacedBy.map((p) => (
+                            <span key={routeId(p)} className="flex min-w-0 flex-wrap items-center gap-2">
+                              <Badge>Replaced by</Badge>
+                              <DetailsLink plugin={{ ...p, commit: null, manifest: null, pin: null, report: null }} />
+                            </span>
+                          ))}
+                        </div>
+                        <p className="text-sm text-muted">{part.reason}</p>
+                        {part.copyable && admin && (
+                          <div>
+                            <Button
+                              hint="Copies this built-in into a saved, checked plugin. It starts off."
+                              pending={action.pending}
+                              onClick={() => void copy(part)}
+                            >
+                              Make an editable copy
+                            </Button>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )
+            })}
+          </div>
         )}
       </AsyncView>
     </Card>
@@ -689,6 +738,7 @@ export const register = () => {
     id: "settings.plugins",
     parent: "settings",
     path: "plugins",
+    retainSearch: ["builtinSearch"],
     component: PluginsPage,
     nav: { label: "Plugins", order: 50, description: "Turn plugins on or off and manage their versions and data." }
   })
@@ -696,6 +746,7 @@ export const register = () => {
     id: "settings.plugins.detail",
     parent: "settings",
     path: "plugins/$pluginId",
+    retainSearch: ["builtinSearch"],
     component: PluginPage
   })
   appBanners.register({ id: "plugins.host.suspended", order: -90, component: SuspendedPlugins })

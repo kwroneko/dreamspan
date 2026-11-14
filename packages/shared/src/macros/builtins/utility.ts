@@ -3,7 +3,7 @@
 // kept only so it's stripped from prompts, as ST strips it for chat completion.
 import { ELSE_MARKER, isFalse, trimScoped } from "../expand.ts"
 import { stringHash } from "../hash.ts"
-import type { MacroCall, MacroSpec } from "../registry.ts"
+import type { MacroCall, MacroContractV1 } from "../../../../plugin-api/src/macros.ts"
 import { reverseMacro } from "./reverse.ts"
 
 const count = { name: "count", optional: true, integer: true } as const
@@ -109,7 +109,7 @@ const repeat = (call: MacroCall, text: string) => {
 
 const tokens = (value: number | undefined) => (value === undefined ? "" : String(value))
 
-export const utilityMacros: ReadonlyArray<MacroSpec> = [
+export const utilityMacros: ReadonlyArray<MacroContractV1> = [
   {
     source: import.meta.url,
     kind: "directive",

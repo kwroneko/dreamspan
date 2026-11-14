@@ -1,3 +1,7 @@
+import { notesContextV1, notesReadContextV1 } from "../agent/tools/notes.ts"
+import { historyContextV1 } from "../agent/tools/history.ts"
+import { adaptMacroV1 } from "./macroAdapter.ts"
+import type { MacroEntry } from "@rp/shared/macros/registry.ts"
 import { Effect, Predicate, Scope, Schema, Context, Fiber } from "effect"
 import type { PluginManifest } from "@rp/shared/plugins.ts"
 import { builtinReplacement } from "@rp/shared/builtinParts.ts"
@@ -212,7 +216,22 @@ export const declaredHandles = (
         Effect.suspend(() => {
           if (name === "providerKinds" && "secretsOf" in entry)
             throw new Error("Credential callbacks are not available in API v1")
-          let copied = registrationCopy(entry, fail, scope, () => enabled)
+          const descriptor = registrationCopy(entry, fail, scope, () => enabled)
+          const macro = entry as MacroEntry
+          let copied =
+            name === "macros" && side === "worker" && typeof macro.handler === "function"
+              ? adaptMacroV1(
+                  {
+                    ...(descriptor as MacroEntry),
+                    handler: macro.handler,
+                    ...(macro.accepts ? { accepts: macro.accepts } : {}),
+                    ...(macro.work ? { work: macro.work } : {}),
+                    replacement: { plugin: manifest.id, name: manifest.name }
+                  },
+                  () => enabled,
+                  fail
+                )
+              : descriptor
           if (name === "rolloutTools" && entry.id === "set_presence" && manifest.surfaces.includes("server:presence")) {
             // The editable policy cannot reclassify state writes or introduce authorization hooks.
             const fields = new Set([
@@ -243,6 +262,107 @@ export const declaredHandles = (
                 () => enabled,
                 (args) => [presenceContext(args[0] as ToolContext, () => enabled), pluginArguments(args[1])]
               )
+            }
+          }
+          if (
+            name === "rolloutTools" &&
+            ["search_chat", "read_messages", "expand_summary", "search_summaries"].includes(entry.id)
+          ) {
+            const fields = new Set([
+              "source",
+              "id",
+              "label",
+              "explanation",
+              "effect",
+              "description",
+              "parameters",
+              "summarize",
+              "execute"
+            ])
+            if (
+              !manifest.surfaces.includes("server:history") ||
+              (entry as { effect?: unknown }).effect !== "read" ||
+              Object.keys(entry).some((k) => !fields.has(k))
+            )
+              throw new Error("History copies must keep the original effect, snapshots and approval rules")
+            const execute = (entry as { execute?: unknown }).execute
+            if (typeof execute !== "function") throw new Error("History handler required")
+            const original = registry.get(entry.id) as import("../agent/tools.ts").RolloutTool | undefined
+            copied = {
+              ...(copied as object),
+              ...(original?.snapshot ? { snapshot: original.snapshot } : {}),
+              label: `${(entry as { id: string; label: string }).label} · ${manifest.name} (plugin)`,
+              execute: registrationCopy(
+                execute,
+                fail,
+                scope,
+                () => enabled,
+                (args) => [historyContextV1(args[0] as ToolContext, () => enabled), pluginArguments(args[1])]
+              )
+            }
+          }
+          if (name === "rolloutTools" && ["list_notes", "switch_note"].includes(entry.id)) {
+            const fields = new Set([
+              "source",
+              "id",
+              "label",
+              "explanation",
+              "effect",
+              "description",
+              "parameters",
+              "summarize",
+              "execute"
+            ])
+            if (
+              !manifest.surfaces.includes("server:notes") ||
+              (entry as { effect?: unknown }).effect !== (entry.id === "list_notes" ? "read" : "chat_state") ||
+              Object.keys(entry).some((k) => !fields.has(k))
+            )
+              throw new Error("Note copies must keep the original effect and approval rules")
+            const execute = (entry as { execute?: unknown }).execute
+            if (typeof execute !== "function") throw new Error("Note handler required")
+            copied = {
+              ...(copied as object),
+              label: `${(entry as { id: string; label: string }).label} · ${manifest.name} (plugin)`,
+              execute: registrationCopy(
+                execute,
+                fail,
+                scope,
+                () => enabled,
+                (args) => [
+                  (entry.id === "list_notes" ? notesReadContextV1 : notesContextV1)(
+                    args[0] as ToolContext,
+                    () => enabled
+                  ),
+                  pluginArguments(args[1])
+                ]
+              )
+            }
+          }
+          if (
+            name === "rolloutTools" &&
+            (["list_notes", "switch_note"].includes(entry.id) ||
+              entry.id === "set_presence" ||
+              ["search_chat", "read_messages", "expand_summary", "search_summaries"].includes(entry.id))
+          ) {
+            const tool = copied as { execute: (...args: unknown[]) => Effect.Effect<unknown, unknown> }
+            const execute = tool.execute
+            copied = {
+              ...(copied as object),
+              execute: (...args: unknown[]) =>
+                Effect.map(execute(...args), (output) => {
+                  if (
+                    typeof output !== "object" ||
+                    output === null ||
+                    !("text" in output) ||
+                    typeof output.text !== "string" ||
+                    Object.keys(output).some((k) => k !== "text" && k !== "isError")
+                  ) {
+                    fail()
+                    throw new Error("Story tools cannot supply receipts or effects")
+                  }
+                  return output
+                })
             }
           }
           if (name === "rolloutTools" && entry.id === "set_presence" && !manifest.surfaces.includes("server:presence"))

@@ -10,9 +10,8 @@ import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { type ContextSnapshot, generationOf } from "../src/assembler/types.ts"
 import type { ToolContext } from "../src/agent/tools.ts"
-import { historyTools } from "../src/agent/tools/history.ts"
-import { editNote, listNotes, switchNote } from "../src/agent/tools/notes.ts"
-import { setPresence } from "../src/agent/tools/presence.ts"
+import { editNote } from "../src/agent/tools/notes.ts"
+import { copiedStoryTools } from "./support/copiedStoryTools.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -680,12 +679,11 @@ const tools = (t: Effect.Success<ReturnType<typeof story>>, snapshot: ContextSna
     writer: t.writer
   }
   return (id: string, args: object) =>
-    Effect.map(
-      [...historyTools, listNotes, setPresence, editNote, switchNote]
-        .find((tool) => tool.id === id)!
-        .execute(context, args as never),
-      (out) => out.text
-    )
+    Effect.gen(function* () {
+      const copies = yield* copiedStoryTools
+      const out = yield* [...copies, editNote].find((tool) => tool.id === id)!.execute(context, args as never)
+      return out.text
+    })
 }
 
 describe("merged chats per viewer (unit C6)", () => {

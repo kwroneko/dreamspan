@@ -1,11 +1,12 @@
+import { checkPlugin } from "../src/plugins/check.ts"
 import { expect, it } from "vitest"
 import { Effect, Scope, Exit } from "effect"
 import { Type } from "@earendil-works/pi-ai"
 import { readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { join } from "node:path"
-import { builtinReplacement } from "@rp/shared/builtinParts.ts"
-import { builtinCopies } from "../src/plugins/builtins.ts"
+import { builtinReplacement, builtinCopyStem } from "@rp/shared/builtinParts.ts"
+import { builtinCopies, builtinCopyListing, missingBuiltinAdapter } from "../src/plugins/builtins.ts"
 import { prepareBuiltinCopy, compareBuiltin, copyBuiltin } from "../src/plugins/copy.ts"
 import { rewriteImports } from "../src/plugins/importPolicy.ts"
 import { saveFiles, pluginFolder, commitFiles } from "../src/plugins/repo.ts"
@@ -22,6 +23,7 @@ import { declaredHandles } from "../src/plugins/handles.ts"
 import { PluginManifest } from "@rp/shared/plugins.ts"
 import { Schema } from "effect"
 import { pluginConsent, pluginAccessGrows } from "@rp/shared/pluginConsent.ts"
+import { makeRegistry } from "@rp/shared/registry.ts"
 
 it("all built-in tools, including generated tools, declare shipped source; only allowlisted adapters copy", async () => {
   await Effect.runPromise(
@@ -35,29 +37,74 @@ it("all built-in tools, including generated tools, declare shipped source; only 
       }).pipe(Effect.provide(ExecutionRegistry.layer))
     )
   )
-  for (const part of builtinCopies) {
-    expect(builtinReplacement(`${part.registry}:${part.id}`)?.side).toBe(part.side)
-    const prepared = await prepareBuiltinCopy(part.registry, part.id, "fixture-copy", tempDir("copy-source"))
-    const manifest = JSON.parse(prepared.files["rp-plugin.json"]!)
-    const base = JSON.parse(prepared.files["builtin-base.json"]!)
-    expect(manifest.replaces).toEqual([`${part.registry}:${part.id}`])
-    expect(manifest.base.path).toBe(part.path)
-    for (const path of part.files) expect(base.files[path]).toBe(await readFile(path, "utf8"))
-    expect(manifest.base.sha256).toBe(
-      createHash("sha256")
-        .update(await readFile(part.path))
-        .digest("hex")
-    )
-    expect(prepared.files["NOTICE.md"]).toContain("No third-party implementation")
-    if (part.side === "client") expect(await appSource({ path: part.path })).toContain("copyable client parts")
-    expect(Object.keys(prepared.files)).not.toContain(".git/rp-create")
-  }
   await expect(prepareBuiltinCopy("replyStrategies", "default", "no-copy", tempDir("no-copy"))).rejects.toThrow(
     "adapter"
   )
 })
 
-it.each(builtinCopies)(
+it("every unavailable story tool refuses both declared replacement and disable", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const execution = yield* installPluginToolDefinitions
+        const unavailable = execution.rolloutTools
+          .list()
+          .filter((tool) => !builtinCopies.some((part) => part.registry === "rolloutTools" && part.id === tool.id))
+        expect(unavailable).toHaveLength(35)
+        for (const original of unavailable) {
+          expect(builtinReplacement(`rolloutTools:${original.id}`)).toBeUndefined()
+          const registry = makeRegistry([original])
+          const handles = declaredHandles(
+            {
+              id: "unavailable-copy",
+              name: "Unavailable copy",
+              api: 1,
+              server: "server.ts",
+              worker: null,
+              client: null,
+              surfaces: ["server:rolloutTools"],
+              replaces: [`rolloutTools:${original.id}`],
+              overrides: [],
+              network: false,
+              base: null
+            },
+            "server",
+            { rolloutTools: registry },
+            yield* Effect.scope,
+            new Map(),
+            () => {}
+          ) as { rolloutTools: typeof registry }
+          expect(Exit.isFailure(yield* Effect.exit(handles.rolloutTools.register(original))), original.id).toBe(true)
+          expect(Exit.isFailure(yield* Effect.exit(handles.rolloutTools.disable(original.id))), original.id).toBe(true)
+          expect(registry.get(original.id)).toBe(original)
+        }
+      }).pipe(Effect.provide(ExecutionRegistry.layer))
+    )
+  ))
+
+it.each(builtinCopies)("copies exact declared source for $registry/$id", async (part) => {
+  expect(builtinCopyStem(part.id)).toMatch(/^[a-z][a-z0-9-]{0,41}$/)
+  expect(builtinReplacement(`${part.registry}:${part.id}`)?.side).toBe(part.side)
+  const prepared = await prepareBuiltinCopy(part.registry, part.id, "fixture-copy", tempDir("copy-source"))
+  const manifest = JSON.parse(prepared.files["rp-plugin.json"]!)
+  const base = JSON.parse(prepared.files["builtin-base.json"]!)
+  expect(manifest.replaces).toEqual([
+    `${part.registry}:${part.id}`,
+    ...("aliases" in part ? part.aliases.map((alias) => `${part.registry}:${alias}`) : [])
+  ])
+  expect(manifest.base.path).toBe(part.path)
+  for (const path of part.files) expect(base.files[path]).toBe(await readFile(path, "utf8"))
+  expect(manifest.base.sha256).toBe(
+    createHash("sha256")
+      .update(await readFile(part.path))
+      .digest("hex")
+  )
+  expect(prepared.files["NOTICE.md"]).toContain("No third-party implementation")
+  if (part.side === "client") expect(await appSource({ path: part.path })).toContain("copyable client parts")
+  expect(Object.keys(prepared.files)).not.toContain(".git/rp-create")
+})
+
+it.each(builtinCopies.filter((part, index) => builtinCopies.findIndex((p) => p.path === part.path) === index))(
   "compares committed $registry base after a simulated update without merging or path authority",
   async (part) => {
     const data = tempDir("copy-update"),
@@ -322,6 +369,56 @@ it("retained presence readers/setters refuse after their supplying plugin scope 
         expect((yield* retained!.set("card", false, "late").pipe(Effect.exit))._tag).toBe("Failure")
         expect(reads).toBe(0)
         expect(writes).toBe(0)
+      }).pipe(Effect.provide(ExecutionRegistry.layer))
+    )
+  )
+})
+
+for (const part of builtinCopies.filter(
+  (part, index, all) => part.registry === "macros" && all.findIndex((p) => p.path === part.path) === index
+))
+  it(`checks the complete shipped ${part.id} macro family through the public worker API`, async () => {
+    const data = tempDir("macro-family")
+    const prepared = await prepareBuiltinCopy("macros", part.id, "family-copy", data)
+    const commit = await saveFiles(data, "", "family-copy", prepared.files, true, "Copy macro family")
+    const report = await checkPlugin(data, "", "family-copy", commit)
+    expect(report, JSON.stringify(report)).toMatchObject({ ok: true, step: "ready" })
+  }, 30000)
+
+it("the assistant catalog keeps every new part within its unchanged result budget", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* installPluginToolDefinitions
+        const parts = [
+          ...builtinCopies.map((p) => ({
+            registry: p.registry,
+            id: p.id,
+            label: p.label,
+            copyable: true,
+            reason:
+              "An editable copy starts off. Copied macros can reduce prompt cache reuse: their text is treated as changing on every reply.",
+            replacedBy: []
+          })),
+          ...registry.rolloutTools
+            .list()
+            .filter((t) => !builtinCopies.some((p) => p.registry === "rolloutTools" && p.id === t.id))
+            .map((t) => ({
+              registry: "rolloutTools",
+              id: t.id,
+              label: t.label,
+              copyable: false,
+              reason: missingBuiltinAdapter(t.id),
+              replacedBy: []
+            }))
+        ]
+        const text = JSON.stringify(builtinCopyListing(parts))
+        expect(text.length).toBeLessThan(14500)
+        const listed = builtinCopyListing(parts)
+          .filter((g) => g.copyable)
+          .flatMap((g) => g.parts.map((p) => `${g.registry}:${p.id}`))
+        expect(listed.toSorted()).toEqual(builtinCopies.map((p) => `${p.registry}:${p.id}`).toSorted())
+        for (const part of parts.filter((p) => !p.copyable)) expect(text).toContain(JSON.stringify(part.id))
       }).pipe(Effect.provide(ExecutionRegistry.layer))
     )
   )
