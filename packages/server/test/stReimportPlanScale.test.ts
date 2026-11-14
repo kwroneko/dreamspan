@@ -21,7 +21,7 @@ const MESSAGES = Number(process.env.ST_PLAN_SCALE_MESSAGES ?? 1000)
 const PREFIX = "ST/data/default-user/"
 const MB = 1024 * 1024
 
-layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "60 minutes" })(
+layer(serverLayer(testConfig({ dbReaders: 2 })), { excludeTestServices: true, timeout: "60 minutes" })(
   "ST re-import preview at scale",
   (it) => {
     it.effect(
@@ -52,6 +52,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "60 minut
                 .join("\n")
           )
 
+          const chat = (yield* api.ListChats({ limit: 10, before: null }))[0]!
           global.gc?.()
           const before = process.memoryUsage().rss
           let peak = before
@@ -60,6 +61,18 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "60 minut
           }, 50)
           const started = Date.now()
           const { plan } = yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })
+          // A real user-message write and foreground read while the check is running.
+          const sendStarted = Date.now()
+          yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: chat.activeLeafSlotId,
+            branch: false,
+            content: "A synthetic message sent during the check."
+          })
+          const sendMs = Date.now() - sendStarted
+          const readStarted = Date.now()
+          yield* api.GetChat({ chatId: chat.id })
+          const readMs = Date.now() - readStarted
           let done = plan
           for (;;) {
             done = yield* api.GetStImportPlan({ planId: plan.planId })
@@ -69,12 +82,23 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "60 minut
           const planMs = Date.now() - started
           clearInterval(sampler)
           const planPeak = peak
+          // The concurrent send must invalidate admission. Check again before confirmation.
+          const stale = yield* api
+            .StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } })
+            .pipe(Effect.flip)
+          assert.strictEqual(stale._tag, "StImportPlanChanged")
+          const refreshed = yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })
+          for (;;) {
+            done = yield* api.GetStImportPlan({ planId: refreshed.plan.planId })
+            if (done.status !== "running") break
+            yield* Effect.sleep(100)
+          }
           // The import the preview was for, of the same folder: it matches every message too.
           const reimportStarted = Date.now()
           const { importId } = yield* api.StartStPathImport({
             path: root,
             prefix: PREFIX,
-            plan: { planId: plan.planId, skip: [] }
+            plan: { planId: done.planId, skip: [] }
           })
           const again = yield* jobEnded(api, importId, 60 * 60_000)
           const reimportMs = Date.now() - reimportStarted
@@ -87,6 +111,8 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "60 minut
             uniqueVersions: family.uniqueVersions,
             importMs,
             planMs,
+            sendMs,
+            readMs,
             reimportMs,
             rssBeforeMB: Math.round(before / MB),
             rssPeakMB: Math.round(planPeak / MB),

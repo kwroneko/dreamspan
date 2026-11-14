@@ -120,6 +120,19 @@ for (const width of [1440, 390])
       await expect(changed.getByRole("listitem").nth(1)).toContainText("Kept: you hid or showed it here")
       await expect(page.getByRole("button", { name: "Import", exact: true })).toBeEnabled()
 
+      // Skipping the earlier parent invalidates the later branch's displayed counts.
+      await mainRow.getByRole("button", { name: "Skip" }).click()
+      await expect(
+        preview.getByText("Message counts cannot be predicted while an earlier file for the same chat is skipped.")
+      ).toBeVisible()
+      await expect(sideRow).toContainText("Its message counts and changes cannot be predicted here.")
+      await expect(sideRow.getByText("1 new message · 1 new branch", { exact: true })).toHaveCount(0)
+      await expect(
+        preview.getByText("Counts assume each file can be linked to a card.", { exact: false })
+      ).toBeVisible()
+      await expectLayout(page, info, `st-reimport-skipped-parent-${width}-${theme}`)
+      await mainRow.getByRole("button", { name: "Include" }).click()
+
       // The branch file skipped.
       await sideRow.getByRole("button", { name: "Skip" }).click()
       await expect(sideRow.getByRole("button", { name: "Skip" })).toHaveAttribute("aria-pressed", "true")
@@ -137,9 +150,7 @@ for (const width of [1440, 390])
           animations: "disabled"
         })
       }
-      await expectLayout(page, info, `st-reimport-preview-${width}-${theme}`, {
-        scope: 'section[aria-label="Chats already here"]'
-      })
+      await expectLayout(page, info, `st-reimport-preview-${width}-${theme}`)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 
       // A change here after the check: the import is refused and the chats are checked again.
@@ -212,6 +223,14 @@ test("a folder picked in the browser: the preview reads only the files it asks f
   await expect(preview.getByText("Importing adds 2 messages and 1 swipe to them.")).toBeVisible()
   // Only the chat file already here went to the server for the check; the card didn't.
   expect(sent).toEqual([`chats/Alice/${main}.jsonl`])
+  // A second picked folder can have the same ST prefix; it still needs a new check.
+  const other = mkdtempSync(join(base, "st-other-"))
+  write(other, {
+    "characters/Alice.png": card("Alice", "Synthetic greeting."),
+    [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...turns(14)])
+  })
+  await page.getByLabel("Choose the folder").setInputFiles(join(other, "ST"))
+  await expect(preview.getByText("Importing adds 4 messages and 0 swipes to them.")).toBeVisible()
   await page.getByRole("button", { name: "Import", exact: true }).click()
   await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats")
   const after = await admin((api) =>
@@ -220,5 +239,99 @@ test("a folder picked in the browser: the preview reads only the files it asks f
       (path) => path.entries.length
     )
   )
-  expect(after).toBe(12)
+  expect(after).toBe(14)
+})
+
+test("untrusted message text stays literal in preview details", async ({ page }) => {
+  const main = "Literal preview"
+  const root = mkdtempSync(join(base, "st-literal-"))
+  write(root, {
+    "characters/Alice.png": card("Alice", "Synthetic greeting."),
+    [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...turns(2)])
+  })
+  await admin((api) =>
+    Effect.gen(function* () {
+      const { importId } = yield* api.StartStPathImport({ path: root, prefix: `${USER}/` })
+      for (;;) {
+        if ((yield* api.GetStImport({ importId })).job.status !== "running") break
+        yield* Effect.sleep(50)
+      }
+    })
+  )
+  const payload =
+    '<img src="x" onerror="window.previewTextExecuted=true"><script>window.previewTextExecuted=true</script>'
+  const changed = turns(4)
+  changed[2] = message({ name: "Alice", mes: payload, minute: 2 })
+  write(root, { [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...changed]) })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/import/st`)
+  await page.getByRole("button", { name: "Import ST data again" }).click()
+  await page.getByLabel("Folder path").fill(join(root, "ST/data"))
+  await page.getByRole("button", { name: "Look in this folder" }).click()
+  const preview = page.getByRole("region", { name: "Chats already here" })
+  await expect(preview.getByText("Importing adds 2 messages and 0 swipes to them.")).toBeVisible()
+  await preview.getByText("2 changed messages", { exact: true }).click()
+  await expect(preview.getByText(payload, { exact: true })).toBeVisible()
+  await expect(preview.locator("img, script")).toHaveCount(0)
+})
+
+test("Skip all also skips files made quiet by an earlier file's predicted additions", async ({ page }) => {
+  const root = mkdtempSync(join(base, "st-skip-quiet-"))
+  const main = "Quiet parent"
+  const side = "Quiet child"
+  write(root, {
+    "characters/Alice.png": card("Alice", "Synthetic greeting."),
+    [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...turns(4)]),
+    [`chats/Alice/${side}.jsonl`]: jsonl([header({ main_chat: main }), ...turns(4)]),
+    ["chats/Alice/Extra changed.jsonl"]: jsonl([header({}), ...turns(4)])
+  })
+  const before = await admin((api) =>
+    Effect.gen(function* () {
+      const { importId } = yield* api.StartStPathImport({ path: root, prefix: `${USER}/` })
+      for (;;) {
+        if ((yield* api.GetStImport({ importId })).job.status !== "running") break
+        yield* Effect.sleep(50)
+      }
+      const chat = (yield* api.ListChats({ limit: 100, before: null })).find((c) => c.title === main)!
+      return { importId, chatId: chat.id }
+    })
+  )
+  write(root, {
+    [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...turns(6)]),
+    [`chats/Alice/${side}.jsonl`]: jsonl([header({ main_chat: main }), ...turns(6)]),
+    ["chats/Alice/Extra changed.jsonl"]: jsonl([header({}), ...turns(6)])
+  })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/import/st`)
+  await page.getByRole("button", { name: "Import ST data again" }).click()
+  await page.getByLabel("Folder path").fill(join(root, "ST/data"))
+  await page.getByRole("button", { name: "Look in this folder" }).click()
+  const preview = page.getByRole("region", { name: "Chats already here" })
+  await expect(preview.getByText("Importing adds 4 messages and 0 swipes to them.")).toBeVisible()
+  await preview.getByRole("button", { name: "Skip all", exact: true }).click()
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.get("job")).not.toBeNull()
+  const importId = new URL(page.url()).searchParams.get("job")!
+  expect(importId).not.toBe(before.importId)
+  await expect
+    .poll(() => admin((api) => Effect.map(api.GetStImport({ importId }), (detail) => detail.job.status)))
+    .toBe("complete")
+  const lengths = await admin((api) =>
+    Effect.gen(function* () {
+      const forks = yield* api.ListForks({ chatId: before.chatId })
+      return yield* Effect.forEach(forks, (fork) =>
+        Effect.map(
+          api.ReadPath({
+            chatId: before.chatId,
+            forkId: fork.id,
+            leafSlotId: fork.tipSlotId,
+            range: { _tag: "Bottom" },
+            limit: 100
+          }),
+          (read) => read.entries.length
+        )
+      )
+    })
+  )
+  expect(lengths.every((n) => n === 4)).toBe(true)
 })

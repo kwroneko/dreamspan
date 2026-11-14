@@ -11,6 +11,7 @@ import {
   type StPlanCounts,
   type StPlanFile,
   type StPlanMessage,
+  stPlanAffectedBySkip,
   PLAN_MESSAGES_PAGE
 } from "@rp/shared/stReimportPlan.ts"
 import { Link } from "@tanstack/react-router"
@@ -63,11 +64,9 @@ const countsLine = (counts: StPlanCounts) => {
 
 const changes = (counts: StPlanCounts) => counts.newMessages + counts.newSwipes + counts.selected + counts.branches > 0
 
-/** Whether the user can choose to import or skip it: it would change something. */
+/** Every importable file can be skipped, including one made quiet by an earlier file. */
 const choosable = (file: StPlanFile) =>
-  file.status === "done" &&
-  (file.target === "existing" || file.target === "unfinished" || file.target === "branch") &&
-  changes(file.counts)
+  file.status === "done" && (file.target === "existing" || file.target === "unfinished" || file.target === "branch")
 
 const why = (file: StPlanFile) => {
   switch (file.target) {
@@ -156,11 +155,13 @@ function FileRow({
   plan,
   file,
   skipped,
+  uncertain,
   onSkip
 }: {
   plan: StImportPlan
   file: StPlanFile
   skipped: boolean
+  uncertain: boolean
   onSkip: (skip: boolean) => void
 }) {
   const detail = file.messages + file.moreMessages
@@ -196,13 +197,18 @@ function FileRow({
             )}
           </p>
           <p className="text-sm text-muted">{file.target === "failed" && file.error ? file.error : why(file)}</p>
-          {file.status === "done" && file.target !== "bin" && file.target !== "greeting" && (
+          {file.status === "done" && file.target !== "bin" && file.target !== "greeting" && !uncertain && (
             <p className="text-sm">{countsLine(file.counts)}</p>
+          )}
+          {uncertain && (
+            <p className="text-sm text-muted">
+              An earlier file for this chat is skipped. Its message counts and changes cannot be predicted here.
+            </p>
           )}
           {file.status === "failed" && file.target !== "failed" && (
             <p className="text-sm text-danger">{file.error ?? "This chat couldn't be checked."}</p>
           )}
-          {file.keepsTip && file.status === "done" && (
+          {!uncertain && file.keepsTip && file.status === "done" && (
             <p className="text-sm text-muted">
               You went on in this chat since: you stay on your messages, and the new ones go on a branch beside them.
             </p>
@@ -221,7 +227,7 @@ function FileRow({
           />
         )}
       </div>
-      {detail > 0 && file.status === "done" && (
+      {!uncertain && detail > 0 && file.status === "done" && (
         <Disclosure
           lazy
           title={plural(detail, "changed message", "changed messages")}
@@ -278,7 +284,7 @@ function PlanCheck({
   const [plan, setPlan] = useState<StImportPlan | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [skip, setSkip] = useState<ReadonlySet<string>>(new Set())
-  const [showAll, setShowAll] = useState(false)
+  const [filesShown, setFilesShown] = useState(FILES_SHOWN)
   const sourceRef = useRef(source)
 
   useEffect(() => {
@@ -310,7 +316,11 @@ function PlanCheck({
           })
         )
       }
-      if (!live) return
+      if (!live) {
+        if (Exit.isSuccess(started))
+          await call(registry, (client) => client("CancelStImportPlan", { planId: started.value.plan.planId }))
+        return
+      }
       if (Exit.isFailure(started)) return fail(describeCause(started.cause).message)
       planId = started.value.plan.planId
       setPlan(started.value.plan)
@@ -357,7 +367,15 @@ function PlanCheck({
   }, [done, planId, skip, onChoice])
 
   const files = useMemo(() => plan?.files ?? [], [plan])
-  const listed = files.filter((file) => file.status !== "done" || file.target !== "existing" || changes(file.counts))
+  const affected = stPlanAffectedBySkip(files, skip)
+  const listed = files.filter(
+    (file) =>
+      file.status !== "done" ||
+      file.target !== "existing" ||
+      changes(file.counts) ||
+      affected.has(file.path) ||
+      skip.has(file.path)
+  )
   const quiet = files.length - listed.length
   const choices = files.filter(choosable)
   const total = files.reduce(
@@ -447,19 +465,25 @@ function PlanCheck({
       )}
       {plan.status === "done" && (
         <p className="text-sm">
-          {total.newMessages + total.newSwipes === 0
-            ? "Nothing new for the chats already here."
-            : `Importing adds ${plural(total.newMessages, "message", "messages")} and ${plural(total.newSwipes, "swipe", "swipes")} to them.`}
+          {affected.size > 0
+            ? "Message counts cannot be predicted while an earlier file for the same chat is skipped."
+            : total.newMessages + total.newSwipes === 0
+              ? "Nothing new for the chats already here."
+              : `Importing adds ${plural(total.newMessages, "message", "messages")} and ${plural(total.newSwipes, "swipe", "swipes")} to them.`}
         </p>
       )}
       {choices.length > 1 && (
         <div className="flex flex-wrap gap-2">
-          <Button hint="Takes in every file's changes." disabled={skip.size === 0} onClick={() => setSkip(new Set())}>
+          <Button
+            hint="Takes in every file's changes."
+            disabled={plan.status !== "done" || skip.size === 0}
+            onClick={() => setSkip(new Set())}
+          >
             Include all
           </Button>
           <Button
             hint="Leaves every chat already here as it is; new chats still come in."
-            disabled={choices.every((file) => skip.has(file.path))}
+            disabled={plan.status !== "done" || choices.every((file) => skip.has(file.path))}
             onClick={() => setSkip(new Set(choices.map((file) => file.path)))}
           >
             Skip all
@@ -467,12 +491,13 @@ function PlanCheck({
         </div>
       )}
       <ul aria-label="Files for chats already here" className="flex flex-col divide-y divide-border">
-        {(showAll ? listed : listed.slice(0, FILES_SHOWN)).map((file) => (
+        {listed.slice(Math.max(0, filesShown - FILES_SHOWN), filesShown).map((file) => (
           <FileRow
             key={file.path}
             plan={plan}
             file={file}
             skipped={skip.has(file.path)}
+            uncertain={affected.has(file.path)}
             onSkip={(skipped) => {
               const next = new Set(skip)
               if (skipped) next.add(file.path)
@@ -482,18 +507,31 @@ function PlanCheck({
           />
         ))}
       </ul>
-      {!showAll && listed.length > FILES_SHOWN && (
+      {filesShown > FILES_SHOWN && (
         <Button
           className="self-start"
-          hint="Lists every file that changes a chat already here."
-          onClick={() => setShowAll(true)}
+          hint="Lists the previous files."
+          onClick={() => setFilesShown(Math.max(FILES_SHOWN, filesShown - FILES_SHOWN))}
         >
-          {`Show all ${listed.length}`}
+          Previous files
+        </Button>
+      )}
+      {listed.length > filesShown && (
+        <Button
+          className="self-start"
+          hint="Lists the next files that change a chat already here."
+          onClick={() => setFilesShown(filesShown + FILES_SHOWN)}
+        >
+          Next files
         </Button>
       )}
       {quiet > 0 && plan.status === "done" && (
         <p className="text-sm text-muted">{`${plural(quiet, "more file has", "more files have")} nothing new.`}</p>
       )}
+      <p className="text-sm text-muted">
+        Counts assume each file can be linked to a card. Card links are checked during import; files needing your choice
+        wait in the report.
+      </p>
       <p className="text-sm text-muted">
         Importing never undoes what you did here: the swipe you chose, your edits, messages you hid or deleted, your
         notes and summaries stay.

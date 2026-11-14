@@ -109,3 +109,18 @@ export const PLAN_MESSAGES_HELD = 500
 export const PLAN_MESSAGES_PAGE = 50
 /** Characters of a message's text a detail row shows. */
 export const PLAN_TEXT_CHARS = 160
+
+/** A later file may match writes from any earlier file in the same chat. */
+export const stPlanAffectedBySkip = (
+  files: ReadonlyArray<Pick<StPlanFile, "path" | "chatId">>,
+  skipped: ReadonlySet<string>
+): ReadonlySet<string> => {
+  const affected = new Set<string>()
+  const missing = new Set<string>()
+  for (const file of files) {
+    if (file.chatId === null) continue
+    if (skipped.has(file.path)) missing.add(file.chatId)
+    else if (missing.has(file.chatId)) affected.add(file.path)
+  }
+  return affected
+}

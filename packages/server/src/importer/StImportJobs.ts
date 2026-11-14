@@ -447,7 +447,7 @@ export class StImportJobs extends Context.Service<
             return yield* new StFolderUnreadable({ message: "That ST user's folder has nothing the import reads." })
           // The preview the user confirmed, checked against the folder as it is now; the files
           // they chose to skip don't go.
-          const expect = choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, entries)
+          const expect = choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, entries, root)
           const skip = new Set(choice?.skip ?? [])
           const files = all.filter((file) => !skip.has(file.path))
           return yield* starting.withPermits(1)(
@@ -480,7 +480,7 @@ export class StImportJobs extends Context.Service<
         starting.withPermits(1)(
           Effect.gen(function* () {
             // The browser leaves out the files the user chose to skip.
-            const expect = choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, null)
+            const expect = choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, null, null)
             yield* busy(user)
             yield* supersede(user)
             const importId = yield* imports.start(user, unsupported, expect)

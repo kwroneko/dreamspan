@@ -3,8 +3,10 @@
 // must be what the import then does, nothing may be written by the preview, and an import
 // confirmed from a preview the chats changed since must be refused. Folders are read by path
 // (StartStImportPlan with `folder`), and one from a browser through the files it asks for.
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, utimesSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { Worker } from "node:worker_threads"
+import { databaseFile } from "../src/db/connection.ts"
 import { assert, layer } from "@effect/vitest"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import type { StImportPlan } from "@rp/shared/stReimportPlan.ts"
@@ -13,6 +15,8 @@ import { client, serverLayer, serverPort, testConfig } from "./support/config.ts
 import { card, header, jsonl, message } from "./support/stFolder.ts"
 import { stImportGraph } from "./support/stImportGraph.ts"
 import { importStPath, jobEnded } from "./support/stUpload.ts"
+import { Reader } from "../src/db/Database.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
@@ -313,6 +317,183 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         { unchanged: 4, newMessages: 8, newSwipes: 0, selected: 0, kept: 0, branches: 0 }
       )
       yield* api.CancelStImportPlan({ planId: plan.planId })
+    })
+  )
+  it.effect("refuses a different folder even when its file metadata agrees", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const source = `${PREFIX}chats/Root/Root.jsonl`
+      const files = new Map([
+        [`${PREFIX}characters/Alice.png`, card("Alice", "m0")],
+        [source, file(turns(4))]
+      ])
+      yield* importStPath(api, onDisk(files), PREFIX)
+      files.set(source, file(turns(6)))
+      const root = onDisk(files)
+      const other = onDisk(files)
+      const modified = new Date("2025-02-01T00:00:00.000Z")
+      utimesSync(join(root, source), modified, modified)
+      utimesSync(join(other, source), modified, modified)
+      const plan = yield* planEnded(
+        api,
+        (yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })).plan.planId
+      )
+      const result = yield* api
+        .StartStPathImport({ path: other, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } })
+        .pipe(Effect.result)
+      if (result._tag === "Success") yield* jobEnded(api, result.success.importId)
+      assert.strictEqual(result._tag, "Failure", "a preview must belong to its chosen folder")
+    })
+  )
+
+  it.effect("refuses a new unrecorded file added after checking", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const source = `${PREFIX}chats/Added/Added.jsonl`
+      const files = new Map([
+        [`${PREFIX}characters/Alice.png`, card("Alice", "m0")],
+        [source, file(turns(4))]
+      ])
+      yield* importStPath(api, onDisk(files), PREFIX)
+      const root = onDisk(files)
+      const plan = yield* planEnded(
+        api,
+        (yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })).plan.planId
+      )
+      writeFileSync(join(root, PREFIX, "chats/Added/New.jsonl"), file(turns(8)))
+      const result = yield* api
+        .StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } })
+        .pipe(Effect.result)
+      if (result._tag === "Success") yield* jobEnded(api, result.success.importId)
+      assert.strictEqual(result._tag, "Failure", "the complete chat manifest must be checked")
+    })
+  )
+
+  it.effect("does not finish successfully when a chat cannot be checked", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const source = `${PREFIX}chats/Broken/Broken.jsonl`
+      const files = new Map([
+        [`${PREFIX}characters/Alice.png`, card("Alice", "m0")],
+        [source, file(turns(4))]
+      ])
+      yield* importStPath(api, onDisk(files), PREFIX)
+      files.set(source, new TextEncoder().encode("x".repeat(8 * 1024 * 1024 + 1)))
+      const root = onDisk(files)
+      const plan = yield* planEnded(
+        api,
+        (yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })).plan.planId
+      )
+      assert.strictEqual(plan.files[0]!.status, "failed")
+      assert.strictEqual(plan.status, "failed", "a failed file must prevent confirmation")
+    })
+  )
+
+  it.effect("detects record changes even when count and latest time stay the same", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const userId = (yield* api.Whoami()).id
+      const reader = yield* Reader
+      const input = { userId, chatIds: [] }
+      const before = yield* reader.StImportPlanStamp(input)
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "UPDATE jobs SET payload_json = json_set(payload_json, '$.keepTip', 1) WHERE kind = 'st-import-chat' AND owner_user_id = ?",
+          params: [userId]
+        }
+      ])
+      const after = yield* reader.StImportPlanStamp(input)
+      assert.notStrictEqual(after, before)
+    })
+  )
+  it.effect("refuses changed bytes even when file size and modification time are restored", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const source = `${PREFIX}chats/Bytes/Bytes.jsonl`
+      const files = new Map([
+        [`${PREFIX}characters/Alice.png`, card("Alice", "m0")],
+        [source, file(turns(4))]
+      ])
+      yield* importStPath(api, onDisk(files), PREFIX)
+      const root = onDisk(files)
+      const modified = new Date("2025-02-01T00:00:00Z")
+      utimesSync(join(root, source), modified, modified)
+      const plan = yield* planEnded(
+        api,
+        (yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })).plan.planId
+      )
+      writeFileSync(join(root, source), new TextDecoder().decode(files.get(source)!).replaceAll("m2", "n2"))
+      utimesSync(join(root, source), modified, modified)
+      const result = yield* api
+        .StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } })
+        .pipe(Effect.result)
+      if (result._tag === "Success") yield* jobEnded(api, result.success.importId)
+      assert.strictEqual(result._tag, "Failure")
+    })
+  )
+  it.effect("keeps predicted selections independent between existing parent and child forks", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const parent = "chats/Selections/Selection parent.jsonl"
+      const child = "chats/Selections/Selection child.jsonl"
+      const files = new Map([
+        [`${PREFIX}characters/Selections.png`, card("Alice", "m0")],
+        [`${PREFIX}${parent}`, file(turns(8))],
+        [`${PREFIX}${child}`, file([...turns(4), ...own("selection side", 4, 2)], "Selection parent")]
+      ])
+      yield* importStPath(api, onDisk(files), PREFIX)
+      const userId = (yield* api.Whoami()).id
+      const record = (yield* (yield* Reader).StImportSources({ userId })).chats.find((row) => row.source === child)!
+      const changed = turns(8)
+      changed[2] = message({ name: "Alice", mes: "m2 new", minute: 2, swipes: ["m2", "m2 new"], swipeId: 1 })
+      files.set(`${PREFIX}${parent}`, file(changed))
+      const root = onDisk(files)
+      const plan = yield* planEnded(
+        api,
+        (yield* api.StartStImportPlan({ folder: { root, prefix: PREFIX } })).plan.planId
+      )
+      const childPlan = byPath(plan).get(child)!
+      assert.strictEqual(
+        childPlan.counts.selected,
+        0,
+        "the parent's new selection cannot change the child's existing selection"
+      )
+      assert.strictEqual(childPlan.counts.newSwipes, 0)
+      const { importId } = yield* api.StartStPathImport({
+        path: root,
+        prefix: PREFIX,
+        plan: { planId: plan.planId, skip: [] }
+      })
+      assert.strictEqual((yield* jobEnded(api, importId)).job.status, "complete")
+      const result = yield* api.ReadPath({
+        chatId: record.chatId,
+        forkId: record.forkId,
+        leafSlotId: record.end,
+        range: { _tag: "Bottom" },
+        limit: 100
+      })
+      assert.strictEqual(result.entries[2]!.version.content, "m2")
+    })
+  )
+  it.effect("the production reader connection refuses writes even with query_only turned off", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.promise(
+        () =>
+          new Promise((resolve, reject) => {
+            const worker = new Worker(new URL("./support/stPlanReadOnlyWorker.ts", import.meta.url), {
+              workerData: { dbPath: databaseFile(config.dataDir) }
+            })
+            let reply: unknown
+            worker.once("message", (message) => {
+              reply = message
+            })
+            worker.once("error", reject)
+            worker.once("exit", (code) =>
+              code === 0 ? resolve(reply) : reject(new Error(`reader probe exited ${code}`))
+            )
+          })
+      )
+      assert.deepStrictEqual(result, { queryOnly: 1, guarded: true, fileGuarded: true })
     })
   )
 })

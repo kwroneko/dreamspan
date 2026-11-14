@@ -19,7 +19,8 @@
 // The stamp of the chats it reads (`StImportPlanStamp`) is taken before the first file is
 // read. The import the user confirms passes it to `StImportBegin`, which takes it again in
 // its transaction and refuses to start if anything changed since: the plan shown is never
-// silently replaced by a different write.
+// admitted against a changed starting snapshot. This is not a lock over later import batches.
+import { createHash, type Hash } from "node:crypto"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { User } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
@@ -38,7 +39,7 @@ import {
   type StPlanMessage,
   type StPlanTarget
 } from "@rp/shared/stReimportPlan.ts"
-import { Context, Effect, Fiber, Layer } from "effect"
+import { Context, Effect, Fiber, Layer, Schedule, Semaphore } from "effect"
 import { Reader } from "../db/Database.ts"
 import type { OverlaySlot, OverlayVersion, PlaceOverlay } from "../db/stImportPlace.ts"
 import { sourceTime } from "../formats/sourceTime.ts"
@@ -51,6 +52,8 @@ import type { StPlanExpect } from "./StImports.ts"
 const IDLE_MS = 60 * 60 * 1000
 /** Changed messages held across a preview's files. */
 const MAX_HELD = 20_000
+/** Bound virtual writes as well as detail rows, across all shared chats. */
+const MAX_OVERLAY_ITEMS = 50_000
 
 /** A chat file of the folder, as the preview is given it. */
 export interface StPlanEntry {
@@ -89,6 +92,8 @@ interface FileState {
   readonly entry: StPlanEntry
   readonly target: StPlanTarget
   readonly recordId: string
+  readonly forkId: string
+  readonly inheritedForkId: string | null
   /** The record is the parent file's: the file is a new branch in its chat. */
   readonly branch: boolean
   /** Matched as a branch merged into another file's chat (`StImportMessages.strict`). */
@@ -112,13 +117,16 @@ interface FileState {
   carry: { readonly keepTip: boolean; readonly branchDeleted: boolean; readonly last: string | null } | null
   /** Its chat's overlay sizes before the file, to take back if it's read again. */
   overlayMark: readonly [number, number, number] | null
+  digest: Hash | null
+  sha256: string | null
 }
 
 /** What the files before would write to a chat that more than one file goes into. */
 interface Overlay {
   readonly slots: Array<OverlaySlot>
   readonly versions: Array<{ readonly slotId: string; readonly version: OverlayVersion }>
-  readonly selects: Array<{ readonly slotId: string; readonly versionId: string }>
+  readonly selects: Array<{ readonly slotId: string; readonly versionId: string; readonly forkId: string }>
+  jsonFork: string | null
   json: string | null
 }
 
@@ -127,6 +135,7 @@ interface Plan {
   readonly user: User
   readonly mode: "path" | "upload"
   readonly root: string | null
+  readonly entries: ReadonlyArray<StPlanEntry>
   readonly files: ReadonlyArray<FileState>
   readonly byPath: ReadonlyMap<string, FileState>
   readonly newChats: number
@@ -137,7 +146,8 @@ interface Plan {
    * By chat, for a chat more than one of the files goes into: what the files before would
    * write to it, which a later file's dry run matches as the import would (`PlaceOverlay`).
    */
-  readonly overlays: ReadonlyMap<string, Overlay>
+  readonly overlays: Map<string, Overlay>
+  overlayItems: number
   batches: number
   status: StImportPlan["status"]
   filesDone: number
@@ -190,7 +200,8 @@ export class StImportPlans extends Context.Service<
     readonly confirm: (
       user: User,
       planId: string,
-      entries: ReadonlyArray<StPlanEntry> | null
+      entries: ReadonlyArray<StPlanEntry> | null,
+      root: string | null
     ) => Effect.Effect<StPlanExpect, StImportPlanChanged>
   }
 >()("rp/importer/StImportPlans") {
@@ -200,6 +211,8 @@ export class StImportPlans extends Context.Service<
       const reader = yield* Reader
       const formats = yield* Formats
       const plans = new Map<string, Plan>()
+      const starting = yield* Semaphore.make(1)
+      const scope = yield* Effect.scope
 
       const planOf = (user: User, planId: string) => {
         const plan = plans.get(user.id)
@@ -253,8 +266,11 @@ export class StImportPlans extends Context.Service<
         file.error = error
         plan.filesDone++
         if (plan.filesDone === plan.files.length && plan.status === "running") {
-          plan.status = "done"
+          plan.status = plan.files.some((entry) => entry.status === "failed") ? "failed" : "done"
+          if (plan.status === "failed")
+            plan.error = "Some chats could not be checked. Check the folder again before importing."
           plan.currentFile = null
+          plan.overlays.clear()
         }
       }
 
@@ -263,6 +279,8 @@ export class StImportPlans extends Context.Service<
         Effect.gen(function* () {
           if (index === 0) {
             Object.assign(file, {
+              digest: createHash("sha256"),
+              sha256: null,
               nextPart: 0,
               index: 0,
               userTurns: 0,
@@ -291,6 +309,7 @@ export class StImportPlans extends Context.Service<
           } else if (file.nextPart !== index) return "restart" as const
           file.status = "checking"
           plan.currentFile = file.entry.path
+          file.digest?.update(bytes)
           const parsed = yield* formats.st.chatPart({
             bytes,
             first: index === 0,
@@ -310,12 +329,16 @@ export class StImportPlans extends Context.Service<
             const overlay = plan.overlays.get(file.chatId)
             const pending =
               overlay === undefined ? 0 : overlay.slots.length + overlay.versions.length + overlay.selects.length
-            if (overlay !== undefined && pending > 0 && overlay.json === null)
+            if (overlay !== undefined && pending > 0 && (overlay.json === null || overlay.jsonFork !== file.forkId)) {
+              overlay.jsonFork = file.forkId
               overlay.json = JSON.stringify({
                 slots: overlay.slots,
                 versions: overlay.versions,
-                selects: overlay.selects
+                selects: overlay.selects.filter(
+                  (selection) => selection.forkId === file.forkId || selection.forkId === file.inheritedForkId
+                )
               })
+            }
             const planned = yield* reader.StImportPlanBatch({
               userId: plan.user.id,
               recordId: file.recordId,
@@ -333,9 +356,19 @@ export class StImportPlans extends Context.Service<
             })
             if (overlay !== undefined && planned.written !== null) {
               const written = JSON.parse(planned.written) as PlaceOverlay
+              plan.overlayItems +=
+                written.slots.reduce((n, slot) => n + 1 + slot.versions.length, 0) +
+                written.versions.length +
+                written.selects.length
+              if (plan.overlayItems > MAX_OVERLAY_ITEMS) {
+                plan.status = "failed"
+                plan.error = "These chats have too many shared changes to check together. Check a smaller folder."
+                plan.overlays.clear()
+                return "done" as const
+              }
               overlay.slots.push(...written.slots)
               overlay.versions.push(...written.versions)
-              overlay.selects.push(...written.selects)
+              overlay.selects.push(...written.selects.map((selection) => ({ ...selection, forkId: file.forkId })))
               overlay.json = null
             }
             file.chatId = planned.chatId
@@ -353,6 +386,8 @@ export class StImportPlans extends Context.Service<
           }
           file.nextPart = index + 1
           if (last) {
+            file.sha256 = file.digest?.digest("hex") ?? null
+            file.digest = null
             settle(plan, file, "done")
             return "done" as const
           }
@@ -401,14 +436,16 @@ export class StImportPlans extends Context.Service<
           }
         }).pipe(
           Effect.catchCause((cause) =>
-            Effect.logError("an ST re-import preview failed", cause).pipe(
-              Effect.andThen(
-                Effect.sync(() => {
-                  plan.status = "failed"
-                  plan.error = "The check failed on the server. Try again."
-                })
-              )
-            )
+            plan.status !== "running"
+              ? Effect.void
+              : Effect.logError("an ST re-import preview failed", cause).pipe(
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      plan.status = "failed"
+                      plan.error = "The check failed on the server. Try again."
+                    })
+                  )
+                )
           )
         )
 
@@ -443,13 +480,17 @@ export class StImportPlans extends Context.Service<
             cursor: null,
             matching: true,
             carry: null,
-            overlayMark: null
+            overlayMark: null,
+            digest: null,
+            sha256: null
           }
           if (target._tag === "bin") {
             files.push({
               ...base,
               target: "bin",
               recordId: target.own.recordId,
+              forkId: target.own.forkId,
+              inheritedForkId: null,
               branch: false,
               strict: false,
               chatId: target.own.chatId as ChatId,
@@ -460,6 +501,8 @@ export class StImportPlans extends Context.Service<
               ...base,
               target: target.own.complete ? "existing" : "unfinished",
               recordId: target.own.recordId,
+              forkId: target.own.forkId,
+              inheritedForkId: null,
               branch: false,
               strict: target.branch,
               chatId: target.own.chatId as ChatId
@@ -469,6 +512,8 @@ export class StImportPlans extends Context.Service<
               ...base,
               target: "branch",
               recordId: target.into.recordId,
+              forkId: `preview-fork:${entry.path}`,
+              inheritedForkId: target.into.forkId,
               branch: true,
               strict: true,
               chatId: target.into.chatId as ChatId
@@ -498,18 +543,20 @@ export class StImportPlans extends Context.Service<
       ) =>
         Effect.gen(function* () {
           yield* end(user)
+          // Stamp before mapping: a concurrent change during mapping cannot be blessed.
+          const stamp = yield* reader.StImportPlanStamp({ userId: user.id, chatIds: [] })
           const { files, newChats } = mapped(yield* recordsOf(user), entries)
           const chatIds = [...new Set(files.map((file) => file.chatId))]
           const sharing = new Map<string, number>()
           for (const file of files)
             if (file.status === "waiting") sharing.set(file.chatId, (sharing.get(file.chatId) ?? 0) + 1)
           // Before any file is read: a change after this makes the confirmed import refuse.
-          const stamp = yield* reader.StImportPlanStamp({ userId: user.id, chatIds })
           const plan: Plan = {
             id: uuidv7(),
             user,
             mode: input.mode,
             root: input.mode === "path" ? input.root : null,
+            entries,
             files,
             byPath: new Map(files.map((file) => [file.entry.path, file])),
             newChats,
@@ -518,9 +565,12 @@ export class StImportPlans extends Context.Service<
             stamp,
             overlays: new Map(
               [...sharing].flatMap(([chatId, n]) =>
-                n > 1 ? [[chatId, { slots: [], versions: [], selects: [], json: null } as Overlay] as const] : []
+                n > 1
+                  ? [[chatId, { slots: [], versions: [], selects: [], json: null, jsonFork: null } as Overlay] as const]
+                  : []
               )
             ),
+            overlayItems: 0,
             batches: 0,
             status: "running",
             filesDone: files.filter((file) => file.status === "done").length,
@@ -534,15 +584,27 @@ export class StImportPlans extends Context.Service<
           if (plan.filesDone === files.length) plan.status = "done"
           plans.set(user.id, plan)
           if (input.mode === "path" && plan.status === "running")
-            plan.fiber = yield* Effect.forkDetach(runPath(plan, input.root))
+            plan.fiber = yield* Effect.forkIn(runPath(plan, input.root), scope)
           return {
             plan: snapshot(plan),
             wanted: input.mode === "upload" ? files.filter((f) => f.status === "waiting").map((f) => f.entry.path) : []
           }
         })
 
+      // Expiry releases inactive accounts too; a timestamp check alone retained every
+      // account's plan and detached work until that account happened to start another.
+      yield* Effect.forkScoped(
+        Effect.repeat(
+          Effect.gen(function* () {
+            const now = Date.now()
+            for (const plan of plans.values()) if (now - plan.touched > IDLE_MS) yield* end(plan.user)
+          }),
+          Schedule.spaced("1 minute")
+        )
+      )
+
       return StImportPlans.of({
-        start,
+        start: (user, input, entries) => starting.withPermits(1)(start(user, input, entries)),
         get: (user, planId) => Effect.map(planOf(user, planId), snapshot),
         messages: (user, planId, path, offset) =>
           Effect.flatMap(planOf(user, planId), (plan) => {
@@ -559,6 +621,7 @@ export class StImportPlans extends Context.Service<
               if (plan.status !== "running") return Effect.void
               plan.status = "cancelled"
               plan.currentFile = null
+              plan.overlays.clear()
               return plan.fiber === null ? Effect.void : Fiber.interrupt(plan.fiber)
             })
           ),
@@ -577,30 +640,57 @@ export class StImportPlans extends Context.Service<
             plan.bytesDone += bytes.byteLength
             return outcome
           }),
-        confirm: (user, planId, entries) =>
+        confirm: (user, planId, entries, root) =>
           Effect.gen(function* () {
             const changed = (message: string) => new StImportPlanChanged({ message })
             const plan = plans.get(user.id)
-            if (plan === undefined || plan.id !== planId || plan.status !== "done")
+            if (
+              plan === undefined ||
+              plan.id !== planId ||
+              plan.status !== "done" ||
+              Date.now() - plan.touched > IDLE_MS
+            )
               return yield* changed("This check isn't finished or has expired. Check the folder again, then import.")
+            if (plan.root !== root || (plan.mode === "path") !== (entries !== null))
+              return yield* changed("Choose the folder that was checked, then import.")
             if (entries !== null) {
-              // The folder as read now must map to the same files, unchanged.
-              const now = mapped(yield* recordsOf(user).pipe(Effect.orDie), entries).files
               const same =
-                now.length === plan.files.length &&
-                now.every((file) => {
-                  const was = plan.byPath.get(file.entry.path)
+                entries.length === plan.entries.length &&
+                entries.every((entry, index) => {
+                  const was = plan.entries[index]
                   return (
                     was !== undefined &&
-                    was.entry.size === file.entry.size &&
-                    was.entry.modifiedMs === file.entry.modifiedMs
+                    was.path === entry.path &&
+                    was.size === entry.size &&
+                    was.modifiedMs === entry.modifiedMs &&
+                    was.mainChat === entry.mainChat
                   )
                 })
-              if (!same) {
-                yield* end(user)
-                return yield* changed(
-                  "The folder changed since this check, so it was worked out again. Look it over, then import."
-                )
+              if (!same) return yield* changed("The folder changed since this check. Check it again before importing.")
+              // Metadata alone cannot establish equality (mtime can be restored). Hash the
+              // same line-bounded reads, without retaining file bodies or parsing them again.
+              for (const file of plan.files) {
+                if (file.sha256 === null) continue
+                const hash = createHash("sha256")
+                let start = 0
+                for (;;) {
+                  const read = yield* readStFolderFile(
+                    root!,
+                    file.entry.path,
+                    { size: file.entry.size, modifiedMs: file.entry.modifiedMs ?? 0 },
+                    start,
+                    true
+                  ).pipe(
+                    Effect.mapError(() =>
+                      changed("The folder changed since this check. Check it again before importing.")
+                    )
+                  )
+                  hash.update(read.bytes)
+                  start = read.next
+                  if (read.last) break
+                }
+                if (hash.digest("hex") !== file.sha256)
+                  return yield* changed("The folder changed since this check. Check it again before importing.")
               }
             }
             return { chatIds: plan.chatIds, stamp: plan.stamp }

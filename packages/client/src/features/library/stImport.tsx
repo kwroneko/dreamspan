@@ -674,6 +674,8 @@ function StartForm({ open, close }: StImportSectionProps & { close: (() => void)
 
   const choose = (next: Chosen | null) => {
     const users = next === null ? [] : stRoots(next.files.map((file) => file.path))
+    setPlanChoice(null)
+    setPlanRound((round) => round + 1)
     setChosen(next)
     setRoots(users)
     setPrefix(users.length === 1 ? users[0]!.prefix : null)
