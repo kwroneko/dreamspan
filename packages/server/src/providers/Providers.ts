@@ -3,6 +3,7 @@ import { Formats } from "../importer/Formats.ts"
 import { payloadText } from "./textPayload.ts"
 import { documentedCachePolicy } from "./cachePolicy.ts"
 import { hasImageBlocks, limitImages } from "./images.ts"
+import { claudeThinkingDefaults } from "./claudeThinking.ts"
 import { imageSample, payloadImages } from "./imageSamples.ts"
 import { captureToolArguments } from "./toolArguments.ts"
 // The provider layer (spec/PROVIDERS.md): one streaming entry point over pi-ai for the
@@ -527,6 +528,10 @@ const buildPiModel = async (prepared: Prepared, model: Model, effective: Effecti
   const base = found?.sameApi ? found.entry : null
   prepared.registerHeaders(base?.headers)
   const price = effective.price
+  // A Claude model's thinking form (claudeThinking.ts), under what the model's settings and the
+  // catalog say: an unlisted adaptive-only model must not be sent budgets or `disabled`.
+  const family = claudeThinkingDefaults(prepared.api, model.key)
+  const levels = { ...family?.thinkingLevelMap, ...effective.thinkingLevels.value }
   return {
     ...base,
     id: model.key,
@@ -535,7 +540,7 @@ const buildPiModel = async (prepared: Prepared, model: Model, effective: Effecti
     provider: prepared.kind.piProvider,
     baseUrl: prepared.baseUrl,
     reasoning: effective.reasoning.value,
-    ...(effective.thinkingLevels.value ? { thinkingLevelMap: { ...effective.thinkingLevels.value } } : {}),
+    ...(Object.keys(levels).length > 0 ? { thinkingLevelMap: levels } : {}),
     input: effective.vision.value ? ["text", "image"] : ["text"],
     cost: {
       input: price?.input ?? 0,
@@ -549,7 +554,7 @@ const buildPiModel = async (prepared: Prepared, model: Model, effective: Effecti
     contextWindow: effective.context.value,
     maxTokens: effective.maxOutput.value,
     ...(effective.cacheTtlS.value !== null ? { promptCache: { short: effective.cacheTtlS.value } } : {}),
-    compat: { ...effective.compat } as never,
+    compat: { ...family?.compat, ...effective.compat } as never,
     ...(Object.keys(effective.sampling).length > 0 ? { samplingParams: { ...effective.sampling } as never } : {})
   } as PiModel<Api>
 }
