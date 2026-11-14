@@ -22,7 +22,10 @@ const child = spawn(
     ...args
   ],
   {
-    env: { LANG: "C", NODE_ENV: "production" },
+    // Rolldown's mimalloc otherwise requests transparent huge pages. Direct memory
+    // compaction can stall even tiny builds for tens of seconds on a busy host.
+    // Use ordinary pages in these short-lived, memory-bounded children instead.
+    env: { LANG: "C", NODE_ENV: "production", MIMALLOC_ALLOW_THP: "0" },
     cwd: dirname(fileURLToPath(target)),
     stdio: ["ignore", "pipe", "pipe", "ipc"]
   }

@@ -83,6 +83,16 @@ it("kills only its own hanging and memory-exhausting check children", async () =
   expect((await runPluginChild(new URL(`file://${memory}`), [], { timeout: 5000, memory: 32 })).ok).toBe(false)
   expect((await runPluginChild(new URL(`file://${hang}`), [], { timeout: 200, memory: 32 })).ok).toBe(false)
 }, 15_000)
+it("uses ordinary allocator pages in children without inheriting the parent environment", async () => {
+  const data = tempDir("plugin-child-environment")
+  const script = join(data, "environment.mjs")
+  await writeFile(script, "console.log(JSON.stringify(process.env))")
+  const result = await runPluginChild(new URL(`file://${script}`), [], {
+    permissions: ["--permission", `--allow-fs-read=${data}`]
+  })
+  expect(result.ok).toBe(true)
+  expect(JSON.parse(result.output)).toEqual({ LANG: "C", NODE_ENV: "production", MIMALLOC_ALLOW_THP: "0" })
+})
 it("survives SIGKILL between file publication and the settings write without enabling anything", async () => {
   const data = tempDir("plugin-kill"),
     script = join(data, "prepare.mjs")
