@@ -145,7 +145,13 @@ const cardWriter =
         input.noteDocJson,
         input.notesDocJson
       )
-      return yield* write(withCrop(card, input.avatar), input)
+      const world = card.extensions.world
+      const alias = typeof world === "string" ? world : null
+      const renamed =
+        alias !== null && input.worldNames && Object.hasOwn(input.worldNames, alias)
+          ? { ...card, extensions: { ...card.extensions, world: input.worldNames[alias]! } }
+          : card
+      return yield* write(withCrop(renamed, input.avatar), input)
     })
 
 const builtins: ReadonlyArray<Exporter> = [

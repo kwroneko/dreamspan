@@ -313,7 +313,7 @@ for (const mode of ["every", "dispatcher", "stale", "declined", "resume", "histo
         )
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     },
-    180000
+    { timeout: 180000, tags: ["slow"] }
   )
 
 it.live(
@@ -349,7 +349,7 @@ it.live(
       assert.isNull((yield* api.GetPlugin({ scope: "user", id })).pin)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
-  60000
+  { timeout: 60000, tags: ["slow"] }
 )
 it("bounds API/source data and refuses paths outside the shipped source allowlist", async () => {
   const docs = await pluginApiDocs("composerControls")
@@ -456,7 +456,7 @@ it.live(
       )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
-  90000
+  { timeout: 90000, tags: ["slow"] }
 )
 
 it.live(
@@ -546,7 +546,7 @@ it.live(
       assert.strictEqual((yield* api.GetPlugin({ scope: "user", id: "growth" })).pin?.commit, versions.growth!.second)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
-  120000
+  { timeout: 120000, tags: ["slow"] }
 )
 
 it.live(
@@ -668,52 +668,56 @@ it.live(
       assert.deepStrictEqual(yield* host.clientAsset(me, { ...target, commit: newer }), approved)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
-  60000
+  { timeout: 60000, tags: ["slow"] }
 )
 
 for (const stage of ["probe", "tests"] as const)
-  it(`authoring ${stage} cannot contact even a loopback listener before consent`, async () => {
-    let requests = 0
-    const listener = createServer((_req, res) => {
-      requests++
-      res.end("synthetic response")
-    })
-    await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve))
-    try {
-      const address = listener.address() as { port: number }
-      const dataDir = testConfig().dataDir
-      const id = `network-${stage}`
-      const fetch = `await fetch("http://127.0.0.1:${address.port}/synthetic")`
-      const files = {
-        "rp-plugin.json": JSON.stringify({
-          id,
-          name: "Network attack",
-          api: 1,
-          client: null,
-          server: "server.ts",
-          worker: null,
-          surfaces: [],
-          overrides: [],
-          replaces: [],
-          base: null,
-          network: false
-        }),
-        "server.ts": `${stage === "probe" ? fetch + ";" : ""}
+  it(
+    `authoring ${stage} cannot contact even a loopback listener before consent`,
+    { timeout: 60000, tags: ["slow"] },
+    async () => {
+      let requests = 0
+      const listener = createServer((_req, res) => {
+        requests++
+        res.end("synthetic response")
+      })
+      await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve))
+      try {
+        const address = listener.address() as { port: number }
+        const dataDir = testConfig().dataDir
+        const id = `network-${stage}`
+        const fetch = `await fetch("http://127.0.0.1:${address.port}/synthetic")`
+        const files = {
+          "rp-plugin.json": JSON.stringify({
+            id,
+            name: "Network attack",
+            api: 1,
+            client: null,
+            server: "server.ts",
+            worker: null,
+            surfaces: [],
+            overrides: [],
+            replaces: [],
+            base: null,
+            network: false
+          }),
+          "server.ts": `${stage === "probe" ? fetch + ";" : ""}
           import { Effect, type Activate } from "@rp/plugin-api/server";
           export const activate: Activate = () => Effect.void;`,
-        ...(stage === "tests"
-          ? { "test/attack.test.ts": `import test from "node:test"; test("network", async () => { ${fetch}; });` }
-          : {})
+          ...(stage === "tests"
+            ? { "test/attack.test.ts": `import test from "node:test"; test("network", async () => { ${fetch}; });` }
+            : {})
+        }
+        const commit = await saveFiles(dataDir, "", id, files, true, "Synthetic network attack")
+        const report = await checkPlugin(dataDir, "", id, commit, { working: true, admin: true })
+        assert.strictEqual(requests, 0, "Unapproved code reached the network")
+        assert.isFalse(report.ok)
+        assert.strictEqual(report.step, stage)
+      } finally {
+        await new Promise<void>((resolve, reject) => listener.close((e) => (e ? reject(e) : resolve())))
       }
-      const commit = await saveFiles(dataDir, "", id, files, true, "Synthetic network attack")
-      const report = await checkPlugin(dataDir, "", id, commit, { working: true, admin: true })
-      assert.strictEqual(requests, 0, "Unapproved code reached the network")
-      assert.isFalse(report.ok)
-      assert.strictEqual(report.step, stage)
-    } finally {
-      await new Promise<void>((resolve, reject) => listener.close((e) => (e ? reject(e) : resolve())))
     }
-  }, 60000)
+  )
 
 it.live("a disabled plugin host offers no plugin capability or definitions", () => {
   const config = testConfig({ plugins: false })
@@ -820,7 +824,7 @@ it.live(
       assert.isNull((yield* api.GetPlugin({ scope: "user", id })).pin)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
-  90000
+  { timeout: 90000, tags: ["slow"] }
 )
 
 it("app_source excludes a configured data volume even beneath a source directory", async () => {

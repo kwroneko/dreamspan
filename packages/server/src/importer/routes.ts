@@ -3,7 +3,7 @@
 // thread. Both routes act as the user the session names, behind the same cross-site guard
 // as every request (server.ts), and refuse content types a cross-site form can send.
 import { formatByteSize } from "@rp/shared/byteSize.ts"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { CurrentUser } from "@rp/shared/api.ts"
 import { SavedRef } from "@rp/shared/editorApi.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
@@ -19,7 +19,12 @@ import { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { SummaryDraftSave } from "@rp/shared/lcm.ts"
 import { MessageDraftSave, messageDraftKey } from "@rp/shared/chatApi.ts"
 import { parseField } from "@rp/shared/editing.ts"
-import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore } from "effect"
+import { ByteSize, Effect, Exit, Layer, Option, Schedule, Schema, Semaphore, Stream } from "effect"
+import { ChatId, ForkId } from "@rp/shared/chatPosition.ts"
+import { chatExport } from "./chatExport.ts"
+import { libraryArchive, type RenderRef } from "./libraryArchive.ts"
+import { zipStream } from "../formats/zipStream.ts"
+import type { UserId } from "@rp/shared/domain.ts"
 import { NodeHttpServerRequest } from "@effect/platform-node"
 import { HttpIncomingMessage, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { Accounts } from "../auth/Accounts.ts"
@@ -114,6 +119,14 @@ const authenticated = <A, E, R>(accounts: Accounts["Service"], handle: Effect.Ef
   })
 
 const ExportRequest = Schema.Struct({ refId: RefId, format: ExportFormatSchema })
+
+const ChatExportRequest = Schema.Struct({
+  chatId: ChatId,
+  /** The branch to export; null: the one the chat opens on. */
+  forkId: Schema.NullOr(ForkId),
+  scope: Schema.Literals(["branch", "all"]),
+  format: Schema.Literals(["jsonl", "txt"])
+})
 
 const LeavingDrafts = Schema.Struct({
   drafts: Schema.Array(EditorDraftSave).check(Schema.isMaxLength(500)),
@@ -447,6 +460,239 @@ export const layer = Layer.unwrap(
       }),
       Effect.catch((error) =>
         Effect.logError("an export failed", error).pipe(Effect.as(jsonError(500, "the export failed")))
+      )
+    )
+
+    // "Export this chat" (ARCHITECTURE.md §13b): written as it's read, so it holds no permit
+    // of the file routes'; one at a time per user, from its first byte to its last.
+    const chatExports = new Set<string>()
+    type DownloadFile = { fileName: string; contentType: string; files: number; body: AsyncIterable<Uint8Array> }
+    type Download = {
+      userId: string
+      file: DownloadFile
+      bytes: number
+      started: boolean
+      done: boolean
+      cancelled: boolean
+      stop: AbortController
+      error: string | null
+    }
+    const downloads = new Map<string, Download>()
+    const expire = (key: string) => {
+      const timer = setTimeout(() => downloads.delete(key), 60_000)
+      timer.unref()
+    }
+    /** Native browser downloads keep archive bytes out of the page's JavaScript heap. */
+    const streamed = (userId: string, file: DownloadFile, ticket?: Download, key?: string) => {
+      async function* chunks() {
+        for await (const chunk of file.body) {
+          if (ticket?.cancelled) throw new Error("export stopped")
+          if (ticket) ticket.bytes += chunk.byteLength
+          yield chunk
+        }
+        if (ticket) ticket.done = true
+      }
+      const body = Stream.fromAsyncIterable(chunks(), (error) => error).pipe(
+        Stream.interruptWhen(
+          ticket
+            ? Effect.callback<void>((resume) => {
+                if (ticket.cancelled) {
+                  resume(Effect.void)
+                  return
+                }
+                const stop = () => resume(Effect.void)
+                ticket.stop.signal.addEventListener("abort", stop, { once: true })
+                return Effect.sync(() => ticket.stop.signal.removeEventListener("abort", stop))
+              })
+            : Effect.never
+        ),
+        Stream.tapError((error) => {
+          if (ticket) ticket.error = "The export stopped before it was done. Try again."
+          return ticket?.cancelled ? Effect.void : Effect.logError("an export failed while it was sent", error)
+        }),
+        Stream.ensuring(
+          Effect.sync(() => {
+            chatExports.delete(userId)
+            if (key) expire(key)
+            if (ticket && !ticket.done) {
+              ticket.done = true
+              ticket.error ??= "The download stopped before it was done. Try again."
+            }
+          })
+        )
+      )
+      const dot = file.fileName.lastIndexOf(".")
+      return HttpServerResponse.stream(body, {
+        contentType: file.contentType,
+        headers: {
+          "content-disposition": disposition(file.fileName.slice(0, dot), file.fileName.slice(dot + 1)),
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "x-export-files": String(file.files)
+        }
+      })
+    }
+    const prepareDownload = <E>(userId: string, native: boolean, prepare: Effect.Effect<DownloadFile, E>) =>
+      Effect.suspend(() => {
+        if (chatExports.has(userId))
+          return Effect.succeed(jsonError(503, "another of your exports is still running; try again once it's done"))
+        // Reserve before the first reader request: two preparations must not race.
+        chatExports.add(userId)
+        return Effect.gen(function* () {
+          const file = yield* prepare
+          if (!native) return streamed(userId, file)
+          const key = randomUUID()
+          const ticket: Download = {
+            userId,
+            file,
+            bytes: 0,
+            started: false,
+            done: false,
+            cancelled: false,
+            stop: new AbortController(),
+            error: null
+          }
+          downloads.set(key, ticket)
+          const timer = setTimeout(() => {
+            if (!ticket.started && downloads.get(key) === ticket) {
+              downloads.delete(key)
+              chatExports.delete(userId)
+            }
+          }, 60_000)
+          timer.unref()
+          return HttpServerResponse.jsonUnsafe({ key }, { headers: { "cache-control": "no-store" } })
+        }).pipe(
+          Effect.onExit((exit) =>
+            Effect.sync(() => {
+              if (Exit.isFailure(exit)) chatExports.delete(userId)
+            })
+          )
+        )
+      })
+
+    const downloadRequest = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      const key = new URL(request.url, "http://download").searchParams.get("key") ?? ""
+      const ticket = downloads.get(key)
+      return { request, key, ticket: ticket?.userId === user.id ? ticket : undefined }
+    })
+    const downloadFile = Effect.gen(function* () {
+      const { key, ticket } = yield* downloadRequest
+      if (!ticket || ticket.started || ticket.cancelled) return jsonError(404, "there's no such download")
+      ticket.started = true
+      // Retain progress until completion, then briefly for the page's last poll.
+      return streamed(ticket.userId, ticket.file, ticket, key)
+    })
+    const downloadStatus = Effect.gen(function* () {
+      const { key, ticket } = yield* downloadRequest
+      if (!ticket) return jsonError(404, "there's no such download")
+      if (ticket.done) {
+        downloads.delete(key)
+      }
+      return HttpServerResponse.jsonUnsafe(
+        { bytes: ticket.bytes, done: ticket.done, error: ticket.error },
+        {
+          headers: { "cache-control": "no-store" }
+        }
+      )
+    })
+    const stopDownload = Effect.gen(function* () {
+      const { request, key, ticket } = yield* downloadRequest
+      if (!request.headers["content-type"]?.startsWith("application/json"))
+        return jsonError(415, "expected application/json")
+      if (!ticket) return jsonError(404, "there's no such download")
+      ticket.cancelled = true
+      ticket.stop.abort()
+      if (!ticket.started) {
+        downloads.delete(key)
+        chatExports.delete(ticket.userId)
+      }
+      return HttpServerResponse.jsonUnsafe({ stopped: true }, { headers: { "cache-control": "no-store" } })
+    })
+    const exportChat = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      if (!request.headers["content-type"]?.startsWith("application/json")) {
+        return jsonError(415, "expected application/json")
+      }
+      const input = yield* HttpServerRequest.schemaBodyJson(ChatExportRequest).pipe(
+        Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.kibibytes(4)),
+        Effect.option
+      )
+      if (Option.isNone(input)) return jsonError(400, "expected a chatId, a forkId, a scope and a format")
+      return yield* prepareDownload(
+        user.id,
+        request.headers["x-export-download"] === "native",
+        chatExport(reader, user.id, input.value)
+      )
+    }).pipe(
+      Effect.catchTags({
+        NotFound: () => Effect.succeed(jsonError(404, "there's no such chat")),
+        ExportNotOffered: () => Effect.succeed(jsonError(400, "this chat can't be exported in that format"))
+      }),
+      Effect.catch((error) =>
+        Effect.logError("a chat export failed", error).pipe(Effect.as(jsonError(500, "the export failed")))
+      )
+    )
+
+    /**
+     * One library entry as an archive's file: a card as a PNG with its avatar (no embedded
+     * assets), a lorebook or preset as ST's JSON. Null, logged, when it can't be written.
+     */
+    const renderRef =
+      (userId: UserId): RenderRef =>
+      (refId, format, worldNames) =>
+        Effect.gen(function* () {
+          const source = yield* reader.ExportSource({ userId, refId })
+          const exporter = (yield* formats.listExports).find((entry) => entry.id === format)
+          if (!exporter || exporter.kind !== source.kind) return null
+          const avatar =
+            exporter.media !== "none" && source.avatar && source.avatar.byteSize <= MAX_EXPORT_FILE_BYTES
+              ? source.avatar
+              : null
+          const bytes = avatar ? yield* readMedia(config.dataDir, avatar.path) : undefined
+          return yield* exports.withPermits(1)(
+            formats.export({
+              format,
+              expectedFormat: exporter,
+              docJson: source.docJson,
+              ...(worldNames === undefined ? {} : { worldNames }),
+              noteDocJson: source.noteDocJson,
+              notesDocJson: source.notesDocJson,
+              avatar: avatar && bytes ? { bytes, mime: avatar.mime } : null,
+              assets: []
+            })
+          )
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("a library entry was left out of the archive", error).pipe(Effect.as(null))
+          )
+        )
+
+    // The whole library in ST's folder layout (ARCHITECTURE.md §13b), as the chat export.
+    const exportLibrary = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      if (!request.headers["content-type"]?.startsWith("application/json")) {
+        return jsonError(415, "expected application/json")
+      }
+      return yield* prepareDownload(
+        user.id,
+        request.headers["x-export-download"] === "native",
+        Effect.gen(function* () {
+          const archive = yield* libraryArchive(reader, user.id, renderRef(user.id))
+          return {
+            fileName: `Library ${new Date().toISOString().slice(0, 10)}.zip`,
+            contentType: "application/zip",
+            files: archive.counts.cards + archive.counts.personas + archive.counts.lorebooks + archive.counts.presets,
+            body: zipStream(archive.entries())
+          }
+        })
+      )
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logError("a library export failed", error).pipe(Effect.as(jsonError(500, "the export failed")))
       )
     )
 
@@ -950,6 +1196,11 @@ export const layer = Layer.unwrap(
       HttpRouter.add("GET", "/library/media", authenticated(accounts, mediaFile)),
       HttpRouter.add("POST", "/library/import", authenticated(accounts, importFile)),
       HttpRouter.add("POST", "/library/export", authenticated(accounts, exportFile)),
+      HttpRouter.add("POST", "/library/chat-export", authenticated(accounts, exportChat)),
+      HttpRouter.add("POST", "/library/archive", authenticated(accounts, exportLibrary)),
+      HttpRouter.add("GET", "/library/download", authenticated(accounts, downloadFile)),
+      HttpRouter.add("GET", "/library/download-status", authenticated(accounts, downloadStatus)),
+      HttpRouter.add("POST", "/library/download-stop", authenticated(accounts, stopDownload)),
       HttpRouter.add("POST", "/st-import/file", authenticated(accounts, stImportFile)),
       HttpRouter.add("POST", "/st-import/plan-file", authenticated(accounts, stImportPlanFile)),
       Layer.effectDiscard(Effect.forkScoped(Effect.repeat(sweep, Schedule.spaced("1 hour"))))

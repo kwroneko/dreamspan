@@ -2,6 +2,7 @@
 import { Schema } from "effect"
 import { DraftTargetKind } from "./drafts.ts"
 import { ForkSplit } from "./chat.ts"
+import { SlotId } from "./chatPosition.ts"
 
 /** The deleted-item set changed since the user confirmed it. */
 export class BinChanged extends Schema.TaggedError<BinChanged>()("BinChanged", {}) {}
@@ -77,6 +78,16 @@ export class BinItem extends Schema.Class<BinItem>("BinItem")({
   byteSize: Schema.Int,
   deletedAt: Schema.Number
 }) {}
+
+/** The most messages one multi-delete takes, and one Undo puts back (job msgactions1). */
+export const MULTI_DELETE_LIMIT = 1000
+/** A multi-delete's messages, in the path's order, top down. */
+export const DeletedSlots = Schema.Array(SlotId).check(Schema.isMinLength(1), Schema.isMaxLength(MULTI_DELETE_LIMIT))
+/** A multi-delete's bin items, for its Undo. */
+export const RestoredItems = Schema.Array(Schema.String).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MULTI_DELETE_LIMIT)
+)
 
 /** Draft text that would otherwise have been lost, saved passively. */
 export class RecoveredText extends Schema.Class<RecoveredText>("RecoveredText")({

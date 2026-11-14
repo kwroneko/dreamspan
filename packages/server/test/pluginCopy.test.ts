@@ -377,13 +377,17 @@ it("retained presence readers/setters refuse after their supplying plugin scope 
 for (const part of builtinCopies.filter(
   (part, index, all) => part.registry === "macros" && all.findIndex((p) => p.path === part.path) === index
 ))
-  it(`checks the complete shipped ${part.id} macro family through the public worker API`, async () => {
-    const data = tempDir("macro-family")
-    const prepared = await prepareBuiltinCopy("macros", part.id, "family-copy", data)
-    const commit = await saveFiles(data, "", "family-copy", prepared.files, true, "Copy macro family")
-    const report = await checkPlugin(data, "", "family-copy", commit)
-    expect(report, JSON.stringify(report)).toMatchObject({ ok: true, step: "ready" })
-  }, 30000)
+  it(
+    `checks the complete shipped ${part.id} macro family through the public worker API`,
+    { timeout: 30000, tags: ["slow"] },
+    async () => {
+      const data = tempDir("macro-family")
+      const prepared = await prepareBuiltinCopy("macros", part.id, "family-copy", data)
+      const commit = await saveFiles(data, "", "family-copy", prepared.files, true, "Copy macro family")
+      const report = await checkPlugin(data, "", "family-copy", commit)
+      expect(report, JSON.stringify(report)).toMatchObject({ ok: true, step: "ready" })
+    }
+  )
 
 it("the assistant catalog keeps every new part within its unchanged result budget", async () => {
   await Effect.runPromise(

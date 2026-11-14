@@ -7,7 +7,7 @@ import { Checkbox as BaseCheckbox } from "@base-ui/react/checkbox"
 import { Radio as BaseRadio } from "@base-ui/react/radio"
 import { RadioGroup as BaseRadioGroup } from "@base-ui/react/radio-group"
 import { Switch as BaseSwitch } from "@base-ui/react/switch"
-import { type ReactElement, type ReactNode, useId } from "react"
+import { type ReactElement, type ReactNode, useId, useRef } from "react"
 import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { inlineExplanationClass } from "./Explanation.tsx"
 import { Tooltip } from "./Tooltip.tsx"
@@ -146,6 +146,59 @@ export function Checkbox({
     </Row>
   )
   return withHint(hint, row)
+}
+
+/**
+ * A tick that picks one row of a list to act on with others (a message among the selected), its
+ * label only for screen readers and its hint the tooltip. The whole 32 px square is the target,
+ * as for the icon buttons beside it. `onToggle` hears whether Shift was held, for a range.
+ */
+export function RowTick({
+  checked,
+  onToggle,
+  label,
+  hint,
+  disabled = false,
+  className = ""
+}: {
+  checked: boolean
+  onToggle: (checked: boolean, shift: boolean) => void
+  label: string
+  hint: string
+  disabled?: boolean
+  className?: string
+}) {
+  // The pointer or key that toggles it, read before Base UI reports the change.
+  const shift = useRef(false)
+  const note = (event: { shiftKey: boolean }) => {
+    shift.current = event.shiftKey
+  }
+  return (
+    <Tooltip label={hint}>
+      {/* Unavailable, it stays hoverable and focusable (read-only), so its tooltip says why. */}
+      <BaseCheckbox.Root
+        aria-label={label}
+        checked={checked}
+        readOnly={disabled}
+        {...(disabled ? { "aria-disabled": true } : {})}
+        onPointerDown={note}
+        onKeyDown={note}
+        onCheckedChange={(next) => {
+          if (!disabled) onToggle(next, shift.current)
+          shift.current = false
+        }}
+        className={`group/tick flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-hover ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"} ${focusRing} ${className}`}
+      >
+        <span className="flex size-4 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast group-data-checked/tick:border-accent group-data-checked/tick:bg-accent">
+          <BaseCheckbox.Indicator className="flex data-unchecked:hidden">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="m2.5 8.5 4 4 7-9" strokeWidth="2" />
+            </svg>
+          </BaseCheckbox.Indicator>
+        </span>
+      </BaseCheckbox.Root>
+    </Tooltip>
+  )
 }
 
 export function Switch({

@@ -445,7 +445,7 @@ function SideChatSurface({
             )}
             {!changes && (
               <>
-                <SlotOutlet slot={chatComposerNotes} props={{ view }} />
+                <SlotOutlet slot={chatComposerNotes} props={{ view, session }} />
                 <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: openPanel }} />
               </>
             )}
