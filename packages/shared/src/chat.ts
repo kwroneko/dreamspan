@@ -114,6 +114,13 @@ export const VersionError = Schema.Struct({
 })
 
 /**
+ * A version's thinking, as the user can hide it from the model: the provider's reasoning, or
+ * the thinking captured from the reply by the preset's tags (spec/REPLY-SECTIONS.md).
+ */
+export const ThinkingPart = Schema.Literals(["reasoning", "sections"])
+export type ThinkingPart = typeof ThinkingPart.Type
+
+/**
  * Something about an assembled context the user should know: a prefill dropped, a piece
  * left out, history cut by the budget (ARCHITECTURE §15).
  */
@@ -139,7 +146,9 @@ export const ContextIssue = Schema.Struct({
     "context_view_missing",
     "summaries_withheld",
     "note_replacement",
-    "compatibility"
+    "compatibility",
+    // Thinking kept out of a request: hidden by the user, or signed thinking the provider would refuse.
+    "thinking_left_out"
   ]),
   message: Schema.String
 })
@@ -285,6 +294,8 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
   hiddenByUser: Schema.Boolean,
   /** The media ids of its version's images taken out of the context here (SetImageExcluded); absent: none. */
   excludedImages: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Its version's thinking hidden from the model here (SetThinkingHidden); absent: none. */
+  hiddenThinking: Schema.optionalKey(Schema.Array(ThinkingPart)),
   version: Version,
   versionCount: Schema.Int,
   /**

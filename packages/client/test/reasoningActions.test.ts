@@ -17,6 +17,7 @@ const props: ReasoningActionProps = {
   text: "Synthetic *raw* thought.",
   streaming: false,
   kind: "reasoning",
+  hidden: false,
   first: true,
   session: {} as ChatSession
 }
@@ -32,9 +33,10 @@ describe("reasoning actions", () => {
     for (const close of dispose) close()
   })
 
-  it("registers Copy reasoning and Collapse all, in order, each replaceable or removable", () => {
+  it("registers Copy reasoning, Hide from the model and Collapse all, in order, each replaceable or removable", () => {
     expect([...reasoningActions.snapshot().entries].map((entry) => entry.id)).toEqual([
       "reasoning.copy",
+      "reasoning.hide",
       "reasoning.collapse-all",
       "reasoning.show-as-text"
     ])
@@ -46,8 +48,20 @@ describe("reasoning actions", () => {
     expect(render()).not.toContain("Copy reasoning")
     replaced()
     expect(render()).toContain("Copy reasoning")
-    dispose[1]!()
+    dispose[2]!()
     expect(render()).not.toContain("Collapse all")
+  })
+
+  it("offers Hide from the model on each panel, Show to the model again once hidden, and waits for the reply", () => {
+    const of = (extra: Partial<ReasoningActionProps>) =>
+      renderToStaticMarkup(
+        createElement(SlotOutlet<ReasoningActionProps>, { slot: reasoningActions, props: { ...props, ...extra } })
+      )
+    expect(of({})).toContain("Hide from the model")
+    expect(of({ kind: "sections" })).toContain("Hide from the model")
+    expect(of({ hidden: true })).toContain("Show to the model again")
+    expect(of({ hidden: true })).toContain('aria-pressed="true"')
+    expect(of({ streaming: true })).toContain('aria-disabled="true"')
   })
 
   it("offers Show as reply text only on a finished reply-section panel", () => {

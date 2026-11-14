@@ -1841,6 +1841,17 @@ export class ChatSession {
     )
   }
 
+  /** Hides the version's thinking from the model in the fork shown, or sends it again; it stays on the message. */
+  setThinkingHidden(
+    entry: PathEntry,
+    part: import("@rp/shared/chat.ts").ThinkingPart,
+    hidden: boolean
+  ): Promise<Outcome<PathEntry>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("SetThinkingHidden", { versionId: entry.version.id, part, forkId: this.view.forkId, hidden })
+    )
+  }
+
   /** Takes an image of the message's version out of the context in the fork shown, or puts it back. */
   setImageExcluded(entry: PathEntry, mediaId: string, excluded: boolean): Promise<Outcome<PathEntry>> {
     return this.slotWrite(entry.slotId, (client) =>

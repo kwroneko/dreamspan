@@ -1655,6 +1655,24 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.SetMessageHidden({ slotId: owner.chat.slotId, hidden: true }), "NotFound")
   },
+  SetThinkingHidden: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.SetThinkingHidden({ versionId: owner.chat.versionId, part: "reasoning", hidden: true }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.SetThinkingHidden({
+            versionId: actor.chat.versionId,
+            part: "sections",
+            forkId: owner.chat.forkId,
+            hidden: true
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
   SelectVersion: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

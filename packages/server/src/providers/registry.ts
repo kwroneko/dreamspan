@@ -16,6 +16,7 @@ import type { TextTokenCounter } from "./textCounters.ts"
 import type { ModelCatalog } from "./contextCatalog.ts"
 import type { ContextLimitParser } from "./contextLimits.ts"
 import type { CompatShim } from "./shims.ts"
+import type { ThinkingBinding } from "./thinkingBinding.ts"
 import { ProviderDefinitions } from "./definitions.ts"
 
 export type Catalog = Readonly<Record<string, Model<Api>>>
@@ -198,6 +199,8 @@ export interface ProviderRegistryShape {
   readonly contextLimits: Registry<ContextLimitParser>
   /** Per provider kind and model pattern: what a provider refuses or needs (shims.ts). */
   readonly shims: Registry<CompatShim>
+  /** Wire formats whose signed reasoning is bound to its conversation (thinkingBinding.ts). */
+  readonly thinkingBindings: Registry<ThinkingBinding>
 }
 
 export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(
@@ -218,7 +221,8 @@ export const empty = Layer.effect(
       textCounters: makeRegistry<TextTokenCounter>(),
       catalogs: makeRegistry<ModelCatalog>(),
       contextLimits: makeRegistry<ContextLimitParser>(),
-      shims: makeRegistry<CompatShim>()
+      shims: makeRegistry<CompatShim>(),
+      thinkingBindings: makeRegistry<ThinkingBinding>()
     })
   )
 ).pipe(Layer.provideMerge(ProviderDefinitions.layer))

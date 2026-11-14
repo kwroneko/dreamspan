@@ -13,9 +13,11 @@ import {
   originalSql,
   shownIn,
   slotDeletedIn,
+  thinkingHiddenIn,
   versionDeletedIn,
   viewAt
 } from "./forkState.ts"
+import { hiddenParts } from "./rows.ts"
 import { selectSummaryLayer, selectFailedRanges, type LayerView } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
@@ -168,6 +170,7 @@ interface HistoryRow {
   readonly amend_count: number
   readonly written: number
   readonly inserted?: number
+  readonly hidden_thinking: number
 }
 
 /**
@@ -643,6 +646,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             (SELECT count(*) FROM versions c WHERE c.slot_id=s.id AND c.fork_id IS NULL
               AND c.ordinal <= o.ordinal AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_number,
             v.speaker_entity_id, v.content, v.reply_sections, v.macro_mode, v.frozen_macros, v.created_at,
+            ${thinkingHiddenIn(sql, fork, "o.id")} AS hidden_thinking,
             (SELECT json_group_array(CASE WHEN ${imageExcludedIn(sql, fork, "o.id", "a.media_id")}
                 THEN json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height, 'excluded', json('true'))
                 ELSE json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height) END) FROM
@@ -693,6 +697,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             side: row.first_writer === "human" && row.first_origin !== "greeting" ? "user" : "assistant",
             content: row.content,
             ...sectionsOf(row.reply_sections),
+            ...(row.hidden_thinking ? { thinkingHidden: hiddenParts(row.hidden_thinking) } : {}),
             ...(row.images_json !== "[]" ? { images: JSON.parse(row.images_json) } : {}),
             macroMode: row.macro_mode,
             frozen: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),

@@ -2,7 +2,9 @@
 // reasoning copies the raw text, stored or streamed so far; Collapse all closes every
 // reasoning block shown, the reply-section panels too, leaving the streaming preference as it
 // is; a reply with both panels shows it once, on the first. A reply-section panel also offers
-// Show as reply text, for a wrong parse (spec/REPLY-SECTIONS.md).
+// Show as reply text, for a wrong parse (spec/REPLY-SECTIONS.md). Each panel's Hide from the
+// model keeps that thinking out of every later request in the fork shown, on this version only,
+// and leaves it on the message, marked; Show to the model again undoes it.
 import { useState } from "react"
 import { showToast } from "../../ui/Toast.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
@@ -42,6 +44,11 @@ export const registerReasoningActions = () => [
     )
   }),
   reasoningActions.register({
+    id: "reasoning.hide",
+    order: 15,
+    component: HideThinking
+  }),
+  reasoningActions.register({
     id: "reasoning.collapse-all",
     order: 20,
     component: CollapseAll
@@ -52,6 +59,41 @@ export const registerReasoningActions = () => [
     component: ShowAsReplyText
   })
 ]
+
+/** Hide from the model, or show to it again: this panel's thinking, this version, the fork shown. */
+function HideThinking({ version, kind, hidden, streaming, session }: ReasoningActionProps) {
+  const [busy, setBusy] = useState(false)
+  const run = async () => {
+    const entry = session.snapshot().entries.find((e) => e.version.id === version.id)
+    if (!entry || streaming) return
+    setBusy(true)
+    const result = await session.setThinkingHidden(entry, kind, !hidden)
+    setBusy(false)
+    if (!result.ok)
+      showToast({
+        title: hidden ? "Couldn't show the thinking to the model" : "Couldn't hide the thinking",
+        description: result.error.message
+      })
+  }
+  const hint = streaming
+    ? "Available once the reply is finished."
+    : hidden
+      ? "Send this thinking to the model again with later messages."
+      : "Keep this thinking out of later messages. It stays here, and you can show it to the model again."
+  return (
+    <Tooltip label={hint}>
+      <button
+        type="button"
+        className={`${actionClass} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
+        aria-disabled={streaming || busy ? true : undefined}
+        aria-pressed={hidden}
+        onClick={() => void run()}
+      >
+        {hidden ? "Show to the model again" : "Hide from the model"}
+      </button>
+    </Tooltip>
+  )
+}
 
 /** Once per reply, on its first panel. */
 function CollapseAll({ first }: ReasoningActionProps) {

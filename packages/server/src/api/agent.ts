@@ -19,7 +19,14 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect, Option } from "effect"
-import { planResume, planStepResume, planMessageResume, type ResumePlan, StepNotResumable } from "../agent/resume.ts"
+import {
+  planResume,
+  planStepResume,
+  planMessageResume,
+  type ResumePlan,
+  StepNotResumable,
+  withoutThinking
+} from "../agent/resume.ts"
 import { countSteps } from "../agent/steps.ts"
 import { notesAt } from "../agent/tools/notes.ts"
 import { type FrozenTool, frozenTool, sendMessageDefinition, severalMessageDefinition } from "../agent/tools.ts"
@@ -271,6 +278,12 @@ const agentVersionResumer = Effect.gen(function* () {
         if (modelChanged) chosen = { connection: model.connectionId as ConnectionId, model: model.modelId as ModelId }
       }
       if (planned instanceof StepNotResumable) return yield* refuse(planned.message)
+      // Reasoning the user hid on this reply isn't sent again by the run that carries it on.
+      if (sourceSlot.entry.version.id === source.id && sourceSlot.entry.hiddenThinking?.includes("reasoning"))
+        planned = {
+          ...planned,
+          transcript: withoutThinking(planned.transcript, (frozen as Frozen).continuity?.historical ?? 0)
+        }
       if (options?.direction !== undefined)
         planned = {
           ...planned,

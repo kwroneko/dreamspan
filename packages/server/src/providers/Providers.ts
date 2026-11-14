@@ -75,6 +75,17 @@ import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import { fetchEndpoints, ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget, type StableEndpoint } from "./registry.ts"
+import {
+  bindThinking,
+  carriesSigned,
+  DROP_NOTES,
+  needsSigned,
+  type RecordedAssistant,
+  refusesSigned,
+  signsReasoning,
+  type ThinkingBinding,
+  thinkingRecord
+} from "./thinkingBinding.ts"
 import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
 import { parseServiceAccount } from "./vertex.ts"
@@ -1072,7 +1083,12 @@ export const layer = (options: ProvidersOptions = {}) =>
 
       type AttemptOutcome =
         | { readonly ok: true; readonly event: Extract<ProviderEvent, { type: "done" }> }
-        | { readonly ok: false; readonly error: ProviderError }
+        | {
+            readonly ok: false
+            readonly error: ProviderError
+            /** Whether the request still sent signed thinking, and whether it left some out (thinkingBinding.ts). */
+            readonly signed?: { readonly sent: boolean; readonly dropped: boolean }
+          }
 
       const emptyUsage = () => ({
         input: 0,
@@ -1094,7 +1110,9 @@ export const layer = (options: ProvidersOptions = {}) =>
         pricing: import("./userCosts.ts").UserPricing,
         /** The model with the newest endpoint list that has arrived (fetched alongside the reply). */
         latest: { current: Model },
-        retryError?: ProviderError
+        retryError?: ProviderError,
+        /** Signed thinking: checked against what it was written after, all left out, or all sent. */
+        bindingMode: "check" | "strip" | "keep" = "check"
       ) => {
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
@@ -1121,7 +1139,11 @@ export const layer = (options: ProvidersOptions = {}) =>
           release: undefined as "first-chunk" | "complete" | "timeout" | "leader-ended" | undefined,
           /** The images the final payload sent, for image token calibration. */
           textPayload: null as ReturnType<typeof payloadText> | null,
-          sentImages: null as ReturnType<typeof payloadImages> | null
+          sentImages: null as ReturnType<typeof payloadImages> | null,
+          /** The wire's signed-thinking binding, and the payload as it went out (thinkingBinding.ts). */
+          binding: undefined as ThinkingBinding | undefined,
+          sent: null as Record<string, unknown> | null,
+          signed: { sent: false, dropped: false }
         }
         /** What the request produced so far, for a close after an interruption or a defect. */
         const partialMessage = (stopReason: "aborted" | "error", errorMessage?: string): AssistantMessage => ({
@@ -1139,6 +1161,21 @@ export const layer = (options: ProvidersOptions = {}) =>
         })
 
         const metadata = (value: string | null) => (value === null ? null : prepared.scrub(value).slice(0, 256))
+
+        /**
+         * A turn with signed thinking records what it answered, so a later request sends it
+         * back only while nothing before it changed (thinkingBinding.ts). Computed only then.
+         */
+        const recordThinking = (message: AssistantMessage): RecordedAssistant =>
+          state.binding && state.sent && signsReasoning(state.binding, message)
+            ? {
+                ...message,
+                thinkingRecord: thinkingRecord(state.binding, state.sent, {
+                  connectionId: prepared.connection.id,
+                  modelId: model.id
+                })
+              }
+            : message
 
         const writeClose = (message: AssistantMessage, error: ProviderError | null, context: PiContext["messages"]) =>
           Effect.gen(function* () {
@@ -1563,7 +1600,28 @@ export const layer = (options: ProvidersOptions = {}) =>
                   )
                   // Then what the provider refuses or needs for this model (compatibility shims).
                   const shimmed = applyShims(registry.shims.list(), transformed, target, retryError)
-                  const final = limitImages(shimmed.payload, effective.maxImages.value)
+                  const limited = limitImages(shimmed.payload, effective.maxImages.value)
+                  // Last: signed thinking the provider would refuse is left out (thinkingBinding.ts).
+                  const binding = registry.thinkingBindings.list().find((b) => b.appliesTo(target))
+                  const bound = binding
+                    ? bindThinking(binding, limited, {
+                        context: request.context.messages,
+                        connectionId: prepared.connection.id,
+                        modelId: model.id,
+                        mode: bindingMode
+                      })
+                    : { payload: limited, dropped: 0, reason: null }
+                  const final = bound.payload
+                  state.binding = binding
+                  state.sent = final
+                  state.signed = {
+                    sent: binding !== undefined && carriesSigned(binding, final),
+                    dropped: bound.dropped > 0
+                  }
+                  const thinkingNotes =
+                    bound.reason === null
+                      ? []
+                      : [{ kind: "thinking_left_out" as const, message: DROP_NOTES[bound.reason] }]
                   await Effect.runPromise(open(final), { signal })
                   const policy = documentedCachePolicy(
                     { provider: prepared.cacheContract ?? "", api: prepared.api, model: model.key },
@@ -1621,13 +1679,16 @@ export const layer = (options: ProvidersOptions = {}) =>
                                         ...shimmed.notices.map((message) => ({
                                           kind: "compatibility" as const,
                                           message
-                                        }))
+                                        })),
+                                        ...thinkingNotes
                                       ]
                                     },
                                     prepared.scrub
                                   )
                                 : wire
-                            )
+                            ),
+                            // Also among the reply's notes, so the message says it (thinkingBinding.ts).
+                            ...(thinkingNotes.length ? { issues: thinkingNotes } : {})
                           })
                         )
                         // Not stopped with the request: what was sent stays on record.
@@ -1732,13 +1793,13 @@ export const layer = (options: ProvidersOptions = {}) =>
             writeClose(message, error, request.context.messages).pipe(
               Effect.map(({ counts, cost }): AttemptOutcome =>
                 error
-                  ? { ok: false, error }
+                  ? { ok: false, error, signed: state.signed }
                   : {
                       ok: true,
                       event: {
                         type: "done",
                         requestId,
-                        message,
+                        message: recordThinking(message),
                         toolArguments: toolArguments.argumentsById,
                         counts,
                         cost
@@ -1802,6 +1863,7 @@ export const layer = (options: ProvidersOptions = {}) =>
               )
 
             let compatibilityError: ProviderError | undefined
+            let bindingMode: "check" | "strip" | "keep" = "check"
             for (let n = 0; ; n++) {
               const outcome = yield* capped(
                 waitForPause(prepared.connection.id, offer).pipe(
@@ -1816,7 +1878,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                       n + 1,
                       pricing,
                       latest,
-                      compatibilityError
+                      compatibilityError,
+                      bindingMode
                     )
                   )
                 )
@@ -1827,6 +1890,17 @@ export const layer = (options: ProvidersOptions = {}) =>
                 return
               }
               const error = outcome.error
+              // Once: a refusal of signed thinking is sent again without any (the provider's
+              // check is stricter than ours), and a model that needs the thinking of the turn
+              // being continued gets what was left out (thinkingBinding.ts).
+              if (bindingMode === "check" && outcome.signed?.sent && refusesSigned(error)) {
+                bindingMode = "strip"
+                continue
+              }
+              if (bindingMode === "check" && outcome.signed?.dropped && needsSigned(error)) {
+                bindingMode = "keep"
+                continue
+              }
               if (
                 !compatibilityError &&
                 request.context.tools?.length &&
