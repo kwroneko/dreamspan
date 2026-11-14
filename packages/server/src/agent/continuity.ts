@@ -48,7 +48,9 @@ export const pathStamp = (entry: PathEntry) =>
     entry.contextExcluded,
     entry.version.content,
     entry.excludedImages ?? [],
-    entry.version.images ?? []
+    entry.version.images ?? [],
+    // Only when some is hidden, so stamps stored before hiding existed still match.
+    ...(entry.hiddenThinking?.length ? [entry.hiddenThinking] : [])
   ])
 
 export const readContinuityPath = Effect.fnUntraced(function* (
@@ -170,12 +172,15 @@ export const previousRun = Effect.fnUntraced(function* (
   if (
     !unchanged ||
     extra.length !== produced.length ||
-    extra.some((e, at) => e.version.id !== produced[at] || e.contextExcluded || e.inserted) ||
+    // Thinking hidden on a message this run posted lives in the carried transcript.
+    extra.some(
+      (e, at) => e.version.id !== produced[at] || e.contextExcluded || e.inserted || !!e.hiddenThinking?.length
+    ) ||
     path.slice(index + 1).some((e) => e.side !== "user" || !e.inContext || e.inserted)
   )
     return {
       reason:
-        "The chat was edited, inserted into, hidden or replaced after the previous run, so this request was put together again."
+        "The chat was edited, inserted into, hidden or replaced, or thinking was hidden, after the previous run, so this request was put together again."
     } as const
   return {
     snapshot,

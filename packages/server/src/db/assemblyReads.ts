@@ -1,3 +1,5 @@
+import { hiddenParts } from "./rows.ts"
+import { sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { makeExternalMediaReadHandlers } from "./externalMedia.ts"
 import { makeSavedMediaReadHandlers } from "./savedMedia.ts"
@@ -8,7 +10,7 @@ import { textDisplay } from "./textDisplay.ts"
 import { fitSummaryOutput } from "../lcm/requestBudget.ts"
 import { presetContext } from "./presetContext.ts"
 import { cacheExpiry } from "./cacheExpiry.ts"
-import { inFork, viewAt } from "./forkState.ts"
+import { inFork, viewAt, thinkingHiddenSql, withFork } from "./forkState.ts"
 // Context assembly and rebuilding in the reader workers (ARCHITECTURE §15).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -219,10 +221,10 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           )
       }).pipe(readingOnce, inFork(sql, chatId, forkId, slotId), query("AssembleContext")),
 
-    RebuildContext: ({ userId, snapshot: json }) =>
+    RebuildContext: ({ userId, snapshot: json, thinkingForkId }) =>
       Effect.gen(function* () {
         const stored = JSON.parse(json) as ContinuousSnapshot
-        const taken = stored.continuity?.prefix ?? stored
+        let taken = stored.continuity?.prefix ?? stored
         if ((taken.assemblerVersion ?? 0) !== ASSEMBLER_VERSION) {
           return {
             _tag: "EarlierAssemblerVersion" as const,
@@ -237,11 +239,48 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             message: "The context can't be built again: it was taken before contexts pinned what they read."
           })
         }
+        if (thinkingForkId !== undefined) {
+          const [branch] = yield* sql`SELECT f.id FROM forks f JOIN chats c ON c.id=f.chat_id
+            WHERE f.id=${thinkingForkId} AND c.id=${taken.inputs.chatId} AND c.owner_user_id=${userId}
+              AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
+          if (!branch) return yield* new NotFound({ entity: "branch", id: thinkingForkId })
+          const ids = [...new Set(taken.sources.history.flatMap((h) => h.entries.map((e) => e.versionId)))]
+          const continued = taken.sources.target.continues
+          if (continued) ids.push(continued.version)
+          const choices = ids.length
+            ? yield* sql<{ id: string; hidden: number; reply_sections: string | null }>`
+            SELECT v.id, ${withFork(sql, thinkingForkId, (f) => thinkingHiddenSql(f, "o.id"))} AS hidden, v.reply_sections
+            FROM version_records v JOIN versions o ON o.id=CASE WHEN v.fork_id IS NULL THEN v.id ELSE v.source_version_id END
+            JOIN slots s ON s.id=v.slot_id WHERE s.chat_id=${taken.inputs.chatId} AND v.id IN ${sql.in(ids)}`
+            : []
+          const byId = new Map(choices.map((c) => [c.id, c]))
+          let changed = false
+          const history = taken.sources.history.map((h) => ({
+            ...h,
+            entries: h.entries.map((e) => {
+              const hidden = hiddenParts(byId.get(e.versionId)?.hidden)
+              if (hidden.includes("sections") === !!e.thinkingHidden?.includes("sections")) return e
+              changed = true
+              return { ...e, thinkingHidden: hidden }
+            })
+          }))
+          let target = taken.sources.target
+          const choice = continued ? byId.get(continued.version) : undefined
+          if (continued && choice && (choice.hidden & 2) !== 0 && choice.reply_sections) {
+            const prefix = sectionsPrefix(JSON.parse(choice.reply_sections) as ReplySections)
+            if (continued.text.startsWith(prefix)) {
+              changed = true
+              target = { ...target, continues: { ...continued, text: continued.text.slice(prefix.length) } }
+            }
+          }
+          if (!changed) return { _tag: "Rebuilt" as const, snapshot: json }
+          taken = { ...taken, sources: { ...taken.sources, target, history } }
+        }
         const { inputs } = taken
         const sources = sqlSources(
           sql,
           { userId, chatId: inputs.chatId as ChatId, slotId: inputs.slotId, versionId: inputs.versionId },
-          { pins: taken.sources, inputs }
+          { pins: taken.sources!, inputs }
         )
         const built = yield* assembler
           .assemble({
@@ -270,8 +309,22 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         return {
           _tag: "Rebuilt" as const,
           snapshot: JSON.stringify({
+            ...(thinkingForkId !== undefined ? stored : {}),
             ...rebuilt,
-            ...(stored.continuity?.prefix ? { ...stored, request: rebuilt.request } : {}),
+            ...(stored.continuity?.prefix
+              ? {
+                  ...stored,
+                  request: rebuilt.request,
+                  ...(thinkingForkId !== undefined
+                    ? {
+                        continuity: {
+                          ...stored.continuity,
+                          prefix: { ...taken, request: rebuilt.request, sources: sources.pins() }
+                        }
+                      }
+                    : {})
+                }
+              : {}),
             // Earlier snapshots predate frozen transform inputs; retain their original shape.
             ...(!taken.summaryAssembly && rebuilt.summaryAssembly ? { summaryAssembly: undefined } : {}),
             sources: sources.pins(),

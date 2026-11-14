@@ -11,7 +11,7 @@ import { messageEditorTools, messageTextEditor, useMessageSaveOptions } from "./
 import { positionOf } from "./position.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
-import type { ForkId, PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
+import type { ForkId, PathEntry, SlotId, ThinkingPart, Version } from "@rp/shared/chat.ts"
 import {
   memo,
   type MouseEvent,
@@ -150,6 +150,7 @@ function ResumeButton({ onResume }: { onResume: () => void }) {
 function VersionBody({
   version,
   session,
+  hiddenThinking,
   parentSlotId,
   depth,
   placement,
@@ -157,6 +158,8 @@ function VersionBody({
 }: {
   version: Version
   session: ChatSession
+  /** Its thinking the user hid from the model here (SetThinkingHidden). */
+  hiddenThinking?: ReadonlyArray<ThinkingPart> | undefined
   parentSlotId: SlotId | null
   depth: number
   placement: 1 | 2
@@ -171,7 +174,13 @@ function VersionBody({
   const text = live ?? version.content
   return (
     <div className="flex flex-col gap-2">
-      <ReasoningPanels version={version} session={session} parentSlotId={parentSlotId} depth={depth} />
+      <ReasoningPanels
+        version={version}
+        session={session}
+        hiddenThinking={hiddenThinking}
+        parentSlotId={parentSlotId}
+        depth={depth}
+      />
       {text === "" && generating ? (
         <p className="text-sm text-muted" aria-live="polite">
           {waiting ? "Waiting for the cache…" : "Writing…"}
@@ -823,6 +832,7 @@ export const Message = memo(function Message({
     <VersionBody
       version={version}
       session={session}
+      hiddenThinking={entry.hiddenThinking}
       parentSlotId={entry.parentSlotId}
       depth={positionOf(entry)}
       placement={model ? 2 : 1}

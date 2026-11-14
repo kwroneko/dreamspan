@@ -26,6 +26,8 @@ import {
   imageExcludedSql,
   imageTarget,
   insertFork,
+  thinkingHiddenSql,
+  thinkingTarget,
   versionAsShown,
   withFork,
   writeOverride,
@@ -630,6 +632,31 @@ export const makeWriteHandlers = (bin: Bin) =>
             )
           return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId, slotId: row.slot_id as SlotId }
         }).pipe(transaction("SetImageExcluded")),
+
+      // Hiding a version's thinking is the fork's, on the message's own version, as an image's is.
+      SetThinkingHidden: ({ userId, versionId, part, forkId, hidden }) =>
+        Effect.gen(function* () {
+          const row = yield* ownedVersion(userId, versionId, true)
+          const { slot, fork } = yield* slotInFork(userId, row.slot_id as SlotId, yield* forkOf(row.slot_id, forkId))
+          const original = (row.fork_id === null ? row.id : row.source_version_id)!
+          const [effective] = yield* sql<{ hidden: number }>`
+            SELECT ${withFork(sql, fork.id, (f) => thinkingHiddenSql(f, "o.id"))} AS hidden
+            FROM versions o WHERE o.id = ${original}`
+          const bit = part === "reasoning" ? 1 : 2
+          if (((effective!.hidden & bit) !== 0) !== hidden)
+            yield* writeOverride(
+              sql,
+              { id: fork.id, chatId: slot.chat_id },
+              {
+                kind: "thinking_hide",
+                targetId: thinkingTarget(original, part),
+                slotId: row.slot_id,
+                valueId: null,
+                flag: hidden ? 1 : 0
+              }
+            )
+          return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId, slotId: row.slot_id as SlotId }
+        }).pipe(transaction("SetThinkingHidden")),
 
       MarkVersion: ({ userId, versionId, mark }) =>
         Effect.gen(function* () {

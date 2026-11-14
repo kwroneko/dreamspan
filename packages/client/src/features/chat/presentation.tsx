@@ -59,6 +59,8 @@ export interface ReasoningActionProps {
   readonly streaming: boolean
   /** Which panel: the provider's reasoning, or the reply's own tagged sections (spec/REPLY-SECTIONS.md). */
   readonly kind: "reasoning" | "sections"
+  /** The user hid it from the model on this version, in the fork shown (SetThinkingHidden). */
+  readonly hidden: boolean
   /** Whether it's the reply's first panel shown (Collapse all shows once, there). */
   readonly first: boolean
   readonly session: ChatSession

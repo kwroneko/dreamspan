@@ -133,7 +133,31 @@ export const planResume = (
   }
 }
 
+/**
+ * The run's thinking taken out of a kept transcript, from message `historical` on (earlier
+ * runs' messages a workshop carries stay as they are): the user hid this reply's reasoning
+ * from the model, so a resumed run doesn't send it. Signed blocks after the gap are then
+ * dropped wire-side too (providers/thinkingBinding.ts). A turn left empty is taken out.
+ */
+export const withoutThinking = (
+  transcript: ReadonlyArray<AgentMessage>,
+  historical = 0,
+  manualThinking = false
+): Array<AgentMessage> => {
+  const last = transcript.findLast((m) => m.role === "assistant")
+  // Manual thinking requires the current tool turn's original blocks. Defer the choice
+  // until that turn finishes; never restore an unsafe block after a provider refusal.
+  if (manualThinking && last?.role === "assistant" && last.content.some((p) => p.type === "toolCall"))
+    return [...transcript]
+  return transcript.flatMap((m, at) => {
+    if (at < historical || m.role !== "assistant" || !m.content.some((p) => p.type === "thinking")) return [m]
+    const content = m.content.filter((p) => p.type !== "thinking")
+    return content.length === 0 ? [] : [{ ...m, content }]
+  })
+}
+
 /** Why a step can't be resumed from, said to the user. */
+
 export class StepNotResumable {
   readonly _tag = "StepNotResumable"
   readonly message: string
