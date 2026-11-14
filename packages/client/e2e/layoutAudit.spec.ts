@@ -1022,6 +1022,7 @@ test.describe("synthetic library and every app surface", () => {
           const card = await openPanel(page, cardName)
           await expect(card.locator("[data-card-tokens]")).toBeVisible()
           await audit("panel-card-header", "[data-card-header]")
+          await expect(card.getByRole("button", { name: "About Description", exact: true })).toBeVisible()
           await audit("panel-card-definition", "[data-card-tabs] [role=tabpanel]")
           const preset = await openPanel(page, "Prompt preset")
           await expect(preset.getByRole("list", { name: "Preset blocks" })).toBeVisible()

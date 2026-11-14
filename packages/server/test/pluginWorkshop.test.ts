@@ -17,6 +17,7 @@ import { writeFile, cp, mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { pluginFolder, saveFiles } from "../src/plugins/repo.ts"
+import { PluginHost } from "../src/plugins/Host.ts"
 import { checkPlugin } from "../src/plugins/check.ts"
 import { createServer } from "node:http"
 import { argsDigest } from "../src/agent/approvals.ts"
@@ -638,6 +639,33 @@ it.live(
       const after = yield* api.GetPlugin(target)
       assert.strictEqual(after.pin?.commit, newer)
       assert.isUndefined(after.pin?.suspended, "A refused old Undo must not turn off the newer version")
+      const host = yield* PluginHost
+      const approved = yield* host.clientAsset(me, { ...target, commit: newer })
+      const edit = yield* run(
+        "plugin_write",
+        { plugin: target.id, path: "client.ts", content: "throw new Error('unapproved work')" },
+        "new-work"
+      )
+      assert.isNotTrue(edit.isError, edit.text)
+      assert.isUndefined((yield* api.GetPlugin(target)).pin?.suspended, "Workshop writes retain the approved version")
+      assert.deepStrictEqual(yield* host.clientAsset(me, { ...target, commit: newer }), approved)
+      const workCommit = yield* run(
+        "plugin_commit",
+        { plugin: target.id, message: "Unapproved work" },
+        "new-work-commit"
+      )
+      assert.isNotTrue(workCommit.isError, workCommit.text)
+      assert.isUndefined((yield* api.GetPlugin(target)).pin?.suspended, "Workshop commits retain the approved version")
+      assert.deepStrictEqual(yield* host.clientAsset(me, { ...target, commit: newer }), approved)
+      const workEffect = (yield* api.ListRolloutEffects({ chatId: chat.id })).find(
+        (e) => e.toolCallId === "new-work-commit"
+      )!
+      yield* api.UndoRolloutEffect(workEffect)
+      assert.isUndefined(
+        (yield* api.GetPlugin(target)).pin?.suspended,
+        "Undoing repository work retains the approved version"
+      )
+      assert.deepStrictEqual(yield* host.clientAsset(me, { ...target, commit: newer }), approved)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
   60000

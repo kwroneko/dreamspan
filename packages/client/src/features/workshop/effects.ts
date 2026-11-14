@@ -59,7 +59,7 @@ export const undoHint = (effect: RolloutEffect) =>
   effect.kind === "plugin.commit"
     ? "Creates a revert version without turning it on."
     : effect.kind === "plugin.write"
-      ? "Restores the previous file text; the plugin stays off."
+      ? "Restores the previous file text. The enabled version keeps running."
       : effect.kind === "plugin.enable"
         ? "Turns this plugin off and keeps its versions and data."
         : effect.kind === "plugin.create"

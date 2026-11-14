@@ -995,6 +995,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const providerSettings = resolveProviderSettings(provider, c.providerSettings)
         const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat, providerSettings)
         resolvedModel = {
+          ...(provider ? { provider: provider.id } : {}),
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
           mapping: mappingCapabilities(effective),

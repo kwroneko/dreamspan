@@ -33,7 +33,12 @@ export const checkPlugin = async (
   owner: string,
   id: string,
   commit: string,
-  authoring?: { readonly working: boolean; readonly admin: boolean; readonly historical?: boolean }
+  authoring?: {
+    readonly working: boolean
+    readonly admin: boolean
+    readonly historical?: boolean
+    readonly approved?: boolean
+  }
 ): Promise<PluginReport> => {
   const appStamp = await pluginAppStamp()
   const report: PluginReport = {
@@ -48,7 +53,13 @@ export const checkPlugin = async (
   try {
     await confined(dataDir, pluginFolder(dataDir, owner, id))
     const build = buildFolder(dataDir, owner, id, commit)
-    // Always compare the on-disk tree, even for a cached build. Cache is not consent.
+    // Approval checks compare HEAD and working files. Runtime checks compare the approved
+    // Git objects and checked build; newer repository work cannot replace approved code.
+    if (authoring?.approved) {
+      const { repoTask } = await import("./repoTask.ts")
+      await repoTask(dataDir, { op: "verify", owner, id, commit, approved: true })
+      await verifyArtifacts(build, commit)
+    }
     const parent = join(build, "..")
     await confined(dataDir, parent, true)
     staging = join(parent, `.check-${randomUUID()}`)
@@ -102,7 +113,7 @@ export const readClientBuild = async (dataDir: string, owner: string, id: string
   const report = JSON.parse(encoded) as PluginReport & { artifacts: Record<string, string> }
   if (!report.ok || report.commit !== commit || !manifest.client) throw new Error("Unchecked client entry")
   const { repoTask } = await import("./repoTask.ts")
-  await repoTask(dataDir, { op: "verify", owner, id, commit })
+  await repoTask(dataDir, { op: "verify", owner, id, commit, approved: true })
   const file = join(folder, "client.mjs")
   const info = await lstat(file)
   if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 16 * 1024 * 1024)
@@ -111,4 +122,30 @@ export const readClientBuild = async (dataDir: string, owner: string, id: string
   if (createHash("sha256").update(bytes).digest("hex") !== report.artifacts["client.mjs"])
     throw new Error("Changed plugin artifact")
   return { manifest, bytes }
+}
+
+/** Stored checksums remain operator-trusted across restarts; any altered approved output is a fault. */
+const verifyArtifacts = async (folder: string, commit: string) => {
+  const info = await lstat(join(folder, "check.json"))
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 524288)
+    throw new Error("Invalid report")
+  const report = JSON.parse(await readFile(join(folder, "check.json"), "utf8")) as PluginReport & {
+    artifacts: Record<string, string>
+  }
+  if (!report.ok || report.commit !== commit || !report.artifacts) throw new Error("Invalid report")
+  for (const [name, hash] of Object.entries(report.artifacts)) {
+    if (!/^(?:server|worker|client|worker-bridge|test-[0-9]+)\.mjs$/.test(name)) throw new Error("Invalid artifact")
+    const file = join(folder, name),
+      info = await lstat(file)
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.nlink !== 1 ||
+      info.size > 16 * 1024 * 1024 ||
+      createHash("sha256")
+        .update(await readFile(file))
+        .digest("hex") !== hash
+    )
+      throw new Error("Changed plugin artifact")
+  }
 }

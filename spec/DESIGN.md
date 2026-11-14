@@ -1,3 +1,5 @@
+**Built fixes1114 (2026-11-14):** §7.1's Move to an own-turn note now normalizes whitespace only at the cut; Undo restores original bytes. Workshop Changes retain the story title independently of branch naming, and summary status text explains pending work without extra requests. These fixes are obsolete as implementation proposals; see ARCHITECTURE's fixes1114 record. No Proposed item is promoted to Decided.
+
 **Built 2026-11-13 (ownturn1):** §7.1’s own-turn card notes, movable preset marker and export notice are implemented and obsolete as implementation proposals (ARCHITECTURE §15). The [P] mechanisms remain marked Proposed; Suggest a split stays later.
 
 **Built 2026-11-07 (tokencut):** History fitting and cache estimates now use the selected model’s local tokenizer under §4’s real-tokenizer decision (originally line 558). This subset is obsolete as an implementation proposal; see ARCHITECTURE §15. Unknown models use the local o200k approximation; provider counting is never on the fitting path.

@@ -128,3 +128,30 @@ it("regenerates a later turn's reused send ID and copies only that turn's receip
   assert.strictEqual(plan.transcript.at(-1)!.role, "rpUser")
   assert.deepStrictEqual(plan.keptCalls, [])
 })
+
+it("projects a tool's display title separately from its model result", () => {
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        { type: "toolCall", id: "enable", name: "plugin_enable", arguments: { commit: "a".repeat(40), plugin: "dice" } }
+      ],
+      stopReason: "toolUse",
+      timestamp: 1
+    },
+    {
+      role: "toolResult",
+      toolCallId: "enable",
+      toolName: "plugin_enable",
+      content: [{ type: "text", text: "Enabled." }],
+      details: { presentation: { title: "Dice Roller", subtitle: "Version aaaaaaaa" } },
+      isError: false,
+      timestamp: 2
+    }
+  ] as unknown as AgentMessage[]
+  const [step] = stepsOf(messages, [], true)
+  if (step?.kind !== "tool") throw new Error("Missing tool step")
+  assert.strictEqual(step.title, "Dice Roller")
+  assert.strictEqual(step.subtitle, "Version aaaaaaaa")
+  assert.strictEqual(step.result, "Enabled.")
+})

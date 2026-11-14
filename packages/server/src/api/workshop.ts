@@ -32,7 +32,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
             Effect.mapError(
               () =>
                 new EffectUndoRefused({
-                  message: "Plugin changed since; undo newer edits first or open Settings → Plugins."
+                  message:
+                    "This plugin has changed since this edit. Undo its newer edits first, or open Settings → Plugins to review its versions."
                 })
             )
           )

@@ -131,6 +131,7 @@ export const runSkills = (
 
 /** The model the run is sent to, as far as the decision needs it. */
 export interface WireTarget {
+  readonly provider?: string
   readonly toolLoading?: "auto" | "every" | "dispatcher"
   readonly kind: string
   readonly api: string
@@ -187,13 +188,28 @@ export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
     declaresDeferred: true
   },
   {
+    id: "openai-responses",
+    supports: (t) =>
+      t.provider === "openai" &&
+      t.kind === "openai-responses" &&
+      /^(?:gpt-5\.4(?:-pro)?|gpt-5\.4-mini)(?:-\d{4}-\d{2}-\d{2})?$/.test(t.key),
+    declaresDeferred: false
+  },
+  {
     id: "dispatcher",
     dispatcher: true,
     declaresDeferred: false,
     supports: (t) => {
       if (t.toolLoading === "every") return false
       if (t.toolLoading === "dispatcher") return true
-      // TOOL-LOADING §11.1: exact measured targets only. No inference from a model family.
+      // TOOL-LOADING §§11.1, 16: measured Chat ids only; Responses nano remains every-tool.
+      if (
+        t.provider === "openai" &&
+        t.kind === "openai-chat" &&
+        t.api === "openai-completions" &&
+        ["gpt-5.4-nano", "gpt-5.4-mini"].includes(t.key)
+      )
+        return true
       if (t.kind === "deepseek" && t.api === "openai-completions" && t.key === "deepseek-flash") return true
       if (t.kind !== "openrouter" || t.api !== "openai-completions") return false
       const route = pinnedRoute(t.settings?.routing)
@@ -203,8 +219,6 @@ export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
       )
     }
   }
-  // Responses serialization remains covered by golden tests, but no live cache measurement
-  // succeeded. It and every other unmeasured wire send the entire catalog from the start.
 ]
 
 /** The workshop's core: finding things, and the two ways to load the rest. */

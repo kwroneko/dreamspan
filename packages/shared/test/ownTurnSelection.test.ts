@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ownTurnSelectionError } from "../src/docs/note.ts"
+import { ownTurnSelectionError, cutOwnTurnText } from "../src/docs/note.ts"
 
 describe("move selections", () => {
   for (const text of ["First.\n\nSecond.", "Hello {{char}}.", "{{outer::{{char}}}}", '<p title="a > b">Blue.</p>']) {
@@ -20,4 +20,22 @@ describe("move selections", () => {
     ])
       expect(ownTurnSelectionError(text, at!, length!)).not.toBeNull()
   })
+})
+
+describe("whitespace at a moved passage", () => {
+  for (const [text, selected, expected] of [
+    ["First. Secret. Last.", "Secret.", "First. Last."],
+    ["Secret. Last.", "Secret.", "Last."],
+    ["First. Secret.", "Secret.", "First."],
+    ["First.\n\nSecret.\n\nLast.", "Secret.", "First.\n\nLast."],
+    ["Secret.\n\nLast.", "Secret.", "Last."],
+    ["First.\n\nSecret.", "Secret.", "First."],
+    ["  Unchanged  prose.\n  First. Secret. Last.  ", "Secret.", "  Unchanged  prose.\n  First. Last.  "],
+    ["preSECRETfix", "SECRET", "prefix"],
+    ["Secret.", "Secret.", ""],
+    ["First.\r\n\r\nSecret.\r\n\r\nLast.", "Secret.", "First.\r\n\r\nLast."]
+  ])
+    it(`cuts only adjacent whitespace in ${JSON.stringify(text)}`, () => {
+      expect(cutOwnTurnText(text!, text!.indexOf(selected!), selected!.length)).toBe(expected)
+    })
 })

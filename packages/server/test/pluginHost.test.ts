@@ -119,7 +119,7 @@ it("survives SIGKILL between file publication and the settings write without ena
   )
 }, 45_000)
 describe("plugin lifecycle", () => {
-  it("enables explicitly, restores scoped entries, and keeps startup healthy when a pinned tree changes", async () => {
+  it("keeps the approved commit running after a working-tree edit and restart", async () => {
     const data = tempDir("plugin-lifecycle"),
       config = testConfig({ dataDir: data })
     let commit = ""
@@ -142,14 +142,28 @@ describe("plugin lifecycle", () => {
         Effect.gen(function* () {
           const api = yield* client()
           const plugin = yield* api.GetPlugin({ scope: "instance", id: "lifecycle" })
-          expect(plugin.pin?.suspended).toBeDefined()
-          expect(plugin.report?.ok).toBe(false)
+          expect(plugin.pin?.suspended).toBeUndefined()
+          expect(plugin.report?.ok).toBe(true)
           expect(JSON.stringify(plugin)).not.toContain("synthetic-secret")
           expect(yield* api.ListClientPlugins()).toEqual([])
         }).pipe(Effect.provide(serverLayer(config)))
       )
     )
     expect(await readFile(join(pluginFolder(data, "", "lifecycle"), "index.ts"), "utf8")).toContain("throw")
+    await writeFile(
+      join(data, "plugins/.builds/instance/lifecycle", commit, "server.mjs"),
+      "throw new Error('altered approved artifact')"
+    )
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const api = yield* client()
+          const plugin = yield* api.GetPlugin({ scope: "instance", id: "lifecycle" })
+          expect(plugin.pin?.suspended).toBeDefined()
+          expect(plugin.report?.ok).toBe(false)
+        }).pipe(Effect.provide(serverLayer(config)))
+      )
+    )
     await mkdir(join(data, "plugins/.builds"), { recursive: true })
   }, 90_000)
 })
@@ -738,5 +752,7 @@ it("checks browser JSX against the shipped API and serves only attested unchange
   await expect(readClientBuild(data, "", id, commit)).rejects.toThrow("artifact")
   await writeFile(join(folder, "client.mjs"), output.bytes)
   await writeFile(join(pluginFolder(data, "", id), "client.tsx"), source + "\n// changed tree")
+  expect((await readClientBuild(data, "", id, commit)).bytes).toEqual(output.bytes)
+  await writeFile(join(folder, "client.tsx"), source + "\n// altered approved tree")
   await expect(readClientBuild(data, "", id, commit)).rejects.toThrow()
 }, 90_000)

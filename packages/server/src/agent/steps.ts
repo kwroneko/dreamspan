@@ -2,8 +2,10 @@ import type {} from "./messages.ts"
 // A transcript as the steps a version shows (spec/AGENTIC.md §5.1): the same projection live,
 // as the loop runs, and afterwards from the stored transcript.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { RolloutStep } from "@rp/shared/agent.ts"
+import type { ApprovalPrompt, RolloutStep } from "@rp/shared/agent.ts"
 import type { FrozenTool } from "./tools.ts"
+
+type Presentation = NonNullable<ApprovalPrompt["presentation"]>
 
 /** The contract's own tool: the message itself, never a step. */
 export const SEND_MESSAGE = "send_message"
@@ -64,7 +66,15 @@ export const placedSteps = (
   // IDs may repeat in a later provider turn. A result answers its own assistant turn.
   const results = new Map<
     number,
-    Map<string, { readonly text: string; readonly isError: boolean; readonly index: number }>
+    Map<
+      string,
+      {
+        readonly text: string
+        readonly isError: boolean
+        readonly index: number
+        readonly presentation?: Presentation
+      }
+    >
   >()
   let assistant = -1
   messages.forEach((m, index) => {
@@ -72,7 +82,16 @@ export const placedSteps = (
       assistant = index
       results.set(index, new Map())
     } else if (m.role === "toolResult")
-      results.get(assistant)?.set(m.toolCallId, { text: resultText(m.content), isError: m.isError, index })
+      results.get(assistant)?.set(m.toolCallId, {
+        text: resultText(m.content),
+        isError: m.isError,
+        index,
+        ...((m.details as { presentation?: Presentation } | null)?.presentation
+          ? {
+              presentation: (m.details as { presentation: Presentation }).presentation
+            }
+          : {})
+      })
   })
   // A turn cut off in its text (a stop, an error) was the message being written: never a step.
   const plain = messages.findLastIndex((m) => m.role === "assistant" && !m.content.some((p) => p.type === "toolCall"))
@@ -119,6 +138,7 @@ export const placedSteps = (
           tool: part.name,
           label: tool?.label ?? part.name,
           title: title(part.arguments, tool?.titleField),
+          ...result?.presentation,
           args: part.arguments,
           status: result ? (result.isError ? "error" : "done") : final ? "error" : "running",
           ...(result ? { result: result.text } : {}),

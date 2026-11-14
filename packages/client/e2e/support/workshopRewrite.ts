@@ -260,7 +260,9 @@ function sideWriteTests() {
             await page.goto(`${server().url}/chats/${workshop.id}`)
             await openPanel(page, "Changes")
             const effect = page.locator('[data-effect-kind="changeset.apply"]')
-            await expect(effect).toContainText("Branch “Renamed original”")
+            await expect(effect).toContainText(
+              `Tab target ${width} ${theme} · Branch “Renamed original” · messages 1–1`
+            )
             await expect(effect).toContainText("messages 1–1")
             await expect(effect).not.toContainText(fixture.original)
             await expectLayout(page, info, `side-write-effect-${width}-${theme}`)
@@ -282,7 +284,9 @@ function sideWriteTests() {
             expect((await read(fixture.newer)).entries[0]!.version.content).toBe("NEWER sentinel")
             await admin((api) => api.DeleteFork({ forkId: fixture.original }))
             await page.reload()
-            await expect(effect).toContainText("Renamed original")
+            await expect(effect).toContainText(
+              `Tab target ${width} ${theme} · Branch “Renamed original” · messages 1–1 (deleted)`
+            )
             await expect(effect).toContainText("(deleted)")
             await expect(effect).not.toContainText(fixture.original)
             await expectLayout(page, info, `side-write-deleted-${width}-${theme}`)

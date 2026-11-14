@@ -100,6 +100,7 @@ function StepRow({
               <span className="min-w-0 [overflow-wrap:anywhere]">
                 <span className="font-medium text-text">{step.label}</span>
                 {step.title && <span> {step.title}</span>}
+                {step.subtitle && <span className="block text-muted">{step.subtitle}</span>}
               </span>
             ) : (
               <span className="min-w-0 [overflow-wrap:anywhere]">

@@ -288,8 +288,8 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
   },
   "packages/server/src/plugins/repoChild.ts": {
     reason:
-      "Confined synthetic request/response files for bounded Git operations under DATA_DIR/plugins/.ops; no plugin code is evaluated.",
-    expressions: ['readFile(join(folder, "request.json"), "utf8")']
+      "Confined operation requests under DATA_DIR/plugins/.ops and checked-build sources matched to bounded approved Git blobs; confined parents and regular-file, link-count and exact-size checks precede each source read. No plugin code is evaluated.",
+    expressions: ['readFile(join(folder, "request.json"), "utf8")', "readFile(file)"]
   },
 
   "packages/server/src/plugins/Host.ts": {

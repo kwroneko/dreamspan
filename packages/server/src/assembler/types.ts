@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 73
+export const ASSEMBLER_VERSION = 74
 
 export type Role = "system" | "user" | "assistant"
 
@@ -800,6 +800,8 @@ export interface PresetInput {
 
 /** The model a generation uses, and what assembly needs to know about it. */
 export interface ModelInput {
+  /** Connection provider identity, kept separately from its API kind. */
+  readonly provider?: string
   readonly connectionId: string
   /** Non-secret cache identity; absent on legacy snapshots. */
   readonly connectionRevision?: number

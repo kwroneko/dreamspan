@@ -9,7 +9,10 @@ const EffectClass = Schema.Literals(["read", "chat_state", "external", "library"
  * What a tool call waiting for the user will do, as the server describes it from the call's real
  * arguments and the items they name (spec/WORKSHOP.md §3.4): never the model's own wording of it.
  */
+const StepPresentation = Schema.Struct({ title: Schema.String, subtitle: Schema.optionalKey(Schema.String) })
+
 export const ApprovalPrompt = Schema.Struct({
+  presentation: Schema.optionalKey(StepPresentation),
   plugin: Schema.optionalKey(Schema.Struct({ id: Schema.String, commit: Schema.String })),
   storyAt: StoryAtField,
   storyScope: Schema.optionalKey(
@@ -60,6 +63,7 @@ export const RolloutStep = Schema.Union([
     label: Schema.String,
     /** What it was called with, in a line: “lighthouse”. */
     title: Schema.String,
+    subtitle: Schema.optionalKey(Schema.String),
     args: Schema.Unknown,
     /** `waiting`: the call asks the user first (`approval` says what it will do). */
     status: Schema.Literals(["running", "waiting", "done", "error"]),

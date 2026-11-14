@@ -86,7 +86,7 @@ test.describe("workshop plugin consent and dice", () => {
   test.afterAll(async () => provider.stop())
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const)
-      test(`dice consent, refusal and Undo ${width} ${theme}`, async ({ page }, info) => {
+      test(`dice consent, refusal and Undo ${width} ${theme}`, async ({ page, context }, info) => {
         test.setTimeout(240000)
         pluginId = `dice-${width}-${theme}`
         const chat = await admin((api) => api.CreateWorkshop({ title: `Dice ${width} ${theme}` }))
@@ -100,6 +100,9 @@ test.describe("workshop plugin consent and dice", () => {
         const approval = page.locator("[data-approval]")
         await expect(approval).toBeVisible({ timeout: 120000 })
         await expect(approval).toContainText("Turn on Dice roller?")
+        const enablingStep = page.locator('[data-step="tool"]').filter({ has: approval })
+        await expect(enablingStep.locator("button").first()).toContainText("Dice roller")
+        await expect(enablingStep.locator("button").first()).toContainText(/Version [a-f0-9]{8}/)
         await expect(approval).toContainText("Runs only in your browser. It can do anything you can do in the app.")
         await expect(approval).toContainText("Adds controls beside your message.")
         await expect(approval.getByRole("button", { name: "Allow in this workshop" })).toHaveCount(0)
@@ -121,12 +124,29 @@ test.describe("workshop plugin consent and dice", () => {
         await die.click()
         await expect(page.getByLabel("Message", { exact: true })).toHaveValue(/🎲 (?:[1-9]|1[0-9]|20)$/)
         await expectLayout(page, info, `plugin-dice-${width}-${theme}`)
+        // Drop server notices to reproduce the cross-tab subscription gap. The local
+        // management broadcast still offers Reload, retaining already evaluated code.
+        const other = await context.newPage()
+        await other.routeWebSocket("**/rpc", (socket) => {
+          const upstream = socket.connectToServer()
+          socket.onMessage((message) => upstream.send(message))
+          upstream.onMessage((message) => {
+            if (!message.toString().includes('"PluginsChanged"')) socket.send(message)
+          })
+        })
+        await other.goto(`${server().url}/chats/${chat.id}`)
+        await expect(other.getByRole("button", { name: "🎲", exact: true })).toBeVisible()
         const badge = page.getByRole("article").last().locator("[data-steps-badge]")
         if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
         const enabled = page.locator('[data-effect-kind="plugin.enable"]')
         await expect(enabled).toBeVisible()
         await enabled.getByRole("button", { name: "Undo", exact: true }).click()
         await expect(die).toHaveCount(0)
+        const reloadNotice = other.getByRole("status", { name: "Plugins", exact: true })
+        await expect(reloadNotice).toContainText("Plugins changed. Reload to apply.")
+        await reloadNotice.getByRole("button", { name: "Reload", exact: true }).click()
+        await expect(other.getByRole("button", { name: "🎲", exact: true })).toHaveCount(0)
+        await other.close()
         await expect(page.getByLabel("Message", { exact: true })).toHaveValue(/🎲 /)
         // Next task declines: no extra code runs. The existing checked version can be requested again.
         const details = await admin((api) => api.GetPlugin({ scope: "user", id: pluginId }))
