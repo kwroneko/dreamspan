@@ -214,6 +214,30 @@ const userDraftOf = (owner: Party) =>
   })
 
 const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
+  WriteForMe: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api
+          .WriteForMe({
+            target: {
+              kind: "draft",
+              chatId: owner.chat.chatId,
+              forkId: owner.chat.forkId,
+              leafSlotId: owner.chat.replySlotId,
+              draftId: owner.composerId
+            }
+          })
+          .pipe(Stream.runDrain),
+        "NotFound"
+      )
+  },
+  GetLastDraftRollout: {
+    probe: (actor, owner) =>
+      refused(actor.api.GetLastDraftRollout({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
+  },
+  GetDraftRunContext: {
+    probe: (actor, owner) => refused(actor.api.GetDraftRunContext({ rolloutId: owner.chat.rolloutId }), "NotFound")
+  },
   ListBuiltinParts: { createOnly: "read-only built-in catalog" },
   CopyBuiltin: {
     adminOnly: (actor) =>

@@ -98,6 +98,7 @@ const BACKGROUND_READS: ReadonlySet<string> = new Set([
 const REPLY_READS: ReadonlySet<string> = new Set([
   "GetSlot",
   "AssembleContext",
+  "AssembleDraftTurn",
   "ResolveConnection",
   "GetModel",
   "GetCostSettings",

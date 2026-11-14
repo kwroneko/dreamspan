@@ -810,35 +810,47 @@ export function DraftRequestView({ request }: { request: DraftRequest }) {
 
 /** /chats/$chatId/context/$versionId */
 export function ContextPage() {
-  const { chatId, versionId } = useParams({ strict: false }) as { chatId: ChatId; versionId: VersionId }
+  const { chatId, versionId, rolloutId } = useParams({ strict: false }) as {
+    chatId: ChatId
+    versionId: VersionId
+    rolloutId?: string
+  }
   const search = useSearch({ strict: false }) as { fork?: unknown }
   const viewed = useMemo(
     () => (typeof search.fork === "string" && search.fork !== "" ? { fork: search.fork as ForkId } : {}),
     [search.fork]
   )
   useTitle("Request")
-  const atom = useMemo(() => AppClient.query("GetRunContext", { versionId }), [versionId])
+  const atom = useMemo(
+    () =>
+      rolloutId
+        ? AppClient.query("GetDraftRunContext", { rolloutId })
+        : AppClient.query("GetRunContext", { versionId }),
+    [versionId, rolloutId]
+  )
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <header className="flex flex-wrap items-center gap-3">
         <CenterHeaderContent>
-          <h1 className="text-lg font-semibold">The request a reply was generated from</h1>
+          <h1 className="text-lg font-semibold">
+            {rolloutId ? "The request that drafted your message" : "The request a reply was generated from"}
+          </h1>
         </CenterHeaderContent>
       </header>
       <AsyncView atom={atom} loading="Loading the context…">
         {(run) =>
-          run.chatId !== chatId ? (
+          run.chatId !== chatId && !rolloutId ? (
             <Navigate to="/chats/$chatId/context/$versionId" params={{ chatId: run.chatId, versionId }} replace />
           ) : (
             <ViewedFork.Provider value={viewed}>
-              <Tooltip label="Returns to the reply.">
+              <Tooltip label={rolloutId ? "Returns to the composer." : "Returns to the reply."}>
                 <Link
                   to="/chats/$chatId"
                   params={{ chatId: run.chatId }}
-                  search={{ ...viewed, slot: run.slotId }}
+                  search={{ ...viewed, slot: run.slotId ?? undefined }}
                   className="text-sm text-muted hover:text-text"
                 >
-                  ← Back to the reply
+                  ← Back to {rolloutId ? "the composer" : "the reply"}
                 </Link>
               </Tooltip>
               <Inspector run={run} />

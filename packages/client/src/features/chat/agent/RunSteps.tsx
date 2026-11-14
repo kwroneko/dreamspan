@@ -387,7 +387,7 @@ function Steps({
   cut,
   editing
 }: {
-  run: RunContext
+  run: MessageRunContext
   entries: ReadonlyArray<TranscriptEntry>
   cut: ReadonlyArray<CutSpan>
   editing: StepEditing
@@ -462,7 +462,7 @@ function Steps({
 }
 
 /** Step edits' state, and carrying on: the slot's row version where the page shows it, then the new version. */
-function useStepEditing(run: RunContext, tools: ReadonlyArray<OfferedTool>): StepEditing {
+function useStepEditing(run: MessageRunContext, tools: ReadonlyArray<OfferedTool>): StepEditing {
   const action = useAction()
   const navigate = useNavigate()
   // A chat beside another (the workshop in a story's panel) keeps its choices under its own keys.
@@ -552,7 +552,7 @@ function Transcript({
   entries,
   cut
 }: {
-  run: RunContext
+  run: MessageRunContext
   tools: ReadonlyArray<OfferedTool>
   entries: ReadonlyArray<TranscriptEntry>
   cut: ReadonlyArray<CutSpan>
@@ -573,7 +573,16 @@ function Transcript({
   )
 }
 
+type MessageRunContext = RunContext & {
+  readonly versionId: VersionId
+  readonly slotId: import("@rp/shared/chat.ts").SlotId
+}
+
 export function RunSteps({ run }: { run: RunContext }) {
+  if (run.versionId === null || run.slotId === null) return null
+  return <MessageRunSteps run={{ ...run, versionId: run.versionId, slotId: run.slotId }} />
+}
+function MessageRunSteps({ run }: { run: MessageRunContext }) {
   const atom = useMemo(() => AppClient.query("GetRunTranscript", { versionId: run.versionId }), [run.versionId])
   const result = useAtomValue(atom)
   // Nothing while it loads (the context above says it's loading); a run without steps adds nothing.

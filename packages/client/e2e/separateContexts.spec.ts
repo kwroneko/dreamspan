@@ -835,7 +835,12 @@ for (const width of [1440, 390])
       const other = await context.newPage()
       await other.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       const reads = { marks: 0, cast: 0, path: 0, next: 0, summaries: 0 }
-      other.on("websocket", (socket) =>
+      let openingEstimate = false
+      other.on("websocket", (socket) => {
+        socket.on("framereceived", ({ payload }) => {
+          const wire = typeof payload === "string" ? payload : payload.toString()
+          if (wire.includes('"_tag":"Cache"')) openingEstimate = true
+        })
         socket.on("framesent", ({ payload }) => {
           const wire = typeof payload === "string" ? payload : payload.toString()
           for (const [key, methods] of Object.entries({
@@ -848,7 +853,7 @@ for (const width of [1440, 390])
             if (methods.some((method) => wire.includes(`"${method}"`))) reads[key as keyof typeof reads]++
           }
         })
-      )
+      })
       try {
         await page.goto(`${server().url}/chats/${chatId}?fork=${forkId}`)
         await other.goto(`${server().url}/chats/${chatId}?fork=${peer.fork.id}`)
@@ -856,7 +861,9 @@ for (const width of [1440, 390])
         await expect(left(page)).toBeVisible()
         await expect(left(other)).toBeVisible()
         await expect(left(other).getByRole("button", { name: "Undo", exact: true })).toBeVisible()
-        // Let opening estimates and shell subscriptions settle before counting invalidations.
+        // A cold opening estimate can arrive after marks; it schedules its own summary read.
+        // Observe it before the quiet period so the assertion measures only Undo's invalidations.
+        await expect.poll(() => openingEstimate).toBe(true)
         await expect.poll(() => reads.marks).toBeGreaterThan(0)
         await other.waitForTimeout(800)
         const beforeReads = { ...reads }

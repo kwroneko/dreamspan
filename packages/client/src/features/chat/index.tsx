@@ -1,3 +1,4 @@
+import { registerWriteForMe } from "./WriteForMe.tsx"
 import { tabKinds } from "../workbench/kinds.ts"
 import { registerChatHeader } from "./headerContributions.tsx"
 import { registerSummaryDetails } from "./SummaryDetails.tsx"
@@ -84,6 +85,7 @@ export const register = () => {
   registerDisplay()
   registerPresentation()
   registerComposerControls()
+  registerWriteForMe()
   registerMessageActions()
   registerMessageSelection()
   registerCompositionActions()
@@ -161,6 +163,19 @@ export const register = () => {
     path: "/chats/$chatId/context/$versionId",
     component: LazyContextPage,
     retainSearch: sidebarSearch
+  })
+  routes.register({
+    id: "chat.draft-request",
+    parent: "app",
+    path: "/chats/$chatId/draft-request/$rolloutId",
+    component: LazyContextPage
+  })
+  tabKinds.register({
+    id: "chat.draft-request",
+    order: 100,
+    match: (url) => /^\/chats\/([^/]+\/draft-request\/[^/]+)$/.exec(url.pathname)?.[1] ?? null,
+    title: () => "Request",
+    icon: "search"
   })
   // What applies to all of the user's chats.
   routes.register({

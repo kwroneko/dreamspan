@@ -32,7 +32,7 @@ export interface ReplyParser {
   readonly id: string
   /** A fresh parse per generation; null when it doesn't apply to this one. */
   readonly create: (input: {
-    readonly request: GenerationRequest
+    readonly request: Pick<GenerationRequest, "initial">
     readonly generation: Generation
   }) => ReplyParse | null
 }

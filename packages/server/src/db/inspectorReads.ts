@@ -330,115 +330,149 @@ const speakerPickOf = (json: string | null) => {
 export const makeInspectorReadHandlers = Effect.gen(function* () {
   const assembler = yield* WorkerAssembler
   const sql = yield* SqlClient.SqlClient
-  const handlers = {
-    RunContext: ({ userId, versionId }) =>
-      Effect.gen(function* () {
-        const [row] = yield* sql<{
-          chat_id: string
-          fork_id: string | null
-          slot_id: string
-          rollout_id: string
-          status: string
-          snapshot: string
-          sent_context_json: string | null
-          speaker_pick_json: string | null
-        }>`
+  const readRun = (
+    userId: import("@rp/shared/domain.ts").UserId,
+    target: { kind: "version"; versionId: VersionId } | { kind: "draft"; rolloutId: string }
+  ) => {
+    const versionId = target.kind === "version" ? target.versionId : null
+    return Effect.gen(function* () {
+      const [row] = yield* target.kind === "draft"
+        ? sql<{
+            chat_id: string
+            fork_id: string | null
+            slot_id: null
+            rollout_id: string
+            status: string
+            snapshot: string
+            sent_context_json: string | null
+            speaker_pick_json: null
+          }>`SELECT r.chat_id, r.fork_id, NULL AS slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot, p.sent_context_json, NULL AS speaker_pick_json
+          FROM rollouts r JOIN chats c ON c.id=r.chat_id JOIN rollout_payloads p ON p.rollout_id=r.id
+          WHERE r.id=${target.rolloutId} AND r.kind='draft' AND c.owner_user_id=${userId} AND c.deleted_at IS NULL`
+        : sql<{
+            chat_id: string
+            fork_id: string | null
+            slot_id: string
+            rollout_id: string
+            status: string
+            snapshot: string
+            sent_context_json: string | null
+            speaker_pick_json: string | null
+          }>`
         SELECT s.chat_id, r.fork_id, v.slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot, p.sent_context_json,
           v.speaker_pick_json
         FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
         JOIN rollouts r ON r.id = v.rollout_id JOIN rollout_payloads p ON p.rollout_id = r.id
         WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND p.context_snapshot_json IS NOT NULL
           AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
-        if (!row) return yield* new NotFound({ entity: "context", id: versionId })
-        const snapshot = JSON.parse(row.snapshot) as ContinuousSnapshot
-        const chatId = row.chat_id as ChatId
-        const requests = yield* rolloutUsage(sql, userId, row.rollout_id)
-        const wire = row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null
-        const display = wire?.display
-        // Captured wire messages are text; their images are the snapshot's, with its estimates.
-        const images = wire ? wireImages(wire.messages, snapshot.request) : []
-        const textCounts = yield* textDisplay(
-          sql,
-          userId,
-          snapshot.inputs.model,
-          assembler,
-          (wire?.messages ?? []).map((m) => m.content + (m.name ?? "")),
-          snapshot.inputs.now
-        )
-        const current = new Map<string, { readonly revisionId: string; readonly fresh: boolean }>()
-        yield* Effect.gen(function* () {
-          if (snapshot.lcm?.selected.length) {
-            const [settings] = yield* sql<{
-              enabled: number
-            }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
+      if (!row)
+        return yield* new NotFound({
+          entity: "context",
+          id: versionId ?? (target.kind === "draft" ? target.rolloutId : "")
+        })
+      const snapshot = JSON.parse(row.snapshot) as ContinuousSnapshot
+      const chatId = row.chat_id as ChatId
+      const requests = yield* rolloutUsage(sql, userId, row.rollout_id)
+      const wire = row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null
+      const display = wire?.display
+      // Captured wire messages are text; their images are the snapshot's, with its estimates.
+      const images = wire ? wireImages(wire.messages, snapshot.request) : []
+      const textCounts = yield* textDisplay(
+        sql,
+        userId,
+        snapshot.inputs.model,
+        assembler,
+        (wire?.messages ?? []).map((m) => m.content + (m.name ?? "")),
+        snapshot.inputs.now
+      )
+      const current = new Map<string, { readonly revisionId: string; readonly fresh: boolean }>()
+      yield* Effect.gen(function* () {
+        if (snapshot.lcm?.selected.length) {
+          const [settings] = yield* sql<{
+            enabled: number
+          }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
             WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' AND ${eventApplies(sql, yield* viewAt(sql, chatId, null), "e")} ORDER BY seq DESC LIMIT 1`
-            if (settings?.enabled)
-              for (const summary of (yield* selectSummaryLayer(sql, userId, chatId, snapshot.inputs.leafSlotId))
-                .summaries)
-                current.set(summary.id, summary)
-          }
-        }).pipe(inFork(sql, chatId, row.fork_id, snapshot.inputs.leafSlotId))
-        const separateContext = yield* separateContextOf(sql, snapshot)
-        return new RunContext({
-          ...(snapshot.continuity
-            ? {
-                continuity: {
-                  ...(snapshot.continuity.parent
-                    ? { parentVersionId: snapshot.continuity.parent.versionId as VersionId }
-                    : {}),
-                  ...(snapshot.continuity.reason ? { reason: snapshot.continuity.reason } : {}),
-                  ...(snapshot.continuity.elided ? { elided: snapshot.continuity.elided } : {})
+          if (settings?.enabled)
+            for (const summary of (yield* selectSummaryLayer(sql, userId, chatId, snapshot.inputs.leafSlotId))
+              .summaries)
+              current.set(summary.id, summary)
+        }
+      }).pipe(inFork(sql, chatId, row.fork_id, snapshot.inputs.leafSlotId))
+      const separateContext = yield* separateContextOf(sql, snapshot)
+      return new RunContext({
+        ...(snapshot.continuity
+          ? {
+              continuity: {
+                ...(snapshot.continuity.parent
+                  ? { parentVersionId: snapshot.continuity.parent.versionId as VersionId }
+                  : {}),
+                ...(snapshot.continuity.reason ? { reason: snapshot.continuity.reason } : {}),
+                ...(snapshot.continuity.elided ? { elided: snapshot.continuity.elided } : {})
+              }
+            }
+          : {}),
+        chatId,
+        slotId: row.slot_id as SlotId | null,
+        versionId,
+        builtAt: snapshot.inputs.now,
+        status: row.status,
+        type: snapshot.inputs.type,
+        mode: snapshot.inputs.mode,
+        capture: display ? "captured" : "unavailable",
+        tokenizer: textCounts.tokenizer,
+        ...speakerPickOf(row.speaker_pick_json),
+        ...(separateContext ? { separateContext } : {}),
+        messages: display
+          ? contextMessages(wire!, images, textCounts.counts, (source) => {
+              if (!source.summary) return source
+              const now = current.get(source.summary.id)
+              return {
+                ...source,
+                summary: {
+                  ...source.summary,
+                  changed: !now || now.revisionId !== source.summary.revision || (!source.summary.stale && !now.fresh)
                 }
               }
-            : {}),
-          chatId,
-          slotId: row.slot_id as SlotId,
-          versionId,
-          builtAt: snapshot.inputs.now,
-          status: row.status,
-          type: snapshot.inputs.type,
-          mode: snapshot.inputs.mode,
-          capture: display ? "captured" : "unavailable",
-          tokenizer: textCounts.tokenizer,
-          ...speakerPickOf(row.speaker_pick_json),
-          ...(separateContext ? { separateContext } : {}),
-          messages: display
-            ? contextMessages(wire!, images, textCounts.counts, (source) => {
-                if (!source.summary) return source
-                const now = current.get(source.summary.id)
-                return {
-                  ...source,
-                  summary: {
-                    ...source.summary,
-                    changed: !now || now.revisionId !== source.summary.revision || (!source.summary.stale && !now.fresh)
-                  }
-                }
-              })
-            : [],
-          samplers: display ? { ...wire!.samplers } : {},
-          ...(display ?? {
-            model: null,
-            preset: { label: null, scope: "unavailable" },
-            issues: []
-          }),
-          requests: requests.map((r): InspectorUsage => ({
-            id: r.id as InspectorUsage["id"],
-            estimatedInput: r.estimated_input,
-            status: r.status,
-            startedAt: r.started_at,
-            firstTokenAt: r.first_token_at,
-            endedAt: r.ended_at,
-            usageSource: r.usage_source,
-            counts: {
-              inputUncached: r.input_uncached,
-              cacheRead: r.cache_read,
-              cacheWrite: r.cache_write,
-              output: r.output
-            },
-            cost: r.cost === null ? null : { amount: r.cost, currency: r.cost_currency! }
-          }))
-        })
-      }).pipe(query("RunContext")),
+            })
+          : [],
+        samplers: display ? { ...wire!.samplers } : {},
+        ...(display ?? {
+          model: null,
+          preset: { label: null, scope: "unavailable" },
+          issues: []
+        }),
+        requests: requests.map((r): InspectorUsage => ({
+          id: r.id as InspectorUsage["id"],
+          estimatedInput: r.estimated_input,
+          status: r.status,
+          startedAt: r.started_at,
+          firstTokenAt: r.first_token_at,
+          endedAt: r.ended_at,
+          usageSource: r.usage_source,
+          counts: {
+            inputUncached: r.input_uncached,
+            cacheRead: r.cache_read,
+            cacheWrite: r.cache_write,
+            output: r.output
+          },
+          cost: r.cost === null ? null : { amount: r.cost, currency: r.cost_currency! }
+        }))
+      })
+    }).pipe(query("RunContext"))
+  }
+  const handlers = {
+    RunContext: ({ userId, versionId }) => readRun(userId, { kind: "version", versionId }),
+    DraftRunContext: ({ userId, rolloutId }) => readRun(userId, { kind: "draft", rolloutId }),
+    LastDraftRollout: ({ userId, chatId, forkId }) =>
+      Effect.gen(function* () {
+        const [owned] = yield* sql`SELECT 1 FROM chats c JOIN forks f ON f.chat_id=c.id
+        WHERE c.id=${chatId} AND f.id=${forkId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
+        if (!owned) return yield* new NotFound({ entity: "branch", id: forkId })
+        const [row] = yield* sql<{
+          id: string
+        }>`SELECT id FROM rollouts INDEXED BY rollouts_fork WHERE chat_id=${chatId} AND fork_id=${forkId} AND kind='draft' ORDER BY created_at DESC, id DESC LIMIT 1`
+        return row?.id ?? null
+      }).pipe(query("LastDraftRollout")),
 
     // A version's generation requests and those of the versions it continued, followed through
     // `source_version_id`. UNION deduplicates identities, including any cycle. Only roots with requests count:
