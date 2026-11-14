@@ -1,5 +1,5 @@
 import { defineSlot } from "../../slots.tsx"
-import type { EntityKind } from "@rp/shared/library.ts"
+import type { EntityKind, RefId } from "@rp/shared/library.ts"
 
 export const libraryActions = defineSlot<{ kind: EntityKind; personas: boolean }>("library.actions")
 
@@ -14,3 +14,6 @@ export interface StImportSectionProps {
 
 /** The ST import page (/import/st): the import shown, the start form, the list of imports. */
 export const stImportSections = defineSlot<StImportSectionProps>("library.st-import.sections")
+
+/** Cards on the Import page; each transfer feature can be replaced independently. */
+export const importCards = defineSlot<{ into: RefId | null }>("library.import.cards")

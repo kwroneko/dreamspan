@@ -136,6 +136,23 @@ export const imageExcludedIn = (sql: SqlClient.SqlClient, fork: ForkRef, o: stri
 /** The override target of image `mediaId` of version `original`, one of its message's own. */
 export const imageTarget = (original: string, mediaId: string) => `${original}:${mediaId}`
 
+/**
+ * SQL: which of version `o`'s thinking (one of its message's own versions) the fork `fork`
+ * hid from the model (`thinking_hide` overrides with flag 1, SetThinkingHidden): 1 the
+ * provider's reasoning, 2 the thinking captured from the reply, 3 both, 0 neither. A copy's
+ * thinking is its original's, so an amend keeps the choice, as it does an image's.
+ */
+export const thinkingHiddenSql = (fork: string, o: string) =>
+  `(coalesce((SELECT flag FROM fork_overrides WHERE id = ${effectiveOverrideSql("thinking_hide", fork, `${o} || ':reasoning'`)}), 0)
+    + 2 * coalesce((SELECT flag FROM fork_overrides WHERE id = ${effectiveOverrideSql("thinking_hide", fork, `${o} || ':sections'`)}), 0))`
+
+/** `thinkingHiddenSql` for a fork bound as a parameter or given as a fragment. */
+export const thinkingHiddenIn = (sql: SqlClient.SqlClient, fork: ForkRef, o: string) =>
+  withFork(sql, fork, (f) => thinkingHiddenSql(f, o))
+
+/** The override target of version `original`'s thinking `part`, one of its message's own. */
+export const thinkingTarget = (original: string, part: "reasoning" | "sections") => `${original}:${part}`
+
 /** `slotDeletedInSql` for a fork bound as a parameter or given as a fragment. */
 export const slotDeletedIn = (sql: SqlClient.SqlClient, fork: ForkRef, s: string) =>
   withFork(sql, fork, (f) => slotDeletedInSql(f, s))
@@ -253,6 +270,7 @@ interface OverrideValue {
     | "hide"
     | "suppress_event"
     | "image_exclude"
+    | "thinking_hide"
     | "summary_revision"
     | "summary_choice"
     | "summary_rerun"

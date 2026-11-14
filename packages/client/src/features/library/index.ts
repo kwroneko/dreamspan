@@ -1,14 +1,15 @@
 import { routes } from "../../routes.tsx"
 import { appBanners, appTools } from "../shell.tsx"
-import { ImportPage } from "./import.tsx"
+import { ImportPage, LibraryArchiveCard } from "./import.tsx"
 import { LibraryPage } from "./list.tsx"
 import { registerItemActions } from "./registerItemActions.tsx"
-import { stImportSections } from "./slots.ts"
+import { importCards, stImportSections } from "./slots.ts"
 import { StImportPage, stImportSectionEntries } from "./stImport.tsx"
 import { StImportIndicator, StImportWatcher } from "./stJobs.tsx"
 
 export const register = () => {
   registerItemActions()
+  importCards.register({ id: "library.export-archive", order: 30, component: LibraryArchiveCard })
   routes.register({
     id: "library",
     parent: "app",
