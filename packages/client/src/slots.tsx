@@ -5,6 +5,7 @@ import { makeRegistry, type Registry } from "./registry.ts"
 
 interface SlotEntry<Props> {
   readonly id: string
+  readonly source?: string
   readonly order: number
   readonly component: ComponentType<Props>
 }

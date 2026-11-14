@@ -1,5 +1,5 @@
 // A multi-delete at the owner's scale (job msgactions1): 3,000 messages, 300 branches sharing the
-// main fork's history, 20–50 swipes on most messages. Deleting 500 messages, at the branch's end
+// main fork's history, 20–50 swipes on most messages. Deleting 1,000 messages, at the branch's end
 // and in its shared middle, and their Undo, each one writer transaction. Synthetic data only.
 // Run: env VITEST_MAX_WORKERS=1 npx vitest run --project server-slow \
 //   packages/server/test/messageSelectionScale.test.ts
@@ -17,7 +17,7 @@ import { tempDir } from "./support/tempDir.ts"
 
 const MESSAGES = 3000
 const BRANCHES = 300
-const RANGE = 500
+const RANGE = 1000
 
 it.live(
   `deleting ${RANGE} of ${MESSAGES} messages with ${BRANCHES} branches, and Undo`,
@@ -65,9 +65,20 @@ it.live(
           })
       )
       const window = (leafSlotId: SlotId | null) =>
-        reader
-          .GetPath({ userId, chatId, forkId: main, leafSlotId, limit: 1000 })
-          .pipe(Effect.map((w) => w.entries.map((e) => e.slotId)))
+        Effect.gen(function* () {
+          const last = yield* reader.GetPath({ userId, chatId, forkId: main, leafSlotId, limit: 1000 })
+          const older =
+            last.olderLeafSlotId === null
+              ? []
+              : (yield* reader.GetPath({
+                  userId,
+                  chatId,
+                  forkId: main,
+                  leafSlotId: last.olderLeafSlotId,
+                  limit: 1000
+                })).entries
+          return [...older, ...last.entries].map((e) => e.slotId)
+        })
       const timed = <A, E, R>(label: string, action: Effect.Effect<A, E, R>) =>
         Effect.gen(function* () {
           const start = performance.now()
@@ -76,15 +87,14 @@ it.live(
           console.log("MULTIDELETE_SAMPLE", label, Math.round(ms))
           return { answer, ms }
         })
-      // The branch's last 500, then 500 in the middle that the branches share: the 1,000
-      // messages up to a leaf, with the 500 taken from their end or from between 200 and 700.
-      const middleLeaf = fixture.main[Math.floor(fixture.main.length / 2)]!.id as SlotId
+      // The branch's last 1,000, then 1,000 in the middle that the branches share.
+      const middleLeaf = fixture.main[Math.floor(fixture.main.length * 0.75)]!.id as SlotId
       for (const [label, leaf] of [
         ["end", null],
         ["middle", middleLeaf]
       ] as const) {
         const shown = yield* window(leaf)
-        // A window of up to 1,000 (the fixture deletes a few messages on the way).
+        // Two pages leave room around the range (the fixture deletes a few messages on the way).
         assert.isAtLeast(shown.length, RANGE + 201)
         const from = leaf === null ? shown.length - RANGE : 200
         const slotIds = shown.slice(from, from + RANGE)

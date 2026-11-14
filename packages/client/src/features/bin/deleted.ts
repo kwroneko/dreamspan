@@ -73,7 +73,11 @@ export const useDeletedManyToast = () => {
               })
           },
           ...more,
-          { label: "Open the bin", onClick: () => void navigate({ to: "/bin" }) }
+          {
+            label: "Open the bin",
+            hint: "Shows deleted items you can restore.",
+            onClick: () => void navigate({ to: "/bin" })
+          }
         ]
       }),
     [registry, navigate]
@@ -109,7 +113,11 @@ export const useDeletedToast = () => {
               })
           },
           ...more,
-          { label: "Open the bin", onClick: () => void navigate({ to: "/bin" }) }
+          {
+            label: "Open the bin",
+            hint: "Shows deleted items you can restore.",
+            onClick: () => void navigate({ to: "/bin" })
+          }
         ]
       }),
     [registry, navigate]

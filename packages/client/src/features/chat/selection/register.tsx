@@ -62,16 +62,26 @@ const describe = (ticked: ReadonlyArray<Ticked>) => {
     .join(" ")
 }
 
-function SelectionBar({ view, session }: { view: ChatView; session: ChatSession }) {
+function SelectionBar({ session }: { view: ChatView; session: ChatSession }) {
   const store = selectionOf(session)
   const state = useSyncExternalStore(store.subscribe, store.snapshot)
   const [confirming, setConfirming] = useState(false)
   const [pending, setPending] = useState(false)
   const deleted = useDeletedManyToast()
-  // Another branch shown: the ticks belonged to the one before.
   useEffect(() => {
-    if (state.active && state.forkId !== view.forkId) store.stop()
-  }, [state.active, state.forkId, view.forkId, store])
+    const unsubscribe = session.subscribe(() => store.reconcile())
+    return () => {
+      unsubscribe()
+      store.stop()
+    }
+  }, [session, store])
+  useEffect(
+    () =>
+      store.subscribe(() => {
+        if (!store.snapshot().active) setConfirming(false)
+      }),
+    [store]
+  )
   useEffect(() => {
     if (!state.active) return
     const onKey = (event: KeyboardEvent) => {
@@ -92,6 +102,7 @@ function SelectionBar({ view, session }: { view: ChatView; session: ChatSession 
     setPending(false)
     setConfirming(false)
     if (!result.ok) {
+      if (result.error.tag === "NotFound") store.stop()
       showToast({
         title: "Nothing was deleted",
         description:
@@ -193,10 +204,11 @@ function SelectionBar({ view, session }: { view: ChatView; session: ChatSession 
 }
 
 export const registerMessageSelection = () => [
-  messageSelect.register({ id: "message.select-tick", order: 0, component: MessageTick }),
-  chatComposerNotes.register({ id: "chat.selection-bar", order: 0, component: SelectionBar }),
+  messageSelect.register({ id: "message.select-tick", source: import.meta.url, order: 0, component: MessageTick }),
+  chatComposerNotes.register({ id: "chat.selection-bar", source: import.meta.url, order: 0, component: SelectionBar }),
   messageActions.register({
     id: "message.select",
+    source: import.meta.url,
     onMerges: true,
     order: 105,
     group: "delete",

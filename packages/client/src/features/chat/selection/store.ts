@@ -51,6 +51,7 @@ const tickedOf = (entry: PathEntry): Ticked => ({
 
 export class MessageSelection {
   private state: SelectionState = IDLE
+  private revision: number | undefined
   private readonly listeners = new Set<() => void>()
 
   private readonly session: ChatSession
@@ -73,7 +74,8 @@ export class MessageSelection {
 
   /** Starts picking with `entry` ticked (Select messages on a message's menu). */
   start(entry: PathEntry) {
-    const forkId = this.session.snapshot().forkId
+    const { forkId, pathRevision } = this.session.snapshot()
+    this.revision = pathRevision
     const ticked = new Map<SlotId, Ticked>()
     if (untickable(entry) === null) ticked.set(entry.slotId, tickedOf(entry))
     this.set({ active: true, forkId, ticked, anchor: entry.slotId, range: false, notice: null })
@@ -118,11 +120,27 @@ export class MessageSelection {
     this.set({ ticked: next, anchor: entry.slotId, range: false, notice })
   }
 
-  /** Drops ticks on messages no longer on the path shown (deleted elsewhere, say). */
-  forget(slotIds: Iterable<SlotId>) {
+  /** A history reload invalidates the choice, including selections outside the loaded window. */
+  reconcile() {
+    if (!this.state.active) return
+    const view = this.session.snapshot()
+    if (view.forkId !== this.state.forkId || view.pathRevision !== this.revision) return this.stop()
     const next = new Map(this.state.ticked)
     let changed = false
-    for (const slotId of slotIds) changed = next.delete(slotId) || changed
+    for (const entry of view.entries) {
+      const previous = next.get(entry.slotId)
+      if (!previous) continue
+      if (untickable(entry) !== null) {
+        next.delete(entry.slotId)
+        changed = true
+      } else {
+        const current = tickedOf(entry)
+        if (JSON.stringify(previous) !== JSON.stringify(current)) {
+          next.set(entry.slotId, current)
+          changed = true
+        }
+      }
+    }
     if (changed) this.set({ ticked: next })
   }
 

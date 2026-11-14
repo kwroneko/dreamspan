@@ -37,7 +37,7 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
         Effect.gen(function* () {
           const itemIds = yield* bin.deleteMessages(userId, forkId, slotIds)
           yield* bin.evictDeleted(userId, itemIds)
-          const rows = yield* Effect.forEach(itemIds, (itemId) => bin.loadItem(userId, itemId))
+          const rows = yield* bin.loadItems(userId, itemIds)
           return rows.map(toBinItem)
         }).pipe(transaction(sql, "DeleteMessages")),
       DeleteFork: ({ userId, forkId }) => deleting("DeleteFork", userId, bin.deleteFork(userId, forkId)),

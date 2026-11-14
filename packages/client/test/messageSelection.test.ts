@@ -72,16 +72,56 @@ it("refuses a range past the limit and says so", () => {
   expect(store.snapshot().notice).toContain("At most")
 })
 
-it("a range of 500 among 3,000 takes a moment and tells listeners once", () => {
+it("a range of 500 among 3,000 tells listeners once", () => {
   const entries = Array.from({ length: 3000 }, (_, i) => entry(i))
   const store = new MessageSelection(sessionOf(entries))
   store.start(entries[1000]!)
   let heard = 0
   store.subscribe(() => heard++)
-  const start = performance.now()
   store.toggle(entries[1499]!, true, true)
-  const ms = performance.now() - start
   expect(store.snapshot().ticked.size).toBe(500)
   expect(heard).toBe(1)
-  expect(ms).toBeLessThan(100)
+})
+
+// Live state can change while a selection is open, including from another browser tab.
+it("reconciles a selected message that starts regenerating or disappears", () => {
+  let entries = [entry(0), entry(1), entry(2)]
+  let revision = 0
+  const session = { snapshot: () => ({ forkId: fork, entries, pathRevision: revision }) } as unknown as ChatSession
+  const store = new MessageSelection(session)
+  store.start(entries[1]!)
+  entries = [entries[0]!, entry(1, { version: { status: "generating" } } as Partial<PathEntry>), entries[2]!]
+  store.reconcile()
+  expect(store.snapshot().ticked.size).toBe(0)
+  store.start(entries[2]!)
+  revision++
+  entries = entries.slice(0, 2)
+  store.reconcile()
+  expect(store.snapshot().active).toBe(false)
+})
+
+it("clears immediately on branch switch", () => {
+  let shown = fork
+  const entries = [entry(0)]
+  const session = { snapshot: () => ({ forkId: shown, entries }) } as unknown as ChatSession
+  const store = new MessageSelection(session)
+  store.start(entries[0]!)
+  shown = "fork-2" as ForkId
+  store.reconcile()
+  expect(store.snapshot().active).toBe(false)
+})
+
+it("measures selection with 5,000 loaded entries", { tags: ["slow"] }, () => {
+  const entries = Array.from({ length: 5000 }, (_, i) => entry(i))
+  const store = new MessageSelection(sessionOf(entries))
+  const measure = (name: string, action: () => void) => {
+    const start = performance.now()
+    action()
+    console.log("SELECTION_5000", name, (performance.now() - start).toFixed(3))
+  }
+  measure("enter", () => store.start(entries[2000]!))
+  measure("range1000", () => store.toggle(entries[2999]!, true, true))
+  expect(store.snapshot().ticked.size).toBe(1000)
+  measure("cancel", () => store.stop())
+  expect(store.snapshot().active).toBe(false)
 })

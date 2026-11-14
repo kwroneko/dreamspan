@@ -43,6 +43,18 @@ const message = (page: Page, i: number) =>
 const tick = (row: Locator) => row.getByRole("checkbox", { name: "Select this message", exact: true })
 const bar = (page: Page) => page.getByRole("region", { name: "Selected messages" })
 
+const showLastAboveBar = async (row: Locator, selected: Locator) => {
+  await row.scrollIntoViewIfNeeded()
+  await expect(row).toBeInViewport({ ratio: 1 })
+  await expect
+    .poll(async () => {
+      const messageBox = await row.boundingBox()
+      const barBox = await selected.boundingBox()
+      return messageBox && barBox ? messageBox.y + messageBox.height - barBox.y : Infinity
+    })
+    .toBeLessThanOrEqual(0)
+}
+
 for (const width of [1440, 390] as const)
   for (const theme of ["light", "dark"] as const)
     test(`select a range, delete it, Undo (${width}px, ${theme})`, async ({ browser }, info) => {
@@ -77,6 +89,10 @@ for (const width of [1440, 390] as const)
       await tick(message(page, COUNT - 4)).click()
       await expect(bar(page)).toContainText("6 messages selected")
 
+      await page.getByTestId("messages").evaluate((list) => {
+        list.scrollTop = list.scrollHeight
+      })
+      await showLastAboveBar(message(page, COUNT), bar(page))
       await expectLayout(page, info, `selection ${width} ${theme}`)
       await shoot(page, `selection-bar-${width}-${theme}`)
 
@@ -86,6 +102,7 @@ for (const width of [1440, 390] as const)
       await expect(dialog).toContainText("They move to the bin.")
       await expect(dialog).toContainText("Only this branch changes")
       await expect(dialog).toContainText("Undo, or the bin, puts them back.")
+      await expectLayout(page, info, `selection confirmation ${width} ${theme}`)
       await shoot(page, `selection-confirm-${width}-${theme}`)
       await dialog.getByRole("button", { name: "Delete 6 messages" }).click()
 
@@ -131,9 +148,91 @@ test("Cancel and Esc end selecting with nothing deleted; Shift-click ticks a run
   await bar(page).getByRole("button", { name: "Cancel", exact: true }).click()
   await expect(bar(page)).toHaveCount(0)
   await expect(page.getByRole("checkbox", { name: "Select this message" })).toHaveCount(0)
+  // Cancelling changes row sizes; bring the last row back into the virtual window.
+  await page.getByTestId("messages").evaluate((list) => {
+    list.scrollTop = list.scrollHeight
+  })
+  await expect(message(page, COUNT)).toBeVisible()
   await messageMenu(message(page, COUNT), "Select messages")
   await expect(bar(page)).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(bar(page)).toHaveCount(0)
-  for (let i = COUNT - 3; i <= COUNT; i++) await expect(message(page, i)).toBeVisible()
+  const path = await admin((api) => api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 }))
+  expect(path.entries.map((entry) => entry.version.content)).toEqual(
+    Array.from({ length: COUNT }, (_, i) => line(i + 1))
+  )
 })
+
+test("selection is tab-local, clears on external deletion, and ticks work with the keyboard", async ({
+  page,
+  context
+}) => {
+  const chatId = await seed("Harbor concurrent selection")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(message(page, COUNT)).toBeVisible()
+  await messageMenu(message(page, COUNT), "Select messages")
+  const other = await context.newPage()
+  await other.goto(`${server().url}/chats/${chatId}`)
+  await expect(message(other, COUNT)).toBeVisible()
+  await expect(bar(other)).toHaveCount(0)
+  await tick(message(page, COUNT - 1)).focus()
+  await page.keyboard.press("Space")
+  await expect(tick(message(page, COUNT - 1))).toBeChecked()
+  await expect(bar(page)).toContainText("2 messages selected")
+  await bar(page).getByRole("button", { name: "Delete…" }).click()
+  await admin((api) =>
+    Effect.gen(function* () {
+      const path = yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
+      yield* api.DeleteMessages({ forkId: path.forkId!, slotIds: [path.entries.at(-1)!.slotId] })
+    })
+  )
+  await expect(bar(page)).toHaveCount(0)
+  await expect(page.getByRole("alertdialog")).toHaveCount(0)
+  await expect(message(other, COUNT)).toHaveCount(0)
+  await other.close()
+})
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`side chat selection and confirmation (${width}px, ${theme})`, async ({ page }, info) => {
+      const story = await seed(`Story beside selection ${width} ${theme}`)
+      const workshop = await admin((api) => api.CreateWorkshop({ attachTo: story }))
+      await admin((api) =>
+        Effect.gen(function* () {
+          const path = yield* api.ReadPath({
+            chatId: workshop.id,
+            leafSlotId: null,
+            range: { _tag: "Bottom" },
+            limit: 100
+          })
+          yield* api.SendMessage({
+            chatId: workshop.id,
+            parentSlotId: path.entries.at(-1)?.slotId ?? null,
+            branch: false,
+            reply: false,
+            content: "Synthetic side chat message."
+          })
+        })
+      )
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${story}?panel=workshop&workshop=${workshop.id}`)
+      const side = page.locator(`[data-side-chat="${workshop.id}"]`)
+      const row = side.getByRole("article").filter({ hasText: "Synthetic side chat message." })
+      await expect(row).toBeVisible()
+      await messageMenu(row, "Select messages")
+      const selected = side.getByRole("region", { name: "Selected messages" })
+      await expect(selected).toContainText("1 message selected")
+      await showLastAboveBar(row, selected)
+      await expectLayout(page, info, `side selection ${width} ${theme}`)
+      await shoot(page, `selection-side-${width}-${theme}`)
+      await selected.getByRole("button", { name: "Delete…" }).click()
+      await expectLayout(page, info, `side selection confirmation ${width} ${theme}`)
+      await shoot(page, `selection-side-confirm-${width}-${theme}`)
+      await page.getByRole("alertdialog").getByRole("button", { name: "Delete message", exact: true }).click()
+      await expect(row).toHaveCount(0)
+      await page.getByRole("button", { name: "Undo", exact: true }).click()
+      await expect(row).toBeVisible()
+    })
