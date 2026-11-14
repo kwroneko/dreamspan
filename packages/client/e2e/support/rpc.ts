@@ -1,16 +1,16 @@
+import { TransportApi, TransportJson, type TransportRpcs } from "@rp/shared/transportApi.ts"
 // Setting up state for a browser test without clicking through it: the same RPCs the
 // client uses, over a WebSocket carrying a session cookie.
-import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { Effect, Exit, Layer } from "effect"
-import { RpcClient, type RpcClientError, type RpcGroup, RpcSerialization } from "effect/rpc"
+import { RpcClient, type RpcClientError, type RpcGroup } from "effect/rpc"
 import { Socket } from "effect/socket"
 import type { TestServer } from "./server.ts"
 
-export type Client = RpcClient.RpcClient<AppRpcs, RpcClientError.RpcClientError>
+export type Client = RpcClient.RpcClient<TransportRpcs, RpcClientError.RpcClientError>
 
 // Inferring the RPC union from the group is too deep for TypeScript at this many RPCs (TS2589),
 // as in the app's client (`src/rpc.ts`).
-const group: RpcGroup.RpcGroup<AppRpcs> = AppApi
+const group: RpcGroup.RpcGroup<TransportRpcs> = TransportApi
 
 /** Logs in over HTTP, and resolves to the session cookie. */
 export const loginCookie = async (server: TestServer, handle: string, password: string) => {
@@ -47,7 +47,7 @@ export const withCookie = async <A>(
               new WebSocket(url, { headers: { cookie } } as unknown as Array<string>) as unknown as globalThis.WebSocket
           )
         ),
-        Layer.provide(RpcSerialization.layerJson)
+        Layer.provide(TransportJson)
       )
     )
     const client = yield* RpcClient.make(group).pipe(Effect.provide(protocol))

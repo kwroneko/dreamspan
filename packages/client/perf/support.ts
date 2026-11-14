@@ -1,11 +1,11 @@
+import { TransportApi, TransportJson, type TransportRpcs } from "@rp/shared/transportApi.ts"
 // The performance harness's server: the real one, built, with bundled database workers and
 // the fake generator, on a random loopback port and a data directory prepared beforehand.
 // No account has a password, so loopback is the local admin: the harness's RPCs need no login.
 import { type ChildProcess, spawn } from "node:child_process"
 import { resolve } from "node:path"
-import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { Effect, Exit, Layer } from "effect"
-import { RpcClient, type RpcClientError, type RpcGroup, RpcSerialization } from "effect/rpc"
+import { RpcClient, type RpcClientError, type RpcGroup } from "effect/rpc"
 import { Socket } from "effect/socket"
 
 const root = resolve(import.meta.dirname, "../../..")
@@ -69,10 +69,10 @@ export const startServer = async (dataDir: string, env: Record<string, string> =
   throw new Error("no free port after 5 attempts")
 }
 
-type Client = RpcClient.RpcClient<AppRpcs, RpcClientError.RpcClientError>
+type Client = RpcClient.RpcClient<TransportRpcs, RpcClientError.RpcClientError>
 // Inferring the RPC union from the group is too deep for TypeScript at this many RPCs (TS2589),
 // as in the app's client (`src/rpc.ts`).
-const group: RpcGroup.RpcGroup<AppRpcs> = AppApi
+const group: RpcGroup.RpcGroup<TransportRpcs> = TransportApi
 
 /** Runs `use` with an RPC client acting as the local user, as another tab would. */
 export const withClient = async <A>(server: PerfServer, use: (client: Client) => Effect.Effect<A, unknown>) => {
@@ -81,7 +81,7 @@ export const withClient = async <A>(server: PerfServer, use: (client: Client) =>
       RpcClient.layerProtocolSocket().pipe(
         Layer.provide(Socket.layerWebSocket(`${server.url.replace(/^http/, "ws")}/rpc`)),
         Layer.provide(Socket.layerWebSocketConstructorGlobal),
-        Layer.provide(RpcSerialization.layerJson)
+        Layer.provide(TransportJson)
       )
     )
     return yield* use(yield* RpcClient.make(group).pipe(Effect.provide(protocol)))

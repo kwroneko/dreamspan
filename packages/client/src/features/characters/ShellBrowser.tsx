@@ -11,7 +11,8 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
-import { useAtomRefresh } from "@effect/atom-react"
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useMemo, useRef, useState } from "react"
 import { carryLink, CHAT_DRAG } from "../../ui/appDrags.ts"
@@ -58,8 +59,7 @@ import {
   sidebarCleared,
   useShellForks,
   useShellNavigation,
-  type ShellFork,
-  type ShellLibrary
+  type ShellFork
 } from "./shellData.tsx"
 
 export function PinButton({
@@ -895,7 +895,9 @@ const SECTIONS = {
   ]
 } as const satisfies Record<string, ReadonlyArray<readonly [ShellSection, string]>>
 
-function Browser({ data }: { data: ShellLibrary }) {
+function Browser() {
+  const result = useAtomValue(shellAtom)
+  const data = AsyncResult.isSuccess(result) ? result.value : undefined
   const { scope, setScope, grid, setGrid } = useShellNavigation()
   const [browse, setBrowse] = useSidebarBrowse()
   const [chatBrowse, setChatBrowse] = useChatBrowse()
@@ -910,8 +912,8 @@ function Browser({ data }: { data: ShellLibrary }) {
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const selected = useSplitChats((params.chatId ?? null) as ChatId | null, shown)?.group.id ?? params.chatId
   const listRef = useRef<HTMLDivElement>(null)
-  useSplitReveal(listRef, selected)
-  const card = [...data.cards, ...data.personas].find((c) => c.card.entityId === scope.entity)
+  useSplitReveal(listRef, data ? selected : undefined)
+  const card = data && [...data.cards, ...data.personas].find((c) => c.card.entityId === scope.entity)
   const cardLabel = card ? card.card.label : "Character not found"
   const needle = search.trim().toLowerCase()
   const kind = scope.chat ? "chat" : scope.entity ? "character" : "all"
@@ -939,6 +941,14 @@ function Browser({ data }: { data: ShellLibrary }) {
     ...(!grid && kind !== "chat" ? { browse: chatBrowse } : {}),
     sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
   })
+  // Subscribe to rows alongside cards, before displaying either. Waiting for cards
+  // first can put the rows in another epoch behind unrelated browsing work.
+  if (!data)
+    return (
+      <AsyncView atom={shellAtom} loading="Loading chats…" still="Still loading your chats…">
+        {() => null}
+      </AsyncView>
+    )
   // The chat by its name, which all its branches share.
   const chatRows = scope.chat ? sections.flatMap(([id]) => forks.section(id).rows) : []
   const chat = chatRows[0]
@@ -1151,9 +1161,7 @@ export function ShellBrowser() {
   // Holds the panel's height while loading too, so the navigation below doesn't jump.
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <AsyncView atom={shellAtom} loading="Loading chats…" still="Still loading your chats…">
-        {(data) => <Browser data={data} />}
-      </AsyncView>
+      <Browser />
     </div>
   )
 }

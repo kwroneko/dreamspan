@@ -106,7 +106,8 @@ export const layer = (
     retryCrashed = false,
     jobDeadline,
     background,
-    first
+    first,
+    short
   }: {
     name?: string
     retryCrashed?: boolean
@@ -119,6 +120,8 @@ export const layer = (
     background?: { readonly tags: ReadonlySet<string>; readonly max: number }
     /** Requests (by tag) that go ahead of everything else queued: what a reply waits on. */
     first?: ReadonlySet<string>
+    /** Bounded independent reads, after replies and before ordinary queued reads. */
+    short?: ReadonlySet<string>
   } = {}
 ) =>
   Layer.effect(
@@ -145,8 +148,15 @@ export const layer = (
                 readers.filter((r) => r.job !== undefined && background.tags.has(r.job.request.tag)).length >=
                   background.max
               const ahead = first === undefined ? -1 : queue.findIndex((job) => first.has(job.request.tag))
+              const light = short === undefined ? -1 : queue.findIndex((job) => short.has(job.request.tag))
               const next =
-                ahead >= 0 ? ahead : held ? queue.findIndex((job) => !background.tags.has(job.request.tag)) : 0
+                ahead >= 0
+                  ? ahead
+                  : light >= 0
+                    ? light
+                    : held
+                      ? queue.findIndex((job) => !background.tags.has(job.request.tag))
+                      : 0
               if (next === -1) break
               const job = queue.splice(next, 1)[0]!
               // Reserved before sending, so a concurrent dispatch can't pick the same reader;

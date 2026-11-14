@@ -10,7 +10,7 @@ import { Effect } from "effect"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { expectLayout } from "./layoutAudit.ts"
 import { closePanel, openPanel } from "./panel.ts"
-import { asUser } from "./rpc.ts"
+import { loginCookie, withCookie, type Client } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { nextReply } from "./strip.ts"
 import {
@@ -34,10 +34,13 @@ const accentOf = (page: Page) =>
 export function workshopChatTests() {
   test.describe("workshop chat", () => {
     const server = serverPerFile(withAdmin)
+    let cookie: Promise<string> | undefined
+    const admin = async <A>(use: (api: Client) => Effect.Effect<A, unknown>) =>
+      withCookie(server(), await (cookie ??= loginCookie(server(), ADMIN.handle, ADMIN.password)), use)
     let provider: Awaited<ReturnType<typeof startWorkshopProvider>>
     test.beforeAll(async () => {
       provider = await startWorkshopProvider()
-      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      await admin((api) =>
         Effect.gen(function* () {
           yield* api.SetDisplayPrefs({ prefs: { steps: "expanded" } })
           const connection = yield* api.CreateConnection({
@@ -70,7 +73,7 @@ export function workshopChatTests() {
       for (const theme of ["light", "dark"] as const)
         test(`made, used and reloaded at ${width} ${theme}`, async ({ page }, info) => {
           test.setTimeout(180_000)
-          const story = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+          const story = await admin((api) =>
             Effect.gen(function* () {
               const chat = yield* api.CreateChat({ title: `Harbor story ${width} ${theme}` })
               yield* api.SendMessage({
@@ -301,9 +304,7 @@ export function workshopChatTests() {
           // The change it made, with Undo and Open under its step (W4).
           await expect(rows.nth(1).getByRole("button", { name: "Undo", exact: true })).toHaveCount(1)
           await expect(rows.nth(1).getByRole("link", { name: "Open", exact: true })).toHaveCount(1)
-          const created = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-            api.ListRolloutEffects({ chatId: workshopId })
-          )
+          const created = await admin((api) => api.ListRolloutEffects({ chatId: workshopId }))
           expect(created).toHaveLength(1)
           expect(created[0]!.title).toBe("Created the card Mara Quill")
           expect(provider.toolResults().join("\n")).toContain("Assistant")
@@ -318,11 +319,8 @@ export function workshopChatTests() {
           await page.goBack()
 
           // The next turn retains the whole run; its inspector links the previous one.
-          await page.getByLabel("Message", { exact: true }).fill("Carry on from that work.")
-          await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
-          await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toHaveCount(2)
-          const lastVersion = () =>
-            asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+          const bottomPath = () =>
+            admin((api) =>
               Effect.gen(function* () {
                 const chat = yield* api.GetChat({ chatId: workshopId })
                 const path = yield* api.ReadPath({
@@ -331,9 +329,30 @@ export function workshopChatTests() {
                   range: { _tag: "Bottom" },
                   limit: 100
                 })
-                return path.entries.at(-1)!.version
+                return path
               })
             )
+          const lastVersion = async () => (await bottomPath()).entries.at(-1)!.version
+          const firstPath = await bottomPath()
+          const firstVersion = firstPath.entries.at(-1)!.version.id
+          await page.getByLabel("Message", { exact: true }).fill("Carry on from that work.")
+          await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          // A phone may render only one answer: later agent steps are beyond its
+          // virtualized window. Verify both completed logical replies, then open
+          // the new answer by the same URL a user can follow.
+          await expect
+            .poll(async () => {
+              const path = await bottomPath()
+              return path.entries.filter(
+                (entry) => entry.version.content === WORKSHOP_ANSWER && entry.version.status === "complete"
+              ).length
+            })
+            .toBe(2)
+          const secondEntry = (await bottomPath()).entries.at(-1)!
+          expect(secondEntry.version.id).not.toBe(firstVersion)
+          await page.goto(`${server().url}/chats/${workshopId}?slot=${secondEntry.slotId}`)
+          await expect(page.locator(`article[data-slot="${secondEntry.slotId}"]`)).toBeVisible()
+          await expect(page.locator(`article[data-slot="${secondEntry.slotId}"]`)).toContainText(WORKSHOP_ANSWER)
           const secondVersion = (await lastVersion()).id
           await page.goto(`${server().url}/chats/${workshopId}/context/${secondVersion}`)
           await expect(
@@ -360,6 +379,11 @@ export function workshopChatTests() {
           await page.goto(`${server().url}/chats/${workshopId}`)
 
           // Keep the base branch's step-edit coverage after checking ordinary continuity.
+          // The old step can also be outside the phone's virtualized window.
+          const cardSlot = (await bottomPath()).entries
+            .filter((entry) => entry.version.content === WORKSHOP_SECOND)
+            .at(-1)!.slotId
+          await page.goto(`${server().url}/chats/${workshopId}?slot=${cardSlot}`)
           const cardMessage = page.getByRole("article").filter({ hasText: WORKSHOP_SECOND }).last()
           if (!(await cardMessage.getByRole("link", { name: "Open the run" }).isVisible()))
             await cardMessage.locator("[data-steps-badge]").click()
@@ -369,9 +393,7 @@ export function workshopChatTests() {
           const edited = "Synthetic edited card result."
           await result.locator('.cm-content[aria-label="Edit Result of read_card"]').fill(edited)
           await expectLayout(page, info, `workshop-step-edit-${width}-${theme}`, { scope: '[aria-label="Steps"]' })
-          const beforeEditEffects = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-            api.ListRolloutEffects({ chatId: workshopId })
-          )
+          const beforeEditEffects = await admin((api) => api.ListRolloutEffects({ chatId: workshopId }))
           const beforeEdit = provider.bodies.length
           await result.getByRole("button", { name: "Resume", exact: true }).click()
           // The card it created still stands: carrying on from an earlier step warns first.
@@ -386,18 +408,9 @@ export function workshopChatTests() {
           // The earlier answer can remain visible while the resumed run is still making its
           // change. Wait for that committed effect before asserting its receipt.
           await expect
-            .poll(
-              async () =>
-                (
-                  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-                    api.ListRolloutEffects({ chatId: workshopId })
-                  )
-                ).length
-            )
+            .poll(async () => (await admin((api) => api.ListRolloutEffects({ chatId: workshopId }))).length)
             .toBe(beforeEditEffects.length + 1)
-          const afterEdit = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-            api.ListRolloutEffects({ chatId: workshopId })
-          )
+          const afterEdit = await admin((api) => api.ListRolloutEffects({ chatId: workshopId }))
           expect(afterEdit).toHaveLength(beforeEditEffects.length + 1)
           for (const original of beforeEditEffects)
             expect(afterEdit.find((effect) => effect.rolloutId === original.rolloutId)).toEqual(original)
@@ -460,7 +473,7 @@ export function workshopChatTests() {
           await expect(page.getByRole("article").filter({ hasText: STORY_REPLY })).toBeVisible()
 
           // A deleted workshop keeps its marker in the bin and restores with its kind intact.
-          await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteChat({ chatId: workshopId }))
+          await admin((api) => api.DeleteChat({ chatId: workshopId }))
           await page.goto(`${server().url}/bin`)
           const binned = page.getByRole("listitem", { name: title, exact: true })
           await expect(binned.locator('[data-kind-badge="workshop"]')).toBeVisible()

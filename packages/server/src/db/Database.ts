@@ -1,3 +1,5 @@
+import type { UserId } from "@rp/shared/domain.ts"
+import { makeShellMaterialization } from "./shellMaterialization.ts"
 // Main-thread access to the database workers. ARCHITECTURE.md §3.1 and §3.6.
 import { StateModules, stateModuleClient } from "./stateModules.ts"
 import { AssemblyModules, moduleClient } from "../assembler/modules.ts"
@@ -83,6 +85,10 @@ export const bundleEntry = (dir: string, name: string) =>
  * A pending chat's first-request preview is one: a card with a huge greeting takes minutes to build.
  */
 const BACKGROUND_READS: ReadonlySet<string> = new Set([
+  "ShellMaterialize",
+  "GetSplitChats",
+  "ThreadsOf",
+  "ListForks",
   "ShellLibrary",
   "ShellCards",
   "ShellForks",
@@ -103,6 +109,22 @@ const REPLY_READS: ReadonlySet<string> = new Set([
   "GetCostSettings",
   "CachePrefixWarm"
 ])
+
+/** Startup preferences/import notices must not sit behind paged history reads. */
+const SHORT_READS: ReadonlySet<string> = new Set([
+  "GetDisplayPrefs",
+  "ListStImports",
+  "ShellEpoch",
+  "GetSplitChatsFast",
+  "ThreadsOfFast"
+])
+
+/** One production policy, also exercised with held worker requests in the liveness tests. */
+export const readerScheduling = (readers: number) => ({
+  background: { tags: BACKGROUND_READS, max: Math.max(1, readers - 1) },
+  first: REPLY_READS,
+  short: SHORT_READS
+})
 
 /** The writer's and readers' entry points. */
 const workerEntries = (options: DatabaseOptions) =>
@@ -227,9 +249,35 @@ export const layer = (options: DatabaseOptions) => {
           yield* writer.Ready()
           return Layer.effect(
             Reader,
-            Effect.map(ReaderPool.client(ReadOps), (calls) =>
-              providerDefinitionClient(stateModuleClient(moduleClient(calls, modules), stateModules), providers)
-            )
+            Effect.gen(function* () {
+              const calls = yield* ReaderPool.client(ReadOps)
+              const raw = providerDefinitionClient(
+                stateModuleClient(moduleClient(calls, modules), stateModules),
+                providers
+              )
+              const shared = yield* makeShellMaterialization((userId: UserId) => raw.ShellMaterialize({ userId }))
+              return Reader.of({
+                ...raw,
+                GetSplitChats: ((payload, options) =>
+                  options !== undefined
+                    ? raw.GetSplitChats(payload, options)
+                    : Effect.flatMap(raw.GetSplitChatsFast<false>(payload), (answer) =>
+                        answer === null ? raw.GetSplitChats<false>(payload) : Effect.succeed(answer)
+                      )) as typeof raw.GetSplitChats,
+                ThreadsOf: ((payload, options) =>
+                  options !== undefined
+                    ? raw.ThreadsOf(payload, options)
+                    : Effect.flatMap(raw.ThreadsOfFast<false>(payload), (answer) =>
+                        answer === null ? raw.ThreadsOf<false>(payload) : Effect.succeed(answer)
+                      )) as typeof raw.ThreadsOf,
+                ShellMaterialize: ((payload, options) =>
+                  options !== undefined
+                    ? raw.ShellMaterialize(payload, options)
+                    : Effect.flatMap(raw.ShellEpoch({ userId: payload.userId }), (epoch) =>
+                        shared.get(payload.userId, `${epoch}:${JSON.stringify(stateModules.list())}`)
+                      )) as typeof raw.ShellMaterialize
+              })
+            })
           ).pipe(
             // Reads are idempotent, so one whose reader crashed can run again.
             // Reads of what the user browses (the shell's lists, cache estimates) leave one reader
@@ -237,8 +285,7 @@ export const layer = (options: DatabaseOptions) => {
             Layer.provide(
               ReaderPool.layer(options.readers, {
                 retryCrashed: true,
-                background: { tags: BACKGROUND_READS, max: Math.max(1, options.readers - 1) },
-                first: REPLY_READS
+                ...readerScheduling(options.readers)
               })
             ),
             Layer.provide(

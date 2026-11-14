@@ -11,6 +11,7 @@ import { Effect } from "effect"
 import { budgets } from "./budgets.ts"
 import { type Fixture, prepare } from "./fixtures.ts"
 import { type PerfServer, startServer, withClient } from "./support.ts"
+import { observePaintedPin } from "./paintedPin.ts"
 
 let server: PerfServer
 let fixture: Fixture
@@ -640,6 +641,48 @@ const fromEndSamples = async (page: Page, ms: number) => {
   return samples
 }
 
+/** The same 100 ms samples, observing the distance delivered after resize/follow.
+ * Keep every corrected distance between samples so a delivered excursion is retained. */
+const afterFollowSamples = async (page: Page, ms: number) => {
+  await messages(page).evaluate((list) => {
+    let last = list.scrollHeight - list.scrollTop - list.clientHeight
+    let delivered: number[] = []
+    let deliveries = 0
+    const observer = new ResizeObserver(() =>
+      queueMicrotask(() => {
+        last = list.scrollHeight - list.scrollTop - list.clientHeight
+        delivered.push(last)
+        deliveries++
+      })
+    )
+    observer.observe([...list.querySelectorAll("[data-index]")].at(-1)!)
+    Object.assign(window, {
+      __burstPin: {
+        take: () => {
+          const value = Math.max(last, ...delivered)
+          delivered = []
+          return value
+        },
+        stop: () => {
+          observer.disconnect()
+          return deliveries
+        }
+      }
+    })
+  })
+  const samples: number[] = []
+  for (let elapsed = 0; elapsed < ms; elapsed += 100) {
+    await page.waitForTimeout(100)
+    samples.push(
+      await page.evaluate(() => (window as unknown as { __burstPin: { take: () => number } }).__burstPin.take())
+    )
+  }
+  const deliveries = await page.evaluate(() =>
+    (window as unknown as { __burstPin: { stop: () => number } }).__burstPin.stop()
+  )
+  return { samples, deliveries }
+}
+
 /**
  * A server of the scenario's own, with the generator paced differently, on a fresh data
  * directory: a chat whose one message gets a reply that starts generating.
@@ -789,16 +832,22 @@ test("a bursty stream: 300 tokens at once, every second", async ({ page }) => {
     await page.goto(paced.url)
     await onScreen(page)
     await page.waitForTimeout(1500)
+    const painted = await observePaintedPin(page, test.info().outputPath("painted-pin-jump.jpg"))
     const from = await now(page)
     const counters0 = await counters(page)
-    const fromEnd = await fromEndSamples(page, 5000)
+    const { samples: fromEnd, deliveries } = await afterFollowSamples(page, 5000)
     const measured = await since(page, from)
+    const presented = await painted.stop()
     const updates = measured.perf.shownUpdates! - counters0.shownUpdates!
     const bodies = measured.perf.liveBodyRenders! - counters0.liveBodyRenders!
     record("bursty", {
       updates,
       bodyRendersPerUpdate: round(bodies / Math.max(1, updates)),
       pinnedPx: round(Math.max(...fromEnd)),
+      afterFollowDeliveries: deliveries,
+      paintedFrames: presented.frames,
+      paintedPinPx: round(presented.maximumPx),
+      paintedMissing: presented.missing,
       gaps: measured.perf.gaps ?? 0,
       ...frameStats(measured)
     })
@@ -807,6 +856,11 @@ test("a bursty stream: 300 tokens at once, every second", async ({ page }) => {
     expect(updates).toBeLessThanOrEqual(7)
     expect(bodies / updates).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
     expect(Math.max(...fromEnd)).toBeLessThanOrEqual(budgets.pinnedPx)
+    expect(deliveries).toBeGreaterThan(0)
+    expect(presented.errors).toEqual([])
+    expect(presented.frames).toBeGreaterThan(0)
+    expect(presented.missing).toBe(0)
+    expect(presented.maximumPx).toBeLessThanOrEqual(budgets.pinnedPx)
     expect(measured.perf.gaps ?? 0).toBe(budgets.gaps)
     expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.longFramesOver100)
   } finally {

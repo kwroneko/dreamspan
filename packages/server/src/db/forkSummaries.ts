@@ -102,6 +102,30 @@ const computeSummaries = (
 ): Effect.Effect<Array<ForkSummary>, SqlError.SqlError> =>
   Effect.gen(function* () {
     if (records.length === 0) return []
+    // Plain branches share Slot objects. Decode their immutable evidence once,
+    // rather than once for every branch which retains that prefix.
+    const participants = new WeakMap<Slot, ReadonlyArray<string>>()
+    const authors = new WeakMap<Slot, ReadonlyArray<{ readonly entity: string; readonly at: number }>>()
+    const emptyParticipants: ReadonlyArray<string> = []
+    const emptyAuthors: ReadonlyArray<{ readonly entity: string; readonly at: number }> = []
+    const participantsOf = (slot: Slot) => {
+      if (slot.participants === "[]") return emptyParticipants
+      let decoded = participants.get(slot)
+      if (decoded === undefined) {
+        decoded = JSON.parse(slot.participants) as Array<string>
+        participants.set(slot, decoded)
+      }
+      return decoded
+    }
+    const authorsOf = (slot: Slot) => {
+      if (slot.human_authors === "[]") return emptyAuthors
+      let decoded = authors.get(slot)
+      if (decoded === undefined) {
+        decoded = JSON.parse(slot.human_authors) as Array<{ entity: string; at: number }>
+        authors.set(slot, decoded)
+      }
+      return decoded
+    }
     // Dense overrides need a row per position per fork. Holding hundreds of
     // long paths at once exhausted the reader heap. Keep the shared-tree read
     // for plain forks, and bound the number of overridden paths held at once.
@@ -209,7 +233,10 @@ const computeSummaries = (
       slotsByFork.set(slot.fork_id, map)
     }
     /** A fork's structural path, root first. Iterative, including an interior checkpoint and every same-tip peer. */
-    const structural = (fork: Pick<ForkRow, "id" | "chat_id" | "tip_slot_id">) => {
+    const parentStructures = new Map<string, ReadonlyArray<Slot>>()
+    const structural = (fork: Pick<ForkRow, "id" | "chat_id" | "tip_slot_id">): ReadonlyArray<Slot> => {
+      const known = parentStructures.get(fork.id)
+      if (known) return known
       const map = plain.has(fork.id) ? trees.get(fork.chat_id) : slotsByFork.get(fork.id)
       const path: Array<Slot> = []
       let slot = map?.get(fork.tip_slot_id ?? "")
@@ -218,7 +245,9 @@ const computeSummaries = (
         const parent = map?.get(slot.parent_slot_id ?? "")
         slot = parent && parent.depth < slot.depth ? parent : undefined
       }
-      return path.reverse()
+      path.reverse()
+      if (parentIds.has(fork.id)) parentStructures.set(fork.id, path)
+      return path
     }
     // Each live parent's path, as ids; none for a parent with no slots (as for one gone).
     const parentPaths = new Map<string, ReadonlySet<string>>()
@@ -267,14 +296,24 @@ const computeSummaries = (
         }
         path = shown
       }
-      const onPath = new Map(path.map((s, position) => [s.id, position]))
-      const applicable = (eventsByFork.get(record.id) ?? []).filter((e) => e.slot_id === null || onPath.has(e.slot_id))
+      const candidatesSeen = threadsSeen.filter((place) => place.forkId === record.id)
+      const ownEvents = eventsByFork.get(record.id) ?? []
+      // Branch-wide events need no position lookup; most imported branches have
+      // no positional events or thread sets. Avoid a whole-path map in that case.
+      const onPath =
+        candidatesSeen.length > 0 || ownEvents.some((e) => e.slot_id !== null)
+          ? new Map(path.map((s, position) => [s.id, position]))
+          : null
+      const applicable =
+        onPath === null ? ownEvents : ownEvents.filter((e) => e.slot_id === null || onPath.has(e.slot_id))
       // The child's bounded lineage retains the parent's cast as of the split. Own
       // events at the base (including branch-wide swaps) must not change that baseline.
       const baseIndex = record.base_slot_id === null ? -1 : path.findIndex((s) => s.id === record.base_slot_id)
-      const before = new Set(path.slice(0, baseIndex + 1).map((s) => s.id))
+      const before = applicable.some((e) => e.source_fork_id !== record.id && e.slot_id !== null)
+        ? new Set(path.slice(0, baseIndex + 1).map((s) => s.id))
+        : null
       const inherited = applicable.filter(
-        (e) => e.source_fork_id !== record.id && (e.slot_id === null || before.has(e.slot_id))
+        (e) => e.source_fork_id !== record.id && (e.slot_id === null || before?.has(e.slot_id) === true)
       )
       const splitState = foldState([
         ...inherited.filter((e) => !branchOwned.has(e.data.key)),
@@ -283,8 +322,7 @@ const computeSummaries = (
       const added = new Set<string>()
       if (record.parent_fork_id !== null && (record.base_slot_id === null || baseIndex >= 0))
         for (const slot of path.slice(baseIndex + 1))
-          for (const id of JSON.parse(slot.participants) as Array<string>)
-            if (!splitState.participants.includes(id)) added.add(id)
+          for (const id of participantsOf(slot)) if (!splitState.participants.includes(id)) added.add(id)
       const branch = applicable.filter((e) => branchOwned.has(e.data.key))
       const positional = new Map<string, Array<Event>>()
       for (const e of applicable) {
@@ -316,13 +354,14 @@ const computeSummaries = (
       for (const s of path) {
         // Every retained swipe at this position counts, even one no longer selected.
         // Cast events at the endpoint describe the next turn, never the preceding one.
-        for (const id of JSON.parse(s.participants) as Array<string>) joined.add(id)
+        for (const id of participantsOf(s)) joined.add(id)
         if (s.deleted_at !== null) continue
         if (shared !== null && split === null && !shared(s)) split = { at: s.created_at, after: messages }
         messages++
         endpoint = s
         if (s.status !== "failed" && s.content_length > 0) candidates.push(s.version_seq)
-        state = foldState(positional.get(s.id) ?? [], state)
+        const changes = positional.get(s.id)
+        if (changes !== undefined || state.playedByMe.length > 1) state = foldState(changes ?? [], state)
         const record = (entity: string, at: number) => {
           if (at >= (activity.get(entity)?.at ?? -Infinity))
             activity.set(entity, { entityId: entity as EntityId, at, slot: s.id })
@@ -331,8 +370,7 @@ const computeSummaries = (
           record(s.speaker, s.at)
           lastSpoke.set(s.speaker, messages)
         }
-        for (const author of JSON.parse(s.human_authors) as Array<{ entity: string; at: number }>)
-          record(author.entity, author.at)
+        for (const author of authorsOf(s)) record(author.entity, author.at)
       }
       for (const event of branch) {
         const { data } = event
@@ -374,7 +412,10 @@ const computeSummaries = (
               ? ("with" as const)
               : ("just" as const)
         })),
-        threads: placesOf(threadsSeen, record.id, (slotId) => onPath.has(slotId), onPath)
+        threads:
+          candidatesSeen.length === 0
+            ? []
+            : placesOf(candidatesSeen, record.id, (slotId) => onPath!.has(slotId), onPath!)
       })
     }
     // All history/participation above is metadata. Read only each fork's newest
@@ -401,6 +442,10 @@ const computeSummaries = (
     }
     return summaries.map((summary, i) => ({ ...summary, preview: previews[i]! }))
   })
+
+/** Navigation needs cast ordering, endpoints and split/thread metadata, without swipe activity. */
+export const computeForkOutlines = (sql: SqlClient.SqlClient, records: ReadonlyArray<ForkRow>) =>
+  computeSummaries(sql, records, records.length <= 2, false)
 
 /** Complete shell summaries, including every retained swipe's participation evidence. */
 export const computeForkSummaries = (

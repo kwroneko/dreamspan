@@ -2,12 +2,61 @@ import { isDeepStrictEqual } from "node:util"
 import { assert, it } from "@effect/vitest"
 import type { ShellCards, ShellCardsUpdate, ShellForks, ShellForksUpdate } from "@rp/shared/chatSetupApi.ts"
 import { applyShellCards, applyShellForks, shellCardsUpdate, shellForksUpdate } from "@rp/shared/shellUpdates.ts"
-import { Effect, Stream } from "effect"
+import { Deferred, Effect, Stream } from "effect"
+import { CurrentUser } from "@rp/shared/api.ts"
+import { makeChatSetupHandlers } from "../src/api/chatSetup.ts"
+import { Writer } from "../src/db/Database.ts"
+import { CacheWarmth } from "../src/chat/CacheWarmth.ts"
+import { Generations } from "../src/chat/Generations.ts"
+import { Generator } from "../src/chat/Generator.ts"
+import { ChatHub } from "../src/chat/ChatHub.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually } from "./support/generation.ts"
 
 const waitFor = (label: string, check: () => boolean) =>
   eventually(check).pipe(Effect.catchCause(() => Effect.die(new Error(`Shell stream: ${label}`))))
+
+it.live("replaying a shared shell snapshot persists its summaries once", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const me = yield* api.Whoami()
+    yield* api.CreateChat({ title: "Shared persistence fixture" })
+    const writer = yield* Writer
+    const stored = yield* Deferred.make<void>()
+    let writes = 0
+    const original = writer.StoreForkSummaries
+    const counted: typeof original = (payload, options) =>
+      Effect.suspend(() => {
+        writes++
+        return original(payload, options).pipe(Effect.tap(() => Deferred.succeed(stored, undefined)))
+      })
+    // These one-shot display reads must never start generation or estimates.
+    const unused = <A extends object>(): A =>
+      new Proxy(
+        {},
+        {
+          get: () => {
+            throw new Error("shell read accessed generation")
+          }
+        }
+      ) as A
+    const handlers = yield* makeChatSetupHandlers.pipe(
+      Effect.provideService(Writer, { ...writer, StoreForkSummaries: counted }),
+      Effect.provideService(CacheWarmth, unused<CacheWarmth["Service"]>()),
+      Effect.provideService(Generations, unused<Generations["Service"]>()),
+      Effect.provideService(Generator, unused<Generator["Service"]>()),
+      Effect.provide(ChatHub.layer)
+    )
+    yield* handlers.GetShellCards().pipe(Effect.provideService(CurrentUser, me))
+    yield* Deferred.await(stored)
+    yield* handlers.GetShellLibrary().pipe(Effect.provideService(CurrentUser, me))
+    yield* handlers
+      .GetShellForks({ entity: null, chat: null, search: "", sort: "recent", sections: [{ id: "chats", limit: 100 }] })
+      .pipe(Effect.provideService(CurrentUser, me))
+    yield* writer.Ready()
+    assert.strictEqual(writes, 1)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)
 
 it.live("shell streams push changed rows, page movement and deletion without a chat subscription", () =>
   Effect.gen(function* () {
