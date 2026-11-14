@@ -135,6 +135,8 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
           bulk: null
         }
         const counter = planCounter(messages, input.firstIndex, input.detailLimit, input.digest)
+        let unchangedPrefix = 0
+        let prefixOpen = true
         const placed = yield* placeStMessages(
           sql,
           {
@@ -148,8 +150,23 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
             overlay
           },
           counting,
-          counter.observe
+          (event) => {
+            counter.observe(event)
+            if (
+              prefixOpen &&
+              event.outcome === "matched" &&
+              event.addedVersions === 0 &&
+              !event.selected &&
+              !event.differs &&
+              !event.deleted &&
+              !event.placeholder
+            )
+              unchangedPrefix++
+            else prefixOpen = false
+          }
         )
+        const reusable =
+          !input.branch && record.forkPrior == null && placed.branchDeleted === (payload.branchDeleted ?? false)
         const last = placed.slotIds.at(-1)
         const depth = (parent?.depth ?? -1) + messages.length
         return {
@@ -162,6 +179,26 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
                 : { ...input.parent, virtual: input.parent.id.startsWith(VIRTUAL) }
               : { id: last, depth, virtual: last.startsWith(VIRTUAL) },
           matching: placed.matching,
+          unchangedSlots: reusable
+            ? placed.slotIds.slice(0, unchangedPrefix).filter((id) => !id.startsWith(VIRTUAL))
+            : [],
+          ...(input.compact && reusable && unchangedPrefix === messages.length && placed.matching
+            ? {
+                compactJson: JSON.stringify(
+                  messages.map((message) => ({
+                    ...message,
+                    selected: 0,
+                    versions: [
+                      {
+                        content: "",
+                        reasoning: null,
+                        at: message.versions[message.selected < message.versions.length ? message.selected : 0]!.at
+                      }
+                    ]
+                  }))
+                )
+              }
+            : {}),
           counts: counter.counts,
           carry: {
             keepTip: placed.keepTip,

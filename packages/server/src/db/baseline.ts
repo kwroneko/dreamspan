@@ -371,7 +371,7 @@ export const baseline: ReadonlyArray<string> = [
   // A confirmed re-import's parsed batches of the chat file it's reading (ARCHITECTURE.md §13
   // "Re-import preview"), held until the file's last part is in and matches the check: then
   // they go into the chat in one transaction (`StImportCommitChat`), or none of them does.
-  // Never outlives its run: cleared at the user's next run, and at startup.
+  // Released on file drop and job end, at the user's next run, and at startup.
   `CREATE TABLE st_import_stage (
     owner_user_id TEXT NOT NULL REFERENCES users(id),
     import_id TEXT NOT NULL,

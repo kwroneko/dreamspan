@@ -5,10 +5,13 @@
 // it. Two imports of the same plan, and an import racing a message sent here, write each file
 // at most once, in one transaction.
 import { assert, layer } from "@effect/vitest"
+import { vi } from "vitest"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { ST_CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
-import { Effect } from "effect"
-import { Reader } from "../src/db/Database.ts"
+import { Effect, Exit, Schema } from "effect"
+import { StFileResult } from "@rp/shared/stImportApi.ts"
+import { StImports } from "../src/importer/StImports.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { card, header, jsonl, message } from "./support/stFolder.ts"
@@ -111,6 +114,34 @@ type Change = (api: Api, chatId: ChatId) => Effect.Effect<unknown, unknown>
 
 /** What the user does here between the import's start and the write of the file. */
 const changes: ReadonlyArray<readonly [string, Change]> = [
+  ["rename", (api, chatId) => api.RenameChat({ chatId, name: "Named here" })],
+  [
+    "multi-delete",
+    (api, chatId) =>
+      Effect.gen(function* () {
+        const rows = yield* entries(api, chatId)
+        const forkId = (yield* api.GetChat({ chatId })).currentForkId!
+        yield* api.DeleteMessages({ forkId, slotIds: [rows[2]!.slotId, rows[3]!.slotId] })
+      })
+  ],
+  [
+    "Undo",
+    (api, chatId) =>
+      Effect.gen(function* () {
+        const rows = yield* entries(api, chatId)
+        const forkId = (yield* api.GetChat({ chatId })).currentForkId!
+        const deleted = yield* api.DeleteMessages({ forkId, slotIds: [rows[2]!.slotId, rows[3]!.slotId] })
+        yield* api.RestoreBinItems({ itemIds: deleted.map((item) => item.id) })
+      })
+  ],
+  [
+    "fork",
+    (api, chatId) =>
+      Effect.gen(function* () {
+        const rows = yield* entries(api, chatId)
+        yield* api.CreateFork({ chatId, fromForkId: null, atSlotId: rows[2]!.slotId })
+      })
+  ],
   [
     "hide",
     (api, chatId) =>
@@ -198,6 +229,128 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       })
     )
 
+  for (const [kind, change] of changes)
+    it.effect(`rechecks the stamp after staging an unchanged prefix, racing ${kind}`, () =>
+      Effect.gen(function* () {
+        const { api, path, chat, bytes, importId } = yield* imported(`Staged race ${kind}`)
+        const cut = bytes.indexOf(10, bytes.indexOf(10, bytes.indexOf(10) + 1) + 1) + 1
+        yield* sendFile(importId, path, bytes.subarray(0, cut), { part: "0", last: "0" })
+        assert.strictEqual(yield* staged, 1)
+        yield* change(api, chat.id)
+        const graph = yield* stImportGraph(config.dataDir, chat.id)
+        const response = yield* sendFile(importId, path, bytes.subarray(cut), { part: "1", last: "1" })
+        assert.strictEqual(response.status, 200)
+        assert.strictEqual(
+          (yield* Effect.map(
+            Effect.promise(() => response.json()),
+            Schema.decodeUnknownSync(StFileResult)
+          )).outcome,
+          "skipped"
+        )
+        yield* api.FinishStImport({ importId, notSent: [] })
+        assert.deepStrictEqual(yield* refusedIn(api, importId), [path])
+        assert.deepStrictEqual(yield* stImportGraph(config.dataDir, chat.id), graph)
+        assert.strictEqual(yield* staged, 0)
+      })
+    )
+
+  it.effect("certifies an image-only amendment that changes the matcher's local-history flag", () =>
+    Effect.gen(function* () {
+      const { api, path, chat, bytes, importId } = yield* imported("Image-only amendment")
+      const row = (yield* entries(api, chat.id))[1]!
+      const userId = (yield* api.Whoami()).id
+      const mediaId = yield* (yield* Writer).RecordMessageImage({
+        userId,
+        media: {
+          sha256: "e".repeat(64) as never,
+          mime: "image/png",
+          byteSize: 16,
+          width: 1,
+          height: 1
+        }
+      })
+      const before = (yield* stamps(api))[chat.id]
+      yield* api.AmendVersion({
+        versionId: row.version.id,
+        content: row.version.content,
+        images: [{ mediaId }],
+        expectedRowVersion: row.version.rowVersion
+      })
+      assert.notStrictEqual((yield* stamps(api))[chat.id], before)
+      assert.strictEqual((yield* sendStFile(importId, path, bytes)).outcome, "skipped")
+      yield* api.FinishStImport({ importId, notSent: [] })
+    })
+  )
+
+  it.effect("refuses a known-stale file before staging any of its parts", () =>
+    Effect.gen(function* () {
+      const { api, path, chat, bytes, importId } = yield* imported("Already stale")
+      yield* api.RenameChat({ chatId: chat.id, name: "Changed before the file arrived" })
+      yield* fixtureSql(config.dataDir, [
+        { sql: "CREATE TABLE stale_stage_probe (n INTEGER)" },
+        {
+          sql: "CREATE TRIGGER stale_stage_probe_insert AFTER INSERT ON st_import_stage BEGIN INSERT INTO stale_stage_probe VALUES (1); END"
+        }
+      ])
+      yield* Effect.gen(function* () {
+        assert.strictEqual((yield* sendStFile(importId, path, bytes)).outcome, "skipped")
+        const [rows] = yield* fixtureSql(config.dataDir, [{ sql: "SELECT count(*) AS n FROM stale_stage_probe" }], {
+          readOnly: true
+        })
+        assert.strictEqual(rows![0]!.n, 0)
+        yield* api.FinishStImport({ importId, notSent: [] })
+      }).pipe(
+        Effect.ensuring(
+          fixtureSql(config.dataDir, [
+            { sql: "DROP TRIGGER IF EXISTS stale_stage_probe_insert" },
+            { sql: "DROP TABLE IF EXISTS stale_stage_probe" }
+          ]).pipe(Effect.ignore)
+        )
+      )
+    })
+  )
+
+  it.effect("takes BOM, CRLF, Unicode and a trailing newline identically across part boundaries", () =>
+    Effect.gen(function* () {
+      const { api, path, chat, importId } = yield* imported("Encoded")
+      yield* api.CancelStImport({ importId })
+      const text = new TextDecoder().decode(lines(8)).replaceAll("m7", "漣 🌊 m7")
+      const bytes = new TextEncoder().encode("\uFEFF" + text.replaceAll("\n", "\r\n") + "\r\n")
+      const plan = yield* check(api, new Map([[path, bytes]]))
+      const run = yield* api.StartStImport({ unsupported: [], plan: { planId: plan.planId, skip: [] } })
+      yield* sendStFile(run.importId, "characters/Alice.png", CARD)
+      assert.strictEqual((yield* sendStFile(run.importId, path, bytes, {}, 450)).outcome, "updated")
+      yield* api.FinishStImport({ importId: run.importId, notSent: [] })
+      assert.deepStrictEqual(yield* refusedIn(api, run.importId), [])
+      assert.strictEqual((yield* entries(api, chat.id)).at(-1)!.version.content, "漣 🌊 m7")
+    })
+  )
+
+  it.effect("never stages out-of-order or duplicate parts twice", () =>
+    Effect.gen(function* () {
+      const { api, path, chat, bytes, importId } = yield* imported("Parts order")
+      const cut = bytes.indexOf(10, bytes.indexOf(10, bytes.indexOf(10) + 1) + 1) + 1
+      const part = (seq: number, body: Uint8Array, last: boolean) =>
+        Effect.gen(function* () {
+          const response = yield* sendFile(importId, path, body, { part: String(seq), last: last ? "1" : "0" })
+          return yield* Effect.map(
+            Effect.promise(() => response.json()),
+            Schema.decodeUnknownSync(StFileResult)
+          )
+        })
+      assert.strictEqual((yield* part(1, bytes.subarray(cut), true)).outcome, "restart")
+      assert.strictEqual(yield* staged, 0)
+      assert.strictEqual((yield* part(0, bytes.subarray(0, cut), false)).outcome, "continue")
+      assert.strictEqual((yield* part(2, bytes.subarray(cut), true)).outcome, "restart")
+      assert.strictEqual(yield* staged, 1)
+      assert.strictEqual((yield* part(1, bytes.subarray(cut), true)).outcome, "updated")
+      assert.strictEqual((yield* part(1, bytes.subarray(cut), true)).outcome, "restart")
+      yield* api.FinishStImport({ importId, notSent: [] })
+      assert.lengthOf(yield* entries(api, chat.id), 8)
+      assert.strictEqual(yield* staged, 0)
+    })
+  )
+
   it.effect("refuses uploaded bytes other than those checked, in parts or whole", () =>
     Effect.gen(function* () {
       const { api, path, chat, importId } = yield* imported("Other bytes")
@@ -235,6 +388,215 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual(yield* staged, 0)
     })
   )
+
+  it.effect("holds a new chat file until its last part, including on Stop", () =>
+    Effect.gen(function* () {
+      const { api, path, bytes, plan, importId } = yield* imported("New file base")
+      yield* api.CancelStImport({ importId })
+      const freshPath = "chats/Alice/New atomic.jsonl"
+      const next = yield* check(
+        api,
+        new Map([
+          [path, bytes],
+          [freshPath, bytes]
+        ])
+      )
+      assert.strictEqual(next.status, "done")
+      const run = yield* api.StartStImport({ unsupported: [], plan: { planId: next.planId, skip: [] } })
+      yield* sendStFile(run.importId, "characters/Alice.png", CARD)
+      const cut = bytes.indexOf(10, bytes.indexOf(10, bytes.indexOf(10) + 1) + 1) + 1
+      yield* sendFile(run.importId, freshPath, bytes.subarray(0, cut), { part: "0", last: "0" })
+      assert.isFalse((yield* api.ListChats({ limit: 200, before: null })).some((c) => c.title.includes("New atomic")))
+      assert.strictEqual(yield* staged, 1)
+      yield* api.CancelStImport({ importId: run.importId })
+      assert.strictEqual(yield* staged, 0)
+      assert.isFalse((yield* api.ListChats({ limit: 200, before: null })).some((c) => c.title.includes("New atomic")))
+      assert.strictEqual(plan.status, "done")
+    })
+  )
+
+  it.effect(
+    "reaps an abandoned upload and its staged rows without another import or restart",
+    () =>
+      Effect.gen(function* () {
+        const { api, path, bytes, importId } = yield* imported("Abandoned")
+        const cut = bytes.indexOf(10, bytes.indexOf(10, bytes.indexOf(10) + 1) + 1) + 1
+        yield* sendFile(importId, path, bytes.subarray(0, cut), { part: "0", last: "0" })
+        assert.strictEqual(yield* staged, 1)
+        const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60_000)
+        yield* Effect.addFinalizer(() => Effect.sync(() => clock.mockRestore()))
+        // The production sweep runs once a minute. Move idle time, retaining its real schedule.
+        yield* Effect.sleep(61_000)
+        assert.strictEqual((yield* api.GetStImport({ importId })).job.status, "interrupted")
+        assert.strictEqual(yield* staged, 0)
+        assert.notStrictEqual(
+          (yield* sendFile(importId, path, bytes.subarray(cut), { part: "1", last: "1" })).status,
+          200
+        )
+      }),
+    { tags: ["slow"], timeout: 90_000 }
+  )
+
+  it.effect("a completed checked upload still accepts its explicit pending card-link choice", () =>
+    Effect.gen(function* () {
+      const path = "chats/Renamed/Link choice.jsonl"
+      const bytes = lines(6)
+      const { api, importId, report } = yield* importStFolder(
+        new Map([
+          ["characters/One.png", CARD],
+          ["characters/Two.png", CARD],
+          [path, bytes]
+        ]),
+        { checked: true }
+      )
+      const choice = report.links.find((choice) => choice.path === path)!
+      assert.isDefined(choice)
+      const result = yield* sendStFile(importId, path, bytes, { card: choice.candidates[0]!.entityId })
+      assert.strictEqual(result.outcome, "added")
+      const detail = yield* api.GetStImport({ importId })
+      assert.isFalse(detail.report!.links.some((choice) => choice.path === path))
+      assert.strictEqual(detail.report!.counts.chat!.added, 1)
+      assert.strictEqual(yield* staged, 0)
+      const userId = (yield* api.Whoami()).id
+      const late = yield* Effect.exit(
+        (yield* Writer).StImportStage({
+          userId,
+          lease: importId,
+          path,
+          seq: 0,
+          batchJson: JSON.stringify({ messagesJson: "[]", speakers: {} })
+        })
+      )
+      assert.isTrue(Exit.isFailure(late))
+    })
+  )
+
+  it.effect("conservatively refuses a change on another fork of the same chat", () =>
+    Effect.gen(function* () {
+      const { api, path, chat, bytes, importId } = yield* imported("Independent fork")
+      yield* api.CancelStImport({ importId })
+      const rows = yield* entries(api, chat.id)
+      const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: null, atSlotId: rows[2]!.slotId })
+      const plan = yield* check(api, new Map([[path, bytes]]))
+      const run = yield* api.StartStImport({ unsupported: [], plan: { planId: plan.planId, skip: [] } })
+      yield* sendStFile(run.importId, "characters/Alice.png", CARD)
+      yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          forkId: fork.id,
+          parentSlotId: rows[2]!.slotId,
+          branch: false,
+          content: "Independent branch"
+        })
+      )
+      assert.strictEqual((yield* sendStFile(run.importId, path, bytes)).outcome, "skipped")
+      yield* api.FinishStImport({ importId: run.importId, notSent: [] })
+      assert.deepStrictEqual(yield* refusedIn(api, run.importId), [path])
+    })
+  )
+
+  it.effect(
+    "reaps an abandoned card-link upload after its job has already finished",
+    () =>
+      Effect.gen(function* () {
+        const path = "chats/Renamed/Abandoned link.jsonl"
+        const bytes = lines(6)
+        const { api, importId, report } = yield* importStFolder(
+          new Map([
+            ["characters/One.png", CARD],
+            ["characters/Two.png", CARD],
+            [path, bytes]
+          ]),
+          { checked: true }
+        )
+        const choice = report.links.find((choice) => choice.path === path)!
+        const cut = bytes.indexOf(10, bytes.indexOf(10, bytes.indexOf(10) + 1) + 1) + 1
+        yield* sendFile(importId, path, bytes.subarray(0, cut), {
+          part: "0",
+          last: "0",
+          card: choice.candidates[0]!.entityId
+        })
+        assert.strictEqual(yield* staged, 1)
+        assert.strictEqual((yield* api.GetStImport({ importId })).job.status, "complete")
+        const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60_000)
+        yield* Effect.addFinalizer(() => Effect.sync(() => clock.mockRestore()))
+        yield* Effect.sleep(61_000)
+        assert.strictEqual(yield* staged, 0)
+        assert.strictEqual((yield* api.GetStImport({ importId })).job.status, "complete")
+      }),
+    { tags: ["slow"], timeout: 90_000 }
+  )
+
+  it.effect("a late staged write after Finish is fenced, so finished jobs cannot accumulate rows", () =>
+    Effect.gen(function* () {
+      const { api, path, importId } = yield* imported("Late finish")
+      const userId = (yield* api.Whoami()).id
+      yield* api.FinishStImport({ importId, notSent: [] })
+      const late = yield* Effect.exit(
+        (yield* Writer).StImportStage({
+          userId,
+          lease: importId,
+          path,
+          seq: 0,
+          batchJson: JSON.stringify({ messagesJson: "[]", speakers: {} })
+        })
+      )
+      assert.isTrue(Exit.isFailure(late))
+      assert.strictEqual(yield* staged, 0)
+    })
+  )
+
+  it.effect("bounds a staged file and releases it on a size refusal", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { path, chat, bytes, importId } = yield* imported("Budget")
+        const cut = bytes.indexOf(10, bytes.indexOf(10, bytes.indexOf(10) + 1) + 1) + 1
+        yield* sendFile(importId, path, bytes.subarray(0, cut), { part: "0", last: "0" })
+        assert.strictEqual(yield* staged, 1)
+        const graph = yield* stImportGraph(config.dataDir, chat.id)
+        const imports = yield* StImports
+        const original = imports.handlers.get("chat")!
+        // Put the live file at its resource boundary without allocating 256 MiB in a fast test.
+        yield* imports.handlers.register({
+          id: "chat",
+          run: (call) => {
+            if (call.session.chat !== null) call.session.chat.stagedChars = 256 * 1024 * 1024
+            return original.run(call)
+          }
+        })
+        const response = yield* sendFile(importId, path, bytes.subarray(cut), { part: "1", last: "1" })
+        assert.strictEqual(response.status, 200)
+        const answer = yield* Effect.map(
+          Effect.promise(() => response.json()),
+          Schema.decodeUnknownSync(StFileResult)
+        )
+        assert.strictEqual(answer.outcome, "failed")
+        assert.strictEqual(answer.message, "This chat is too large to import. Not imported.")
+        assert.strictEqual(yield* staged, 0)
+        assert.deepStrictEqual(yield* stImportGraph(config.dataDir, chat.id), graph)
+      })
+    )
+  )
+
+  for (const action of ["cancel", "finish", "restart", "bad last part"] as const)
+    it.effect(`releases staged rows on ${action}`, () =>
+      Effect.gen(function* () {
+        const { api, path, bytes, importId } = yield* imported(`Cleanup ${action}`)
+        const cut = bytes.indexOf(10, bytes.indexOf(10, bytes.indexOf(10) + 1) + 1) + 1
+        assert.strictEqual(
+          (yield* sendFile(importId, path, bytes.subarray(0, cut), { part: "0", last: "0" })).status,
+          200
+        )
+        assert.strictEqual(yield* staged, 1)
+        if (action === "cancel") yield* api.CancelStImport({ importId })
+        else if (action === "finish") yield* api.FinishStImport({ importId, notSent: [] })
+        else if (action === "restart") {
+          // Start again with just the header, holding no parsed message batch yet.
+          yield* sendFile(importId, path, bytes.subarray(0, bytes.indexOf(10) + 1), { part: "0", last: "0" })
+        } else yield* sendFile(importId, path, new TextEncoder().encode("\n"), { part: "1", last: "1" })
+        assert.strictEqual(yield* staged, 0)
+      })
+    )
 
   it.effect("an import racing a message sent here either writes the file whole or not at all", () =>
     Effect.gen(function* () {

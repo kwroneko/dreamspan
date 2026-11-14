@@ -407,7 +407,12 @@ function PlanCheck({
     )
   if (plan === null)
     return <p className="text-sm text-muted">Checking what importing does to the chats already here…</p>
-  if (plan.files.length === 0) return null
+  if (plan.files.length === 0)
+    return (
+      <p className="text-sm text-muted">
+        New-chat counts are estimates. New files aren’t checked; some may be skipped or join another chat.
+      </p>
+    )
 
   return (
     <section aria-label="Chats already here" className="flex flex-col gap-3">
@@ -417,6 +422,9 @@ function PlanCheck({
           What importing does to the chats you already have. Nothing changes until you import.
         </p>
       </div>
+      <p className="text-sm text-muted">
+        New-chat counts are estimates. New files aren’t checked; some may be skipped or join another chat.
+      </p>
       {plan.status === "running" && (
         <div className="flex flex-col gap-2">
           <ProgressBar
@@ -531,8 +539,8 @@ function PlanCheck({
         <p className="text-sm text-muted">{`${plural(quiet, "more file has", "more files have")} nothing new.`}</p>
       )}
       <p className="text-sm text-muted">
-        Counts assume each file can be linked to a card. Card links are checked during import; files needing your choice
-        wait in the report.
+        Counts assume each file can be linked to a card. Card links are checked during import; a file needing your
+        choice may wait in the report or be listed under Not imported.
       </p>
       <p className="text-sm text-muted">
         Importing never undoes what you did here: the swipe you chose, your edits, messages you hid or deleted, your

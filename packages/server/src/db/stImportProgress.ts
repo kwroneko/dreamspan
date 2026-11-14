@@ -46,6 +46,8 @@ export const resolveStNote = (note: StImportNote, slotIds: ReadonlyArray<SlotId>
 export interface StStagedBatch {
   readonly messagesJson: string
   readonly hashes?: ReadonlyArray<string>
+  /** Reader-matched unchanged prefix, certified by the commit's chat stamp. */
+  readonly cached?: ReadonlyArray<SlotId>
   readonly speakers: Readonly<Record<string, EntityId | null>>
   readonly arrivalRefs?: Readonly<Record<string, RefId>>
 }

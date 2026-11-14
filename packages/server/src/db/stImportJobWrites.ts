@@ -2,7 +2,7 @@
 // Each is one small transaction; progress comes at most about once a second per job.
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { NotFound, type WriteOps } from "./ops.ts"
+import { NotFound, ST_IMPORT_RUN, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
 export const makeStImportJobWriteHandlers = Effect.gen(function* () {
@@ -47,6 +47,12 @@ export const makeStImportJobWriteHandlers = Effect.gen(function* () {
             error = coalesce(${end?.error ?? null}, error),
             finished_at = ${end === undefined ? null : at}
           WHERE id = ${id} AND owner_user_id = ${userId} AND status = 'running' RETURNING id`
+        if (end !== undefined && rows.length > 0) {
+          yield* sql`DELETE FROM st_import_stage WHERE owner_user_id = ${userId} AND import_id = ${id}`
+          if (end.status !== "complete")
+            yield* sql`UPDATE jobs SET payload_json = '{}' WHERE owner_user_id = ${userId}
+              AND kind = ${ST_IMPORT_RUN} AND json_extract(payload_json, '$.importId') = ${id}`
+        }
         return rows.length > 0
       }).pipe(transaction(sql, "StImportJobUpdate")),
 

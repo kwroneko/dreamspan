@@ -5,14 +5,20 @@ import { fixtureSql } from "./support/lcmFixtures.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { serverLayer, testConfig } from "./support/config.ts"
 import { card, header, jsonl, message } from "./support/stFolder.ts"
-import { importStFolder, sendFile } from "./support/stUpload.ts"
+import { importStFolder as runImportStFolder, sendFile } from "./support/stUpload.ts"
 import { stImportGraph } from "./support/stImportGraph.ts"
 
-for (const count of [10, 205]) {
+for (const [count, checked] of [
+  [10, false],
+  [10, true],
+  [205, false],
+  [205, true]
+] as const) {
+  const importStFolder = (files: Parameters<typeof runImportStFolder>[0]) => runImportStFolder(files, { checked })
   const config = testConfig()
 
   layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })(
-    `ST shared path selections: ${count} messages`,
+    `ST shared path selections: ${count} messages (${checked ? "checked" : "unchecked"})`,
     (it) => {
       it.effect("reimporting an ST branch with a changed shared-prefix swipe selects it only on the child's path", () =>
         Effect.gen(function* () {
@@ -119,6 +125,7 @@ for (const count of [10, 205]) {
               ["chats/Alice/branch.jsonl", jsonl([header({ main_chat: "main" }), ...branch])]
             ])
           )
+          assert.notStrictEqual(second.answers.get("chats/Alice/branch.jsonl")!.outcome, "skipped")
           const parentAfter = yield* api.ReadPath({
             chatId: chat.id,
             forkId: chat.currentForkId,
@@ -278,7 +285,11 @@ for (const count of [10, 205]) {
           // A parent re-import that stopped after its first batch still owns its old end.
           const parentRecord = sources.find((r) => r.source === "chats/Alice/main.jsonl")!
           const interrupted = yield* api.StartStImport({ unsupported: [] })
-          yield* writer.StImportClaim({ userId: user.id, recordId: parentRecord.recordId, lease: interrupted.importId })
+          yield* writer.StImportClaim({
+            userId: user.id,
+            recordId: parentRecord.recordId,
+            lease: interrupted.importId
+          })
           yield* writer.StImportMessages({
             userId: user.id,
             chatId: chat.id,

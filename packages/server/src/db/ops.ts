@@ -2914,14 +2914,14 @@ export class WriteOpsLibrary extends RpcGroup.make(
       userId: UserId,
       lease: Schema.String,
       path: Schema.String,
-      chatId: ChatId,
-      stamp: Schema.String,
+      chatId: Schema.NullOr(ChatId),
+      stamp: Schema.NullOr(Schema.String),
       claim: Schema.NullOr(
         Schema.Struct({ recordId: Schema.String, parentRecordId: Schema.optionalKey(Schema.String) })
       ),
       start: Schema.NullOr(
         Schema.Struct({
-          parentRecordId: Schema.String,
+          parentRecordId: Schema.optionalKey(Schema.String),
           title: Schema.String,
           createdAt: Schema.Number,
           groupId: Schema.optionalKey(Schema.String),
@@ -4448,6 +4448,8 @@ export class ReadOps extends RpcGroup.make(
       virtualPrefix: Schema.String,
       /** Return what the batch would write (`written`), for the chat's later files. */
       track: Schema.Boolean,
+      /** Keep only arrival metadata when the entire batch is an unchanged certified prefix. */
+      compact: Schema.optionalKey(Schema.Boolean),
       /** The file's digest so far (stImportPlanCount.ts), "" before its first batch. */
       digest: Schema.String
     },
@@ -4457,6 +4459,9 @@ export class ReadOps extends RpcGroup.make(
       /** Where the next batch goes on from; `virtual` once the rest is new. */
       cursor: Schema.NullOr(Schema.Struct({ id: Schema.String, depth: Schema.Int, virtual: Schema.Boolean })),
       matching: Schema.Boolean,
+      /** Stored slots before the first change; reusable only under the same whole-chat stamp. */
+      unchangedSlots: Schema.optionalKey(Schema.Array(SlotId)),
+      compactJson: Schema.optionalKey(Schema.String),
       counts: StPlanCounts,
       carry: Schema.Struct({
         keepTip: Schema.Boolean,

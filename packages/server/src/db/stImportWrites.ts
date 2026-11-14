@@ -43,6 +43,7 @@ import { docHash, searchText } from "./documents.ts"
 import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImportNote, WriteOps } from "./ops.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 import { transaction } from "./tx.ts"
+import { toStorageError } from "./connection.ts"
 import { stImportChatStamp } from "./stImportPlanStamp.ts"
 import { addCounts, emptyCounts, emptyDigest, planCounter, sameCounts } from "./stImportPlanCount.ts"
 import {
@@ -292,6 +293,18 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       AND json_extract(payload_json, '$.importId') = ${lease}`.pipe(
       Effect.flatMap(([row]) => (row?.n === 1 ? Effect.void : Effect.fail(new ImportLeaseLost({ recordId }))))
     )
+
+  /** Staging cannot resume after a job ended, including a late in-flight part after Finish. */
+  const stagingCurrent = (userId: UserId, lease: string, path: string) =>
+    Effect.gen(function* () {
+      yield* current(userId, lease, path)
+      const [ended] = yield* sql`SELECT id FROM st_import_jobs WHERE owner_user_id = ${userId}
+      AND id = ${lease} AND status <> 'running'
+        AND NOT (status = 'complete' AND EXISTS (
+          SELECT 1 FROM json_each(report_json, '$.links') choice WHERE choice.value ->> '$.path' = ${path}
+        ))`
+      if (ended !== undefined) return yield* new ImportLeaseLost({ recordId: path })
+    })
 
   /**
    * The record, which this run holds the lease of: a run that another started since, or that
@@ -871,7 +884,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
 
     StImportStage: ({ userId, lease, path, seq, batchJson }) =>
       Effect.gen(function* () {
-        yield* current(userId, lease, path)
+        if (batchJson === null) yield* current(userId, lease, path)
+        else yield* stagingCurrent(userId, lease, path)
         if (batchJson === null || seq === 0)
           yield* sql`DELETE FROM st_import_stage WHERE import_id = ${lease} AND path = ${path}`
         if (batchJson !== null)
@@ -887,113 +901,146 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
     StImportCommitChat: (input) =>
       Effect.gen(function* () {
         const { userId, lease, path, finish } = input
-        const changed = () => new StImportPlanChanged({ message: "Changed since the check. Not imported." })
-        yield* current(userId, lease, path)
-        // The chat as the check read it, or as this run's own writes left it: else nothing.
-        if ((yield* stImportChatStamp(sql, userId, input.chatId)) !== input.stamp) return yield* changed()
-        const recordId =
-          input.claim !== null
-            ? (yield* claim({ userId, lease, ...input.claim })).recordId
-            : input.start !== null
-              ? (yield* startChat({ userId, lease, source: path, chatId: input.chatId, ...input.start }, true)).recordId
-              : yield* Effect.die(new Error("a commit names neither a record nor a start"))
         const staged = yield* sql<{ batch_json: string }>`SELECT batch_json FROM st_import_stage
-          WHERE import_id = ${lease} AND path = ${path} ORDER BY seq`
-        if (staged.length !== input.batches) return yield* changed()
-        const progress = emptyWriteProgress(input.matching)
-        const slotIds: Array<SlotId> = []
-        const counts = emptyCounts()
-        let digest = emptyDigest
-        let keepsTip = false
+          WHERE owner_user_id = ${userId} AND import_id = ${lease} AND path = ${path} ORDER BY seq`.pipe(
+          Effect.mapError(toStorageError("StImportCommitChat"))
+        )
+        const batches: Array<{
+          batch: StStagedBatch
+          messages: ReadonlyArray<StPlacedMessage>
+          prepared: ReturnType<typeof prepareStMessageBatch>
+        }> = []
         for (const row of staged) {
           const batch = JSON.parse(row.batch_json) as StStagedBatch
           const messages = yield* Schema.decodeEffect(StPlacedMessages)(batch.messagesJson).pipe(Effect.orDie)
-          const counter = planCounter(messages, progress.written, 0, digest)
-          const written = yield* placeBatch(
-            {
-              userId,
-              chatId: input.chatId,
-              recordId,
-              lease,
-              advanceLeaf: input.advanceLeaf,
-              strict: input.strict,
-              parentSlotId: progress.cursor,
-              matching: progress.matching,
-              speakers: batch.speakers,
-              ...(batch.arrivalRefs === undefined ? {} : { arrivalRefs: batch.arrivalRefs }),
-              ...(input.groupArrival === undefined ? {} : { groupArrival: input.groupArrival }),
-              ...(input.groupId === undefined ? {} : { groupId: input.groupId })
-            },
+          batches.push({
+            batch,
             messages,
-            [],
-            progress.matching ? null : prepareStMessageBatch(messages, batch.speakers),
-            counter.observe,
-            () => {}
-          )
-          stepWriteProgress(progress, written, finish.prevEnd, finish.hiddenRun, [])
-          slotIds.push(...written.slotIds)
-          addCounts(counts, counter.counts)
-          digest = counter.digest()
-          keepsTip = written.keepTip
+            prepared: prepareStMessageBatch(messages.slice(batch.cached?.length ?? 0), batch.speakers)
+          })
         }
-        // Placed as the check showed, message by message, or not at all.
-        if (
-          input.expect !== null &&
-          (!sameCounts(counts, input.expect.counts) ||
-            digest !== input.expect.digest ||
-            keepsTip !== input.expect.keepsTip)
-        )
-          return yield* changed()
-        const { position, applies, leaf } = stFinishAt({ ...finish, ...progress })
-        // The state, with the summary named by the slots its messages went to.
-        const state = JSON.parse(finish.stateJson) as Record<string, unknown> | null
-        const prevState = JSON.parse(finish.prevStateJson) as Record<string, unknown> | null
-        const notes: Array<StImportNote> = []
-        for (const note of finish.notes) {
-          if (note.kind !== "imported_summary") {
-            notes.push(note)
-            continue
+        return yield* Effect.gen(function* () {
+          const changed = () => new StImportPlanChanged({ message: "Changed since the check. Not imported." })
+          yield* stagingCurrent(userId, lease, path)
+          // A new chat is claimed and created in this transaction too.
+          if (input.chatId !== null && (yield* stImportChatStamp(sql, userId, input.chatId)) !== input.stamp)
+            return yield* changed()
+          const target =
+            input.claim !== null
+              ? yield* claim({ userId, lease, ...input.claim })
+              : input.start !== null
+                ? yield* startChat({ userId, lease, source: path, chatId: input.chatId, ...input.start }, true)
+                : yield* Effect.die(new Error("a commit names neither a record nor a start"))
+          const { chatId, recordId } = target
+          if (input.chatId !== null && chatId !== input.chatId) return yield* changed()
+          if (batches.length !== input.batches) return yield* changed()
+          const progress = emptyWriteProgress(input.matching)
+          const slotIds: Array<SlotId> = []
+          const counts = emptyCounts()
+          let digest = emptyDigest
+          let keepsTip = false
+          for (const { batch, messages, prepared } of batches) {
+            const counter = planCounter(messages, progress.written, 0, digest)
+            const cached = progress.matching ? (batch.cached ?? []) : []
+            for (const index of cached.keys())
+              counter.observe({
+                index,
+                outcome: "matched",
+                addedVersions: 0,
+                selected: false,
+                differs: false,
+                locallyChanged: false,
+                deleted: false,
+                hiddenDiffers: false,
+                placeholder: false,
+                branchFrom: false
+              })
+            const written = yield* placeBatch(
+              {
+                userId,
+                chatId,
+                recordId,
+                lease,
+                advanceLeaf: input.advanceLeaf,
+                strict: input.strict,
+                parentSlotId: progress.cursor,
+                matching: progress.matching,
+                speakers: batch.speakers,
+                ...(batch.arrivalRefs === undefined ? {} : { arrivalRefs: batch.arrivalRefs }),
+                ...(input.groupArrival === undefined ? {} : { groupArrival: input.groupArrival }),
+                ...(input.groupId === undefined ? {} : { groupId: input.groupId })
+              },
+              messages,
+              cached,
+              prepared,
+              counter.observe,
+              () => {}
+            )
+            stepWriteProgress(progress, written, finish.prevEnd, finish.hiddenRun, [])
+            slotIds.push(...written.slotIds)
+            addCounts(counts, counter.counts)
+            digest = counter.digest()
+            keepsTip = written.keepTip
           }
-          const resolved = resolveStNote(note, slotIds)
-          const { modifiedAt: _dated, ...mapped } = resolved
-          const summary = stStateHash(mapped)
-          if (state !== null) state.summary = summary
-          if (summary !== prevState?.summary) notes.push(resolved)
-        }
-        const finished = yield* finishChat({
-          userId,
-          chatId: input.chatId,
-          recordId,
-          lease,
-          position,
-          events: applies ? finish.events : [],
-          notes: applies ? notes : [],
-          removedNotes: applies ? finish.removedNotes : [],
-          previousNotes: finish.previousNotes,
-          leaf,
-          end: progress.cursor,
-          lastMessageAt: finish.lastMessageAt,
-          sha256: finish.sha256,
-          stateJson: applies ? JSON.stringify(state) : finish.prevStateJson,
-          fork: finish.fork,
-          stCurrent: finish.stCurrent
-        })
-        yield* sql`DELETE FROM st_import_stage WHERE import_id = ${lease} AND path = ${path}`
-        const stamp = yield* stImportChatStamp(sql, userId, input.chatId)
-        const slots: Record<string, SlotId> = {}
-        for (const index of input.slotsAt) {
-          const slot = slotIds[index]
-          if (slot !== undefined) slots[index] = slot
-        }
-        return {
-          chatId: input.chatId,
-          recordId,
-          stamp: stamp!,
-          progress: { ...progress },
-          slots,
-          notes: finished.notes
-        }
-      }).pipe(transaction(sql, "StImportCommitChat")),
+          // Placed as the check showed, message by message, or not at all.
+          if (
+            input.expect !== null &&
+            (!sameCounts(counts, input.expect.counts) ||
+              digest !== input.expect.digest ||
+              keepsTip !== input.expect.keepsTip)
+          )
+            return yield* changed()
+          const { position, applies, leaf } = stFinishAt({ ...finish, ...progress })
+          // The state, with the summary named by the slots its messages went to.
+          const state = JSON.parse(finish.stateJson) as Record<string, unknown> | null
+          const prevState = JSON.parse(finish.prevStateJson) as Record<string, unknown> | null
+          const notes: Array<StImportNote> = []
+          for (const note of finish.notes) {
+            if (note.kind !== "imported_summary") {
+              notes.push(note)
+              continue
+            }
+            const resolved = resolveStNote(note, slotIds)
+            const { modifiedAt: _dated, ...mapped } = resolved
+            const summary = stStateHash(mapped)
+            if (state !== null) state.summary = summary
+            if (summary !== prevState?.summary) notes.push(resolved)
+          }
+          const finished = yield* finishChat({
+            userId,
+            chatId,
+            recordId,
+            lease,
+            position,
+            events: applies ? finish.events : [],
+            notes: applies ? notes : [],
+            removedNotes: applies ? finish.removedNotes : [],
+            previousNotes: finish.previousNotes,
+            leaf,
+            end: progress.cursor,
+            lastMessageAt: finish.lastMessageAt,
+            sha256: finish.sha256,
+            stateJson: applies ? JSON.stringify(state) : finish.prevStateJson,
+            fork: finish.fork,
+            stCurrent: finish.stCurrent
+          })
+          yield* sql`DELETE FROM st_import_stage WHERE import_id = ${lease} AND path = ${path}`
+          const stamp = yield* stImportChatStamp(sql, userId, chatId)
+          const slots: Record<string, SlotId> = {}
+          for (const index of input.slotsAt) {
+            const slot = slotIds[index]
+            if (slot !== undefined) slots[index] = slot
+          }
+          return {
+            chatId,
+            recordId,
+            stamp: stamp!,
+            progress: { ...progress },
+            slots,
+            notes: finished.notes
+          }
+        }).pipe(transaction(sql, "StImportCommitChat"))
+      }),
 
     // The import's hidden messages up to a slot shown again, in the fork through it (a `hide`
     // row of its own, spec/FORK-INDEPENDENCE-DELTA.md §2.4): other forks keep their hides.

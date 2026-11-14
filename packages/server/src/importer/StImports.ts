@@ -31,7 +31,7 @@ import {
 import { createHash } from "node:crypto"
 import { lstat, rm } from "node:fs/promises"
 import { join } from "node:path"
-import { Context, Effect, Exit, Layer, Schema } from "effect"
+import { Context, Effect, Exit, Layer, Schedule, Schema } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { AppConfig } from "../config.ts"
@@ -153,6 +153,8 @@ interface ChatProgress {
   readonly path: string
   readonly countAs: "chat" | "group_chat"
   nextPart: number
+  /** Last actual file part, independent of report polling. */
+  touched: number
   readonly title: string
   readonly header: StChatHeader | null
   readonly link: Link
@@ -215,11 +217,17 @@ interface ChatProgress {
   exact: StPlanExpectFile | null
   /** Its batches waiting in the writer for that transaction. */
   staged: number
+  stagedChars: number
+  prepared: {
+    parent: { id: string; depth: number } | null
+    carry: Parameters<Reader["Service"]["StImportPlanBatch"]>[0]["carry"]
+  } | null
   /** The record of the parent its header names, which claiming its own record takes. */
   claimParent: string | undefined
 }
 
 interface Session extends FolderContext {
+  readonly userId: User["id"]
   readonly galleryCards: Map<string, Array<RefId>>
   readonly arrivalRefs: Map<EntityId, RefId>
   readonly importedAt: number
@@ -257,9 +265,11 @@ interface Session extends FolderContext {
 type StGroup = NonNullable<Link["group"]>
 
 /** Storing a file failed on the server, not because of the file; the error is logged. */
-export class StImportFailed extends Schema.TaggedError<StImportFailed>()("StImportFailed", {}) {
+export class StImportFailed extends Schema.TaggedError<StImportFailed>()("StImportFailed", {
+  reason: Schema.optionalKey(Schema.String)
+}) {
   override get message() {
-    return "The import failed on the server; try again."
+    return this.reason ?? "The import failed on the server; try again."
   }
 }
 
@@ -353,6 +363,7 @@ export class StImports extends Context.Service<
         Effect.gen(function* () {
           const sources = yield* reader.StImportSources({ userId: user.id })
           const session: Session = {
+            userId: user.id,
             id: uuidv7(),
             importedAt: Date.now(),
             arrivalRefs: new Map(),
@@ -769,11 +780,37 @@ export class StImports extends Context.Service<
 
       /** Ends the chat being read, giving back the budget its summaries held. */
       const dropChat = (session: Session) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           const chat = session.chat
           session.chat = null
-          if (chat !== null) session.held -= chat.summaryChars
+          if (chat === null) return
+          session.held -= chat.summaryChars
+          if (chat.staged > 0)
+            yield* writer
+              .StImportStage({
+                userId: session.userId,
+                lease: session.id,
+                path: chat.path,
+                seq: 0,
+                batchJson: null
+              })
+              .pipe(Effect.catchTag("ImportLeaseLost", () => Effect.void))
         })
+
+      // A card-link upload can be sent after its job completed, so it is no longer
+      // covered by StImportJobs' running-upload sweep. Expire partial files here too.
+      const scope = yield* Effect.scope
+      const sweepFiles = Effect.gen(function* () {
+        const now = Date.now()
+        for (const [userId, session] of sessions) {
+          if (session.chat !== null && now - session.chat.touched >= 10 * 60_000)
+            yield* dropChat(session).pipe(
+              Effect.catch((error) => Effect.logWarning("releasing an idle ST file failed", error))
+            )
+          if (now - session.touched > IDLE_MS && sessions.get(userId) === session) sessions.delete(userId)
+        }
+      })
+      yield* Effect.forkIn(Effect.repeat(sweepFiles, Schedule.spaced(60_000)), scope)
 
       /** The chat's record and, for a new one, the chat itself: once it has a user message. */
       /** What a chat file's record and chat start with. */
@@ -850,12 +887,62 @@ export class StImports extends Context.Service<
         batch: Batch,
         speakers: ReadonlyMap<string, EntityId | null>
       ) =>
-        writer.StImportStage({
-          userId: user.id,
-          lease: session.id,
-          path: progress.path,
-          seq: progress.staged++,
-          batchJson: JSON.stringify(batchFields(session, batch, speakers))
+        Effect.gen(function* () {
+          let fields = batchFields(session, batch, speakers)
+          // Matching that cannot write runs on a reader. The final transaction certifies
+          // every reused slot with the check's stamp; a concurrent change refuses the file.
+          if (progress.target !== null && progress.prepared !== null) {
+            const prepared = progress.prepared
+            const planned = yield* reader.StImportPlanBatch({
+              userId: user.id,
+              recordId: progress.target.recordId,
+              branch: false,
+              parent: prepared.parent,
+              carry: prepared.carry,
+              matching: true,
+              strict: progress.branch,
+              messagesJson: fields.messagesJson,
+              firstIndex: 0,
+              detailLimit: 0,
+              overlayJson: null,
+              virtualPrefix: "virtual:prepare:",
+              track: false,
+              compact: true,
+              digest: ""
+            })
+            fields = {
+              ...fields,
+              cached: planned.unchangedSlots ?? [],
+              messagesJson: planned.compactJson ?? fields.messagesJson
+            }
+            progress.prepared =
+              planned.matching && planned.cursor !== null && !planned.cursor.virtual
+                ? { parent: planned.cursor, carry: planned.carry }
+                : null
+          }
+          const batchJson = JSON.stringify(fields)
+          // One file at a time, with a finite decoded-text budget even for an endless upload.
+          if (progress.stagedChars + batchJson.length > 256 * 1024 * 1024) {
+            session.report.issue(
+              progress.path,
+              "error",
+              "st.chat_too_large",
+              "This chat is too large to import. Not imported."
+            )
+            session.report.count(progress.countAs, "failed")
+            return yield* new StImportFailed({ reason: "This chat is too large to import. Not imported." })
+          }
+          // A lost reply may follow a successful stage commit; dropping the failed
+          // request must attempt cleanup in that case too.
+          const seq = progress.staged++
+          yield* writer.StImportStage({
+            userId: user.id,
+            lease: session.id,
+            path: progress.path,
+            seq,
+            batchJson
+          })
+          progress.stagedChars += batchJson.length
         })
 
       const writeBatch = (
@@ -1083,9 +1170,10 @@ export class StImports extends Context.Service<
        * chat is as the check read it (or as this run's own writes left it) and its messages
        * place as the check showed.
        */
-      const commitChat = (session: Session, user: User, progress: ChatProgress, exact: StPlanExpectFile) =>
+      const commitChat = (session: Session, user: User, progress: ChatProgress, exact: StPlanExpectFile | null) =>
         Effect.gen(function* () {
-          const stamp = session.stamps.get(exact.chatId)
+          const chatId = exact?.chatId ?? progress.into
+          const stamp = chatId === null ? null : session.stamps.get(chatId)
           if (stamp === undefined) return null
           // The finish names the slots of the file's messages by their places in it; the
           // transaction takes the slots they go to.
@@ -1099,7 +1187,7 @@ export class StImports extends Context.Service<
             userId: user.id,
             lease: session.id,
             path: progress.path,
-            chatId: exact.chatId as ChatId,
+            chatId: chatId as ChatId | null,
             stamp,
             claim:
               own === null
@@ -1108,10 +1196,7 @@ export class StImports extends Context.Service<
                     recordId: own.recordId,
                     ...(progress.claimParent === undefined ? {} : { parentRecordId: progress.claimParent })
                   },
-            start:
-              own === null && progress.fork !== null
-                ? { parentRecordId: progress.fork.parentRecordId, ...startFields(progress) }
-                : null,
+            start: own === null ? { ...progress.fork, ...startFields(progress) } : null,
             batches: progress.staged,
             advanceLeaf: progress.isNew,
             strict: progress.branch,
@@ -1135,7 +1220,10 @@ export class StImports extends Context.Service<
               stCurrent: progress.stCurrent
             },
             slotsAt: progress.summaries.filter((s) => s.index < progress.index).map((s) => s.index),
-            expect: exact.uncertain ? null : { counts: exact.counts, digest: exact.digest, keepsTip: exact.keepsTip }
+            expect:
+              exact === null || exact.uncertain
+                ? null
+                : { counts: exact.counts, digest: exact.digest, keepsTip: exact.keepsTip }
           })
           progress.staged = 0
           Object.assign(progress, committed.progress)
@@ -1144,7 +1232,7 @@ export class StImports extends Context.Service<
             if (slot === undefined) delete summary.slot
             else summary.slot = slot
           }
-          session.stamps.set(exact.chatId, committed.stamp)
+          session.stamps.set(committed.chatId, committed.stamp)
           const target: Target = { chatId: committed.chatId, recordId: committed.recordId }
           progress.target = target
           if (own === null) session.report.chat(progress.path, target.chatId)
@@ -1264,6 +1352,7 @@ export class StImports extends Context.Service<
           countAs: file.kind,
           modifiedAt: request.modifiedAt ?? session.importedAt,
           nextPart: 0,
+          touched: Date.now(),
           title: stChatTitle(
             file.name,
             mainChat,
@@ -1311,6 +1400,8 @@ export class StImports extends Context.Service<
           differing: 0,
           exact: null,
           staged: 0,
+          stagedChars: 0,
+          prepared: { parent: null, carry: null },
           claimParent: undefined
         }
       }
@@ -1393,10 +1484,18 @@ export class StImports extends Context.Service<
               begun.exact = expected ?? null
               begun.claimParent = parentRecordId
               begun.content = content
+              // Refuse an already stale target before staging or preparing all its
+              // messages. The final transaction rechecks this stamp for later races.
+              if (expected !== undefined && expected.target !== "greeting") {
+                const now = yield* reader.StImportPlanStamp({ userId: user.id })
+                if (now[expected.chatId] !== session.stamps.get(expected.chatId))
+                  return yield* refuse(session, user, path, file.kind, false)
+              }
             }
             session.chat = begun
           }
           const progress = session.chat
+          progress.touched = Date.now()
           progress.partHashes.push(part.sha256)
           progress.userTurns += part.userTurns
           if (progress.runOpen) {
@@ -1444,7 +1543,7 @@ export class StImports extends Context.Service<
             }
             progress.decided = true
           }
-          if (exact !== null) {
+          if (session.exact !== null) {
             for (const held of progress.pending.splice(0))
               yield* stageBatch(session, user, progress, held.batch, held.speakers)
             for (const batch of part.batches) yield* stageBatch(session, user, progress, batch, speakers)
@@ -1526,6 +1625,9 @@ export class StImports extends Context.Service<
               // request was interrupted, gives back what it held.
               Effect.onExit((exit) =>
                 Exit.isFailure(exit) && session.chat?.path === path ? dropChat(session) : Effect.void
+              ),
+              Effect.catchTag("StImportFailed", (error) =>
+                error.reason === undefined ? Effect.fail(error) : Effect.succeed(result("failed", error.reason))
               ),
               Effect.catchTags({
                 // Another run of this import took the file over, or finished it.

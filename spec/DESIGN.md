@@ -1,3 +1,5 @@
+**Built review-reimport2 (2026-11-14):** §1.4's checked re-imports stage new chats atomically as well, clean up partial and abandoned files, and certify reader-prepared unchanged prefixes in the final file transaction. The preview discloses new-chat estimates and unresolved card links. This implementation record is obsolete as a proposal; see ARCHITECTURE §13. No decision status changes.
+
 **Built fixes1114 (2026-11-14):** §7.1's Move to an own-turn note now normalizes whitespace only at the cut; Undo restores original bytes. Workshop Changes retain the story title independently of branch naming, and summary status text explains pending work without extra requests. These fixes are obsolete as implementation proposals; see ARCHITECTURE's fixes1114 record. No Proposed item is promoted to Decided.
 
 **Built 2026-11-13 (ownturn1):** §7.1’s own-turn card notes, movable preset marker and export notice are implemented and obsolete as implementation proposals (ARCHITECTURE §15). The [P] mechanisms remain marked Proposed; Suggest a split stays later.

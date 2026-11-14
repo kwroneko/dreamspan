@@ -153,6 +153,10 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `st-reimport-preview-${width}-${theme}`)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
 
+      await expect(preview).toContainText("New-chat counts are estimates.")
+      await expect(preview).toContainText(
+        "a file needing your choice may wait in the report or be listed under Not imported."
+      )
       // A change here after the check: the file is refused, nothing of it written, and the
       // report offers to check the folder again.
       await admin((api) =>
@@ -208,54 +212,99 @@ for (const width of [1440, 390])
       ).toBe(1)
     })
 
-test("a folder picked in the browser: the preview reads only the files it asks for", async ({ page }) => {
-  const main = "Bridge picked"
-  const root = mkdtempSync(join(base, "st-"))
-  write(root, {
-    "characters/Alice.png": card("Alice", "Synthetic greeting."),
-    [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...turns(10)])
-  })
-  const chatId = await admin((api) =>
-    Effect.gen(function* () {
-      const { importId } = yield* api.StartStPathImport({ path: root, prefix: `${USER}/` })
-      for (;;) {
-        if ((yield* api.GetStImport({ importId })).job.status !== "running") break
-        yield* Effect.sleep(50)
-      }
-      return (yield* api.ListChats({ limit: 100, before: null })).find((c) => c.title === main)!.id
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`${width} ${theme}: picked folders check, refuse and check again`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      const main = `Bridge picked ${width} ${theme}`
+      const root = mkdtempSync(join(base, "st-"))
+      write(root, {
+        "characters/Alice.png": card("Alice", "Synthetic greeting."),
+        [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...turns(10)])
+      })
+      const chatId = await admin((api) =>
+        Effect.gen(function* () {
+          const { importId } = yield* api.StartStPathImport({ path: root, prefix: `${USER}/` })
+          for (;;) {
+            if ((yield* api.GetStImport({ importId })).job.status !== "running") break
+            yield* Effect.sleep(50)
+          }
+          return (yield* api.ListChats({ limit: 100, before: null })).find((c) => c.title === main)!.id
+        })
+      )
+      write(root, { [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...later()]) })
+      const sent: Array<string> = []
+      page.on("request", (request) => {
+        if (request.url().includes("/st-import/plan-file"))
+          sent.push(new URL(request.url()).searchParams.get("path") ?? "")
+      })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/import/st`)
+      await page.getByRole("button", { name: "Import ST data again" }).click()
+      await page.getByLabel("Choose the folder").setInputFiles(join(root, "ST"))
+      const preview = page.getByRole("region", { name: "Chats already here" })
+      await expect(preview.getByText("Importing adds 2 messages and 1 swipe to them.")).toBeVisible()
+      // Only the chat file already here went to the server for the check; the card didn't.
+      expect(sent).toEqual([`chats/Alice/${main}.jsonl`])
+      // A second picked folder can have the same ST prefix; it still needs a new check.
+      const other = mkdtempSync(join(base, "st-other-"))
+      write(other, {
+        "characters/Alice.png": card("Alice", "Synthetic greeting."),
+        [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...turns(14)])
+      })
+      await page.getByLabel("Choose the folder").setInputFiles(join(other, "ST"))
+      await expect(preview.getByText("Importing adds 4 messages and 0 swipes to them.")).toBeVisible()
+      await page.getByRole("button", { name: "Import", exact: true }).click()
+      await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats")
+      const after = await admin((api) =>
+        Effect.map(
+          api.ReadPath({ chatId: chatId as ChatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 }),
+          (path) => path.entries.length
+        )
+      )
+      expect(after).toBe(14)
+
+      // The picked-folder refusal must offer a fresh pick, rather than a server path.
+      write(other, { [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...turns(16)]) })
+      await page.getByRole("button", { name: "Import ST data again" }).click()
+      await page.getByLabel("Choose the folder").setInputFiles(join(other, "ST"))
+      await expect(preview.getByText("Importing adds 2 messages and 0 swipes to them.")).toBeVisible()
+      await admin((api) =>
+        Effect.gen(function* () {
+          const path = yield* api.ReadPath({
+            chatId: chatId as ChatId,
+            leafSlotId: null,
+            range: { _tag: "Bottom" },
+            limit: 100
+          })
+          yield* api.SetMessageHidden({ slotId: path.entries[2]!.slotId, hidden: true })
+        })
+      )
+      await page.getByRole("button", { name: "Import", exact: true }).click()
+      const refused = page.getByRole("list", { name: "Not imported" })
+      await expect(refused).toContainText(`${main}.jsonl`)
+      await expectLayout(page, info, `st-reimport-picked-refused-${width}-${theme}`)
+      if (process.env.SCREENSHOT_DIR)
+        await page.screenshot({
+          path: resolve(process.env.SCREENSHOT_DIR, `st-reimport-picked-refused-${width}-${theme}.png`),
+          animations: "disabled"
+        })
+      await page.getByRole("button", { name: "Check again" }).click()
+      await expect(page.getByLabel("Choose the folder")).toBeVisible()
+      await page.getByLabel("Choose the folder").setInputFiles(join(other, "ST"))
+      await expect(preview.getByText("Importing adds 2 messages and 0 swipes to them.")).toBeVisible()
+      await page.getByRole("button", { name: "Import", exact: true }).click()
+      await expect(refused).toHaveCount(0)
+      const final = await admin((api) =>
+        Effect.map(
+          api.ReadPath({ chatId: chatId as ChatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 }),
+          (path) => path.entries.length
+        )
+      )
+      expect(final).toBe(16)
     })
-  )
-  write(root, { [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...later()]) })
-  const sent: Array<string> = []
-  page.on("request", (request) => {
-    if (request.url().includes("/st-import/plan-file")) sent.push(new URL(request.url()).searchParams.get("path") ?? "")
-  })
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/import/st`)
-  await page.getByRole("button", { name: "Import ST data again" }).click()
-  await page.getByLabel("Choose the folder").setInputFiles(join(root, "ST"))
-  const preview = page.getByRole("region", { name: "Chats already here" })
-  await expect(preview.getByText("Importing adds 2 messages and 1 swipe to them.")).toBeVisible()
-  // Only the chat file already here went to the server for the check; the card didn't.
-  expect(sent).toEqual([`chats/Alice/${main}.jsonl`])
-  // A second picked folder can have the same ST prefix; it still needs a new check.
-  const other = mkdtempSync(join(base, "st-other-"))
-  write(other, {
-    "characters/Alice.png": card("Alice", "Synthetic greeting."),
-    [`chats/Alice/${main}.jsonl`]: jsonl([header({}), ...turns(14)])
-  })
-  await page.getByLabel("Choose the folder").setInputFiles(join(other, "ST"))
-  await expect(preview.getByText("Importing adds 4 messages and 0 swipes to them.")).toBeVisible()
-  await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats")
-  const after = await admin((api) =>
-    Effect.map(
-      api.ReadPath({ chatId: chatId as ChatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 }),
-      (path) => path.entries.length
-    )
-  )
-  expect(after).toBe(14)
-})
 
 test("untrusted message text stays literal in preview details", async ({ page }) => {
   const main = "Literal preview"

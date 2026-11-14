@@ -518,9 +518,13 @@ export const makeWriteHandlers = (bin: Bin) =>
               if (content !== row.content)
                 yield* sql`UPDATE version_history SET images_json = ${before}
                   WHERE id = (SELECT max(id) FROM version_history WHERE version_id = ${versionId})`
-              else
+              else {
                 yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
                   VALUES (${versionId}, ${row.content}, ${at}, ${before})`
+                // The import matcher reads whether this history exists, even when text did
+                // not change. Certify image-only amends in its whole-chat snapshot too.
+                yield* sql`UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = ${slot.chat_id}`
+              }
               yield* sql`DELETE FROM version_attachments WHERE version_id = ${versionId}`
               yield* attach(versionId)
             }
