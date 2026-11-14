@@ -3,17 +3,16 @@
 // playing Tobin; and "Docks", the source, with Kai and Lio. Helpers to write messages, marks and
 // notes, to merge, and to capture the exact request of a reply by any character at any fork's
 // tip. Synthetic data only.
-import { DatabaseSync } from "node:sqlite"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { MergeTimelines } from "@rp/shared/mergeApi.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../../src/assembler/types.ts"
-import { databaseFile } from "../../src/db/connection.ts"
 import { Reader, Writer } from "../../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./config.ts"
 import { cardDoc } from "./docs.ts"
+import { fixtureSql } from "./lcmFixtures.ts"
 import { generateReply } from "./generation.ts"
 import { completionChunks, sse, startMockProvider } from "./mockProvider.ts"
 
@@ -197,25 +196,34 @@ const story = (dataDir: string) =>
         return JSON.parse(built.snapshot) as ContextSnapshot
       })
     /** A join's stored row, read beside the server on the database file. */
-    const stored = (slotId: SlotId) => {
-      const db = new DatabaseSync(databaseFile(dataDir), { readOnly: true })
-      try {
-        return db
-          .prepare("SELECT timelines, split_id, stretch_before_slot_id, cast_json FROM chat_merges WHERE slot_id = ?")
-          .get(slotId) as {
-          timelines: string
-          split_id: string | null
-          stretch_before_slot_id: string | null
-          cast_json: string
-        }
-      } finally {
-        db.close()
-      }
-    }
+    const stored = (slotId: SlotId) =>
+      Effect.map(
+        fixtureSql(
+          dataDir,
+          [
+            {
+              sql: "SELECT timelines, split_id, stretch_before_slot_id, cast_json FROM chat_merges WHERE slot_id = ?",
+              params: [slotId]
+            }
+          ],
+          { readOnly: true }
+        ),
+        (rows) =>
+          rows[0]![0] as {
+            timelines: string
+            split_id: string | null
+            stretch_before_slot_id: string | null
+            cast_json: string
+          }
+      )
     // Nara narrates the Ledger: she reads everything (CHARACTER-CONTEXT §6, today's default).
     yield* mark(ledger, { key: "cast.role", value: { entity: nara, role: "narrator" } })
     return {
       api,
+      dataDir,
+      mock,
+      model: made.model,
+      events: made.events,
       reader,
       writer,
       userId,

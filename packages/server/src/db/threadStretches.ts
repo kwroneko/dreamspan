@@ -46,7 +46,9 @@ export const threadStretches = (
       stretch_before_slot_id: string | null
       own: string | null
     }>`
-      SELECT j.id, j.chain_id, j.depth, m.stretch_before_slot_id,
+      SELECT j.id, j.chain_id, j.depth,
+        CASE WHEN m.split_id IS NULL AND m.source_chat_id IS NOT m.chat_id
+          THEN NULL ELSE m.stretch_before_slot_id END AS stretch_before_slot_id,
         CASE WHEN m.split_id IS NULL THEN (SELECT json_group_array(c.value ->> 'entity') FROM json_each(m.cast_json) c
           WHERE c.value ->> 'from' <> 'source') END AS own
       FROM chat_merges m JOIN slots j ON j.id = m.slot_id
@@ -76,6 +78,8 @@ export const threadStretches = (
       if (to === null || to > end) continue
       // This chat's own characters skip an ordinary merge's destination part: only its join applies.
       const own = viewers && join.own !== null ? (JSON.parse(join.own) as Array<string>) : []
+      // Older ordinary merges stored the layout's span boundary here too. A different
+      // chat has no common prefix, even for those records (or after its source is purged).
       const from = own.some((id) => viewers!.includes(id))
         ? to
         : join.stretch_before_slot_id === null

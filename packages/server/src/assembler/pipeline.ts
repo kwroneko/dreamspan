@@ -262,6 +262,11 @@ export interface Scripted {
   readonly applied?: ReadonlyArray<ScriptRef>
 }
 
+/** Layouts can expand one stored version into several independently scripted pieces. */
+export const projectedScriptKey = (entry: Pick<ProjectedEntry, "piece">) => `projected:${entry.piece}`
+export const projectedScript = (scripted: ReadonlyMap<string, Scripted> | undefined, entry: ProjectedEntry) =>
+  scripted?.get(projectedScriptKey(entry)) ?? scripted?.get(entry.entry.versionId)
+
 /** A message of the path with its role and name in this context. */
 export interface ProjectedEntry {
   readonly entry: HistoryEntry

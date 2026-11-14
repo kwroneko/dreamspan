@@ -157,6 +157,8 @@ for (const [width, theme] of [
 
 for (const [width, theme] of [
   [1440, "light"],
+  [1440, "dark"],
+  [390, "light"],
   [390, "dark"]
 ] as const)
   test(`merging another chat with each character keeping its own past (${width} ${theme})`, async ({ page }) => {
@@ -185,7 +187,12 @@ for (const [width, theme] of [
     await shoot(page, `own-past-dialog-${width}-${theme}`)
     await dialog(page).getByRole("button", { name: "Merge", exact: true }).click()
     await expect(dialog(page)).toHaveCount(0)
-    await expect(page.getByRole("article", { name: `Merged chat “Docks ${suffix}”`, exact: true })).toBeVisible()
+    const row = page.locator("article[data-merge]").last()
+    await expect(row).toBeVisible()
+    // One user click must survive the merge's pending state/metadata updates.
+    await row.getByRole("button", { name: /^Merged “/ }).click()
+    await expect(row.getByRole("list", { name: /^Messages of / })).toBeVisible()
+    await expect(row.getByRole("button", { name: /^Merged “/ })).toHaveAttribute("aria-expanded", "true")
     const stored = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.ReadPath({ chatId: home.chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 50 })
     )
@@ -193,8 +200,10 @@ for (const [width, theme] of [
   })
 
 for (const [width, theme] of [
+  [1440, "light"],
   [1440, "dark"],
-  [390, "light"]
+  [390, "light"],
+  [390, "dark"]
 ] as const)
   test(`merging another chat brings only the notes ticked (${width} ${theme})`, async ({ page }) => {
     const suffix = `notes-${width}-${theme}`
@@ -203,7 +212,7 @@ for (const [width, theme] of [
       Effect.gen(function* () {
         for (const [title, content] of [
           ["Harbor curfew", "No boats leave after the second bell."],
-          ["Gull omens", "Three gulls on the crane mean a storm."]
+          ["Gull omens", '<img src=x onerror="globalThis.mergeNoteInjected=true"> Three gulls mean a storm.']
         ] as const) {
           const note = yield* api.CreateChatNote({ chatId: away.chatId, forkId: away.forkId, title, content })
           yield* api.ChangeCast({
@@ -225,6 +234,11 @@ for (const [width, theme] of [
     await expect(curfew).not.toBeChecked()
     await expect(omens).not.toBeChecked()
     await expect(notes).toContainText("Every reply reads it, this chat's characters' too.")
+    await expect(notes).toContainText('<img src=x onerror="globalThis.mergeNoteInjected=true">')
+    await expect(notes.locator("img, script")).toHaveCount(0)
+    expect(
+      await page.evaluate(() => (window as unknown as { mergeNoteInjected?: boolean }).mergeNoteInjected)
+    ).toBeUndefined()
     await expect(notes).toContainText("“No boats leave after the second bell.”")
     // Its hint is the tooltip on hover and focus, and the box's description.
     await expect(curfew).toHaveAccessibleDescription(
@@ -232,6 +246,14 @@ for (const [width, theme] of [
     )
     await curfew.click()
     await expect(curfew).toBeChecked()
+    await dialog(page)
+      .getByRole("radio", { name: /^Each character keeps its own chat's past/ })
+      .click()
+    await page.reload()
+    await expect(dialog(page)).toBeVisible()
+    await expect(curfew).toBeChecked()
+    await expect(omens).not.toBeChecked()
+    await expect(dialog(page).getByRole("radio", { name: /^Each character keeps its own chat's past/ })).toBeChecked()
     await shoot(page, `notes-dialog-${width}-${theme}`)
     await dialog(page).getByRole("button", { name: "Merge", exact: true }).click()
     await expect(dialog(page)).toHaveCount(0)

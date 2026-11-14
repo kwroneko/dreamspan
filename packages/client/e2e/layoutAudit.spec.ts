@@ -1231,13 +1231,9 @@ test.describe("synthetic library and every app surface", () => {
           await audit("chatmerge-dialog", '[role="dialog"]')
           await dialog.getByRole("button", { name: "Merge", exact: true }).click()
           await expect(dialog).toHaveCount(0)
-          const row = page.locator("article[data-merge]").last()
-          // The row can re-render as the merge's events arrive; open it once it has settled.
-          await expect(async () => {
-            const toggle = row.getByRole("button", { name: /^Merged “/ })
-            if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
-            await expect(row.getByRole("list", { name: /^Messages of / })).toBeVisible({ timeout: 2000 })
-          }).toPass({ timeout: 15000 })
+          const row = page.getByRole("article", { name: `Merged chat “${source.title}”`, exact: true })
+          await row.getByRole("button", { name: /^Merged “/ }).click()
+          await expect(row.getByRole("list", { name: /^Messages of / })).toBeVisible()
           await audit("chatmerge-timeline", "article[data-merge]")
           await openPanel(page, "This chat")
           await expect(page.getByRole("radiogroup", { name: "Merged chats" })).toBeVisible()

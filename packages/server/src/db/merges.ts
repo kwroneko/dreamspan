@@ -26,6 +26,7 @@ import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { viewedJoin } from "../assembler/mergeKnowledge.ts"
+import { identitiesOf } from "../assembler/knowledge.ts"
 import { leftOutNote, mergedRowText, summaryRowName } from "../assembler/merges.ts"
 import { estimateTokens } from "../assembler/st.ts"
 import type { Bin } from "./bin.ts"
@@ -139,22 +140,25 @@ interface MergePlan {
   readonly sourceSide: ReadonlyArray<string>
   /** Another chat's notes it can bring (`ChatMergePreview.notes`); none for a branch or thread of this chat. */
   readonly notes: ReadonlyArray<NoteToBring>
+  /** Destination characters with evidence of presence, rather than only an unplayed cast join. */
+  readonly destReaders: ReadonlyArray<string>
 }
 
 /** The chat's state at `leaf` on `fork`'s path, its purged references left out. */
-const stateAt = (sql: SqlClient.SqlClient, chatId: string, leaf: string | null, fork: string) =>
+const eventsAt = (sql: SqlClient.SqlClient, chatId: string, leaf: string | null, fork: string) =>
   Effect.gen(function* () {
     const rows = yield* stateEventsThrough(sql, chatId as ChatId, leaf as SlotId | null, fork)
-    return foldState(
-      yield* withoutPurged(
-        sql,
-        rows.map((e) => ({
-          scope: e.scope,
-          data: { key: e.key, value: JSON.parse(e.value_json) }
-        })) as Array<FoldableEvent>
-      )
+    return yield* withoutPurged(
+      sql,
+      rows.map((e) => ({
+        scope: e.scope,
+        data: { key: e.key, value: JSON.parse(e.value_json) }
+      })) as Array<FoldableEvent>
     )
   })
+
+const stateAt = (sql: SqlClient.SqlClient, chatId: string, leaf: string | null, fork: string) =>
+  Effect.map(eventsAt(sql, chatId, leaf, fork), foldState)
 
 const refused = (message: string) => new MergeRefused({ message })
 
@@ -494,14 +498,36 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
     const transcript = [...notes, ...blocks].join("\n\n")
 
     // The cast: the union of both at the merge point (DESIGN §3.3 [D]).
-    const destCast = yield* castAt(sql, request.chatId, atId, fork.id)
+    const destEvents = yield* eventsAt(sql, request.chatId, atId, fork.id)
+    const destState = foldState(destEvents)
+    const destCast = destState.participants
+    const identities = identitiesOf(destEvents)
+    // A source character silently added to this cast has not read this chat yet. Presence
+    // comes from retained authored versions on this path, including previous card identities,
+    // never from the current cast alone. An unselected swipe still records participation.
+    const candidates = sameChat ? [] : sourceCast.filter((id) => destCast.includes(id))
+    const evidence = [...new Set(candidates.flatMap((id) => identities.get(id) ?? [id]))]
+    const present = evidence.length
+      ? new Set(
+          (yield* sql<{ entity: string }>`
+          ${displaySlots(sql, pieces, 0, atPos)}
+          SELECT DISTINCT p.entity_id AS entity FROM display_slots path
+          JOIN slots s ON s.id = path.id
+          JOIN versions v ON v.slot_id = s.id AND v.purged_at IS NULL
+          JOIN version_participants p ON p.version_id = v.id
+          WHERE v.origin <> 'merge' AND v.status <> 'generating' AND v.status <> 'failed'
+            AND p.entity_id IN ${sql.in(evidence)}`).map((r) => r.entity)
+        )
+      : new Set<string>()
+    const destReaders = destCast.filter(
+      (id) => !candidates.includes(id) || (identities.get(id) ?? [id]).some((alias) => present.has(alias))
+    )
     const union = [...new Set([...destCast, ...sourceCast])]
     const added = sourceCast.filter((id) => !destCast.includes(id))
     const castCards = new Map(
       (yield* loadCards(sql, userId, union as Array<EntityId>)).map((c) => [c.card.entityId as string, c.card])
     )
     // A join's characters away here are back from the join on, and the templates name only those in it.
-    const destState = yield* stateAt(sql, request.chatId, atId, fork.id)
     const sourceAway = splitId === null ? [] : awayAt(yield* stateAt(sql, source.chat_id, sourceEnd, source.id))
     const inThread = sourceCast.filter((id) => !sourceAway.includes(id))
     const destAway = awayAt(destState)
@@ -541,7 +567,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
           readable: !(seen.rows.length === 0 && seen.partial),
           // Another chat kept separate: which chat's past the character keeps (db/threadStretches.ts).
           ...(splitId === null && choosesTimelines
-            ? { from: destCast.includes(id) ? (sourceCast.includes(id) ? "both" : "here") : "merged" }
+            ? { from: destReaders.includes(id) ? (sourceCast.includes(id) ? "both" : "here") : "merged" }
             : {})
         } satisfies MergeView)
       }
@@ -623,6 +649,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
           source.tip_slot_id,
           sourceEnd,
           previewFields,
+          bringable,
           rows
         ])
       )
@@ -646,6 +673,7 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       transcript,
       union,
       destCast,
+      destReaders,
       sourceCast,
       added,
       castNames,
@@ -805,6 +833,16 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
         // The ticked notes, on from the join: a chat note as this chat's new copy, a card's
         // note itself (its moved-passage partner switched with it, graphWrites.ts).
         for (const note of bring) {
+          for (const binding of note.bindings)
+            yield* graph.insertStateEvent(
+              userId,
+              chatId,
+              slotId,
+              null,
+              null,
+              { key: "note.binding", value: { note: binding.note, revision: binding.revision } },
+              plan.fork.id
+            )
           const entity = note.copy === null ? note.entry.id : yield* insertCopiedNote(sql, userId, note.copy, now)
           yield* graph.insertStateEvent(
             userId,
@@ -817,7 +855,7 @@ export const makeMergeWriteHandlers = (bin: Bin) =>
           )
         }
         const mergeId = uuidv7()
-        const inDestination = new Set(plan.destCast)
+        const inDestination = new Set(plan.destReaders)
         const inSource = new Set(plan.sourceSide)
         yield* sql`INSERT INTO chat_merges ${sql.insert({
           id: mergeId,

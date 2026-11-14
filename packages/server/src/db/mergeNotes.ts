@@ -6,11 +6,12 @@
 // The preview and the write read the same list (`mergeNotes`), inside the writer's transaction
 // for the write.
 import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import { readReplaceTarget, targetCard } from "@rp/shared/docs/note.ts"
 import { NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { validateDoc } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import type { Doc } from "@rp/shared/library.ts"
+import type { Doc, RevisionId } from "@rp/shared/library.ts"
 import type { MergeNote } from "@rp/shared/mergeApi.ts"
 import { type FoldableEvent, foldState, noteSwitches } from "@rp/shared/state.ts"
 import { Effect, Predicate } from "effect"
@@ -26,6 +27,13 @@ export interface NoteToBring {
   readonly entry: MergeNote
   /** A chat note's copy as it would be stored here; null for a card's note (switched on only). */
   readonly copy: Doc | null
+  /** The source revisions of card notes, frozen with the preview and bound at the join. */
+  readonly bindings: ReadonlyArray<{
+    readonly note: EntityId
+    readonly revision: RevisionId
+    readonly doc: Doc
+    readonly content: string
+  }>
 }
 
 const EXCERPT = 160
@@ -58,18 +66,38 @@ export const mergeNotes = Effect.fnUntraced(function* (
     source.forkId
   )
   const destRows = yield* stateEventRowsThrough(sql, dest.chatId as ChatId, dest.at as SlotId, dest.forkId)
-  const heads = (yield* sql<{ entity: string; doc_json: string }>`
-    SELECT e.id AS entity, h.doc_json FROM entities e JOIN entity_refs r ON r.entity_id = e.id
+  const heads = (yield* sql<{ entity: string; revision: RevisionId; doc_json: string }>`
+    SELECT e.id AS entity, h.id AS revision, h.doc_json FROM entities e JOIN entity_refs r ON r.entity_id = e.id
     JOIN entity_revisions h ON h.id = r.head_revision_id
     WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
       AND (json_extract(h.doc_json, '$.owner.chat') = ${source.chatId}
         OR json_extract(h.doc_json, '$.owner.card') IN ${sql.in(sourceCast.length ? [...sourceCast] : [""])})
-    ORDER BY e.id`).map((row) => ({ entity: row.entity, doc: JSON.parse(row.doc_json) as Doc }))
+    ORDER BY e.id`).map((row) => ({ entity: row.entity, revision: row.revision, doc: JSON.parse(row.doc_json) as Doc }))
   if (heads.length === 0) return [] as Array<NoteToBring>
   const sourceEvents = toEvents(sourceRows)
-  const onThere = noteSwitches(sourceEvents, heads)
-  const onHere = noteSwitches(toEvents(destRows), heads)
-  const bound = foldState(sourceEvents).noteRevisions
+  const destEvents = toEvents(destRows)
+  const resolve = Effect.fnUntraced(function* (events: ReadonlyArray<FoldableEvent>) {
+    const bound = foldState(events).noteRevisions
+    const ids = [...new Set(Object.values(bound))]
+    const revisions = new Map(
+      (ids.length
+        ? yield* sql<{ entity_id: string; id: RevisionId; doc_json: string }>`SELECT entity_id, id, doc_json
+          FROM entity_revisions WHERE id IN ${sql.in(ids)}`
+        : []
+      ).map((r) => [r.id as string, r])
+    )
+    return heads.map((head) => {
+      const pinned = revisions.get(bound[head.entity] ?? "")
+      return pinned?.entity_id === head.entity
+        ? { entity: head.entity, revision: pinned.id, doc: JSON.parse(pinned.doc_json) as Doc }
+        : head
+    })
+  })
+  const there = yield* resolve(sourceEvents)
+  const here = yield* resolve(destEvents)
+  const onThere = noteSwitches(sourceEvents, there)
+  const onHere = noteSwitches(destEvents, here)
+  const hereDocs = new Map(here.map((n) => [n.entity, n.doc]))
   // A note an agent's reply wrote exists only where that reply is shown (agentNotes.ts).
   const byAgent = yield* agentWrittenNotes(
     sql,
@@ -77,7 +105,7 @@ export const mergeNotes = Effect.fnUntraced(function* (
   )
   const named = notesNamed(sourceRows)
   const cardIds = new Set<string>()
-  for (const { doc } of heads) {
+  for (const { doc } of there) {
     if (typeof ownerOf(doc).card === "string") cardIds.add(ownerOf(doc).card as string)
     const condition = conditionOf(doc)
     if (Array.isArray(condition.cards)) for (const id of condition.cards) cardIds.add(String(id))
@@ -98,23 +126,18 @@ export const mergeNotes = Effect.fnUntraced(function* (
       : typeof condition.card === "string"
         ? [condition.card]
         : []
-    if (condition.when === "own_turn") return { when: "own_turn", names: [] }
+    const placement = doc.placement as { mode?: string; section?: string } | undefined
+    if (condition.when === "own_turn" || (placement?.mode === "section" && placement.section === "own_turn"))
+      return { when: "own_turn", names: [] }
     if (condition.when === "turn" || condition.when === "not_muted")
       return { when: condition.when, names: cards.map(nameOf) }
     return { when: "always", names: [] }
   }
 
   const chatNotes: Array<NoteToBring> = []
-  for (const { entity, doc: head } of heads) {
-    if (ownerOf(head).chat !== source.chatId || onThere.get(entity) !== true) continue
+  for (const { entity, doc } of there) {
+    if (ownerOf(doc).chat !== source.chatId || onThere.get(entity) !== true) continue
     if (byAgent.has(entity) && !named.has(entity)) continue
-    // Its text as the source's merged end shows it: the branch's own save, else the note's first.
-    const revision = bound[entity]
-    const [atEnd] = revision
-      ? yield* sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions
-          WHERE id = ${revision} AND entity_id = ${entity}`
-      : []
-    const doc = atEnd ? (JSON.parse(atEnd.doc_json) as Doc) : head
     const linked = typeof doc.link === "string" ? yield* sharedNote(sql, userId, doc.link) : null
     const content = linked?.content ?? (typeof doc.content === "string" ? doc.content : "")
     // The copy is this chat's own: no link, no source messages, no import identity.
@@ -136,15 +159,16 @@ export const mergeNotes = Effect.fnUntraced(function* (
           slotId: null
         })
       },
-      copy
+      copy,
+      bindings: []
     })
   }
 
   // Card notes: on in the source (its switch, else the card's default) and off here.
   const on = (switches: ReadonlyMap<string, boolean>, entity: string, doc: Doc) =>
     switches.get(entity) ?? doc.on_by_default === true
-  const groups = new Map<string, Array<{ entity: string; doc: Doc }>>()
-  for (const note of heads) {
+  const groups = new Map<string, Array<{ entity: string; revision: RevisionId; doc: Doc }>>()
+  for (const note of there) {
     const card = ownerOf(note.doc).card
     if (typeof card !== "string" || !sourceCast.includes(card)) continue
     const key = typeof note.doc.move_group === "string" ? JSON.stringify([card, note.doc.move_group]) : note.entity
@@ -152,12 +176,47 @@ export const mergeNotes = Effect.fnUntraced(function* (
   }
   const cardNotes: Array<NoteToBring> = []
   for (const members of groups.values()) {
-    if (!members.some((m) => on(onThere, m.entity, m.doc)) || members.some((m) => on(onHere, m.entity, m.doc))) continue
+    if (
+      !members.some((m) => on(onThere, m.entity, m.doc)) ||
+      members.some((m) => on(onHere, m.entity, hereDocs.get(m.entity) ?? m.doc))
+    )
+      continue
     // A moved passage is shown by its own-turn part; what's left of the field goes with it.
     const moved = members.length > 1 || typeof members[0]!.doc.move_group === "string"
     const shown = members.find((m) => m.doc.replaces === undefined) ?? members[0]!
     const card = ownerOf(shown.doc).card as string
-    const content = typeof shown.doc.content === "string" ? shown.doc.content : ""
+    const bindings = yield* Effect.forEach(members, (m) =>
+      Effect.gen(function* () {
+        const linked = typeof m.doc.link === "string" ? yield* sharedNote(sql, userId, m.doc.link) : null
+        return {
+          note: m.entity as EntityId,
+          revision: m.revision,
+          doc: m.doc,
+          content: linked?.content ?? (typeof m.doc.content === "string" ? m.doc.content : "")
+        }
+      })
+    )
+    const content = bindings.find((m) => m.note === shown.entity)!.content
+    // A newly joined card may collide with a target this chat already reserved. Resolve
+    // its implicit owner before checking, because it isn't in the destination cast yet.
+    let conflict: string | null = null
+    for (const member of members) {
+      const target = readReplaceTarget(member.doc.replaces)
+      if (target === null) continue
+      const normalized =
+        target.kind === "card_field" ? { ...target, card: targetCard(target, card)! as EntityId } : target
+      conflict ??= yield* replacementConflict(
+        sql,
+        userId,
+        member.entity,
+        {
+          ...member.doc,
+          owner: { chat: dest.chatId },
+          replaces: normalized
+        },
+        { chatId: dest.chatId as ChatId, forkId: dest.forkId as ForkId, slotId: null }
+      )
+    }
     cardNotes.push({
       entry: {
         id: shown.entity,
@@ -167,9 +226,10 @@ export const mergeNotes = Effect.fnUntraced(function* (
         card: nameOf(card),
         ...(moved ? { when: "moved" as const, names: [] } : readers(shown.doc)),
         excerpt: excerptOf(content),
-        conflict: null
+        conflict
       },
-      copy: null
+      copy: null,
+      bindings
     })
   }
   const byTitle = (a: NoteToBring, b: NoteToBring) =>

@@ -104,7 +104,7 @@ describe("merging another chat with separate origins (merge2)", () => {
           )
 
           const { slotId: J } = yield* t.merge(t.ledger, docks, "separate")
-          const row = t.stored(J)
+          const row = yield* t.stored(J)
           assert.strictEqual(row.timelines, "separate")
           assert.isNull(row.split_id)
           assert.isNull(row.stretch_before_slot_id, "another chat's characters lived none of the Ledger")

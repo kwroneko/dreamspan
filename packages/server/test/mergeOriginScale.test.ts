@@ -107,6 +107,17 @@ it.live(
       const started = performance.now()
       const ledger = yield* build("Ledger", mira, "HOME", 3_000)
       const pier = yield* build("Pier", kai, "DOCKS", 3_000)
+      // Overlap the casts so the preview/write must check destination participation at
+      // scale (including its many retained swipes). Mira never read Pier's earlier rows.
+      yield* h.writer.AddStateEvent({
+        userId: h.userId,
+        chatId: pier.chatId,
+        forkId: pier.forkId,
+        slotId: pier.tip,
+        versionId: null,
+        scope: null,
+        data: { key: "participant.join", value: { entity: mira } }
+      })
       const fixtureMs = performance.now() - started
       const [counts] = yield* fixtureSql(
         config.dataDir,
@@ -209,6 +220,7 @@ it.live(
       const seen = yield* time("preview separate", 3, h.reader.PreviewChatMerge(request(ledger.forkId, "separate")))
       assert.strictEqual(seen.messages, 3_000)
       assert.strictEqual(seen.views?.find((v) => v.entity === kai)?.from, "merged")
+      assert.strictEqual(seen.views?.find((v) => v.entity === mira)?.from, "both")
       const made = yield* time(
         "merge separate",
         1,

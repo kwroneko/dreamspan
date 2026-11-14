@@ -61,6 +61,8 @@ import { builtinScriptSources, type ScriptSource } from "./scriptSources.ts"
 import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import type { ScriptRef } from "@rp/shared/regexScripts.ts"
 import {
+  projectedScript,
+  projectedScriptKey,
   type Assembly,
   type AssemblerStage,
   AssemblySources,
@@ -708,7 +710,7 @@ const loreScanStage = sync("lore-scan", (assembly) => {
   const projected = need(assembly, "projected")
   const scripted = new Map(need(assembly, "scripted"))
   const rest = projected.flatMap((p, i) =>
-    scripted.get(p.entry.versionId)?.depth === projected.length - 1 - i ? [] : [i]
+    projectedScript(scripted, p)?.depth === projected.length - 1 - i ? [] : [i]
   )
   const results = applyScripts(
     assembly,
@@ -720,7 +722,7 @@ const loreScanStage = sync("lore-scan", (assembly) => {
     }))
   )
   rest.forEach((index, i) =>
-    scripted.set(projected[index]!.entry.versionId, { ...results[i]!, depth: projected.length - 1 - index })
+    scripted.set(projectedScriptKey(projected[index]!), { ...results[i]!, depth: projected.length - 1 - index })
   )
   assembly.scripted = scripted
 })
@@ -2010,7 +2012,7 @@ const composeStage = sync("compose", (assembly) => {
   const scripted: Array<
     { readonly text: string; readonly volatile: boolean; readonly applied?: ReadonlyArray<ScriptRef> } | undefined
   > = projected.map((p, i) =>
-    read.get(p.entry.versionId)?.depth === projected.length - 1 - i ? read.get(p.entry.versionId) : undefined
+    projectedScript(read, p)?.depth === projected.length - 1 - i ? projectedScript(read, p) : undefined
   )
   const rest = scripted.flatMap((s, i) => (s ? [] : [i]))
   const ran = applyScripts(
@@ -2920,7 +2922,7 @@ const htmlDepthStage = sync("context.htmlDepth", (assembly) => {
   const scripted = new Map(need(assembly, "scripted"))
   const depthOf = (i: number) => projected.length - 1 - i
   // Templates the history stage didn't run the scripts on run here, as lore scanning does.
-  const rest = projected.flatMap((p, i) => (scripted.get(p.entry.versionId)?.depth === depthOf(i) ? [] : [i]))
+  const rest = projected.flatMap((p, i) => (projectedScript(scripted, p)?.depth === depthOf(i) ? [] : [i]))
   const ran = applyScripts(
     assembly,
     need(assembly, "scripts"),
@@ -2930,12 +2932,12 @@ const htmlDepthStage = sync("context.htmlDepth", (assembly) => {
       depth: depthOf(i)
     }))
   )
-  rest.forEach((index, i) => scripted.set(projected[index]!.entry.versionId, { ...ran[i]!, depth: depthOf(index) }))
+  rest.forEach((index, i) => scripted.set(projectedScriptKey(projected[index]!), { ...ran[i]!, depth: depthOf(index) }))
   projected.forEach((p, i) => {
-    const read = scripted.get(p.entry.versionId)!
+    const read = projectedScript(scripted, p)!
     const form = htmlDepthForm(read.text, mode)
     if (form === read.text) return
-    scripted.set(p.entry.versionId, depthOf(i) >= n ? { ...read, text: form } : { ...read, volatile: true })
+    scripted.set(projectedScriptKey(p), depthOf(i) >= n ? { ...read, text: form } : { ...read, volatile: true })
   })
   assembly.scripted = scripted
 })

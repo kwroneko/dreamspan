@@ -14,6 +14,8 @@ import {
   type MergeNote,
   type MergeTimelines
 } from "@rp/shared/mergeApi.ts"
+import { usePlaceParam } from "../../usePlaceParam.ts"
+import { useChatPlaceKey } from "./chatPlace.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type ComponentType, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
@@ -251,10 +253,49 @@ function SourcePicker({
   )
 }
 
+interface MergeSetup {
+  sources?: ReadonlyArray<MergeSource>
+  at?: SlotId | null
+  start?: SlotId | null
+  includeLeftOut?: boolean
+  timelines?: MergeTimelines
+  notes?: ReadonlyArray<string>
+  reader?: EntityId | null
+}
+
+const readSetup = (raw: string): MergeSetup => {
+  try {
+    const value = JSON.parse(raw) as MergeSetup
+    if (!value || typeof value !== "object") return {}
+    return {
+      sources: Array.isArray(value.sources)
+        ? value.sources
+            .filter(
+              (s) =>
+                s &&
+                typeof s.chat === "string" &&
+                typeof s.listed === "string" &&
+                typeof s.fork === "string" &&
+                typeof s.title === "string"
+            )
+            .slice(0, 32)
+        : [],
+      ...(typeof value.at === "string" || value.at === null ? { at: value.at } : {}),
+      ...(typeof value.start === "string" || value.start === null ? { start: value.start } : {}),
+      includeLeftOut: value.includeLeftOut === true,
+      timelines: value.timelines === "separate" ? "separate" : "together",
+      notes: Array.isArray(value.notes) ? value.notes.filter((n) => typeof n === "string").slice(0, 500) : [],
+      reader: typeof value.reader === "string" ? value.reader : null
+    }
+  } catch {
+    return {}
+  }
+}
+
 export function MergeChatDialog({
   session,
   at: initialAt,
-  onClose,
+  onClose: finishClose,
   threads: ThreadPicker
 }: {
   session: ChatSession
@@ -268,14 +309,27 @@ export function MergeChatDialog({
   const { cast } = useCast()
   const navigate = useNavigate()
   const [forkId] = useState(() => view.forkId ?? view.chat?.currentForkId ?? null)
-  const [sources, setSources] = useState<ReadonlyArray<MergeSource>>([])
+  const [saved, setSaved] = usePlaceParam(useChatPlaceKey("mergeSetup"), "")
+  const setup = useMemo(() => readSetup(saved), [saved])
+  const changeSetup = (next: Partial<MergeSetup>) => setSaved(JSON.stringify({ ...setup, ...next }), true)
+  const onClose = () => {
+    setSaved("", true)
+    finishClose()
+  }
+  const sourceKey = JSON.stringify(setup.sources ?? [])
+  const sources = useMemo(() => JSON.parse(sourceKey) as ReadonlyArray<MergeSource>, [sourceKey])
+  const setSources = (next: ReadonlyArray<MergeSource>) => changeSetup({ sources: next })
   const source = sources[0] ?? null
   const joining = ThreadPicker !== undefined
-  const [at, setAt] = useState<SlotId | null>(initialAt)
-  const [start, setStart] = useState<SlotId | null>(null)
-  const [includeLeftOut, setIncludeLeftOut] = useState(false)
+  const at = setup.at === undefined ? initialAt : setup.at
+  const setAt = (next: SlotId | null) => changeSetup({ at: next })
+  const start = setup.start ?? null
+  const setStart = (next: SlotId | null) => changeSetup({ start: next })
+  const includeLeftOut = setup.includeLeftOut ?? false
+  const setIncludeLeftOut = (next: boolean) => changeSetup({ includeLeftOut: next })
   /** How the characters see a join, in a chat with one shared context (spec/THREADS.md §7.1). */
-  const [timelines, setTimelines] = useState<MergeTimelines>("together")
+  const timelines = setup.timelines ?? "together"
+  const setTimelines = (next: MergeTimelines) => changeSetup({ timelines: next })
   /** Each source's preview, in order, once all are read. */
   const [read, setRead] = useState<{ readonly for: unknown; readonly previews: ReadonlyArray<ChatMergePreview> }>({
     for: null,
@@ -283,13 +337,16 @@ export function MergeChatDialog({
   })
   const [previewError, setPreviewError] = useState<AppError | null>(null)
   /** "What the model reads" for one character, with separate timelines; null: the first. */
-  const [reader_, setReaderFor] = useState<EntityId | null>(null)
+  const reader_ = setup.reader ?? null
+  const setReaderFor = (next: EntityId | null) => changeSetup({ reader: next })
   /** null: the source's own title. */
   const [title, setTitle] = useState<string | null>(null)
   const [framing, setFraming] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
   /** The merged chat's notes ticked to bring (`MergeNote.id`). */
-  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set())
+  const ticked = new Set(setup.notes ?? [])
+  const setTicked = (next: ReadonlySet<string> | ((was: ReadonlySet<string>) => ReadonlySet<string>)) =>
+    changeSetup({ notes: [...(typeof next === "function" ? next(ticked) : next)] })
   const reader = useAction()
   const writer = useAction()
 
@@ -483,10 +540,7 @@ export function MergeChatDialog({
                 setStale(false)
                 setTitle(null)
                 setFraming(null)
-                setStart(null)
-                setIncludeLeftOut(false)
-                setTicked(new Set())
-                setSources([next])
+                changeSetup({ sources: [next], start: null, includeLeftOut: false, notes: [], reader: null })
               }}
             />
           )}
