@@ -15,12 +15,14 @@ import { type PlannedJob } from "./lcmJobs.ts"
 import { lineageValidator } from "./lcmLayer.ts"
 import { audienceIds } from "./lcmAudience.ts"
 import { type LcmSlot, lcmPath, slotInput } from "./lcmPath.ts"
-import { readSummary } from "./lcmReads.ts"
+import { completeSummaries, readSummary, SummaryReads } from "./lcmReads.ts"
 import { insertedOnPath, pathView, seamStale } from "./lcmDisplay.ts"
 import { positionOf } from "./displayPath.ts"
 
 /** How many jobs one plan asks the writer for; the rest follow in later plans, so a write stays short. */
 export const MAX_JOBS_PER_PLAN = 4
+/** Past this many level-1 ranges to sign afresh, one read of the whole path is cheaper than one read each. */
+const MAX_RANGE_READS = 32
 const DEFAULT_FANOUT = 5
 const DEFAULT_CONDENSE_TARGET = 800
 
@@ -75,14 +77,22 @@ export const maintain = (
           AND audience_json IS ${audience}`).map((r) => r.batch_id)
     )
     const rows = yield* sql<{ id: string; status: string }>`${onPath}
-      SELECT s.id, s.status FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
+      SELECT s.id, s.status FROM path CROSS JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
       WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status IN ('complete', 'truncated', 'superseded', 'failed')
-        AND s.audience_json IS ${audience}`
+        AND s.audience_json IS ${audience}
+      ORDER BY s.last_slot_id,s.rowid`
     const choices = yield* summaryChoices(sql, chatId)
     const dismissed = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => c.summary_id))
     const candidates: Array<Candidate> = []
     const held: Array<{ level: number; from: number; to: number }> = []
     const failedById = new Map<string, Summary>()
+    if (!shown)
+      yield* completeSummaries(
+        sql,
+        chatId,
+        leaf,
+        rows.map((r) => r.id)
+      )
     for (const row of rows) {
       if (!(yield* valid(row.id))) continue
       const summary = yield* readSummary(sql, userId, row.id, undefined, memo, shown ?? undefined)
@@ -201,10 +211,37 @@ export const maintain = (
         }
       }
     }
-    // The chains of stale level-1 summaries: whether anything in them can still be summarized, and what to send.
+    // What each level-1 summary's range sends, as its signature has it. The fork's kept facts
+    // (db/lcmReads.ts) hold it for the ranges signed before; a shared path without inserted slots
+    // reads only the ranges they lack, and the whole effective path once when many are missing.
+    const kept = identities === undefined && !shown ? yield* SummaryReads : null
+    const rangeKey = (s: Summary) => `${fork}\u0000${s.id}`
+    const unsigned = candidates.filter((s) => s.level === 1 && !kept?.ranges.has(rangeKey(s)))
+    const path =
+      candidates.length && (kept === null || unsigned.length > MAX_RANGE_READS)
+        ? yield* lcmPath(sql, userId, chatId, leaf, undefined, Number.MAX_SAFE_INTEGER, identities)
+        : []
+    const sent = (range: Effect.Success<ReturnType<typeof lcmPath>>) =>
+      // The images a slot sends are part of what a later pass may not repair unauthorized.
+      range.map((slot) => (slot.images.length ? [slotInput(slot), slot.images.map((i) => i.mediaId)] : slotInput(slot)))
+    const ranges = new Map<string, unknown>()
+    for (const s of unsigned)
+      ranges.set(
+        s.id,
+        sent(
+          path.length
+            ? path.slice(s.from - 1, s.to)
+            : yield* lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities)
+        )
+      )
+    const rangeOf = (s: Summary) => ranges.get(s.id) ?? kept?.ranges.get(rangeKey(s))
     const chains = new Map<string, ReadonlyArray<LcmSlot>>()
-    const chainOf = (s: Summary) =>
-      lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities)
+    const chainOf = (s: Summary) => {
+      const range = path.slice(s.from - 1, s.to)
+      return range[0]?.id === s.firstSlotId && range.at(-1)?.id === s.lastSlotId
+        ? Effect.succeed(range)
+        : lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities)
+    }
     for (const s of candidates)
       if (s.level === 1 && s.status !== "superseded" && (!s.fresh || forced.has(s.id)))
         chains.set(s.id, yield* chainOf(s))
@@ -212,11 +249,6 @@ export const maintain = (
       SELECT eager FROM summarization_jobs WHERE chat_id = ${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND status IN ('complete', 'failed')
         AND audience_json IS ${audience}
       ORDER BY updated_at DESC, id DESC LIMIT 1`
-    // Freeze effective message inputs and every selected child revision at the authorizing reply.
-    // Completion can continue that exact episode; later edits do not inherit its permission.
-    const path = candidates.length
-      ? yield* lcmPath(sql, userId, chatId, leaf, undefined, Number.MAX_SAFE_INTEGER, identities)
-      : []
     const byId = new Map(candidates.map((s) => [s.id as string, s]))
     const signatures: Record<string, string> = {}
     const signature = (s: Summary): string =>
@@ -226,12 +258,7 @@ export const maintain = (
             s.revisionId,
             choices.find((c) => c.summary_id === s.id)?.chosen_id ?? null,
             s.level === 1
-              ? path
-                  .slice(s.from - 1, s.to)
-                  // The images a slot sends are part of what a later pass may not repair unauthorized.
-                  .map((slot) =>
-                    slot.images.length ? [slotInput(slot), slot.images.map((i) => i.mediaId)] : slotInput(slot)
-                  )
+              ? rangeOf(s)
               : s.children.map((c) => {
                   const child = byId.get(c.summaryId)
                   return child ? signature(child) : c.revisionId
@@ -240,6 +267,7 @@ export const maintain = (
         )
         .digest("hex"))
     for (const s of candidates) signature(s)
+    if (kept) for (const [id, range] of ranges) kept.ranges.set(`${fork}\u0000${id}`, range)
     for (const retry of retries) {
       const chain = yield* lcmPath(sql, userId, chatId, retry.last, retry.first, Number.MAX_SAFE_INTEGER, identities)
       signatures[`retry:${retry.ask.id}`] = createHash("sha256")
@@ -258,7 +286,7 @@ export const maintain = (
         const source = byId.get(id)
         if (source && source.level === 1 && previous?.signatures[id] === signatures[id]) {
           forced.set(id, ask)
-          chains.set(id, path.slice(source.from - 1, source.to))
+          chains.set(id, yield* chainOf(source))
         }
       }
     const finishedParts = yield* sql<{
