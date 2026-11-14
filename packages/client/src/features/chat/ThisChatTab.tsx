@@ -19,7 +19,7 @@ import { Button } from "../../ui/Button.tsx"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { CodeEditor } from "../../ui/CodeEditor.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { Fieldset } from "../../ui/Field.tsx"
+import { Field, Fieldset } from "../../ui/Field.tsx"
 import { Disclosure } from "../../ui/Surface.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { useCast } from "./cast.ts"
@@ -31,6 +31,8 @@ import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import type { ChatSession } from "./session.ts"
 import { summarizes, useChatKindLook } from "./kindLooks.ts"
 import { KindBadge } from "./KindBadge.tsx"
+import { ModelSelect } from "../pickers/ModelPicker.tsx"
+import { modelValue, parseModelValue, useModelChoices } from "./modelChoices.ts"
 
 const link = "text-accent hover:underline"
 
@@ -255,6 +257,47 @@ export function SummariesSwitch({ session }: { session: ChatSession }) {
   )
 }
 
+/**
+ * The model that writes this chat's summaries from here on (its "summarizer" binding), or the
+ * account's choice, which is the chat's own model unless Settings → Chats names one.
+ */
+function SummaryModel({ session, account }: { session: ChatSession; account: LcmSettingsView["account"] }) {
+  const { cast } = useCast()
+  const own = cast?.summaryModel ?? null
+  const fromAccount = account?.summarizer ?? null
+  const models = useModelChoices(
+    true,
+    [own, fromAccount].flatMap((m) => (m ? [modelValue(m.connection, m.model)] : []))
+  )
+  const [error, setError] = useState<AppError | null>(null)
+  const accountLabel = fromAccount
+    ? (models.find((m) => m.value === modelValue(fromAccount.connection, fromAccount.model))?.label ?? "…")
+    : null
+  const choose = (model: ReturnType<typeof parseModelValue> | null) =>
+    session.changeCast({ _tag: "SummaryModel", model }).then((outcome) => setError(outcome.ok ? null : outcome.error))
+  const follow = accountLabel ? `Account default: ${accountLabel}` : "Same as the chat's model"
+  return (
+    <Field
+      label="Summary model"
+      about="Writes this chat's summaries from here on. A cheaper model can keep costs down."
+      error={error?.message}
+    >
+      <ModelSelect
+        ariaLabel="This chat's summary model"
+        items={models}
+        value={own ? modelValue(own.connection, own.model) : null}
+        placeholder={follow}
+        onValueChange={(value) => void choose(parseModelValue(value))}
+        clear={{
+          label: fromAccount ? "Use the account default" : "Use the chat's model",
+          hint: "This chat stops choosing its own summary model from here on.",
+          onClear: () => void choose(null)
+        }}
+      />
+    </Field>
+  )
+}
+
 /** How this chat's summaries are written and sent, each the chat's own or the account default's. */
 export function SummarySettings({ session }: { session: ChatSession }) {
   const { view, settings, error, write } = useLcmSettings(session)
@@ -272,26 +315,29 @@ export function SummarySettings({ session }: { session: ChatSession }) {
         {settings === null ? (
           <Loading />
         ) : (
-          <SlotOutlet
-            slot={summarySettingFields}
-            props={{
-              scope: "chat",
-              transcriptOnly: chatKinds.get(view.chat?.kind ?? "")?.summaryTranscript === true,
-              view: settings,
-              fallback: resolveLcm(null, settings.account),
-              write,
-              disabled: false,
-              instruction: (
-                <Instruction
-                  key={view.forkId}
-                  targetId={`chat:${session.id}:fork:${view.forkId}`}
-                  view={settings}
-                  write={write}
-                  disabled={false}
-                />
-              )
-            }}
-          />
+          <>
+            <SummaryModel session={session} account={settings.account} />
+            <SlotOutlet
+              slot={summarySettingFields}
+              props={{
+                scope: "chat",
+                transcriptOnly: chatKinds.get(view.chat?.kind ?? "")?.summaryTranscript === true,
+                view: settings,
+                fallback: resolveLcm(null, settings.account),
+                write,
+                disabled: false,
+                instruction: (
+                  <Instruction
+                    key={view.forkId}
+                    targetId={`chat:${session.id}:fork:${view.forkId}`}
+                    view={settings}
+                    write={write}
+                    disabled={false}
+                  />
+                )
+              }}
+            />
+          </>
         )}
         <Problem error={error} />
       </section>

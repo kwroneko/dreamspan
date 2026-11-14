@@ -5,7 +5,7 @@ import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { DEFAULT_RESPONSE, withModelSettings } from "@rp/shared/modelSettings.ts"
-import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
+import { fitPair, resolveLcm, summaryMacroPrompts, summaryModelBinding } from "@rp/shared/lcmSettings.ts"
 import { charDefinitions, newestMessage, ownTurnNotes, presetOrder, withMain } from "@rp/shared/presetOrder.ts"
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
 import { conditionOf, triggersFor } from "@rp/shared/presetConditions.ts"
@@ -238,7 +238,13 @@ const modelStage: AssemblerStage = {
   run: (assembly) =>
     Effect.gen(function* () {
       const sources = yield* AssemblySources
-      assembly.model = yield* sources.model(need(assembly, "state").modelBindings[""] ?? null)
+      const bindings = need(assembly, "state").modelBindings
+      // A summary is written with the summary model: the chat's own, else the account's, else the chat's.
+      assembly.model = yield* sources.model(
+        assembly.request.summarizing
+          ? summaryModelBinding(bindings, sources.lcmDefaults ? yield* sources.lcmDefaults() : null)
+          : (bindings[""] ?? null)
+      )
       return assembly
     })
 }

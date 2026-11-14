@@ -11,7 +11,13 @@ import { Field } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { type PickerBodyProps, PickerPopover, PickerSearch, pickerRowClass } from "./PickerParts.tsx"
+import {
+  type PickerBodyProps,
+  PickerFooterButton,
+  PickerPopover,
+  PickerSearch,
+  pickerRowClass
+} from "./PickerParts.tsx"
 import { MODEL_SORTS, type ModelSort, modelConnection, modelRows, modelsInOrder } from "./modelList.ts"
 import { type ModelSelection, useModelUse } from "./modelSelection.ts"
 import type { ModelChoice } from "../chat/modelChoices.ts"
@@ -171,13 +177,16 @@ export function ModelSelect({
   value,
   onValueChange,
   placeholder = "None",
-  ariaLabel = "Choose a model"
+  ariaLabel = "Choose a model",
+  clear
 }: {
   items: ReadonlyArray<ModelChoice>
   value: string | null
   onValueChange: (value: string) => void
   placeholder?: string
   ariaLabel?: string
+  /** A row under the list that takes the choice off (back to `placeholder`), shown while one is chosen. */
+  clear?: { readonly label: string; readonly hint: string; readonly onClear: () => void }
 }) {
   const { used, refresh } = useModelUse()
   const current = items.find((item) => item.value === value)
@@ -201,6 +210,21 @@ export function ModelSelect({
       triggerLabel={ariaLabel}
       hint="Choose a model from your connections"
       side="bottom"
+      {...(clear && current
+        ? {
+            footer: (close: () => void) => (
+              <PickerFooterButton
+                hint={clear.hint}
+                onClick={() => {
+                  close()
+                  clear.onClear()
+                }}
+              >
+                {clear.label}
+              </PickerFooterButton>
+            )
+          }
+        : {})}
     />
   )
 }

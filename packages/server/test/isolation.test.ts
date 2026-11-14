@@ -1192,6 +1192,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         yield* refused(actor.api.ChangeGenerationDefaults({ change: { preset: owner.refId } }), "NotFound")
         yield* refused(actor.api.ChangeGenerationDefaults({ change: { judge: theirs } }), "NotFound")
         yield* refused(actor.api.ChangeGenerationDefaults({ change: { fallback: theirs } }), "NotFound")
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { summarizer: theirs } }), "NotFound")
         // Another user's model on the caller's own connection is no better.
         yield* refused(
           actor.api.ChangeGenerationDefaults({

@@ -31,6 +31,7 @@ import { type Write } from "./LcmFields.tsx"
 import { modelValue, parseModelValue, useModelChoices } from "./modelChoices.ts"
 
 const NONE = "none"
+const SAME_AS_CHAT = "Same as the chat's model"
 
 const savedTail = (defaults: GenerationDefaults | null) => defaults?.lcm?.tail ?? ""
 
@@ -53,7 +54,7 @@ function ChatDefaultsContent() {
   const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
   const models = useModelChoices(
     true,
-    [defaults?.model, defaults?.judge, defaults?.lcm?.fallback].flatMap((model) =>
+    [defaults?.model, defaults?.judge, defaults?.lcm?.summarizer, defaults?.lcm?.fallback].flatMap((model) =>
       model ? [modelValue(model.connection, model.model)] : []
     )
   )
@@ -241,6 +242,20 @@ export function SummaryDefaults({
     <Card>
       <CardHeader title="Summaries" />
       <section aria-label="Models for summaries" className="flex flex-col gap-4">
+        <Field label="Summary model" about="Writes the summaries in chats that don't choose their own.">
+          <ModelSelect
+            ariaLabel="Summary model"
+            items={items.filter((item) => item.value !== NONE)}
+            value={defaults ? choice(defaults.lcm?.summarizer) : null}
+            placeholder={SAME_AS_CHAT}
+            onValueChange={(value) => void change({ summarizer: parseModelValue(value) })}
+            clear={{
+              label: SAME_AS_CHAT,
+              hint: "Summaries are written with each chat's own model again.",
+              onClear: () => void change({ summarizer: null })
+            }}
+          />
+        </Field>
         <Field label="Fallback summarizer" about="Tried once when a summary keeps failing on its own model.">
           <ModelSelect
             ariaLabel="Fallback summarizer"

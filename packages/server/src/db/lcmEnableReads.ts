@@ -30,7 +30,7 @@ import { lcmPath } from "./lcmPath.ts"
 import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { query } from "./tx.ts"
 import { readDefaults } from "./generationSettings.ts"
-import { chunkSize, lcmMisfits, resolveLcm } from "@rp/shared/lcmSettings.ts"
+import { chunkSize, lcmMisfits, resolveLcm, summaryModelBinding } from "@rp/shared/lcmSettings.ts"
 import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
 
 /** The speed of the model's last requests, for how long the work takes; null without any. */
@@ -216,8 +216,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           ...base,
           events: (at) => Effect.map(base.events(at), (read) => [...read, forced])
         })
-        const bound =
-          state.modelBindings["summarizer"] ?? state.modelBindings["narrator"] ?? state.modelBindings[""] ?? null
+        const bound = summaryModelBinding(state.modelBindings, (yield* readDefaults(sql, userId)).lcm)
         const narrator = state.modelBindings["narrator"] ?? state.modelBindings[""] ?? null
         const model = yield* base.model(bound).pipe(Effect.catchTag("AssemblyFailed", () => Effect.succeed(null)))
         const narrating = yield* base

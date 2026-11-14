@@ -66,8 +66,14 @@ export const readDefaults = (sql: SqlClient.SqlClient, userId: UserId) =>
       typeof choice?.connection === "string" && typeof choice.model === "string"
         ? ownedModel(sql, userId, choice.connection, choice.model)
         : Effect.succeed(false)
-    const { fallback, ...rest } = stored ?? {}
-    const lcm = stored ? { ...rest, ...((yield* usable(fallback)) ? { fallback } : {}) } : null
+    const { fallback, summarizer, ...rest } = stored ?? {}
+    const lcm = stored
+      ? {
+          ...rest,
+          ...((yield* usable(summarizer)) ? { summarizer } : {}),
+          ...((yield* usable(fallback)) ? { fallback } : {})
+        }
+      : null
     const judge = (yield* setting(sql, userId, DEFAULT_JUDGE)) as { connection?: unknown; model?: unknown } | null
     return new GenerationDefaults({
       persona: personaOk ? (persona as EntityId) : null,

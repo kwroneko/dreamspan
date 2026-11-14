@@ -39,7 +39,7 @@ import { knowsSql, readKnowers } from "./knowers.ts"
 import { threadStretches } from "./threadStretches.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
-import { resolveLcm } from "@rp/shared/lcmSettings.ts"
+import { resolveLcm, summaryModelBinding } from "@rp/shared/lcmSettings.ts"
 import { sqlSources } from "./assemblySources.ts"
 import { AssemblySources } from "../assembler/pipeline.ts"
 import { inFork } from "./forkState.ts"
@@ -609,8 +609,9 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const sources = sqlSources(sql, { userId, chatId, next: true, leafSlotId })
         const base = yield* Effect.map(AssemblySources, (s) => s).pipe(Effect.provide(sources.layer))
         const state = foldState((yield* base.events(leafSlotId)).map((e) => e.event))
-        const settings = resolveLcm(state.lcm, yield* base.lcmDefaults!())
-        const model = yield* base.model(state.modelBindings.summarizer ?? state.modelBindings[""] ?? null)
+        const account = yield* base.lcmDefaults!()
+        const settings = resolveLcm(state.lcm, account)
+        const model = yield* base.model(summaryModelBinding(state.modelBindings, account))
         const candidates = yield* sql<{
           rollout: string
           call: string
