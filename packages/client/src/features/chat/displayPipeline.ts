@@ -29,18 +29,21 @@ export const displayTransforms = makeRegistry<{
   readonly replacement?: string
   /** Worker rules need the positional fields even when the built-in switches are off. */
   readonly needsContext?: boolean
-  readonly transform: (input: DisplayInput) => Promise<DisplayResult> | DisplayResult
+  /** `abandoned` aborts once nobody will read the answer (the text changed or left the
+   * screen). A worker rule drops its queued call then; the built-ins ignore it. */
+  readonly transform: (input: DisplayInput, abandoned?: AbortSignal) => Promise<DisplayResult> | DisplayResult
 }>()
 
 export const applyDisplayTransforms = async (
   input: DisplayInput,
-  stages = displayTransforms.list()
+  stages = displayTransforms.list(),
+  abandoned?: AbortSignal
 ): Promise<DisplayResult> => {
   let text = input.text
   const issues: string[] = []
   for (const stage of [...stages].sort((a, b) => a.order - b.order).slice(0, 20)) {
     try {
-      const result = await stage.transform({ ...input, text })
+      const result = await stage.transform({ ...input, text }, abandoned)
       if (result.text.length > 1_000_000) throw new Error("output limit")
       text = result.text
       issues.push(...result.issues.slice(0, 100))

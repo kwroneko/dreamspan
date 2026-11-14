@@ -2,7 +2,10 @@ import { Schema } from "effect"
 import { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import type { DisplayInput } from "./features/chat/displayPipeline.ts"
 import type { DisplayListContext } from "./features/chat/displayScripts.ts"
-import type { DisplayResultV1 } from "../../plugin-api/src/display.ts"
+import type { DisplayResultV1, TimelineRowV1 } from "../../plugin-api/src/display.ts"
+
+/** The most text one answer may carry across the worker boundary, in characters. */
+const DISPLAY_ANSWER_CHARS = 2_000_000
 
 // Project before traversal: neither whole versions/settings nor unknown card fields
 // (including their getters) belong in the supported display contract.
@@ -89,45 +92,93 @@ export const displayResult = (value: unknown): DisplayResultV1 => {
 const decodeScripts = Schema.decodeUnknownSync(Schema.Array(RegexScript))
 export const displayListResult = (value: unknown): ReadonlyArray<RegexScript> => {
   if (!Array.isArray(value) || value.length > 1000) throw new Error("Invalid script list")
-  return decodeScripts(value).map(scriptData)
+  const scripts = decodeScripts(value).map(scriptData)
+  let chars = 0
+  for (const script of scripts) {
+    if (script.trim_strings.length > 100 || script.placement.length > 100) throw new Error("Invalid script list")
+    chars += script.id.length + script.name.length + script.find_regex.length + script.replace_string.length
+    for (const trim of script.trim_strings) chars += trim.length
+    if (chars > DISPLAY_ANSWER_CHARS) throw new Error("Script list is too large")
+  }
+  return scripts
 }
 
-/** Validate data rows before any render closures are reattached. Infinity is the
- * existing empty-range sentinel; NaN, duplicate keys and arbitrary bodies fail. */
-export const timelineResult = (
-  value: unknown
-): ReadonlyArray<import("../../plugin-api/src/display.ts").TimelineRowV1> => {
+const BODY_KINDS = ["merge", "history", "lcm-boundary", "summary", "threads", "text"]
+/** Validate data rows before any render closures are reattached, and rebuild each from the
+ * contract's own fields: nothing else an answer carries (extra properties, a forged prototype
+ * key) reaches the page's objects. Infinity is the existing empty-range sentinel; NaN,
+ * duplicate keys, arbitrary bodies and more than DISPLAY_ANSWER_CHARS of text in all fail. */
+export const timelineResult = (value: unknown): ReadonlyArray<TimelineRowV1> => {
   if (!Array.isArray(value) || value.length > 2000) throw new Error("Invalid timeline output")
   const keys = new Set<string>()
-  for (const row of value as Array<import("../../plugin-api/src/display.ts").TimelineRowV1>) {
+  let chars = 0
+  return (value as ReadonlyArray<TimelineRowV1 | null>).map((row): TimelineRowV1 => {
     if (
       !row ||
+      typeof row !== "object" ||
       typeof row.key !== "string" ||
       row.key.length > 200 ||
       keys.has(row.key) ||
+      typeof row.estimate !== "number" ||
       !Number.isFinite(row.estimate) ||
       row.estimate < 1 ||
       row.estimate > 100000 ||
+      typeof row.from !== "number" ||
+      typeof row.to !== "number" ||
       !(
-        (row.from === Infinity || (Number.isInteger(row.from) && row.from >= 0)) &&
-        (row.to === -1 || (Number.isInteger(row.to) && row.to >= row.from))
+        (row.from === Infinity || (Number.isSafeInteger(row.from) && row.from >= 0)) &&
+        (row.to === -1 || (Number.isSafeInteger(row.to) && row.to >= row.from))
       ) ||
       (row.lastSlotId !== undefined && (typeof row.lastSlotId !== "string" || row.lastSlotId.length > 100)) ||
       (row.entry !== undefined &&
         (!row.entry ||
+          typeof row.entry !== "object" ||
           typeof row.entry.slotId !== "string" ||
           row.entry.slotId.length > 100 ||
-          !Number.isInteger(row.entry.depth) ||
+          !Number.isSafeInteger(row.entry.depth) ||
           row.entry.depth < 0 ||
-          (row.entry.position !== undefined && (!Number.isInteger(row.entry.position) || row.entry.position < 0)) ||
-          (row.entry.version !== null && (!row.entry.version || typeof row.entry.version.origin !== "string")))) ||
-      (row.body &&
-        (!["merge", "history", "lcm-boundary", "summary", "threads", "text"].includes(row.body.kind) ||
-          (row.body.ref !== undefined && typeof row.body.ref !== "string") ||
+          (row.entry.position !== undefined && (!Number.isSafeInteger(row.entry.position) || row.entry.position < 0)) ||
+          (row.entry.version !== null &&
+            (!row.entry.version ||
+              typeof row.entry.version !== "object" ||
+              typeof row.entry.version.origin !== "string" ||
+              row.entry.version.origin.length > 100)))) ||
+      (row.body !== undefined &&
+        (!row.body ||
+          typeof row.body !== "object" ||
+          !BODY_KINDS.includes(row.body.kind) ||
+          (row.body.ref !== undefined && (typeof row.body.ref !== "string" || row.body.ref.length > 200)) ||
           (row.body.text !== undefined && (typeof row.body.text !== "string" || row.body.text.length > 200000))))
     )
       throw new Error("Invalid timeline row")
     keys.add(row.key)
-  }
-  return value as ReadonlyArray<import("../../plugin-api/src/display.ts").TimelineRowV1>
+    chars += row.key.length + (row.body?.text?.length ?? 0)
+    if (chars > DISPLAY_ANSWER_CHARS) throw new Error("Timeline output is too large")
+    return {
+      key: row.key,
+      estimate: row.estimate,
+      from: row.from,
+      to: row.to,
+      ...(row.lastSlotId === undefined ? {} : { lastSlotId: row.lastSlotId }),
+      ...(row.entry === undefined
+        ? {}
+        : {
+            entry: {
+              slotId: row.entry.slotId,
+              depth: row.entry.depth,
+              ...(row.entry.position === undefined ? {} : { position: row.entry.position }),
+              version: row.entry.version === null ? null : { origin: row.entry.version.origin }
+            }
+          }),
+      ...(row.body === undefined
+        ? {}
+        : {
+            body: {
+              kind: row.body.kind,
+              ...(row.body.ref === undefined ? {} : { ref: row.body.ref }),
+              ...(row.body.text === undefined ? {} : { text: row.body.text })
+            }
+          })
+    }
+  })
 }

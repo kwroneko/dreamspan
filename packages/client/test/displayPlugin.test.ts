@@ -222,8 +222,9 @@ it("the 50 ms callback deadline terminates a worker and rejects queued work, wit
     onmessage: ((event: { data: unknown }) => void) | null = null
     onerror: (() => void) | null = null
     terminate = terminate
-    postMessage(job: { kind: string }) {
-      if (job.kind === "init") queueMicrotask(() => this.onmessage?.({ data: { kind: "ready", entries: [] } }))
+    postMessage(job: { kind: string; seq: number }) {
+      if (job.kind === "init")
+        queueMicrotask(() => this.onmessage?.({ data: { kind: "ready", seq: job.seq, entries: [] } }))
     }
   }
   vi.stubGlobal("Worker", SlowWorker)
@@ -232,7 +233,9 @@ it("the 50 ms callback deadline terminates a worker and rejects queued work, wit
   const first = worker.bridge.call("displayTransforms", "display.macros", displayInput(input))
   const queued = worker.bridge.call("displayTransforms", "display.macros", displayInput(input))
   const results = Promise.allSettled([first, queued])
+  // The deadline, then the one further turn an already-arrived answer is given.
   await vi.advanceTimersByTimeAsync(DISPLAY_PLUGIN_DEADLINE_MS)
+  await vi.advanceTimersByTimeAsync(1)
   expect((await results).map((result) => result.status)).toEqual(["rejected", "rejected"])
   expect(terminate).toHaveBeenCalledTimes(1)
   await expect(worker.bridge.call("displayTransforms", "display.macros", {})).rejects.toThrow("off")
@@ -262,9 +265,10 @@ it("normal closure gives worker cleanup a bounded turn, then terminates even if 
     onmessage: ((event: { data: unknown }) => void) | null = null
     onerror = null
     terminate = terminate
-    postMessage(job: { kind: string }) {
+    postMessage(job: { kind: string; seq: number }) {
       messages.push(job)
-      if (job.kind === "init") queueMicrotask(() => this.onmessage?.({ data: { kind: "ready", entries: [] } }))
+      if (job.kind === "init")
+        queueMicrotask(() => this.onmessage?.({ data: { kind: "ready", seq: job.seq, entries: [] } }))
       // Deliberately never acknowledge dispose: cleanup is not allowed to hang.
     }
   }

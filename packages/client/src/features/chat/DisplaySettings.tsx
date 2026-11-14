@@ -23,6 +23,7 @@ import { displayTransforms } from "./displayPipeline.ts"
 import { timelineTransforms } from "./timelineContributions.tsx"
 import { displayScriptLists } from "./displayScripts.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
+import { builtinReplacement } from "@rp/shared/builtinParts.ts"
 import { approvedScripts, CardScripts } from "./displayScripts.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
@@ -318,26 +319,30 @@ function ReplacedDisplayRules() {
   const transforms = useSyncExternalStore(displayTransforms.subscribe, displayTransforms.snapshot)
   const lists = useSyncExternalStore(displayScriptLists.subscribe, displayScriptLists.snapshot)
   const timeline = useSyncExternalStore(timelineTransforms.subscribe, timelineTransforms.snapshot)
-  const replaced = [...transforms.entries, ...lists.entries, ...timeline.entries].filter((rule) => rule.replacement)
+  // The names consent and the copy picker use for the same parts (@rp/shared/builtinParts.ts).
+  const replaced = (
+    [
+      ["displayTransforms", transforms.entries],
+      ["displayScriptLists", lists.entries],
+      ["timelineTransforms", timeline.entries]
+    ] as const
+  ).flatMap(([registry, entries]) =>
+    entries
+      .filter((rule) => rule.replacement)
+      .map((rule) => ({
+        key: `${registry}:${rule.id}`,
+        name: builtinReplacement(`${registry}:${rule.id}`)?.label ?? rule.id,
+        by: rule.replacement
+      }))
+  )
   if (!replaced.length) return null
-  const names: Record<string, string> = {
-    "display.macros": "Display macros",
-    "display.regex": "Display regex",
-    "display-regex.global": "Global display scripts",
-    "display-regex.preset": "Preset display scripts",
-    "display-regex.character": "Character display scripts",
-    "timeline.merges": "Merged chat rows",
-    "timeline.history-budget": "History budget divider",
-    "timeline.lcm": "Summary rows and divider",
-    "timeline.threads": "Parallel thread dividers"
-  }
   return (
     <ul aria-label="Replaced display rules" className="flex min-w-0 flex-col gap-1 text-sm text-muted">
       {replaced.map((rule) => (
-        <li key={rule.id} className="[overflow-wrap:anywhere]">
+        <li key={rule.key} className="[overflow-wrap:anywhere]">
           <Tooltip label="This browser copy changes only how the chat looks. Turn it off in Plugins to restore the original.">
             <span tabIndex={0}>
-              {names[rule.id] ?? rule.id} · Replaced by {rule.replacement}
+              {rule.name} · Replaced by {rule.by}
             </span>
           </Tooltip>
         </li>

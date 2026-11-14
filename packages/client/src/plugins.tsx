@@ -14,7 +14,7 @@ import type {
   BannerEntry,
   NoticeChannelEntry
 } from "../../plugin-api/src/client.ts"
-import { startDisplayPlugin, isDisplayPlugin, type DisplayBridge } from "./displayPlugin.ts"
+import { startDisplayPlugin, isDisplayPlugin, DisplaySuperseded, type DisplayBridge } from "./displayPlugin.ts"
 import { displayInput, displayResult, displayListInput, displayListResult, timelineResult } from "./displayAdapter.ts"
 import { displayTransforms } from "./features/chat/displayPipeline.ts"
 import { timelineTransforms, timelineInput, timelineRows } from "./features/chat/timelineContributions.tsx"
@@ -122,6 +122,16 @@ export const clientPluginHost = (p: ClientPlugin, display?: DisplayBridge) => {
           document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus({ preventScroll: true })
       })
   }
+  // A worker stopped while idle (it posted without being asked) has no call to fail: the
+  // copy is reported and turned off here, exactly as a failed call does.
+  display?.onFault?.(() => {
+    if (!live) return
+    report(p, "display", "display")
+    queueMicrotask(() => {
+      close()
+      if (active.get(key)?.plugin === p) active.delete(key)
+    })
+  })
   const reserved = (name: string, id: string) =>
     (name === "appBanners" && (id === "plugins.host" || id.startsWith("plugins.host."))) ||
     (name === "routes" && (id === "settings.plugins" || id.startsWith("settings.plugins.")))
@@ -198,12 +208,19 @@ export const clientPluginHost = (p: ClientPlugin, display?: DisplayBridge) => {
                 ? { replacement: p.manifest.name }
                 : {}),
               transform: fallback,
-              asyncTransform: async (rows, context) => {
+              asyncTransform: async (rows, context, signal) => {
                 try {
                   if (!live) throw new Error("Plugin is off")
-                  const result = await display.call("timelineTransforms", entry.id, timelineInput(rows, context))
+                  const result = await display.call(
+                    "timelineTransforms",
+                    entry.id,
+                    timelineInput(rows, context),
+                    signal
+                  )
                   return timelineRows(timelineResult(result), rows, context)
-                } catch {
+                } catch (error) {
+                  // The timeline moved on before this was sent: nobody reads this answer.
+                  if (error instanceof DisplaySuperseded) return rows
                   fail()
                   close()
                   return fallback(rows, context)
@@ -228,14 +245,18 @@ export const clientPluginHost = (p: ClientPlugin, display?: DisplayBridge) => {
                 ? { replacement: p.manifest.name }
                 : {}),
               needsContext: true,
-              transform: async (input) => {
+              transform: async (input, signal) => {
+                const fallback = () => (original ? original.transform(input) : { text: input.text, issues: [] })
                 try {
                   if (!live) throw new Error("Plugin is off")
-                  return displayResult(await display.call("displayTransforms", entry.id, displayInput(input)))
-                } catch {
+                  return displayResult(await display.call("displayTransforms", entry.id, displayInput(input), signal))
+                } catch (error) {
+                  // The message changed or left the screen before this was sent.
+                  // Nobody reads this answer, so the original is not run for it either.
+                  if (error instanceof DisplaySuperseded) return { text: input.text, issues: [] }
                   fail()
                   close()
-                  return original ? original.transform(input) : { text: input.text, issues: [] }
+                  return fallback()
                 }
               }
             }
@@ -250,6 +271,12 @@ export const clientPluginHost = (p: ClientPlugin, display?: DisplayBridge) => {
           (entry, fail) => {
             if (entry.api !== 1 || !Number.isFinite(entry.order)) throw new Error("Invalid display rule")
             const original = displayScriptLists.get(entry.id)
+            // Every message on screen asks with the same lists. One worker call answers them
+            // all: the newest answers are kept by the identity of what was asked.
+            const answers: Array<{
+              readonly input: Parameters<NonNullable<typeof original>["scripts"]>[0]
+              readonly scripts: Promise<ReturnType<typeof displayListResult>>
+            }> = []
             return {
               id: entry.id,
               order: entry.order,
@@ -260,7 +287,25 @@ export const clientPluginHost = (p: ClientPlugin, display?: DisplayBridge) => {
               asyncScripts: async (input) => {
                 try {
                   if (!live) throw new Error("Plugin is off")
-                  return displayListResult(await display.call("displayScriptLists", entry.id, displayListInput(input)))
+                  let known = answers.find(
+                    (answer) =>
+                      answer.input.global === input.global &&
+                      answer.input.preset === input.preset &&
+                      answer.input.character === input.character &&
+                      answer.input.characterId === input.characterId &&
+                      answer.input.placement === input.placement
+                  )
+                  if (!known) {
+                    known = {
+                      input,
+                      scripts: display
+                        .call("displayScriptLists", entry.id, displayListInput(input))
+                        .then(displayListResult)
+                    }
+                    answers.unshift(known)
+                    answers.length = Math.min(answers.length, 32)
+                  }
+                  return await known.scripts
                 } catch {
                   fail()
                   close()

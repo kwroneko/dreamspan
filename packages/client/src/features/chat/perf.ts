@@ -21,6 +21,12 @@ export const perf = {
   liveBodyRenders: 0,
   rowRenders: 0,
   listRenders: 0,
+  /** Display-copy worker calls answered, the slowest (ms, send to answer) and the longest queue. */
+  displayCalls: 0,
+  displayCallMaxMs: 0,
+  displayQueueMax: 0,
+  /** Each answered call's time in ms, newest last, the last 5,000. */
+  displayCallMs: [] as number[],
   /** The open chat's window: what the harness reports when a scenario gets stuck. */
   window: { loaded: 0, first: "", older: false, newer: false, paging: false, loading: false, error: "" }
 }

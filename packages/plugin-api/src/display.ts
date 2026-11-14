@@ -112,7 +112,8 @@ export interface DisplayScriptListV1 {
   readonly source?: string
   /** Lists run by order, before transforms. Script placement, enabled/display-only
    * flags and min/max depths are still applied by the display regex runner.
-   * Same 50 ms deadline/fallback as text transforms.
+   * Same 50 ms deadline/fallback as text transforms. Asked once per distinct
+   * input, not once per message: return the same list for the same input.
    */
   readonly scripts: (context: DisplayListContextV1) => ReadonlyArray<RegexScript> | Promise<ReadonlyArray<RegexScript>>
 }

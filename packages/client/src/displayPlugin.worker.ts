@@ -1,5 +1,8 @@
 // Only admitted, approved browser plugin URLs arrive here. Content is never imported.
 // This is a liveness boundary for display callbacks, not a new plugin trust category.
+// The plugin shares this global: nothing checked here protects the page. The page validates
+// every message itself (displayPlugin.ts, displayAdapter.ts); the checks below only give an
+// honest plugin an early, clear failure.
 import type { DisplayTransformV1, DisplayScriptListV1, TimelineTransformV1 } from "../../plugin-api/src/display.ts"
 
 const disposers: Array<() => void> = []
@@ -24,6 +27,8 @@ const freeze = (value: unknown): unknown => {
 self.onmessage = async (
   event: MessageEvent<{
     kind: "init" | "call" | "dispose"
+    /** The page's exchange number; every answer repeats it. */
+    seq?: number
     url?: string
     id?: string
     surfaces?: ReadonlyArray<string>
@@ -76,7 +81,7 @@ self.onmessage = async (
         })
       )
       if (metadata.length > 100) throw new Error("Too many rules")
-      self.postMessage({ kind: "ready", entries: metadata })
+      self.postMessage({ kind: "ready", seq: job.seq, entries: metadata })
     } else {
       const entry = entries.get(`${job.registry}:${job.entry}`)
       if (!entry) throw new Error("Rule is off")
@@ -88,7 +93,7 @@ self.onmessage = async (
       // Validation/serialization is inside the same host deadline as the callback.
       const encoded = JSON.stringify(value)
       if (encoded.length > 2_000_000) throw new Error("Output limit")
-      self.postMessage({ kind: "result", value })
+      self.postMessage({ kind: "result", seq: job.seq, value })
     }
   } catch {
     await dispose()

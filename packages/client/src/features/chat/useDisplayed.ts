@@ -151,11 +151,15 @@ export function useDisplayed(
   useEffect(() => {
     if (!streaming) {
       let active = true
-      void applyDisplayTransforms(input, stages.entries).then((value) => {
+      // Aborting tells a worker rule to drop work nobody reads: a screen of messages that
+      // re-renders must not fill a copy's queue with answers to text already replaced.
+      const abandoned = new AbortController()
+      void applyDisplayTransforms(input, stages.entries, abandoned.signal).then((value) => {
         if (active) setResult({ input, stages, ...value })
       })
       return () => {
         active = false
+        abandoned.abort()
       }
     }
     // Streaming: what arrives during a run is taken by the next one.

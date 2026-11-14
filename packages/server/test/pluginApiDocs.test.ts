@@ -49,3 +49,36 @@ it("browser declarations do not pull Effect, app renderers or server/schema impl
     .filter((file) => /packages\/(?:client|server|shared)\/src\/|node_modules\/effect\//.test(file))
   expect(implementations).toEqual([])
 })
+
+// A display rule can never come with server code or page controls: that is what keeps it out
+// of everything a model is sent and out of the page's own realm (review-adapters2).
+for (const [name, change] of [
+  ["page controls", { surfaces: ["client:displayTransforms", "client:composerControls"] }],
+  ["server code", { surfaces: ["client:displayTransforms", "server:rolloutTools"], server: "server.ts" }],
+  ["assembly code", { surfaces: ["client:timelineTransforms", "worker:macros"], worker: "worker.ts" }]
+] as const)
+  it(`refuses a display plugin that also carries ${name}`, async () => {
+    const dir = tempDir("plugin-display-mixed")
+    const files = {
+      "rp-plugin.json": JSON.stringify({
+        id: "example",
+        name: "Example",
+        api: 1,
+        server: null,
+        worker: null,
+        client: "client.tsx",
+        overrides: [],
+        replaces: [],
+        base: null,
+        network: false,
+        ...change
+      }),
+      "client.tsx": `import type {Activate} from "@rp/plugin-api/client"\nexport const activate:Activate=()=>{}`,
+      "server.ts": `export const activate=()=>{}`,
+      "worker.ts": `export const activate=()=>{}`
+    }
+    const commit = await saveFiles(dir, "", "example", files, true, "Mixed display plugin")
+    const report = await checkPlugin(dir, "", "example", commit)
+    expect(report.ok).toBe(false)
+    expect(report.message).toBe("Display rules run only in the browser and need a separate plugin from page controls.")
+  }, 30000)

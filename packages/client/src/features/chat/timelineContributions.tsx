@@ -45,7 +45,9 @@ export interface TimelineTransform {
   readonly replacement?: string
   readonly asyncTransform?: (
     rows: ReadonlyArray<TimelineRow>,
-    context: TimelineContext
+    context: TimelineContext,
+    /** Aborts once the timeline moved on: a call not yet sent to the worker is dropped. */
+    abandoned?: AbortSignal
   ) => Promise<ReadonlyArray<TimelineRow>>
   readonly transform: (rows: ReadonlyArray<TimelineRow>, context: TimelineContext) => ReadonlyArray<TimelineRow>
 }
@@ -172,7 +174,10 @@ export const timelineRows = (
     }
     if (!row.body) {
       if (!original) throw new Error("Unknown timeline row")
-      return { ...original, ...fields }
+      // A retained row keeps the message, range and anchor it was made with: a copy chooses
+      // which rows show, their order and their estimated height, never what a row is about
+      // (scrolling to a message and its links follow these fields).
+      return trusted ? { ...original, ...fields } : { ...original, estimate: row.estimate }
     }
     const { body } = row
 
@@ -315,16 +320,18 @@ export function useTransformedRows(
   } | null>(null)
   useEffect(() => {
     if (!ordered.some((entry) => entry.asyncTransform)) return
-    let live = true
+    // Newest input wins: the timeline changes on every reply, and each change abandons the
+    // run before it, so a copy's queue holds one timeline at most.
+    const abandoned = new AbortController()
     void (async () => {
       let rows = initial
-      for (const entry of ordered)
-        rows = await (entry.asyncTransform?.(rows, context) ?? entry.transform(rows, context))
-      if (live) setAnswer({ initial, ordered, context, inputs, rows })
+      for (const entry of ordered) {
+        if (abandoned.signal.aborted) return
+        rows = await (entry.asyncTransform?.(rows, context, abandoned.signal) ?? entry.transform(rows, context))
+      }
+      if (!abandoned.signal.aborted) setAnswer({ initial, ordered, context, inputs, rows })
     })()
-    return () => {
-      live = false
-    }
+    return () => abandoned.abort()
   }, [initial, ordered, context, inputs])
   return answer?.initial === initial &&
     answer.ordered === ordered &&
