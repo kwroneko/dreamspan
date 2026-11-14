@@ -26,7 +26,7 @@ export const sentText = (snapshot: ContextSnapshot) =>
     )
     .join("\n")
 
-export interface At {
+interface At {
   readonly chatId: ChatId
   readonly forkId: ForkId
 }
