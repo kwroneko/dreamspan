@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber } from "effect"
+import { Deferred, Effect, Exit, Fiber, Semaphore } from "effect"
 import type { UserId } from "@rp/shared/domain.ts"
+import { storeStaleParts } from "../src/db/Database.ts"
 import { makeShellMaterialization } from "../src/db/shellMaterialization.ts"
 
 const owner = "synthetic-owner" as UserId
@@ -128,4 +129,27 @@ it.effect("epochs arriving during a read share one latest queued computation", (
     assert.strictEqual(yield* shared.get(owner, "four"), 4)
     assert.strictEqual(calls, 2, "intermediate epochs never become separate full-tree jobs")
   }).pipe(Effect.scoped)
+)
+
+// What a write costs a part is computed again by the next; only parts that keep losing what
+// they computed hand the rest to the materialization (db/Database.ts).
+it.effect("stored parts continue past one part a write cost, and stop after two in a row", () =>
+  Effect.gen(function* () {
+    const run = (remaining: ReadonlyArray<number>) =>
+      Effect.gen(function* () {
+        let parts = 0
+        let stored = 0
+        yield* storeStaleParts(
+          Semaphore.makeUnsafe(1),
+          () => Effect.sync(() => ({ chats: ["synthetic-chat"], remaining: remaining[parts++]! })),
+          () => Effect.sync(() => void stored++)
+        )
+        return { parts, stored }
+      })
+    assert.deepStrictEqual(yield* run([184, 184, 152, 104, 0]), { parts: 5, stored: 5 })
+    assert.deepStrictEqual(yield* run([184, 190, 170, 100, 120, 90, 0]), { parts: 7, stored: 7 })
+    assert.deepStrictEqual(yield* run([184, 184, 184, 0]), { parts: 3, stored: 3 })
+    // Measured against the fewest left so far, so counts a write keeps pushing back still stop.
+    assert.deepStrictEqual(yield* run([184, 190, 184, 190, 0]), { parts: 3, stored: 3 })
+  })
 )

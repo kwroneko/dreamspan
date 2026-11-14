@@ -1,4 +1,5 @@
 import type { UserId } from "@rp/shared/domain.ts"
+import type { ChatId } from "@rp/shared/chat.ts"
 import { makeShellMaterialization } from "./shellMaterialization.ts"
 // Main-thread access to the database workers. ARCHITECTURE.md §3.1 and §3.6.
 import { StateModules, stateModuleClient } from "./stateModules.ts"
@@ -8,7 +9,7 @@ import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { type ResourceLimits, Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
-import { Cause, Context, Effect, Layer, Schema } from "effect"
+import { Cause, Context, Effect, Layer, Schema, Semaphore } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import { Worker as Workers } from "effect/workers"
 import { type BinLimits, defaultBinLimits } from "@rp/shared/bin.ts"
@@ -86,6 +87,7 @@ export const bundleEntry = (dir: string, name: string) =>
  */
 const BACKGROUND_READS: ReadonlySet<string> = new Set([
   "ShellMaterialize",
+  "ShellSummarizeStale",
   "GetSplitChats",
   "ThreadsOf",
   "ListForks",
@@ -207,6 +209,42 @@ export const writerProtocol = (threads: Layer.Layer<Workers.WorkerPlatform | Wor
   )
 }
 
+/**
+ * Stores the user's stale fork summaries part by part (`ShellSummarizeStale`, about a second of
+ * a background reader each), so a library with thousands of long branches is never one read
+ * that holds a reader for minutes, and what each part computed survives a write to another
+ * branch or a restart. Stops when no part is left or two in a row make no progress (writes
+ * keep reaching those forks); the materialization then computes what remains itself. Each part,
+ * computed and stored, holds the user's `gate`, so another reader's part starts only once this
+ * one is stored and never computes the same forks again.
+ */
+const STALLED_PARTS = 2
+
+export const storeStaleParts = <C, E1, E2>(
+  gate: Semaphore.Semaphore,
+  summarize: () => Effect.Effect<{ readonly chats: ReadonlyArray<C>; readonly remaining: number }, E1>,
+  store: (chats: ReadonlyArray<C>) => Effect.Effect<unknown, E2>
+) =>
+  Effect.gen(function* () {
+    let left = Infinity
+    let stalled = 0
+    while (true) {
+      const part = yield* gate.withPermits(1)(
+        Effect.gen(function* () {
+          const part = yield* summarize()
+          if (part.chats.length > 0) yield* store(part.chats)
+          return part
+        })
+      )
+      if (part.chats.length === 0 || part.remaining === 0) return
+      // One write can cost a part (the first write to a chat no summary was stored for yet
+      // stales all its forks), so only a second part in a row without progress stops.
+      stalled = part.remaining < left ? 0 : stalled + 1
+      if (stalled === STALLED_PARTS) return
+      left = Math.min(left, part.remaining)
+    }
+  }).pipe(Effect.ignore)
+
 export const layer = (options: DatabaseOptions) => {
   const dbPath = databaseFile(options.dataDir)
 
@@ -256,20 +294,68 @@ export const layer = (options: DatabaseOptions) => {
                 stateModuleClient(moduleClient(calls, modules), stateModules),
                 providers
               )
-              const shared = yield* makeShellMaterialization((userId: UserId) => raw.ShellMaterialize({ userId }))
+              // One part at a time per user, whichever read asked for it (storeStaleParts).
+              const gates = new Map<string, Semaphore.Semaphore>()
+              const gateOf = (userId: UserId) => {
+                let gate = gates.get(userId)
+                if (gate === undefined) gates.set(userId, (gate = Semaphore.makeUnsafe(1)))
+                return gate
+              }
+              const store = (userId: UserId) => (chats: Parameters<typeof writer.StoreForkSummaries>[0]["chats"]) =>
+                writer.StoreForkSummaries({ userId, chats })
+              // What the materialization still computed itself is stored under the same gate
+              // before anyone sees it, so a branch read waiting for the gate never computes it again.
+              const shared = yield* makeShellMaterialization((userId: UserId) =>
+                Effect.andThen(
+                  storeStaleParts(gateOf(userId), () => raw.ShellSummarizeStale({ userId }), store(userId)),
+                  gateOf(userId).withPermits(1)(
+                    Effect.flatMap(raw.ShellMaterialize({ userId }), (snapshot) =>
+                      snapshot.fresh.length === 0
+                        ? Effect.succeed(snapshot)
+                        : Effect.forEach(
+                            // In parts of 250 chats, as the API stores them.
+                            Array.from({ length: Math.ceil(snapshot.fresh.length / 250) }, (_, n) =>
+                              snapshot.fresh.slice(n * 250, n * 250 + 250)
+                            ),
+                            store(userId),
+                            { discard: true }
+                          ).pipe(
+                            Effect.as({ ...snapshot, fresh: [] }),
+                            // Not stored: the API stores them as before.
+                            Effect.orElseSucceed(() => snapshot)
+                          )
+                    )
+                  )
+                )
+              )
+              // A chat's branch reads first store its stale summaries, so what they compute is
+              // kept for the next read and the shell instead of computed again by each of them.
+              const storeChat = (userId: UserId, chatId: ChatId) =>
+                storeStaleParts(gateOf(userId), () => raw.ShellSummarizeStale({ userId, chatId }), store(userId))
               return Reader.of({
                 ...raw,
+                ListForks: ((payload, options) =>
+                  options !== undefined
+                    ? raw.ListForks(payload, options)
+                    : Effect.andThen(
+                        storeChat(payload.userId, payload.chatId),
+                        raw.ListForks<false>(payload)
+                      )) as typeof raw.ListForks,
                 GetSplitChats: ((payload, options) =>
                   options !== undefined
                     ? raw.GetSplitChats(payload, options)
                     : Effect.flatMap(raw.GetSplitChatsFast<false>(payload), (answer) =>
-                        answer === null ? raw.GetSplitChats<false>(payload) : Effect.succeed(answer)
+                        answer === null
+                          ? Effect.andThen(storeChat(payload.userId, payload.chatId), raw.GetSplitChats<false>(payload))
+                          : Effect.succeed(answer)
                       )) as typeof raw.GetSplitChats,
                 ThreadsOf: ((payload, options) =>
                   options !== undefined
                     ? raw.ThreadsOf(payload, options)
                     : Effect.flatMap(raw.ThreadsOfFast<false>(payload), (answer) =>
-                        answer === null ? raw.ThreadsOf<false>(payload) : Effect.succeed(answer)
+                        answer === null
+                          ? Effect.andThen(storeChat(payload.userId, payload.chatId), raw.ThreadsOf<false>(payload))
+                          : Effect.succeed(answer)
                       )) as typeof raw.ThreadsOf,
                 ShellMaterialize: ((payload, options) =>
                   options !== undefined

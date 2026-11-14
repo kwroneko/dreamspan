@@ -38,8 +38,15 @@ import {
   computeForkOutlines,
   FORK_SUMMARY_FORMAT,
   type ForkSummary,
-  summaryStamps
+  makePathResolver,
+  type PathResolver,
+  summaryStamps,
+  summaryValidSql
 } from "./forkSummaries.ts"
+
+/** A `ShellSummarizeStale` part: forks a batch, batches until about this long has passed. */
+const PART_FORKS = 16
+const PART_MS = 1000
 import { readFavourites } from "./cardFavourites.ts"
 import { type CardSummaryRow, cardSummary, cardSummaryBook } from "./cards.ts"
 import type { ReadOps } from "./ops.ts"
@@ -65,8 +72,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       const userStamp = yield* summaryStamps(sql, userId)
       const rows = yield* sql<{ id: string; chat_id: string; messages: number | null; stale: number }>`
       SELECT f.id, f.chat_id, s.messages,
-        s.fork_id IS NULL OR s.format <> ${FORK_SUMMARY_FORMAT} OR s.stamp <> c.shell_stamp
-          OR s.user_stamp <> ${userStamp} AS stale
+        s.fork_id IS NULL OR NOT ${sql.literal(summaryValidSql("s", "c", String(userStamp)))} AS stale
       FROM chats c CROSS JOIN forks f ON f.chat_id = c.id LEFT JOIN fork_summaries s ON s.fork_id = f.id
       WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL LIMIT 5001`
       if (rows.length > 5000) return false
@@ -162,8 +168,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         chat_added_at: number
         shell_stamp: number
         s_format: number | null
-        s_stamp: number | null
-        s_user_stamp: number | null
+        s_valid: number
         preview: string | null
         messages: number | null
         leaf: string | null
@@ -176,7 +181,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       }>`
           SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, f.parent_fork_id, f.base_slot_id,
             c.title, c.kind, c.current_fork_id, c.created_at AS chat_created_at, coalesce(c.added_at, c.created_at) AS chat_added_at,
-            c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
+            c.shell_stamp, s.format AS s_format,
+            coalesce(${sql.literal(summaryValidSql("s", "c", String(userStamp)))}, 0) AS s_valid, s.preview,
             s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
             CASE WHEN s.fork_id IS NOT NULL
               THEN '[' || s.cast_json || ',' || s.joined_json || ',' || s.departed_json || ',' || s.activity_json || ',' || s.added_json || ',' || s.threads_json || ']' END AS lists
@@ -206,11 +212,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       const importing = (row: { title: string }) => importState(row.title).unfinished
       if (recompute !== true && modules === "") {
         for (const row of joinedRows) {
-          if (
-            row.lists === null ||
-            row.s_format !== FORK_SUMMARY_FORMAT ||
-            ((row.s_stamp !== row.shell_stamp || row.s_user_stamp !== userStamp) && !importing(row))
-          )
+          if (row.lists === null || row.s_format !== FORK_SUMMARY_FORMAT || (row.s_valid !== 1 && !importing(row)))
             continue
           const [cast, joined, departed, activity, added, threads] = JSON.parse(row.lists) as [
             Array<string>,
@@ -613,8 +615,83 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       return null
     })
   const shellEpoch = makeShellEpoch(sql)
+  // The trees read for the last part, kept for the next while the owner's stamp stays put, with
+  // each chat's stamp when its tree was read. A write since reaches only some forks (their
+  // `fork_shell_stamps` move past that stamp): the others are walked from the kept tree and
+  // stored as computed at that stamp, so a reply streaming into a long chat doesn't make every
+  // part read its tree again. The forks it reached wait for a new read of the tree.
+  let parts: {
+    readonly userId: string
+    readonly userStamp: number
+    readonly stamps: Map<string, number>
+    readonly resolver: PathResolver
+  } | null = null
   const handlers = {
     ShellEpoch: ({ userId }) => shellEpoch(userId).pipe(query("ShellEpoch")),
+    ShellSummarizeStale: ({ userId, chatId }) =>
+      Effect.gen(function* () {
+        if ((yield* ActiveStateModules) !== "") return { chats: [], remaining: 0 }
+        const userStamp = yield* summaryStamps(sql, userId)
+        const only = chatId ?? ""
+        // As `shellState` walks them: a chat an import is still writing isn't.
+        const stale = (yield* sql<ForkRow & { shell_stamp: number; title: string; fork_stamp: number }>`
+          SELECT f.*, c.shell_stamp, c.title,
+            coalesce((SELECT stamp FROM fork_shell_stamps WHERE fork_id = f.id), 0) AS fork_stamp
+          FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
+          LEFT JOIN fork_summaries s ON s.fork_id = f.id
+          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL
+            AND (${only} = '' OR c.id = ${only})
+            AND (s.fork_id IS NULL OR NOT ${sql.literal(summaryValidSql("s", "c", String(userStamp)))})
+          ORDER BY c.id, f.id`).filter((row) => !importState(row.title).unfinished)
+        // Parts are for chats with many stale forks, which share a tree. One or two (a chat after a
+        // write, or a small chat) are left to the read that wants them, which reads only their paths,
+        // once: a reply streaming into the chat would make every part's walk of them wasted.
+        const byStaleChat = new Map<string, Array<ForkRow & { shell_stamp: number; fork_stamp: number }>>()
+        for (const row of stale) byStaleChat.set(row.chat_id, [...(byStaleChat.get(row.chat_id) ?? []), row])
+        for (const [id, forks] of byStaleChat) if (forks.length <= 2) byStaleChat.delete(id)
+        const total = [...byStaleChat.values()].reduce((n, forks) => n + forks.length, 0)
+        if (total === 0) {
+          parts = null
+          return { chats: [], remaining: 0 }
+        }
+        // A fork a write reached after its chat's tree was read: walked once the tree is read again.
+        const kept = (p: NonNullable<typeof parts>, fork: { chat_id: string; fork_stamp: number }) =>
+          fork.fork_stamp <= (p.stamps.get(fork.chat_id) ?? Infinity)
+        if (
+          parts === null ||
+          parts.userId !== userId ||
+          parts.userStamp !== userStamp ||
+          [...byStaleChat.values()].every((forks) => !forks.some((fork) => kept(parts!, fork)))
+        )
+          parts = { userId, userStamp, stamps: new Map(), resolver: makePathResolver(sql, true) }
+        const current = parts
+        // A chat not read yet is read in this part, at its stamp now (read before its tree, so its
+        // summaries never claim a later stamp than what they were computed from).
+        for (const [id, forks] of byStaleChat)
+          if (!current.stamps.has(id)) current.stamps.set(id, forks[0]!.shell_stamp)
+        const started = Date.now()
+        const done: Array<ForkSummary> = []
+        // The forks of a chat share its tree through the resolver, a batch at a time.
+        for (const all of byStaleChat.values()) {
+          if (done.length > 0 && Date.now() - started >= PART_MS) break
+          const forks = all.filter((fork) => kept(current, fork))
+          for (let at = 0; at < forks.length && (done.length === 0 || Date.now() - started < PART_MS); at += PART_FORKS)
+            done.push(...(yield* computeForkSummaries(sql, forks.slice(at, at + PART_FORKS), false, current.resolver)))
+        }
+        // Nothing to keep the trees for once the last part is done.
+        if (done.length === total) parts = null
+        const byChat = new Map<string, Array<ForkSummary>>()
+        for (const summary of done) byChat.set(summary.chatId, [...(byChat.get(summary.chatId) ?? []), summary])
+        return {
+          chats: [...byChat].map(([chatId, forks]) => ({
+            chatId,
+            stamp: current.stamps.get(chatId)!,
+            userStamp,
+            forks: JSON.stringify(forks)
+          })),
+          remaining: total - done.length
+        }
+      }).pipe(query("ShellSummarizeStale")),
     ShellMaterialize: ({ userId }) =>
       Effect.gen(function* () {
         const state = yield* shellState(userId, false)

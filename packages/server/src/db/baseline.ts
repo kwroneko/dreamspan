@@ -56,6 +56,18 @@ const shellSummaries: ReadonlyArray<string> = [
     threads_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(threads_json) AND json_type(threads_json) = 'array')
   ) STRICT`,
   `CREATE TABLE shell_user_stamps (user_id TEXT PRIMARY KEY, stamp INTEGER NOT NULL) STRICT`,
+  // The chat stamp at which a write last reached the fork's summary (db/summaryValidity.ts):
+  // one computed at that stamp or later is valid. No row: none since the chat's first noted write.
+  `CREATE TABLE fork_shell_stamps (
+    fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE,
+    stamp INTEGER NOT NULL
+  ) STRICT, WITHOUT ROWID`,
+  // The chat's stamp after the last write whose reach the writer noted. While it is the chat's
+  // stamp, every move of the stamp since a summary was computed reached its fork's stamp above.
+  `CREATE TABLE chat_shell_tracked (
+    chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+    stamp INTEGER NOT NULL
+  ) STRICT, WITHOUT ROWID`,
   `CREATE TRIGGER shell_slots_insert AFTER INSERT ON slots BEGIN ${bumpChat("NEW.chat_id")} END`,
   // Not chain_id: the database assigns it once, in the inserting statement.
   `CREATE TRIGGER shell_slots_update AFTER UPDATE OF chat_id, parent_slot_id, depth, selected_version_id, created_at,

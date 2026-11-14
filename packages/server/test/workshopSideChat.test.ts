@@ -891,6 +891,9 @@ describe("side chat", () => {
         limit: 200
       })
       assert.isFalse((search ?? []).some((hit) => hit.content.includes("Side")))
+      // A branch read stores the story's stale fork summaries (db/Database.ts); the side chat's
+      // reads of the story may already have, so both runs store them before comparing.
+      yield* api.ListForks({ chatId: id })
       const rows = yield* fixtureSql(
         config.dataDir,
         [
@@ -976,7 +979,7 @@ const normalize = (input: unknown) => {
     if (typeof value === "number" && key === "event_seq") return value
     if (
       typeof value === "number" &&
-      (/(?:_at|At)$/.test(key) || ["now", "timestamp", "ms", "durationMs"].includes(key))
+      (/(?:_at|At)$/.test(key) || ["at", "now", "timestamp", "ms", "durationMs"].includes(key))
     )
       return 0
     if (Array.isArray(value)) return value.map((part) => walk(part))

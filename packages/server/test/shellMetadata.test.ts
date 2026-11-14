@@ -109,7 +109,8 @@ it.live("unsplit named-chat navigation reads endpoints, not the library tree, an
         (text) =>
           text.includes("version_participants") ||
           text.includes("FROM segments g") ||
-          text.includes("SELECT NULL AS fork_id")
+          text.includes("SELECT NULL AS fork_id") ||
+          text.includes("CROSS JOIN slots s ON s.chat_id = j.value")
       ),
       "neither navigation read may walk a message path or materialize the shell"
     )

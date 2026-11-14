@@ -3591,6 +3591,17 @@ export class ReadOps extends RpcGroup.make(
     success: ShellSnapshotRead,
     error: StorageError
   }),
+  /**
+   * Some of the user's stale fork summaries, computed for `StoreForkSummaries` (about a second's
+   * worth, a chat's forks together), and how many stay stale: `ShellMaterialize` stores them part
+   * by part before it reads the whole library, and a chat's branch reads (`ListForks`, the slow
+   * `GetSplitChats` and `ThreadsOf`) that chat's alone (`chatId`) before they read (db/shellReads.ts).
+   */
+  Rpc.make("ShellSummarizeStale", {
+    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId) },
+    success: Schema.Struct({ chats: Schema.Array(ChatSummariesAt), remaining: Schema.Int }),
+    error: StorageError
+  }),
   Rpc.make("ShellLibrary", {
     /** `recompute`: ignore every stored summary (tests compare the two). */
     payload: { userId: UserId, recompute: Schema.optionalKey(Schema.Boolean) },

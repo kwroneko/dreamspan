@@ -18,7 +18,14 @@ DatabaseSync.prototype.prepare = function (text) {
   const statement = prepare.call(this, text)
   const all = statement.all
   statement.all = function (...args) {
-    if (capture && text.includes("SELECT NULL AS fork_id") && text.includes("version_participants")) executions++
+    // A walk: a chat's whole slot tree (the batch path resolver's read, db/forkPaths.ts) or the
+    // paths of a few forks alone (`shellSlotsQuery` with evidence).
+    if (
+      capture &&
+      (text.includes("CROSS JOIN slots s ON s.chat_id = j.value") ||
+        (text.includes("WITH RECURSIVE views AS MATERIALIZED") && text.includes("version_participants")))
+    )
+      executions++
     return Reflect.apply(all, this, args)
   }
   return statement

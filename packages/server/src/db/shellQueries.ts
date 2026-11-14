@@ -66,14 +66,11 @@ export const shellPlainForksQuery = `SELECT f.id FROM json_each(?) j CROSS JOIN 
 /**
  * Every slot of the chats given (a JSON array of ids) as `shellSlotsQuery` reads it for a fork
  * of `shellPlainForksQuery`'s: the chat's tree once, for all such forks to walk their paths in.
+ * Since perfshell2 the shell reads trees through db/forkPaths.ts instead; this and
+ * `shellPlainForksQuery` remain for the plan and classification tests that pin their behavior.
  */
-const treeQuery = (
-  evidence: boolean
-) => `SELECT NULL AS fork_id, s.id, s.depth, s.chat_id, s.parent_slot_id, s.created_at,
+export const shellTreeQuery = `SELECT NULL AS fork_id, s.id, s.depth, s.chat_id, s.parent_slot_id, s.created_at,
   CASE WHEN s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL THEN 1 END AS deleted_at,
   v.status, v.speaker_entity_id AS speaker, CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at,
-  v.seq AS version_seq, v.content_length, ${evidence ? slotParticipantsSql("s") : "'[]'"} AS participants, ${evidence ? slotHumanAuthorsSql("s") : "'[]'"} AS human_authors
+  v.seq AS version_seq, v.content_length, ${slotParticipantsSql("s")} AS participants, ${slotHumanAuthorsSql("s")} AS human_authors
   FROM json_each(?) j CROSS JOIN slots s ON s.chat_id = j.value JOIN versions v ON v.slot_id = s.id AND v.id = s.selected_version_id`
-
-export const shellTreeQuery = treeQuery(true)
-export const shellOutlineTreeQuery = treeQuery(false)

@@ -1124,6 +1124,12 @@
     },
     {
       "type": "table",
+      "name": "chat_shell_tracked",
+      "tbl_name": "chat_shell_tracked",
+      "sql": "CREATE TABLE chat_shell_tracked ( chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE, stamp INTEGER NOT NULL ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
       "name": "chats",
       "tbl_name": "chats",
       "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER, added_at INTEGER, st_group_id TEXT, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3) , deleted_at INTEGER, bin_item_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0, -- Moved by triggers on every write the shell's fork summaries read (fork_summaries). shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT"
@@ -1235,6 +1241,12 @@
       "name": "fork_overrides",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL, -- image_exclude: the message's own version and an image of it, \"<version id>:<media id>\". target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "fork_shell_stamps",
+      "tbl_name": "fork_shell_stamps",
+      "sql": "CREATE TABLE fork_shell_stamps ( fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE, stamp INTEGER NOT NULL ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "table",

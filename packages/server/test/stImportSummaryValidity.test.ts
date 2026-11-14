@@ -2,6 +2,7 @@
 import { assert, layer } from "@effect/vitest"
 import { Effect } from "effect"
 import { Reader } from "../src/db/Database.ts"
+import { summaryValidSql } from "../src/db/forkSummaries.ts"
 import { serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { card, header, jsonl, message } from "./support/stFolder.ts"
@@ -39,7 +40,7 @@ layer(serverLayer(config), { excludeTestServices: true })("ST branch summary val
             config.dataDir,
             [
               {
-                sql: `SELECT s.rowid AS row, s.fork_id, s.stamp = c.shell_stamp AS valid
+                sql: `SELECT s.rowid AS row, s.fork_id, ${summaryValidSql("s", "c", "coalesce((SELECT stamp FROM shell_user_stamps WHERE user_id = c.owner_user_id), 0)")} AS valid
         FROM fork_summaries s JOIN chats c ON c.id = s.chat_id ORDER BY s.fork_id`
               }
             ],

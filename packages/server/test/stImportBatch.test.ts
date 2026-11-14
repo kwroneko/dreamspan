@@ -1,5 +1,5 @@
 import { docHash } from "../src/db/documents.ts"
-import { FORK_SUMMARY_FORMAT } from "../src/db/forkSummaries.ts"
+import { summaryValidSql } from "../src/db/forkSummaries.ts"
 // Compare every stored message field and the derived indexes against the positional
 // import path, which still writes each version and slot separately.
 import { readFileSync } from "node:fs"
@@ -244,11 +244,10 @@ it.live(
               // including the exact stamps and the summaries they protect.
               sql: `SELECT f.id AS expected_fork, s.*, c.shell_stamp AS chat_stamp,
                 coalesce(u.stamp, 0) AS owner_stamp,
-                s.format = ? AND s.stamp = c.shell_stamp AND s.user_stamp = coalesce(u.stamp, 0) AS valid
+                ${summaryValidSql("s", "c", "coalesce(u.stamp, 0)")} AS valid
                 FROM forks f JOIN chats c ON c.id = f.chat_id
                 LEFT JOIN fork_summaries s ON s.fork_id = f.id
-                LEFT JOIN shell_user_stamps u ON u.user_id = c.owner_user_id ORDER BY f.id`,
-              params: [FORK_SUMMARY_FORMAT]
+                LEFT JOIN shell_user_stamps u ON u.user_id = c.owner_user_id ORDER BY f.id`
             },
             { sql: "PRAGMA foreign_key_check" }
           ],

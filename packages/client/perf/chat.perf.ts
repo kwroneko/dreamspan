@@ -145,6 +145,23 @@ const onScreen = (page: Page, slot: string | null = null) =>
       throw new Error(`not on screen: ${JSON.stringify(state)}`, { cause: error })
     })
 
+/**
+ * Waits until the chat the URL names is shown: its surface is no longer the outgoing one, which
+ * stays on screen, busy, until the new chat's first read finishes (`OpenChat`), and its last
+ * message is on screen. `onScreen` alone passes on the outgoing surface.
+ */
+const arrived = async (page: Page) => {
+  await page.waitForFunction(
+    () => document.querySelector('[aria-busy="true"] [data-testid=messages]') === null,
+    undefined,
+    {
+      timeout: 60_000,
+      polling: 50
+    }
+  )
+  await onScreen(page)
+}
+
 /** Regenerates the last `count` replies of a chat: that many streams at once. */
 const startStreams = (chatId: string, count: number) =>
   withClient(server, (api) =>
@@ -588,7 +605,9 @@ test("switch chats mid-stream", async ({ page }) => {
     .getByRole("link", { name: `Open chat ${fixture.short[0]!.title}`, exact: true })
     .first()
     .click()
-  await onScreen(page)
+  // The short chat itself, not the streaming one kept on screen while it loads: Back from the
+  // latter never left, so it measured nothing.
+  await arrived(page)
   const awayMs = Date.now() - started
   await page.waitForTimeout(1000)
   started = Date.now()
