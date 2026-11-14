@@ -655,6 +655,7 @@ const replySectionsStage = sync("reply-sections", (assembly) => {
   const speaker = need(assembly, "cast").speaker?.entity ?? null
   const scripted = new Map(need(assembly, "scripted"))
   let left = sendBack
+  let hidden = 0
   for (const entry of [...need(assembly, "history")].reverse()) {
     if (left === 0) break
     // Another card's (both known and different) are skipped without counting.
@@ -662,6 +663,13 @@ const replySectionsStage = sync("reply-sections", (assembly) => {
     if (speaker !== null && entry.speaker !== null && entry.speaker !== speaker) continue
     const read = scripted.get(entry.versionId)
     if (!read) continue
+    // Thinking the user hid stays out, and only it: it still counts as one of the replies that
+    // send theirs, so no older reply's thinking takes its place (SetThinkingHidden).
+    if (entry.thinkingHidden?.includes("sections")) {
+      hidden++
+      left--
+      continue
+    }
     // Each section's text through the prompt-only reasoning scripts at the message's depth,
     // as ST runs them on the reasoning it adds to a prompt, then back in its tags.
     const sections = entry.replySections
@@ -683,6 +691,14 @@ const replySectionsStage = sync("reply-sections", (assembly) => {
     })
     left--
   }
+  if (hidden > 0)
+    assembly.issues.push({
+      kind: "thinking_left_out",
+      message:
+        hidden === 1
+          ? "Thinking you hid on an earlier reply was left out."
+          : `Thinking you hid on ${hidden} earlier replies was left out.`
+    })
   assembly.scripted = scripted
 })
 

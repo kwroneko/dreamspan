@@ -335,12 +335,21 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         const carried = continuation
         continuation = undefined
         const last = requests >= plan.turnCap || carried !== undefined
+        // Measured with thinking enabled: keeping declarations and forbidding calls preserves
+        // Anthropic's signed prefix and cache. Other wires retain their existing cap shape.
+        const finalRequest = Option.isSome(registry)
+          ? registry.value.thinkingBindings
+              .list()
+              .find((b) => b.appliesTo({ kind: model.kind, api: model.api, model: model.key }))?.finalRequest
+          : undefined
+        const cappedWithTools = requests >= plan.turnCap && finalRequest !== undefined
+        const offerTools = !last || cappedWithTools
         // Another model's thinking isn't sent to this one (a resume on another model, §12.3).
         const suffix = forTarget(liveSuffix(transcript.messages), target)
         // Where each deferred tool was loaded, for the provider transform. A request sent without
         // tools (the cap's) has no load points either: its history can't name undeclared tools.
         const toolLoading =
-          deferred.size > 0 && !last && !dispatch
+          deferred.size > 0 && offerTools && !dispatch
             ? { api: model.api, deferred: deferredDefinitions, loads: loadPoints(suffix, deferred) }
             : undefined
         const requestSuffix = dispatch ? dispatcherMessages(suffix, deferredDefinitions) : suffix
@@ -350,7 +359,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           carried === undefined
             ? requestSuffix
             : [...requestSuffix, { ...emptyAssistant(piModel), content: [{ type: "text", text: carried }] }],
-          last ? undefined : piTools,
+          offerTools ? piTools : undefined,
           {
             explicitTail: model.cacheBreakpoints === "explicit",
             replayReasoning: several || plan.continuity === "resume_previous",
@@ -387,7 +396,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 ...(prefix.maxTokens !== undefined ? { maxTokens: prefix.maxTokens } : {}),
                 ...(prefix.reasoning ? { reasoning: prefix.reasoning } : {}),
                 sessionId: request.chatId,
-                payload: wire.payload,
+                payload: cappedWithTools ? { ...wire.payload, ...finalRequest } : wire.payload,
                 breakpoints: wire.breakpoints,
                 ...(run.checkpoints?.length ? { preserveBreakpoints: true } : {}),
                 ...(wire.stable ? { stable: wire.stable } : {}),
@@ -403,7 +412,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             .pipe(
               Stream.runForEach((event) =>
                 Effect.gen(function* () {
-                  if (event.type === "waiting-cache") request.onWaitingCache?.(event.waiting)
+                  if (event.type === "retrying" && event.notice) request.onNotice?.(event.notice)
+                  else if (event.type === "waiting-cache") request.onWaitingCache?.(event.waiting)
                   else if (event.type === "done") {
                     done = event.message
                     rawArguments = event.toolArguments

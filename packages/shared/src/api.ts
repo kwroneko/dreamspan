@@ -20,6 +20,7 @@ import { BinItem } from "./bin.ts"
 import { ChatApi, ChatEventsApi, MessageVersionApi } from "./chatApi.ts"
 import { AgentApi } from "./agentApi.ts"
 import { DecisionApi } from "./decisionApi.ts"
+import { ThinkingApi } from "./thinkingApi.ts"
 import { ProviderListApi } from "./providerApi.ts"
 import { ChatSetupApi, ShellUpdatesApi } from "./chatSetupApi.ts"
 import { StImportApi } from "./stImportApi.ts"
@@ -457,6 +458,9 @@ export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {
 /** The decision-model settings RPCs (decisionApi.ts). */
 export class AuthenticatedDecisionApi extends DecisionApi.middleware(Authentication) {}
 
+/** Hiding a version's thinking from the model (thinkingApi.ts). */
+export class AuthenticatedThinkingApi extends ThinkingApi.middleware(Authentication) {}
+
 /** Text search across chats (textSearchApi.ts). */
 export class AuthenticatedTextSearchApi extends TextSearchApi.middleware(Authentication) {}
 
@@ -479,6 +483,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedWorkshopApi)
   .merge(AuthenticatedDecisionApi)
+  .merge(AuthenticatedThinkingApi)
   .merge(AuthenticatedCardArchiveApi)
   .merge(AuthenticatedCardSourcesApi)
   .merge(AuthenticatedGalleryApi)

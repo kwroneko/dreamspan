@@ -321,6 +321,8 @@ export interface PathRow extends VersionRow {
   readonly hidden_by_user: number
   /** Media ids of the shown version's images the fork took out, as a JSON array; absent on older reads. */
   readonly excluded_images?: string
+  /** Which of the shown version's thinking the fork hid (`thinkingHiddenSql`); absent on older reads. */
+  readonly hidden_thinking?: number | null
   readonly branch_name: string | null
   readonly slot_fork_id: string | null
   readonly starts_fork_id: string | null
@@ -340,6 +342,12 @@ export interface PathRow extends VersionRow {
   /** Its copies in other threads, as [slot, fork] pairs in JSON (`PathEntry.copies`); absent on older reads. */
   readonly send_copies?: string | null
 }
+
+/** The parts a `thinkingHiddenSql` value (forkState.ts) names. */
+export const hiddenParts = (mask: number | null | undefined): Array<"reasoning" | "sections"> => [
+  ...((mask ?? 0) & 1 ? (["reasoning"] as const) : []),
+  ...((mask ?? 0) & 2 ? (["sections"] as const) : [])
+]
 
 const copiesOf = (json: string | null | undefined) => {
   const pairs = json ? (JSON.parse(json) as Array<[string, string]>) : []
@@ -361,6 +369,7 @@ export const toPathEntry = (row: PathRow) => {
     ...(row.excluded_images && row.excluded_images !== "[]"
       ? { excludedImages: JSON.parse(row.excluded_images) as Array<string> }
       : {}),
+    ...(row.hidden_thinking ? { hiddenThinking: hiddenParts(row.hidden_thinking) } : {}),
     version,
     versionCount: row.version_count,
     branchCount: row.branch_count,
