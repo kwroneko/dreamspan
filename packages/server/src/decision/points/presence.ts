@@ -46,6 +46,8 @@ export const presencePoint: DecisionPoint<PresenceInput, ReadonlyArray<PresenceC
   label: "Who is in the scene",
   description:
     "After each reply in a chat with several characters, asks whether each character is still in the scene. A character who left isn't picked to reply until they're back. Without it, no one is marked away automatically.",
+  instead: "No one was marked away or back on their own.",
+  appliesTo: ({ state }) => state.participants.filter((entity) => !state.playedByMe.includes(entity)).length >= 2,
   defaultThreshold: 0.85,
   questions: ({ candidates }) =>
     Object.fromEntries(

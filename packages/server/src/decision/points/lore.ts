@@ -36,6 +36,8 @@ export const lorePoint: DecisionPoint<LoreInput, ReadonlyArray<LoreAdmission>> =
   label: "Lorebook entries",
   description:
     "Before each reply, asks about the lorebook entries whose keys didn't match but that have a question for the decision model, and includes those it answers yes. Without it, only keys include entries.",
+  instead: "Only the entries' keys decided which were included.",
+  appliesTo: ({ loreAsked }) => loreAsked,
   defaultThreshold: 0.7,
   questions: ({ candidates }) =>
     Object.fromEntries(

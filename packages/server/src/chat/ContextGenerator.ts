@@ -414,6 +414,12 @@ export const layer = Layer.effect(
             if (outcome.source === "model" && outcome.value.length > 0)
               assembled = yield* assembleWith({ stamp: assembled.loreDecision.stamp, lore: outcome.value })
           }
+          // Points a connection has on that this chat turned off (`decision.points`): nothing was
+          // asked; the snapshot says which, so the inspector can say what decided instead.
+          const decisionsOff =
+            !request.replyOnly && Option.isSome(decisions) && state.decisionsOff?.length
+              ? yield* decisions.value.skippedIn(userId, { state, loreAsked: assembled.loreDecision !== undefined })
+              : []
           let generation = JSON.parse(assembled.generation) as Generation
           let snapshot = JSON.parse(assembled.snapshot) as ContinuousSnapshot
           if (request.storyAt)
@@ -636,7 +642,7 @@ export const layer = Layer.effect(
               modelId: model.modelId as ModelId,
               // An agent turn's tools and contract are frozen with its context (spec/AGENTIC.md §3.3).
               snapshot: agentic
-                ? `${JSON.stringify({ ...snapshot, ...(request.storyAt ? { storyAt: request.storyAt } : {}), ...(continuity ? { continuity } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
+                ? `${JSON.stringify({ ...snapshot, ...(request.storyAt ? { storyAt: request.storyAt } : {}), ...(continuity ? { continuity } : {}), ...(decisionsOff.length ? { decisionsOff } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
                     {
                       mode: planned.mode,
                       contract: plan.contract,
@@ -646,7 +652,9 @@ export const layer = Layer.effect(
                       ...(cardSkills.length ? { cardSkills } : {})
                     }
                   )}}`
-                : assembled.snapshot,
+                : decisionsOff.length
+                  ? `${assembled.snapshot.slice(0, -1)},"decisionsOff":${JSON.stringify(decisionsOff)}}`
+                  : assembled.snapshot,
               ...(continuity?.parent ? { parentRolloutId: continuity.parent.rolloutId } : {}),
               ...(seed ? { transcript: JSON.stringify(seed) } : {}),
               ...(agentic ? { mode: planned.mode } : {}),

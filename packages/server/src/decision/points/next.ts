@@ -59,6 +59,8 @@ export const nextPoint: DecisionPoint<NextInput, NextPick> = {
   label: "Who replies next",
   description:
     "When Auto chooses who replies in a chat with several characters, the decision model reads the last few messages and picks who speaks next. Without it, Auto picks by the chat's reply order.",
+  instead: "The chat's reply order, or your own pick, chose who replied.",
+  appliesTo: ({ state }) => state.participants.filter((entity) => !state.playedByMe.includes(entity)).length >= 2,
   defaultThreshold: 0.5,
   timeoutMs: NEXT_TIMEOUT_MS,
   questions: ({ candidates }) =>

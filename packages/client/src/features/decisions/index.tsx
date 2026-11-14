@@ -9,7 +9,6 @@ import { type Model, resolveModel } from "@rp/shared/providers.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
-import { AppClient } from "../../rpc.ts"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { ModelSelect } from "../pickers/ModelPicker.tsx"
@@ -20,9 +19,10 @@ import { modelsAtom } from "../connections/data.ts"
 import { connectionSections, type ConnectionSectionProps } from "../connections/detail.tsx"
 import { TextField } from "../editor/controls.tsx"
 import { lorebookEntrySettings } from "../editor/lorebookSettings.ts"
-
-const pointsAtom = AppClient.query("ListDecisionPoints", undefined, { timeToLive: "5 minutes" })
-const settingsAtom = AppClient.query("GetDecisionSettings", undefined, { reactivityKeys: ["decisions"] })
+import { useCast } from "../chat/cast.ts"
+import { chatSettingSections } from "../chat/presentation.tsx"
+import { ChatDecisions } from "./ChatDecisions.tsx"
+import { pointsAtom, settingsAtom } from "./data.ts"
 
 const NONE = "none"
 
@@ -33,7 +33,10 @@ const NONE = "none"
 export const useDecisionPointOn = (pointId: string): boolean => {
   const points = useAtomValue(pointsAtom)
   const settings = useAtomValue(settingsAtom)
+  // Off in the chat shown (its Decisions setting): the server asks nothing there either.
+  const offHere = useCast().cast?.decisionsOff?.includes(pointId) ?? false
   return (
+    !offHere &&
     AsyncResult.isSuccess(points) &&
     AsyncResult.isSuccess(settings) &&
     points.value.some((point) => point.id === pointId) &&
@@ -166,6 +169,8 @@ const QUESTION_ABOUT =
 
 export const register = () => {
   connectionSections.register({ id: "decisions", order: 45, component: DecisionsSection })
+  // This chat, under Who replies: the decisions a connection has on, each off or on for this chat.
+  chatSettingSections.register({ id: "settings.decisions", order: 41, component: ChatDecisions })
   lorebookEntrySettings.register({
     id: "decision_hint",
     order: 1000,

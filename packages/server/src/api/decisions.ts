@@ -15,10 +15,11 @@ export const makeDecisionHandlers = Effect.gen(function* () {
     ListDecisionPoints: () =>
       Effect.succeed(
         engine._tag === "Some"
-          ? engine.value.points.list().map(({ id, label, description, defaultThreshold }) => ({
+          ? engine.value.points.list().map(({ id, label, description, instead, defaultThreshold }) => ({
               id,
               label,
               description,
+              ...(instead ? { instead } : {}),
               defaultThreshold
             }))
           : []

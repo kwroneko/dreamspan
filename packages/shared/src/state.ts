@@ -98,6 +98,13 @@ export const StateEventData = Schema.Union([
   /** `tools` null: this chat follows the app default list again. */
   event("agent.tools", Schema.Struct({ tools: Schema.NullOr(Schema.Array(Schema.String)) })),
   /**
+   * Decision points this chat turns off (spec/AGENTIC.md §7, §9), by id, over what a decision
+   * connection has on: the whole list, replaced by each event. A point listed here asks nothing
+   * and sends nothing in this chat from here on; the chat can never turn one on that no
+   * connection has on (provider sends stay opt-in per connection).
+   */
+  event("decision.points", Schema.Struct({ off: Schema.Array(Schema.String) })),
+  /**
    * Whether agent replies may change a note, or a card's field (as a note replacing it), in this
    * chat (spec/AGENTIC.md §4.3): over the note's `agent_editable` or the card's
    * `agent_editable_fields`. One of `note`, or `card` with `field`. `on: null` drops the chat's
@@ -219,6 +226,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "output.contract": { ids: {} },
   "cards.rotation": { ids: {} },
   "agent.tools": { ids: {} },
+  "decision.points": { ids: {} },
   "agent.permission": {
     ids: { note: { table: "entity", kind: "note", chatOwned: true }, card: { table: "entity", kind: "card" } }
   },
@@ -447,6 +455,8 @@ export interface ChatState {
   readonly cardsRotation: boolean | null
   /** `agent.tools`: offered tools; null: the default list. */
   readonly agentTools: ReadonlyArray<string> | null
+  /** `decision.points`: the decision points turned off here; absent (no event) or empty: none. */
+  readonly decisionsOff?: ReadonlyArray<string>
   /** `agent.permission`s by `permissionKey`: on or off, over the note's or card's own. */
   readonly agentPermissions: Readonly<Record<string, boolean>>
   readonly rolloutContinuity: "fork" | "resume_previous" | null
@@ -642,6 +652,10 @@ const applyCore = (
       return { ...state, cardsRotation: data.value.on }
     case "agent.tools":
       return { ...state, agentTools: data.value.tools }
+    case "decision.points": {
+      const { decisionsOff: _was, ...rest } = state
+      return data.value.off.length === 0 ? rest : { ...rest, decisionsOff: [...new Set(data.value.off)] }
+    }
     case "agent.permission": {
       const key = permissionKey(data.value)
       if (key === null) return state
