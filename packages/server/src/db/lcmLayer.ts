@@ -1,9 +1,10 @@
+import { pathSegments } from "./pathSegments.ts"
 import { summaryChoices } from "./lcmFork.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { readSummary, SummaryReads } from "./lcmReads.ts"
+import { readSummary, SummaryReads, primeSummaryReads } from "./lcmReads.ts"
 import { audienceScope, firstUnknownPosition, inputsKnown } from "./lcmAudience.ts"
 import { slotDeletedIn, viewAt } from "./forkState.ts"
 
@@ -205,7 +206,7 @@ export interface LayerView {
   readonly unknownFrom?: number | null
 }
 
-export const selectSummaryLayer = (
+const selectLayer = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chatId: string,
@@ -219,13 +220,13 @@ export const selectSummaryLayer = (
       present: number
     }>`SELECT EXISTS(SELECT 1 FROM summaries s JOIN chats c ON c.id = s.chat_id WHERE s.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND s.sealed = 1 AND s.status IN ('complete', 'truncated')) AS present`
     if (!any?.present) return { summaries: [], cursor: null, cursorDepth: -1 }
+    if (leaf !== null) yield* primeSummaryReads(sql, userId, chatId, leaf)
     // In a fork that shows inserted slots, the path is its display path, and the numbers are positions.
     const shown = yield* pathView(sql, chatId, leaf)
-    const candidates = yield* sql<{ id: string }>`WITH RECURSIVE path(id) AS (
-      SELECT s.id FROM slots s JOIN chats c ON c.id = s.chat_id WHERE s.id = ${leaf} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
-      UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
+    const candidates = yield* sql<{ id: string }>`${pathSegments(sql, chatId, leaf, null)}, path(id) AS MATERIALIZED (
+      SELECT p.id FROM segments g CROSS JOIN slots p ON p.chain_id=g.chain_id AND p.depth BETWEEN g.lo AND g.hi ORDER BY p.depth DESC
     ) SELECT s.id FROM ${shown ? sql`(SELECT id FROM path UNION SELECT value FROM json_each(${insertedOnPath(shown)})) path` : sql`path`}
-      JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
+      CROSS JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
       WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status IN ('complete', 'truncated')
         AND (${partialBatch ? 1 : 0} OR s.batch_id IS NULL OR NOT EXISTS (SELECT 1 FROM summarization_jobs j INDEXED BY summarization_jobs_batch
           WHERE j.chat_id = s.chat_id AND j.batch_id = s.batch_id AND j.status IN ('pending', 'processing')))
@@ -261,10 +262,16 @@ export const selectSummaryLayer = (
                 ] as const
             )
           )
+    const kept = yield* SummaryReads
+    const fork = yield* viewAt(sql, chatId, leaf)
     for (const candidate of candidates) {
       if (sharedEnds !== null && (sharedEnds.get(candidate.id) ?? -1) >= unknownFrom!) continue
-      if (!(yield* valid(candidate.id))) continue
-      const summary = yield* readSummary(sql, userId, candidate.id, undefined, memo, shown ?? undefined)
+      const checked = shown ? undefined : kept?.valid.get(candidate.id)
+      if (!(checked ?? (yield* valid(candidate.id)))) continue
+      const summary =
+        kept?.projections.get(`${fork}\u0000${candidate.id}`) ??
+        (yield* readSummary(sql, userId, candidate.id, undefined, memo, shown ?? undefined))
+      memo.set(candidate.id, summary)
       if (
         summary.status === "superseded" ||
         (shown
@@ -312,11 +319,12 @@ export const selectSummaryLayer = (
     }
     const chosen = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => activeChoice(c.chosen_id)))
     const dismissed = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => c.summary_id))
-    for (const [end, options] of ending) {
-      const allowed = options.filter((s) => !dismissed.has(s.id))
-      if (allowed.length) ending.set(end, allowed)
-      else ending.delete(end)
-    }
+    if (dismissed.size)
+      for (const [end, options] of ending) {
+        const allowed = options.filter((s) => !dismissed.has(s.id))
+        if (allowed.length) ending.set(end, allowed)
+        else ending.delete(end)
+      }
     const protectedChoice = (s: Summary) => !dismissed.has(s.id) && (s.origin === "user" || s.origin === "imported")
     const protectedSummaries = [...ending.values()].flat().filter(protectedChoice)
     const includesChoice = (s: Summary, manual: Summary): boolean =>
@@ -325,22 +333,23 @@ export const selectSummaryLayer = (
           ? child.revisionId === manual.revisionId
           : memo.has(child.summaryId) && includesChoice(memo.get(child.summaryId)!, manual)
       )
-    for (const [end, options] of ending) {
-      const allowed = options.filter(
-        (s) =>
-          !protectedSummaries.some(
-            (manual) =>
-              s.id !== manual.id &&
-              s.origin === "generated" &&
-              s.level >= manual.level &&
-              s.from <= manual.from &&
-              s.to >= manual.to &&
-              !includesChoice(s, manual)
-          )
-      )
-      if (allowed.length) ending.set(end, allowed)
-      else ending.delete(end)
-    }
+    if (protectedSummaries.length)
+      for (const [end, options] of ending) {
+        const allowed = options.filter(
+          (s) =>
+            !protectedSummaries.some(
+              (manual) =>
+                s.id !== manual.id &&
+                s.origin === "generated" &&
+                s.level >= manual.level &&
+                s.from <= manual.from &&
+                s.to >= manual.to &&
+                !includesChoice(s, manual)
+            )
+        )
+        if (allowed.length) ending.set(end, allowed)
+        else ending.delete(end)
+      }
     for (const options of ending.values())
       options.sort(
         (a, b) =>
@@ -360,9 +369,41 @@ export const selectSummaryLayer = (
       expected = summary.from - 1
     }
     if (expected !== 0) selected = []
+    // Candidate projections omit L1 inputs; expose only complete summary DTOs to consumers.
+    selected = yield* Effect.forEach(selected, (s) =>
+      Effect.map(readSummary(sql, userId, s.id, undefined, undefined, shown ?? undefined), (full) =>
+        s === full
+          ? full
+          : extend(full, {
+              firstSlotId: s.firstSlotId,
+              lastSlotId: s.lastSlotId,
+              from: s.from,
+              to: s.to,
+              fresh: s.fresh
+            })
+      )
+    )
     const newest = selected.at(-1)
     // `cursorDepth` is the cursor's position on the display path: its depth in a fork without insertions.
     return { summaries: selected, cursor: newest?.lastSlotId ?? null, cursorDepth: newest ? newest.to - 1 : -1 }
+  })
+
+/** All consumers in one read transaction share the same selected layer, including its order. */
+export const selectSummaryLayer: typeof selectLayer = (...args) =>
+  Effect.gen(function* () {
+    const kept = yield* SummaryReads
+    const [, userId, chatId, leaf, partial = false, view] = args
+    const fork = yield* viewAt(args[0], chatId, leaf)
+    const key = JSON.stringify([userId, chatId, leaf, fork, partial, view ?? null])
+    const hit = kept?.layers.get(key)
+    if (hit) return hit
+    if (partial && kept?.facts.some((f) => f.fork === fork && [...f.rows.values()].every((r) => r.batch_id === null))) {
+      const shared = kept.layers.get(JSON.stringify([userId, chatId, leaf, fork, false, view ?? null]))
+      if (shared) return shared
+    }
+    const layer = yield* selectLayer(...args)
+    kept?.layers.set(key, layer)
+    return layer
   })
 
 /** Failures only stand while their declared inputs still match the viewed path. */
@@ -384,7 +425,7 @@ export const selectFailedRanges = (
         WHERE s.id=${leaf} AND c.id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
       UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id=p.id WHERE s.parent_slot_id IS NOT NULL
     ) SELECT s.id FROM ${shown ? sql`(SELECT id FROM path UNION SELECT value FROM json_each(${insertedOnPath(shown)})) path` : sql`path`}
-      JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id=path.id
+      CROSS JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id=path.id
       WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.level=1 AND s.status='failed' AND s.audience_json IS ${audience}`
     const valid = lineageValidator(sql, userId, shown ?? undefined),
       failures: Array<{ id: string; revision: string; from: number; to: number }> = []

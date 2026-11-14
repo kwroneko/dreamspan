@@ -61,6 +61,10 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "model.unbind", value: {} }
     case "DefaultPreset":
       return { key: "preset.unbind", value: {} }
+    case "SummaryModel":
+      return change.model === null
+        ? { key: "model.unbind", value: {} }
+        : { key: "model.binding", value: { connection: change.model.connection, model: change.model.model } }
     case "MacroBinding":
       return change.value === null
         ? { key: "macro.unbind", value: { name: change.name } }
@@ -432,6 +436,9 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       ...(Object.keys(state.roles).length ? { roles: state.roles } : {}),
       playedByMe: state.playedByMe as Cast["playedByMe"],
       model: (state.modelBindings[""] ?? null) as Cast["model"],
+      ...(state.modelBindings["summarizer"]
+        ? { summaryModel: state.modelBindings["summarizer"] as NonNullable<Cast["summaryModel"]> }
+        : {}),
       preset: (state.presetBindings[""]?.ref ?? null) as Cast["preset"],
       presetLocked: state.presetBindings[""] !== undefined,
       lorebooks: state.lorebooks as Cast["lorebooks"],
@@ -756,7 +763,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             slotId,
             displayEnd,
             versionId: null,
-            scope: null,
+            // The summary model is the "summarizer" role's own binding; everything else is chat-wide.
+            scope: change._tag === "SummaryModel" ? "summarizer" : null,
             data: toEvent(change)
           })
         }

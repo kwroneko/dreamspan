@@ -1,3 +1,4 @@
+import { cardChoiceLabel } from "../chat/CardVersion.tsx"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import { remoteOf } from "@rp/shared/cardSources.ts"
 import { lazy, Suspense } from "react"
@@ -22,7 +23,8 @@ export const registerCharacterPanels = () =>
       const cast = view.cast
       const tab = (card: CastCard): PanelTabEntry => ({
         value: `card:${card.entityId}`,
-        label: card.label,
+        label: cardChoiceLabel(card),
+        keepLabel: cast!.cards.some((other) => other.entityId !== card.entityId && other.name === card.name),
         avatar: { id: card.entityId, name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop },
         ...(cast!.playedByMe.includes(card.entityId) ? { note: "you" } : {})
       })

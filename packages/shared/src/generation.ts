@@ -28,7 +28,8 @@ export class GenerationDefaults extends Schema.Class<GenerationDefaults>("Genera
  * Some of the defaults, each given one replacing the stored one and the rest left as they are,
  * so a page changing one setting doesn't write back what another tab has changed since.
  * `tail` is the default summarization instruction (`lcm.tail`), `fallback` the fallback
- * summarizer (`lcm.fallback`); null removes either.
+ * summarizer (`lcm.fallback`), `summarizer` the model that writes summaries (`lcm.summarizer`);
+ * null removes any of them.
  */
 export const GenerationDefaultsChange = Schema.Struct({
   persona: Schema.optionalKey(Schema.NullOr(EntityId)),
@@ -36,6 +37,7 @@ export const GenerationDefaultsChange = Schema.Struct({
   preset: Schema.optionalKey(Schema.NullOr(RefId)),
   judge: Schema.optionalKey(Schema.NullOr(ModelChoice)),
   fallback: Schema.optionalKey(Schema.NullOr(ModelChoice)),
+  summarizer: Schema.optionalKey(Schema.NullOr(ModelChoice)),
   tail: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** The summarization defaults for new chats (DESIGN §8), one at a time; null restores the built-in. */
   lcm: Schema.optionalKey(LcmSettingsChange)

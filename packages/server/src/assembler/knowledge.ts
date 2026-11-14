@@ -137,7 +137,7 @@ export const knowledgeStage: AssemblerStage = {
             viewer: own[0]!,
             aliases: own,
             stored: true,
-            ...(sources.stretches ? { ranges: yield* sources.stretches() } : {})
+            ...(sources.stretches ? { ranges: yield* sources.stretches(undefined, own) } : {})
           }
         }
         return assembly
@@ -173,7 +173,12 @@ export const knowledgeStage: AssemblerStage = {
                 viewer: stretch,
                 ...alias,
                 ...(sources.stretches
-                  ? { ranges: yield* sources.stretches(historyLeafOf(need(assembly, "target"))) }
+                  ? {
+                      ranges: yield* sources.stretches(
+                        historyLeafOf(need(assembly, "target")),
+                        aliases && aliases.length > 1 ? aliases : [stretch]
+                      )
+                    }
                   : {})
               }
             }

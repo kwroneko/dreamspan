@@ -133,6 +133,7 @@ export const ContextIssue = Schema.Struct({
     "plugin_replacement",
     "history_truncated",
     "summary_failed",
+    "summary_model_unavailable",
     "examples_truncated",
     "regex_skipped",
     "lorebook_issue",

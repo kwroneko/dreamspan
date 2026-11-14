@@ -116,6 +116,14 @@ lcmTest("a refused summary falls back to the fallback model, whose answer is the
   Effect.gen(function* () {
     const h = yield* lcmHarness(server, { summarizer: () => ({ text: `${PLANTED} cannot` }) })
     yield* h.defaults({ judge: h.judge, fallback: h.fallback })
+    const account = yield* h.api.AddUserModel({
+      connectionId: h.connection.id,
+      key: "account-summary",
+      overrides: { context: 8192, settings: { samplers: { openai_max_tokens: 512 } } }
+    })
+    yield* h.api.ChangeGenerationDefaults({
+      change: { summarizer: { connection: h.connection.id, model: account.id } }
+    })
     const job = yield* h.enqueue(0, 5)
     yield* h.drain
     const [row] = (yield* fixtureSql(h.dataDir, [
@@ -155,6 +163,7 @@ lcmTest(
   (server) =>
     Effect.gen(function* () {
       const h = yield* lcmHarness(server, { summarizer: () => ({ status: 400 }) })
+      yield* h.api.ChangeGenerationDefaults({ change: { summarizer: h.primary } })
       const first = yield* h.enqueue(0, 5)
       yield* h.drain
       const [failed] = yield* summaries(h.dataDir, h.chat.id)

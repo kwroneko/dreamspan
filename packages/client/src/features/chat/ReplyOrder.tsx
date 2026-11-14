@@ -1,3 +1,4 @@
+import { cardChoiceLabel } from "./CardVersion.tsx"
 // Who replies when nobody is picked, per chat (ST's group "Group reply strategy",
 // `activation_strategy`): the Cast tab's `cast.reply-order` section (a `castSections` entry, so
 // a plugin can replace or remove it). The choices are the reply policies that have a label
@@ -105,7 +106,7 @@ export function PendingReplyFrom({ pending }: { pending: PendingChat }) {
         <Select
           items={repliers.map(({ card }) => ({
             value: card.entityId as string,
-            label: card.name
+            label: cardChoiceLabel(card)
           }))}
           value={value}
           onValueChange={(id) => pending.setReplier(id as EntityId)}

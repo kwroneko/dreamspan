@@ -75,10 +75,24 @@ export const LcmDefaults = Schema.Struct({
   ...sizes,
   /** The old name of `when`: false is "next-reply". Read when `when` is absent, never written. */
   spendAhead: Schema.optionalKey(Schema.Boolean),
+  /** The model that writes summaries in a chat without its own; absent: the chat's model. */
+  summarizer: Schema.optionalKey(ModelChoice),
   /** Tried once for a summary whose retries ran out on the summarizer's model. */
   fallback: Schema.optionalKey(ModelChoice)
 }).check(ordered)
 export type LcmDefaults = typeof LcmDefaults.Type
+
+type Binding = { readonly connection: string; readonly model: string }
+
+/**
+ * The model a chat's summaries are written with: the chat's own summary model (its
+ * "summarizer"-scoped `model.binding`), else the account's (`lcm.summarizer`), else the chat's
+ * model; null when none is set (the user's default model applies then, as for a reply).
+ */
+export const summaryModelBinding = (
+  bindings: Readonly<Record<string, Binding>>,
+  defaults: LcmDefaults | null | undefined
+): Binding | null => bindings["summarizer"] ?? defaults?.summarizer ?? bindings["narrator"] ?? bindings[""] ?? null
 
 /** The settings a user sets field by field: a chat's (`ChangeLcmSettings`) or the account default's. */
 export type LcmField =
