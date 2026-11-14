@@ -55,6 +55,20 @@ lcmTest(
           assert.deepStrictEqual(kept, yield* plans(forkId), `${name}: kept facts plan as fresh ones`)
           return result
         })
+      // This branch-local override was added by the thinking replay work. The generic
+      // semantic-override trigger must fence it even after both planning readers are warm.
+      for (const hidden of [true, false])
+        yield* step(
+          `thinking sections ${hidden ? "hidden" : "shown"}`,
+          true,
+          h.writer.SetThinkingHidden({
+            userId: h.userId,
+            versionId: h.rows[0]!.version.id,
+            forkId: main,
+            part: "sections",
+            hidden
+          })
+        )
       // Appending: no summary's input changes, and the kept leaf's facts extend to the new one.
       const user = yield* step(
         "append",
@@ -228,6 +242,115 @@ lcmTest(
       )
       yield* step("claim one", false, h.writer.ClaimSummaryJob({ userId: h.userId }))
       // A restarted reader keeps nothing: the kept facts were only ever a copy.
+      assert.lengthOf(h.mock.requests(), 0)
+    }),
+  { timeout: 120_000 }
+)
+
+lcmTest(
+  "staged adoption publishes a lower-rowid summary after readers have kept a newer one",
+  (server) =>
+    Effect.gen(function* () {
+      const h = yield* lcmHarness(server, { messages: 12 })
+      const at = {
+        userId: h.userId,
+        chatId: h.chat.id,
+        forkId: h.chat.currentForkId!,
+        leafSlotId: h.rows.at(-1)!.slotId
+      }
+      const params = {
+        ...at,
+        choice: "adopt" as const,
+        approved: { jobs: 0, tokens: 0, cost: 0, currency: "USD" },
+        imported: {
+          noteEntity: "synthetic-staged-note",
+          content: "Synthetic imported summary.",
+          firstSlotId: h.rows[0]!.slotId,
+          lastSlotId: h.rows[7]!.slotId,
+          slotCount: 8,
+          hidden: 0
+        }
+      }
+      let stage = yield* h.writer.StageLcmEnable(params)
+      while (!stage.ready) stage = yield* h.writer.StageLcmEnable({ ...params, runId: stage.runId })
+      yield* completeFixture(
+        h.dataDir,
+        h.writer,
+        h.userId,
+        h.chat.id,
+        h.rows.slice(8).map((r) => ({ slotId: r.slotId, versionId: r.version.id, amendCount: 0 }))
+      )
+      const inspect = Effect.map(
+        fixtureSql(
+          h.dataDir,
+          [
+            {
+              sql: "SELECT lcm_stamp AS stamp,(SELECT rowid FROM summaries WHERE id=?) AS staged,(SELECT max(rowid) FROM summaries WHERE chat_id=?) AS top FROM chats WHERE id=?",
+              params: [stage.runId, h.chat.id, h.chat.id]
+            }
+          ],
+          { readOnly: true }
+        ),
+        (rows) => rows[0]![0]!
+      )
+      const plans = Effect.all([h.reader.PlanSummaries(at), h.reader.PlanSummaries({ ...at, reason: "reply" })])
+      const before = yield* plans
+      const old = yield* inspect
+      assert.isBelow(old.staged as number, old.top as number)
+      yield* h.writer.EnableLcm({
+        ...at,
+        choice: "adopt",
+        approved: params.approved,
+        runId: stage.runId,
+        switchOff: []
+      })
+      assert.isAbove((yield* inspect).stamp as number, old.stamp as number, "publication fences the late seal")
+      const kept = yield* plans
+      assert.notStrictEqual(kept[1].maintenancePins, before[1].maintenancePins)
+      yield* fixtureSql(h.dataDir, [{ sql: "UPDATE chats SET lcm_stamp=lcm_stamp+1 WHERE id=?", params: [h.chat.id] }])
+      assert.deepStrictEqual(kept, yield* plans)
+      assert.lengthOf(h.mock.requests(), 0)
+    }),
+  { timeout: 120_000 }
+)
+
+lcmTest(
+  "a new tail after deleting the kept leaf plans identically from kept and fresh facts",
+  (server) =>
+    Effect.gen(function* () {
+      const h = yield* lcmHarness(server, { messages: 12 })
+      const at = {
+        userId: h.userId,
+        chatId: h.chat.id,
+        forkId: h.chat.currentForkId!,
+        leafSlotId: h.rows.at(-1)!.slotId
+      }
+      yield* completeFixture(
+        h.dataDir,
+        h.writer,
+        h.userId,
+        h.chat.id,
+        h.rows.slice(0, 8).map((r) => ({ slotId: r.slotId, versionId: r.version.id, amendCount: 0 }))
+      )
+      yield* h.reader.PlanSummaries(at)
+      yield* h.reader.PlanSummaries({ ...at, reason: "reply" })
+      yield* h.writer.DeleteMessage({ userId: h.userId, slotId: at.leafSlotId, forkId: at.forkId })
+      const made = yield* h.writer.AppendMessage({
+        userId: h.userId,
+        chatId: h.chat.id,
+        parentSlotId: h.rows[10]!.slotId,
+        branch: false,
+        commitDraft: null,
+        version: text("Synthetic replacement tail.")
+      })
+      const position = { ...at, leafSlotId: made.slotId }
+      const plans = Effect.all([
+        h.reader.PlanSummaries(position),
+        h.reader.PlanSummaries({ ...position, reason: "reply" })
+      ])
+      const kept = yield* plans
+      yield* fixtureSql(h.dataDir, [{ sql: "UPDATE chats SET lcm_stamp=lcm_stamp+1 WHERE id=?", params: [h.chat.id] }])
+      assert.deepStrictEqual(kept, yield* plans)
       assert.lengthOf(h.mock.requests(), 0)
     }),
   { timeout: 120_000 }

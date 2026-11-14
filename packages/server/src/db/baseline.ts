@@ -170,8 +170,8 @@ const lcmStamp: ReadonlyArray<string> = [
     `CREATE TRIGGER lcm_stamp_lcm_enable_slots_${op} AFTER ${op.toUpperCase()} ON lcm_enable_slots
     BEGIN ${bumpLcm(`(SELECT chat_id FROM lcm_enable_runs WHERE id = ${rowOf(op)}.run_id)`)} END`
   ]),
-  // A sealed summary changes only by these; an unsealed one is in no reader's facts until sealed,
-  // when its rowid finds it.
+  // Sealed changes are fenced here. Ordinary completions insert and seal atomically and
+  // are found by rowid; staged adoption fences its late seal through publication below.
   `CREATE TRIGGER lcm_stamp_summaries_update AFTER UPDATE ON summaries WHEN OLD.sealed = 1
     BEGIN ${bumpLcm("NEW.chat_id")} ${bumpLcm("OLD.chat_id")} END`,
   `CREATE TRIGGER lcm_stamp_summaries_delete AFTER DELETE ON summaries BEGIN ${bumpLcm("OLD.chat_id")} END`,
@@ -1686,6 +1686,9 @@ export const baseline: ReadonlyArray<string> = [
     -- NULL when its inputs' versions had no images, so freshness needs no image read.
     images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json))
   ) STRICT`,
+  // The implicit rowid suffix supports max(rowid) and the per-chat rowid delta without
+  // scanning summaries on unrelated forks. (chat_id, level) cannot bound that delta.
+  `CREATE INDEX summaries_chat ON summaries(chat_id)`,
   `CREATE INDEX summaries_chat_level ON summaries(chat_id, level)`,
   `CREATE INDEX summaries_last_slot ON summaries(last_slot_id)`,
   `CREATE INDEX summaries_status ON summaries(chat_id, status, level)`,

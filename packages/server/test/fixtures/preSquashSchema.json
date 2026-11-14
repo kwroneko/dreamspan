@@ -746,6 +746,12 @@
     },
     {
       "type": "index",
+      "name": "summaries_chat",
+      "tbl_name": "summaries",
+      "sql": "CREATE INDEX summaries_chat ON summaries(chat_id)"
+    },
+    {
+      "type": "index",
       "name": "summaries_chat_level",
       "tbl_name": "summaries",
       "sql": "CREATE INDEX summaries_chat_level ON summaries(chat_id, level)"

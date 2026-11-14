@@ -2,8 +2,9 @@
 // They stay valid while the chat's LCM stamp (baseline.ts `lcmStamp`) and the schema do: every
 // write that can change a sealed summary's facts moves the stamp, and appending doesn't, so a
 // reply's plans extend what the last one read instead of reading it again. Summaries sealed since
-// are found by rowid: a summary is inserted and sealed in one transaction (lcmWrites.ts and the
-// other three writers), and its row is never deleted while its chat exists.
+// are found by rowid using summaries_chat: ordinary completions insert and seal atomically.
+// Staged import adoption can seal an older row; its publication moves the chat stamp in that
+// transaction (lcmEnableWrites.ts). Summary rows live as long as their chat.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { lcmStampTriggers } from "./baseline.ts"

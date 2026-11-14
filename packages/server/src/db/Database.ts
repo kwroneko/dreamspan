@@ -238,6 +238,18 @@ export const layer = (options: DatabaseOptions) => {
             Layer.provide(
               ReaderPool.layer(options.readers, {
                 retryCrashed: true,
+                affinity: (request) =>
+                  request.tag === "PlanSummaries" &&
+                  typeof request.payload === "object" &&
+                  request.payload !== null &&
+                  "userId" in request.payload &&
+                  "chatId" in request.payload
+                    ? JSON.stringify([
+                        request.payload.userId,
+                        request.payload.chatId,
+                        "reason" in request.payload && request.payload.reason !== undefined
+                      ])
+                    : undefined,
                 isolated: (request) =>
                   request.tag === "PlanSummaries" &&
                   typeof request.payload === "object" &&

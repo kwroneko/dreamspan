@@ -1,3 +1,4 @@
+import { factRowCharacters } from "./lcmFactWeight.ts"
 import { factStore } from "./lcmFactStore.ts"
 import { lineageCache } from "./lcmLineageCache.ts"
 import { BaseViews, messageView } from "./lcmBaseView.ts"
@@ -308,8 +309,10 @@ interface KeptFacts {
   readonly characters: number
 }
 const KEPT_LEAVES = 4
-const weightOf = (row: SummaryRow) => row.content.length + 400
-const fullWeight = (summary: Summary) => 64 * summary.inputs.length + 64
+const weightOf = factRowCharacters
+const fullWeight = (summary: Summary) =>
+  summary.inputs.reduce((n, input) => n + factRowCharacters(input), 64) +
+  summary.children.reduce((n, child) => n + factRowCharacters(child), 0)
 
 /** Runs `effect` keeping what it reads of summaries for the rest of it (`SummaryReads`). */
 export const readingOnce = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -623,7 +626,8 @@ export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chat
         for (const [id, range] of ranges) if (!prior?.ranges.has(id)) characters += JSON.stringify(range).length
         for (const row of rows) characters += weightOf(row)
         for (const [id, summary] of summaries) if (!prior?.summaries.has(id)) characters += fullWeight(summary)
-        characters += 64 * inputs.length + 256 * children.length
+        characters += inputs.reduce((n, input) => n + factRowCharacters(input), 0)
+        characters += children.reduce((n, child) => n + factRowCharacters(child), 0)
         const leaves = here
           ? [
               { leaf, chain: here.chain_id, depth: here.depth, ids },
