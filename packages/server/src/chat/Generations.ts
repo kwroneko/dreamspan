@@ -453,6 +453,8 @@ export class Generations extends Context.Service<
         gen
           .generate({
             ...entry.request,
+            onNotice: (message) =>
+              hub.publish(entry.request.chatId, { _tag: "RequestNotice", versionId: entry.request.versionId, message }),
             onWaitingCache: (waiting) => {
               entry.waitingCache = waiting
               hub.publish(entry.request.chatId, { _tag: "WaitingCache", versionId: entry.request.versionId, waiting })

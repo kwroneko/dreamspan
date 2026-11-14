@@ -54,6 +54,7 @@ import {
   versionDeletedIn,
   versionDeletedInSql,
   imageExcludedSql,
+  thinkingHiddenSql,
   withFork
 } from "./forkState.ts"
 import { pathSegments } from "./pathSegments.ts"
@@ -71,6 +72,7 @@ import {
   toPathEntry,
   toUser,
   toVersion,
+  hiddenParts,
   type UserRow,
   type VersionRow
 } from "./rows.ts"
@@ -117,6 +119,7 @@ const pathColumns = (fork: string) => `${shownVersionColumns}, s.parent_slot_id,
   coalesce(hso.flag, ${contextExcluded()}) AS context_excluded, coalesce(hso.flag, s.hidden_by_user) AS hidden_by_user,
   (SELECT json_group_array(a.media_id) FROM version_attachments a
     WHERE a.version_id = v.id AND ${imageExcludedSql(fork, "o.id", "a.media_id")}) AS excluded_images,
+  ${thinkingHiddenSql(fork, "o.id")} AS hidden_thinking,
   ${branchLabel("s")} AS branch_name, s.fork_id AS slot_fork_id, ${startsFork("s")} AS starts_fork_id,
   (s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL OR coalesce(dso.flag, 0) = 1) AS slot_deleted,
   (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.fork_id IS NULL AND NOT ${versionDeletedInSql(fork, "c")})
@@ -1032,6 +1035,24 @@ export const makeReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })
         return toVersion(row)
       }).pipe(query("GetVersion")),
+
+    GetThinkingHidden: ({ userId, versionId, forkId }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{ chat_id: ChatId; slot_id: SlotId; original: string }>`
+          SELECT s.chat_id, s.id AS slot_id, CASE WHEN v.fork_id IS NULL THEN v.id ELSE v.source_version_id END AS original
+          FROM versions v JOIN slots s ON s.id=v.slot_id JOIN chats c ON c.id=s.chat_id
+          WHERE v.id=${versionId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
+            AND s.deleted_at IS NULL AND v.deleted_at IS NULL AND v.purged_at IS NULL`
+        if (!row) return yield* new NotFound({ entity: "version", id: versionId })
+        const fork = forkId
+          ? (yield* liveFork(yield* ownedChat(userId, row.chat_id), forkId)).id
+          : yield* forkAt(sql, row.chat_id, row.slot_id)
+        const [choice] = yield* sql<{
+          hidden: number
+        }>`SELECT ${withFork(sql, fork, (f) => thinkingHiddenSql(f, "o.id"))} AS hidden
+          FROM versions o WHERE o.id=${row.original}`
+        return hiddenParts(choice?.hidden)
+      }).pipe(query("GetThinkingHidden")),
 
     LiveVersions: ({ userId, versionIds }) =>
       (versionIds.length === 0

@@ -124,6 +124,8 @@ export const storageKinds = makeRegistry<StorageKind>([
       "suppress_event",
       "insert",
       "image_exclude",
+      // A version's thinking hidden from the model in a branch (SetThinkingHidden).
+      "thinking_hide",
       // The per-branch correction of who was present (spec/THREADS.md §3.4, §16.2).
       "presence_away",
       "presence_range"

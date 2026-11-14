@@ -717,6 +717,8 @@ export interface HistoryEntry {
    * `content`; sent before it, in their tags, only where the preset sends sections back.
    */
   readonly replySections?: import("@rp/shared/replySections.ts").ReplySections
+  /** The version's thinking the user hid from the model here (SetThinkingHidden): never sent. */
+  readonly thinkingHidden?: ReadonlyArray<import("@rp/shared/chat.ts").ThinkingPart>
   readonly macroMode: "template" | "verbatim"
   readonly frozen: FrozenValues | null
   /** Whether a template's variable writes are recorded already, as state events of its version. */
