@@ -97,13 +97,13 @@ layer(serverLayer(testConfig({ dbReaders: 2 })), { excludeTestServices: true, ti
             }
           })
           // A message sent after a check: every file of the chat is refused, nothing written.
-          const before = yield* check
+          const earlier = yield* check
           const leaf = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId
           yield* api.SendMessage({ chatId: chat.id, parentSlotId: leaf, branch: false, content: "Sent after the check." })
           const staleStarted = Date.now()
           const stale = yield* jobEnded(
             api,
-            (yield* api.StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: before.planId, skip: [] } }))
+            (yield* api.StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: earlier.planId, skip: [] } }))
               .importId,
             60 * 60_000
           )
