@@ -67,6 +67,10 @@ export interface AssemblyFixture {
   readonly noteRevisions?: Readonly<Record<string, ReadonlyArray<{ readonly revision: string; readonly doc: NoteDoc }>>>
   readonly preset: PresetDoc
   readonly model?: ModelInput | null
+  /** Each binding the model stage asked for, in order (the fixture's `model` answers them all). */
+  readonly modelAsked?: Array<{ readonly connection: string; readonly model: string } | null>
+  /** The account's summary defaults; absent: the source isn't offered. */
+  readonly lcmDefaults?: import("@rp/shared/lcmSettings.ts").LcmDefaults | null
   readonly now?: number
 }
 
@@ -178,7 +182,12 @@ const fixtureSources = (fixture: AssemblyFixture) => {
         entries.slice(0, leaf === null ? 0 : entries.findIndex((e) => e.slotId === leaf) + 1).filter((e) => e.inContext)
           .length
       ),
-    model: () => Effect.succeed(fixture.model ?? null),
+    model: (binding) =>
+      Effect.sync(() => {
+        fixture.modelAsked?.push(binding)
+        return fixture.model ?? null
+      }),
+    ...(fixture.lcmDefaults !== undefined ? { lcmDefaults: () => Effect.succeed(fixture.lcmDefaults ?? null) } : {}),
     preset: () => Effect.succeed({ ref: "ref-preset", revision: "rev-preset", scope: "chat", doc: fixture.preset })
   })
 }

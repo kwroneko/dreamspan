@@ -1,3 +1,5 @@
+import { planningContext, summaryChunkRoom } from "./lcmModelBudget.ts"
+import { resolveSummaryModel } from "../assembler/summaryModel.ts"
 import { workshopTranscript } from "./workshopTranscript.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { summarySafeText } from "../agent/compaction.ts"
@@ -85,9 +87,8 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         // Enabling waits for the next reply; startup and a finished job's pass do not begin it.
         if (progress?.armed && reason !== "reply") return { ...empty, backfill: { ...progress, settled: false } }
         // Nothing is planned without a model to summarize with: jobs would only fail. The state is the caller's to show.
-        const bound =
-          state.modelBindings["summarizer"] ?? state.modelBindings["narrator"] ?? state.modelBindings[""] ?? null
-        const usable = yield* Effect.flatMap(AssemblySources, (s) => s.model(bound)).pipe(
+        const usable = yield* Effect.flatMap(AssemblySources, (s) => resolveSummaryModel(s, state.modelBindings)).pipe(
+          Effect.map((resolved) => resolved.model),
           Effect.provide(sources.layer),
           Effect.catchTag("AssemblyFailed", () => Effect.succeed(null))
         )
@@ -143,18 +144,30 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         }))
         const onPath = new Set(path.map((s) => s.id))
         const active = jobs.filter((j) => onPath.has(j.lastSlotId))
-        const built = yield* assembler
-          .assemble({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random })
-          .pipe(Effect.provide(sources.layer))
+        const built = yield* planningContext(assembler, sources.layer, usable)
         // Recent messages kept as written (DESIGN §8): their pair as the assembly fitted it to the
         // history allowance. Planning starts at the midpoint, so summaries are usually ready before
         // the maximum, and keeps the target.
         const recent = built.lcm?.recentBudget ?? { target: 0, maximum: 0 }
         const windowMax = recent.maximum
-        const leafInput = chunkSize(resolveLcm(state.lcm, defaults.lcm).leafInput, recent)
+        const settings = resolveLcm(state.lcm, defaults.lcm)
+        const configured = chunkSize(settings.leafInput, recent)
         // A chunk that doesn't fit twice in the band plans nothing: the Summaries section says so
         // under the chunk size, and it's the user's setting, not a failure.
-        if (leafInput < 1 || leafInput * 2 > recent.maximum - recent.target) return empty
+        if (configured < 1 || configured * 2 > recent.maximum - recent.target) return empty
+        const leafInput = Math.min(
+          configured,
+          yield* summaryChunkRoom({
+            sql,
+            assembler,
+            layer: sources.layer,
+            model: usable,
+            reply: built,
+            settings,
+            chatId
+          })
+        )
+        if (leafInput < 1) return empty
         const leafPlanner = assembler.leafPlanners.get("leaf")
         const maintenancePlanner = assembler.maintenancePlanners.get("maintenance")
         if (!leafPlanner || !maintenancePlanner)

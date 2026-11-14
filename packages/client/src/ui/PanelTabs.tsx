@@ -23,6 +23,7 @@ interface ToolTab {
 }
 
 interface SubjectTab {
+  readonly keepLabel?: boolean | undefined
   readonly dirty?: boolean | undefined
   readonly value: string
   readonly label: string
@@ -309,8 +310,8 @@ export function SubjectTabs({
         {[false, true].map((short) => (
           <div key={String(short)} className="flex">
             {tabs.map((tab) => (
-              <span key={tab.value} className={chipClass(tab, short && tab.avatar !== undefined)}>
-                {chip(tab, short && tab.avatar !== undefined)}
+              <span key={tab.value} className={chipClass(tab, short && tab.avatar !== undefined && !tab.keepLabel)}>
+                {chip(tab, short && tab.avatar !== undefined && !tab.keepLabel)}
               </span>
             ))}
           </div>
@@ -323,7 +324,7 @@ export function SubjectTabs({
           className="flex items-center gap-1 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:thin]"
         >
           {tabs.map((tab, index) => {
-            const short = compact && tab.avatar !== undefined && index !== named
+            const short = compact && tab.avatar !== undefined && !tab.keepLabel && index !== named
             return (
               <BaseTabs.Tab
                 data-layout-audit-ignore="inset: Tabs form the panel navigation strip"

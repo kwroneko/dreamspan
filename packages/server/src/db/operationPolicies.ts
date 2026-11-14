@@ -184,6 +184,8 @@ type StateInput = {
   chatId: ChatId
   slotId: SlotId | null
   forkId: ForkId | null
+  /** A role's own setting (the summary model's "summarizer"); undo restores only chat-wide ones. */
+  scope?: string | null
   data: typeof StoredStateEventData.Type | ReadonlyArray<typeof StoredStateEventData.Type>
 }
 const stateSnapshot = (sql: SqlClient.SqlClient, userId: UserId, input: StateInput) =>
@@ -225,7 +227,7 @@ const statePolicy = (id: string): OperationPolicy =>
         const changes = (Array.isArray(input.data) ? input.data : [input.data]) as ReadonlyArray<
           typeof StoredStateEventData.Type
         >
-        if (changes.some((c) => !allowedStateKeys.has(c.key)))
+        if (changes.some((c) => !allowedStateKeys.has(c.key)) || (input.scope ?? null) !== null)
           return yield* refuseOperation("This chat change is not exposed to tools.")
         return yield* stateSnapshot(sql, userId, input)
       }),

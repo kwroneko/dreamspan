@@ -118,3 +118,70 @@ for (const phase of ["missing leaf", "plan", "reconcile", "claim", "job"] as con
     60_000
   )
 }
+
+it.live(
+  "a held maintenance plan leaves the next send and the job claim loop running",
+  () => {
+    const config = testConfig()
+    let manual: Summarizer["Service"]
+    let start: (
+      reader: Reader["Service"],
+      writer: Writer["Service"]
+    ) => Effect.Effect<Summarizer["Service"], unknown, Scope.Scope>
+    const layer = Layer.effect(
+      Summarizer,
+      Effect.gen(function* () {
+        const context = (yield* Effect.context<Providers | SummaryChecks | ChatHub | AppConfig>()).pipe(
+          Context.pick(Providers, SummaryChecks, ChatHub, AppConfig)
+        )
+        start = (reader, writer) =>
+          makeSummarizer(true).pipe(
+            Effect.provide(context),
+            Effect.provideService(Reader, reader),
+            Effect.provideService(Writer, writer)
+          )
+        manual = yield* makeSummarizer(false)
+        return manual
+      })
+    )
+    return Effect.gen(function* () {
+      const h = yield* lcmHarness({ config, summarizer: () => manual })
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const claimed = yield* Deferred.make<string>()
+      const pool = yield* start(
+        Reader.of({
+          ...h.reader,
+          PlanSummaries: (input, options) =>
+            input.reason === undefined
+              ? h.reader.PlanSummaries(input, options)
+              : Deferred.succeed(entered, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.andThen(h.reader.PlanSummaries(input, options))
+                )
+        }),
+        Writer.of({
+          ...h.writer,
+          ClaimSummaryJob: (input, options) =>
+            h.writer
+              .ClaimSummaryJob(input, options)
+              .pipe(Effect.tap((job) => (job ? Deferred.succeed(claimed, job.id) : Effect.void)))
+        })
+      )
+      const position = {
+        userId: h.userId,
+        chatId: h.chat.id,
+        forkId: h.chat.currentForkId!,
+        leafSlotId: h.rows.at(-1)!.slotId
+      }
+      yield* pool.afterReply(position)
+      yield* Deferred.await(entered)
+      yield* pool.beforeReply(position)
+      const job = yield* h.enqueue(0, h.rows.length - 1)
+      assert.strictEqual(yield* Deferred.await(claimed), job.id)
+      assert.isFalse(yield* Deferred.isDone(release))
+      yield* Deferred.succeed(release, undefined)
+    }).pipe(Effect.provide(serverLayer(config, undefined, layer)))
+  },
+  30000
+)

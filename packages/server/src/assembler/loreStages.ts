@@ -10,7 +10,7 @@ import { matchLorebooks } from "./lorebook.ts"
 import { loreAllowance, loreBudget } from "./budget.ts"
 import { estimateTokens } from "./st.ts"
 import { cardFields } from "./macros.ts"
-import { AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
+import { projectedScript, AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
 import { characterNoteText, historyLeafOf, type LorebookInput, type LoreRecord, noteCard } from "./types.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 import { applyScripts, PLACEMENT } from "./regex.ts"
@@ -153,7 +153,7 @@ export const loreActivationStage: AssemblerStage = {
       const messages = need(assembly, "projected")
         .toReversed()
         .map((p) => {
-          const text = assembly.scripted?.get(p.entry.versionId)?.text ?? env.text(p.piece)
+          const text = projectedScript(assembly.scripted, p)?.text ?? env.text(p.piece)
           return `${p.name}: ${text}`
         })
       const continuing = need(assembly, "target").continues
@@ -188,7 +188,7 @@ export const loreActivationStage: AssemblerStage = {
         .slice(-6)
         .map((p) => ({
           from: p.name,
-          text: (assembly.scripted?.get(p.entry.versionId)?.text ?? env.text(p.piece)).slice(-2_000)
+          text: (projectedScript(assembly.scripted, p)?.text ?? env.text(p.piece)).slice(-2_000)
         }))
       const decisionStamp = createHash("sha256")
         .update(

@@ -835,14 +835,31 @@ for (const width of [1440, 390])
       const other = await context.newPage()
       await other.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       const reads = { marks: 0, cast: 0, path: 0, next: 0, summaries: 0 }
-      let openingEstimate = false
+      let openingCache = false
+      const pending = new Set<string>()
+      const envelopes = (wire: string) => {
+        const parsed: unknown = JSON.parse(wire)
+        return (Array.isArray(parsed) ? parsed : [parsed]) as ReadonlyArray<{
+          _tag?: string
+          id?: string | number
+          requestId?: string | number
+          tag?: string
+        }>
+      }
       other.on("websocket", (socket) => {
         socket.on("framereceived", ({ payload }) => {
           const wire = typeof payload === "string" ? payload : payload.toString()
-          if (wire.includes('"_tag":"Cache"')) openingEstimate = true
+          if (wire.includes('"_tag":"Cache"')) openingCache = true
+          for (const message of envelopes(wire)) if (message._tag === "Exit") pending.delete(String(message.requestId))
         })
         socket.on("framesent", ({ payload }) => {
           const wire = typeof payload === "string" ? payload : payload.toString()
+          for (const message of envelopes(wire))
+            if (
+              message._tag === "Request" &&
+              ["GetNextContext", "GetLcmState", "GetLcmCoverage"].includes(message.tag ?? "")
+            )
+              pending.add(String(message.id))
           for (const [key, methods] of Object.entries({
             marks: ["GetAwayMarks"],
             cast: ["GetCast", "GetCasts"],
@@ -861,10 +878,11 @@ for (const width of [1440, 390])
         await expect(left(page)).toBeVisible()
         await expect(left(other)).toBeVisible()
         await expect(left(other).getByRole("button", { name: "Undo", exact: true })).toBeVisible()
-        // A cold opening estimate can arrive after marks; it schedules its own summary read.
-        // Observe it before the quiet period so the assertion measures only Undo's invalidations.
-        await expect.poll(() => openingEstimate).toBe(true)
+        // SubscribeChat starts a background estimate; under load it can arrive after
+        // the away row. Wait for that snapshot and its reads before measuring Undo.
         await expect.poll(() => reads.marks).toBeGreaterThan(0)
+        await expect.poll(() => openingCache).toBe(true)
+        await expect.poll(() => pending.size).toBe(0)
         await other.waitForTimeout(800)
         const beforeReads = { ...reads }
         const unchangedRow = await left(other).elementHandle()

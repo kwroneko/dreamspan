@@ -1,3 +1,5 @@
+import { messageView } from "./lcmBaseView.ts"
+import { pathSegments } from "./pathSegments.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { imageExcludedIn, originalSql, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
@@ -30,25 +32,61 @@ export interface LcmSlot {
   /** Live children that aren't inserted: alternates below it, which make it a branch point. */
   children: number
 }
+/**
+ * `choices`: a fork's effective message overrides (db/lcmBaseView.ts) as a table, so a path's
+ * columns join them instead of probing the fork's steps for each slot (`lcmPathColumns`).
+ * Only without published LCM ranges' hides, whose rule needs the probe.
+ */
+const choicesCte = (sql: SqlClient.SqlClient, overrides: string) => sql`choices AS MATERIALIZED (
+    SELECT value ->> '$.kind' AS kind,value ->> '$.target_id' AS target_id,
+      value ->> '$.value_id' AS value_id,value ->> '$.flag' AS flag FROM json_each(${overrides})
+  )`
+
+/** `lcmPathColumns` reading a fork's overrides from `choices` (`choicesCte`): the same values. */
+const choiceColumns = (sql: SqlClient.SqlClient) => {
+  const live = sql`s.deleted_at IS NULL AND s.purged_at IS NULL AND coalesce(ds.flag,0)=0 AND coalesce(h.flag,s.context_excluded)=0
+        AND v.deleted_at IS NULL AND v.purged_at IS NULL AND coalesce(dv.flag,0)=0`
+  return sql`p.id, s.parent_slot_id AS parent, s.depth, p.position, s.parent_slot_id AS previous, s.inserted,
+      CASE WHEN ${live} AND v.status NOT IN ('generating','failed') AND (v.content_length > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
+      CASE WHEN ${live} AND v.status NOT IN ('generating','failed') THEN CASE WHEN v.content_length > 0 THEN t.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
+      (SELECT json_group_array(json_object('mediaId',m.id,'sha256',m.sha256,'width',m.width,'height',m.height))
+        FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND coalesce((SELECT ie.flag FROM choices ie
+          WHERE ie.kind='image_exclude' AND ie.target_id=(${sql.literal(originalSql("v"))}) || ':' || a.media_id),0) <> 1 ORDER BY a.ordinal) AS images_json,
+      (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
+      coalesce(v.status = 'generating',0) AS generating,
+      (SELECT count(*) FROM slots child WHERE child.parent_slot_id = p.id AND child.deleted_at IS NULL AND child.inserted = 0) AS children
+      FROM path p JOIN slots s ON s.id = p.id
+      LEFT JOIN choices so ON so.kind='select' AND so.target_id=s.id
+      LEFT JOIN choices ro ON ro.kind='replace' AND ro.target_id=coalesce(so.value_id,s.selected_version_id)
+      LEFT JOIN versions v ON v.id = coalesce(ro.value_id,so.value_id,s.selected_version_id)
+      LEFT JOIN choices ds ON ds.kind='delete_slot' AND ds.target_id=s.id
+      LEFT JOIN choices h ON h.kind='hide' AND h.target_id=s.id
+      LEFT JOIN choices dv ON dv.kind='delete_version' AND dv.target_id=${sql.literal(originalSql("v"))}
+      LEFT JOIN version_texts t ON t.version_seq = v.seq AND v.content_length > 0
+        AND v.status NOT IN ('generating','failed') AND ${live}
+      ORDER BY p.position`
+}
+
 // Keep LEFT joins on individual tables. A joined view on their right is
 // materialized in full by SQLite, even for a bounded path window.
 export const lcmPathColumns = (
   sql: SqlClient.SqlClient,
-  fork: string | null
+  fork: string | null,
+  base = false
 ) => sql`p.id, s.parent_slot_id AS parent, s.depth, p.position, s.parent_slot_id AS previous, s.inserted,
-      CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
-        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND (v.content_length > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
-      CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
-        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN CASE WHEN v.content_length > 0 THEN t.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
+      CASE WHEN NOT ${base ? sql`(s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL)` : slotDeletedIn(sql, fork, "s")} AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0
+        AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND (v.content_length > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
+      CASE WHEN NOT ${base ? sql`(s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL)` : slotDeletedIn(sql, fork, "s")} AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0
+        AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN CASE WHEN v.content_length > 0 THEN t.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
       (SELECT json_group_array(json_object('mediaId',m.id,'sha256',m.sha256,'width',m.width,'height',m.height))
-        FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND NOT ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "a.media_id")} ORDER BY a.ordinal) AS images_json,
+        FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND NOT ${base ? sql`0` : imageExcludedIn(sql, fork, `(${originalSql("v")})`, "a.media_id")} ORDER BY a.ordinal) AS images_json,
       (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
       coalesce(v.status = 'generating',0) AS generating,
       (SELECT count(*) FROM slots child WHERE child.parent_slot_id = p.id AND child.deleted_at IS NULL AND child.inserted = 0) AS children
-      FROM path p JOIN slots s ON s.id = p.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
+      FROM path p JOIN slots s ON s.id = p.id LEFT JOIN versions v ON v.id = ${base ? sql`s.selected_version_id` : shownIn(sql, fork, "s")}
       LEFT JOIN version_texts t ON t.version_seq = v.seq AND v.content_length > 0
-        AND v.status NOT IN ('generating','failed') AND NOT ${slotDeletedIn(sql, fork, "s")}
-        AND ${contextExcludedIn(sql, fork)} = 0 AND NOT ${shownVersionDeletedIn(sql, fork, "v")}
+        AND v.status NOT IN ('generating','failed') AND NOT ${base ? sql`(s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL)` : slotDeletedIn(sql, fork, "s")}
+        AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0 AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")}
       ORDER BY p.position`
 
 /**
@@ -115,7 +153,12 @@ const wholePath = (
       WHERE s.id = ${leaf} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
     if (!owned) return yield* new NotFound({ entity: "chat path", id: leaf })
     const fork = yield* viewAt(sql, chatId, leaf)
-    const columns = lcmPathColumns(sql, fork)
+    const changes = yield* messageView(sql, fork)
+    // A fork's own choices join as a table, unless a published range's hide needs its probe.
+    const overrides =
+      changes.length > 0 && changes.every((c) => c.kind !== "hide_range") ? JSON.stringify(changes) : undefined
+    const columns = overrides === undefined ? lcmPathColumns(sql, fork, changes.length === 0) : choiceColumns(sql)
+    const choices = overrides === undefined ? sql`` : sql`, ${choicesCte(sql, overrides)}`
     const decode = (rows: ReadonlyArray<LcmSlot & { images_json: string }>) =>
       rows.map(({ images_json, ...row }) => ({
         ...row,
@@ -125,11 +168,11 @@ const wholePath = (
     const end = pieces === null ? null : positionIn(pieces, (yield* placesOf(sql, chatId, [leaf])).get(leaf))
     if (pieces === null || end === null)
       return decode(
-        yield* sql<LcmSlot & { images_json: string }>`WITH RECURSIVE path AS (
-          SELECT id, parent_slot_id, depth AS position, 1 AS n FROM slots WHERE id = ${leaf}
-          UNION ALL SELECT s.id, s.parent_slot_id, s.depth, p.n + 1 FROM slots s JOIN path p ON s.id = p.parent_slot_id
-            WHERE p.id IS NOT ${first ?? null} AND p.n < ${limit}
-        ) SELECT ${columns}`
+        yield* sql<LcmSlot & { images_json: string }>`${pathSegments(sql, chatId, leaf, limit)},
+          bounds(lo) AS (SELECT f.depth FROM slots f JOIN segments g ON f.chain_id=g.chain_id AND f.depth BETWEEN g.lo AND g.hi WHERE f.id=${first ?? null}),
+          path AS (SELECT s.id,s.parent_slot_id,s.depth AS position FROM segments g CROSS JOIN slots s
+            ON s.chain_id=g.chain_id AND s.depth BETWEEN max(g.lo,g.floor,coalesce((SELECT lo FROM bounds),0)) AND g.hi)${choices}
+          SELECT ${columns}`
       )
     // The display stretch, read from one position earlier for the slot before its first.
     const from = first === undefined ? null : positionIn(pieces, (yield* placesOf(sql, chatId, [first])).get(first))
@@ -141,7 +184,7 @@ const wholePath = (
           SELECT s.id, w.start + s.depth - w.lo FROM w CROSS JOIN slots s ON s.chain_id = w.chain_id AND s.depth BETWEEN w.lo AND w.hi
           WHERE w.slot_id IS NULL
           UNION ALL SELECT w.slot_id, w.start FROM w WHERE w.slot_id IS NOT NULL
-        ) SELECT ${columns}`
+        )${choices} SELECT ${columns}`
     )
     const stretch = rows.map((row, n) => ({ ...row, previous: n === 0 ? null : rows[n - 1]!.id }))
     return start > 0 ? stretch.slice(1) : stretch
