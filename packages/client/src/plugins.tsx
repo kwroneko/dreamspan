@@ -3,6 +3,7 @@ import { useState, useSyncExternalStore, type ComponentType } from "react"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
+import { builtinReplacement } from "@rp/shared/builtinParts.ts"
 import type {
   Activate,
   ClientHost,
@@ -133,6 +134,8 @@ export const clientPluginHost = (p: ClientPlugin) => {
         if (claims.has(claim)) throw new Error("Plugin entry already owned")
         if (registry.get(entry.id) && claims.get(claim) !== key && !p.manifest.replaces.includes(claim))
           throw new Error("Replacement must be declared")
+        if ((registry.get(id) || p.manifest.replaces.includes(claim)) && builtinReplacement(claim)?.side !== "client")
+          throw new Error("This built-in still needs a copy adapter")
         const converted = convert(entry, () => {
           if (live) {
             report(p, p.manifest.replaces.includes(claim) ? "event" : id, name)
@@ -155,6 +158,8 @@ export const clientPluginHost = (p: ClientPlugin) => {
         if (reserved(name, id)) throw new Error("The plugin host cannot be replaced")
         if (!live || !p.manifest.replaces.includes(`${name}:${id}`) || claims.has(`${name}:${id}`))
           throw new Error("Replacement must be declared")
+        if (builtinReplacement(`${name}:${id}`)?.side !== "client")
+          throw new Error("This built-in still needs a copy adapter")
         claims.set(`${name}:${id}`, key)
         const stop = registry.disable(id)
         return own(() => {
@@ -174,11 +179,17 @@ export const clientPluginHost = (p: ClientPlugin) => {
           (entry, fail) => {
             const guard = (run: () => void) => () => {
               if (!live) return
-              try {
-                run()
-              } catch {
+              const failed = () => {
                 fail()
                 close()
+              }
+              try {
+                const result: unknown = run()
+                // Void callbacks can still be async in TypeScript. Observe their rejection
+                // here rather than relying on an attributable global Error stack.
+                if (result) void Promise.resolve(result).catch(failed)
+              } catch {
+                failed()
               }
             }
             return {

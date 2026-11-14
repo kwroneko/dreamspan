@@ -4,6 +4,7 @@ import { Type } from "@earendil-works/pi-ai"
 import { readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { join } from "node:path"
+import { builtinReplacement } from "@rp/shared/builtinParts.ts"
 import { builtinCopies } from "../src/plugins/builtins.ts"
 import { prepareBuiltinCopy, compareBuiltin, copyBuiltin } from "../src/plugins/copy.ts"
 import { rewriteImports } from "../src/plugins/importPolicy.ts"
@@ -35,6 +36,7 @@ it("all built-in tools, including generated tools, declare shipped source; only 
     )
   )
   for (const part of builtinCopies) {
+    expect(builtinReplacement(`${part.registry}:${part.id}`)?.side).toBe(part.side)
     const prepared = await prepareBuiltinCopy(part.registry, part.id, "fixture-copy", tempDir("copy-source"))
     const manifest = JSON.parse(prepared.files["rp-plugin.json"]!)
     const base = JSON.parse(prepared.files["builtin-base.json"]!)
@@ -55,49 +57,52 @@ it("all built-in tools, including generated tools, declare shipped source; only 
   )
 })
 
-it("compares exact committed base text after a simulated update, never merges it or reads a supplied path", async () => {
-  const data = tempDir("copy-update"),
-    prepared = await prepareBuiltinCopy("noticeChannels", "notifications.completion-sound", "updated-copy", data)
-  const manifest = JSON.parse(prepared.files["rp-plugin.json"]!)
-  const snapshot = JSON.parse(prepared.files["builtin-base.json"]!)
-  const path = manifest.base.path
-  // Simulate the older shipped build in the saved base, without mutating installed sources.
-  snapshot.files[path] += "\n// earlier shipped version\n"
-  const sha = (s: string) => createHash("sha256").update(s).digest("hex")
-  manifest.base.sha256 = sha(snapshot.files[path])
-  snapshot.digest = sha(JSON.stringify(snapshot.files))
-  prepared.files["rp-plugin.json"] = JSON.stringify(manifest)
-  prepared.files["builtin-base.json"] = JSON.stringify(snapshot)
-  const commit = await saveFiles(data, "", "updated-copy", prepared.files, true, "Earlier app copy")
-  const before = await commitFiles(pluginFolder(data, "", "updated-copy"), commit)
-  const comparison = await compareBuiltin(data, "", "updated-copy", commit)
-  expect(comparison).toMatchObject({ changed: true, available: true })
-  expect(comparison!.files[0]!.before).toContain("earlier shipped")
-  expect(comparison!.files[0]!.current).not.toContain("earlier shipped")
-  expect(await commitFiles(pluginFolder(data, "", "updated-copy"), commit)).toEqual(before)
-  // Dirty text never becomes provenance or a path authority.
-  await writeFile(join(pluginFolder(data, "", "updated-copy"), "builtin-base.json"), "forged")
-  expect(await compareBuiltin(data, "", "updated-copy", commit)).toEqual(comparison)
-  manifest.base.path = "../../../../secret.key"
-  prepared.files["rp-plugin.json"] = JSON.stringify(manifest)
-  const bad = await saveFiles(
-    data,
-    "",
-    "bad-base",
-    { ...prepared.files, "rp-plugin.json": JSON.stringify({ ...manifest, id: "bad-base" }) },
-    true,
-    "Bad metadata"
-  )
-  expect(await compareBuiltin(data, "", "bad-base", bad)).toEqual({ changed: true, available: false, files: [] })
-  await expect(
-    prepareBuiltinCopy(
-      "noticeChannels",
-      "notifications.completion-sound",
-      "data-copy",
-      process.cwd() + "/packages/client/src"
+it.each(builtinCopies)(
+  "compares committed $registry base after a simulated update without merging or path authority",
+  async (part) => {
+    const data = tempDir("copy-update"),
+      prepared = await prepareBuiltinCopy(part.registry, part.id, "updated-copy", data)
+    const manifest = JSON.parse(prepared.files["rp-plugin.json"]!)
+    const snapshot = JSON.parse(prepared.files["builtin-base.json"]!)
+    const path = manifest.base.path
+    // Simulate the older shipped build in the saved base, without mutating installed sources.
+    snapshot.files[path] += "\n// earlier shipped version\n"
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex")
+    manifest.base.sha256 = sha(snapshot.files[path])
+    snapshot.digest = sha(JSON.stringify(snapshot.files))
+    prepared.files["rp-plugin.json"] = JSON.stringify(manifest)
+    prepared.files["builtin-base.json"] = JSON.stringify(snapshot)
+    const commit = await saveFiles(data, "", "updated-copy", prepared.files, true, "Earlier app copy")
+    const before = await commitFiles(pluginFolder(data, "", "updated-copy"), commit)
+    const comparison = await compareBuiltin(data, "", "updated-copy", commit)
+    expect(comparison).toMatchObject({ changed: true, available: true })
+    expect(comparison!.files[0]!.before).toContain("earlier shipped")
+    expect(comparison!.files[0]!.current).not.toContain("earlier shipped")
+    expect(await commitFiles(pluginFolder(data, "", "updated-copy"), commit)).toEqual(before)
+    // Dirty text never becomes provenance or a path authority.
+    await writeFile(join(pluginFolder(data, "", "updated-copy"), "builtin-base.json"), "forged")
+    expect(await compareBuiltin(data, "", "updated-copy", commit)).toEqual(comparison)
+    manifest.base.path = "../../../../secret.key"
+    prepared.files["rp-plugin.json"] = JSON.stringify(manifest)
+    const bad = await saveFiles(
+      data,
+      "",
+      "bad-base",
+      { ...prepared.files, "rp-plugin.json": JSON.stringify({ ...manifest, id: "bad-base" }) },
+      true,
+      "Bad metadata"
     )
-  ).rejects.toThrow("Data")
-})
+    expect(await compareBuiltin(data, "", "bad-base", bad)).toEqual({ changed: true, available: false, files: [] })
+    await expect(
+      prepareBuiltinCopy(
+        "noticeChannels",
+        "notifications.completion-sound",
+        "data-copy",
+        process.cwd() + "/packages/client/src"
+      )
+    ).rejects.toThrow("Data")
+  }
+)
 
 it("rewrites syntax only and refuses path tricks, re-exports, type imports, dynamic imports and require", () => {
   const allowed = (s: string) =>
@@ -198,7 +203,7 @@ it("a throwing replacement signals suspension and closing its scope restores the
           server: "server.ts",
           worker: null,
           client: null,
-          surfaces: ["server:rolloutTools"],
+          surfaces: ["server:rolloutTools", "server:presence"],
           overrides: [],
           replaces: ["rolloutTools:set_presence"],
           base: null,

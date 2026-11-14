@@ -1,3 +1,5 @@
-import { pluginCopyTests } from "./support/pluginCopies.ts"
+import { pluginCopyTests, copiedPresenceTests } from "./support/pluginCopies.ts"
 
 pluginCopyTests()
+
+copiedPresenceTests()

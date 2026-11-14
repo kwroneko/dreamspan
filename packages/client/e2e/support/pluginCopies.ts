@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { asUser } from "./rpc.ts"
 import { pluginFolder } from "../../../server/src/plugins/repo.ts"
+import { startMockProvider, sse } from "../../../server/test/support/mockProvider.ts"
 import { expectLayout } from "./layoutAudit.ts"
 
 export const pluginCopyTests = () => {
@@ -88,11 +89,12 @@ export const pluginCopyTests = () => {
         await expect(page).toHaveURL(/compare=/)
         await page.reload()
         await expect(page.getByRole("dialog")).toContainText("Earlier shipped original")
+        await expect(page.getByRole("heading", { name: "Compare originals", exact: true })).toBeInViewport()
         await shot(page, info, "comparison")
         await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).last().click()
         await page.getByRole("button", { name: "Turn on", exact: true }).first().click()
         await expect(page.getByRole("dialog")).toContainText("Changes optional reply sounds and alerts.")
-        await expect(page.getByRole("dialog")).toContainText("Replaces existing parts")
+        await expect(page.getByRole("dialog")).toContainText("Replaces Completion sound.")
         await shot(page, info, "consent")
         await page.getByRole("dialog").getByRole("button", { name: "Turn on", exact: true }).click()
         await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 90000 })
@@ -125,31 +127,147 @@ export const pluginCopyTests = () => {
         }
       })
 
-  test("a copied tool's added access is taken from the saved version in consent", async ({ page }, info) => {
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    const made = await admin((api) =>
-      api.CopyBuiltin({ registry: "rolloutTools", id: "set_presence", pluginId: "consent-presence-copy" })
-    )
-    const file = join(pluginFolder(server().dataDir, "", made.id), "rp-plugin.json")
-    const manifest = JSON.parse(await readFile(file, "utf8"))
-    manifest.surfaces.push("server:storage")
-    await admin((api) =>
-      api.CommitPlugin({
-        ...made,
-        files: { "rp-plugin.json": JSON.stringify(manifest) },
-        message: "Keep private plugin data"
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const)
+      test(`a copied tool's saved access ${width} ${theme}`, async ({ page }, info) => {
+        await page.setViewportSize({ width, height: 1000 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.addInitScript((v) => localStorage.setItem("rp.theme", v), theme)
+        await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+        const made = await admin((api) =>
+          api.CopyBuiltin({
+            registry: "rolloutTools",
+            id: "set_presence",
+            pluginId: `consent-presence-${width}-${theme}`
+          })
+        )
+        const file = join(pluginFolder(server().dataDir, "", made.id), "rp-plugin.json")
+        const manifest = JSON.parse(await readFile(file, "utf8"))
+        manifest.surfaces.push("server:storage")
+        await admin((api) =>
+          api.CommitPlugin({
+            ...made,
+            files: { "rp-plugin.json": JSON.stringify(manifest) },
+            message: "Keep private plugin data"
+          })
+        )
+        // The working tree cannot hide the access declared by the saved version.
+        const { writeFile } = await import("node:fs/promises")
+        await writeFile(file, JSON.stringify({ ...manifest, surfaces: ["server:rolloutTools", "server:presence"] }))
+        await page.goto(`${server().url}/settings/plugins/instance~${made.id}`)
+        await page.getByRole("button", { name: "Turn on", exact: true }).first().click()
+        await expect(page.getByRole("dialog")).toContainText("Stores its own data on the server.")
+        await expect(page.getByRole("dialog")).toContainText("Replaces Who's present (set_presence).")
+        await expect(page.getByRole("dialog")).toContainText("Changes what the model sees.")
+        await expect(page.getByRole("dialog")).toContainText("including stored keys and every user's chats")
+        await shot(page, info, "copied-tool-access")
+        await page.getByRole("dialog").getByRole("button", { name: "Turn on", exact: true }).click()
+        await expect(page.getByRole("dialog")).toContainText("Plugin files are unavailable or invalid.", {
+          timeout: 90000
+        })
+        expect((await admin((api) => api.GetPlugin(made))).pin).toBeNull()
       })
-    )
-    // The working tree cannot hide the access declared by the saved version.
-    const { writeFile } = await import("node:fs/promises")
-    await writeFile(file, JSON.stringify({ ...manifest, surfaces: ["server:rolloutTools", "server:presence"] }))
-    await page.goto(`${server().url}/settings/plugins/instance~${made.id}`)
-    await page.getByRole("button", { name: "Turn on", exact: true }).first().click()
-    await expect(page.getByRole("dialog")).toContainText("Stores its own data on the server.")
-    await expect(page.getByRole("dialog")).toContainText("including stored keys and every user's chats")
-    await shot(page, info, "copied-tool-access")
-    await page.getByRole("dialog").getByRole("button", { name: "Turn on", exact: true }).click()
-    await expect(page.getByRole("dialog")).toContainText("Plugin files are unavailable or invalid.", { timeout: 90000 })
-    expect((await admin((api) => api.GetPlugin(made))).pin).toBeNull()
-  })
 }
+
+export const copiedPresenceTests = () =>
+  test.describe("copied presence provenance", () => {
+    const server = serverPerFile(withAdmin)
+    const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+    let mock: Awaited<ReturnType<typeof startMockProvider>>
+    test.beforeAll(async () => {
+      mock = await startMockProvider((request, response) => {
+        const done = ((request.body?.messages ?? []) as Array<{ role: string }>).some((m) => m.role === "tool")
+        const name = done ? "send_message" : "set_presence"
+        const args = done ? { message: "Synthetic reply." } : { character: "Synthetic visitor", present: false }
+        sse(response, [
+          {
+            id: "presence",
+            object: "chat.completion.chunk",
+            model: "copy-model",
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: "assistant",
+                  tool_calls: [
+                    { index: 0, id: name, type: "function", function: { name, arguments: JSON.stringify(args) } }
+                  ]
+                },
+                finish_reason: "tool_calls"
+              }
+            ]
+          }
+        ])
+      })
+    })
+    test.afterAll(async () => mock?.close())
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const)
+        test(`copied tool steps and inspector ${width} ${theme}`, async ({ page }, info) => {
+          test.setTimeout(150000)
+          const id = `visible-presence-${width}-${theme}`
+          const chat = await admin((api) =>
+            Effect.gen(function* () {
+              const made = yield* api.CopyBuiltin({ registry: "rolloutTools", id: "set_presence", pluginId: id })
+              expect(yield* api.EnablePlugin({ ...made, consent: true })).toMatchObject({ ok: true })
+              const connection = yield* api.CreateConnection({
+                kind: "openai-chat",
+                settings: {
+                  name: "Synthetic copy",
+                  baseUrl: mock.url + "/v1",
+                  compat: {},
+                  cacheTtlS: null,
+                  maxConcurrent: null,
+                  presetOverrideRefId: null
+                }
+              })
+              const model = yield* api.AddUserModel({ connectionId: connection.id, key: "copy-model", overrides: {} })
+              yield* api.SetGenerationDefaults({
+                defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+              })
+              yield* api.SetDisplayPrefs({ prefs: { steps: "expanded" } })
+              const chat = yield* api.CreateChat({ title: "Copied presence" })
+              yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "AgentEnabled", on: true } })
+              yield* api.SendMessage({
+                chatId: chat.id,
+                parentSlotId: null,
+                branch: false,
+                content: "A visitor leaves."
+              })
+              return chat
+            })
+          )
+          try {
+            await page.setViewportSize({ width, height: 1000 })
+            await page.emulateMedia({ colorScheme: theme })
+            await page.addInitScript((v) => localStorage.setItem("rp.theme", v), theme)
+            await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+            await page.goto(`${server().url}/chats/${chat.id}`)
+            await page
+              .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
+              .last()
+              .click()
+            const reply = page.getByRole("article").last()
+            await expect(reply).toContainText("Synthetic reply.", { timeout: 60000 })
+            const badge = reply.locator("[data-steps-badge]")
+            if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+            await expect(reply.locator('[data-step="tool"]').first()).toContainText("Who's present (editable) (plugin)")
+            await expectLayout(page, info, `copied-presence-steps-${width}-${theme}`)
+            if (process.env.SCREENSHOT_DIR)
+              await page.screenshot({
+                path: join(process.env.SCREENSHOT_DIR, `copied-presence-steps-${width}-${theme}.png`)
+              })
+            await reply.getByRole("link", { name: "Open the run" }).click()
+            await expect(page.getByRole("region", { name: "Tools offered" })).toContainText(
+              "Who's present (editable) (plugin)"
+            )
+            await expectLayout(page, info, `copied-presence-inspector-${width}-${theme}`)
+            if (process.env.SCREENSHOT_DIR)
+              await page.screenshot({
+                path: join(process.env.SCREENSHOT_DIR, `copied-presence-inspector-${width}-${theme}.png`)
+              })
+          } finally {
+            await admin((api) => api.DisablePlugin({ scope: "instance", id }))
+          }
+        })
+  })

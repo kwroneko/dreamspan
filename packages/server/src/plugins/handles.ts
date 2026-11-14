@@ -1,5 +1,6 @@
 import { Effect, Predicate, Scope, Schema, Context, Fiber } from "effect"
 import type { PluginManifest } from "@rp/shared/plugins.ts"
+import { builtinReplacement } from "@rp/shared/builtinParts.ts"
 import { presenceContext } from "../agent/tools/presenceAdapter.ts"
 import type { ToolContext } from "../agent/tools.ts"
 export interface RegistrationRegistry {
@@ -187,6 +188,12 @@ export const declaredHandles = (
             !manifest.replaces.includes(`${name}:${id}`)
           )
             throw new Error("Replacement was not declared")
+          if (
+            (registry.get(id) || manifest.replaces.includes(`${name}:${id}`)) &&
+            claims.get(`${name}:${id}`) !== manifest.id &&
+            builtinReplacement(`${name}:${id}`)?.side !== side
+          )
+            throw new Error("This built-in still needs a copy adapter")
           yield* Effect.acquireRelease(
             Effect.sync(() => {
               claims.set(`${name}:${id}`, manifest.id)
@@ -207,10 +214,28 @@ export const declaredHandles = (
             throw new Error("Credential callbacks are not available in API v1")
           let copied = registrationCopy(entry, fail, scope, () => enabled)
           if (name === "rolloutTools" && entry.id === "set_presence" && manifest.surfaces.includes("server:presence")) {
+            // The editable policy cannot reclassify state writes or introduce authorization hooks.
+            const fields = new Set([
+              "source",
+              "id",
+              "label",
+              "explanation",
+              "effect",
+              "description",
+              "parameters",
+              "summarize",
+              "execute"
+            ])
+            if (
+              (entry as { effect?: unknown }).effect !== "chat_state" ||
+              Object.keys(entry).some((key) => !fields.has(key))
+            )
+              throw new Error("Presence copies must keep the original effect and approval rules")
             const execute = (entry as { execute?: unknown }).execute
             if (typeof execute !== "function") throw new Error("Presence handler required")
             copied = {
               ...(copied as object),
+              label: `${(entry as { readonly id: string; readonly label: string }).label} · ${manifest.name} (plugin)`,
               execute: registrationCopy(
                 execute,
                 fail,
@@ -220,6 +245,8 @@ export const declaredHandles = (
               )
             }
           }
+          if (name === "rolloutTools" && entry.id === "set_presence" && !manifest.surfaces.includes("server:presence"))
+            throw new Error("Presence copies must declare presence access")
           return claim(entry.id, registry.register(copied as never))
         }),
       disable: (id: string) =>

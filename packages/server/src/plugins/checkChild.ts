@@ -11,6 +11,7 @@ import { checkNetworkFilter } from "./checkNetwork.ts"
 import { CLIENT_PLUGIN_SURFACES } from "@rp/shared/pluginClient.ts"
 import type { PluginReport } from "@rp/shared/plugins.ts"
 import { rewriteImports } from "./importPolicy.ts"
+import { builtinReplacement } from "@rp/shared/builtinParts.ts"
 
 const [dataDir, owner, id, commit, folder, appStamp, previous, expectedReport, sourceMode, actorRole] =
   process.argv.slice(2) as [string, string, string, string, string, string, string, string, string, string]
@@ -68,6 +69,13 @@ try {
     throw new Error("Admin required")
   }
   if (manifest.overrides.length) throw new Error("Internal service overrides need a restart adapter")
+  for (const part of manifest.replaces) {
+    const adapter = builtinReplacement(part)
+    if (!adapter || !manifest[adapter.side]) {
+      message = "This replacement still needs a built-in copy adapter for its runtime."
+      throw new Error("Unsupported replacement")
+    }
+  }
   if (owner && (manifest.server || manifest.worker || manifest.network))
     throw new Error("Server code needs an instance plugin and an admin")
   for (const surface of manifest.surfaces) {

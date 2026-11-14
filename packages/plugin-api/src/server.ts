@@ -49,8 +49,10 @@ export interface PresenceArgs {
   readonly present: boolean
 }
 /** Requires server:presence as well as server:rolloutTools. Only set_presence uses this adapter. */
-export interface PresenceTool extends Omit<PluginTool, "execute"> {
+export interface PresenceTool extends Omit<PluginTool, "execute" | "effect" | "capability"> {
   readonly id: "set_presence"
+  /** The host preserves the built-in state-write permission, receipts and Undo. */
+  readonly effect: "chat_state"
   readonly summarize: (args: PresenceArgs) => string
   readonly execute: (
     context: PresenceContext,

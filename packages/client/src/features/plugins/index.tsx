@@ -234,6 +234,7 @@ function PluginDetail({ plugin }: { plugin: Detail }) {
     strict: false
   })
   const busy = useRef(false)
+  const comparisonHeading = useRef<HTMLSpanElement>(null)
   const [report, setReport] = useState<PluginReport | null>(null)
   const target = targetOf(plugin)
   const manage = canManage(plugin, admin)
@@ -389,7 +390,12 @@ function PluginDetail({ plugin }: { plugin: Detail }) {
         onOpenChange={(open) => {
           if (!open) closeDialog()
         }}
-        title="Compare originals"
+        title={
+          <span ref={comparisonHeading} tabIndex={-1} className="outline-none">
+            Compare originals
+          </span>
+        }
+        initialFocus={() => comparisonHeading.current}
       >
         <p className="text-sm text-muted">The saved original and this update. Your editable copy is kept separately.</p>
         {plugin.original?.files.map((file) => (

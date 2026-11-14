@@ -10,7 +10,7 @@ import { pluginFolder } from "../src/plugins/repo.ts"
 import { frozenTool, type ToolContext } from "../src/agent/tools.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { foldState } from "@rp/shared/state.ts"
-import { generateReply } from "./support/generation.ts"
+import { generateReply, eventually, finished } from "./support/generation.ts"
 import { startMockProvider, sse, completionChunks } from "./support/mockProvider.ts"
 
 const chunks = (name: string, args: unknown) => [
@@ -50,6 +50,28 @@ it("copies, changes and runs set_presence, refuses a second replacement, then re
           me = yield* api.Whoami()
         const original = execution.rolloutTools.get("set_presence")!,
           bytes = JSON.stringify(frozenTool(original))
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startMockProvider((request, res) => {
+              const done = ((request.body?.messages ?? []) as Array<{ role: string }>).filter(
+                (m) => m.role === "tool"
+              ).length
+              sse(
+                res,
+                done === 0
+                  ? chunks("set_presence", { character: "Mira", present: false })
+                  : chunks("send_message", { message: "Mira leaves." })
+              )
+            })
+          ),
+          (m) => Effect.promise(() => m.close())
+        )
+        yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          state: [{ key: "agent.enabled", value: { on: true } }]
+        })
+        const originalRequest = mock.requests()[0]!.raw
         const made = yield* api.CopyBuiltin({ registry: "rolloutTools", id: "set_presence", pluginId: "presence-copy" })
         expect(made.report, JSON.stringify(made.report)).toMatchObject({ ok: true })
         expect((yield* api.GetPlugin(made)).pin).toBeNull()
@@ -74,22 +96,6 @@ it("copies, changes and runs set_presence, refuses a second replacement, then re
           ok: false,
           message: "Another enabled plugin already replaces this part. Turn it off first."
         })
-        const mock = yield* Effect.acquireRelease(
-          Effect.promise(() =>
-            startMockProvider((request, res) => {
-              const done = ((request.body?.messages ?? []) as Array<{ role: string }>).filter(
-                (m) => m.role === "tool"
-              ).length
-              sse(
-                res,
-                done === 0
-                  ? chunks("set_presence", { character: "Mira", present: false })
-                  : chunks("send_message", { message: "Mira leaves." })
-              )
-            })
-          ),
-          (m) => Effect.promise(() => m.close())
-        )
         const reply = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
           model: {},
@@ -99,15 +105,60 @@ it("copies, changes and runs set_presence, refuses a second replacement, then re
         expect(steps[0]).toMatchObject({
           kind: "tool",
           tool: "set_presence",
+          label: "Changed who's present · Who's present (editable) (plugin)",
+          effect: "chat_state",
           result: "Copied: Mira is away from the next message on."
         })
         expect(
           foldState(yield* reader.StateEventsAt({ userId: me.id, chatId: reply.chat.id, slotId: reply.version.slotId }))
             .away
         ).toContain(reply.mira.entityId)
+        // The copied effect follows the displayed swipe, independently on each branch.
+        const sourceFork = reply.chat.currentForkId!
+        const { fork: peer } = yield* api.CreateFork({
+          chatId: reply.chat.id,
+          fromForkId: sourceFork,
+          atSlotId: reply.version.slotId
+        })
+        mock.setHandler((_request, res) => sse(res, chunks("send_message", { message: "No presence change." })))
+        const { entry } = yield* reader.GetSlot({ userId: me.id, slotId: reply.version.slotId, forkId: sourceFork })
+        const swipe = yield* api.Regenerate({
+          slotId: entry.slotId,
+          expectedRowVersion: entry.rowVersion,
+          forkId: sourceFork
+        })
+        yield* eventually(() => finished(reply.events, swipe.version.id) !== undefined)
+        const away = (forkId: typeof sourceFork) =>
+          reader
+            .StateEventsAt({ userId: me.id, chatId: reply.chat.id, slotId: reply.version.slotId, forkId })
+            .pipe(Effect.map((events) => foldState(events).away))
+        expect(yield* away(sourceFork)).toEqual([])
+        expect(yield* away(peer.id)).toEqual([reply.mira.entityId])
+        yield* api.SelectVersion({
+          slotId: reply.version.slotId,
+          versionId: reply.version.id,
+          expectedVersionId: swipe.version.id,
+          forkId: sourceFork
+        })
+        expect(yield* away(sourceFork)).toEqual([reply.mira.entityId])
         yield* api.DisablePlugin(made)
         expect(execution.rolloutTools.get("set_presence")).toBe(original)
         expect(JSON.stringify(frozenTool(execution.rolloutTools.get("set_presence")!))).toBe(bytes)
+        mock.setHandler((request, res) =>
+          sse(
+            res,
+            ((request.body?.messages ?? []) as Array<{ role: string }>).some((m) => m.role === "tool")
+              ? chunks("send_message", { message: "Mira leaves." })
+              : chunks("set_presence", { character: "Mira", present: false })
+          )
+        )
+        const nextRequest = mock.requests().length
+        yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          state: [{ key: "agent.enabled", value: { on: true } }]
+        })
+        expect(mock.requests()[nextRequest]!.raw).toBe(originalRequest)
         expect(yield* api.EnablePlugin({ ...other, consent: true })).toMatchObject({ ok: true })
         yield* api.DisablePlugin(other)
         // A callback failure schedules durable suspension and reveals the exact original.
@@ -126,7 +177,6 @@ it("copies, changes and runs set_presence, refuses a second replacement, then re
           .get("set_presence")!
           .execute({} as ToolContext, { character: "throw", present: false } as never)
           .pipe(Effect.exit)
-        const { eventually } = yield* Effect.promise(() => import("./support/generation.ts"))
         yield* eventually(() => execution.rolloutTools.get("set_presence") === original)
         expect((yield* api.GetPlugin(made)).pin?.suspended).toBeDefined()
       }).pipe(Effect.provide(serverLayer(config)))
@@ -192,6 +242,10 @@ it("assistant copies are confined, inert, journalled and require the existing ex
         ).toBe(true)
         const effects = yield* api.ListRolloutEffects({ chatId: chat.id })
         expect(effects.filter((e) => e.kind === "plugin.create")).toHaveLength(1)
+        yield* api.UndoRolloutEffect(effects.find((e) => e.kind === "plugin.create")!)
+        const retained = yield* api.GetPlugin({ scope: "user", id: args.pluginId })
+        expect(retained.commit).toBe(detail.commit)
+        expect(retained.pin === null || !!retained.pin.suspended).toBe(true)
       }).pipe(Effect.provide(serverLayer(config)))
     )
   )
