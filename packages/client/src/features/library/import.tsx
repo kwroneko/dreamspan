@@ -1,7 +1,10 @@
+import { SlotOutlet } from "../../slots.tsx"
+import { importCards } from "./slots.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // The import screen: the way to a SillyTavern folder's import, first as the main path, and
-// files picked or dropped, each uploaded in turn, with its report. With `?into=<ref>` it
+// files picked or dropped, each uploaded in turn, with its report, and the whole library
+// exported as one .zip (ARCHITECTURE.md §13b). With `?into=<ref>` it
 // updates that library entry from a new version of its file, and offers only that.
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
 import type { RefId } from "@rp/shared/library.ts"
@@ -9,7 +12,7 @@ import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
 import { Link, useCanGoBack, useRouter, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { useContext, useRef, useState } from "react"
+import { useContext, useEffect, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { sessionAtom } from "../../session.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
@@ -19,7 +22,7 @@ import { Spinner } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
-import { uploadFile, type UploadOutcome } from "./files.ts"
+import { downloadLibraryArchive, uploadFile, type UploadOutcome } from "./files.ts"
 import { ImportReportView } from "./report.tsx"
 import { askMediaApproval } from "../savedMedia/approval.ts"
 
@@ -76,6 +79,59 @@ function UploadRow({ upload }: { upload: Upload }) {
         </Alert>
       )}
     </li>
+  )
+}
+
+/** The whole library as one .zip (ARCHITECTURE.md §13b), with what it received and a Stop. */
+export function LibraryArchiveCard() {
+  const [received, setReceived] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const abort = useRef<AbortController | null>(null)
+  useEffect(() => () => abort.current?.abort(), [])
+  const run = async () => {
+    setError(null)
+    setReceived(0)
+    const controller = new AbortController()
+    abort.current = controller
+    const result = await downloadLibraryArchive(setReceived, controller.signal)
+    abort.current = null
+    setReceived(null)
+    if (result !== null && result !== "aborted") setError(result)
+  }
+  return (
+    <Card className="flex flex-col">
+      <CardHeader
+        title="Export the whole library"
+        about="Every character, persona, lorebook, preset and chat with all its branches, as a .zip laid out like a SillyTavern data folder."
+      />
+      <p className="mb-3 text-sm text-muted">
+        Includes archived entries and exportable card notes. Leaves out deleted items, workshops, chat pictures, saved
+        card assets, chat notes, summaries, history, version marks, who wrote each version, status, and privacy or
+        thread boundaries. Separate contexts become one transcript. SillyTavern ignores own-turn note rules. Changes
+        made during export may appear in the files.
+      </p>
+      {error !== null && <Alert tone="danger">{error}</Alert>}
+      <div className="mt-auto flex flex-wrap items-center gap-3">
+        <Button
+          hint="Downloads everything in your library as one .zip."
+          variant="primary"
+          pending={received !== null}
+          onClick={() => void run()}
+        >
+          Export everything
+        </Button>
+        {received !== null && (
+          <>
+            <span role="status" className="text-sm text-muted">
+              Exported {formatByteSize(received)}…
+            </span>
+            <Button hint="Stops the export. Discard any unfinished download." onClick={() => abort.current?.abort()}>
+              Stop
+            </Button>
+          </>
+        )}
+      </div>
+    </Card>
   )
 }
 
@@ -184,6 +240,7 @@ export function ImportPage() {
             onFiles={(files) => void importFiles(files)}
           />
         </Card>
+        {!into && <SlotOutlet slot={importCards} props={{ into: null }} />}
       </div>
       {uploads.length > 0 && (
         <Card>

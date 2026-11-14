@@ -5,7 +5,7 @@ import { checkPlugin } from "../src/plugins/check.ts"
 import { tempDir } from "./support/tempDir.ts"
 // Each published recipe is type-checked/bundled against the installed API, including restricted probes.
 for (const doc of pluginDocumentation)
-  it(`checks the published ${doc.topic} recipe`, async () => {
+  it(`checks the published ${doc.topic} recipe`, { timeout: 30000, tags: ["slow"] }, async () => {
     const dir = tempDir("plugin-docs"),
       side = doc.side === "common" ? "server" : doc.side
     const entry = side === "client" ? "client.tsx" : side + ".ts"
@@ -27,4 +27,4 @@ for (const doc of pluginDocumentation)
     }
     const commit = await saveFiles(dir, "", "example", files, true, "Docs recipe")
     expect(await checkPlugin(dir, "", "example", commit)).toMatchObject({ ok: true, step: "ready" })
-  }, 30000)
+  })
