@@ -3770,6 +3770,21 @@ export class ReadOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
+   * Every version of each of these messages, as the fork shows them (ListVersions' rules), in
+   * one request: the chat export's read (chatExport/stChat.ts). A message the fork no longer
+   * shows comes back with no versions.
+   */
+  Rpc.make("ExportVersions", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      slotIds: Schema.Array(SlotId).check(Schema.isMaxLength(MAX_PATH_WINDOW))
+    },
+    success: Schema.Array(Schema.Struct({ slotId: SlotId, versions: Schema.Array(Version) })),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
    * The state events that apply at `slotId` (null: before the first message), in fold
    * order: initial events, then each slot on the path by depth, then by seq. Events
    * attached to a version count only while that version is selected (DATA-MODEL §5.2).
