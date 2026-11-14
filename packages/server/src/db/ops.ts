@@ -135,7 +135,7 @@ import {
   SetComposerImageFields,
   ComposerChoice
 } from "@rp/shared/composerApi.ts"
-import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
+import { AccountRejected, AutoRefused, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import { StImportJob } from "@rp/shared/stImportApi.ts"
 import {
   CardFamily,
@@ -2494,11 +2494,20 @@ export class WriteOpsLibrary extends RpcGroup.make(
       /** The reply's speaker and the round's are Auto's picks: the decision model may change each (DESIGN §2.3). */
       autoPick: Schema.optionalKey(Schema.Boolean),
       /** A side chat's story position (spec/WORKSHOP.md §4): kept with a queued entry for its reply. */
-      storyAt: StoryAtField
+      storyAt: StoryAtField,
+      /**
+       * An Auto turn (db/autoGuard.ts): admitted in this transaction only while its run is
+       * unbroken and `token` is the one its last turn handed back; null starts a run.
+       */
+      auto: Schema.optionalKey(Schema.Struct({ token: Schema.NullOr(Schema.String) }))
     },
     success: Schema.Union([
-      /** `queue`: the chat's queue, when the post queued the rest of a round behind it. */
-      Schema.TaggedStruct("Posted", { result: AppendResult, queue: Schema.optionalKey(Schema.Array(QueuedMessage)) }),
+      /** `queue`: the chat's queue, when the post queued the rest of a round behind it. `auto`: the run's next token. */
+      Schema.TaggedStruct("Posted", {
+        result: AppendResult,
+        queue: Schema.optionalKey(Schema.Array(QueuedMessage)),
+        auto: Schema.optionalKey(Schema.Struct({ token: Schema.String }))
+      }),
       Schema.TaggedStruct("Queued", {
         queued: QueuedMessage,
         queue: Schema.Array(QueuedMessage),
@@ -2507,7 +2516,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
         recovered: Schema.Int
       })
     ]),
-    error: Schema.Union([NotFound, LeafMoved, StorageError])
+    error: Schema.Union([NotFound, LeafMoved, AutoRefused, StorageError])
   }),
   Rpc.make("EditQueued", {
     payload: {
@@ -3181,7 +3190,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
       )
     },
     success: Schema.Void,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, AutoRefused, StorageError])
   }),
   /**
    * The sanitized SDK payload projection, recorded before HTTP; only the rollout's owner may

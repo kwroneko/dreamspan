@@ -23,6 +23,7 @@ import { withoutPurged } from "./stateRefs.ts"
 import { decisionStateStamp } from "../decision/stateStamp.ts"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
+import { brokenTurnAt } from "./autoGuard.ts"
 
 const KEY = "decisions"
 
@@ -133,6 +134,9 @@ export const makeDecisionWriteHandlers = (bin: Bin) =>
           const [chat] = yield* sql<{ id: string }>`SELECT id FROM chats
             WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
           if (!chat || !(yield* ownedModel(sql, userId, connectionId, modelId)))
+            return yield* new NotFound({ entity: "decision", id: rolloutId })
+          // Asked for an Auto turn that may no longer send anything (db/autoGuard.ts).
+          if (slotId !== null && (yield* brokenTurnAt(sql, slotId)))
             return yield* new NotFound({ entity: "decision", id: rolloutId })
           if (slotId !== null) {
             const [slot] = yield* sql<{ id: string }>`SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`

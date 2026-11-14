@@ -35,7 +35,7 @@ const seen = (leaf: Tip | null, status = "complete", over: Partial<Seen> = {}): 
 })
 const run = (turns = 3, tokenLimit: number | null = null): AutoRun => newRun("f1", turns, tokenLimit, tip("s1"))
 /** A run whose reply at `slot` is being written. */
-const writing = (from: AutoRun, slot: string) => started(starting(from), tip(slot))
+const writing = (from: AutoRun, slot: string) => started(starting(from), tip(slot), `token-${slot}`)
 
 describe("auto replies: what a run does next", () => {
   it("starts a reply only from the message it left, complete, with nothing typed, queued or picked", () => {
@@ -114,7 +114,7 @@ describe("auto replies: what a run does next", () => {
     expect(ended.stop).toBe("typed")
     expect(stepOf(ended, seen(tip("s2")))).toEqual({ do: "wait" })
     // A reply posted after the stop isn't taken up.
-    expect(started(ended, tip("s3")).waiting).toEqual(tip("s3"))
+    expect(started(ended, tip("s3"), "t").waiting).toEqual(tip("s3"))
     expect(canResume(ended)).toBe(false)
     expect(canResume(counted(ended, { tokens: 5, requests: 1 }))).toBe(true)
     const again = resumed(ended, tip("s2"))
@@ -156,9 +156,23 @@ describe("auto replies: what a run does next", () => {
     store.set(first)
     const second = resumed(stopped(first, "you"), tip("s1"))
     store.set(second)
-    expect(store.update(first.id, (r) => started(r, tip("s2")))).toBeNull()
+    expect(store.update(first.id, (r) => started(r, tip("s2"), "t"))).toBeNull()
     expect(store.get()).toBe(second)
     store.set(null)
     expect(store.update(second.id, starting)).toBeNull()
+  })
+
+  it("carries the server's token from each reply to the next, and drops it on Continue", () => {
+    const first = run()
+    expect(first.token).toBeNull()
+    const second = writing(first, "s2")
+    expect(second.token).toBe("token-s2")
+    // Continue is the user's own click: the server starts a run again.
+    expect(resumed(stopped(counted(second, { tokens: 1, requests: 1 }), "moved"), tip("s2")).token).toBeNull()
+  })
+
+  it("says in plain words why the server ended it", () => {
+    expect(stopText(stopped(run(), "settings"))).toContain("a setting, preset, model or library entry changed")
+    expect(stopText(stopped(run(), "restarted"))).toContain("the server restarted")
   })
 })

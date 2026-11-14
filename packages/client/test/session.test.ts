@@ -124,7 +124,7 @@ describe("ChatSession", () => {
     const call = vi.spyOn(s, "call")
     let allowed = true
     try {
-      const result = s.generate(null, null, "", undefined, [], false, { allowed: () => allowed })
+      const result = s.generate(null, null, "", undefined, [], false, { allowed: () => allowed, token: null })
       allowed = false
       release()
       expect(await result).toMatchObject({ ok: false, error: { tag: "Cancelled" } })

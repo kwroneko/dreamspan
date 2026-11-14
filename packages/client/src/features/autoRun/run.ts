@@ -23,6 +23,8 @@ export type AutoStop =
   | "uncounted"
   | "left"
   | "disconnected"
+  | "settings"
+  | "restarted"
 
 export interface Tip {
   readonly slotId: SlotId
@@ -45,6 +47,12 @@ export interface AutoRun {
   readonly tip: Tip | null
   /** The reply being written for it. */
   readonly waiting: Tip | null
+  /**
+   * What the server handed back for its last turn, which the next must present: the server
+   * starts that turn only if nothing changed since that the run didn't cause. Null: the next
+   * turn is the user's own click (Start, Continue), which starts a run on the server.
+   */
+  readonly token: string | null
   /** A request to start a reply, or to read one's usage, is out. */
   readonly pending: "start" | "count" | null
   readonly stop: AutoStop | null
@@ -91,6 +99,7 @@ export const newRun = (forkId: string | null, turns: number, tokenLimit: number 
   requests: 0,
   tip,
   waiting: null,
+  token: null,
   pending: null,
   stop: null
 })
@@ -139,8 +148,9 @@ export const stopped = (run: AutoRun, why: AutoStop, error?: string): AutoRun =>
   run.stop !== null ? run : { ...run, stop: why, ...(error === undefined ? {} : { error }) }
 
 export const starting = (run: AutoRun): AutoRun => ({ ...run, asked: run.asked + 1, pending: "start" })
-export const started = (run: AutoRun, reply: Tip): AutoRun => ({
+export const started = (run: AutoRun, reply: Tip, token: string | null): AutoRun => ({
   ...run,
+  token,
   pending: null,
   waiting: reply
 })
@@ -161,6 +171,7 @@ export const resumed = (run: AutoRun, tip: Tip | null): AutoRun => ({
   ...run,
   id: ++runs,
   stop: null,
+  token: null,
   pending: null,
   waiting: null,
   tip
@@ -214,6 +225,10 @@ export const stopText = (run: AutoRun): string => {
       return `Stopped ${progress}: the connection was lost.`
     case "left":
       return `Stopped ${progress}: you left the chat or branch.`
+    case "settings":
+      return `Stopped ${progress}: a setting, preset, model or library entry changed.`
+    case "restarted":
+      return `Stopped ${progress}: the server restarted.`
     case "error":
       return `Stopped ${progress}: ${run.error ?? "the next reply couldn't be started."}`
   }

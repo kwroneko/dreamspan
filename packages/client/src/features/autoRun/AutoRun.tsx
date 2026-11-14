@@ -361,13 +361,26 @@ export function AutoRunRow(context: ComposerControlContext) {
             store.get()?.stop === null &&
             !pendingEvents.current.some((event) => externalEvent(event, now)) &&
             stepOf({ ...now, pending: null }, seenOf(current.current, false)).do === "start",
+          token: now.token,
           ...(now.tokenLimit === null ? {} : { outputLimit: now.tokenLimit - now.tokens })
         }
       )
       .then((outcome) => {
         if (!outcome.ok) {
           store.update(now.id, (r) => ({
-            ...(outcome.error.tag === "LeafMoved" ? stopped(r, "moved") : stopped(r, "error", outcome.error.message)),
+            ...(outcome.error.tag === "LeafMoved"
+              ? stopped(r, "moved")
+              : outcome.error.tag === "AutoRefused"
+                ? // The server found a change this tab hadn't heard of yet: nothing was sent.
+                  stopped(
+                    r,
+                    outcome.error.reason === "settings"
+                      ? "settings"
+                      : outcome.error.reason === "expired"
+                        ? "restarted"
+                        : "moved"
+                  )
+                : stopped(r, "error", outcome.error.message)),
             pending: null,
             asked: r.tokenLimit === null ? r.asked : r.turns
           }))
@@ -379,8 +392,9 @@ export function AutoRunRow(context: ComposerControlContext) {
           return
         }
         const reply = { slotId: outcome.value.entry.slotId, versionId: outcome.value.entry.version.id }
+        const token = outcome.value.auto?.token ?? null
         const after = store.update(now.id, (r) => {
-          const next = started(r, reply)
+          const next = started(r, reply, token)
           return pendingEvents.current.some((event) => externalEvent(event, next)) ? stopped(next, "moved") : next
         })
         // Stopped (or dismissed) while the request was out: the reply it started is stopped too.

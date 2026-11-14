@@ -1630,8 +1630,12 @@ export class ChatSession {
     round: ReadonlyArray<EntityId> = [],
     /** Auto picked `speaker` and the round, and "Who replies next" is on: the decision model chooses (DESIGN §2.3). */
     autoPick = false,
-    /** A tab-owned auto run rechecks its consent after asynchronous reply hooks. */
-    auto?: { readonly allowed: () => boolean; readonly outputLimit?: number }
+    /**
+     * A tab-owned auto run rechecks its consent after asynchronous reply hooks, and presents
+     * the token its last turn was handed (null: its first), which the server checks as it
+     * admits the turn.
+     */
+    auto?: { readonly allowed: () => boolean; readonly outputLimit?: number; readonly token: string | null }
   ): Promise<Outcome<SendResult>> {
     await beforeReply()
     if (auto && !auto.allowed())
@@ -1648,7 +1652,11 @@ export class ChatSession {
           ...(round.length > 0 ? { round } : {}),
           ...(autoPick ? { autoPick } : {}),
           ...(auto
-            ? { immediate: true, ...(auto.outputLimit === undefined ? {} : { outputLimit: auto.outputLimit }) }
+            ? {
+                immediate: true,
+                auto: { token: auto.token },
+                ...(auto.outputLimit === undefined ? {} : { outputLimit: auto.outputLimit })
+              }
             : {}),
           ...(composer === undefined ? {} : { composer: commitOf(composer) }),
           ...this.replyExtras()

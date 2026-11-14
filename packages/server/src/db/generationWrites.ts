@@ -29,6 +29,7 @@ import type { WriteOps } from "./ops.ts"
 import { LcmSettingsInvalid } from "@rp/shared/lcm.ts"
 import { orderProblem } from "./lcmEnableWrites.ts"
 import { transaction } from "./tx.ts"
+import { refuseBrokenTurn } from "./autoGuard.ts"
 
 export const makeGenerationWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -124,6 +125,9 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         if (!(yield* ownedModel(sql, userId, connectionId, modelId))) {
           return yield* new NotFound({ entity: "model", id: modelId })
         }
+        // An Auto turn whose chat or configuration changed after it was admitted: its context was
+        // read since, so no request record is made and nothing is sent.
+        yield* refuseBrokenTurn(sql, versionId)
         const now = Date.now()
         // The fork it writes in: the one named, else the current one when its path holds the
         // leaf, as a send's does.

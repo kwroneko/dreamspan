@@ -25,6 +25,16 @@ export class LeafMoved extends Schema.TaggedError<LeafMoved>()("LeafMoved", {
   activeLeafSlotId: Schema.NullOr(Schema.String)
 }) {}
 
+/**
+ * An Auto turn wasn't started: since the turn before it, something its run didn't cause changed
+ * what it would send (`changed`: the branch; `settings`: the configuration), the token isn't the
+ * one that turn handed back (`replayed`), or the server no longer knows the run (`expired`).
+ * Nothing was sent.
+ */
+export class AutoRefused extends Schema.TaggedError<AutoRefused>()("AutoRefused", {
+  reason: Schema.Literals(["changed", "settings", "replayed", "expired"])
+}) {}
+
 /** A model with this key already exists on the connection. */
 export class ModelKeyTaken extends Schema.TaggedError<ModelKeyTaken>()("ModelKeyTaken", {
   connectionId: Schema.String,

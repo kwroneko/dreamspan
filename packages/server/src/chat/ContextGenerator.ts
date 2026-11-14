@@ -680,6 +680,18 @@ export const layer = Layer.effect(
             Effect.catchTag("NotFound", () =>
               Effect.fail(new GenerationFailed({ class: "not_found", message: "The model or the message is gone." }))
             ),
+            // An Auto turn whose chat changed before its request was made (db/autoGuard.ts).
+            Effect.catchTag("AutoRefused", (refused) =>
+              Effect.fail(
+                new GenerationFailed({
+                  class: "auto_refused",
+                  message:
+                    refused.reason === "settings"
+                      ? "Not sent: your settings changed after auto replies started this reply."
+                      : "Not sent: this chat changed after auto replies started this reply."
+                })
+              )
+            ),
             Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("StartRollout"))
           )
           const outputStrategy = execution.replies.get("reply")
