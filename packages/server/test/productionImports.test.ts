@@ -234,8 +234,8 @@ const developmentImports = new Set(["./dev/fakeCardSource.ts", "./dev/fakeSavedM
 const computedReviews: Record<string, string> = {
   "packages/client/src/plugins.tsx: import(/* @vite-ignore */ url)":
     "Canonical same-origin checked client module URLs built only from authenticated enabled-commit descriptors; no content or arbitrary caller import path.",
-  'packages/server/src/plugins/Host.ts: import(pathToFileURL(join(folder, "server.mjs")).href)':
-    "Only explicit admin-enabled, checked server bundle URLs in the confined plugin build tree; never content.",
+  "packages/server/src/plugins/Host.ts: import(server!)":
+    "Only explicit admin-enabled executable bytes captured from process-attested, hash-verified approved artifacts as a data URL; no mutable file path is imported.",
   "packages/server/src/plugins/probeChild.ts: import(pathToFileURL(join(folder, `${side}.mjs`)).href)":
     "Checked synthetic/admin-authorized server and worker bundles, in a bounded clean-environment permission child.",
 
@@ -255,6 +255,32 @@ const computedReviews: Record<string, string> = {
 
 /** Every filesystem read is classified; a new expression requires review. */
 const readReviews: Record<string, { reason: string; expressions: Array<string> }> = {
+  "packages/server/src/plugins/copy.ts": {
+    reason:
+      "Only the finite shipped-source catalog, matched by registry/id; validates all parents, excludes the configured data volume, refuses links and non-text/oversized files. base.path is matched to the catalog and never opened. Client src is copied by Docker for inert authenticated copies, never served as modules.",
+    expressions: ["readFile(file)"]
+  },
+  "packages/server/src/plugins/reference.ts": {
+    reason:
+      "Shipped allowlisted agent/plugin/API source only; bounded index, confined non-link UTF-8 files, and finite API topic declarations. Source workspaces are included by final Docker COPY.",
+    expressions: [
+      "readdir(join(root, p), { withFileTypes: true })",
+      'readFile(join(root, p), "utf8")',
+      'readFile(join(root, "packages/plugin-api/src", doc.side + ".ts"), "utf8")',
+      'readFile( join(root, topic === "stateKeys" ? "packages/shared/src/state.ts" : "packages/shared/src/macros/registry.ts"), "utf8" )'
+    ]
+  },
+  "packages/server/src/plugins/authorRepo.ts": {
+    reason:
+      "Private operation journals and creation markers inside validated plugin Git metadata; no caller-selected journal paths, links or source execution. Directory listings detect an existing repository or its empty pre-intent metadata directory.",
+    expressions: [
+      'readFile(file, "utf8")',
+      'readFile(join(journals, request.undo + ".json"), "utf8")',
+      'readFile(marker, "utf8")',
+      'readdir(join(folder, ".git"))',
+      "readdir(folder)"
+    ]
+  },
   "packages/server/src/plugins/serve.ts": {
     reason:
       "The Vite build manifest shipped with the configured client dist; facade points only to a validated assets filename.",
@@ -267,8 +293,8 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
   },
   "packages/server/src/plugins/repoChild.ts": {
     reason:
-      "Confined synthetic request/response files for bounded Git operations under DATA_DIR/plugins/.ops; no plugin code is evaluated.",
-    expressions: ['readFile(join(folder, "request.json"), "utf8")']
+      "Confined operation requests under DATA_DIR/plugins/.ops and checked-build sources matched to bounded approved Git blobs; confined parents and regular-file, link-count and exact-size checks precede each source read. No plugin code is evaluated.",
+    expressions: ['readFile(join(folder, "request.json"), "utf8")', "readFile(file)"]
   },
 
   "packages/server/src/plugins/Host.ts": {
@@ -286,7 +312,8 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       'readFile(join(root, "packages/server/dist/workers/stamp.json"))',
       'readFile(join(staging, "check.json"), "utf8")',
       'readFile(join(build, "check.json"))',
-      'readFile(join(folder, "rp-plugin.json"), "utf8")',
+      'readFile(reportFile, "utf8")',
+      'readFile(file, "utf8")',
       'readFile(join(folder, "check.json"), "utf8")'
     ]
   },

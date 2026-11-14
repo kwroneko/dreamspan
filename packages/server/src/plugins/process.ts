@@ -12,6 +12,7 @@ export const runPluginChild = (
     readonly timeout?: number
     readonly memory?: number
     readonly permissions?: ReadonlyArray<string>
+    readonly networkFilter?: string
   } = {}
 ): Promise<ChildResult> =>
   new Promise((resolve) => {

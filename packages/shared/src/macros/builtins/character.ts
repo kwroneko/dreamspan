@@ -17,6 +17,7 @@ const expanded = (call: MacroCall, text: string | undefined, scope: string) => {
 export const cardField = (call: MacroCall, key: TextField) => expanded(call, call.context.card?.[key], `card.${key}`)
 
 const fieldMacro = (name: string, key: TextField, aliases?: ReadonlyArray<string>): MacroSpec => ({
+  source: import.meta.url,
   kind: "value",
   name,
   ...(aliases ? { aliases } : {}),
@@ -53,16 +54,37 @@ const greeting = (call: MacroCall) => {
 }
 
 export const characterMacros: ReadonlyArray<MacroSpec> = [
-  { kind: "value", name: "user", handler: (call) => call.context.names.user },
-  { kind: "value", name: "char", handler: (call) => call.context.names.char },
   {
+    source: import.meta.url,
+    kind: "value",
+    name: "user",
+    handler: (call) => call.context.names.user
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "char",
+    handler: (call) => call.context.names.char
+  },
+  {
+    source: import.meta.url,
     kind: "value",
     name: "group",
     aliases: ["charIfNotGroup"],
     handler: ({ context: { names } }) => names.group ?? names.char
   },
-  { kind: "value", name: "groupNotMuted", handler: ({ context: { names } }) => names.groupNotMuted ?? names.char },
-  { kind: "value", name: "notChar", handler: ({ context: { names } }) => names.notChar ?? names.user },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "groupNotMuted",
+    handler: ({ context: { names } }) => names.groupNotMuted ?? names.char
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "notChar",
+    handler: ({ context: { names } }) => names.notChar ?? names.user
+  },
   fieldMacro("charPrompt", "systemPrompt"),
   fieldMacro("charInstruction", "postHistoryInstructions"),
   fieldMacro("charDescription", "description", ["description"]),
@@ -70,10 +92,16 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
   fieldMacro("charScenario", "scenario", ["scenario"]),
   fieldMacro("persona", "persona"),
   fieldMacro("mesExamplesRaw", "mesExamples"),
-  { kind: "value", name: "mesExamples", handler: (call) => formatExamples(cardField(call, "mesExamples")) },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "mesExamples",
+    handler: (call) => formatExamples(cardField(call, "mesExamples"))
+  },
   fieldMacro("charDepthPrompt", "depthPrompt"),
   fieldMacro("charCreatorNotes", "creatorNotes", ["creatorNotes"]),
   {
+    source: import.meta.url,
     kind: "value",
     name: "charFirstMessage",
     aliases: ["greeting"],
@@ -81,13 +109,20 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
     handler: greeting
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "charVersion",
     aliases: ["version", "char_version"],
     handler: (call) => call.context.card?.version ?? ""
   },
-  { kind: "value", name: "model", handler: (call) => call.context.model ?? "" },
   {
+    source: import.meta.url,
+    kind: "value",
+    name: "model",
+    handler: (call) => call.context.model ?? ""
+  },
+  {
+    source: import.meta.url,
     // Once per expansion. Without an original it stays as written, as ST's does.
     kind: "value",
     name: "original",
@@ -98,6 +133,7 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    source: import.meta.url,
     // Registered by ST's Summarize extension; without a summary to read it stays as written.
     kind: "value",
     name: "summary",
@@ -108,6 +144,7 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    source: import.meta.url,
     // Who the model writes as, and the direction it was given (DESIGN §2.2). Outside a
     // generation there's neither, and they stay as written. A macro's output is never expanded
     // again, so the direction is sent exactly as typed.
@@ -120,6 +157,7 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "direction",
     handler: (call) => {
@@ -128,8 +166,24 @@ export const characterMacros: ReadonlyArray<MacroSpec> = [
       return direction
     }
   },
-  { kind: "value", name: "isMobile", handler: (call) => String(call.context.isMobile ?? false) },
-  { kind: "value", name: "lastGenerationType", handler: (call) => call.context.lastGenerationType ?? "" },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "isMobile",
+    handler: (call) => String(call.context.isMobile ?? false)
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "lastGenerationType",
+    handler: (call) => call.context.lastGenerationType ?? ""
+  },
   // ST extensions don't exist here (DESIGN §1.5).
-  { kind: "value", name: "hasExtension", args: [{ name: "extensionName" }], handler: () => "false" }
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "hasExtension",
+    args: [{ name: "extensionName" }],
+    handler: () => "false"
+  }
 ]

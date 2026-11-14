@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { expect, it } from "vitest"
 import { Effect } from "effect"
 import { client, login, serverLayer, testConfig } from "./support/config.ts"
+import { PluginHost } from "../src/plugins/Host.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { checkoutCommit, pluginFolder, saveFiles } from "../src/plugins/repo.ts"
 
@@ -315,3 +316,40 @@ it("refuses immediate Go back when the previous enabled version adds server or n
     ).pipe(Effect.provide(serverLayer(config)))
   )
 }, 60_000)
+
+it("keeps the approved browser build running across uncommitted edits and newer commits", async () => {
+  const config = testConfig()
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const api = yield* client(),
+          actor = yield* api.Whoami(),
+          host = yield* PluginHost
+        const target = { scope: "instance" as const, id: "approved-build" }
+        const first = yield* api.CreatePlugin({
+          ...target,
+          files: files(target.id, 'export const activate = () => { console.log("APPROVED") }')
+        })
+        expect((yield* api.EnablePlugin({ ...target, commit: first, consent: true })).ok).toBe(true)
+        const bytes = yield* host.clientAsset(actor, { ...target, commit: first })
+        yield* Effect.promise(() =>
+          writeFile(join(pluginFolder(config.dataDir, "", target.id), "client.ts"), 'throw new Error("UNAPPROVED")')
+        )
+        expect(yield* host.clientAsset(actor, { ...target, commit: first })).toEqual(bytes)
+        expect((yield* api.GetPlugin(target)).pin?.suspended).toBeUndefined()
+        const second = yield* api.CommitPlugin({
+          ...target,
+          files: files(target.id, 'export const activate = () => { console.log("NEW VERSION") }'),
+          message: "Work in progress"
+        })
+        expect((yield* api.GetPlugin(target)).pin).toMatchObject({ commit: first })
+        expect((yield* api.GetPlugin(target)).pin?.suspended).toBeUndefined()
+        expect(yield* host.clientAsset(actor, { ...target, commit: first })).toEqual(bytes)
+        expect((yield* host.clients(actor)).map((p) => p.commit)).toEqual([first])
+        expect((yield* api.EnablePlugin({ ...target, commit: second, consent: true })).ok).toBe(true)
+        expect((yield* host.clients(actor)).map((p) => p.commit)).toEqual([second])
+        expect(yield* host.clientAsset(actor, { ...target, commit: second })).not.toEqual(bytes)
+      })
+    ).pipe(Effect.provide(serverLayer(config)))
+  )
+}, 90_000)

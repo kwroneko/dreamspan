@@ -21,7 +21,7 @@ import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
 // rebuild reads again (ARCHITECTURE §15).
 import { documentedCachePolicy } from "../providers/cachePolicy.ts"
-import { findProvider, resolveProviderSettings } from "@rp/shared/providerDefinitions.ts"
+import { findProvider, resolveProviderSettings, isDirectOpenAI } from "@rp/shared/providerDefinitions.ts"
 import { CurrentProviderDefinitions } from "../providers/definitions.ts"
 import { prefillUnavailable } from "../assembler/prefill.ts"
 import { mappingCapabilities } from "../providers/mapping.ts"
@@ -995,6 +995,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const providerSettings = resolveProviderSettings(provider, c.providerSettings)
         const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat, providerSettings)
         resolvedModel = {
+          openaiDirect: isDirectOpenAI(provider?.id, c.baseUrl),
+          ...(provider ? { provider: provider.id } : {}),
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
           mapping: mappingCapabilities(effective),

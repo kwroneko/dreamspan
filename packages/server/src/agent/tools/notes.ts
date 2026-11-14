@@ -152,6 +152,7 @@ export const noteRefusal = (note: NoteView) =>
       : null
 
 export const listNotes: RolloutTool<Record<string, never>> = {
+  source: import.meta.url,
   id: "list_notes",
   label: "Looked at the notes",
   explanation: "List this chat's notes",
@@ -180,6 +181,7 @@ export const listNotes: RolloutTool<Record<string, never>> = {
 }
 
 export const switchNote: RolloutTool<{ readonly note: string; readonly on: boolean }> = {
+  source: import.meta.url,
   id: "switch_note",
   label: "Switched a note",
   explanation: "Switch the notes you let it change",
@@ -236,6 +238,7 @@ export const writeNote: RolloutTool<{
   readonly depth?: number
   readonly for?: string
 }> = {
+  source: import.meta.url,
   id: "write_note",
   label: "Wrote a note",
   explanation: "Write new notes for this chat",
@@ -306,6 +309,7 @@ export const editNote: RolloutTool<{
   readonly replace?: string
   readonly content?: string
 }> = {
+  source: import.meta.url,
   id: "edit_note",
   label: "Changed a note",
   explanation: "Change the notes you let it change",

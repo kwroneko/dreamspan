@@ -56,13 +56,21 @@ export const effectState = (effect: RolloutEffect) => (effect.undoneAt === null 
 
 /** Undo's hover: what it does to this kind of change. */
 export const undoHint = (effect: RolloutEffect) =>
-  effect.kind === "chat.create"
-    ? "Moves the chat it started to the bin."
-    : effect.kind === "library.create"
-      ? "Moves the item it made to the bin."
-      : effect.kind === "library.revise"
-        ? "Puts the item back as it was before, as a new revision."
-        : "Undoes this change."
+  effect.kind === "plugin.commit"
+    ? "Creates a revert version without turning it on."
+    : effect.kind === "plugin.write"
+      ? "Restores the previous file text. The enabled version keeps running."
+      : effect.kind === "plugin.enable"
+        ? "Turns this plugin off and keeps its versions and data."
+        : effect.kind === "plugin.create"
+          ? "Turns this plugin off and keeps its repository and versions."
+          : effect.kind === "chat.create"
+            ? "Moves the chat it started to the bin."
+            : effect.kind === "library.create"
+              ? "Moves the item it made to the bin."
+              : effect.kind === "library.revise"
+                ? "Puts the item back as it was before, as a new revision."
+                : "Undoes this change."
 
 /** The changes one reply's run made, as the Changes tab groups them. */
 export interface ReplyChanges {

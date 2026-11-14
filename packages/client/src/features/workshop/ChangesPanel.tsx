@@ -2,6 +2,7 @@
 // chat, newest first, grouped by the reply that made them, each change with Undo and Open and each
 // reply with "Undo all of this reply". Read in pages of 50 (`ListRolloutEffects`): the first again
 // whenever a change is undone anywhere or the newest reply settles.
+import { syncClientPlugins } from "../../pluginLifecycle.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { UndoAllReport } from "@rp/shared/workshopApi.ts"
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
@@ -115,7 +116,10 @@ function ReplyGroup({ chatId, group }: { chatId: ChatId; group: ReplyChanges }) 
       (client) => client("UndoRolloutEffects", { chatId, rolloutId: group.rolloutId }),
       [EFFECTS_KEY, "library", "chats", "chat-lists", "bin"]
     )
-    if (result.ok) setReport(result.value)
+    if (result.ok) {
+      setReport(result.value)
+      if (group.effects.some((e) => e.kind.startsWith("plugin."))) await syncClientPlugins()
+    }
   }
   return (
     <li

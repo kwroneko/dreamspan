@@ -65,6 +65,7 @@ export interface MacroInfo {
 }
 
 export interface MacroSpec {
+  readonly source?: string
   /** Values insert text; directives change text, flow or variable state. */
   readonly kind: "value" | "directive"
   /** A letter, then letters, digits, "_" or "-"; or "//". Matched case-insensitively. */
@@ -93,6 +94,10 @@ export interface MacroSpec {
    * Volatile handlers put their work here rather than charging only when drawing. */
   readonly work?: (call: MacroCall) => number
   readonly handler: (call: MacroCall) => string
+}
+/** Data-only macros. Resolver, variables, randomness and work callbacks need other adapters. */
+export interface DataMacroSpec extends Omit<MacroSpec, "handler" | "accepts" | "work"> {
+  readonly handler: (call: Pick<MacroCall, "args" | "list" | "flags" | "isScoped" | "offset" | "contentHash">) => string
 }
 
 export interface MacroEntry extends MacroSpec {

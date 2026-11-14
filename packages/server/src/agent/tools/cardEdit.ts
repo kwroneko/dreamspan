@@ -32,6 +32,7 @@ export const editCard: RolloutTool<{
   readonly replace: string
   readonly wrap?: string
 }> = {
+  source: import.meta.url,
   id: "edit_card",
   label: "Changed a character",
   explanation: "Change the character details you let it change",

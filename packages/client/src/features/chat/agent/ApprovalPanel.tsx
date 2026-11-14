@@ -3,6 +3,8 @@
 // edit changes, and the answers. Allow lets this one call run; Allow in this workshop also lets the
 // assistant do this kind of thing here without asking; Decline tells it not to, with a note if the
 // user writes one. The answer names the call's arguments' digest, so it holds for this call only.
+import { syncClientPlugins } from "../../../pluginLifecycle.ts"
+import { useCaller } from "../../editor/caller.ts"
 import { StoryScope } from "../../workshop/StoryScope.tsx"
 import type { ApprovalAnswer } from "@rp/shared/workshopApi.ts"
 import { ReplyExtrasContext } from "../replyExtras.ts"
@@ -19,9 +21,10 @@ import type { StepActionProps } from "./stepActions.ts"
 const UNCERTAIN_TEXT =
   "The app stopped while this was running. It may already have happened: check before allowing it again."
 
-export function ApprovalPanel({ step }: StepActionProps) {
+export function ApprovalPanel({ step, version }: StepActionProps) {
   const approval = step.status === "waiting" ? step.approval : undefined
   const action = useAction()
+  const call = useCaller()
   const replyExtras = useContext(ReplyExtrasContext)
   const [answering, setAnswering] = useState<ApprovalAnswer | null>(null)
   const [noting, setNoting] = useState(false)
@@ -30,7 +33,7 @@ export function ApprovalPanel({ step }: StepActionProps) {
   const answer = async (choice: ApprovalAnswer) => {
     setAnswering(choice)
     const trimmed = note.trim()
-    await action.run(
+    const result = await action.run(
       (client) =>
         client("AnswerToolApproval", {
           rolloutId: approval.rolloutId,
@@ -44,6 +47,28 @@ export function ApprovalPanel({ step }: StepActionProps) {
       choice === "allow_chat" ? ["workshop-capabilities"] : []
     )
     setAnswering(null)
+    if (result.ok && approval.plugin && choice === "allow") {
+      // The approval reply precedes compilation/activation. Keep following this exact call
+      // even if the completed steps fold and unmount this panel. Other tabs keep their reload notice.
+      void (async () => {
+        const until = Date.now() + 60000
+        while (Date.now() < until) {
+          const effects = await call((client) => client("ListVersionEffects", { versionId: version.id }))
+          if (!effects.ok) return
+          if (effects.value.some((e) => e.toolCallId === approval.toolCallId && e.kind === "plugin.enable")) {
+            await syncClientPlugins()
+            return
+          }
+          const steps = await call((client) => client("GetRolloutSteps", { versionId: version.id }))
+          if (
+            !steps.ok ||
+            steps.value.some((s) => s.kind === "tool" && s.id === approval.toolCallId && s.status === "error")
+          )
+            return
+          await new Promise((resolve) => setTimeout(resolve, 200))
+        }
+      })().catch(() => undefined)
+    }
   }
   const busy = answering !== null
   return (
@@ -118,26 +143,30 @@ export function ApprovalPanel({ step }: StepActionProps) {
           variant="primary"
           pending={answering === "allow"}
           disabled={busy}
-          hint="Lets the assistant do this once."
+          hint={
+            approval.plugin ? "Checks and runs this exact version from now on." : "Lets the assistant do this once."
+          }
           onClick={() => void answer("allow")}
         >
-          Allow
+          {approval.plugin ? "Turn on" : "Allow"}
         </Button>
-        <Button
-          pending={answering === "allow_chat"}
-          disabled={busy}
-          hint={`Lets it do this kind of thing here without asking again (${approval.capabilityLabel}).`}
-          onClick={() => void answer("allow_chat")}
-        >
-          Allow in this workshop
-        </Button>
+        {!approval.plugin && approval.capability !== "plugins.apply" && (
+          <Button
+            pending={answering === "allow_chat"}
+            disabled={busy}
+            hint={`Lets it do this kind of thing here without asking again (${approval.capabilityLabel}).`}
+            onClick={() => void answer("allow_chat")}
+          >
+            Allow in this workshop
+          </Button>
+        )}
         <Button
           pending={answering === "deny"}
           disabled={busy}
-          hint="Tells the assistant not to. Nothing is changed."
+          hint={approval.plugin ? "Leaves this plugin as it is." : "Tells the assistant not to. Nothing is changed."}
           onClick={() => void answer("deny")}
         >
-          Decline
+          {approval.plugin ? "Not now" : "Decline"}
         </Button>
         {!noting && (
           <Button

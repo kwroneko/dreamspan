@@ -373,6 +373,10 @@ export const findProvider = <A extends ProviderResolution>(
   return providers.find((provider) => provider.defaultFor?.includes(kind))
 }
 
+/** Classify the direct API without copying a transport address into a context snapshot. */
+export const isDirectOpenAI = (provider: string | undefined, baseUrl: string | null | undefined) =>
+  provider === "openai" && (baseUrl === null || /^https:\/\/api\.openai\.com\/v1\/?$/.test(baseUrl ?? ""))
+
 /** The data needed to resolve a stored connection, including in a database worker. */
 export type ProviderResolution = Pick<ProviderDefinition, "id" | "defaults" | "cacheContract" | "defaultFor">
 

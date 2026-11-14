@@ -122,3 +122,20 @@ it.effect(
       assert.isAtMost(sent.length, turns / 3, "summary requests come in batches")
     })
 )
+
+it.effect("bounds summary status claims to the excerpt and keeps later results outside it", () =>
+  Effect.gen(function* () {
+    const { compact, sent } = setup(0)
+    const messages = [
+      ...start,
+      ...group(0, "Old lookup. ".repeat(1400)),
+      ...group(1, "A later action completed successfully.")
+    ]
+    yield* compact(messages)
+    assert.isAbove(sent.length, 0)
+    const request = JSON.stringify(sent[0])
+    assert.include(request, "Report only events in this input range")
+    assert.include(request, "no result in this excerpt")
+    assert.notInclude(request, "A later action completed successfully.")
+  })
+)

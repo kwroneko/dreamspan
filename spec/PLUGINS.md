@@ -1,5 +1,8 @@
 # Plugins: threat model and structure
 
+**Built fixes1114 (2026-11-14; obsolete as an implementation proposal):** coordinator ruling: the enabled version is the checked build of its approved commit. New working-tree or committed work keeps that build running until explicit replacement approval or Turn off. Altered approved Git objects/build files remain faults. See ARCHITECTURE §17. This settles this enabled-version behavior only; other Proposed/Open decisions are unchanged.
+
+
 **Status**: Proposed, 2026-10-11. The owner's statements of 2026-10-11 are marked **[D]**. Supersedes the recommendation in [CORDIS.md](CORDIS.md), whose evaluation of Cordis itself still stands. Building the plugin system is PLAN phase 6. §8 lists what has to shape the code before then. Implemented registry groundwork in §8 is obsolete as an implementation proposal (2026-10-30; ARCHITECTURE §3.8, §5, §6, §11, §15, §16): shared registries, provider kinds/transforms/costs, state modules in database workers, execution/planning/summary strategies, assembler stages/macros/role projections/source descriptors, format/import/export/parser workflows, and client features/routes/slots. These are swappable registrations; Remote plugin installation and in-app agent authoring remain unbuilt; the P3 status below records consent UI. Built [P] details remain [P]. The loader, consent and agent authoring are designed as a delta to this spec in [WORKSHOP.md](WORKSHOP.md) §5–§6 (proposed, 2026-11-12).
 
 **Built P1 foundation (2026-11-13):** repository pinning, source confinement, checks, scoped server/worker registration, settings, private storage and management RPCs are obsolete as implementation proposals; see ARCHITECTURE §17 and WORKSHOP's P1 status. The full-trust threat model is retained. Authoring tools, editable copies, internal service overrides and the future sandbox remain unbuilt; P3 consent is recorded below. Proposed choices remain **[P]**.
@@ -8,6 +11,10 @@
 
 
 **Built P3 settings and consent; independently reviewed (2026-11-13):** WORKSHOP §9's P3 row and the Settings/consent/recovery subset of §§5.1, 5.6, 6.3 and 8 are implemented and obsolete as implementation proposals; see ARCHITECTURE §17, “Settings → Plugins and consent”. The existing Settings patterns, exact-version consent, durable details/check/data metadata, Turn off, previous-enabled-version Go back and data deletion are built. Session trust remains Open (PLUGINS §10 question 1; WORKSHOP §10 question 3): updates always ask; no automatic/session trust behavior was inferred. An earlier version that adds declared access asks again. P4–P5, installation fetching, internal overrides and the future sandbox remain unbuilt. Proposed details remain **[P]**. No baseline change relative to P2.
+
+**Built P4 authoring (2026-11-13):** WORKSHOP §9's P4 row and the authoring subset of §§6.1–6.4 are implemented and obsolete as implementation proposals; see ARCHITECTURE §17, “Workshop plugin authoring”. Dedicated confined tools, working/committed checks, generated API references, bounded shipped-source reference, receipts/Undo and exact-version consent are built. P5's `plugin_copy_builtin` and editable copies remain unbuilt. Session trust remains Open and dormant. Independent P4 review closes check-child network access, binds consent preparation to scope and arguments, and repairs interrupted repository creation. The coordinator accepts Every-tool definitions only for available, enabled capabilities; role/capability filtering and per-mode costs are recorded in ARCHITECTURE. No Proposed item is promoted to Decided; no baseline change relative to P3.
+
+**Built P5 editable copies (2026-11-14):** WORKSHOP §9's P5 row, §5.7 and `plugin_copy_builtin` in §6 are implemented and obsolete as implementation proposals for the completion sound, `set_presence` and the pure `reverse` macro. Source declarations/tests, confined rewriting, exact source/base provenance, changed-original comparison, explicit replacements/conflicts/recovery and client-source shipping are built; see ARCHITECTURE §17, “Editable built-in copies”. Independent review binds both replacement handles and disable to those adapters, preserves presence effect/authorization metadata, names replacements in consent and exposes copied-tool provenance in persisted Steps/inspector labels. Other registries remain unavailable for copying until their typed adapters exist. Full provider/reply/assembler transports and internal overrides remain unbuilt. Proposed details remain **[P]**; session trust remains Open and dormant. No baseline change relative to P4.
 
 ---
 
@@ -105,7 +112,7 @@ Plugins attach metadata without changing the kernel's formats:
 
 ## 4. Plugins are git repositories [D, details P]
 
-- **Where they live:** each plugin is a repo under `DATA_DIR/plugins/`. Enabling a plugin pins a commit, so nothing changes under the user without a new commit being enabled.
+- **Where they live:** each plugin is a repo under `DATA_DIR/plugins/`. Enabling a plugin pins a commit and its checked artifacts, so nothing changes under the user without a new commit being approved. Repository edits, new commits, checks and Undo of repository work keep the approved build running. A working-tree edit is never executed by the runtime. **Independent review, 2026-11-14 (built, obsolete as a proposal):** server and worker imports capture verified artifact bytes as data URLs; worker snapshots never reopen mutable build paths, including after respawn. Browser serving verifies every generated artifact as well as the recorded source.
 - **Upstream and local edits:**
   - A registry install tracks its upstream remote. Edits the user's agent makes are commits on a local branch.
   - An upstream update is fetched and merged. On conflicts the agent resolves them, much like a ref that follows another in the library.
@@ -113,6 +120,7 @@ Plugins attach metadata without changing the kernel's formats:
 - **Agent-written plugins** are repos from the start, with each change a commit.
 - **Folders and zips** become a repo with an initial commit on import.
 - **Built-in features can be forked into a repo:** the module's source is exported as a plugin that replaces the built-in id, and the user's agent changes it from there. The built-in keeps updating, and the fork shows when its base changed.
+- **Runtime verification sequences (implemented 2026-11-14):** approve A → edit/check/commit B → A keeps running, including after reload/restart → approve B to replace A, or decline to retain A. Separately approve A → alter its checked artifacts or recorded tree → suspend with a fault banner. These are the same two sequences as WORKSHOP §6.3; ordinary repository work cannot suspend A.
 - **When an update breaks a plugin:**
   - The plugin is type-checked and bundled against the running version at startup. If it no longer compiles or fails to load, it's disabled and reported; the app keeps running.
   - The user's agent can repair it from the changelog and the types, committing the fix. Agents make repairs as cheap as they make forks, which is what makes the internal tier affordable.

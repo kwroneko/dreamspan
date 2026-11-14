@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 // Entry for a bounded build child; never imported by the HTTP process.
 import { writeFile, readdir, readFile, lstat } from "node:fs/promises"
 import { join, resolve } from "node:path"
@@ -7,28 +7,32 @@ import ts from "typescript"
 import { build } from "rolldown"
 import { snapshot } from "./repo.ts"
 import { runPluginChild } from "./process.ts"
+import { checkNetworkFilter } from "./checkNetwork.ts"
 import { CLIENT_PLUGIN_SURFACES } from "@rp/shared/pluginClient.ts"
 import type { PluginReport } from "@rp/shared/plugins.ts"
+import { rewriteImports } from "./importPolicy.ts"
+import { builtinReplacement } from "@rp/shared/builtinParts.ts"
 
-const [dataDir, owner, id, commit, folder, appStamp, previous, expectedReport] = process.argv.slice(2) as [
-  string,
-  string,
-  string,
-  string,
-  string,
-  string,
-  string,
-  string
-]
+const [dataDir, owner, id, commit, folder, appStamp, previous, expectedReport, sourceMode, actorRole] =
+  process.argv.slice(2) as [string, string, string, string, string, string, string, string, string, string]
 let cached = false
 let step: PluginReport["step"] = "snapshot"
 let message = "Plugin tree is invalid or differs from its commit"
 const root = fileURLToPath(new URL("../../../../", import.meta.url))
 try {
-  const manifest = await snapshot(dataDir, owner, id, commit, folder)
+  const manifest = await snapshot(
+    dataDir,
+    owner,
+    id,
+    commit,
+    folder,
+    sourceMode === "working",
+    sourceMode === "historical"
+  )
   step = "manifest"
   message = "Plugin manifest or declared surface is unsupported"
   const server = [
+    "presence",
     "rolloutTools",
     "operationTools",
     "workshopCapabilities",
@@ -57,7 +61,21 @@ try {
     "maintenancePlanners",
     "storage"
   ]
+  if (
+    actorRole === "regular" &&
+    (manifest.server || manifest.worker || manifest.overrides.length || manifest.network)
+  ) {
+    message = "Server code needs an admin. Load probe and tests were skipped."
+    throw new Error("Admin required")
+  }
   if (manifest.overrides.length) throw new Error("Internal service overrides need a restart adapter")
+  for (const part of manifest.replaces) {
+    const adapter = builtinReplacement(part)
+    if (!adapter || !manifest[adapter.side]) {
+      message = "This replacement still needs a built-in copy adapter for its runtime."
+      throw new Error("Unsupported replacement")
+    }
+  }
   if (owner && (manifest.server || manifest.worker || manifest.network))
     throw new Error("Server code needs an instance plugin and an admin")
   for (const surface of manifest.surfaces) {
@@ -137,39 +155,54 @@ try {
     for (const path of sources) {
       const source = program.getSourceFile(path)!
       const test = path.includes("/test/")
-      const imports = (node: ts.Node) => {
-        let spec: ts.Expression | undefined
-        if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) spec = node.moduleSpecifier
-        else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
-          spec = node.arguments[0]
-        if (spec) {
-          if (!ts.isStringLiteralLike(spec)) throw new Error("Computed plugin imports are refused")
-          const value = spec.text
-          if (
-            !value.startsWith("./") &&
-            !value.startsWith("../") &&
-            ![
-              "@rp/plugin-api/server",
-              "@rp/plugin-api/worker",
-              "@rp/plugin-api/client",
-              "react",
-              "react/jsx-runtime",
-              ...(test ? ["node:test", "node:assert/strict"] : [])
-            ].includes(value)
-          )
-            throw new Error("Undeclared dependency")
-          if (value.startsWith(".") && !resolve(path, "..", value).startsWith(folder + "/"))
-            throw new Error("Escaping import")
-        }
-        ts.forEachChild(node, imports)
+      const policy = rewriteImports(source.text, path, (value) => {
+        if (
+          !value.startsWith("./") &&
+          !value.startsWith("../") &&
+          ![
+            "@rp/plugin-api/server",
+            "@rp/plugin-api/worker",
+            "@rp/plugin-api/client",
+            "react",
+            "react/jsx-runtime",
+            ...(test ? ["node:test", "node:assert/strict"] : [])
+          ].includes(value)
+        )
+          return undefined
+        if (
+          value.includes("\\") ||
+          value.includes("%") ||
+          (value.startsWith(".") && !resolve(path, "..", value).startsWith(folder + "/"))
+        )
+          return undefined
+        return value
+      })
+      if (policy.unsupported.length) {
+        message =
+          "This plugin needs an adapter for: " +
+          policy.unsupported.join(", ") +
+          ". Read plugin_api for supported imports."
+        throw new Error("Unsupported import")
       }
-      imports(source)
     }
     // Only report plugin-local diagnostics. App/API contracts are checked by npm run check.
     const diagnostics = ts
       .getPreEmitDiagnostics(program)
       .filter((d) => !d.file || d.file.fileName.startsWith(folder + "/"))
-    if (diagnostics.length) throw new Error("Type error")
+    if (diagnostics.length) {
+      message =
+        "Plugin type check failed. " +
+        diagnostics
+          .slice(0, 8)
+          .map((d) => {
+            const path = d.file?.fileName.slice(folder.length + 1) ?? "source"
+            const line = d.file && d.start !== undefined ? d.file.getLineAndCharacterOfPosition(d.start).line + 1 : 1
+            // No diagnostic interpolation: source literals and host paths can contain secrets.
+            return `${path}:${line} TS${d.code} (consult plugin_api for supported types)`
+          })
+          .join("; ")
+      throw new Error("Type error")
+    }
     step = "bundle"
     message = "Plugin bundle failed"
     for (const side of ["server", "worker", "client"] as const) {
@@ -209,47 +242,59 @@ try {
     ]
     step = "probe"
     message = "Plugin import, activation or declared registrations failed"
-    const probe = await runPluginChild(
-      new URL("./probeChild.ts", import.meta.url),
-      [folder, JSON.stringify(manifest)],
-      {
-        permissions,
-        timeout: 15_000,
-        memory: 256
-      }
-    )
-    if (!probe.ok) throw new Error("Probe failed")
-    step = "tests"
-    message = "Plugin tests failed"
-    let testIndex = 0
-    for (const test of sources.filter((source) => source.includes("/test/") && source.endsWith(".test.ts"))) {
-      const output = join(folder, `test-${testIndex++}.mjs`)
-      await build({
-        input: test,
-        platform: "node",
-        tsconfig: false,
-        output: { file: output, format: "esm" },
-        plugins: [
-          {
-            name: "plugin-test-imports",
-            resolveId(source, importer) {
-              if (
-                source === "node:test" ||
-                source === "node:assert/strict" ||
-                (source === "node:module" && importer === "\0rolldown/runtime.js")
-              )
-                return { id: source, external: true }
-              if (source === "@rp/plugin-api/server") return { id: pathToFileURL(api("server")).href, external: true }
-              if (source === "@rp/plugin-api/worker") return { id: pathToFileURL(api("worker")).href, external: true }
-              if (importer && !source.startsWith(".") && !source.startsWith("/"))
-                throw new Error("Test dependency must be vendored")
-              return null
+    if (actorRole !== "regular") {
+      // Created by the trusted compiler, never selected or supplied by plugin source.
+      // Failure to install it fails the check; there is no network-capable fallback.
+      const networkFilter = join(folder, `.network-${randomUUID()}.bpf`)
+      await writeFile(networkFilter, checkNetworkFilter(), { flag: "wx", mode: 0o600 })
+      const probe = await runPluginChild(
+        new URL("./probeChild.ts", import.meta.url),
+        [folder, JSON.stringify(manifest)],
+        {
+          permissions,
+          networkFilter,
+          timeout: 15_000,
+          memory: 256
+        }
+      )
+      if (!probe.ok) throw new Error("Probe failed")
+      step = "tests"
+      message = "Plugin tests failed"
+      let testIndex = 0
+      for (const test of sources.filter((source) => source.includes("/test/") && source.endsWith(".test.ts"))) {
+        const output = join(folder, `test-${testIndex++}.mjs`)
+        await build({
+          input: test,
+          platform: "node",
+          tsconfig: false,
+          output: { file: output, format: "esm" },
+          plugins: [
+            {
+              name: "plugin-test-imports",
+              resolveId(source, importer) {
+                if (
+                  source === "node:test" ||
+                  source === "node:assert/strict" ||
+                  (source === "node:module" && importer === "\0rolldown/runtime.js")
+                )
+                  return { id: source, external: true }
+                if (source === "@rp/plugin-api/server") return { id: pathToFileURL(api("server")).href, external: true }
+                if (source === "@rp/plugin-api/worker") return { id: pathToFileURL(api("worker")).href, external: true }
+                if (importer && !source.startsWith(".") && !source.startsWith("/"))
+                  throw new Error("Test dependency must be vendored")
+                return null
+              }
             }
-          }
-        ]
-      })
-      const tested = await runPluginChild(pathToFileURL(output), [], { permissions, timeout: 10_000, memory: 256 })
-      if (!tested.ok) throw new Error("Test failed")
+          ]
+        })
+        const tested = await runPluginChild(pathToFileURL(output), [], {
+          permissions,
+          networkFilter,
+          timeout: 10_000,
+          memory: 256
+        })
+        if (!tested.ok) throw new Error("Test failed")
+      }
     }
   }
   if (manifest.worker)
@@ -266,7 +311,9 @@ export const assembly = installWorkerAssembly(manifest,activate);
   message =
     manifest.server || manifest.worker
       ? "Plugin check passed. Server code has full access, including stored keys and network."
-      : "Plugin check passed"
+      : actorRole === "regular"
+        ? "Type check and bundle passed. Load probe and tests skipped: an admin runs plugin tests."
+        : "Plugin check passed"
 } catch {
   /* Deliberately fixed messages: plugin exceptions can contain credentials and paths. */
 }
@@ -281,6 +328,7 @@ const report: PluginReport = {
   cached,
   steps: order
     .slice(0, order.indexOf(step) + 1)
+    .filter((current) => actorRole !== "regular" || !["probe", "tests"].includes(current))
     .map((current) => ({ step: current, ok: step === "ready" || current !== step }))
 }
 

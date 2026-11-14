@@ -67,6 +67,8 @@ export interface ToolContext {
 
 /** What a tool returns to the model: text, or a failure the model can correct. */
 export interface ToolOutput {
+  /** Display metadata only, kept in the transcript but never sent to a model. */
+  readonly presentation?: NonNullable<ApprovalPrompt["presentation"]>
   /** Non-atomic tools may record their already-applied changes with their result. */
   readonly effects?: ReadonlyArray<RolloutEffectRecord>
   readonly text: string
@@ -78,6 +80,8 @@ export interface ToolOutput {
 export type WorkshopStoryRead = "positioned" | "conversation" | "library" | "account" | "refused"
 
 export interface RolloutTool<A = never> {
+  /** Shipped implementation, used only by the authenticated editable-copy catalog. */
+  readonly source?: string
   /** Declares how a workshop tool reads story facts; deliberately not sent to the model. */
   readonly storyRead?: WorkshopStoryRead
   /** Kinds that must resolve this name through kindTools, including a disabled variant. */
@@ -97,6 +101,9 @@ export interface RolloutTool<A = never> {
   /** Argument used as the plain step title, frozen with setup-tool metadata. */
   readonly titleField?: string
   readonly effect: EffectClass
+  /** Mandatory consent, or a separately validated reversible rollback. Off still refuses. */
+  readonly approval?: "always" | "rollback"
+  readonly adminOnly?: true
   /** False: never one of a story's reply tools (This chat's Tools list leaves it out), only a planner's. */
   readonly replyTool?: false
   /** Model-facing, with its usage guidance: when to call it and when not to. */
@@ -123,7 +130,10 @@ export interface RolloutTool<A = never> {
   readonly describe?: (
     context: ToolContext,
     args: A
-  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope">, unknown>
+  ) => Effect.Effect<
+    Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin" | "presentation">,
+    unknown
+  >
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
 
@@ -155,6 +165,7 @@ export const prepareToolSnapshots = (tools: ReadonlyArray<RolloutTool<never>>, c
  */
 export const USER_ONLY_WRITES = [
   "SetPluginPins",
+  "CompletePluginUndo",
   "SetWorkshopGrant",
   "AnswerToolApproval",
   "RequestToolApproval",

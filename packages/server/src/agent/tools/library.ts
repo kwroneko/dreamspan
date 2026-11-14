@@ -41,6 +41,7 @@ const listLibrary: RolloutTool<{
   readonly query?: string
   readonly limit?: number
 }> = {
+  source: import.meta.url,
   id: "list_library",
   storyRead: "library",
   label: "Looked in your library",
@@ -75,6 +76,7 @@ const listLibrary: RolloutTool<{
 }
 
 const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Record<string, unknown>>> => ({
+  source: import.meta.url,
   id: `read_${kind}`,
   storyRead: "library",
   label: `Read a ${kind}`,

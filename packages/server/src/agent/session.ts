@@ -679,11 +679,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             content: [{ type: "text", text: fullText }],
             // What a loading call loaded is part of the transcript: replay derives the loaded set from it.
             details:
-              sentText !== fullText
-                ? { sentText, ...(result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : {}) }
-                : result.loaded?.length && !result.isError
-                  ? { loaded: [...result.loaded] }
-                  : null,
+              sentText !== fullText || result.loaded?.length || result.presentation
+                ? {
+                    ...(sentText !== fullText ? { sentText } : {}),
+                    ...(result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : {}),
+                    ...(result.presentation ? { presentation: result.presentation } : {})
+                  }
+                : null,
             ...(result.isError ? { isError: true } : {})
           }
         }
@@ -935,7 +937,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           // A call waiting for the user shows as waiting, with what it asks.
           const steps = stepsOf(agent.state.messages, frozen, final, several ? id : undefined).map((step) => {
             const approval = step.kind === "tool" ? waiting.get(step.id) : undefined
-            return approval && step.kind === "tool" ? { ...step, status: "waiting" as const, approval } : step
+            return approval && step.kind === "tool"
+              ? { ...step, ...approval.presentation, status: "waiting" as const, approval }
+              : step
           })
           const json = JSON.stringify(steps)
           if (json === shown.get(id)) continue

@@ -2233,3 +2233,52 @@ for (const afterTokens of [false, true])
       assert.isTrue(rows.some((r) => r.status === "failed"))
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
+
+describe("Chat tool reasoning refusal", () => {
+  it.live("retries an unfamiliar model once without effort after the explicit function-tools 400", () =>
+    Effect.gen(function* () {
+      const server = yield* mock((request, res) => {
+        if (request.path.endsWith("/models"))
+          return json(res, 200, openAiList([{ id: "synthetic-reasoning-model", context_window: 32000 }]))
+        if (request.body?.reasoning_effort !== "none")
+          return json(res, 400, {
+            error: {
+              message:
+                "Function tools with reasoning_effort are not supported for this model in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.",
+              type: "invalid_request_error"
+            }
+          })
+        return sse(res, completionChunks(["Accepted."], {}))
+      })
+      const { userId, connection, modelId, providers } = yield* connect(
+        "openai-chat",
+        server.url + "/v1",
+        null,
+        "synthetic-reasoning-model"
+      )
+      const events = yield* collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context: {
+            ...context,
+            tools: [{ name: "look", description: "Look.", parameters: { type: "object", properties: {} } as never }]
+          },
+          options: { sampling: { reasoning_effort: "low" } },
+          attribution: { purpose: "test" }
+        })
+      )
+      assert.strictEqual(events.at(-1)?.type, "done")
+      const calls = server.requests().filter((r) => r.path.endsWith("/chat/completions"))
+      assert.lengthOf(calls, 2)
+      assert.strictEqual(calls[0]!.body!.reasoning_effort, "low")
+      assert.strictEqual(calls[1]!.body!.reasoning_effort, "none")
+      const first = { ...calls[0]!.body },
+        next = { ...calls[1]!.body }
+      delete first.reasoning_effort
+      delete next.reasoning_effort
+      assert.deepStrictEqual(first, next)
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+})

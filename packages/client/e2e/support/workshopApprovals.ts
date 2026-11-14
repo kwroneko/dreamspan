@@ -106,10 +106,10 @@ export function workshopApprovalTests() {
 
           await page.goto(`${server().url}/chats/${workshop.id}`)
           await expect(page.getByTestId("composer")).toBeVisible()
-          await expect(chip).toHaveText(/^Can: 5 · Asks: 3$/)
+          await expect(chip).toHaveText(/^Can: 6 · Asks: 4$/)
 
           // Ask first: chosen in the chip, it says so there.
-          const popover = await choose("library.write", "Ask first", /^Can: 4 · Asks: 4$/)
+          const popover = await choose("library.write", "Ask first", /^Can: 5 · Asks: 5$/)
           await expect(
             popover.locator('[data-capability="library.write"]').getByRole("button", { name: "Use the default" })
           ).toBeVisible()
@@ -152,7 +152,7 @@ export function workshopApprovalTests() {
           await reloaded.getByRole("button", { name: "Allow", exact: true }).click()
           const done = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })
           await expect(done).toHaveCount(1, { timeout: 30_000 })
-          await expect(chip).toHaveText(/^Can: 4 · Asks: 4$/)
+          await expect(chip).toHaveText(/^Can: 5 · Asks: 5$/)
           expect(await effects()).toHaveLength(1)
 
           // The next one asks again; Allow in this workshop also allows it from now on.
@@ -163,7 +163,7 @@ export function workshopApprovalTests() {
           await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toHaveCount(2, {
             timeout: 30_000
           })
-          await expect(chip).toHaveText(/^Can: 5 · Asks: 3$/)
+          await expect(chip).toHaveText(/^Can: 6 · Asks: 4$/)
           expect(await effects()).toHaveLength(2)
           const latest = page.getByRole("article").last()
           await openSteps(latest)
@@ -259,7 +259,7 @@ export function workshopApprovalTests() {
           await expect(page.getByRole("article").last().locator("[data-effect]").first()).toContainText("Undone")
 
           // Off: the tool isn't in the next request at all, and nothing more is made.
-          const off = await choose("library.write", "Off", /^Can: 4 · Asks: 3 · Off: 1$/)
+          const off = await choose("library.write", "Off", /^Can: 5 · Asks: 4 · Off: 1$/)
           await page.keyboard.press("Escape")
           await expect(off).toHaveCount(0)
           const offAt = provider.bodies.length

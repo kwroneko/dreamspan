@@ -2,6 +2,7 @@
 // Grants are the owner's rows, one a workshop, capability and target; approvals bind an answer to
 // one call (its rollout, id and arguments' digest). Only the owner's own RPCs write either: the
 // agent session hands its tools a writer without these operations (agent/tools.ts).
+import { User } from "@rp/shared/domain.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { ApprovalRefused } from "@rp/shared/workshopApi.ts"
 import { Effect } from "effect"
@@ -186,6 +187,36 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
           FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ''
             AND (expires_at IS NULL OR expires_at > ${now}) ORDER BY capability`
       }).pipe(query("WorkshopGrants")),
+    AuthorizePluginTool: ({ userId, rolloutId, toolCallId, capability, digest, requireApproval, rollback }) =>
+      Effect.gen(function* () {
+        const run = yield* ownedRollout(sql, userId, rolloutId)
+        const [chat] = yield* sql`SELECT 1 FROM chats c WHERE c.id = ${run.chat_id} AND c.kind = 'workshop'
+          AND NOT EXISTS (SELECT 1 FROM state_events WHERE chat_id = c.id AND key = 'workshop.attached')`
+        const [user] = yield* sql<
+          typeof User.Type
+        >`SELECT id,handle,display_name AS displayName,role FROM users WHERE id = ${userId} AND disabled_at IS NULL`
+        if (!chat || !user || run.status !== "running")
+          return yield* new ApprovalRefused({ message: "Plugin tools need a running, standalone workshop." })
+        const grants = yield* sql<{
+          capability: string
+          mode: "off" | "ask" | "allow"
+        }>`SELECT capability,mode FROM workshop_grants WHERE chat_id = ${run.chat_id}
+          AND target = '' AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+        const mode = resolveMode(
+          { workshopCapabilities, capabilityDefaults },
+          new Map(grants.map((g) => [g.capability, g.mode])),
+          capability,
+          "outside"
+        )
+        if (mode === "off") return yield* new ApprovalRefused({ message: "This capability is off in this workshop." })
+        if (requireApproval || (mode === "ask" && !rollback)) {
+          const [approval] =
+            yield* sql`SELECT 1 FROM tool_approvals WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}
+            AND capability = ${capability} AND digest = ${digest ?? ""} AND status = 'used' AND (answer = 'allow' OR (${requireApproval ? 1 : 0} = 0 AND answer = 'allow_chat'))`
+          if (!approval) return yield* new ApprovalRefused({ message: "This exact call needs your approval." })
+        }
+        return new User(user)
+      }).pipe(query("AuthorizePluginTool")),
     ToolApprovalFor: ({ userId, rolloutId, toolCallId, digest }) =>
       Effect.gen(function* () {
         yield* ownedRollout(sql, userId, rolloutId)
@@ -200,6 +231,25 @@ export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
           ORDER BY a.created_at DESC LIMIT 1`
         return row ? { rolloutId: row.rollout_id, status: row.status, note: row.note } : null
       }).pipe(query("ToolApprovalFor")),
+    RolloutEffectsForRun: ({ userId, chatId, rolloutId }) =>
+      Effect.gen(function* () {
+        const run = yield* ownedRollout(sql, userId, rolloutId)
+        if (run.chat_id !== chatId) return yield* new NotFound({ entity: "workshop rollout", id: rolloutId })
+        return (yield* sql<
+          Parameters<typeof toRolloutEffect>[0]
+        >`SELECT * FROM rollout_effects WHERE rollout_id = ${rolloutId} AND undone_at IS NULL ORDER BY created_at DESC, tool_call_id DESC, seq DESC`).map(
+          toRolloutEffect
+        )
+      }).pipe(query("RolloutEffectsForRun")),
+    RolloutEffectFor: (input) =>
+      Effect.gen(function* () {
+        yield* ownedRollout(sql, input.userId, input.rolloutId)
+        const [row] = yield* sql<
+          Parameters<typeof toRolloutEffect>[0]
+        >`SELECT * FROM rollout_effects WHERE rollout_id = ${input.rolloutId} AND tool_call_id = ${input.toolCallId} AND seq = ${input.seq}`
+        if (!row) return yield* new NotFound({ entity: "rollout effect", id: input.toolCallId })
+        return toRolloutEffect(row)
+      }).pipe(query("RolloutEffectFor")),
     VersionEffects: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [version] = yield* sql<{ rollout_id: string | null; transcript: string | null }>`SELECT v.rollout_id,

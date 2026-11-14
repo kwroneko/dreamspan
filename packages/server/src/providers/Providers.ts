@@ -70,7 +70,7 @@ import { Secrets } from "../secrets.ts"
 import { catalogEntry, withCatalog } from "./catalog.ts"
 import { withCatalogs } from "./contextCatalog.ts"
 import type { ListedModel } from "./modelLists.ts"
-import { applyShims, providerRules, withShims } from "./shims.ts"
+import { hasRetryShim, applyShims, providerRules, withShims } from "./shims.ts"
 import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import { fetchEndpoints, ModelListError } from "./modelLists.ts"
@@ -1093,7 +1093,8 @@ export const layer = (options: ProvidersOptions = {}) =>
         number: number,
         pricing: import("./userCosts.ts").UserPricing,
         /** The model with the newest endpoint list that has arrived (fetched alongside the reply). */
-        latest: { current: Model }
+        latest: { current: Model },
+        retryError?: ProviderError
       ) => {
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
@@ -1561,8 +1562,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                     initial
                   )
                   // Then what the provider refuses or needs for this model (compatibility shims).
-                  const shimmed = applyShims(registry.shims.list(), transformed, target).payload
-                  const final = limitImages(shimmed, effective.maxImages.value)
+                  const shimmed = applyShims(registry.shims.list(), transformed, target, retryError)
+                  const final = limitImages(shimmed.payload, effective.maxImages.value)
                   await Effect.runPromise(open(final), { signal })
                   const policy = documentedCachePolicy(
                     { provider: prepared.cacheContract ?? "", api: prepared.api, model: model.key },
@@ -1613,7 +1614,16 @@ export const layer = (options: ProvidersOptions = {}) =>
                                 ? inspectWire(
                                     wire,
                                     request.inspection.request,
-                                    request.inspection.display,
+                                    {
+                                      ...request.inspection.display,
+                                      issues: [
+                                        ...request.inspection.display.issues,
+                                        ...shimmed.notices.map((message) => ({
+                                          kind: "compatibility" as const,
+                                          message
+                                        }))
+                                      ]
+                                    },
                                     prepared.scrub
                                   )
                                 : wire
@@ -1791,11 +1801,23 @@ export const layer = (options: ProvidersOptions = {}) =>
                 )
               )
 
+            let compatibilityError: ProviderError | undefined
             for (let n = 0; ; n++) {
               const outcome = yield* capped(
                 waitForPause(prepared.connection.id, offer).pipe(
                   Effect.andThen(
-                    attempt(prepared, model, piModel, knownContext, request, offer, n + 1, pricing, latest)
+                    attempt(
+                      prepared,
+                      model,
+                      piModel,
+                      knownContext,
+                      request,
+                      offer,
+                      n + 1,
+                      pricing,
+                      latest,
+                      compatibilityError
+                    )
                   )
                 )
               )
@@ -1805,6 +1827,18 @@ export const layer = (options: ProvidersOptions = {}) =>
                 return
               }
               const error = outcome.error
+              if (
+                !compatibilityError &&
+                request.context.tools?.length &&
+                hasRetryShim(
+                  registry.shims.list(),
+                  { kind: prepared.kind.id, provider: prepared.provider, api: prepared.api, model: model.key },
+                  error
+                )
+              ) {
+                compatibilityError = error
+                continue
+              }
               if (error.reason === "rate_limited" && error.retryAfterMs !== null) {
                 pausedUntil.set(prepared.connection.id, Date.now() + error.retryAfterMs)
               }

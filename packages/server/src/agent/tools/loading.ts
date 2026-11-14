@@ -30,6 +30,7 @@ const load = (context: ToolContext, names: ReadonlyArray<string>) => {
 }
 
 export const toolSearch: RolloutTool<{ readonly query: string; readonly max_results?: number }> = {
+  source: import.meta.url,
   id: TOOL_SEARCH,
   label: "Looked for tools",
   explanation: "Find and load tools the assistant doesn't have yet.",
@@ -79,6 +80,7 @@ export const CARD_SKILLS = "skills.card"
 const availableSkills = (context: ToolContext) => context.offer?.cardSkills ?? []
 
 export const makeLoadSkill = (): RolloutTool<{ readonly name: string }> => ({
+  source: import.meta.url,
   id: LOAD_SKILL,
   label: "Loaded a skill",
   explanation: "Load a group of tools with instructions for using them.",

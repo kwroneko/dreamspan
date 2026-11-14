@@ -95,6 +95,7 @@ const readRun: RolloutTool<{
   readonly from_step?: number
   readonly max_tokens?: number
 }> = {
+  source: import.meta.url,
   id: "read_run",
   storyRead: "conversation",
   label: "Read earlier steps",

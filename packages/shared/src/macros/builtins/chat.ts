@@ -38,13 +38,44 @@ const idleDuration = (call: MacroCall) => {
 }
 
 export const chatMacros: ReadonlyArray<MacroSpec> = [
-  { kind: "value", name: "lastMessage", handler: (call) => lastText(call) },
-  { kind: "value", name: "lastMessageId", handler: (call) => optional(lastIndex(call)) },
-  { kind: "value", name: "lastUserMessage", handler: (call) => lastText(call, (m) => m.fromUser && !m.system) },
-  { kind: "value", name: "lastCharMessage", handler: (call) => lastText(call, (m) => !m.fromUser && !m.system) },
-  { kind: "value", name: "firstIncludedMessageId", handler: (call) => optional(call.context.firstIncludedMessageId) },
-  { kind: "value", name: "firstDisplayedMessageId", handler: (call) => optional(call.context.firstDisplayedMessageId) },
   {
+    source: import.meta.url,
+    kind: "value",
+    name: "lastMessage",
+    handler: (call) => lastText(call)
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "lastMessageId",
+    handler: (call) => optional(lastIndex(call))
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "lastUserMessage",
+    handler: (call) => lastText(call, (m) => m.fromUser && !m.system)
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "lastCharMessage",
+    handler: (call) => lastText(call, (m) => !m.fromUser && !m.system)
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "firstIncludedMessageId",
+    handler: (call) => optional(call.context.firstIncludedMessageId)
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "firstDisplayedMessageId",
+    handler: (call) => optional(call.context.firstDisplayedMessageId)
+  },
+  {
+    source: import.meta.url,
     kind: "value",
     name: "lastSwipeId",
     handler: (call) => {
@@ -53,6 +84,7 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "currentSwipeId",
     handler: (call) => {
@@ -62,6 +94,7 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "allChatRange",
     handler: (call) => {
@@ -70,6 +103,7 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "time",
     volatile: "clock",
@@ -79,11 +113,36 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
       return m ? formatMoment(atOffset(call.context.now, Number.parseInt(m[1]!, 10)), "LT") : now(call, "LT")
     }
   },
-  { kind: "value", name: "date", volatile: "clock", handler: (call) => now(call, "LL") },
-  { kind: "value", name: "weekday", volatile: "clock", handler: (call) => now(call, "dddd") },
-  { kind: "value", name: "isotime", volatile: "clock", handler: (call) => now(call, "HH:mm") },
-  { kind: "value", name: "isodate", volatile: "clock", handler: (call) => now(call, "YYYY-MM-DD") },
   {
+    source: import.meta.url,
+    kind: "value",
+    name: "date",
+    volatile: "clock",
+    handler: (call) => now(call, "LL")
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "weekday",
+    volatile: "clock",
+    handler: (call) => now(call, "dddd")
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "isotime",
+    volatile: "clock",
+    handler: (call) => now(call, "HH:mm")
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "isodate",
+    volatile: "clock",
+    handler: (call) => now(call, "YYYY-MM-DD")
+  },
+  {
+    source: import.meta.url,
     kind: "value",
     name: "datetimeformat",
     args: [{ name: "format" }],
@@ -93,8 +152,16 @@ export const chatMacros: ReadonlyArray<MacroSpec> = [
       return now(call, call.args[0]!)
     }
   },
-  { kind: "value", name: "idleDuration", aliases: ["idle_duration"], volatile: "clock", handler: idleDuration },
   {
+    source: import.meta.url,
+    kind: "value",
+    name: "idleDuration",
+    aliases: ["idle_duration"],
+    volatile: "clock",
+    handler: idleDuration
+  },
+  {
+    source: import.meta.url,
     kind: "value",
     name: "timeDiff",
     args: [{ name: "left" }, { name: "right" }],

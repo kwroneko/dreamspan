@@ -163,7 +163,7 @@ test("content containing module URLs, import maps, scripts and links never impor
   await expect(page.getByRole("main")).toBeVisible()
   expect(loads).toEqual([])
 })
-test("assets require authentication, ownership, enabled pin and checked exact path; changed trees and stale caches fail", async ({
+test("assets require authentication, ownership, enabled pin and checked exact path; edits keep the approved build and tampered builds fail", async ({
   page,
   playwright
 }) => {
@@ -208,7 +208,10 @@ test("assets require authentication, ownership, enabled pin and checked exact pa
     join(server().dataDir, "plugins/instance", id, "client.tsx"),
     pluginFiles(id)["client.tsx"] + "\n// changed"
   )
-  expect((await page.request.get(server().url + path)).status()).toBe(404)
+  const duringEdit = await page.request.get(server().url + path)
+  expect(duringEdit.status()).toBe(200)
+  expect(await duringEdit.body()).toEqual(await response.body())
+  expect((await admin((api) => api.GetPlugin({ scope: "instance", id }))).pin?.suspended).toBeUndefined()
   await writeFile(join(server().dataDir, "plugins/instance", id, "client.tsx"), pluginFiles(id)["client.tsx"])
   const output = join(server().dataDir, "plugins/.builds/instance", id, commit, "client.mjs")
   const checked = await readFile(output)
@@ -218,6 +221,8 @@ test("assets require authentication, ownership, enabled pin and checked exact pa
   } finally {
     await writeFile(output, checked)
   }
+  expect((await admin((api) => api.GetPlugin({ scope: "instance", id }))).pin?.suspended).toBeDefined()
+  await admin((api) => api.EnablePlugin({ scope: "instance", id, commit, consent: true }))
 })
 
 test("user assets stay private across accounts and rollback cannot revive a stale cached revision", async ({
@@ -264,7 +269,8 @@ test("user assets stay private across accounts and rollback cannot revive a stal
       message: "Synthetic update"
     })
   )
-  expect((await page.request.get(path(first))).status()).toBe(404)
+  expect((await page.request.get(path(first))).status()).toBe(200)
+  expect((await page.request.get(path(second))).status()).toBe(404)
   await admin((api) => api.EnablePlugin({ scope: "user", id, commit: second, consent: true }))
   expect((await page.request.get(path(second))).status()).toBe(200)
   expect((await page.request.get(path(first))).status()).toBe(404)

@@ -1,6 +1,7 @@
 // One change a workshop run made outside the chat (spec/WORKSHOP.md §3.6), with Undo and Open: in
 // its step's row and in the Changes tab. Undo is refused once the item changed since (an edit by
 // hand, say); the reason shows with Open beside it, to look at its history first.
+import { syncClientPlugins } from "../../pluginLifecycle.ts"
 import { type StoryScope as Scope } from "@rp/shared/branchNaming.ts"
 import type { StoryAt } from "@rp/shared/chat.ts"
 import { StoryScope } from "./StoryScope.tsx"
@@ -36,7 +37,10 @@ export function EffectRow({ effect, when = false }: { effect: RolloutEffect; whe
       (client) => client("UndoRolloutEffect", effectKey(current)),
       [EFFECTS_KEY, "library", "chats", "chat-lists", "bin"]
     )
-    if (result.ok) setShown(result.value)
+    if (result.ok) {
+      setShown(result.value)
+      if (current.kind.startsWith("plugin.")) await syncClientPlugins()
+    }
   }
   return (
     <div data-effect={effectId(current)} data-effect-kind={current.kind} className="flex flex-col gap-1 text-xs">

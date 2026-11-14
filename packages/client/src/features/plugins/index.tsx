@@ -1,7 +1,7 @@
 import { RegistryContext } from "@effect/atom-react"
 import { formatByteSize } from "@rp/shared/byteSize.ts"
 import { hasServerCode, pluginAccessGrows, pluginConsent, pluginSurfaces } from "@rp/shared/pluginConsent.ts"
-import type { PluginDetails, PluginReport, PluginView } from "@rp/shared/plugins.ts"
+import type { BuiltinPart, PluginDetails, PluginReport, PluginView } from "@rp/shared/plugins.ts"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useContext, useEffect, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, invalidateKeys, useAction } from "../../actions.tsx"
@@ -17,6 +17,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 import { userNoticeReceivers } from "../noticeContributions.tsx"
 import { appBanners, useTitle } from "../shell.tsx"
 import { settingsGroups } from "../settings/groups.ts"
+import { uuid } from "../../uuid.ts"
 import { openWithoutPlugins } from "../../plugins.tsx"
 
 type View = typeof PluginView.Type
@@ -24,7 +25,7 @@ type Detail = typeof PluginDetails.Type
 const KEY = "plugins"
 const pluginsAtom = AppClient.query("ListPlugins", undefined, { reactivityKeys: [KEY] })
 const targetOf = (plugin: View) => ({ scope: plugin.scope, id: plugin.id })
-const routeId = (plugin: View) => `${plugin.scope}~${plugin.id}`
+const routeId = (plugin: Pick<View, "scope" | "id">) => `${plugin.scope}~${plugin.id}`
 const status = (plugin: View) => (!plugin.pin || plugin.pin.suspended ? "Off" : "On")
 const canManage = (plugin: View, admin: boolean) =>
   admin || (plugin.scope === "user" && plugin.manifest !== null && !hasServerCode(plugin.manifest))
@@ -56,39 +57,108 @@ function SafeStart() {
 function PluginsPage() {
   useTitle("Plugins")
   return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <Card>
+        <CardHeader center title="Plugins" actions={<SafeStart />} />
+        <AsyncView atom={pluginsAtom} loading="Reading plugins…">
+          {(plugins) =>
+            plugins.length === 0 ? (
+              <EmptyState title="No plugins installed">
+                <p>An admin can add one through the server's plugins folder.</p>
+              </EmptyState>
+            ) : (
+              <ul className="flex flex-col divide-y divide-border">
+                {plugins.map((plugin) => (
+                  <li key={routeId(plugin)} className="flex min-w-0 flex-col gap-1 py-3 first:pt-0 last:pb-0">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <DetailsLink plugin={plugin} />
+                      <Badge>{status(plugin)}</Badge>
+                    </div>
+                    <p className="text-sm text-muted">
+                      {plugin.scope === "instance" ? "Every account" : "Your account"}
+                      {plugin.pin?.suspended && plugin.pin.suspended.reason !== "Plugin turned off"
+                        ? " · Needs attention"
+                        : ""}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )
+          }
+        </AsyncView>
+      </Card>
+      <BuiltinParts />
+    </div>
+  )
+}
+const builtinPartsAtom = AppClient.query("ListBuiltinParts", undefined, { reactivityKeys: [KEY] })
+function BuiltinParts() {
+  const admin = useSession().user.role === "admin"
+  const action = useAction()
+  const navigate = useNavigate()
+  const busy = useRef(false)
+  const copy = async (part: typeof BuiltinPart.Type) => {
+    if (busy.current) return
+    busy.current = true
+    const pluginId =
+      part.id
+        .replace(/^notifications\./, "")
+        .replaceAll("_", "-")
+        .slice(0, 42) +
+      "-copy-" +
+      uuid().slice(0, 8)
+    const result = await action.run(
+      (client) => client("CopyBuiltin", { registry: part.registry, id: part.id, pluginId }),
+      [KEY]
+    )
+    busy.current = false
+    if (result.ok)
+      void navigate({
+        to: "/settings/plugins/$pluginId",
+        params: { pluginId: `${result.value.scope}~${result.value.id}` }
+      })
+  }
+  return (
     <Card>
-      <CardHeader center title="Plugins" actions={<SafeStart />} />
-      <AsyncView atom={pluginsAtom} loading="Reading plugins…">
-        {(plugins) =>
-          plugins.length === 0 ? (
-            <EmptyState title="No plugins installed">
-              <p>An admin can add one through the server's plugins folder.</p>
-            </EmptyState>
-          ) : (
-            <ul className="flex flex-col divide-y divide-border">
-              {plugins.map((plugin) => (
-                <li key={routeId(plugin)} className="flex min-w-0 flex-col gap-1 py-3 first:pt-0 last:pb-0">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <DetailsLink plugin={plugin} />
-                    <Badge>{status(plugin)}</Badge>
+      <CardHeader title="Built-in parts" description="Make an editable plugin, then review it before turning it on." />
+      <ErrorAlert error={action.error} />
+      <AsyncView atom={builtinPartsAtom} loading="Reading built-in parts…">
+        {(parts) => (
+          <ul className="flex min-w-0 flex-col divide-y divide-border">
+            {parts.map((part) => (
+              <li key={`${part.registry}:${part.id}`} className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium [overflow-wrap:anywhere]">{part.label}</span>
+                  {part.replacedBy.map((p) => (
+                    <span key={routeId(p)} className="flex min-w-0 flex-wrap items-center gap-2">
+                      <Badge>Replaced by</Badge>
+                      <DetailsLink plugin={{ ...p, commit: null, manifest: null, pin: null, report: null }} />
+                    </span>
+                  ))}
+                </div>
+                <p className="text-sm text-muted">{part.reason}</p>
+                {part.copyable && admin && (
+                  <div>
+                    <Button
+                      hint="Copies this built-in into a saved, checked plugin. It starts off."
+                      pending={action.pending}
+                      onClick={() => void copy(part)}
+                    >
+                      Make an editable copy
+                    </Button>
                   </div>
-                  <p className="text-sm text-muted">
-                    {plugin.scope === "instance" ? "Every account" : "Your account"}
-                    {plugin.pin?.suspended && plugin.pin.suspended.reason !== "Plugin turned off"
-                      ? " · Needs attention"
-                      : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )
-        }
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </AsyncView>
     </Card>
   )
 }
 function CheckReport({ report }: { report: PluginReport | null }) {
   const turnedOff = report?.message === "Plugin turned off"
+  const conflict = report?.message === "Another enabled plugin already replaces this part. Turn it off first."
   return (
     <div className="flex min-w-0 flex-col gap-2">
       {report ? (
@@ -97,20 +167,22 @@ function CheckReport({ report }: { report: PluginReport | null }) {
           title={turnedOff ? "Turned off" : report.ok ? "Checks passed" : "Checks failed"}
         >
           <p>
-            {turnedOff
-              ? "This plugin is turned off."
-              : report.ok
-                ? "This version passed every check."
-                : {
-                    snapshot: "The saved files are missing or have changed. Save a new version before turning it on.",
-                    manifest: "This version's information or requested additions aren't supported.",
-                    types: "This version's code doesn't work with this app.",
-                    bundle: "This version couldn't be prepared to run.",
-                    probe: "This version couldn't start or tried to change an undeclared part of the app.",
-                    tests: "This version failed its own tests.",
-                    activate: "This version couldn't keep running.",
-                    ready: "This version couldn't run."
-                  }[report.step]}
+            {conflict
+              ? "Another plugin already replaces this part. Turn it off first."
+              : turnedOff
+                ? "This plugin is turned off."
+                : report.ok
+                  ? "This version passed every check."
+                  : {
+                      snapshot: "The saved files are missing or have changed. Save a new version before turning it on.",
+                      manifest: "This version's information or requested additions aren't supported.",
+                      types: "This version's code doesn't work with this app.",
+                      bundle: "This version couldn't be prepared to run.",
+                      probe: "This version couldn't start or tried to change an undeclared part of the app.",
+                      tests: "This version failed its own tests.",
+                      activate: "This version couldn't keep running.",
+                      ready: "This version couldn't run."
+                    }[report.step]}
           </p>
           <p className="text-xs text-muted">Version {report.commit.slice(0, 8)}</p>
         </Alert>
@@ -158,8 +230,11 @@ function PluginDetail({ plugin }: { plugin: Detail }) {
   const registry = useContext(RegistryContext)
   const action = useAction()
   const navigate = useNavigate()
-  const search: { enable?: unknown; enableRevision?: unknown; deleteData?: unknown } = useSearch({ strict: false })
+  const search: { enable?: unknown; enableRevision?: unknown; deleteData?: unknown; compare?: unknown } = useSearch({
+    strict: false
+  })
   const busy = useRef(false)
+  const comparisonHeading = useRef<HTMLSpanElement>(null)
   const [report, setReport] = useState<PluginReport | null>(null)
   const target = targetOf(plugin)
   const manage = canManage(plugin, admin)
@@ -171,7 +246,8 @@ function PluginDetail({ plugin }: { plugin: Detail }) {
         ...previous,
         enable: undefined,
         enableRevision: undefined,
-        deleteData: undefined
+        deleteData: undefined,
+        compare: undefined
       }),
       replace: true
     })
@@ -282,6 +358,71 @@ function PluginDetail({ plugin }: { plugin: Detail }) {
         )}
         {!admin && <p className="mt-3 text-sm text-muted">An admin turns plugins on and applies new versions.</p>}
       </Card>
+      {plugin.original?.changed && (
+        <Card>
+          <CardHeader title="The original changed in this update" />
+          <p className="text-sm text-muted">
+            Your copy stays as you saved it. Compare the original before asking a workshop to update it.
+          </p>
+          <div className="mt-3">
+            <Button
+              hint="Shows the original you copied beside the current app source."
+              disabled={!plugin.original.available}
+              onClick={() =>
+                void navigate({
+                  to: ".",
+                  search: (previous: Record<string, unknown>) => ({ ...previous, compare: "1" })
+                })
+              }
+            >
+              Compare
+            </Button>
+          </div>
+          {!plugin.original.available && (
+            <p className="mt-2 text-sm text-muted">
+              The saved original is unavailable. Ask a workshop to make a fresh copy.
+            </p>
+          )}
+        </Card>
+      )}
+      <Dialog
+        open={(search.compare === "1" || search.compare === 1) && !!plugin.original?.available}
+        onOpenChange={(open) => {
+          if (!open) closeDialog()
+        }}
+        title={
+          <span ref={comparisonHeading} tabIndex={-1} className="outline-none">
+            Compare originals
+          </span>
+        }
+        initialFocus={() => comparisonHeading.current}
+      >
+        <p className="text-sm text-muted">The saved original and this update. Your editable copy is kept separately.</p>
+        {plugin.original?.files.map((file) => (
+          <div key={file.path} className="flex min-w-0 flex-col gap-2">
+            <h3 className="text-sm font-medium [overflow-wrap:anywhere]">{file.path}</h3>
+            <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="min-w-0">
+                <h4 className="text-sm text-muted">When copied</h4>
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded border border-border p-3 text-xs [overflow-wrap:anywhere]">
+                  {file.before}
+                </pre>
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm text-muted">Current original</h4>
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded border border-border p-3 text-xs [overflow-wrap:anywhere]">
+                  {file.current}
+                </pre>
+              </div>
+            </div>
+          </div>
+        ))}
+        <DialogActions>
+          <Button hint="Closes this comparison without changing your copy." onClick={closeDialog}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
       <ErrorAlert error={action.error} />
       <Card>
         <CardHeader title="Versions" />
@@ -484,7 +625,7 @@ function SuspendedNotice({ plugin }: { plugin: View }) {
         </>
       }
     >
-      <p>The app couldn't run this plugin. Its data is kept.</p>
+      <p>This approved version failed a check or stopped working. Its data is kept.</p>
       <Recovery plugin={plugin} />
     </Alert>
   )

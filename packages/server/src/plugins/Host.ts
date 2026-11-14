@@ -1,14 +1,17 @@
 // Full-trust server plugins, scoped registrations and worker bridges. Consent is never inferred.
 import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
+import { randomUUID } from "node:crypto"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { pathToFileURL } from "node:url"
 import {
   PluginRejected,
   type PluginPin,
   type PluginReport,
   type PluginView,
-  type PluginDetails
+  type PluginDetails,
+  type BuiltinPart,
+  type BuiltinComparison,
+  type CopyBuiltinResult
 } from "@rp/shared/plugins.ts"
 import type { User, UserId } from "@rp/shared/domain.ts"
 import { hasServerCode, pluginAccessGrows } from "@rp/shared/pluginConsent.ts"
@@ -22,10 +25,13 @@ import { StateModules } from "../db/stateModules.ts"
 import { AssemblyModules } from "../assembler/modules.ts"
 import { Notices } from "../chat/Notices.ts"
 import { Network } from "../net/Network.ts"
-import { checkPlugin, readBuild, readClientBuild } from "./check.ts"
+import { checkPlugin, readBuild, readClientBuild, readRuntimeBuild } from "./check.ts"
 import { declaredHandles, type RegistrationRegistry } from "./handles.ts"
+import { makePluginAuthoring } from "../agent/tools/plugins.ts"
+import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
 import { repoTask } from "./repoTask.ts"
 import type { Activate, ServerHost } from "../../../plugin-api/src/server.ts"
+import { builtinCopies, builtinCopy } from "./builtins.ts"
 
 type Target = { readonly scope: "instance" | "user"; readonly id: string }
 type Version = Target & { readonly commit: string; readonly expectedRevision?: number }
@@ -39,6 +45,12 @@ const attempt = <A>(run: () => Promise<A>) =>
 export class PluginHost extends Context.Service<
   PluginHost,
   {
+    readonly builtinParts: (actor: User) => Effect.Effect<ReadonlyArray<typeof BuiltinPart.Type>, unknown>
+    readonly copyBuiltin: (
+      actor: User,
+      input: { registry: string; id: string; pluginId: string }
+    ) => Effect.Effect<typeof CopyBuiltinResult.Type, unknown>
+    readonly undoEffect: (actor: User, effect: RolloutEffect) => Effect.Effect<RolloutEffect, unknown>
     readonly clients: (actor: User) => Effect.Effect<ReadonlyArray<ClientPlugin>, unknown>
     readonly clientAsset: (actor: User, target: Version) => Effect.Effect<Uint8Array, unknown>
     readonly list: (actor: User) => Effect.Effect<ReadonlyArray<typeof PluginView.Type>, Failure | unknown>
@@ -93,6 +105,7 @@ export class PluginHost extends Context.Service<
       const active = new Map<string, Scope.Closeable>(),
         claims = new Map<string, string>(),
         reports = new Map<string, PluginReport>()
+      const replacements = new Map<string, { owner: string; parts: ReadonlyArray<string> }>()
       const lock = yield* Semaphore.make(1)
       const assetChecks = yield* Semaphore.make(4)
       const keyOf = (owner: string, id: string) => `${owner}/${id}`
@@ -129,6 +142,7 @@ export class PluginHost extends Context.Service<
           const key = keyOf(owner, id),
             scope = active.get(key)
           active.delete(key)
+          replacements.delete(key)
           if (scope) yield* Scope.close(scope, Exit.void)
         })
       const suspend = (actor: User, owner: string, id: string, report: PluginReport) =>
@@ -154,7 +168,14 @@ export class PluginHost extends Context.Service<
         })
       const activate = (actor: User, owner: string, id: string, commit: string, report: PluginReport) =>
         Effect.gen(function* () {
-          const { folder, manifest } = yield* attempt(() => readBuild(config.dataDir, owner, id, commit))
+          const { manifest, server, worker } = yield* attempt(() => readRuntimeBuild(config.dataDir, owner, id, commit))
+          for (const [key, other] of replacements) {
+            if (key === keyOf(owner, id) || (owner && other.owner && owner !== other.owner)) continue
+            if (manifest.replaces.some((part) => other.parts.includes(part)))
+              return yield* new PluginRejected({
+                message: "Another enabled plugin already replaces this part. Turn it off first."
+              })
+          }
           const scope = yield* Scope.make()
           const fail = () => {
             Effect.runFork(
@@ -174,9 +195,7 @@ export class PluginHost extends Context.Service<
           }
           const effect = Effect.gen(function* () {
             if (manifest.server) {
-              const module = yield* attempt(
-                () => import(pathToFileURL(join(folder, "server.mjs")).href) as Promise<{ activate: Activate }>
-              )
+              const module = yield* attempt(() => import(server!) as Promise<{ activate: Activate }>)
               const fetch = network.fetchFor({ mode: "inherit" }, (route) => {
                 Effect.runFork(Effect.logInfo(`Plugin ${id} network request via ${route.via}`))
               })
@@ -209,7 +228,7 @@ export class PluginHost extends Context.Service<
               )
             }
             if (manifest.worker) {
-              const module = pathToFileURL(join(folder, "worker-bridge.mjs")).href
+              const module = worker!
               yield* states.onFailure(id, fail)
               yield* states.register({ id: `plugin:${id}`, module, exportName: "state" })
               yield* assemblies.register({ id: `plugin:${id}`, module, exportName: "assembly" })
@@ -217,6 +236,7 @@ export class PluginHost extends Context.Service<
           })
           yield* Scope.provide(effect, scope).pipe(Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))))
           active.set(keyOf(owner, id), scope)
+          replacements.set(keyOf(owner, id), { owner, parts: manifest.replaces })
           yield* Scope.addFinalizer(lifetime, Scope.close(scope, Exit.void))
         })
       const check = (actor: User, target: Version) =>
@@ -242,11 +262,14 @@ export class PluginHost extends Context.Service<
           yield* close(owner, target.id)
           const loaded = yield* activate(actor, owner, target.id, target.commit, report).pipe(Effect.exit)
           if (Exit.isFailure(loaded)) {
+            const conflict = loaded.cause.reasons.some((r) => r._tag === "Fail" && r.error instanceof PluginRejected)
             const failed: PluginReport = {
               ...report,
               ok: false,
               step: "activate",
-              message: "Plugin activation failed; plugin turned off"
+              message: conflict
+                ? "Another enabled plugin already replaces this part. Turn it off first."
+                : "Plugin activation failed; plugin turned off"
             }
             yield* suspend(actor, owner, target.id, failed)
             return failed
@@ -330,7 +353,17 @@ export class PluginHost extends Context.Service<
             target.scope === "instance" && actor.role !== "admin"
               ? null
               : yield* reader.PluginDataInfo({ userId: actor.id, pluginId: target.id, owner })
-          return { ...view, pin: pins.value[target.id] ?? null, revision: pins.revision, versions, data }
+          const original = view.commit
+            ? yield* attempt(() =>
+                repoTask<typeof BuiltinComparison.Type | null>(config.dataDir, {
+                  op: "compareBuiltin",
+                  owner,
+                  id: target.id,
+                  commit: view.pin && !view.pin.suspended ? view.pin.commit : view.commit!
+                })
+              ).pipe(Effect.catch(() => Effect.succeed(null)))
+            : null
+          return { ...view, pin: pins.value[target.id] ?? null, revision: pins.revision, versions, data, original }
         })
       const authorizeLocal = (actor: User, target: Target) =>
         Effect.gen(function* () {
@@ -391,7 +424,61 @@ export class PluginHost extends Context.Service<
           }
           return result
         })
-      const service = PluginHost.of({
+      const service: PluginHost["Service"] = PluginHost.of({
+        builtinParts: (actor) =>
+          Effect.gen(function* () {
+            const plugins = yield* service.list(actor)
+            const parts: Array<typeof BuiltinPart.Type> = builtinCopies.map((p) => ({
+              registry: p.registry,
+              id: p.id,
+              label: p.label,
+              copyable: true,
+              reason: "An editable copy starts off. Review it before turning it on.",
+              replacedBy: plugins
+                .filter((v) => v.pin && !v.pin.suspended && v.manifest?.replaces.includes(`${p.registry}:${p.id}`))
+                .map(({ scope, id }) => ({ scope, id }))
+            }))
+            for (const tool of execution.rolloutTools.list()) {
+              if (parts.some((p) => p.registry === "rolloutTools" && p.id === tool.id) || !tool.source) continue
+              parts.push({
+                registry: "rolloutTools",
+                id: tool.id,
+                label: tool.explanation ?? tool.label,
+                copyable: false,
+                reason: "This tool still needs an adapter for its app data and actions.",
+                replacedBy: []
+              })
+            }
+            return parts
+          }),
+        copyBuiltin: (actor, input) =>
+          Semaphore.withPermit(lock)(
+            Effect.gen(function* () {
+              if (actor.role !== "admin")
+                return yield* new PluginRejected({ message: "Only an admin can create a copy here" })
+              const part = builtinCopy(input.registry, input.id)
+              if (!part) return yield* new PluginRejected({ message: "This part does not have a copy adapter yet" })
+              const scope = part.side !== "client" ? ("instance" as const) : ("user" as const)
+              const owner = scope === "instance" ? "" : actor.id
+              const result = yield* attempt(() =>
+                repoTask<{ commit?: string; unsupported?: ReadonlyArray<string> }>(config.dataDir, {
+                  op: "copyBuiltin",
+                  owner,
+                  id: input.pluginId,
+                  registry: input.registry,
+                  partId: input.id,
+                  key: randomUUID()
+                })
+              )
+              if (result.unsupported)
+                return yield* new PluginRejected({
+                  message: "This built-in needs an adapter for: " + result.unsupported.join(", ") + "."
+                })
+              const report = yield* check(actor, { scope, id: input.pluginId, commit: result.commit! })
+              return { scope, id: input.pluginId, commit: result.commit!, report }
+            })
+          ),
+        undoEffect: (actor, effect) => authoring.undoEffect(actor, effect),
         clients,
         clientAsset: (actor, target) =>
           Semaphore.withPermit(assetChecks)(
@@ -407,6 +494,33 @@ export class PluginHost extends Context.Service<
               yield* authorize
               const build = yield* attempt(() =>
                 readClientBuild(config.dataDir, target.scope === "instance" ? "" : actor.id, target.id, target.commit)
+              ).pipe(
+                Effect.tapError(() =>
+                  Semaphore.withPermit(lock)(
+                    Effect.gen(function* () {
+                      const owner = target.scope === "instance" ? "" : actor.id
+                      const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+                      if (pins.value[target.id]?.commit === target.commit && !pins.value[target.id]?.suspended) {
+                        const users = yield* reader.ListUsers()
+                        const admin =
+                          users.find(
+                            (u) => u.id === pins.value[target.id]!.enabledBy && u.role === "admin" && !u.disabled
+                          ) ?? users.find((u) => u.role === "admin" && !u.disabled)
+                        if (admin)
+                          yield* suspend(admin, owner, target.id, {
+                            commit: target.commit,
+                            appStamp: "",
+                            ok: false,
+                            step: "snapshot",
+                            message:
+                              "The approved plugin files changed. Check this version before turning it on again.",
+                            at: Date.now()
+                          })
+                        else yield* close(owner, target.id)
+                      }
+                    })
+                  )
+                )
               )
               // A disable/update admitted during the file check wins before any bytes are returned.
               yield* authorize
@@ -490,19 +604,6 @@ export class PluginHost extends Context.Service<
           Semaphore.withPermit(lock)(
             Effect.gen(function* () {
               const owner = yield* authorize(actor, target, true)
-              // Editing a pinned repo immediately turns it off; applying any new commit is explicit.
-              yield* close(owner, target.id)
-              const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
-              const pin = pins.value[target.id]
-              if (pin)
-                yield* suspend(actor, owner, target.id, {
-                  commit: pin.commit,
-                  appStamp: "",
-                  ok: false,
-                  step: "snapshot",
-                  message: "Plugin changed; turn on its new version to apply it",
-                  at: Date.now()
-                })
               return yield* attempt(() =>
                 repoTask<string>(config.dataDir, { op: "save", owner, id: target.id, files, initial: false, message })
               )
@@ -554,44 +655,83 @@ export class PluginHost extends Context.Service<
             })
           )
       })
+      const dirty = (actor: User, target: Target) =>
+        Effect.gen(function* () {
+          const owner = yield* authorize(actor, target)
+          const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+          const pin = pins.value[target.id]
+          if (pin) {
+            yield* authorizeLocal(actor, target)
+            if (!pin.suspended)
+              yield* suspend(actor, owner, target.id, {
+                commit: pin.commit,
+                appStamp: "",
+                ok: false,
+                step: "snapshot",
+                message: "Plugin turned off",
+                at: Date.now()
+              })
+          } else yield* close(owner, target.id)
+        })
+      const authoring = makePluginAuthoring({
+        host: { ...service, get: details },
+        lock,
+        dataDir: config.dataDir,
+        reader,
+        writer,
+        rollback,
+        dirty
+      })
+      if (config.plugins) for (const tool of authoring.tools) yield* execution.rolloutTools.register(tool)
       if (config.plugins) {
         const users = yield* reader.ListUsers()
         const pins = yield* reader.AllPluginPins()
-        for (const group of pins)
-          for (const [id, pin] of Object.entries(group.value)) {
-            if (pin.suspended) continue
-            const actor = users.find((u) => u.id === pin.enabledBy && u.role === "admin" && !u.disabled)
-            if (!actor) {
-              const admin = users.find((u) => u.role === "admin" && !u.disabled)
-              if (admin)
-                yield* suspend(admin, group.owner, id, {
-                  commit: pin.commit,
-                  appStamp: "",
-                  ok: false,
-                  step: "activate",
-                  message: "Plugin author is no longer an active admin",
-                  at: Date.now()
-                })
-              continue
-            }
-            const user: User = { id: actor.id, handle: actor.handle, displayName: actor.displayName, role: actor.role }
-            const report = yield* attempt(() => checkPlugin(config.dataDir, group.owner, id, pin.commit))
-            reports.set(keyOf(group.owner, id), report)
-            if (!report.ok) {
-              yield* suspend(user, group.owner, id, report)
-              continue
-            }
-            yield* activate(user, group.owner, id, pin.commit, report).pipe(
-              Effect.catchCause(() =>
-                suspend(user, group.owner, id, {
-                  ...report,
-                  ok: false,
-                  step: "activate",
-                  message: "Plugin startup activation failed; plugin turned off"
-                })
-              )
-            )
+        const pending = pins
+          .flatMap((group) => Object.entries(group.value).map(([id, pin]) => ({ owner: group.owner, id, pin })))
+          .sort((a, b) => a.pin.enabledAt - b.pin.enabledAt || keyOf(a.owner, a.id).localeCompare(keyOf(b.owner, b.id)))
+        for (const { owner, id, pin } of pending) {
+          if (pin.suspended) continue
+          const actor = users.find((u) => u.id === pin.enabledBy && u.role === "admin" && !u.disabled)
+          if (!actor) {
+            const admin = users.find((u) => u.role === "admin" && !u.disabled)
+            if (admin)
+              yield* suspend(admin, owner, id, {
+                commit: pin.commit,
+                appStamp: "",
+                ok: false,
+                step: "activate",
+                message: "Plugin author is no longer an active admin",
+                at: Date.now()
+              })
+            continue
           }
+          const user: User = { id: actor.id, handle: actor.handle, displayName: actor.displayName, role: actor.role }
+          const report = yield* attempt(() =>
+            checkPlugin(config.dataDir, owner, id, pin.commit, {
+              working: false,
+              admin: true,
+              historical: true,
+              approved: true
+            })
+          )
+          reports.set(keyOf(owner, id), report)
+          if (!report.ok) {
+            yield* suspend(user, owner, id, report)
+            continue
+          }
+          yield* activate(user, owner, id, pin.commit, report).pipe(
+            Effect.catchCause((cause) =>
+              suspend(user, owner, id, {
+                ...report,
+                ok: false,
+                step: "activate",
+                message: cause.reasons.some((r) => r._tag === "Fail" && r.error instanceof PluginRejected)
+                  ? "Another enabled plugin already replaces this part. Turn it off first."
+                  : "Plugin startup activation failed; plugin turned off"
+              })
+            )
+          )
+        }
       }
       return service
     })

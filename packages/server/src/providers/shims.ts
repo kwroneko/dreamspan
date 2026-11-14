@@ -14,6 +14,7 @@
 // model page shows it). Its payload rewrite applies when the request's own routing pins one.
 import { type FixedCapability, type ModelUpstream, pinnedRoute, type RouteRule } from "@rp/shared/providers.ts"
 import type { RequestTarget } from "./registry.ts"
+import type { ProviderError } from "@rp/shared/errors.ts"
 import { portableParameters } from "./toolSchemas.ts"
 
 interface ShimRequest {
@@ -37,6 +38,8 @@ export interface CompatShim {
   /** Capabilities a user edit can't change, because the provider refuses anything else. */
   readonly fixed?: ReadonlyArray<FixedCapability>
   /** Rewrites the final payload; returns it (the same object changed in place, or a new one). */
+  /** A refusal-specific rewrite: ordinary requests do not use this shim's payload. */
+  readonly retryWhen?: (error: ProviderError) => boolean
   readonly payload?: (payload: Record<string, unknown>, request: ShimRequest) => Record<string, unknown>
   /**
    * The router's upstreams it's for (OpenRouter provider slugs, lower case, and their names).
@@ -146,19 +149,46 @@ const pinsRoute = (shim: CompatShim, payload: Record<string, unknown>) => {
 export const applyShims = (
   shims: ReadonlyArray<CompatShim>,
   payload: Record<string, unknown>,
-  target: RequestTarget
-): { readonly payload: Record<string, unknown>; readonly applied: ReadonlyArray<string> } => {
+  target: RequestTarget,
+  retryError?: ProviderError
+): {
+  readonly payload: Record<string, unknown>
+  readonly applied: ReadonlyArray<string>
+  readonly notices: ReadonlyArray<string>
+} => {
   const applied: Array<string> = []
+  const notices: Array<string> = []
   let current = payload
   for (const shim of shims) {
     const on = { provider: target.provider ?? target.kind, api: target.api }
     if (!shim.payload || !shimApplies(shim, on, target.model ?? "")) continue
+    if (shim.retryWhen && (!retryError || !shim.retryWhen(retryError))) continue
     if (routeShim(shim) && !pinsRoute(shim, current)) continue
+    const before = effortOf(current)
     current = shim.payload(current, { target })
+    const after = effortOf(current)
+    if (
+      before !== after &&
+      after === "none" &&
+      typeof before === "string" &&
+      /^(?:minimal|low|medium|high|xhigh|max)$/.test(before)
+    )
+      notices.push(
+        `Reasoning effort “${before}” was changed to “none” for this request because this model refuses reasoning with tools. Your saved setting is unchanged.`
+      )
     applied.push(shim.id)
   }
-  return { payload: current, applied }
+  return { payload: current, applied, notices }
 }
+
+/** Only explicit, pre-output compatibility refusals can request a single corrected attempt. */
+export const hasRetryShim = (shims: ReadonlyArray<CompatShim>, target: RequestTarget, error: ProviderError) =>
+  shims.some(
+    (s) =>
+      !s.upstreams &&
+      shimApplies(s, { provider: target.provider ?? target.kind, api: target.api }, target.model ?? "") &&
+      s.retryWhen?.(error)
+  )
 
 /** Takes Bedrock's `prompt_cache_breakpoint` markers out of a Responses or Chat Completions payload. */
 const withoutBreakpoints = (payload: Record<string, unknown>) => {
@@ -276,6 +306,28 @@ export const builtinShims: ReadonlyArray<CompatShim> = [
     model: /^gpt-5\.4(?:[-.]|$)/i,
     payload: (payload) => {
       if (Array.isArray(payload.tools) && payload.tools.length > 0 && reasoning(payload))
+        payload.reasoning_effort = "none"
+      return payload
+    }
+  },
+  {
+    id: "openai-chat-tool-reasoning-refusal",
+    label: "If function tools refuse reasoning, retries once without reasoning.",
+    models: "Models that refuse reasoning with function tools",
+    providers: ["openai", "openai-compatible"],
+    apis: ["openai-completions"],
+    model: /.*/,
+    retryWhen: (e) =>
+      e.status === 400 &&
+      !e.afterTokens &&
+      /Function tools with reasoning_effort are not supported/i.test(e.message) &&
+      /reasoning_effort to ['"]none['"]/i.test(e.message),
+    payload: (payload) => {
+      if (
+        Array.isArray(payload.tools) &&
+        payload.tools.some((t) => object(t)?.type === "function") &&
+        reasoning(payload)
+      )
         payload.reasoning_effort = "none"
       return payload
     }

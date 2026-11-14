@@ -488,6 +488,7 @@ describe("workshop chat rewrites", () => {
           expectedRowVersion: sibling.rowVersion,
           commitDraft: null
         })
+        yield* f.api.NameFork({ forkId: f.forkId, name: "Harbor path" })
         const side = yield* f.api.CreateWorkshop({ attachTo: f.chat.id })
         const sideRun = `side-${side.id}`
         yield* fixtureSql(config.dataDir, [
@@ -531,6 +532,15 @@ describe("workshop chat rewrites", () => {
         assert.include(JSON.stringify(prompt), f.forkId)
         const result = yield* f.tool(name).execute(ctx, args as never)
         assert.isUndefined(result.isError, result.text)
+        if (name === "rewrite_messages" || name === "rewrite_chat" || name === "rewrite_instructions") {
+          const effects = yield* f.reader.RolloutEffectsForRun({
+            userId: f.userId,
+            chatId: side.id,
+            rolloutId: sideRun
+          })
+          assert.strictEqual(effects[0]!.undo!.scopeTitle, "The garden")
+        }
+
         const [provenance] = yield* fixtureSql(
           config.dataDir,
           [{ sql: "SELECT leaf_slot_id FROM rollouts WHERE chat_id=? AND kind='edit'", params: [f.chat.id] }],
@@ -551,7 +561,7 @@ describe("workshop chat rewrites", () => {
         })
         assert.strictEqual(newest.entries[0]!.version.content, "NEWEST sentinel")
         const effect = (yield* f.api.ListRolloutEffects({ chatId: side.id }))[0]!
-        assert.include(effect.title, "Original")
+        assert.include(effect.title, "Harbor path")
         yield* f.api.UndoRolloutEffect(effect)
         assert.include((yield* f.path()).entries[0]!.version.content, "Aria ")
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

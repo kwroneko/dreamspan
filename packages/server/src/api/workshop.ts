@@ -1,3 +1,5 @@
+import { PluginHost } from "../plugins/Host.ts"
+import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
 import { CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -16,6 +18,28 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const reader = yield* Reader
   const execution = yield* ExecutionRegistry
+  const plugins = yield* PluginHost
+  const undo = (
+    actor: import("@rp/shared/domain.ts").User,
+    input: { rolloutId: string; toolCallId: string; seq: number }
+  ) =>
+    writer.UndoRolloutEffect({ ...input, userId: actor.id }).pipe(
+      Effect.catchTag("EffectUndoRefused", (error) => {
+        if (error.message !== "Plugin file undo must run through the host.") return Effect.fail(error)
+        return Effect.gen(function* () {
+          const effect = yield* reader.RolloutEffectFor({ ...input, userId: actor.id })
+          return yield* plugins.undoEffect(actor, effect).pipe(
+            Effect.mapError(
+              () =>
+                new EffectUndoRefused({
+                  message:
+                    "This plugin has changed since this edit. Undo its newer edits first, or open Settings → Plugins to review its versions."
+                })
+            )
+          )
+        })
+      })
+    )
   /** The capabilities of the tools this chat's kind offers, as they stand in it. */
   const capabilitiesOf = (userId: UserId, chatId: ChatId) =>
     Effect.gen(function* () {
@@ -110,13 +134,32 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         internal("ListRolloutEffects")
       ),
     UndoRolloutEffect: (input) =>
-      Effect.flatMap(CurrentUser, (user) => writer.UndoRolloutEffect({ ...input, userId: user.id })).pipe(
-        internal("UndoRolloutEffect")
-      ),
+      Effect.flatMap(CurrentUser, (user) => undo(user, input)).pipe(internal("UndoRolloutEffect")),
     UndoRolloutEffects: (input) =>
-      Effect.flatMap(CurrentUser, (user) => writer.UndoRolloutEffects({ ...input, userId: user.id })).pipe(
-        internal("UndoRolloutEffects")
-      ),
+      Effect.flatMap(CurrentUser, (user) =>
+        Effect.gen(function* () {
+          const all = yield* reader.RolloutEffectsForRun({
+            userId: user.id,
+            chatId: input.chatId,
+            rolloutId: input.rolloutId
+          })
+          const rows = all.filter((e) => e.rolloutId === input.rolloutId && e.undoneAt === null)
+          if (!rows.some((e) => e.kind.startsWith("plugin.")))
+            return yield* writer.UndoRolloutEffects({ ...input, userId: user.id })
+          const undone: Array<(typeof rows)[number]> = []
+          for (const [at, row] of rows.entries()) {
+            const result = yield* undo(user, row).pipe(Effect.exit)
+            if (result._tag === "Failure")
+              return {
+                undone,
+                refused: { effect: row, reason: "This change couldn't be undone. Undo newer changes first." },
+                left: rows.slice(at + 1)
+              }
+            undone.push(result.value)
+          }
+          return { undone, refused: null, left: [] }
+        })
+      ).pipe(internal("UndoRolloutEffects")),
     ListAttachedWorkshops: ({ chatId }) =>
       Effect.flatMap(CurrentUser, (user) => reader.AttachedWorkshops({ userId: user.id, chatId })).pipe(
         internal("ListAttachedWorkshops")

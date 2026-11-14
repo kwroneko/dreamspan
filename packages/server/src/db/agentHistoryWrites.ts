@@ -218,7 +218,7 @@ export const makeAgentHistoryWriteHandlers = (
           ? `${input.title} · ${position.label} · messages ${range!.first}–${range!.last}`
           : input.title
         yield* sql`INSERT INTO rollout_effects(rollout_id,tool_call_id,seq,kind,target_kind,target_id,title,undo_json,created_at)
-        VALUES (${input.rolloutId},${input.toolCallId},0,'changeset.apply','chat',${input.chatId},${effectTitle},${JSON.stringify({ changesetId: applied.changesetIds[0], chatId: input.chatId, forkId: input.forkId, bytes, ...(position ? { storyAt: input.storyAt, storyScope: { branch: position.naming, first: range!.first, last: range!.last }, scopeTitle: input.title } : {}), seq: after?.state_seq ?? seq })},${receiptAt})`
+        VALUES (${input.rolloutId},${input.toolCallId},0,'changeset.apply','chat',${input.chatId},${effectTitle},${JSON.stringify({ changesetId: applied.changesetIds[0], chatId: input.chatId, forkId: input.forkId, bytes, ...(position ? { storyAt: input.storyAt, storyScope: { branch: position.naming, first: range!.first, last: range!.last }, scopeTitle: snapshot.name?.trim() || "Untitled chat" } : {}), seq: after?.state_seq ?? seq })},${receiptAt})`
         return result
       }).pipe(transaction(sql, "ApplyAgentChangeset"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>

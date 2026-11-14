@@ -21,6 +21,8 @@ export const storageKinds = makeRegistry<StorageKind>([
       "setting.set",
       "changeset.apply",
       "plugin.create",
+      "plugin.write",
+      "plugin.disable",
       "plugin.commit",
       "plugin.enable",
       "reply.generate"

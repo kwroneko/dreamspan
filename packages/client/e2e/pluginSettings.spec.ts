@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { Effect } from "effect"
 import * as Database from "../../server/src/db/Database.ts"
 import { saveFiles } from "../../server/src/plugins/repo.ts"
+import { checkPlugin } from "../../server/src/plugins/check.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { pluginFiles } from "./support/plugin.ts"
@@ -87,7 +88,8 @@ for (const width of [1440, 390])
         api.CommitPlugin({ scope: "instance", id, files: updated, message: "Adds a server part" })
       )
       await page.reload()
-      await page.getByRole("button", { name: "Dismiss", exact: true }).first().click()
+      await expect(page.getByRole("status").filter({ hasText: `${id} is off` })).toHaveCount(0)
+      expect((await admin((api) => api.GetPlugin({ scope: "instance", id }))).pin?.commit).toBe(first)
       await turnOn(page)
       await expect(page.getByRole("dialog")).toContainText(
         "Runs on the server with full access, including stored keys and every user's chats."
@@ -133,6 +135,10 @@ for (const width of [1440, 390])
       await admin((api) => api.PinPluginCommit({ scope: "instance", id, commit: second, consent: true }))
       await server().pause()
       await writeFile(join(server().dataDir, "plugins/instance", id, "server.ts"), "// Changed synthetic file")
+      await writeFile(
+        join(server().dataDir, "plugins/.builds/instance", id, second, "server.ts"),
+        "// Altered approved source"
+      )
       await server().restart()
       await page.goto(details(id))
       const notice = page
@@ -218,6 +224,8 @@ test("non-admin views and own data controls at both widths and themes", async ({
   )
   const id = "own-client"
   const commit = await saveFiles(server().dataDir, user.id, id, plain(id), true, "Synthetic own plugin")
+  // A synthetic approved pin has the checked artifacts a real enable publishes first.
+  expect((await checkPlugin(server().dataDir, user.id, id, commit)).ok).toBe(true)
   await server().pause()
   await Effect.runPromise(
     Effect.scoped(
