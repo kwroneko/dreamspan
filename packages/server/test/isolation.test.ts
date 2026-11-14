@@ -4983,6 +4983,14 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  GetThinkingHidden: (reader, actor, owner) =>
+    Effect.all([
+      refused(reader.GetThinkingHidden({ userId: actor.user.id, versionId: owner.chat.versionId }), "NotFound"),
+      refused(
+        reader.GetThinkingHidden({ userId: actor.user.id, versionId: actor.chat.versionId, forkId: owner.chat.forkId }),
+        "NotFound"
+      )
+    ]).pipe(Effect.asVoid),
   RecordSentContext: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       yield* refused(

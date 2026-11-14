@@ -61,7 +61,7 @@ describe("reasoning actions", () => {
     expect(of({ kind: "sections" })).toContain("Hide from the model")
     expect(of({ hidden: true })).toContain("Show to the model again")
     expect(of({ hidden: true })).toContain('aria-pressed="true"')
-    expect(of({ streaming: true })).toContain('aria-disabled="true"')
+    expect(of({ streaming: true })).not.toContain('aria-disabled="true"')
   })
 
   it("offers Show as reply text only on a finished reply-section panel", () => {

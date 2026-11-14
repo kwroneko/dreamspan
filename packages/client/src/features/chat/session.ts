@@ -1184,6 +1184,9 @@ export class ChatSession {
       case "Steps":
         // Each event holds every step as it stands: the newest replaces what's shown.
         return this.setLiveSteps(event.versionId, event.steps)
+      case "RequestNotice":
+        if (this.view.entries.some((e) => e.version.id === event.versionId)) this.notice(event.message)
+        return
       case "WaitingCache":
         if (!this.live.has(event.versionId)) this.setLive(event.versionId, "")
         this.registry.set(waitingCache(event.versionId), event.waiting)
@@ -1845,10 +1848,11 @@ export class ChatSession {
   setThinkingHidden(
     entry: PathEntry,
     part: import("@rp/shared/chat.ts").ThinkingPart,
-    hidden: boolean
+    hidden: boolean,
+    forkId = this.view.forkId
   ): Promise<Outcome<PathEntry>> {
     return this.slotWrite(entry.slotId, (client) =>
-      client("SetThinkingHidden", { versionId: entry.version.id, part, forkId: this.view.forkId, hidden })
+      client("SetThinkingHidden", { versionId: entry.version.id, part, forkId, hidden })
     )
   }
 

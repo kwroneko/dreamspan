@@ -1,3 +1,4 @@
+import { ProviderRegistry } from "../src/providers/registry.ts"
 // The thinking request per Claude model family (providers/claudeThinking.ts), as the wire bytes
 // show it: a model pi-ai's catalog doesn't list, marked as reasoning, gets adaptive thinking and
 // `output_config.effort` where Anthropic refuses budgets, and budgets where those are all a model
@@ -61,10 +62,15 @@ const reply = [
   { type: "message_stop" }
 ]
 
-type Body = { thinking?: Record<string, unknown>; output_config?: Record<string, unknown> }
+type Body = { thinking?: Record<string, unknown>; output_config?: Record<string, unknown>; max_tokens?: number }
 
 /** The body the app sends for `key`, marked as reasoning (or as `overrides` say), at `reasoning`. */
-const bodyFor = (key: string, reasoning: ThinkingLevel | undefined, overrides: ModelOverrides = { reasoning: true }) =>
+const bodyFor = (
+  key: string,
+  reasoning: ThinkingLevel | undefined,
+  overrides: ModelOverrides = { reasoning: true },
+  maxTokens?: number
+) =>
   Effect.gen(function* () {
     const server = yield* Effect.acquireRelease(
       Effect.promise(() => startMockProvider((_request, res) => anthropicSse(res, reply))),
@@ -86,7 +92,7 @@ const bodyFor = (key: string, reasoning: ThinkingLevel | undefined, overrides: M
         connectionId: connection.id,
         modelId: model.id,
         context,
-        ...(reasoning ? { options: { reasoning } } : {}),
+        options: { ...(reasoning ? { reasoning } : {}), ...(maxTokens === undefined ? {} : { maxTokens }) },
         attribution: { purpose: "generation" }
       })
     )
@@ -115,7 +121,11 @@ describe("the thinking request per Claude family", () => {
       ["us.anthropic.claude-opus-5-5-v1:0", "adaptive-only"],
       ["anthropic.claude-haiku-4-5-20251001-v1:0", null],
       ["claude-fable-5-2@20261001", "adaptive-only"],
-      ["gpt-5.4", null]
+      ["gpt-5.4", null],
+      ["claude-future-6", "adaptive-only"],
+      ["claude-sonnet-4-7", "adaptive-only"],
+      ["claude-opus-4-20250514", null],
+      ["claude-mythos-preview", "adaptive"]
     ]
     for (const [key, form] of cases) assert.strictEqual(claudeThinkingForm(key), form, key)
     assert.isNull(claudeThinkingDefaults("openai-completions", "anthropic/claude-fable-5.2"))
@@ -173,3 +183,38 @@ describe("the thinking request per Claude family", () => {
     }).pipe(Effect.provide(layer()))
   )
 })
+
+for (const key of ["claude-opus-4-7-custom", "claude-opus-4-8-custom", "claude-sonnet-5-custom"]) {
+  it.live(`review: ${key} keeps thinking off when no effort is chosen`, () =>
+    Effect.gen(function* () {
+      const body = yield* bodyFor(key, undefined)
+      assert.deepStrictEqual(body.thinking, { type: "disabled" })
+      assert.isUndefined(body.output_config)
+    }).pipe(Effect.provide(layer()))
+  )
+}
+for (const key of [
+  "claude-future-6",
+  "claude-mythos-preview",
+  "claude-sonnet-4-6-custom",
+  "claude-fable-5-2@20261001"
+]) {
+  it.live(`review: ${key} uses adaptive thinking within the output cap`, () =>
+    Effect.gen(function* () {
+      const body = yield* bodyFor(key, "max", { reasoning: true }, 128)
+      assert.deepStrictEqual(body.thinking, { type: "adaptive", display: "summarized" })
+      assert.deepStrictEqual(body.output_config, { effort: "max" })
+      assert.strictEqual(body.max_tokens, 128)
+    }).pipe(Effect.provide(layer()))
+  )
+}
+
+it.live("review: a plugin can replace the family's model defaults", () =>
+  Effect.gen(function* () {
+    const registry = yield* ProviderRegistry
+    const binding = registry.thinkingBindings.get("anthropic-messages")!
+    yield* registry.thinkingBindings.register({ ...binding, modelDefaults: () => null })
+    const body = yield* bodyFor("claude-future-6", "low")
+    assert.strictEqual(body.thinking?.type, "enabled")
+  }).pipe(Effect.provide(layer()))
+)

@@ -409,54 +409,60 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     })
 
   const versionTarget = (slotId: string, versionId: string) =>
-    sql<{
-      depth: number
-      parent_slot_id: string | null
-      ordinal: number
-      speaker_entity_id: string | null
-      direction: string | null
-      continues: string | null
-      continued_text: string | null
-      continued_sections: string | null
-    }>`
+    Effect.flatMap(viewAt(sql, chatId, slotId), (fork) =>
+      sql<{
+        depth: number
+        parent_slot_id: string | null
+        ordinal: number
+        speaker_entity_id: string | null
+        direction: string | null
+        continues: string | null
+        continued_text: string | null
+        continued_sections: string | null
+        continued_hidden: number
+      }>`
       SELECT s.depth, s.parent_slot_id, v.ordinal, v.speaker_entity_id, v.direction,
         -- A generated version with a source continues it (ContinueVersion); the source is
         -- a version of the same slot (graphIntegrity.ts), frozen once it was written.
         CASE WHEN v.writer = 'model' AND v.origin = 'generated' THEN v.source_version_id END AS continues,
         (SELECT x.content FROM version_records x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id) AS continued_text,
         (SELECT x.reply_sections FROM version_records x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id)
-          AS continued_sections
+          AS continued_sections,
+        ${thinkingHiddenIn(sql, fork, "(SELECT CASE WHEN x.fork_id IS NULL THEN x.id ELSE x.source_version_id END FROM versions x WHERE x.id = v.source_version_id)")} AS continued_hidden
       FROM version_records v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND s.id = ${slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}
         AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
-      Effect.flatMap(([row]) =>
-        row
-          ? Effect.succeed({
-              chatId,
-              slotId,
-              versionId,
-              depth: row.depth,
-              parentSlotId: row.parent_slot_id,
-              ordinal: row.ordinal,
-              speaker: row.speaker_entity_id,
-              direction: row.direction,
-              ...(row.continues === null
-                ? {}
-                : {
-                    // The reply as it came, its leading sections in their tags (spec/REPLY-SECTIONS.md).
-                    continues: {
-                      version: row.continues,
-                      text: originalReply(
-                        row.continued_text ?? "",
-                        row.continued_sections === null ? null : (JSON.parse(row.continued_sections) as ReplySections)
-                      )
-                    }
-                  })
-            })
-          : Effect.fail(new NotFound({ entity: "version", id: versionId }))
-      ),
-      Effect.flatMap((target) => placeTarget(target, false)),
-      Effect.tap(pinTarget)
+        Effect.flatMap(([row]) =>
+          row
+            ? Effect.succeed({
+                chatId,
+                slotId,
+                versionId,
+                depth: row.depth,
+                parentSlotId: row.parent_slot_id,
+                ordinal: row.ordinal,
+                speaker: row.speaker_entity_id,
+                direction: row.direction,
+                ...(row.continues === null
+                  ? {}
+                  : {
+                      // The reply as it came, its leading sections in their tags (spec/REPLY-SECTIONS.md).
+                      continues: {
+                        version: row.continues,
+                        text: originalReply(
+                          row.continued_text ?? "",
+                          row.continued_sections === null || (row.continued_hidden & 2) !== 0
+                            ? null
+                            : (JSON.parse(row.continued_sections) as ReplySections)
+                        )
+                      }
+                    })
+              })
+            : Effect.fail(new NotFound({ entity: "version", id: versionId }))
+        ),
+        Effect.flatMap((target) => placeTarget(target, false)),
+        Effect.tap(pinTarget)
+      )
     )
 
   const viewedLeaf = "next" in settings ? (settings.cut ?? settings.leafSlotId ?? null) : null

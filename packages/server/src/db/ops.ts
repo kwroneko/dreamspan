@@ -4106,6 +4106,12 @@ export class ReadOps extends RpcGroup.make(
     success: Version,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A version's thinking choice on a branch, including an unselected swipe. */
+  Rpc.make("GetThinkingHidden", {
+    payload: { userId: UserId, versionId: VersionId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
+    success: Schema.Array(ThinkingPart),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Invalidates carried story tool results after edits, swipes, summary or speaker changes. */
   Rpc.make("StoryReadStamp", {
     payload: { userId: UserId, chatId: ChatId },
@@ -4444,7 +4450,7 @@ export class ReadOps extends RpcGroup.make(
    * (`SourcePins` in assembler/types.ts) rather than the chat as it is now (invariant 6).
    */
   Rpc.make("RebuildContext", {
-    payload: { userId: UserId, snapshot: Schema.String },
+    payload: { userId: UserId, snapshot: Schema.String, thinkingForkId: Schema.optionalKey(ForkId) },
     success: Schema.Union([
       Schema.Struct({ _tag: Schema.Literal("Rebuilt"), snapshot: Schema.String }),
       Schema.Struct({

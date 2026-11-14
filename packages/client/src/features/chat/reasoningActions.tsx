@@ -61,31 +61,50 @@ export const registerReasoningActions = () => [
 ]
 
 /** Hide from the model, or show to it again: this panel's thinking, this version, the fork shown. */
-function HideThinking({ version, kind, hidden, streaming, session }: ReasoningActionProps) {
+function HideThinking({ version, kind, hidden, session }: ReasoningActionProps) {
   const [busy, setBusy] = useState(false)
   const run = async () => {
     const entry = session.snapshot().entries.find((e) => e.version.id === version.id)
-    if (!entry || streaming) return
+    if (!entry || busy) return
     setBusy(true)
-    const result = await session.setThinkingHidden(entry, kind, !hidden)
+    const forkId = entry.shownForkId ?? session.snapshot().forkId
+    const result = await session.setThinkingHidden(entry, kind, !hidden, forkId)
     setBusy(false)
     if (!result.ok)
       showToast({
         title: hidden ? "Couldn't show the thinking to the model" : "Couldn't hide the thinking",
         description: result.error.message
       })
+    else
+      showToast({
+        title: hidden ? "Thinking allowed again" : "Thinking hidden",
+        actions: [
+          {
+            label: "Undo",
+            hint: "Restore the previous choice on this branch.",
+            onClick: () => {
+              void session.setThinkingHidden(entry, kind, !!hidden, forkId).then((undone) => {
+                if (!undone.ok) showToast({ title: "Couldn't undo the choice", description: undone.error.message })
+              })
+            }
+          }
+        ]
+      })
   }
-  const hint = streaming
-    ? "Available once the reply is finished."
-    : hidden
-      ? "Send this thinking to the model again with later messages."
-      : "Keep this thinking out of later messages. It stays here, and you can show it to the model again."
+  const hint =
+    kind === "reasoning"
+      ? hidden
+        ? "Allow reasoning in replays. Plain chats never send it."
+        : "Omit from replays after this tool turn. Plain chats never send it."
+      : hidden
+        ? "Allow this thinking in later replies."
+        : "Omit this thinking when later replies include it."
   return (
     <Tooltip label={hint}>
       <button
         type="button"
         className={`${actionClass} aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
-        aria-disabled={streaming || busy ? true : undefined}
+        aria-disabled={busy ? true : undefined}
         aria-pressed={hidden}
         onClick={() => void run()}
       >

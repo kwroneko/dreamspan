@@ -1,23 +1,17 @@
-// Signed thinking goes back only into the conversation that produced it (ARCHITECTURE §6
-// "Signed thinking"). Anthropic binds each signed thinking block to the request it was written
-// for: the system prompt, the set of tools and every message before it, plus a chain to the
-// signed block before it. A request that sends a block whose prefix changed is refused (400,
-// "bound to a different conversation"); dropping a leading run of blocks, a trailing run, or all
-// of them is allowed, dropping one from the middle is not.
-//
-// So the provider layer records, on each assistant turn that came back with signed blocks, a
-// digest of the request as it was sent (thinking left out, cache markers ignored), the key of
-// the last signed block that request carried, and the connection and model that wrote it. When
-// a later request is about to go out, the same digest is taken over its own messages before each
-// signed turn: the first turn whose prefix, chain, connection or model no longer matches has its
-// signed blocks dropped, and so has every signed turn after it (the trailing run the provider
-// accepts). The reply text, tool calls and results stay. Nothing changes for a payload without
-// signed blocks, and nothing is dropped when nothing before them changed.
-//
-// Each wire format that carries signed reasoning is a registered binding (`thinkingBindings` in
-// the provider registry), replaceable or removable by id like every provider part.
+import { claudeThinkingDefaults, claudeThinkingForm } from "./claudeThinking.ts"
+import { sanitizeSurrogates } from "@earendil-works/pi-ai/utils/sanitize-unicode"
+// Signed thinking is replayed only with its original request prefix. This runs after every
+// wire transform, so compaction, loading, Resume and plugin definitions share one guard.
+// Cache markers are ignored only at the API's marker positions, never inside tool data.
 import { createHash } from "node:crypto"
-import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared"
+import {
+  normalizeContext,
+  type Api,
+  type Model as PiModel,
+  type AssistantMessage,
+  type Message
+} from "@earendil-works/pi-ai"
 import type { RequestTarget } from "./registry.ts"
 
 /** What an assistant turn with signed blocks records about the request that produced it. */
@@ -28,6 +22,10 @@ export interface ThinkingRecord {
   readonly prev: string | null
   readonly connectionId: string
   readonly modelId: string
+  /** Non-secret digest of the transport identity, including credentials and address. */
+  readonly connectionStamp?: string
+  /** Per-item prefixes when a response has separate reasoning and output items. */
+  readonly prefixes?: Readonly<Record<string, string>>
 }
 
 /** An assistant turn as the provider layer returns it: with its record when it carries signed blocks. */
@@ -36,6 +34,10 @@ export type RecordedAssistant = AssistantMessage & { readonly thinkingRecord?: T
 /** A wire format's signed reasoning: where it sits in the payload, and how to leave it out. */
 export interface ThinkingBinding {
   readonly id: string
+  /** Keep declarations at the turn cap and forbid calls with these wire fields. */
+  readonly modelDefaults?: (key: string) => ReturnType<typeof claudeThinkingDefaults>
+  readonly deferHiddenThinking?: (key: string) => boolean
+  readonly finalRequest?: Readonly<Record<string, unknown>>
   readonly appliesTo: (target: RequestTarget) => boolean
   /** The payload's conversation messages, in order. */
   readonly messages: (payload: Record<string, unknown>) => ReadonlyArray<unknown> | null
@@ -48,28 +50,43 @@ export interface ThinkingBinding {
   /** The message as the binding compares it: signed reasoning left out. */
   readonly comparable: (message: unknown) => unknown
   /** The message without its signed reasoning; null when nothing else is left in it. */
-  readonly strip: (message: unknown) => unknown
+  readonly strip: (message: unknown, keys?: ReadonlySet<string>) => unknown
   /** The signed blocks' identities a pi assistant message will carry on this wire. */
   readonly piSigned: (message: AssistantMessage) => ReadonlyArray<string>
+  readonly before?: (message: unknown, key: string) => unknown | null
+  readonly reply?: (message: AssistantMessage, model: PiModel<Api>) => ReadonlyArray<unknown>
 }
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 
-/** Stable JSON: object keys sorted, `cache_control` left out (moving a marker changes nothing). */
-const stable = (value: unknown): string => {
-  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`
-  const record = object(value)
-  if (record === undefined) return JSON.stringify(value) ?? "null"
-  return `{${Object.keys(record)
-    .filter((key) => key !== "cache_control" && record[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stable(record[key])}`)
-    .join(",")}}`
-}
+/** Preserve JSON data ordering; API markers are removed only by the binding's projections. */
+const stable = (value: unknown): string => JSON.stringify(value) ?? "null"
 
 /** A short identity for a signature (signatures run to kilobytes). */
 const keyOf = (signature: string) => createHash("sha256").update(signature).digest("hex").slice(0, 32)
+
+/** Remove a marker only on a content block, retaining identically named tool arguments. */
+const unmarked = (value: unknown): unknown => {
+  const block = object(value)
+  if (!block) return value
+  const { cache_control: _marker, ...rest } = block
+  return block.type === "tool_result" && Array.isArray(block.content)
+    ? { ...rest, content: block.content.map(unmarked) }
+    : rest
+}
+
+/** Normalize only cache metadata in a wire message's content blocks. */
+const messageWithoutMarkers = (value: unknown, block: (value: unknown) => unknown): unknown => {
+  const message = object(value)
+  return message && Array.isArray(message.content) ? { ...message, content: message.content.map(block) } : value
+}
+const responseBlockWithoutMarker = (value: unknown): unknown => {
+  const block = object(value)
+  if (!block) return value
+  const { prompt_cache_breakpoint: _marker, ...rest } = block
+  return rest
+}
 
 // Anthropic Messages (direct, Amazon Bedrock, Google Vertex and proxies that speak it).
 const SIGNED_BLOCKS = new Set(["thinking", "redacted_thinking"])
@@ -88,15 +105,20 @@ const blocksOf = (message: unknown) => {
 
 export const anthropicBinding: ThinkingBinding = {
   id: "anthropic-messages",
+  modelDefaults: (key) => claudeThinkingDefaults("anthropic-messages", key),
+  deferHiddenThinking: (key) => /claude-/i.test(key) && claudeThinkingForm(key) === null,
+  finalRequest: { tool_choice: { type: "none" } },
   appliesTo: (target) => target.api === "anthropic-messages",
   messages: (payload) => (Array.isArray(payload.messages) ? payload.messages : null),
-  withMessages: (payload, messages) => ({ ...payload, messages: [...messages] }),
-  // Tools are bound as a set: their order doesn't matter.
+  withMessages: (payload, messages) => ({
+    ...payload,
+    messages: [...messages],
+    ...(object(payload.thinking)?.type === "enabled" ? { thinking: { type: "disabled" } } : {})
+  }),
   head: (payload) => ({
-    system: typeof payload.system === "string" ? [{ type: "text", text: payload.system }] : (payload.system ?? null),
-    tools: Array.isArray(payload.tools)
-      ? [...payload.tools].sort((a, b) => String(object(a)?.name ?? "").localeCompare(String(object(b)?.name ?? "")))
-      : []
+    model: payload.model,
+    system: Array.isArray(payload.system) ? payload.system.map(unmarked) : (payload.system ?? null),
+    tools: Array.isArray(payload.tools) ? payload.tools.map(unmarked) : []
   }),
   signed: (message) => {
     if (object(message)?.role !== "assistant") return []
@@ -115,18 +137,49 @@ export const anthropicBinding: ThinkingBinding = {
       role: record.role,
       content:
         typeof content === "string"
-          ? [{ type: "text", text: content }]
+          ? content
           : Array.isArray(content)
-            ? content.filter((block) => !SIGNED_BLOCKS.has(String(object(block)?.type)))
+            ? content.filter((block) => !SIGNED_BLOCKS.has(String(object(block)?.type))).map(unmarked)
             : content
     }
   },
-  strip: (message) => {
+  strip: (message, keys) => {
     const blocks = blocksOf(message)
     if (blocks === null) return message
-    const kept = blocks.filter((block) => !SIGNED_BLOCKS.has(String(object(block)?.type)))
-    return kept.length === 0 ? null : { ...object(message), content: kept }
+    const kept = blocks.filter((block) => {
+      const part = object(block)
+      if (!part || !SIGNED_BLOCKS.has(String(part.type))) return true
+      const signature = anthropicSignature(part)
+      return keys !== undefined && signature !== undefined && !keys.has(keyOf(signature))
+    })
+    return kept.length === blocks.length ? message : kept.length === 0 ? null : { ...object(message), content: kept }
   },
+  before: (message, key) => {
+    const before: Array<unknown> = []
+    for (const value of blocksOf(message) ?? []) {
+      const block = object(value)
+      if (block && SIGNED_BLOCKS.has(String(block.type))) {
+        const signature = anthropicSignature(block)
+        if (signature && keyOf(signature) === key) break
+      } else before.push(unmarked(value))
+    }
+    return before.length ? before : null
+  },
+  reply: (message) => [
+    {
+      role: "assistant",
+      content: message.content.flatMap((part): Array<unknown> => {
+        if (part.type === "thinking")
+          return [
+            part.redacted
+              ? { type: "redacted_thinking", data: part.thinkingSignature }
+              : { type: "thinking", thinking: part.thinking, signature: part.thinkingSignature }
+          ]
+        if (part.type === "text") return part.text.trim() ? [{ type: "text", text: sanitizeSurrogates(part.text) }] : []
+        return [{ type: "tool_use", id: part.id, name: part.name, input: part.arguments ?? {} }]
+      })
+    }
+  ],
   piSigned: (message) =>
     message.content.flatMap((part) =>
       part.type === "thinking" && part.thinkingSignature && part.thinkingSignature.trim() !== ""
@@ -153,8 +206,8 @@ const parsedDetails = (signature: string | undefined) => {
 
 export const openRouterClaudeBinding: ThinkingBinding = {
   id: "openrouter-claude",
-  appliesTo: (target) =>
-    target.kind === "openrouter" && target.api === "openai-completions" && /^anthropic\//i.test(target.model ?? ""),
+  deferHiddenThinking: (key) => /claude-/i.test(key) && claudeThinkingForm(key) === null,
+  appliesTo: (target) => target.api === "openai-completions" && /(?:^anthropic\/|claude-)/i.test(target.model ?? ""),
   messages: (payload) =>
     Array.isArray(payload.messages)
       ? payload.messages.filter((m) => !["system", "developer"].includes(String(object(m)?.role)))
@@ -167,14 +220,11 @@ export const openRouterClaudeBinding: ThinkingBinding = {
     }
   },
   head: (payload) => ({
-    system: (Array.isArray(payload.messages) ? payload.messages : []).filter((m) =>
-      ["system", "developer"].includes(String(object(m)?.role))
-    ),
-    tools: Array.isArray(payload.tools)
-      ? [...payload.tools].sort((a, b) =>
-          String(object(object(a)?.function)?.name ?? "").localeCompare(String(object(object(b)?.function)?.name ?? ""))
-        )
-      : []
+    model: payload.model,
+    system: (Array.isArray(payload.messages) ? payload.messages : [])
+      .filter((m) => ["system", "developer"].includes(String(object(m)?.role)))
+      .map((m) => messageWithoutMarkers(m, unmarked)),
+    tools: Array.isArray(payload.tools) ? payload.tools.map(unmarked) : []
   }),
   signed: (message) => {
     const record = object(message)
@@ -185,11 +235,14 @@ export const openRouterClaudeBinding: ThinkingBinding = {
   comparable: (message) => {
     const record = object(message)
     if (!record) return message
-    return Object.fromEntries(Object.entries(record).filter(([key]) => !ROUTER_REASONING.includes(key)))
+    return messageWithoutMarkers(
+      Object.fromEntries(Object.entries(record).filter(([key]) => !ROUTER_REASONING.includes(key))),
+      unmarked
+    )
   },
   strip: (message) => {
     const record = object(message)
-    if (!record) return message
+    if (!record || !ROUTER_REASONING.some((key) => Object.hasOwn(record, key))) return message
     return Object.fromEntries(Object.entries(record).filter(([key]) => !ROUTER_REASONING.includes(key)))
   },
   piSigned: (message) => {
@@ -202,7 +255,49 @@ export const openRouterClaudeBinding: ThinkingBinding = {
   }
 }
 
-export const builtinThinkingBindings: ReadonlyArray<ThinkingBinding> = [anthropicBinding, openRouterClaudeBinding]
+const reasoningItem = (value: unknown) => {
+  const item = object(value)
+  return item?.type === "reasoning" && typeof item.encrypted_content === "string" ? item : undefined
+}
+
+/** Responses binds instructions, tools, output format, effort and the preceding input items. */
+export const responsesBinding: ThinkingBinding = {
+  id: "openai-responses",
+  appliesTo: (target) => target.api === "openai-responses",
+  messages: (payload) => (Array.isArray(payload.input) ? payload.input : null),
+  withMessages: (payload, messages) => ({ ...payload, input: [...messages] }),
+  head: (payload) => ({
+    model: payload.model,
+    instructions: payload.instructions ?? null,
+    tools: payload.tools ?? [],
+    text: payload.text ?? null,
+    reasoning: payload.reasoning ?? null
+  }),
+  signed: (item) => {
+    const reasoning = reasoningItem(item)
+    return reasoning ? [keyOf(reasoning.encrypted_content as string)] : []
+  },
+  comparable: (item) => (reasoningItem(item) ? null : messageWithoutMarkers(item, responseBlockWithoutMarker)),
+  strip: (item) => (object(item)?.type === "reasoning" ? null : item),
+  piSigned: (message) =>
+    message.content.flatMap((part) => {
+      if (part.type !== "thinking" || !part.thinkingSignature) return []
+      try {
+        const item = reasoningItem(JSON.parse(part.thinkingSignature))
+        return item ? [keyOf(item.encrypted_content as string)] : []
+      } catch {
+        return []
+      }
+    }),
+  reply: (message, model) =>
+    convertResponsesMessages(model, normalizeContext({ messages: [message] }), new Set([model.provider]))
+}
+
+export const builtinThinkingBindings: ReadonlyArray<ThinkingBinding> = [
+  anthropicBinding,
+  openRouterClaudeBinding,
+  responsesBinding
+]
 
 /** Whether a payload carries signed reasoning on this wire. */
 export const carriesSigned = (binding: ThinkingBinding, payload: Record<string, unknown>) =>
@@ -214,7 +309,7 @@ export type DropReason = "changed" | "model" | "refused"
 export const DROP_NOTES: Record<DropReason, string> = {
   changed:
     "Thinking from earlier in this reply was left out, because something before it changed after it was written. The provider refuses it then.",
-  model: "Thinking written by another model or connection was left out. Only the model that wrote it can read it.",
+  model: "Thinking was left out because the model or connection changed.",
   refused: "The provider refused earlier thinking, so this request was sent again without it."
 }
 
@@ -238,11 +333,16 @@ export const bindThinking = (
     readonly context: ReadonlyArray<Message>
     readonly connectionId: string
     readonly modelId: string
+    readonly connectionStamp?: string
     readonly mode: "check" | "strip" | "keep"
   }
 ): BindResult => {
   const messages = binding.messages(payload)
-  if (messages === null || input.mode === "keep" || !messages.some((m) => binding.signed(m).length > 0))
+  if (
+    messages === null ||
+    input.mode === "keep" ||
+    (input.mode !== "strip" && !messages.some((m) => binding.signed(m).length > 0))
+  )
     return { payload, dropped: 0, reason: null }
   const records = new Map<string, ThinkingRecord>()
   for (const message of input.context) {
@@ -255,30 +355,37 @@ export const bindThinking = (
   const out: Array<unknown> = []
   let dropping = input.mode === "strip"
   let reason: DropReason | null = input.mode === "strip" ? "refused" : null
-  let lastKept: string | null = null
   let dropped = 0
   for (const message of messages) {
     const keys = binding.signed(message)
-    if (keys.length > 0 && !dropping) {
-      const record = records.get(keys[0]!)
-      const sameRecord = keys.every((key) => records.get(key) === record)
+    if (input.mode === "strip") {
+      const stripped = binding.strip(message)
+      dropped += keys.length || (stripped !== message ? 1 : 0)
+      if (stripped !== null) out.push(stripped)
+      continue
+    }
+    const leaving = new Set<string>()
+    for (const key of keys) {
+      const record = records.get(key)
       const written =
-        record !== undefined && record.connectionId === input.connectionId && record.modelId === input.modelId
-      const unchanged =
-        written &&
-        sameRecord &&
-        record.prefix === hash.copy().digest("hex") &&
-        (lastKept === null || record.prev === lastKept)
-      if (unchanged) lastKept = keys.at(-1)!
-      else {
+        record !== undefined &&
+        record.connectionId === input.connectionId &&
+        record.modelId === input.modelId &&
+        record.connectionStamp === input.connectionStamp
+      const prefix = hash.copy()
+      const before = binding.before?.(message, key)
+      if (before != null) prefix.update(stable(before))
+      if (!dropping && (!written || (record.prefixes?.[key] ?? record.prefix) !== prefix.digest("hex"))) {
         dropping = true
         reason = record !== undefined && !written ? "model" : "changed"
       }
+      if (dropping) leaving.add(key)
     }
-    hash.update(stable(binding.comparable(message)))
-    if (keys.length > 0 && dropping) {
-      dropped += keys.length
-      const stripped = binding.strip(message)
+    const comparable = binding.comparable(message)
+    if (comparable !== null) hash.update(stable(comparable))
+    if (leaving.size > 0) {
+      dropped += leaving.size
+      const stripped = binding.strip(message, leaving)
       if (stripped !== null) out.push(stripped)
     } else out.push(message)
   }
@@ -291,26 +398,37 @@ export const bindThinking = (
 export const thinkingRecord = (
   binding: ThinkingBinding,
   sent: Record<string, unknown>,
-  written: { readonly connectionId: string; readonly modelId: string }
+  written: { readonly connectionId: string; readonly modelId: string; readonly connectionStamp?: string },
+  reply?: ReadonlyArray<unknown>
 ): ThinkingRecord => {
   const messages = binding.messages(sent) ?? []
   const hash = createHash("sha256").update(stable(binding.head(sent)))
   let prev: string | null = null
   for (const message of messages) {
-    hash.update(stable(binding.comparable(message)))
+    const comparable = binding.comparable(message)
+    if (comparable !== null) hash.update(stable(comparable))
     prev = binding.signed(message).at(-1) ?? prev
   }
-  return { prefix: hash.digest("hex"), prev, ...written }
+  const prefix = hash.copy().digest("hex")
+  const prefixes: Record<string, string> = {}
+  for (const item of reply ?? []) {
+    for (const key of binding.signed(item)) {
+      const prefix = hash.copy()
+      const before = binding.before?.(item, key)
+      if (before != null) prefix.update(stable(before))
+      prefixes[key] = prefix.digest("hex")
+    }
+    const comparable = binding.comparable(item)
+    if (comparable !== null) hash.update(stable(comparable))
+  }
+  return { prefix, prev, ...written, ...(reply ? { prefixes } : {}) }
 }
 
 /** Whether a turn came back with signed reasoning this wire sends back. */
 export const signsReasoning = (binding: ThinkingBinding, message: AssistantMessage) =>
   binding.piSigned(message).length > 0
 
-/**
- * A refusal of signed thinking: Anthropic's "Invalid `signature` in `thinking` block" (bound to
- * a different conversation, or one it can't verify). Its retry sends no signed blocks.
- */
+/** Only the measured prefix-binding 400, before any output, permits one stripped retry. */
 export const refusesSigned = (error: {
   readonly status: number | null
   readonly message: string
@@ -318,18 +436,6 @@ export const refusesSigned = (error: {
 }) =>
   error.status === 400 &&
   !error.afterTokens &&
-  /signature[^.]*\b(?:redacted_)?thinking\b[^.]*block|bound to a different conversation/i.test(error.message)
-
-/**
- * A provider that needs the turn being continued to start with its thinking (older Claude
- * models with thinking on: "Expected `thinking` or `redacted_thinking`"). Its retry sends the
- * signed blocks as they were: those models don't bind them to what came before.
- */
-export const needsSigned = (error: {
-  readonly status: number | null
-  readonly message: string
-  readonly afterTokens?: boolean
-}) =>
-  error.status === 400 &&
-  !error.afterTokens &&
-  /expected\s+`?thinking`?\s+or\s+`?redacted_thinking`?|must start with a thinking block/i.test(error.message)
+  /Invalid `signature` in `(?:redacted_)?thinking` block\. The block is bound to a different conversation\./.test(
+    error.message
+  )

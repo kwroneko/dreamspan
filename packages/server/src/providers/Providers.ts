@@ -3,7 +3,6 @@ import { Formats } from "../importer/Formats.ts"
 import { payloadText } from "./textPayload.ts"
 import { documentedCachePolicy } from "./cachePolicy.ts"
 import { hasImageBlocks, limitImages } from "./images.ts"
-import { claudeThinkingDefaults } from "./claudeThinking.ts"
 import { imageSample, payloadImages } from "./imageSamples.ts"
 import { captureToolArguments } from "./toolArguments.ts"
 // The provider layer (spec/PROVIDERS.md): one streaming entry point over pi-ai for the
@@ -80,7 +79,6 @@ import {
   bindThinking,
   carriesSigned,
   DROP_NOTES,
-  needsSigned,
   type RecordedAssistant,
   refusesSigned,
   signsReasoning,
@@ -162,6 +160,7 @@ export type ProviderEvent =
       readonly maxRetries: number
       readonly delayMs: number
       readonly error: ProviderError
+      readonly notice?: string
     }
   | {
       readonly type: "done"
@@ -523,14 +522,24 @@ const fromList = (error: ModelListError) =>
   )
 
 /** The pi-ai model for a request: the catalog entry when it's for this wire API, overlaid with the merged description. */
-const buildPiModel = async (prepared: Prepared, model: Model, effective: EffectiveModel): Promise<PiModel<Api>> => {
+const buildPiModel = async (
+  prepared: Prepared,
+  model: Model,
+  effective: EffectiveModel,
+  bindings: ReadonlyArray<ThinkingBinding>
+): Promise<PiModel<Api>> => {
   const found = await catalogEntry(prepared.kind, model.key)
   const base = found?.sameApi ? found.entry : null
   prepared.registerHeaders(base?.headers)
   const price = effective.price
   // A Claude model's thinking form (claudeThinking.ts), under what the model's settings and the
   // catalog say: an unlisted adaptive-only model must not be sent budgets or `disabled`.
-  const family = claudeThinkingDefaults(prepared.api, model.key)
+  const family =
+    base && model.upstream?.compat
+      ? null
+      : bindings
+          .find((binding) => binding.appliesTo({ kind: prepared.kind.id, api: prepared.api, model: model.key }))
+          ?.modelDefaults?.(model.key)
   const levels = { ...family?.thinkingLevelMap, ...effective.thinkingLevels.value }
   return {
     ...base,
@@ -1119,6 +1128,19 @@ export const layer = (options: ProvidersOptions = {}) =>
         /** Signed thinking: checked against what it was written after, all left out, or all sent. */
         bindingMode: "check" | "strip" | "keep" = "check"
       ) => {
+        const connectionStamp = createHash("sha256")
+          .update(
+            JSON.stringify([
+              prepared.kind.id,
+              prepared.provider,
+              prepared.api,
+              prepared.baseUrl,
+              prepared.apiKey,
+              prepared.headers,
+              prepared.settings
+            ])
+          )
+          .digest("hex")
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
         const toolArguments = captureToolArguments()
@@ -1175,10 +1197,16 @@ export const layer = (options: ProvidersOptions = {}) =>
           state.binding && state.sent && signsReasoning(state.binding, message)
             ? {
                 ...message,
-                thinkingRecord: thinkingRecord(state.binding, state.sent, {
-                  connectionId: prepared.connection.id,
-                  modelId: model.id
-                })
+                thinkingRecord: thinkingRecord(
+                  state.binding,
+                  state.sent,
+                  {
+                    connectionId: prepared.connection.id,
+                    modelId: model.id,
+                    connectionStamp
+                  },
+                  state.binding.reply?.(message, piModel)
+                )
               }
             : message
 
@@ -1613,6 +1641,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                         context: request.context.messages,
                         connectionId: prepared.connection.id,
                         modelId: model.id,
+                        connectionStamp,
                         mode: bindingMode
                       })
                     : { payload: limited, dropped: 0, reason: null }
@@ -1845,7 +1874,7 @@ export const layer = (options: ProvidersOptions = {}) =>
               prepared.settings
             )
             const piModel = yield* Effect.tryPromise({
-              try: () => buildPiModel(prepared, model, effective),
+              try: () => buildPiModel(prepared, model, effective, registry.thinkingBindings.list()),
               catch: (error) =>
                 scrubbed(prepared, providerError("unknown", `could not prepare the model: ${String(error)}`))
             })
@@ -1900,10 +1929,14 @@ export const layer = (options: ProvidersOptions = {}) =>
               // being continued gets what was left out (thinkingBinding.ts).
               if (bindingMode === "check" && outcome.signed?.sent && refusesSigned(error)) {
                 bindingMode = "strip"
-                continue
-              }
-              if (bindingMode === "check" && outcome.signed?.dropped && needsSigned(error)) {
-                bindingMode = "keep"
+                offer({
+                  type: "retrying",
+                  attempt: n + 1,
+                  maxRetries: 1,
+                  delayMs: 0,
+                  error,
+                  notice: "Earlier thinking was refused. Trying once without it."
+                })
                 continue
               }
               if (

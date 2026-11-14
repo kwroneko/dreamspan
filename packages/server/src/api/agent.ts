@@ -1,3 +1,4 @@
+import { ProviderRegistry } from "../providers/registry.ts"
 import { CALL_TOOL, dispatcherDefinition } from "../agent/dispatcher.ts"
 import { storyReadStamp } from "../agent/continuity.ts"
 import { loadingWireFor } from "../agent/loadingPlan.ts"
@@ -85,6 +86,7 @@ const agentVersionResumer = Effect.gen(function* () {
   const hub = yield* ChatHub
   const generations = yield* Generations
   const generator = yield* Generator
+  const providerRegistry = yield* Effect.serviceOption(ProviderRegistry)
   const execution = yield* ExecutionRegistry
   /**
    * The tools the chat offers now (spec/AGENTIC.md §12.4), or undefined when that's what the run
@@ -278,12 +280,33 @@ const agentVersionResumer = Effect.gen(function* () {
         if (modelChanged) chosen = { connection: model.connectionId as ConnectionId, model: model.modelId as ModelId }
       }
       if (planned instanceof StepNotResumable) return yield* refuse(planned.message)
+      // Only the user's thinking choices override a saved request. Its other pinned text,
+      // settings and tool receipts remain as they were, including "send the saved request".
+      const thinkingForkId = sourceSlot.entry.shownForkId
+      if (thinkingForkId) {
+        const updated = yield* reader
+          .RebuildContext({ userId, snapshot, thinkingForkId })
+          .pipe(Effect.catchTag("AssemblyFailed", (error) => refuse(error.message)))
+        if (updated._tag === "Rebuilt") snapshot = updated.snapshot
+      }
       // Reasoning the user hid on this reply isn't sent again by the run that carries it on.
-      if (sourceSlot.entry.version.id === source.id && sourceSlot.entry.hiddenThinking?.includes("reasoning"))
+      if ((yield* reader.GetThinkingHidden({ userId, versionId, forkId })).includes("reasoning")) {
+        const model = (JSON.parse(snapshot) as ContextSnapshot).inputs.model
+        const binding =
+          model && Option.isSome(providerRegistry)
+            ? providerRegistry.value.thinkingBindings
+                .list()
+                .find((b) => b.appliesTo({ kind: model.kind, api: model.api, model: model.key }))
+            : undefined
         planned = {
           ...planned,
-          transcript: withoutThinking(planned.transcript, (frozen as Frozen).continuity?.historical ?? 0)
+          transcript: withoutThinking(
+            planned.transcript,
+            (frozen as Frozen).continuity?.historical ?? 0,
+            !!model && !!binding?.deferHiddenThinking?.(model.key)
+          )
         }
+      }
       if (options?.direction !== undefined)
         planned = {
           ...planned,

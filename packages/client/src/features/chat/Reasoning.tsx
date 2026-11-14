@@ -200,7 +200,7 @@ function ReasoningBlock({
           </button>
         </Tooltip>
         {hidden && (
-          <Tooltip label="You hid this thinking from the model. It isn't sent with later messages.">
+          <Tooltip label="Saved here; omitted from later replays when the current tool turn ends.">
             <span
               className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted"
               data-thinking-hidden=""

@@ -1,8 +1,7 @@
 // A fake Anthropic Messages endpoint that enforces signed thinking the way the API documents
 // it (preserved thinking's history-editing check): a thinking or redacted_thinking block is
-// valid only while the system prompt, the set of tools and every message before it are what
-// they were when it was written, and while the signed block before it is the one it followed.
-// Removing a leading run, a trailing run or all blocks is allowed; one from the middle is not.
+// valid only while system, ordered tools and preceding non-thinking content match the
+// request that produced it. Signatures themselves are not part of later blocks' prefixes.
 // It also plays an older model on request: a continued tool turn must start with its thinking.
 // Its own canonical form is written independently of the app's (src/providers/thinkingBinding.ts).
 import { createHash, randomUUID } from "node:crypto"
@@ -22,37 +21,58 @@ const canonical = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(canonical)
   if (value !== null && typeof value === "object") {
     const record = value as Record<string, unknown>
-    return Object.fromEntries(
-      Object.keys(record)
-        .filter((key) => key !== "cache_control")
-        .sort()
-        .map((key) => [key, canonical(record[key])])
-    )
+    return Object.fromEntries(Object.keys(record).map((key) => [key, canonical(record[key])]))
   }
   return value
+}
+const unmark = (block: Block): Block => {
+  const { cache_control: _marker, ...rest } = block
+  return block.type === "tool_result" && Array.isArray(block.content)
+    ? { ...rest, content: (block.content as Array<Block>).map(unmark) }
+    : rest
 }
 const isSigned = (block: Block) => block.type === "thinking" || block.type === "redacted_thinking"
 const signatureOf = (block: Block) => String(block.type === "redacted_thinking" ? block.data : block.signature)
 const blocks = (message: Message): Array<Block> =>
   typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content
 
-/** What the request before message `index` is bound to. */
-export const prefixOf = (body: AnthropicBody, index: number) =>
+/** The independent fake compares the actual JSON data, with only API cache markers removed. */
+const prefixData = (body: AnthropicBody, index: number, within: Array<Block> = []) =>
+  canonical({
+    model: body.model,
+    system: Array.isArray(body.system) ? (body.system as Array<Block>).map(unmark) : (body.system ?? null),
+    tools: (body.tools ?? []).map((t) => {
+      const { cache_control: _marker, ...rest } = t
+      return rest
+    }),
+    messages: body.messages.slice(0, index).map((m) => ({
+      role: m.role,
+      content: typeof m.content === "string" ? m.content : m.content.filter((b) => !isSigned(b)).map(unmark)
+    })),
+    ...(within.length ? { within: within.map(unmark) } : {})
+  })
+
+export const prefixOf = (body: AnthropicBody, index: number, within: Array<Block> = []) =>
   createHash("sha256")
-    .update(
-      JSON.stringify(
-        canonical({
-          system: typeof body.system === "string" ? [{ type: "text", text: body.system }] : (body.system ?? null),
-          tools: [...(body.tools ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
-          messages: body.messages
-            .slice(0, index)
-            .map((m) => ({ role: m.role, content: blocks(m).filter((b) => !isSigned(b)) }))
-        })
-      )
-    )
+    .update(JSON.stringify(prefixData(body, index, within)))
     .digest("hex")
 
+const firstDifference = (before: unknown, now: unknown, path = ""): string | null => {
+  if (JSON.stringify(before) === JSON.stringify(now)) return null
+  if (before && now && typeof before === "object" && typeof now === "object") {
+    const left = before as Record<string, unknown>,
+      right = now as Record<string, unknown>
+    for (const key of [...new Set([...Object.keys(left), ...Object.keys(right)])]) {
+      const found = firstDifference(left[key], right[key], path ? `${path}.${key}` : key)
+      if (found) return found
+    }
+  }
+  return path || "request"
+}
+
 export interface Issued {
+  readonly within?: Array<Block>
+  readonly source?: AnthropicBody
   readonly prefix: string
   readonly prev: string | null
 }
@@ -65,7 +85,6 @@ export const verify = (
   issued: ReadonlyMap<string, Issued>,
   options: { readonly needsTurnThinking?: boolean } = {}
 ): Verdict => {
-  let lastKept: string | null = null
   for (const [index, message] of body.messages.entries()) {
     if (message.role !== "assistant") continue
     for (const [at, block] of blocks(message).entries()) {
@@ -74,15 +93,36 @@ export const verify = (
       const known = issued.get(signature)
       const where = `messages.${index}.content.${at}`
       if (!known) return { ok: false, message: `${where}: Invalid \`signature\` in \`thinking\` block.` }
-      if (known.prefix !== prefixOf(body, index) || (lastKept !== null && known.prev !== lastKept))
+      if (
+        known.prefix !==
+        prefixOf(
+          body,
+          index,
+          blocks(message)
+            .slice(0, at)
+            .filter((b) => !isSigned(b))
+        )
+      )
         return {
           ok: false,
-          message: `${where}: Invalid \`signature\` in \`thinking\` block. The block is bound to a different conversation. Remove the block, or set \`thinking.block_binding.prefix_mismatch_behavior\` to "drop_block".`
+          message: `${where}: Invalid \`signature\` in \`thinking\` block. The block is bound to a different conversation. Content before this block differs from when it was created, first at ${
+            known.source
+              ? firstDifference(
+                  prefixData(known.source, known.source.messages.length, known.within),
+                  prefixData(
+                    body,
+                    index,
+                    blocks(message)
+                      .slice(0, at)
+                      .filter((b) => !isSigned(b))
+                  )
+                )
+              : "request"
+          }.`
         }
-      lastKept = signature
     }
   }
-  if (options.needsTurnThinking) {
+  if (options.needsTurnThinking && (body as { thinking?: { type?: string } }).thinking?.type === "enabled") {
     // The last assistant turn with a tool call, when tool results follow it: it must start with thinking.
     const at = body.messages.findLastIndex((m) => m.role === "assistant")
     const turn = at < 0 ? undefined : body.messages[at]
@@ -133,7 +173,7 @@ export const enforcingAnthropic = (options: {
       body.messages
         .flatMap((m) => (m.role === "assistant" ? blocks(m).filter(isSigned).map(signatureOf) : []))
         .at(-1) ?? null
-    issued.set(signature, { prefix: prefixOf(body, body.messages.length), prev })
+    issued.set(signature, { prefix: prefixOf(body, body.messages.length), prev, source: structuredClone(body) })
     const events: Array<{ type: string } & Record<string, unknown>> = [
       start(body.model),
       { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },

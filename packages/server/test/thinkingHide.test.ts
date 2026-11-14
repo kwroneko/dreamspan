@@ -167,12 +167,12 @@ describe("signed thinking through an agent run", () => {
         }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
     )
 
-  it.live("the turn cap's last request, sent without tools, leaves the run's thinking out and says so", () =>
+  it.live("the turn cap keeps Anthropic tools and thinking, forbidding calls with tool_choice none", () =>
     Effect.gen(function* () {
       yield* agentCapped(2)
       const fake = enforcingAnthropic({
         reply: (body) =>
-          (body as { tools?: Array<unknown> }).tools?.length
+          (body as { tool_choice?: { type: string } }).tool_choice?.type !== "none"
             ? { thinking: "I should check the keeper.", call: { name: "look_up", input: { topic: "keeper" } } }
             : { thinking: "Time to answer.", text: "Ansel keeps the lamp." }
       })
@@ -186,8 +186,10 @@ describe("signed thinking through an agent run", () => {
       )
       const last = fake.verdicts.at(-1)!
       assert.isTrue(hasResult(last.body))
-      assert.strictEqual(signedIn(last.body), 0, "bound to a request with tools, it would be refused")
-      assert.lengthOf(yield* issuesOf(api, version.id), 1)
+      assert.strictEqual(signedIn(last.body), 1)
+      assert.deepStrictEqual(last.body.tools, fake.verdicts[0]!.body.tools)
+      assert.deepStrictEqual((last.body as { tool_choice?: unknown }).tool_choice, { type: "none" })
+      assert.deepStrictEqual(yield* issuesOf(api, version.id), [])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
@@ -319,6 +321,14 @@ describe("signed thinking through an agent run", () => {
   it.live("a refusal the check didn't foresee is sent once more without the thinking", () =>
     Effect.gen(function* () {
       yield* agent
+      let executions = 0
+      yield* (yield* ExecutionRegistry).rolloutTools.register({
+        ...lookup,
+        execute: () => {
+          executions++
+          return Effect.succeed({ text: "Ansel." })
+        }
+      } as RolloutTool<never>)
       const fake = enforcingAnthropic({
         reply: (body) =>
           hasResult(body)
@@ -343,9 +353,11 @@ describe("signed thinking through an agent run", () => {
         return fake.handler(request, res)
       })
       const api = yield* client()
-      const { version } = yield* anthropicReply(api, mock.url)
+      const { version, events } = yield* anthropicReply(api, mock.url)
       assert.strictEqual(version.status, "complete", JSON.stringify(version.error))
       assert.strictEqual(refused, 1)
+      assert.strictEqual(executions, 1, "the retry never repeats a tool that already ran")
+      assert.isTrue(events.some((e) => e._tag === "RequestNotice" && e.message.includes("Trying once")))
       const last = fake.verdicts.at(-1)!
       assert.isTrue(last.verdict.ok)
       assert.strictEqual(signedIn(last.body), 0)
@@ -427,6 +439,18 @@ describe("hiding captured thinking", () => {
       assert.deepStrictEqual(hidden.hiddenThinking, ["sections"])
       assert.strictEqual(hidden.version.id, version.id, "the message and its thinking stay")
       assert.deepStrictEqual(hidden.version.replySections, version.replySections)
+      const inherited = yield* (yield* Writer).CreateFork({
+        userId: me.id,
+        chatId: chat.id,
+        fromForkId: forkId,
+        atSlotId: version.slotId
+      })
+      const inheritedChoice = yield* (yield* Reader).GetSlot({
+        userId: me.id,
+        slotId: version.slotId,
+        forkId: inherited.fork.id
+      })
+      assert.deepStrictEqual(inheritedChoice.entry.hiddenThinking, ["sections"])
       const elsewhere = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: version.slotId, forkId: other.fork.id })
       assert.isUndefined(elsewhere.entry.hiddenThinking, "another fork keeps it")
 
@@ -442,6 +466,10 @@ describe("hiding captured thinking", () => {
       const swiped = yield* api.Regenerate({ slotId: version.slotId, forkId, expectedRowVersion: hidden.rowVersion })
       assert.isUndefined(swiped.hiddenThinking)
       yield* eventually(() => finished(events, swiped.version.id) !== undefined)
+      assert.deepStrictEqual(
+        yield* (yield* Reader).GetThinkingHidden({ userId: me.id, versionId: version.id, forkId }),
+        ["sections"]
+      )
       const selected = yield* (yield* Reader).GetSlot({ userId: me.id, slotId: version.slotId, forkId })
       const back = yield* api.SelectVersion({
         slotId: version.slotId,
@@ -458,3 +486,124 @@ describe("hiding captured thinking", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 })
+
+it.live("review: Continue never prefills a section the user hid", () =>
+  Effect.gen(function* () {
+    let first = true
+    const mock = yield* mockOf((_request, res) => {
+      if (!first) return plain(res)
+      first = false
+      return withSection(res)
+    })
+    const api = yield* client()
+    const { version, events } = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: { prefill: "assistant" },
+      presetFields: {
+        reply_sections: {
+          enabled: true,
+          pairs: [{ open: "<thinking>", close: "</thinking>", regex: false }],
+          send_back: 1
+        }
+      }
+    })
+    const hidden = yield* api.SetThinkingHidden({ versionId: version.id, part: "sections", hidden: true })
+    const continued = yield* api.ContinueVersion({ versionId: version.id, expectedRowVersion: hidden.rowVersion })
+    yield* eventually(() => finished(events, continued.version.id) !== undefined)
+    assert.notInclude(JSON.stringify(mock.requests().at(-1)!.body), "Plan: Mira is wary.")
+    assert.include(JSON.stringify(mock.requests().at(-1)!.body), "The ledger says otherwise.")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)
+
+it.live("review: saved prefixes apply the branch's new thinking choice without changing pinned prose", () =>
+  Effect.gen(function* () {
+    let first = true
+    const mock = yield* mockOf((_request, res) => {
+      if (!first) return plain(res)
+      first = false
+      return withSection(res)
+    })
+    const api = yield* client()
+    const { version, chat, events } = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: { prefill: "assistant" },
+      presetFields: {
+        reply_sections: {
+          enabled: true,
+          pairs: [{ open: "<thinking>", close: "</thinking>", regex: false }],
+          send_back: 1
+        }
+      }
+    })
+    const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false }))
+    yield* eventually(() => finished(events, entry.version.id) !== undefined)
+    const me = yield* api.Whoami()
+    const reader = yield* Reader
+    const material = yield* reader.RolloutMaterial({ userId: me.id, versionId: entry.version.id })
+    const old = JSON.parse(material.snapshot)
+    assert.include(JSON.stringify(old.request), "Plan: Mira is wary.")
+    const same = yield* reader.RebuildContext({
+      userId: me.id,
+      snapshot: material.snapshot,
+      thinkingForkId: chat.currentForkId!
+    })
+    assert.strictEqual(same._tag, "Rebuilt")
+    if (same._tag === "Rebuilt") assert.strictEqual(same.snapshot, material.snapshot)
+    yield* api.SetThinkingHidden({ versionId: version.id, part: "sections", hidden: true })
+    const rebuilt = yield* reader.RebuildContext({
+      userId: me.id,
+      snapshot: material.snapshot,
+      thinkingForkId: chat.currentForkId!
+    })
+    assert.strictEqual(rebuilt._tag, "Rebuilt")
+    if (rebuilt._tag !== "Rebuilt") return
+    const next = JSON.parse(rebuilt.snapshot)
+    assert.notInclude(JSON.stringify(next.request), "Plan: Mira is wary.")
+    assert.include(JSON.stringify(next.request), "The ledger says otherwise.")
+    assert.deepStrictEqual(next.inputs, old.inputs)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)
+
+for (const exact of [false, true]) {
+  it.live(
+    `review: ${exact ? "a repeated binding refusal stops after one retry" : "another signature error is never retried"}`,
+    () =>
+      Effect.gen(function* () {
+        yield* agent
+        let executions = 0
+        yield* (yield* ExecutionRegistry).rolloutTools.register({
+          ...lookup,
+          execute: () => {
+            executions++
+            return Effect.succeed({ text: "Ansel." })
+          }
+        } as RolloutTool<never>)
+        const fake = enforcingAnthropic({
+          reply: () => ({ thinking: "Check", call: { name: "look_up", input: { topic: "keeper" } } })
+        })
+        let attempts = 0
+        const mock = yield* mockOf((request, res) => {
+          if (request.path.startsWith("/v1/messages") && hasResult(request.body as unknown as AnthropicBody)) {
+            attempts++
+            return json(res, 400, {
+              type: "error",
+              error: {
+                type: "invalid_request_error",
+                message: exact
+                  ? "Invalid `signature` in `thinking` block. The block is bound to a different conversation."
+                  : "Invalid signature in thinking block."
+              }
+            })
+          }
+          return fake.handler(request, res)
+        })
+        const api = yield* client()
+        const { version } = yield* anthropicReply(api, mock.url)
+        assert.strictEqual(version.status, "failed")
+        assert.strictEqual(attempts, exact ? 2 : 1)
+        assert.strictEqual(executions, 1)
+        const versions = yield* api.ListVersions({ slotId: version.slotId })
+        assert.lengthOf(versions, 1, "an HTTP retry must not create a reply version")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+}
