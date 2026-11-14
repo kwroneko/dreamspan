@@ -79,6 +79,8 @@ export const ExportInput = Schema.Struct({
   /** Metadata used to choose media and HTTP headers, checked again by the executing worker. */
   expectedFormat: Schema.optionalKey(ExportFormatInfo),
   docJson: Schema.String,
+  /** Archive-only external world filename remapping, applied in the format worker. */
+  worldNames: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   noteDocJson: Schema.NullOr(Schema.String),
   /** A card's other exportable notes, a linked one with its shared note's text. */
   notesDocJson: Schema.Array(Schema.String),

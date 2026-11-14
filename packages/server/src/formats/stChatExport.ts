@@ -10,6 +10,8 @@ import { stReasoningExtra } from "./stChat.ts"
 export interface StSpeaker {
   readonly name: string
   readonly user: boolean
+  readonly avatar?: string
+  readonly avatarType?: "avatar" | "persona"
 }
 
 /** ST's humanized date ("2026-11-14@15h04m05s"), as it stamps chat files and headers. */
@@ -23,13 +25,24 @@ export const stStamp = (at: number) => {
 }
 
 /** A name a file can carry on any system: no path separators or reserved characters. */
-export const fileStem = (name: string, fallback: string) => {
-  const cleaned = name
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
+export const fileStem = (name: string, fallback: string, maxBytes = 120): string => {
+  let safe = name
+    .normalize("NFC")
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "_")
     .trim()
-    .replace(/[. ]+$/, "")
-    .slice(0, 150)
-  return cleaned === "" ? fallback : cleaned
+  if (/^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(safe)) safe = `_${safe}`
+  // Leave room for extensions and de-duplication suffixes on byte-limited file systems.
+  // Walk once: repeatedly truncating an untrusted, very long name is quadratic.
+  let cleaned = ""
+  let bytes = 0
+  for (const character of safe) {
+    const width = Buffer.byteLength(character, "utf8")
+    if (bytes + width > maxBytes) break
+    cleaned += character
+    bytes += width
+  }
+  cleaned = cleaned.replace(/[. ]+$/, "")
+  return cleaned === "" ? (name === fallback ? "File" : fileStem(fallback, "File", maxBytes)) : cleaned
 }
 
 export const stHeader = (input: {
@@ -72,9 +85,8 @@ const dates = (version: Version) => {
   const recorded = version.recorded
   return {
     send_date: iso(version.createdAt),
-    ...(recorded?.startedAt !== undefined && recorded.finishedAt !== undefined
-      ? { gen_started: iso(recorded.startedAt), gen_finished: iso(recorded.finishedAt) }
-      : {})
+    ...(recorded?.startedAt !== undefined ? { gen_started: iso(recorded.startedAt) } : {}),
+    ...(recorded?.finishedAt !== undefined ? { gen_finished: iso(recorded.finishedAt) } : {})
   }
 }
 
@@ -84,20 +96,22 @@ const shownText = (text: string, version: Version, speaker: StSpeaker, userName:
     ? text.replace(/\{\{char\}\}/gi, speaker.name).replace(/\{\{user\}\}/gi, userName)
     : text
 
-/** The versions ST can hold: written ones; a failed or unfinished generation has no text to give. */
-const exportedVersions = (entry: PathEntry, versions: ReadonlyArray<Version>) => {
-  const kept = versions.filter(
-    (version) => version.id === entry.version.id || (version.status !== "failed" && version.status !== "generating")
-  )
-  return kept.some((version) => version.id === entry.version.id) ? kept : [entry.version]
-}
+/** Failed and in-progress versions still have exportable text, even though ST has no status field. */
+const exportedVersions = (entry: PathEntry, versions: ReadonlyArray<Version>) =>
+  versions.some((version) => version.id === entry.version.id) ? versions : [...versions, entry.version]
 
 /**
  * One message as an ST line: the shown version's text and generation on the message, every
  * version in `swipes` and `swipe_info`. `versions` are the message's as its fork shows them;
  * one version needs no swipe fields, as ST writes a message never swiped.
  */
-export const stLine = (entry: PathEntry, versions: ReadonlyArray<Version>, speaker: StSpeaker, userName: string) => {
+export const stLine = (
+  entry: PathEntry,
+  versions: ReadonlyArray<Version>,
+  speaker: StSpeaker,
+  userName: string,
+  branches: ReadonlyArray<string> = []
+) => {
   const all = exportedVersions(entry, versions)
   const shown = all.findIndex((version) => version.id === entry.version.id)
   const of = (version: Version) => {
@@ -105,13 +119,20 @@ export const stLine = (entry: PathEntry, versions: ReadonlyArray<Version>, speak
     return { mes: shownText(mes, version, speaker, userName), extra: { ...extra, ...generationExtra(version) } }
   }
   const selected = of(entry.version)
+  const avatarType = speaker.avatarType ?? (speaker.user ? "persona" : "avatar")
   return JSON.stringify({
     name: speaker.name,
     is_user: speaker.user,
     is_system: entry.contextExcluded,
     ...dates(entry.version),
     mes: selected.mes,
-    extra: selected.extra,
+    extra: { ...selected.extra, ...(branches.length ? { branches } : {}) },
+    ...(speaker.avatar
+      ? {
+          ...(avatarType === "avatar" ? { original_avatar: speaker.avatar } : {}),
+          force_avatar: `/thumbnail?type=${avatarType}&file=${encodeURIComponent(speaker.avatar)}`
+        }
+      : {}),
     ...(all.length > 1
       ? {
           swipe_id: shown,

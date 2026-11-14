@@ -1,3 +1,5 @@
+import { SlotOutlet } from "../../slots.tsx"
+import { importCards } from "./slots.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
 // The import screen: the way to a SillyTavern folder's import, first as the main path, and
@@ -10,7 +12,7 @@ import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
 import { Link, useCanGoBack, useRouter, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { useContext, useRef, useState } from "react"
+import { useContext, useEffect, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { sessionAtom } from "../../session.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
@@ -81,10 +83,11 @@ function UploadRow({ upload }: { upload: Upload }) {
 }
 
 /** The whole library as one .zip (ARCHITECTURE.md §13b), with what it received and a Stop. */
-function LibraryArchiveCard() {
+export function LibraryArchiveCard() {
   const [received, setReceived] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
+  useEffect(() => () => abort.current?.abort(), [])
   const run = async () => {
     setError(null)
     setReceived(0)
@@ -99,8 +102,14 @@ function LibraryArchiveCard() {
     <Card className="flex flex-col">
       <CardHeader
         title="Export the whole library"
-        about="Every character, persona, lorebook, preset and chat with all its branches, as a .zip laid out like a SillyTavern folder: a backup, or a folder SillyTavern opens."
+        about="Every character, persona, lorebook, preset and chat with all its branches, as a .zip laid out like a SillyTavern data folder."
       />
+      <p className="mb-3 text-sm text-muted">
+        Includes archived entries and exportable card notes. Leaves out deleted items, workshops, chat pictures, saved
+        card assets, chat notes, summaries, history, version marks, who wrote each version, status, and privacy or
+        thread boundaries. Separate contexts become one transcript. SillyTavern ignores own-turn note rules. Changes
+        made during export may appear in the files.
+      </p>
       {error !== null && <Alert tone="danger">{error}</Alert>}
       <div className="mt-auto flex flex-wrap items-center gap-3">
         <Button
@@ -114,9 +123,9 @@ function LibraryArchiveCard() {
         {received !== null && (
           <>
             <span role="status" className="text-sm text-muted">
-              Received {formatByteSize(received)}…
+              Exported {formatByteSize(received)}…
             </span>
-            <Button hint="Stops the export; nothing is downloaded." onClick={() => abort.current?.abort()}>
+            <Button hint="Stops the export. Discard any unfinished download." onClick={() => abort.current?.abort()}>
               Stop
             </Button>
           </>
@@ -231,7 +240,7 @@ export function ImportPage() {
             onFiles={(files) => void importFiles(files)}
           />
         </Card>
-        {!into && <LibraryArchiveCard />}
+        {!into && <SlotOutlet slot={importCards} props={{ into: null }} />}
       </div>
       {uploads.length > 0 && (
         <Card>

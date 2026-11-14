@@ -2,7 +2,8 @@
 // chat files or plain text, read from the reader workers a window at a time and written to
 // the response as it's read, so neither the server nor the browser holds a whole chat. The
 // library archive (libraryArchive.ts) writes every chat the same way.
-import type { CastCard, Chat, EntityId, Fork, PathEntry, Version } from "@rp/shared/chat.ts"
+import type { CastCard, Chat, EntityId, Fork, PathEntry, RecordedGeneration, Version } from "@rp/shared/chat.ts"
+import type { PathWindow } from "@rp/shared/chatApi.ts"
 import type { ChatId, ForkId, SlotId } from "@rp/shared/chatPosition.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
@@ -24,7 +25,7 @@ export type ChatExportScope = "branch" | "all"
 /** Messages read per request; the readers' window cap (db/ops.ts MAX_PATH_WINDOW). */
 const WINDOW = 1000
 /** Messages whose versions are read in one request. */
-const SWIPED_BATCH = 200
+const SWIPED_BATCH = 20
 
 interface ChatExport {
   /** The download's name, with its extension. */
@@ -57,6 +58,12 @@ const familyOrder = (forks: ReadonlyArray<Fork>) => {
   return ordered
 }
 
+/** The filename and actual ST avatar folder captured when the library was listed. */
+export interface ExportAvatar {
+  readonly file: string
+  readonly type: "avatar" | "persona"
+}
+
 /**
  * A chat's files: its name, who's in it, and each branch's lines. `lead` is the branch whose
  * cast names the chat (the one it opens on, or the one asked for).
@@ -67,7 +74,8 @@ export const chatFiles = (
   chat: Chat,
   forks: ReadonlyArray<Fork>,
   lead: Fork | null,
-  format: ChatExportFormat
+  format: ChatExportFormat,
+  avatars: ReadonlyMap<string, ExportAvatar> = new Map()
 ) =>
   Effect.gen(function* () {
     const chatId = chat.id
@@ -95,7 +103,11 @@ export const chatFiles = (
         const card = id === null ? undefined : cards.get(id)
         const user =
           id !== null ? state.playedByMe.includes(id) || card?.persona === true : entry.version.writer === "human"
-        return { name: card?.name ?? (user ? userName : (voice ?? "Narrator")), user }
+        return {
+          name: card?.name ?? (user ? userName : (voice ?? "Narrator")),
+          user,
+          ...(id && avatars.has(id) ? { avatar: avatars.get(id)!.file, avatarType: avatars.get(id)!.type } : {})
+        }
       }
       return { userName, characterName, voices, speaker }
     }
@@ -106,30 +118,46 @@ export const chatFiles = (
       fileStem(`${leadCast?.characterName ?? "Chat"} - ${stStamp(chat.createdAt)}`, "Chat")
     )
 
-    /** One branch's path, root first: read backwards a window at a time, then given in order. */
+    /** Keep only page cursors on the backwards pass; re-read each page root first. */
     async function* pathOf(fork: Fork): AsyncGenerator<ReadonlyArray<PathEntry>> {
-      const windows: Array<ReadonlyArray<PathEntry>> = []
-      let window = await run(
-        reader.ReadPath({ userId, chatId, forkId: fork.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: WINDOW })
-      )
-      windows.push(window.entries)
-      while (window.older !== null) {
-        window = await run(
+      const cursors: Array<SlotId | null> = []
+      let cursor: SlotId | null = null
+      do {
+        cursors.push(cursor)
+        const page: PathWindow = await run(
           reader.ReadPath({
             userId,
             chatId,
             forkId: fork.id,
             leafSlotId: null,
-            range: { _tag: "Older", from: window.older },
+            range: cursor === null ? { _tag: "Bottom" } : { _tag: "Older", from: cursor },
             limit: WINDOW
           })
         )
-        windows.push(window.entries)
+        cursor = page.older
+      } while (cursor !== null)
+      while (cursors.length > 0) {
+        const from = cursors.pop()!
+        const page: PathWindow = await run(
+          reader.ReadPath({
+            userId,
+            chatId,
+            forkId: fork.id,
+            leafSlotId: null,
+            range: from === null ? { _tag: "Bottom" } : { _tag: "Older", from },
+            limit: WINDOW
+          })
+        )
+        yield page.entries
       }
-      while (windows.length > 0) yield windows.pop()!
     }
 
-    async function* lines(fork: Fork, mainChat: string | null): AsyncGenerator<string> {
+    async function* lines(
+      fork: Fork,
+      mainChat: string | null,
+      branchLinks: ReadonlyMap<SlotId, ReadonlyArray<string>> = new Map(),
+      branchOffsets: ReadonlyMap<number, ReadonlyArray<string>> = new Map()
+    ): AsyncGenerator<string> {
       const cast = fork.id === lead?.id && leadCast ? leadCast : await castOf(fork)
       if (format === "jsonl")
         yield stHeader({
@@ -139,6 +167,7 @@ export const chatFiles = (
           mainChat
         }) + "\n"
       let firstLine = true
+      let messageIndex = 0
       for await (const entries of pathOf(fork)) {
         await known(
           entries.flatMap((entry) => {
@@ -164,9 +193,49 @@ export const chatFiles = (
               reader.ExportVersions({ userId, chatId, forkId: fork.id, slotIds: swiped })
             ))
               versions.set(slotId, list)
-          for (const entry of batch)
-            yield stLine(entry, versions.get(entry.slotId) ?? [entry.version], cast.speaker(entry), cast.userName) +
-              "\n"
+          // Imported figures live on the version; native figures live in the ledger.
+          // VersionMetrics caps a request at 200 ids and follows continuation ancestry.
+          const native = [
+            ...new Map(
+              batch
+                .flatMap((entry) => versions.get(entry.slotId) ?? [entry.version])
+                .map((version) => [version.id, version])
+            ).values()
+          ].filter(
+            (version) =>
+              version.writer === "model" &&
+              version.recorded === undefined &&
+              version.origin !== "imported" &&
+              version.origin !== "greeting"
+          )
+          const figures = new Map<string, RecordedGeneration>()
+          for (let at = 0; at < native.length; at += 200) {
+            for (const metrics of await run(
+              reader.VersionMetrics({ userId, versionIds: native.slice(at, at + 200).map((version) => version.id) })
+            )) {
+              const last = metrics.last
+              figures.set(metrics.versionId, {
+                startedAt: last.startedAt,
+                ...(last.endedAt !== null ? { finishedAt: last.endedAt } : {}),
+                ...(!metrics.running && metrics.outputUnknown === 0 ? { tokens: metrics.output } : {}),
+                ...(last.firstTokenAt !== null ? { firstTokenMs: last.firstTokenAt - last.startedAt } : {})
+              })
+            }
+          }
+          const withFigures = (version: Version): Version => {
+            const recorded = figures.get(version.id)
+            return recorded ? { ...version, recorded } : version
+          }
+          for (const entry of batch) {
+            messageIndex++
+            yield stLine(
+              { ...entry, version: withFigures(entry.version) },
+              (versions.get(entry.slotId) ?? [entry.version]).map(withFigures),
+              cast.speaker(entry),
+              cast.userName,
+              branchLinks.get(entry.slotId) ?? branchOffsets.get(messageIndex)
+            ) + "\n"
+          }
         }
       }
       if (format === "txt" && !firstLine) yield "\n"
@@ -174,9 +243,24 @@ export const chatFiles = (
 
     const extension = format === "jsonl" ? "jsonl" : "txt"
     const ordered = familyOrder(forks)
-    /** Each branch's file name: the first's is the chat's, the others "<it> - Branch #n". */
-    const stemsFor = (stem: string) =>
-      new Map(ordered.map((fork, index) => [fork.id as string, index === 0 ? stem : `${stem} - Branch #${index}`]))
+    /** Names are portable and unique, including user-named root branches. */
+    const stemsFor = (stem: string) => {
+      const taken = new Set<string>()
+      return new Map(
+        ordered.map((fork, index) => {
+          const base = fork.name?.trim()
+            ? `${stem} - ${fileStem(fork.name, "Branch", 230 - Buffer.byteLength(stem) - 3)}`
+            : index === 0
+              ? stem
+              : `${stem} - Branch #${index}`
+          let name = base
+          for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${base} (${n})`
+          taken.add(name.toLowerCase())
+          return [fork.id as string, name]
+        })
+      )
+    }
+
     return {
       base,
       extension,
@@ -185,6 +269,7 @@ export const chatFiles = (
       branches: ordered.length,
       /** The branches' file names when the chat's is `stem`, first to last. */
       stems: (stem: string) => [...stemsFor(stem).values()],
+      currentStem: (stem: string) => (lead ? stemsFor(stem).get(lead.id) : undefined),
       /** One branch as a file on its own, without a main chat. */
       single: (fork: Fork) => textChunks(lines(fork, null)),
       /** Every branch in `folder`, each linked to the file of the branch it was made from. */
@@ -192,7 +277,19 @@ export const chatFiles = (
         const stems = stemsFor(stem)
         for (const fork of ordered) {
           const parent = fork.parentForkId === null ? null : (stems.get(fork.parentForkId) ?? null)
-          yield { name: `${folder}${stems.get(fork.id)!}.${extension}`, chunks: textChunks(lines(fork, parent)) }
+          const links = new Map<SlotId, Array<string>>()
+          const offsets = new Map<number, Array<string>>()
+          for (const child of ordered) {
+            if (child.parentForkId !== fork.id) continue
+            if (child.baseSlotId !== null)
+              links.set(child.baseSlotId, [...(links.get(child.baseSlotId) ?? []), stems.get(child.id)!])
+            else if (child.split && child.split.after > 0)
+              offsets.set(child.split.after, [...(offsets.get(child.split.after) ?? []), stems.get(child.id)!])
+          }
+          yield {
+            name: `${folder}${stems.get(fork.id)!}.${extension}`,
+            chunks: textChunks(lines(fork, parent, links, offsets))
+          }
         }
       }
     }
@@ -230,7 +327,7 @@ export const chatExport = (
     }
     if (chosen === null) return yield* new NotFound({ entity: "chat", id: chatId })
     const files = yield* chatFiles(reader, userId, chat, forks, chosen, format)
-    if (scope === "branch" || files.branches <= 1) {
+    if (scope === "branch") {
       return {
         fileName: `${files.base}.${files.extension}`,
         contentType: format === "jsonl" ? "application/x-ndjson; charset=utf-8" : "text/plain; charset=utf-8",

@@ -54,16 +54,6 @@ const fileName = (disposition: string | null, fallback: string) => {
   return disposition?.match(/filename="([^"]+)"/)?.[1] ?? fallback
 }
 
-/** Hands bytes to the browser as a download named `name`. */
-const save = (blob: Blob, name: string) => {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = name
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
-}
-
 export interface ChatExportRequest {
   readonly chatId: string
   readonly forkId: string | null
@@ -78,49 +68,68 @@ export interface ChatExportRequest {
  */
 export const downloadChatExport = (
   request: ChatExportRequest,
-  fallbackName: string,
   onProgress: (bytes: number) => void,
   signal: AbortSignal
-) => streamedDownload("/library/chat-export", request, "export the chat", fallbackName, onProgress, signal)
+) => streamedDownload("/library/chat-export", request, "export the chat", onProgress, signal)
 
 /** The whole library as one .zip (ARCHITECTURE.md §13b), as `downloadChatExport`. */
 export const downloadLibraryArchive = (onProgress: (bytes: number) => void, signal: AbortSignal) =>
-  streamedDownload("/library/archive", {}, "export the library", "Library.zip", onProgress, signal)
+  streamedDownload("/library/archive", {}, "export the library", onProgress, signal)
 
 const streamedDownload = async (
   path: string,
   request: unknown,
   what: string,
-  fallbackName: string,
   onProgress: (bytes: number) => void,
   signal: AbortSignal
 ): Promise<string | null | "aborted"> => {
+  let key: string | undefined
+  const stop = () => {
+    if (key)
+      void fetch(`/library/download-stop?key=${encodeURIComponent(key)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        keepalive: true
+      }).catch(() => {})
+  }
   try {
+    // Do not abort preparation: if it finishes after Stop, release its reservation below.
     const response = await fetch(path, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(request),
-      signal
+      headers: { "content-type": "application/json", "x-export-download": "native" },
+      body: JSON.stringify(request)
     })
     if (!response.ok) return failure(response, what)
-    const parts: Array<Uint8Array<ArrayBuffer>> = []
-    let received = 0
-    const reader = response.body!.getReader()
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      parts.push(value)
-      received += value.byteLength
-      onProgress(received)
+    const prepared = (await response.json()) as { key: string }
+    key = prepared.key
+    signal.addEventListener("abort", stop, { once: true })
+    if (signal.aborted) {
+      stop()
+      return "aborted"
     }
-    save(
-      new Blob(parts, { type: response.headers.get("content-type") ?? "application/octet-stream" }),
-      fileName(response.headers.get("content-disposition"), fallbackName)
-    )
-    return null
+    const link = document.createElement("a")
+    link.href = `/library/download?key=${encodeURIComponent(key)}`
+    link.download = ""
+    link.click()
+    for (;;) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 250))
+      if (signal.aborted) return "aborted"
+      const status = await fetch(`/library/download-status?key=${encodeURIComponent(key)}`, { signal })
+      if (!status.ok) {
+        stop()
+        return failure(status, what)
+      }
+      const progress = (await status.json()) as { bytes: number; done: boolean; error: string | null }
+      onProgress(progress.bytes)
+      if (progress.done) return progress.error
+    }
   } catch {
+    stop()
     if (signal.aborted) return "aborted"
     return "The export stopped before it was done. Check that the server is running, and try again."
+  } finally {
+    signal.removeEventListener("abort", stop)
   }
 }
 

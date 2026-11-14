@@ -53,6 +53,7 @@ for (const width of [1440, 390])
         return page.getByRole("dialog", { name: "Export this chat", exact: true })
       }
       let dialog = await open()
+      const exportUrl = page.url()
       await expect(dialog.getByRole("button", { name: "SillyTavern (.jsonl)", exact: true })).toHaveAttribute(
         "aria-pressed",
         "true"
@@ -63,6 +64,7 @@ for (const width of [1440, 390])
       )
       await expect(dialog.getByText(/Not in the file: pictures/)).toBeVisible()
       await expectLayout(page, info, "chat-export", { scope: '[role="dialog"]' })
+      await page.screenshot({ path: info.outputPath("chat-export.png"), animations: "disabled" })
       let download = page.waitForEvent("download")
       await dialog.getByRole("button", { name: "Export", exact: true }).click()
       const branch = await download
@@ -77,8 +79,9 @@ for (const width of [1440, 390])
 
       dialog = await open()
       await dialog.getByRole("button", { name: "Every branch", exact: true }).click()
-      await expect(dialog.getByText(/Branch names become/)).toBeVisible()
+      await expect(dialog.getByText(/Separate contexts and away periods/)).toBeVisible()
       await expectLayout(page, info, "chat-export-all", { scope: '[role="dialog"]' })
+      await page.screenshot({ path: info.outputPath("chat-export-all.png"), animations: "disabled" })
       download = page.waitForEvent("download")
       await dialog.getByRole("button", { name: "Export", exact: true }).click()
       const zip = await download
@@ -89,6 +92,7 @@ for (const width of [1440, 390])
           .toString()
       ).toBe("PK")
       await expect(dialog).toHaveCount(0)
+      expect(page.url()).toBe(exportUrl)
     })
 
 for (const width of [1440, 390])
@@ -107,9 +111,11 @@ for (const width of [1440, 390])
       await page.goto(`${server().url}/import`)
       await expect(page.getByRole("heading", { name: "Export the whole library", exact: true })).toBeVisible()
       await expectLayout(page, info, "library-archive")
+      await page.screenshot({ path: info.outputPath("library-archive.png"), animations: "disabled" })
       const download = page.waitForEvent("download")
       await page.getByRole("button", { name: "Export everything", exact: true }).click()
       const zip = await download
+      expect(page.url()).toBe(`${server().url}/import`)
       expect(zip.suggestedFilename()).toMatch(/^Library \d{4}-\d{2}-\d{2}\.zip$/)
       expect(
         readFileSync(await zip.path())

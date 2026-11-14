@@ -3,25 +3,22 @@
 // every version of each message, which one is shown, hidden messages and reasoning; plain
 // text reads like ST's .txt export ("Name: text").
 import { formatByteSize } from "@rp/shared/byteSize.ts"
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Alert } from "../../ui/Surface.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { downloadChatExport } from "../library/files.ts"
 import type { ChatCommandDialogProps } from "./commands.tsx"
-import { chatDisplayName } from "./chatTitle.ts"
 import { type ExportFormat, exportFormats } from "./chatExportText.ts"
 
 type Scope = "branch" | "all"
 
 /** What the file can't hold, so nobody expects it back from a re-import. */
-const leftOut = (format: ExportFormat, scope: Scope) =>
+const leftOut = (format: ExportFormat) =>
   format === "txt"
-    ? "Only the version each message shows, without hidden-message marks, reasoning or pictures."
-    : `Not in the file: pictures, notes, summaries, edit history, deleted messages, and which versions are hidden or starred.${
-        scope === "all" ? " Branch names become “Branch #1”, “Branch #2”…" : ""
-      }`
+    ? "Only the shown text; no pictures, reasoning, notes, summaries, deleted messages, or privacy and thread boundaries."
+    : "Not in the file: pictures, notes, summaries, edit history, deleted messages or branches, version marks, who wrote each version, status, and privacy or thread boundaries. Separate contexts and away periods become one transcript; changes during export may appear."
 
 export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
   const { session, view } = context
@@ -32,19 +29,15 @@ export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
   const [error, setError] = useState<string | null>(null)
   const abort = useRef<AbortController | null>(null)
   const running = received !== null
+  useEffect(() => () => abort.current?.abort(), [])
 
   const run = async () => {
     setError(null)
     setReceived(0)
     const controller = new AbortController()
     abort.current = controller
-    const base =
-      chatDisplayName(view)
-        .replace(/[\\/:*?"<>|]+/g, " ")
-        .trim() || "chat"
     const result = await downloadChatExport(
       { chatId: session.id, forkId: view.forkId, scope, format },
-      `${base}.${scope === "all" ? "zip" : format}`,
       setReceived,
       controller.signal
     )
@@ -93,16 +86,18 @@ export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
           }
         ]}
       />
-      <p className="text-sm text-muted">{leftOut(format, scope)}</p>
+      <p className="text-sm text-muted">{leftOut(format)}</p>
       {error !== null && <Alert tone="danger">{error}</Alert>}
       {running && (
         <p role="status" className="text-sm text-muted">
-          Received {formatByteSize(received)}…
+          Exported {formatByteSize(received)}…
         </p>
       )}
       <DialogActions>
         <Button
-          hint={running ? "Stops the export; nothing is downloaded." : "Closes this dialog without exporting."}
+          hint={
+            running ? "Stops the export. Discard any unfinished download." : "Closes this dialog without exporting."
+          }
           onClick={cancel}
         >
           {running ? "Stop" : "Cancel"}

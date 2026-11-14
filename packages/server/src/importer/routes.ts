@@ -3,7 +3,7 @@
 // thread. Both routes act as the user the session names, behind the same cross-site guard
 // as every request (server.ts), and refuse content types a cross-site form can send.
 import { formatByteSize } from "@rp/shared/byteSize.ts"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { CurrentUser } from "@rp/shared/api.ts"
 import { SavedRef } from "@rp/shared/editorApi.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
@@ -19,7 +19,7 @@ import { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { SummaryDraftSave } from "@rp/shared/lcm.ts"
 import { MessageDraftSave, messageDraftKey } from "@rp/shared/chatApi.ts"
 import { parseField } from "@rp/shared/editing.ts"
-import { ByteSize, Effect, Layer, Option, Schedule, Schema, Semaphore, Stream } from "effect"
+import { ByteSize, Effect, Exit, Layer, Option, Schedule, Schema, Semaphore, Stream } from "effect"
 import { ChatId, ForkId } from "@rp/shared/chatPosition.ts"
 import { chatExport } from "./chatExport.ts"
 import { libraryArchive, type RenderRef } from "./libraryArchive.ts"
@@ -465,15 +465,60 @@ export const layer = Layer.unwrap(
     // "Export this chat" (ARCHITECTURE.md §13b): written as it's read, so it holds no permit
     // of the file routes'; one at a time per user, from its first byte to its last.
     const chatExports = new Set<string>()
-    /** A file written as it's read, holding the user's one export until its last byte. */
-    const streamed = (
-      userId: string,
-      file: { fileName: string; contentType: string; files: number; body: AsyncIterable<Uint8Array> }
-    ) => {
-      chatExports.add(userId)
-      const body = Stream.fromAsyncIterable(file.body, (error) => error).pipe(
-        Stream.tapError((error) => Effect.logError("an export failed while it was sent", error)),
-        Stream.ensuring(Effect.sync(() => chatExports.delete(userId)))
+    type DownloadFile = { fileName: string; contentType: string; files: number; body: AsyncIterable<Uint8Array> }
+    type Download = {
+      userId: string
+      file: DownloadFile
+      bytes: number
+      started: boolean
+      done: boolean
+      cancelled: boolean
+      stop: AbortController
+      error: string | null
+    }
+    const downloads = new Map<string, Download>()
+    const expire = (key: string) => {
+      const timer = setTimeout(() => downloads.delete(key), 60_000)
+      timer.unref()
+    }
+    /** Native browser downloads keep archive bytes out of the page's JavaScript heap. */
+    const streamed = (userId: string, file: DownloadFile, ticket?: Download, key?: string) => {
+      async function* chunks() {
+        for await (const chunk of file.body) {
+          if (ticket?.cancelled) throw new Error("export stopped")
+          if (ticket) ticket.bytes += chunk.byteLength
+          yield chunk
+        }
+        if (ticket) ticket.done = true
+      }
+      const body = Stream.fromAsyncIterable(chunks(), (error) => error).pipe(
+        Stream.interruptWhen(
+          ticket
+            ? Effect.callback<void>((resume) => {
+                if (ticket.cancelled) {
+                  resume(Effect.void)
+                  return
+                }
+                const stop = () => resume(Effect.void)
+                ticket.stop.signal.addEventListener("abort", stop, { once: true })
+                return Effect.sync(() => ticket.stop.signal.removeEventListener("abort", stop))
+              })
+            : Effect.never
+        ),
+        Stream.tapError((error) => {
+          if (ticket) ticket.error = "The export stopped before it was done. Try again."
+          return ticket?.cancelled ? Effect.void : Effect.logError("an export failed while it was sent", error)
+        }),
+        Stream.ensuring(
+          Effect.sync(() => {
+            chatExports.delete(userId)
+            if (key) expire(key)
+            if (ticket && !ticket.done) {
+              ticket.done = true
+              ticket.error ??= "The download stopped before it was done. Try again."
+            }
+          })
+        )
       )
       const dot = file.fileName.lastIndexOf(".")
       return HttpServerResponse.stream(body, {
@@ -486,6 +531,84 @@ export const layer = Layer.unwrap(
         }
       })
     }
+    const prepareDownload = <E>(userId: string, native: boolean, prepare: Effect.Effect<DownloadFile, E>) =>
+      Effect.suspend(() => {
+        if (chatExports.has(userId))
+          return Effect.succeed(jsonError(503, "another of your exports is still running; try again once it's done"))
+        // Reserve before the first reader request: two preparations must not race.
+        chatExports.add(userId)
+        return Effect.gen(function* () {
+          const file = yield* prepare
+          if (!native) return streamed(userId, file)
+          const key = randomUUID()
+          const ticket: Download = {
+            userId,
+            file,
+            bytes: 0,
+            started: false,
+            done: false,
+            cancelled: false,
+            stop: new AbortController(),
+            error: null
+          }
+          downloads.set(key, ticket)
+          const timer = setTimeout(() => {
+            if (!ticket.started && downloads.get(key) === ticket) {
+              downloads.delete(key)
+              chatExports.delete(userId)
+            }
+          }, 60_000)
+          timer.unref()
+          return HttpServerResponse.jsonUnsafe({ key }, { headers: { "cache-control": "no-store" } })
+        }).pipe(
+          Effect.onExit((exit) =>
+            Effect.sync(() => {
+              if (Exit.isFailure(exit)) chatExports.delete(userId)
+            })
+          )
+        )
+      })
+
+    const downloadRequest = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      const key = new URL(request.url, "http://download").searchParams.get("key") ?? ""
+      const ticket = downloads.get(key)
+      return { request, key, ticket: ticket?.userId === user.id ? ticket : undefined }
+    })
+    const downloadFile = Effect.gen(function* () {
+      const { key, ticket } = yield* downloadRequest
+      if (!ticket || ticket.started || ticket.cancelled) return jsonError(404, "there's no such download")
+      ticket.started = true
+      // Retain progress until completion, then briefly for the page's last poll.
+      return streamed(ticket.userId, ticket.file, ticket, key)
+    })
+    const downloadStatus = Effect.gen(function* () {
+      const { key, ticket } = yield* downloadRequest
+      if (!ticket) return jsonError(404, "there's no such download")
+      if (ticket.done) {
+        downloads.delete(key)
+      }
+      return HttpServerResponse.jsonUnsafe(
+        { bytes: ticket.bytes, done: ticket.done, error: ticket.error },
+        {
+          headers: { "cache-control": "no-store" }
+        }
+      )
+    })
+    const stopDownload = Effect.gen(function* () {
+      const { request, key, ticket } = yield* downloadRequest
+      if (!request.headers["content-type"]?.startsWith("application/json"))
+        return jsonError(415, "expected application/json")
+      if (!ticket) return jsonError(404, "there's no such download")
+      ticket.cancelled = true
+      ticket.stop.abort()
+      if (!ticket.started) {
+        downloads.delete(key)
+        chatExports.delete(ticket.userId)
+      }
+      return HttpServerResponse.jsonUnsafe({ stopped: true }, { headers: { "cache-control": "no-store" } })
+    })
     const exportChat = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
       const user = yield* CurrentUser
@@ -497,10 +620,11 @@ export const layer = Layer.unwrap(
         Effect.option
       )
       if (Option.isNone(input)) return jsonError(400, "expected a chatId, a forkId, a scope and a format")
-      if (chatExports.has(user.id)) {
-        return jsonError(503, "another of your exports is still running; try again once it's done")
-      }
-      return streamed(user.id, yield* chatExport(reader, user.id, input.value))
+      return yield* prepareDownload(
+        user.id,
+        request.headers["x-export-download"] === "native",
+        chatExport(reader, user.id, input.value)
+      )
     }).pipe(
       Effect.catchTags({
         NotFound: () => Effect.succeed(jsonError(404, "there's no such chat")),
@@ -517,7 +641,7 @@ export const layer = Layer.unwrap(
      */
     const renderRef =
       (userId: UserId): RenderRef =>
-      (refId, format) =>
+      (refId, format, worldNames) =>
         Effect.gen(function* () {
           const source = yield* reader.ExportSource({ userId, refId })
           const exporter = (yield* formats.listExports).find((entry) => entry.id === format)
@@ -532,6 +656,7 @@ export const layer = Layer.unwrap(
               format,
               expectedFormat: exporter,
               docJson: source.docJson,
+              ...(worldNames === undefined ? {} : { worldNames }),
               noteDocJson: source.noteDocJson,
               notesDocJson: source.notesDocJson,
               avatar: avatar && bytes ? { bytes, mime: avatar.mime } : null,
@@ -551,16 +676,19 @@ export const layer = Layer.unwrap(
       if (!request.headers["content-type"]?.startsWith("application/json")) {
         return jsonError(415, "expected application/json")
       }
-      if (chatExports.has(user.id)) {
-        return jsonError(503, "another of your exports is still running; try again once it's done")
-      }
-      const archive = yield* libraryArchive(reader, user.id, renderRef(user.id))
-      return streamed(user.id, {
-        fileName: `Library ${new Date().toISOString().slice(0, 10)}.zip`,
-        contentType: "application/zip",
-        files: archive.counts.cards + archive.counts.personas + archive.counts.lorebooks + archive.counts.presets,
-        body: zipStream(archive.entries())
-      })
+      return yield* prepareDownload(
+        user.id,
+        request.headers["x-export-download"] === "native",
+        Effect.gen(function* () {
+          const archive = yield* libraryArchive(reader, user.id, renderRef(user.id))
+          return {
+            fileName: `Library ${new Date().toISOString().slice(0, 10)}.zip`,
+            contentType: "application/zip",
+            files: archive.counts.cards + archive.counts.personas + archive.counts.lorebooks + archive.counts.presets,
+            body: zipStream(archive.entries())
+          }
+        })
+      )
     }).pipe(
       Effect.catch((error) =>
         Effect.logError("a library export failed", error).pipe(Effect.as(jsonError(500, "the export failed")))
@@ -1010,6 +1138,9 @@ export const layer = Layer.unwrap(
       HttpRouter.add("POST", "/library/export", authenticated(accounts, exportFile)),
       HttpRouter.add("POST", "/library/chat-export", authenticated(accounts, exportChat)),
       HttpRouter.add("POST", "/library/archive", authenticated(accounts, exportLibrary)),
+      HttpRouter.add("GET", "/library/download", authenticated(accounts, downloadFile)),
+      HttpRouter.add("GET", "/library/download-status", authenticated(accounts, downloadStatus)),
+      HttpRouter.add("POST", "/library/download-stop", authenticated(accounts, stopDownload)),
       HttpRouter.add("POST", "/st-import/file", authenticated(accounts, stImportFile)),
       Layer.effectDiscard(Effect.forkScoped(Effect.repeat(sweep, Schedule.spaced("1 hour"))))
     )

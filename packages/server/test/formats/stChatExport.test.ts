@@ -1,6 +1,8 @@
 // A chat's lines as SillyTavern files (formats/stChatExport.ts) and the streamed zip that holds
 // every branch (formats/zipStream.ts). Synthetic messages only.
-import type { PathEntry, Version } from "@rp/shared/chat.ts"
+import type { Chat, Fork, PathEntry, Version } from "@rp/shared/chat.ts"
+import { Effect } from "effect"
+import { chatFiles, type ReaderService } from "../../src/importer/chatExport.ts"
 import { describe, expect, it } from "vitest"
 import { fileStem, stHeader, stLine, stStamp, textLine } from "../../src/formats/stChatExport.ts"
 import { parseStDate } from "../../src/formats/stChat.ts"
@@ -70,7 +72,7 @@ describe("SillyTavern chat lines", () => {
       }
     })
     const second = version("v2", "Second.", { reasoning: "Thinking it over.", createdAt: Date.UTC(2026, 0, 2, 11) })
-    const failed = version("v3", "", { status: "failed" })
+    const failed = version("v3", "Partial reply.", { status: "failed" })
     const line = JSON.parse(
       stLine(entry(second, { versionCount: 3, contextExcluded: true }), [first, second, failed], aria, "Sam")
     )
@@ -82,7 +84,7 @@ describe("SillyTavern chat lines", () => {
       send_date: "2026-01-02T11:00:00.000Z",
       extra: { reasoning: "Thinking it over.", reasoning_type: "model" },
       swipe_id: 1,
-      swipes: ["First.", "Second."]
+      swipes: ["First.", "Second.", "Partial reply."]
     })
     expect(line.swipe_info[0]).toEqual({
       send_date: "2026-01-02T10:00:00.000Z",
@@ -100,10 +102,37 @@ describe("SillyTavern chat lines", () => {
     expect(textLine(entry(greeting), aria, "Sam")).toBe("Aria: Hello Sam, I am Aria.")
   })
 
+  it("uses an avatar's actual folder when the user plays a character card", () => {
+    const speaker = { name: "Aria", user: true, avatar: "Aria.png", avatarType: "avatar" as const }
+    const line = JSON.parse(stLine(entry(version("v", "Spoken by the user.")), [], speaker, "Aria"))
+    expect(line.force_avatar).toBe("/thumbnail?type=avatar&file=Aria.png")
+    expect(line.original_avatar).toBe("Aria.png")
+  })
+
   it("stamps and file names are ones ST and any file system accept", () => {
     expect(stStamp(Date.UTC(2025, 11, 31, 23, 59, 58))).toBe("2025-12-31@23h59m58s")
     expect(fileStem('A/B: "C"?. ', "x")).toBe("A_B_ _C__")
     expect(fileStem("  ", "fallback")).toBe("fallback")
+    expect(fileStem("CON.txt", "x")).toBe("_CON.txt")
+    expect(fileStem("..", "x")).toBe("x")
+    expect(fileStem("a".repeat(149) + ". ", "x")).not.toMatch(/[. ]$/)
+    expect(Buffer.byteLength(fileStem("😀".repeat(150), "x"))).toBeLessThanOrEqual(120)
+    expect(fileStem("e\u0301", "x")).toBe("é")
+    expect(Buffer.byteLength(fileStem("界".repeat(100_000), "x"))).toBe(120)
+  })
+  it("keeps long colliding branch names within filesystem byte limits after family de-duplication", async () => {
+    const name = "CON." + "界".repeat(39)
+    const forks = Array.from({ length: 300 }, (_, index) => ({
+      id: `fork-${index}`,
+      parentForkId: index === 0 ? null : "fork-0",
+      name,
+      createdAt: index
+    })) as unknown as ReadonlyArray<Fork>
+    const chat = { id: "chat", title: name, createdAt: 0 } as unknown as Chat
+    const family = await Effect.runPromise(chatFiles({} as ReaderService, "user" as never, chat, forks, null, "jsonl"))
+    const stems = family.stems(`${family.base} (12345)`)
+    expect(new Set(stems.map((stem) => stem.toLowerCase())).size).toBe(300)
+    for (const stem of stems) expect(Buffer.byteLength(`${stem}.jsonl`)).toBeLessThanOrEqual(255)
   })
 })
 

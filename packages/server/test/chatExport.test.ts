@@ -2,6 +2,8 @@
 // is imported, its chats exported through the real route, and the exported files imported
 // into a second, empty server, which must then hold the same messages, swipes, choices,
 // hidden flags, reasoning and recorded generations, branch for branch.
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { assert, layer } from "@effect/vitest"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
@@ -87,6 +89,13 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
       const used = { used: 0 }
       for (const [name, entry] of readZip(whole, defaultLimits))
         archive.set(name, extract(whole, entry, defaultLimits, used))
+      if (process.env.REVIEW_LIBRARY_OUT) {
+        for (const [name, bytes] of archive) {
+          const path = join(process.env.REVIEW_LIBRARY_OUT, name)
+          mkdirSync(join(path, ".."), { recursive: true })
+          writeFileSync(path, bytes)
+        }
+      }
       // The fixture has what the export must carry: two branches, a second swipe chosen,
       // reasoning, and messages hidden from the context.
       type Digested = {
