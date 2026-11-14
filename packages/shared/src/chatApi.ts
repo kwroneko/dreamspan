@@ -316,6 +316,7 @@ export const ChatEvent = Schema.Union([
     text: Schema.String,
     replace: LiveReplace
   }),
+  Schema.TaggedStruct("RequestNotice", { versionId: VersionId, message: Schema.String }),
   Schema.TaggedStruct("WaitingCache", { versionId: VersionId, waiting: Schema.Boolean }),
   /** A slot was added, or its selection or versions changed. */
   Schema.TaggedStruct("Slot", { entry: PathEntry }),

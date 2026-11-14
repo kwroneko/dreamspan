@@ -11,7 +11,7 @@
 // tag has come and the body starts (owner, 2026-11-02); open or folded as the user prefers.
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useAtomValue } from "@effect/atom-react"
-import type { SlotId, Version } from "@rp/shared/chat.ts"
+import type { SlotId, ThinkingPart, Version } from "@rp/shared/chat.ts"
 import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
 import { sectionsDisplay, sectionUnclosed } from "@rp/shared/replySections.ts"
 import { useId, useState, useSyncExternalStore } from "react"
@@ -33,13 +33,15 @@ const words = (text: string) => {
 interface PanelProps {
   readonly version: Version
   readonly session: ChatSession
+  /** The thinking the user hid from the model on this version, in the fork shown (SetThinkingHidden). */
+  readonly hiddenThinking?: ReadonlyArray<ThinkingPart> | undefined
   /** The message's place, for its display scripts (useDisplayed.ts); absent: the chat's end. */
   readonly parentSlotId?: SlotId | null | undefined
   readonly depth?: number | undefined
 }
 
 /** The provider's reasoning field. */
-function Reasoning({ version, session, parentSlotId, depth }: PanelProps) {
+function Reasoning({ version, session, hiddenThinking, parentSlotId, depth }: PanelProps) {
   const live = useAtomValue(liveReasoning(version.id))
   const body = useAtomValue(liveText(version.id)) ?? version.content
   const text = live ?? version.reasoning ?? ""
@@ -54,6 +56,7 @@ function Reasoning({ version, session, parentSlotId, depth }: PanelProps) {
       text={text}
       streaming={version.status === "generating"}
       kind="reasoning"
+      hidden={hiddenThinking?.includes("reasoning") ?? false}
       first
       label="Reasoning"
       thinking={body === ""}
@@ -62,7 +65,7 @@ function Reasoning({ version, session, parentSlotId, depth }: PanelProps) {
 }
 
 /** The reply's own leading tagged sections, taken out of its text. */
-function ReplySections({ version, session, parentSlotId, depth }: PanelProps) {
+function ReplySections({ version, session, hiddenThinking, parentSlotId, depth }: PanelProps) {
   const live = useAtomValue(liveSections(version.id))
   const reasoning = useAtomValue(liveReasoning(version.id)) ?? version.reasoning ?? ""
   const body = useAtomValue(liveText(version.id)) ?? version.content
@@ -82,6 +85,7 @@ function ReplySections({ version, session, parentSlotId, depth }: PanelProps) {
       text={text}
       streaming={streaming}
       kind="sections"
+      hidden={hiddenThinking?.includes("sections") ?? false}
       first={reasoning === ""}
       label="Thinking in the reply"
       streamingLabel={thinking ? "Thinking…" : "Thinking in the reply"}
@@ -113,6 +117,7 @@ function ReasoningBlock({
   text,
   streaming,
   kind,
+  hidden,
   first,
   label,
   streamingLabel = `${label}…`,
@@ -122,6 +127,8 @@ function ReasoningBlock({
   text: string
   streaming: boolean
   kind: "reasoning" | "sections"
+  /** Hidden from the model by the user: marked in the header. */
+  hidden: boolean
   first: boolean
   label: string
   /** The header while the reply is being written; default: the label, still going ("…"). */
@@ -192,11 +199,23 @@ function ReasoningBlock({
             <span>{words(text)}</span>
           </button>
         </Tooltip>
+        {hidden && (
+          <Tooltip label="Saved here; omitted from later replays when the current tool turn ends.">
+            <span
+              className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted"
+              data-thinking-hidden=""
+              tabIndex={0}
+            >
+              <Icon name="ghost" size={14} />
+              Hidden from the model
+            </span>
+          </Tooltip>
+        )}
         <span id={hintId} hidden>
           {hint}
         </span>
         <div className="flex w-full flex-wrap items-center gap-x-1 pl-4 empty:hidden sm:w-auto sm:pl-0">
-          <SlotOutlet slot={reasoningActions} props={{ version, text, streaming, kind, first, session }} />
+          <SlotOutlet slot={reasoningActions} props={{ version, text, streaming, kind, hidden, first, session }} />
         </div>
       </div>
       {notice && <p className="pl-4 text-xs text-muted">{notice}</p>}
