@@ -96,6 +96,7 @@ const BACKGROUND_READS: ReadonlySet<string> = new Set([
  * queued, as browsing reads the history in pages. All are small but the assembly.
  */
 const REPLY_READS: ReadonlySet<string> = new Set([
+  "PlanSummaries",
   "GetSlot",
   "AssembleContext",
   "ResolveConnection",
@@ -237,6 +238,12 @@ export const layer = (options: DatabaseOptions) => {
             Layer.provide(
               ReaderPool.layer(options.readers, {
                 retryCrashed: true,
+                isolated: (request) =>
+                  request.tag === "PlanSummaries" &&
+                  typeof request.payload === "object" &&
+                  request.payload !== null &&
+                  "reason" in request.payload &&
+                  request.payload.reason !== undefined,
                 background: { tags: BACKGROUND_READS, max: Math.max(1, options.readers - 1) },
                 first: REPLY_READS
               })

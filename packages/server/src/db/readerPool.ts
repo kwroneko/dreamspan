@@ -106,7 +106,8 @@ export const layer = (
     retryCrashed = false,
     jobDeadline,
     background,
-    first
+    first,
+    isolated
   }: {
     name?: string
     retryCrashed?: boolean
@@ -119,6 +120,8 @@ export const layer = (
     background?: { readonly tags: ReadonlySet<string>; readonly max: number }
     /** Requests (by tag) that go ahead of everything else queued: what a reply waits on. */
     first?: ReadonlySet<string>
+    /** These reads get one separate reader; they never occupy an ordinary reader, even with size 1. */
+    isolated?: (request: RpcMessage.RequestEncoded) => boolean
   } = {}
 ) =>
   Layer.effect(
@@ -144,10 +147,17 @@ export const layer = (
                 background !== undefined &&
                 readers.filter((r) => r.job !== undefined && background.tags.has(r.job.request.tag)).length >=
                   background.max
-              const ahead = first === undefined ? -1 : queue.findIndex((job) => first.has(job.request.tag))
+              const eligible = (job: Job) => (isolated?.(job.request) === true) === (reader.id === size)
+              const ahead =
+                first === undefined ? -1 : queue.findIndex((job) => eligible(job) && first.has(job.request.tag))
               const next =
-                ahead >= 0 ? ahead : held ? queue.findIndex((job) => !background.tags.has(job.request.tag)) : 0
-              if (next === -1) break
+                ahead >= 0
+                  ? ahead
+                  : queue.findIndex((job) => eligible(job) && (!held || !background!.tags.has(job.request.tag)))
+              if (next === -1) {
+                i++
+                continue
+              }
               const job = queue.splice(next, 1)[0]!
               // Reserved before sending, so a concurrent dispatch can't pick the same reader;
               // released again if the send fails.
@@ -209,7 +219,7 @@ export const layer = (
         const onStart = (reader: Reader) =>
           Effect.suspend(() => {
             reader.ready = true
-            Deferred.doneUnsafe(started, Exit.void)
+            if (reader.id < size) Deferred.doneUnsafe(started, Exit.void)
             return dispatch
           })
 
@@ -242,8 +252,15 @@ export const layer = (
           }
           // A respawn that fails while no reader is up may never succeed, so queued requests
           // fail instead of waiting on it.
-          if (!wasReady && !readers.some((other) => other.ready)) failed.push(...queue.splice(0))
-          if (!wasReady && !Deferred.isDoneUnsafe(started)) {
+          if (!wasReady) {
+            for (let n = queue.length - 1; n >= 0; n--) {
+              const job = queue[n]!
+              const separate = isolated?.(job.request) === true
+              if (!readers.some((other) => other.ready && (other.id === size) === separate))
+                failed.push(...queue.splice(n, 1))
+            }
+          }
+          if (!wasReady && reader.id < size && !Deferred.isDoneUnsafe(started)) {
             diedBeforeStart.add(reader.id)
             if (diedBeforeStart.size === size) Deferred.doneUnsafe(started, Exit.fail(error))
           }
@@ -259,7 +276,7 @@ export const layer = (
           )
         }
 
-        for (let id = 0; id < size; id++) {
+        for (let id = 0; id < size + (isolated ? 1 : 0); id++) {
           const reader: Reader = {
             id,
             worker: yield* platform.spawn<RpcMessage.FromServerEncoded, RpcMessage.FromClientEncoded>(id),

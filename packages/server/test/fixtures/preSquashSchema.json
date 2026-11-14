@@ -656,6 +656,12 @@
     },
     {
       "type": "index",
+      "name": "slots_chain_cover",
+      "tbl_name": "slots",
+      "sql": "CREATE INDEX slots_chain_cover ON slots(chain_id, depth, id, parent_slot_id)"
+    },
+    {
+      "type": "index",
       "name": "slots_chat_depth",
       "tbl_name": "slots",
       "sql": "CREATE INDEX slots_chat_depth ON slots(chat_id, depth)"
@@ -767,6 +773,12 @@
       "name": "summaries_selected_revision",
       "tbl_name": "summaries",
       "sql": "CREATE INDEX summaries_selected_revision ON summaries(selected_revision_id)"
+    },
+    {
+      "type": "index",
+      "name": "summaries_status",
+      "tbl_name": "summaries",
+      "sql": "CREATE INDEX summaries_status ON summaries(chat_id, status, level)"
     },
     {
       "type": "index",
@@ -1025,6 +1037,12 @@
       "name": "versions_generating",
       "tbl_name": "versions",
       "sql": "CREATE INDEX versions_generating ON versions(id) WHERE status = 'generating'"
+    },
+    {
+      "type": "index",
+      "name": "versions_lcm_inputs",
+      "tbl_name": "versions",
+      "sql": "CREATE INDEX versions_lcm_inputs ON versions(id, slot_id, status, content_length, deleted_at, purged_at)"
     },
     {
       "type": "index",

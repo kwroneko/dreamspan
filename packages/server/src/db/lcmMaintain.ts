@@ -75,9 +75,10 @@ export const maintain = (
           AND audience_json IS ${audience}`).map((r) => r.batch_id)
     )
     const rows = yield* sql<{ id: string; status: string }>`${onPath}
-      SELECT s.id, s.status FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
+      SELECT s.id, s.status FROM path CROSS JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
       WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status IN ('complete', 'truncated', 'superseded', 'failed')
-        AND s.audience_json IS ${audience}`
+        AND s.audience_json IS ${audience}
+      ORDER BY s.last_slot_id,s.rowid`
     const choices = yield* summaryChoices(sql, chatId)
     const dismissed = new Set(choices.filter((c) => c.summary_id !== c.chosen_id).map((c) => c.summary_id))
     const candidates: Array<Candidate> = []
@@ -201,10 +202,17 @@ export const maintain = (
         }
       }
     }
-    // The chains of stale level-1 summaries: whether anything in them can still be summarized, and what to send.
+    // Read the effective path once; stale ranges and episode signatures share this projection.
+    const path = candidates.length
+      ? yield* lcmPath(sql, userId, chatId, leaf, undefined, Number.MAX_SAFE_INTEGER, identities)
+      : []
     const chains = new Map<string, ReadonlyArray<LcmSlot>>()
-    const chainOf = (s: Summary) =>
-      lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities)
+    const chainOf = (s: Summary) => {
+      const range = path.slice(s.from - 1, s.to)
+      return range[0]?.id === s.firstSlotId && range.at(-1)?.id === s.lastSlotId
+        ? Effect.succeed(range)
+        : lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities)
+    }
     for (const s of candidates)
       if (s.level === 1 && s.status !== "superseded" && (!s.fresh || forced.has(s.id)))
         chains.set(s.id, yield* chainOf(s))
@@ -212,11 +220,6 @@ export const maintain = (
       SELECT eager FROM summarization_jobs WHERE chat_id = ${chatId} AND (fork_id IS NULL OR fork_id=${fork}) AND status IN ('complete', 'failed')
         AND audience_json IS ${audience}
       ORDER BY updated_at DESC, id DESC LIMIT 1`
-    // Freeze effective message inputs and every selected child revision at the authorizing reply.
-    // Completion can continue that exact episode; later edits do not inherit its permission.
-    const path = candidates.length
-      ? yield* lcmPath(sql, userId, chatId, leaf, undefined, Number.MAX_SAFE_INTEGER, identities)
-      : []
     const byId = new Map(candidates.map((s) => [s.id as string, s]))
     const signatures: Record<string, string> = {}
     const signature = (s: Summary): string =>

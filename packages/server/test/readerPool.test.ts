@@ -52,19 +52,26 @@ const readers = (
     gate,
     heldStart = () => false,
     background,
-    first
+    first,
+    isolated
   }: {
     script?: (spawn: number) => URL
     gate?: Gate
     heldStart?: (spawn: number) => boolean
     background?: { readonly tags: ReadonlySet<string>; readonly max: number }
     first?: ReadonlySet<string>
+    isolated?: (request: import("effect/rpc").RpcMessage.RequestEncoded) => boolean
   } = {}
 ) => {
   let spawns = 0
   return Layer.effect(Readers, ReaderPool.client(PoolOps)).pipe(
     Layer.provide(
-      ReaderPool.layer(size, { retryCrashed: true, ...(background ? { background } : {}), ...(first ? { first } : {}) })
+      ReaderPool.layer(size, {
+        retryCrashed: true,
+        ...(background ? { background } : {}),
+        ...(first ? { first } : {}),
+        ...(isolated ? { isolated } : {})
+      })
     ),
     Layer.provide(
       NodeWorker.layer(() => {
@@ -107,6 +114,20 @@ const stopLog = () => {
 }
 
 describe("reader pool", () => {
+  for (const size of [1, 2])
+    it.live(`maintenance has its own reader with ${size} interactive readers`, () => {
+      const gate = makeGate()
+      return Effect.gen(function* () {
+        const { Hold, Count } = yield* Readers
+        const maintenance = yield* Effect.forkChild(Hold())
+        yield* gate.holding
+        // No release until the interactive read answers: sharing a reader would deadlock.
+        yield* Count({ n: 1 })
+        yield* gate.release
+        yield* Fiber.join(maintenance)
+      }).pipe(Effect.provide(readers(size, { gate, isolated: (request) => request.tag === "Hold" })), Effect.scoped)
+    })
+
   it.live(
     "background reads leave a reader free: others behind them go first",
     () => {

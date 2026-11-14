@@ -1581,6 +1581,7 @@ export const baseline: ReadonlyArray<string> = [
   ) STRICT`,
   `CREATE INDEX summaries_chat_level ON summaries(chat_id, level)`,
   `CREATE INDEX summaries_last_slot ON summaries(last_slot_id)`,
+  `CREATE INDEX summaries_status ON summaries(chat_id, status, level)`,
   `CREATE TABLE summary_revisions (
     seq INTEGER PRIMARY KEY,
     id TEXT NOT NULL UNIQUE,
@@ -1968,6 +1969,8 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, PRIMARY KEY(user_id, chat_id)) STRICT`,
   `CREATE INDEX chats_owner_live ON chats(owner_user_id, id) WHERE deleted_at IS NULL`,
   `CREATE UNIQUE INDEX slots_chain ON slots(chain_id, depth)`,
+  `CREATE INDEX slots_chain_cover ON slots(chain_id, depth, id, parent_slot_id)`,
+  `CREATE INDEX versions_lcm_inputs ON versions(id, slot_id, status, content_length, deleted_at, purged_at)`,
   `CREATE INDEX state_events_chain ON state_events(chat_id, slot_chain_id, slot_depth)`,
   `CREATE TRIGGER slots_chain_assigned AFTER INSERT ON slots BEGIN
     UPDATE slots SET chain_id = coalesce(
