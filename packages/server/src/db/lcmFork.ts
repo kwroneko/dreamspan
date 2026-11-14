@@ -1,3 +1,5 @@
+import { lineageCte } from "./forkLabels.ts"
+import { withFork } from "./forkState.ts"
 // Summary material is shared; choices and requests use the same frozen lineage as messages.
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
@@ -32,8 +34,16 @@ export const inJobFork =
 export const summaryChoices = (sql: SqlClient.SqlClient, chatId: string) =>
   Effect.gen(function* () {
     const fork = yield* viewAt(sql, chatId, null)
-    return yield* sql<{ summary_id: string; chosen_id: string }>`SELECT s.id AS summary_id,
-    coalesce(o.value_id,b.chosen_id,s.id) AS chosen_id FROM summaries s
+    return yield* sql<{
+      summary_id: string
+      chosen_id: string
+    }>`WITH RECURSIVE ${withFork(sql, fork, (f) => lineageCte("lineage", f))},
+      candidates(id) AS (
+        SELECT b.summary_id FROM lcm_summary_choices b JOIN summaries s ON s.id=b.summary_id WHERE s.chat_id=${chatId}
+        UNION SELECT o.target_id FROM lineage l CROSS JOIN fork_overrides o INDEXED BY fork_overrides_point
+          ON o.fork_id=l.fork_id AND o.kind='summary_choice' AND o.seq<=l.bound
+      ) SELECT s.id AS summary_id,
+    coalesce(o.value_id,b.chosen_id,s.id) AS chosen_id FROM candidates requested CROSS JOIN summaries s ON s.id=requested.id
     LEFT JOIN fork_overrides o ON o.id=${effectiveOverride(sql, "summary_choice", fork, "s.id")}
     LEFT JOIN lcm_summary_choices b ON b.summary_id=s.id WHERE s.chat_id=${chatId} AND (o.id IS NOT NULL OR b.summary_id IS NOT NULL)`
   })

@@ -83,7 +83,7 @@ export const knowsSql = (
         AND coalesce(${rangeAwaySql(sql, ranges, "c.value")}, EXISTS (SELECT 1 FROM json_each(coalesce(v.presence_json, '{}'), '$.away') a
           WHERE a.value = c.value)) = 0)) AND ${kept}) END`
     return viewers.includes(STRETCH_VIEW)
-      ? sql`(NOT ${stretchedSql(sql, yield* threadStretches(sql, fork ?? null, leaf))} OR ${rule})`
+      ? sql`(NOT ${stretchedSql(sql, yield* threadStretches(sql, fork ?? null, leaf, viewers))} OR ${rule})`
       : rule
   })
 
@@ -106,7 +106,8 @@ export const readKnowers = (
 ) =>
   Effect.gen(function* () {
     const corrections = yield* readPresenceRanges(sql, fork ?? null)
-    const stretches = ranges ?? (viewers?.includes(STRETCH_VIEW) ? yield* threadStretches(sql, fork ?? null) : [])
+    const stretches =
+      ranges ?? (viewers?.includes(STRETCH_VIEW) ? yield* threadStretches(sql, fork ?? null, undefined, viewers) : [])
     const rows = yield* sql<{
       id: string
       slot_id: string

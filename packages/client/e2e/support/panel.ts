@@ -28,6 +28,12 @@ export const panelTab = async (page: Page, tab: string) => {
     .or(page.getByRole("tablist", { name: "Characters", exact: true }))
     .getByRole("tab", { name: tab, exact: true })
   if ((await shown.count()) > 0) return shown.click()
+  // Card tabs include the standard version. A bare name is safe only when it identifies one tab.
+  const escaped = tab.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const versioned = page
+    .getByRole("tablist", { name: "Characters", exact: true })
+    .getByRole("tab", { name: new RegExp(`^${escaped} ·`) })
+  if ((await versioned.count()) === 1) return versioned.click()
   await page.getByRole("button", { name: "More tools", exact: true }).click()
   await page.getByRole("menuitem", { name: tab, exact: true }).click()
 }

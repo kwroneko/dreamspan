@@ -1,3 +1,4 @@
+import { cardChoiceLabel } from "./CardVersion.tsx"
 import { useSplitChats } from "./splitChats.ts"
 import { kindTitle } from "./kindLooks.ts"
 import { CenterHeader } from "../../ui/CenterHeader.tsx"
@@ -407,10 +408,10 @@ function ChatHeaderFrame({
               className="flex shrink-0 items-center -space-x-2 @max-[40rem]/header:hidden"
             >
               {characters.slice(0, 4).map((c) => (
-                <Tooltip key={c.entityId} label={`Opens ${c.label}'s card in the side panel.`} side="bottom">
+                <Tooltip key={c.entityId} label={`Opens ${cardChoiceLabel(c)}'s card in the side panel.`} side="bottom">
                   <button
                     type="button"
-                    aria-label={`Show ${c.label}'s card`}
+                    aria-label={`Show ${cardChoiceLabel(c)}'s card`}
                     className="inline-flex rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
                     onClick={() =>
                       void navigate({

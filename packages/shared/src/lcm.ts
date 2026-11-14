@@ -115,7 +115,8 @@ export class LcmState extends Schema.Class<LcmState>("LcmState")({
         id: Schema.String,
         from: Schema.Int,
         through: Schema.Int,
-        content: Schema.String
+        content: Schema.String,
+        model: Schema.optionalKey(Schema.String)
       })
     )
   ),

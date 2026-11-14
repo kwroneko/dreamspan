@@ -109,6 +109,7 @@ export const registerMessageActions = () => [
   }),
   messageActions.register({
     id: "message.merge",
+    dialogInUrl: true,
     order: 75,
     group: "place",
     // Not in a kind that takes no merges (a workshop): the server refuses them there.

@@ -398,7 +398,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         )
         const reruns = new Set((yield* rerunRequests(sql, chatId)).map((r) => r.job_id))
         const [kind] = yield* sql<{ kind: string }>`SELECT kind FROM chats WHERE id=${chatId}`
-        let runSummaries: Array<{ id: string; from: number; through: number; content: string }> | undefined
+        let runSummaries:
+          Array<{ id: string; from: number; through: number; content: string; model?: string }> | undefined
         if (identities === undefined && chatKinds.get(kind?.kind ?? "")?.summaryTranscript) {
           const path = yield* lcmPath(sql, userId, chatId, leafSlotId)
           const fork = yield* viewAt(sql, chatId, leafSlotId)
@@ -408,7 +409,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
             ORDER BY CAST(requested.key AS INTEGER) DESC LIMIT 1`
           runSummaries = latest?.transcript
             ? activeRunSummaries(JSON.parse(latest.transcript) as Array<AgentMessage>).map(
-                ({ id, from, through, content }) => ({ id, from, through, content })
+                ({ id, from, through, content, model }) => ({ id, from, through, content, ...(model ? { model } : {}) })
               )
             : []
         }

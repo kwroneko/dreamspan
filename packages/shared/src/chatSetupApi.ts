@@ -330,6 +330,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   playedByMe: Schema.Array(EntityId),
   /** The chat-wide model and preset; the context assembler reads these. */
   model: Schema.NullOr(Schema.Struct({ connection: ConnectionId, model: ModelId })),
+  /** The chat's own summary model (a "summarizer"-scoped `model.binding`); absent: the account's, else the chat's model. */
+  summaryModel: Schema.optionalKey(Schema.Struct({ connection: ConnectionId, model: ModelId })),
   preset: Schema.NullOr(RefId),
   presetLocked: Schema.optional(Schema.Boolean),
   lorebooks: Schema.Array(RefId),
@@ -396,6 +398,10 @@ export const CastChange = Schema.Union([
   /** The chat's own model or preset taken off (`model.unbind`, `preset.unbind`): it uses the default again. */
   Schema.TaggedStruct("DefaultModel", {}),
   Schema.TaggedStruct("DefaultPreset", {}),
+  /** The model that writes this chat's summaries from here on; null follows the account's choice again. */
+  Schema.TaggedStruct("SummaryModel", {
+    model: Schema.NullOr(Schema.Struct({ connection: ConnectionId, model: ModelId }))
+  }),
   /** A stable prompt-name pin; null removes it and follows the cast/personas again. */
   Schema.TaggedStruct("MacroBinding", { name: Schema.Literals(["user", "char"]), value: Schema.NullOr(Schema.String) }),
   Schema.TaggedStruct("Roles", { projection: RolesProjection }),

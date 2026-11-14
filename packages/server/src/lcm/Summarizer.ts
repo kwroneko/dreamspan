@@ -88,6 +88,7 @@ export function makeSummarizer(pool: boolean) {
       hub = yield* ChatHub
     const scope = yield* Effect.scope
     const running = new Map<string, SummaryJob>()
+    let planning = false
     const users = new Set<UserId>(),
       due = new Map<string, { position: Position; at: number; reason: PlanReason | undefined }>()
     /** Open chats read their summaries again (ChatEvent `Lcm`). */
@@ -408,18 +409,31 @@ export function makeSummarizer(pool: boolean) {
       yield* Effect.forkIn(
         Effect.gen(function* () {
           while (true) {
-            for (const [chatId, p] of due)
-              if (p.at <= Date.now()) {
-                due.delete(chatId)
-                yield* plan(p.position, false, p.reason).pipe(
-                  Effect.catchCause((cause) => {
-                    if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
-                    // Keep the already-frozen reply authorization; an enqueue race never authorizes later edits.
-                    const error = Cause.findErrorOption(cause)
-                    if (error._tag === "Some" && error.value._tag === "StorageError") schedule(p.position, "completion")
-                    return Effect.logWarning("LCM planning failed", cause)
-                  })
+            // One coalesced maintenance pass at a time, off the claim/reconciliation loop.
+            // A slow read must not hold up jobs already queued for another chat.
+            if (!planning)
+              for (const [key, p] of due) {
+                if (p.at > Date.now()) continue
+                due.delete(key)
+                planning = true
+                yield* Effect.forkIn(
+                  plan(p.position, false, p.reason).pipe(
+                    Effect.catchCause((cause) => {
+                      if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
+                      const error = Cause.findErrorOption(cause)
+                      if (error._tag === "Some" && error.value._tag === "StorageError")
+                        schedule(p.position, "completion")
+                      return Effect.logWarning("LCM planning failed", cause)
+                    }),
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        planning = false
+                      })
+                    )
+                  ),
+                  scope
                 )
+                break
               }
             for (const userId of users) {
               const reconciled = yield* writer

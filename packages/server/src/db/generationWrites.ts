@@ -289,8 +289,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         }
         if (defaults.lcm?.preset && !(yield* ownedPreset(sql, userId, defaults.lcm.preset)))
           return yield* new NotFound({ entity: "ref", id: defaults.lcm.preset })
-        const fallback = defaults.lcm?.fallback
-        for (const choice of [defaults.judge, fallback])
+        for (const choice of [defaults.judge, defaults.lcm?.fallback, defaults.lcm?.summarizer])
           if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
             return yield* new NotFound({ entity: "model", id: choice.model })
         const locked = yield* connectionLock(userId, model)
@@ -326,7 +325,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           return yield* new NotFound({ entity: "ref", id: change.preset })
         if (change.lcm?.preset && !(yield* ownedPreset(sql, userId, change.lcm.preset)))
           return yield* new NotFound({ entity: "ref", id: change.lcm.preset })
-        for (const choice of [change.judge, change.fallback])
+        for (const choice of [change.judge, change.fallback, change.summarizer])
           if (choice && !(yield* ownedModel(sql, userId, choice.connection, choice.model)))
             return yield* new NotFound({ entity: "model", id: choice.model })
         const locked = yield* connectionLock(userId, change.model ?? null)
@@ -334,7 +333,12 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         if (change.model !== undefined) yield* putSetting(userId, DEFAULT_MODEL, change.model)
         if (change.preset !== undefined) yield* putSetting(userId, DEFAULT_PRESET, change.preset)
         if (change.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, change.judge)
-        if (change.tail !== undefined || change.fallback !== undefined || change.lcm !== undefined) {
+        if (
+          change.tail !== undefined ||
+          change.fallback !== undefined ||
+          change.summarizer !== undefined ||
+          change.lcm !== undefined
+        ) {
           const [row] = yield* sql<{ value_json: string }>`
             SELECT value_json FROM settings WHERE scope = 'user' AND scope_id = ${userId} AND key = ${DEFAULT_LCM}`
           const stored = row ? (JSON.parse(row.value_json) as Record<string, unknown>) : {}
@@ -346,6 +350,10 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           if (change.fallback !== undefined) {
             if (change.fallback) lcm.fallback = change.fallback
             else delete lcm.fallback
+          }
+          if (change.summarizer !== undefined) {
+            if (change.summarizer) lcm.summarizer = change.summarizer
+            else delete lcm.summarizer
           }
           for (const [key, value] of Object.entries(change.lcm ?? {})) {
             if (value === undefined) continue
