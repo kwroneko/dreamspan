@@ -173,7 +173,99 @@ it("refuses layout replacement through the extension-page adapter", () => {
         path: "/extensions/layout",
         component: () => null
       })
-    ).toThrow("layout")
+    ).toThrow("adapter")
+  } finally {
+    scope.close()
+    stop()
+  }
+})
+
+it("notice replacements have no account data, restore the exact built-in on throw/disable and refuse another owner", async () => {
+  dom()
+  const { noticeChannels } = await import("../src/features/noticeContributions.tsx")
+  const { completionSound } = await import("../src/features/completionSoundPart.tsx")
+  const builtin = noticeChannels.register(completionSound)
+  for (const part of noticeChannels.list()) expect(part.source, part.id).toBeTruthy()
+  const p = fixture("sound-copy", ["noticeChannels"])
+  const made = { ...p, manifest: { ...p.manifest, replaces: ["noticeChannels:notifications.completion-sound"] } }
+  const scope = clientPluginHost(made)
+  let played = 0
+  scope.host.registries.noticeChannels!.register({
+    id: completionSound.id,
+    component: () => null,
+    activate: () => {},
+    receive: (...args: unknown[]) => {
+      expect(args).toEqual([])
+      played++
+    }
+  })
+  noticeChannels.get(completionSound.id)!.receive({} as never)
+  expect(played).toBe(1)
+  const second = clientPluginHost({ ...made, id: "another-copy", manifest: { ...made.manifest, id: "another-copy" } })
+  expect(() =>
+    second.host.registries.noticeChannels!.register({
+      id: completionSound.id,
+      component: () => null,
+      activate: () => {},
+      receive: () => {}
+    })
+  ).toThrow("owned")
+  second.close()
+  scope.close()
+  expect(noticeChannels.get(completionSound.id)).toBe(completionSound)
+  const broken = clientPluginHost(made)
+  broken.host.registries.noticeChannels!.register({
+    id: completionSound.id,
+    component: () => null,
+    activate: () => {},
+    receive: () => {
+      throw new Error("synthetic")
+    }
+  })
+  noticeChannels.get(completionSound.id)!.receive({} as never)
+  expect(noticeChannels.get(completionSound.id)).toBe(completionSound)
+  broken.close()
+  builtin()
+})
+
+it("refuses a declared replacement in a client registry without a built-in copy adapter", () => {
+  dom()
+  const original = { id: "uncopyable.banner", order: 1, component: () => null }
+  const stop = appBanners.register(original)
+  const p = fixture("uncopyable", ["appBanners"])
+  const scope = clientPluginHost({ ...p, manifest: { ...p.manifest, replaces: ["appBanners:uncopyable.banner"] } })
+  try {
+    expect(() => scope.host.registries.appBanners!.register({ ...original, order: 2 })).toThrow("adapter")
+    expect(() => scope.host.registries.appBanners!.disable(original.id)).toThrow("adapter")
+    expect(appBanners.get(original.id)).toBe(original)
+  } finally {
+    scope.close()
+    stop()
+  }
+})
+
+it("restores the built-in when a notice callback rejects without an Error stack", async () => {
+  dom()
+  const { noticeChannels } = await import("../src/features/noticeContributions.tsx")
+  const { completionSound } = await import("../src/features/completionSoundPart.tsx")
+  const stop = noticeChannels.register(completionSound)
+  const p = fixture("async-sound", ["noticeChannels"])
+  const scope = clientPluginHost({
+    ...p,
+    manifest: { ...p.manifest, replaces: ["noticeChannels:notifications.completion-sound"] }
+  })
+  try {
+    const rejected = Promise.reject("synthetic rejection without a stack")
+    // Keep the regression itself from creating an unhandled rejection before the host observes it.
+    void rejected.catch(() => {})
+    scope.host.registries.noticeChannels!.register({
+      ...completionSound,
+      receive: () => rejected
+    })
+    noticeChannels.get(completionSound.id)!.receive({} as never)
+    await new Promise<void>((done) => queueMicrotask(done))
+    await new Promise<void>((done) => queueMicrotask(done))
+    expect(noticeChannels.get(completionSound.id)).toBe(completionSound)
   } finally {
     scope.close()
     stop()

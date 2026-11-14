@@ -38,11 +38,22 @@ describe("plugin consent", () => {
     })
   it("describes replacements and unknown surfaces without promising isolation", () => {
     expect(pluginConsent({ ...manifest, surfaces: ["future:part"], replaces: ["client:original"] }, "user")).toContain(
-      "Replaces existing parts of the app."
+      "Replaces an unsupported part of the app."
     )
     expect(pluginSurfaces({ ...manifest, surfaces: ["future:part"] })).toEqual([
       "Changes an additional part of the app."
     ])
+  })
+  it("names each replaced built-in and warns when the model's input can change", () => {
+    for (const [part, words] of [
+      ["noticeChannels:notifications.completion-sound", "Replaces Completion sound."],
+      ["rolloutTools:set_presence", "Replaces Who's present (set_presence)."],
+      ["macros:reverse", "Replaces Reverse text macro (reverse)."]
+    ]) {
+      const text = pluginConsent({ ...manifest, replaces: [part!] }, "user")
+      expect(text).toContain(words)
+      if (!part!.startsWith("noticeChannels:")) expect(text).toContain("Changes what the model sees.")
+    }
   })
 })
 

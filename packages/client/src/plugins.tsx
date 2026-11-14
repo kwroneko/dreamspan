@@ -3,6 +3,7 @@ import { useState, useSyncExternalStore, type ComponentType } from "react"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import type { ClientPlugin } from "@rp/shared/pluginClient.ts"
+import { builtinReplacement } from "@rp/shared/builtinParts.ts"
 import type {
   Activate,
   ClientHost,
@@ -10,14 +11,15 @@ import type {
   ComposerEntry,
   PanelEntry,
   RouteEntry,
-  BannerEntry
+  BannerEntry,
+  NoticeChannelEntry
 } from "../../plugin-api/src/client.ts"
 import { composerControls } from "./features/chat/composerControls.tsx"
 import { chatPanels } from "./features/chat/panels.tsx"
 import { appBanners } from "./features/shell.tsx"
 import { shellSearchKeys } from "./features/workbench/kinds.ts"
 import { fullPath, routes } from "./routes.tsx"
-import { userNoticeReceivers } from "./features/noticeContributions.tsx"
+import { userNoticeReceivers, noticeChannels } from "./features/noticeContributions.tsx"
 import { Button } from "./ui/Button.tsx"
 import { Popover } from "./ui/Popover.tsx"
 import { useAction } from "./actions.tsx"
@@ -132,8 +134,18 @@ export const clientPluginHost = (p: ClientPlugin) => {
         if (claims.has(claim)) throw new Error("Plugin entry already owned")
         if (registry.get(entry.id) && claims.get(claim) !== key && !p.manifest.replaces.includes(claim))
           throw new Error("Replacement must be declared")
+        if ((registry.get(id) || p.manifest.replaces.includes(claim)) && builtinReplacement(claim)?.side !== "client")
+          throw new Error("This built-in still needs a copy adapter")
         const converted = convert(entry, () => {
-          if (live) report(p, id, name)
+          if (live) {
+            report(p, p.manifest.replaces.includes(claim) ? "event" : id, name)
+            // A broken replacement must reveal the original, including render failures.
+            if (p.manifest.replaces.includes(claim))
+              queueMicrotask(() => {
+                close()
+                if (active.get(key)?.plugin === p) active.delete(key)
+              })
+          }
         })
         claims.set(claim, key)
         const stop = registry.register(converted)
@@ -146,6 +158,8 @@ export const clientPluginHost = (p: ClientPlugin) => {
         if (reserved(name, id)) throw new Error("The plugin host cannot be replaced")
         if (!live || !p.manifest.replaces.includes(`${name}:${id}`) || claims.has(`${name}:${id}`))
           throw new Error("Replacement must be declared")
+        if (builtinReplacement(`${name}:${id}`)?.side !== "client")
+          throw new Error("This built-in still needs a copy adapter")
         claims.set(`${name}:${id}`, key)
         const stop = registry.disable(id)
         return own(() => {
@@ -158,6 +172,35 @@ export const clientPluginHost = (p: ClientPlugin) => {
   const registries: { -readonly [K in keyof ClientHost["registries"]]: ClientHost["registries"][K] } = {}
   for (const surface of p.manifest.surfaces.filter((s) => s.startsWith("client:"))) {
     switch (surface) {
+      case "client:noticeChannels":
+        registries.noticeChannels = adapter<NoticeChannelEntry, Parameters<typeof noticeChannels.register>[0]>(
+          "noticeChannels",
+          noticeChannels,
+          (entry, fail) => {
+            const guard = (run: () => void) => () => {
+              if (!live) return
+              const failed = () => {
+                fail()
+                close()
+              }
+              try {
+                const result: unknown = run()
+                // Void callbacks can still be async in TypeScript. Observe their rejection
+                // here rather than relying on an attributable global Error stack.
+                if (result) void Promise.resolve(result).catch(failed)
+              } catch {
+                failed()
+              }
+            }
+            return {
+              id: entry.id,
+              component: wrap(entry.component, fail),
+              activate: guard(entry.activate),
+              receive: guard(entry.receive)
+            }
+          }
+        )
+        break
       case "client:composerControls":
         registries.composerControls = adapter<ComposerEntry, Parameters<typeof composerControls.register>[0]>(
           "composerControls",

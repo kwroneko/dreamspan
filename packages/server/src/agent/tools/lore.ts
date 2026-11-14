@@ -7,6 +7,7 @@ import type { RolloutTool } from "../tools.ts"
 import { safely } from "./history.ts"
 
 export const lookupLore: RolloutTool<{ readonly query?: string; readonly entry?: string; readonly limit?: number }> = {
+  source: import.meta.url,
   id: "lookup_lore",
   label: "Looked up the lore",
   explanation: "Look up lorebook entries",

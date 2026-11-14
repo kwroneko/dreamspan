@@ -80,6 +80,8 @@ export interface ToolOutput {
 export type WorkshopStoryRead = "positioned" | "conversation" | "library" | "account" | "refused"
 
 export interface RolloutTool<A = never> {
+  /** Shipped implementation, used only by the authenticated editable-copy catalog. */
+  readonly source?: string
   /** Declares how a workshop tool reads story facts; deliberately not sent to the model. */
   readonly storyRead?: WorkshopStoryRead
   /** Kinds that must resolve this name through kindTools, including a disabled variant. */

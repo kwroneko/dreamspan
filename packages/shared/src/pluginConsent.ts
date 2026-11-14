@@ -1,11 +1,14 @@
 // Shared with the future authoring consent workflow. Descriptions are information, not confinement.
 import type { PluginManifest } from "./plugins.ts"
+import { builtinReplacement } from "./builtinParts.ts"
 
 const surfaces: Readonly<Record<string, string>> = {
   "client:composerControls": "Adds controls beside your message.",
   "client:chatPanels": "Adds panels beside your chats.",
   "client:routes": "Adds pages to the app. Reload to use changed pages.",
   "client:appBanners": "Adds notices across the app.",
+  "client:noticeChannels": "Changes optional reply sounds and alerts.",
+  "server:presence": "Reads the current cast and marks characters present or away.",
   "server:rolloutTools": "Adds or changes tools the assistant can use.",
   "server:operationTools": "Changes which app actions the assistant can use.",
   "server:workshopCapabilities": "Changes the kinds of work available in workshops.",
@@ -42,7 +45,13 @@ export const pluginConsent = (manifest: PluginManifest, scope: "instance" | "use
     ? "Runs on the server with full access, including stored keys and every user's chats."
     : "Runs only in your browser. It can do anything you can do in the app.",
   ...pluginSurfaces(manifest),
-  ...(manifest.replaces.length ? ["Replaces existing parts of the app."] : []),
+  ...new Set(
+    manifest.replaces.map((part) => {
+      const known = builtinReplacement(part)
+      return known ? `Replaces ${known.label}.` : "Replaces an unsupported part of the app."
+    })
+  ),
+  ...(manifest.replaces.some((part) => /^(rolloutTools|macros):/.test(part)) ? ["Changes what the model sees."] : []),
   ...(hasServerCode(manifest) ? ["Can send data to other sites."] : []),
   ...(scope === "instance" ? ["Applies to every user of this app."] : [])
 ]

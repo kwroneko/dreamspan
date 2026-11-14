@@ -5,9 +5,11 @@ import { join, resolve, sep } from "node:path"
 import { pluginDocumentation } from "../../../plugin-api/src/docs.ts"
 import { budgetResult } from "../agent/tools.ts"
 import { confined, validPath } from "./repo.ts"
+import { builtinCopies } from "./builtins.ts"
 const root = fileURLToPath(new URL("../../../../", import.meta.url)).replace(/\/$/, "")
 const sourceRoots = ["packages/server/src/agent", "packages/server/src/plugins", "packages/plugin-api/src"]
 const sourceFiles = [
+  ...builtinCopies.filter((p) => p.side === "client").flatMap((p) => p.files),
   "packages/shared/src/registry.ts",
   "packages/shared/src/pluginClient.ts",
   "packages/shared/src/pluginConsent.ts"
@@ -45,7 +47,7 @@ export const appSource = async (
     return readFile(join(root, p), "utf8")
   }
   const scope =
-    "Read-only shipped reference: server agent/plugins, plugin-api, shared registry/pluginClient/pluginConsent. No client source, data, configuration, environment or secrets. At most 256 files, 128 KiB/file, 200 lines or 30 matches, 12000 characters/result."
+    "Read-only shipped reference: server agent/plugins, plugin-api, shared registry/pluginClient/pluginConsent and the copyable client parts. No data, configuration, environment or secrets. At most 256 files, 128 KiB/file, 200 lines or 30 matches, 12000 characters/result."
   if (input.path) {
     validPath(input.path)
     if (!files.includes(input.path)) throw new Error("Path is outside shipped reference sources")
@@ -82,7 +84,7 @@ export const pluginApiDocs = async (topic?: string) => {
       api: 1,
       topics: pluginDocumentation.map(({ topic, description }) => ({ topic, description })),
       unsupported:
-        "Other structural descriptors, full provider/reply transports, internal overrides and editable built-in copies are not supported authoring contracts."
+        "Other structural descriptors, full provider/reply transports, internal overrides are not supported authoring contracts. Only built-ins listed by plugin_copy_builtin are copyable."
     })
   const doc = pluginDocumentation.find((d) => d.topic === topic)
   if (!doc) throw new Error("Unknown API topic; read the index")
@@ -106,7 +108,7 @@ export const pluginApiDocs = async (topic?: string) => {
       join(root, topic === "stateKeys" ? "packages/shared/src/state.ts" : "packages/shared/src/macros/registry.ts"),
       "utf8"
     )
-    for (const name of topic === "stateKeys" ? ["PluginStateKey"] : ["MacroSpec", "MacroEntry"]) {
+    for (const name of topic === "stateKeys" ? ["PluginStateKey"] : ["MacroSpec", "MacroEntry", "DataMacroSpec"]) {
       const start = extra.indexOf("export interface " + name),
         open = extra.indexOf("{", start)
       let depth = 1,

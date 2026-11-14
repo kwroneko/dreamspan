@@ -11,6 +11,7 @@ const scope = (call: MacroCall, which: VarScope) => call.variables[which]
 
 const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec> => [
   {
+    source: import.meta.url,
     kind: "directive",
     name: `set${infix}var`,
     args: [name, value],
@@ -20,6 +21,7 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
     }
   },
   {
+    source: import.meta.url,
     kind: "directive",
     name: `add${infix}var`,
     args: [name, value],
@@ -29,24 +31,28 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
     }
   },
   {
+    source: import.meta.url,
     kind: "directive",
     name: `inc${infix}var`,
     args: [name],
     handler: (call) => scope(call, which).add(call.args[0]!, 1)
   },
   {
+    source: import.meta.url,
     kind: "directive",
     name: `dec${infix}var`,
     args: [name],
     handler: (call) => scope(call, which).add(call.args[0]!, -1)
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: `get${infix}var`,
     args: [name],
     handler: (call) => normalize(scope(call, which).get(call.args[0]!))
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: `has${infix}var`,
     aliases: [`${infix}varexists`],
@@ -54,6 +60,7 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
     handler: (call) => String(scope(call, which).has(call.args[0]!))
   },
   {
+    source: import.meta.url,
     kind: "directive",
     name: `delete${infix}var`,
     aliases: [`flush${infix}var`],
@@ -64,6 +71,7 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
     }
   },
   {
+    source: import.meta.url,
     kind: "directive",
     name: `set${infix}varkey`,
     aliases: [`set${infix}varindex`],
@@ -74,6 +82,7 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
     }
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: `get${infix}varkey`,
     aliases: [`get${infix}varindex`],

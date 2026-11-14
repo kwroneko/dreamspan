@@ -15,7 +15,8 @@ const SLOW_SERVER_FILES = [
   "test/startup.test.ts",
   "test/shutdown.test.ts",
   "test/resumeKill.test.ts",
-  "test/pluginHost.test.ts"
+  "test/pluginHost.test.ts",
+  "test/pluginCopies.test.ts"
 ]
 
 /**

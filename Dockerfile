@@ -39,6 +39,7 @@ COPY packages/plugin-api/package.json packages/plugin-api/
 COPY packages/plugin-api/src packages/plugin-api/src
 COPY packages/server/package.json packages/server/
 COPY packages/server/src packages/server/src
+COPY packages/client/src packages/client/src
 COPY --from=build /app/packages/client/dist packages/client/dist
 COPY --from=build /app/packages/server/dist/workers packages/server/dist/workers
 # The two guarded development imports must fail plainly in this image.

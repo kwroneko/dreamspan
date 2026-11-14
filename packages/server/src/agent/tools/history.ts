@@ -636,6 +636,7 @@ const searchChat: RolloutTool<{
   readonly limit?: number
   readonly before_message?: Address
 }> = {
+  source: import.meta.url,
   id: "search_chat",
   label: "Searched the chat",
   explanation: "Search the chat's earlier messages",
@@ -710,6 +711,7 @@ const searchChat: RolloutTool<{
 }
 
 const readMessages: RolloutTool<{ readonly from: Address; readonly count?: number; readonly joined_from?: Address }> = {
+  source: import.meta.url,
   id: "read_messages",
   label: "Read earlier messages",
   explanation: "Read earlier messages in full",
@@ -869,6 +871,7 @@ const expandSummary: RolloutTool<{
   readonly joined?: string
   readonly max_tokens?: number
 }> = {
+  source: import.meta.url,
   id: "expand_summary",
   label: "Opened a summary",
   explanation: "Open a summary for more detail",
@@ -936,6 +939,7 @@ const expandSummary: RolloutTool<{
 }
 
 const searchSummaries: RolloutTool<{ readonly query: string; readonly limit?: number }> = {
+  source: import.meta.url,
   id: "search_summaries",
   label: "Searched the summaries",
   explanation: "Search the summaries",
@@ -1115,6 +1119,7 @@ const overStory = <A>(
     },
   execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput, unknown> = tool.execute
 ): RolloutTool<A & { readonly offset?: number }> => ({
+  source: import.meta.url,
   ...tool,
   id: definition.id,
   storyRead: "positioned",

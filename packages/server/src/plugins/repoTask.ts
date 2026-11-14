@@ -6,6 +6,15 @@ import { confined, limits, validPath } from "./repo.ts"
 import { runPluginChild } from "./process.ts"
 import type { AuthorRequest } from "./authorRepo.ts"
 export type RepoRequest =
+  | {
+      readonly op: "copyBuiltin"
+      readonly owner: string
+      readonly id: string
+      readonly registry: string
+      readonly partId: string
+      readonly key: string
+    }
+  | { readonly op: "compareBuiltin"; readonly owner: string; readonly id: string; readonly commit: string }
   | { readonly op: "author"; readonly owner: string; readonly id: string; readonly request: AuthorRequest }
   | {
       readonly op: "authorCreate"

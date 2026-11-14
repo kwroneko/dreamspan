@@ -4,6 +4,7 @@
 import { ELSE_MARKER, isFalse, trimScoped } from "../expand.ts"
 import { stringHash } from "../hash.ts"
 import type { MacroCall, MacroSpec } from "../registry.ts"
+import { reverseMacro } from "./reverse.ts"
 
 const count = { name: "count", optional: true, integer: true } as const
 
@@ -109,10 +110,28 @@ const repeat = (call: MacroCall, text: string) => {
 const tokens = (value: number | undefined) => (value === undefined ? "" : String(value))
 
 export const utilityMacros: ReadonlyArray<MacroSpec> = [
-  { kind: "directive", name: "space", args: [count], handler: (call) => repeat(call, " ") },
-  { kind: "directive", name: "newline", args: [count], handler: (call) => repeat(call, "\n") },
-  { kind: "directive", name: "noop", handler: () => "" },
   {
+    source: import.meta.url,
+    kind: "directive",
+    name: "space",
+    args: [count],
+    handler: (call) => repeat(call, " ")
+  },
+  {
+    source: import.meta.url,
+    kind: "directive",
+    name: "newline",
+    args: [count],
+    handler: (call) => repeat(call, "\n")
+  },
+  {
+    source: import.meta.url,
+    kind: "directive",
+    name: "noop",
+    handler: () => ""
+  },
+  {
+    source: import.meta.url,
     // Inline, it's removed with the newlines around it after evaluation; scoped, its block
     // is trimmed like any block.
     kind: "directive",
@@ -121,15 +140,27 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
     handler: (call) => (call.isScoped ? (call.args[0] ?? "") : "{{trim}}")
   },
   {
+    source: import.meta.url,
     kind: "directive",
     name: "if",
     args: [{ name: "condition" }, { name: "content" }],
     delayArgResolution: true,
     handler: conditional
   },
-  { kind: "directive", name: "else", handler: () => ELSE_MARKER },
-  { kind: "value", name: "input", handler: (call) => call.context.input ?? "" },
   {
+    source: import.meta.url,
+    kind: "directive",
+    name: "else",
+    handler: () => ELSE_MARKER
+  },
+  {
+    source: import.meta.url,
+    kind: "value",
+    name: "input",
+    handler: (call) => call.context.input ?? ""
+  },
+  {
+    source: import.meta.url,
     kind: "value",
     name: "maxPrompt",
     aliases: ["maxPromptTokens"],
@@ -137,24 +168,22 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
       max === undefined || response === undefined ? "" : String(max - response)
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "maxContext",
     aliases: ["maxContextTokens"],
     handler: (call) => tokens(call.context.maxContextTokens)
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "maxResponse",
     aliases: ["maxResponseTokens"],
     handler: (call) => tokens(call.context.maxResponseTokens)
   },
+  reverseMacro,
   {
-    kind: "directive",
-    name: "reverse",
-    args: [{ name: "value" }],
-    handler: (call) => Array.from(call.args[0]!).reverse().join("")
-  },
-  {
+    source: import.meta.url,
     // The comment's argument is still expanded first, as in ST, so variable writes in a
     // comment take effect.
     kind: "directive",
@@ -164,6 +193,7 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
     handler: () => ""
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "roll",
     args: [{ name: "formula" }],
@@ -173,6 +203,7 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
     handler: roll
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "random",
     volatile: true,
@@ -184,6 +215,7 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
     }
   },
   {
+    source: import.meta.url,
     kind: "value",
     name: "pick",
     list: true,
@@ -192,8 +224,15 @@ export const utilityMacros: ReadonlyArray<MacroSpec> = [
     accepts: oneOfTheChoices,
     handler: pick
   },
-  { kind: "directive", name: "banned", args: [{ name: "word" }], handler: () => "" },
   {
+    source: import.meta.url,
+    kind: "directive",
+    name: "banned",
+    args: [{ name: "word" }],
+    handler: () => ""
+  },
+  {
+    source: import.meta.url,
     kind: "value",
     name: "outlet",
     args: [{ name: "key" }],

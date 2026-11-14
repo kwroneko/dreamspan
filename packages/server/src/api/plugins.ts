@@ -17,6 +17,8 @@ const boundary = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 export const makePluginHandlers = Effect.gen(function* () {
   const host = yield* PluginHost
   return {
+    ListBuiltinParts: () => boundary(Effect.flatMap(CurrentUser, (user) => host.builtinParts(user))),
+    CopyBuiltin: (input) => boundary(Effect.flatMap(CurrentUser, (user) => host.copyBuiltin(user, input))),
     ListPlugins: () => boundary(Effect.flatMap(CurrentUser, (user) => host.list(user))),
     GetPlugin: (target) => boundary(Effect.flatMap(CurrentUser, (user) => host.get(user, target))),
     CreatePlugin: (input) => boundary(Effect.flatMap(CurrentUser, (user) => host.create(user, input, input.files))),

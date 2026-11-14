@@ -19,13 +19,21 @@ try {
   const request = JSON.parse(await readFile(join(folder, "request.json"), "utf8")) as RepoRequest
   const repo = pluginFolder(dataDir, request.owner, request.id)
   let result: unknown = null
-  if (request.op === "authorCreate")
+  if (request.op === "copyBuiltin") {
+    const { copyBuiltin } = await import("./copy.ts")
+    result = await copyBuiltin(dataDir, request.registry, request.partId, request.id, request.owner, request.key)
+  } else if (request.op === "authorCreate")
     result = await createAuthorRepo(dataDir, request.owner, request.id, request.files, request.key)
   else if (request.op === "save")
     result = await saveFiles(dataDir, request.owner, request.id, request.files, request.initial, request.message)
   else {
     await confined(dataDir, repo)
     switch (request.op) {
+      case "compareBuiltin": {
+        const { compareBuiltin } = await import("./copy.ts")
+        result = await compareBuiltin(dataDir, request.owner, request.id, request.commit)
+        break
+      }
       case "author":
         result = await authorRepo(dataDir, request.owner, request.id, request.request)
         break

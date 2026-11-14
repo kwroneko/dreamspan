@@ -57,6 +57,20 @@ export const PluginData = Schema.Struct({
 })
 const PluginTarget = { scope: PluginScope, id: PluginId }
 const PluginVersion = { ...PluginTarget, commit: PluginCommit }
+export const BuiltinPart = Schema.Struct({
+  registry: Schema.String,
+  id: Schema.String,
+  label: Schema.String,
+  copyable: Schema.Boolean,
+  reason: Schema.String,
+  replacedBy: Schema.Array(Schema.Struct(PluginTarget))
+})
+export const BuiltinComparison = Schema.Struct({
+  changed: Schema.Boolean,
+  available: Schema.Boolean,
+  files: Schema.Array(Schema.Struct({ path: Schema.String, before: Schema.String, current: Schema.String }))
+})
+export const CopyBuiltinResult = Schema.Struct({ ...PluginVersion, report: PluginReport })
 export const PluginView = Schema.Struct({
   ...PluginTarget,
   commit: Schema.NullOr(PluginCommit),
@@ -67,6 +81,7 @@ export const PluginView = Schema.Struct({
 export const PluginDetails = Schema.Struct({
   ...PluginView.fields,
   revision: Schema.Int,
+  original: Schema.optionalKey(Schema.NullOr(BuiltinComparison)),
   versions: Schema.Array(
     Schema.Struct({ commit: PluginCommit, message: Schema.String, manifest: Schema.NullOr(PluginManifest) })
   ),
@@ -75,6 +90,12 @@ export const PluginDetails = Schema.Struct({
 const PluginFiles = Schema.Record(Schema.String, Schema.String)
 const Error = Schema.Union([PluginRejected, Forbidden, ServerError, StaleWrite])
 export class PluginApi extends RpcGroup.make(
+  Rpc.make("ListBuiltinParts", { success: Schema.Array(BuiltinPart), error: Error }),
+  Rpc.make("CopyBuiltin", {
+    payload: { registry: Schema.String, id: Schema.String, pluginId: PluginId },
+    success: CopyBuiltinResult,
+    error: Error
+  }),
   Rpc.make("ListPlugins", { success: Schema.Array(PluginView), error: Error }),
   Rpc.make("GetPlugin", { payload: PluginTarget, success: PluginDetails, error: Error }),
   // Local source only; registry fetch/merge and archive imports belong to later units.

@@ -1,6 +1,8 @@
 // Each unexposed RPC is an explicit decision. New operations must be classified here or exposed.
 export const operationExclusions: Readonly<Record<string, string>> = {
   GoBackPlugin: "Plugin management stays user-only until P4 supplies its approval workflow.",
+  ListBuiltinParts: "Dedicated plugin authoring tools retain source and permission boundaries.",
+  CopyBuiltin: "Dedicated plugin authoring tools retain inertness, receipts and exact-version consent.",
   ListPlugins: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
   GetPlugin: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",
   CreatePlugin: "Plugin management is user-only in P1; P4 supplies scoped tools and explicit consent.",

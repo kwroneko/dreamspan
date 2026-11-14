@@ -15,11 +15,13 @@ import { checkPlugin } from "../../plugins/check.ts"
 import { appSource, pluginApiDocs } from "../../plugins/reference.ts"
 import { argsDigest } from "../approvals.ts"
 import { budgetResult, ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
+import { builtinCopy } from "../../plugins/builtins.ts"
 
 export const PLUGIN_TOOLS = [
   "plugin_list",
   "plugin_api",
   "plugin_create",
+  "plugin_copy_builtin",
   "plugin_read",
   "plugin_search",
   "plugin_write",
@@ -37,6 +39,7 @@ const labels: Readonly<Record<string, string>> = {
   plugin_list: "Listed your plugins",
   plugin_api: "Read the plugin docs",
   plugin_create: "Created a plugin",
+  plugin_copy_builtin: "Copied a built-in part",
   plugin_read: "Read a plugin file",
   plugin_search: "Searched a plugin",
   plugin_write: "Wrote a plugin file",
@@ -216,6 +219,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
       ? "plugins.apply"
       : "plugins.write"
     built.push({
+      source: import.meta.url,
       id,
       effect,
       capability,
@@ -295,6 +299,99 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           )
         }))
       )
+  )
+  add(
+    "plugin_copy_builtin",
+    "library",
+    {
+      registry: Type.Optional(str()),
+      id: Type.Optional(str()),
+      pluginId: Type.Optional(Type.String({ pattern: "^[a-z][a-z0-9-]{0,63}$" }))
+    },
+    "Without arguments, list built-in parts and copy support. With registry and id, create, commit and check an editable copy. Nothing is enabled; plugin_enable still asks.",
+    (ctx, args, actor) =>
+      Effect.gen(function* () {
+        if (args.registry === undefined && args.id === undefined)
+          return { text: data(JSON.stringify(yield* host.builtinParts(actor))) }
+        const part = builtinCopy(String(args.registry), String(args.id))
+        if (!part)
+          return yield* refused("This part does not have a copy adapter yet. Read plugin_api for supported parts.")
+        const target: Target = {
+          scope: part.side !== "client" ? "instance" : "user",
+          id:
+            typeof args.pluginId === "string"
+              ? args.pluginId
+              : part.id.replace(/^notifications\./, "").replaceAll("_", "-") + "-copy"
+        }
+        const owner = ownerOf(actor, target)
+        const result = yield* attempt(() =>
+          repoTask<AuthorResult & { unsupported?: ReadonlyArray<string> }>(dataDir, {
+            op: "copyBuiltin",
+            owner,
+            id: target.id,
+            registry: part.registry,
+            partId: part.id,
+            key: operationKey(ctx, args)
+          })
+        )
+        if ("unsupported" in result)
+          return {
+            isError: true,
+            text: data("This built-in needs an adapter for: " + result.unsupported!.join(", ") + ".")
+          }
+        const snapshot = yield* repo(owner, target.id, { action: "checkpoint", commit: result.commit! })
+        const report = yield* attempt(() =>
+          checkPlugin(dataDir, owner, target.id, result.commit!, { working: false, admin: actor.role === "admin" })
+        )
+        if (report.ok && actor.role === "admin")
+          checked.set(checkKey(owner, target.id), { tree: snapshot.tree!, commit: result.commit! })
+        const saved = yield* record(
+          ctx,
+          data(JSON.stringify({ plugin: (owner ? "" : "instance:") + target.id, ...result, report })),
+          [
+            effects("plugin.create", target, `Made an editable copy of ${part.label}`, {
+              creation: true,
+              commit: result.commit
+            })
+          ]
+        )
+        const selected = yield* attempt(() =>
+          repoTask<Pick<typeof PluginDetails.Type, "manifest">>(dataDir, {
+            op: "info",
+            owner,
+            id: target.id,
+            selected: result.commit!
+          })
+        )
+        return {
+          ...saved,
+          ...(selected.manifest
+            ? {
+                presentation: { title: selected.manifest.name, subtitle: `Version ${result.commit!.slice(0, 8)}` }
+              }
+            : {})
+        }
+      }),
+    {
+      describe: (ctx, args) =>
+        Effect.gen(function* () {
+          const actor = yield* proof(ctx, "plugins.write", false, true)
+          if (args.registry === undefined && args.id === undefined) return { title: "List built-in parts?", rows: [] }
+          const part = builtinCopy(String(args.registry), String(args.id))
+          if (!part)
+            return yield* refused("This part does not have a copy adapter yet. Read plugin_api for supported parts.")
+          ownerOf(actor, { scope: part.side === "client" ? "user" : "instance", id: part.id })
+          const name = `${part.label} (editable)`
+          return {
+            title: `Make an editable copy of ${part.label}?`,
+            presentation: { title: name },
+            rows: [
+              { label: "Plugin", value: name },
+              { label: "Starts", value: "Off. Turning it on requires a separate review." }
+            ]
+          }
+        })
+    }
   )
   add(
     "plugin_create",

@@ -38,6 +38,27 @@ export const activate: Activate = host => { host.registries.routes!.register({ i
 export const activate: Activate = host => { host.registries.appBanners!.register({ id: "example.banner", order: 80, component: () => <p>Example notice</p> }) }`
   },
   {
+    topic: "noticeChannels",
+    side: "client",
+    types: ["NoticeChannelEntry", "ClientRegistry"],
+    description:
+      "client:noticeChannels. Optional completion sounds and settings. Callbacks receive no account data. A failing replacement is off in this tab and the original returns. Use plugin_copy_builtin to start from the shipped sound.",
+    example: `import {type Activate} from "@rp/plugin-api/client"
+export const activate: Activate = host => {host.registries.noticeChannels!.register({id:"example.alert",component:()=> <p>Example alert</p>,activate:()=>{},receive:()=>{}})}`
+  },
+  {
+    topic: "presence",
+    side: "server",
+    types: ["PresenceArgs", "PresenceContext", "PresenceTool"],
+    surfaces: ["server:rolloutTools", "server:presence"],
+    replaces: ["rolloutTools:set_presence"],
+    description:
+      "server:rolloutTools plus server:presence, replaces rolloutTools:set_presence. Only this tool receives causal cast data and a validated presence write, preserving receipts and narrator rules. Other tools receive data-only context. Read the shipped copy before editing it. Full server trust still applies.",
+    example: `import {Effect,type PresenceTool,type Activate} from "@rp/plugin-api/server"
+const tool:PresenceTool={id:"set_presence",label:"Presence",description:"Marks presence",effect:"chat_state",parameters:{type:"object",properties:{}},summarize:()=>"Presence",execute:context=>Effect.map(context.cast,cards=>({text:cards.map(c=>c.name).join(", ")}))}
+export const activate:Activate=host=>host.registries.rolloutTools!.register(tool)`
+  },
+  {
     topic: "rolloutTools",
     side: "server",
     types: ["PluginToolContext", "PluginTool"],

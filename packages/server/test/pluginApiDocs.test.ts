@@ -17,9 +17,9 @@ for (const doc of pluginDocumentation)
         server: side === "server" ? entry : null,
         worker: side === "worker" ? entry : null,
         client: side === "client" ? entry : null,
-        surfaces: [side + ":" + doc.topic],
+        surfaces: "surfaces" in doc ? doc.surfaces : [side + ":" + doc.topic],
         overrides: [],
-        replaces: [],
+        replaces: "replaces" in doc ? doc.replaces : [],
         base: null,
         network: false
       }),

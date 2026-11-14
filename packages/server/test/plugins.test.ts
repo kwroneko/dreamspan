@@ -72,13 +72,13 @@ describe("plugin source confinement", () => {
   })
 })
 it("gives frozen declared handles, owns registrations and restores core entries", async () => {
-  const registry = makeRegistry([{ id: "core", value: { text: "original" } }]),
+  const registry = makeRegistry([{ id: "reverse", value: { text: "original" } }]),
     claims = new Map<string, string>()
   const scope = Effect.runSync(Scope.make())
   const entry = { id: "added", value: { text: "first" } }
   const a = declaredHandles(
-    { ...manifest(), surfaces: ["server:macros"], replaces: ["macros:core"] },
-    "server",
+    { ...manifest(), surfaces: ["worker:macros"], replaces: ["macros:reverse"] },
+    "worker",
     { macros: registry },
     scope,
     claims,
@@ -90,11 +90,11 @@ it("gives frozen declared handles, owns registrations and restores core entries"
   entry.value.text = "mutated"
   expect(registry.get("added")?.value.text).toBe("first")
   expect(a.macros.get("added")).toEqual({ id: "added" })
-  await Effect.runPromise(Scope.provide(a.macros.disable("core"), scope))
+  await Effect.runPromise(Scope.provide(a.macros.disable("reverse"), scope))
   const bscope = Effect.runSync(Scope.make())
   const b = declaredHandles(
-    { ...manifest("other"), surfaces: ["server:macros"], replaces: ["macros:added"] },
-    "server",
+    { ...manifest("other"), surfaces: ["worker:macros"], replaces: ["macros:added"] },
+    "worker",
     { macros: registry },
     bscope,
     claims,
@@ -105,7 +105,7 @@ it("gives frozen declared handles, owns registrations and restores core entries"
   ).rejects.toThrow()
   await Effect.runPromise(Scope.close(scope, Exit.void))
   await Effect.runPromise(Scope.close(bscope, Exit.void))
-  expect(registry.get("core")?.value.text).toBe("original")
+  expect(registry.get("reverse")?.value.text).toBe("original")
   expect(registry.get("added")).toBeUndefined()
 })
 it("does not pass live clients, credentials, env or another plugin's objects to handlers", () => {

@@ -1,3 +1,4 @@
+import { PluginFault } from "@rp/shared/pluginFault.ts"
 import { workerStorage } from "./workerStorage.ts"
 // Adapter loaded through StateModules/AssemblyModules in both source and bundled workers.
 import { Effect, Scope, Context } from "effect"
@@ -33,7 +34,7 @@ export const installWorkerState =
         }
       }
       const handles = declaredHandles(manifest, "worker", registries, scope, claims, () => {
-        throw new Error(`rp-plugin-fault:${manifest.id}`)
+        throw new PluginFault(manifest.id)
       })
       yield* activate(
         Object.freeze({
@@ -45,7 +46,7 @@ export const installWorkerState =
       ).pipe(
         Effect.setContext(Context.make(Scope.Scope, scope)),
         Effect.timeout("5 seconds"),
-        Effect.catchCause(() => Effect.die(new Error(`rp-plugin-fault:${manifest.id}`)))
+        Effect.catchCause(() => Effect.die(new PluginFault(manifest.id)))
       )
     })
 export const installWorkerAssembly =
@@ -68,7 +69,7 @@ export const installWorkerAssembly =
       registries.stateKeys = recording()
       const handles = {
         ...declaredHandles(manifest, "worker", registries, scope, claims, () => {
-          throw new Error(`rp-plugin-fault:${manifest.id}`)
+          throw new PluginFault(manifest.id)
         })
       }
 
@@ -82,6 +83,6 @@ export const installWorkerAssembly =
       ).pipe(
         Effect.setContext(Context.make(Scope.Scope, scope)),
         Effect.timeout("5 seconds"),
-        Effect.catchCause(() => Effect.die(new Error(`rp-plugin-fault:${manifest.id}`)))
+        Effect.catchCause(() => Effect.die(new PluginFault(manifest.id)))
       )
     })
