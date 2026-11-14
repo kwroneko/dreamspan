@@ -4,7 +4,18 @@ import { parentPort, workerData } from "node:worker_threads"
 import { uuidv7 } from "../../../shared/src/id.ts"
 import { syntheticMarkdown } from "../../src/dev/syntheticText.ts"
 import { rebuildForkLabels } from "../../src/db/forkLabels.ts"
-const { file, chats, branches = 200 } = workerData as { file: string; chats: Array<string>; branches?: number }
+const {
+  file,
+  chats,
+  branches = 200,
+  shape: form = "default"
+} = workerData as { file: string; chats: Array<string>; branches?: number; shape?: "default" | "owner" }
+/**
+ * "owner": the owner's larger shape (hundreds of branches of thousands of messages, dense swipes):
+ * each branch is 1,000 messages from a base spread over the whole path, swiped as the main path is.
+ */
+const owner = form === "owner"
+const branchLength = owner ? 1_000 : 100
 /** Four-version sentinels plus dense 20–50-swipe messages on every tenth main-path message. */
 const versionsAt = (depth: number) => (depth % 50 === 1 ? 4 : depth % 10 === 3 ? 20 + (depth % 31) : 1)
 const htmlAt = (depth: number) => depth % 997 === 0
@@ -32,7 +43,7 @@ const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => 
     let selected = ""
     for (
       let ordinal = 0;
-      ordinal < (model ? (forkId === chatId ? versionsAt(depth) : 20 + (depth % 31)) : 1);
+      ordinal < (model ? (forkId === chatId || owner ? versionsAt(depth) : 20 + (depth % 31)) : 1);
       ordinal++
     ) {
       const id = uuidv7()
@@ -74,11 +85,12 @@ const fill = (db: DatabaseSync, chatId: string, count: number, seed: number) => 
     )
     const tip = db.prepare("UPDATE forks SET tip_slot_id=? WHERE id=?")
     for (let branch = 1; branch < branches; branch++) {
-      const base = 2999 + (branch % 10) * 200
+      // Owner shape: bases spread from the start to just behind the leaf, read or not.
+      const base = owner ? Math.floor((branch * (count - 3)) / branches) : 2999 + (branch % 10) * 200
       const forkId = `${chatId}-branch-${branch}`
       let leaf = slots[base]!
       fork.run(forkId, chatId, chatId, leaf, leaf, `Voyage branch ${branch}`, start + branch)
-      for (let n = 1; n <= 100; n++) leaf = message(base + n, leaf, branch, forkId)
+      for (let n = 1; n <= branchLength; n++) leaf = message(base + n, leaf, branch, forkId)
       tip.run(leaf, forkId)
     }
   }

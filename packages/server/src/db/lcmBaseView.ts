@@ -36,6 +36,3 @@ export const messageView = (sql: SqlClient.SqlClient, fork: string | null) =>
     memo?.set(fork, effective)
     return effective
   })
-
-export const baseView = (sql: SqlClient.SqlClient, fork: string | null) =>
-  Effect.map(messageView(sql, fork), (rows) => rows.length === 0)

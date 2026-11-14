@@ -1,4 +1,4 @@
-import { snapshotCache } from "./lcmSnapshotCache.ts"
+import { factStore } from "./lcmFactStore.ts"
 import { lineageCache } from "./lcmLineageCache.ts"
 import { BaseViews, messageView } from "./lcmBaseView.ts"
 import { pathSegments } from "./pathSegments.ts"
@@ -267,19 +267,49 @@ interface SummaryReadMemo {
   readonly layers: Map<string, { summaries: Array<Summary>; cursor: Summary["lastSlotId"] | null; cursorDepth: number }>
   readonly facts: Array<SummaryFacts>
   readonly commit: Array<() => void>
+  /**
+   * By fork and id: what a level-1 summary's range sends on the path, as maintenance signs it
+   * (db/lcmMaintain.ts). Kept with the fork's facts: every slot of the range is an input, so the
+   * LCM stamp moves with any change to it.
+   */
+  readonly ranges: Map<string, unknown>
 }
 export const SummaryReads = Context.Reference<SummaryReadMemo | null>("rp/SummaryReads", { defaultValue: () => null })
 
-interface FactSnapshot extends Pick<SummaryReadMemo, "summaries" | "projections" | "valid" | "facts"> {
-  readonly metadata: string
-  readonly inputState: string
-  readonly eligible: boolean
+type Proof = { count: number; valid: number | null; fresh: number }
+/** A path's summaries as kept for its leaf: those ending on it, with the summaries they pin. */
+interface KeptLeaf {
+  readonly leaf: string
+  readonly chain: string
+  readonly depth: number
+  readonly ids: ReadonlyArray<string>
+}
+/**
+ * What a connection keeps of one fork's summaries while the chat's LCM stamp holds
+ * (db/lcmFactStore.ts): each fact is the fork's view of one summary, whatever the leaf, so a
+ * plan at another leaf of the fork reads only the summaries the kept ones lack.
+ */
+interface KeptFacts {
+  readonly rows: ReadonlyMap<string, SummaryRow>
+  readonly proofs: ReadonlyMap<string, Proof>
+  readonly inputs: ReadonlyMap<string, ReadonlyArray<InputRow>>
+  readonly children: ReadonlyMap<string, ReadonlyArray<ChildRow>>
+  /** Summaries whose freshness folds from these facts alone (no audience, images or application). */
+  readonly pure: ReadonlySet<string>
+  readonly valid: ReadonlyMap<string, boolean>
+  /** By summary id: projections, and full summaries, of pure summaries only. */
+  readonly projections: ReadonlyMap<string, Summary>
+  readonly summaries: ReadonlyMap<string, Summary>
+  readonly ranges: ReadonlyMap<string, unknown>
+  /** The most recent leaves first, at most `KEPT_LEAVES`. */
+  readonly leaves: ReadonlyArray<KeptLeaf>
+  /** Every summary of the chat with a greater rowid was sealed after these were read. */
+  readonly floor: number
   readonly characters: number
 }
-const metadataOf = (rows: ReadonlyArray<SummaryRow>) =>
-  JSON.stringify(rows.toSorted((a, b) => a.id.localeCompare(b.id)))
-const inputStateOf = (ids: ReadonlyArray<string>, proofs: ReadonlyMap<string, { fresh: number }>) =>
-  JSON.stringify(ids.toSorted().map((id) => [id, proofs.get(id)?.fresh ?? 1]))
+const KEPT_LEAVES = 4
+const weightOf = (row: SummaryRow) => row.content.length + 400
+const fullWeight = (summary: Summary) => 64 * summary.inputs.length + 64
 
 /** Runs `effect` keeping what it reads of summaries for the rest of it (`SummaryReads`). */
 export const readingOnce = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -293,6 +323,7 @@ export const readingOnce = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
             valid: new Map(),
             facts: [],
             layers: new Map(),
+            ranges: new Map(),
             commit: []
           }
           return Effect.provideService(
@@ -307,32 +338,66 @@ export const readingOnce = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         })
   )
 
-/** Batch the proofs for an ordinary primary path in this read transaction only. */
-export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chatId: string, leaf: string) =>
+/**
+ * The summaries a path's layer can use and those they pin, as ids: every sealed summary ending on
+ * the path to `leaf`, then their parts, recursively. With `kept`, only what the kept leaf nearest
+ * up the path lacks is read: the summaries ending past it, and those sealed since (`top`).
+ */
+const pathSummaryIds = (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  leaf: string,
+  kept: KeptFacts | undefined,
+  top: number
+) =>
   Effect.gen(function* () {
-    const kept = yield* SummaryReads
-    const fork = yield* viewAt(sql, chatId, leaf)
-    if (!kept || kept.facts.some((f) => f.fork === fork)) return
-    if ((yield* lcmView(sql, chatId, fork)).pieces !== null) return
-    const retained = yield* lineageCache<ChildRow>(sql)
-    // Corruption fixtures with relaxed storage invariants keep the independent row-by-row proof.
-    if (!retained) return
-    const snapshot = retained
-      ? yield* snapshotCache<FactSnapshot>(
-          sql,
-          JSON.stringify([userId, chatId, fork, leaf]),
-          JSON.stringify([userId, chatId, fork])
+    const closure = (ends: ReadonlyArray<string>) =>
+      ends.length === 0
+        ? Effect.succeed([] as Array<string>)
+        : Effect.map(
+            sql<{ id: string }>`WITH RECURSIVE wanted(id) AS (
+              SELECT value FROM json_each(${JSON.stringify(ends)})
+              UNION SELECT p.parent_id FROM wanted w CROSS JOIN summary_parents p ON p.summary_id=w.id
+            ) SELECT id FROM wanted`,
+            (rows) => rows.map((r) => r.id)
+          )
+    const [here] = yield* sql<{ chain_id: string; depth: number }>`SELECT chain_id,depth FROM slots
+      WHERE id=${leaf} AND chat_id=${chatId}`
+    const exact = kept?.leaves.find((l) => l.leaf === leaf)
+    if (here && exact && top <= kept!.floor) return { here, ids: exact.ids }
+    if (here && kept) {
+      const segments = yield* sql<{ chain_id: string; lo: number; hi: number }>`${pathSegments(sql, chatId, leaf, null)}
+        SELECT chain_id,lo,hi FROM segments`
+      const onPath = (chain: string, depth: number) =>
+        segments.some((g) => g.chain_id === chain && g.lo <= depth && depth <= g.hi)
+      const base =
+        exact ??
+        kept.leaves
+          .filter((l) => l.depth <= here.depth && onPath(l.chain, l.depth))
+          .reduce<KeptLeaf | undefined>((best, l) => (best === undefined || l.depth > best.depth ? l : best), undefined)
+      if (base) {
+        // Summaries ending past the kept leaf: only the segments reaching below its depth.
+        const past =
+          base.depth < here.depth
+            ? (yield* sql<{ id: string }>`${pathSegments(sql, chatId, leaf, here.depth - base.depth)}
+              SELECT s.id FROM segments g CROSS JOIN slots p ON p.chain_id=g.chain_id AND p.depth BETWEEN max(g.lo,g.floor) AND g.hi
+                CROSS JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id=p.id
+              WHERE s.chat_id=${chatId} AND s.sealed=1`).map((r) => r.id)
+            : []
+        const sealed =
+          top > kept.floor
+            ? (yield* sql<{ id: string; chain_id: string; depth: number }>`SELECT s.id,b.chain_id,b.depth
+                FROM summaries s JOIN slots b ON b.id=s.last_slot_id
+                WHERE s.chat_id=${chatId} AND s.rowid>${kept.floor} AND s.sealed=1`)
+                .filter((r) => onPath(r.chain_id, r.depth))
+                .map((r) => r.id)
+            : []
+        const known = new Set(base.ids)
+        const added = (yield* closure([...past, ...sealed].filter((id) => !known.has(id)))).filter(
+          (id) => !known.has(id)
         )
-      : undefined
-    const restore = (value: FactSnapshot) => {
-      for (const [id, data] of value.summaries) kept.summaries.set(id, data)
-      for (const [id, data] of value.projections) kept.projections.set(id, data)
-      for (const [id, data] of value.valid) kept.valid.set(id, data)
-      kept.facts.push(...value.facts)
-    }
-    if (snapshot?.hit) {
-      restore(snapshot.hit)
-      return
+        return { here, ids: added.length ? [...base.ids, ...new Set(added)] : base.ids }
+      }
     }
     // Find only endpoints on this path, then their pinned descendants. No full path is
     // materialized in JavaScript: ordered input/child parent links prove the same chains.
@@ -342,7 +407,25 @@ export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chat
         WHERE s.chat_id=${chatId} AND s.sealed=1
       UNION SELECT p.parent_id FROM wanted w CROSS JOIN summary_parents p ON p.summary_id=w.id
     ) SELECT id FROM wanted`).map((r) => r.id)
-    const rows = yield* summaryRows(sql, userId, ids, fork)
+    return { here, ids }
+  })
+
+/** Batch the proofs for an ordinary primary path, reusing what this connection kept of its fork. */
+export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chatId: string, leaf: string) =>
+  Effect.gen(function* () {
+    const kept = yield* SummaryReads
+    const fork = yield* viewAt(sql, chatId, leaf)
+    if (!kept || kept.facts.some((f) => f.fork === fork)) return
+    if ((yield* lcmView(sql, chatId, fork)).pieces !== null) return
+    const retained = yield* lineageCache<ChildRow>(sql)
+    // Corruption fixtures with relaxed storage invariants keep the independent row-by-row proof.
+    if (!retained) return
+    const store = yield* factStore<KeptFacts>(sql, chatId, JSON.stringify([userId, chatId, fork]))
+    const prior = store?.hit
+    const { here, ids } = yield* pathSummaryIds(sql, chatId, leaf, prior, store?.top ?? 0)
+    // Only summaries the kept facts lack are read; the kept ones are this fork's view of them still.
+    const missing = prior ? ids.filter((id) => !prior.rows.has(id)) : ids
+    const rows = missing.length ? yield* summaryRows(sql, userId, missing, fork) : []
     const stamp = (r: SummaryRow) =>
       JSON.stringify([
         r.chat_id,
@@ -353,9 +436,10 @@ export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chat
         r.selected_revision_id,
         r.status
       ])
+    if (prior) for (const [id, data] of prior.valid) kept.valid.set(id, data)
     const cached = new Map(
       rows.flatMap((r) => {
-        const entry = retained?.get(r.id, stamp(r))
+        const entry = retained.get(r.id, stamp(r))
         if (entry?.valid !== undefined) kept.valid.set(r.id, entry.valid)
         return entry ? [[r.id as string, entry] as const] : []
       })
@@ -365,54 +449,25 @@ export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chat
     const pure = rows
       .filter((r) => r.origin !== "changeset" && r.audience_json === null && r.images_json === null)
       .map((r) => r.id)
-    const pureIds = new Set<string>(pure)
-    const changes = yield* messageView(sql, fork)
+    const pureIds = new Set<string>([...(prior?.pure ?? []), ...pure])
+    const changes = rows.length ? yield* messageView(sql, fork) : []
     const base = changes.length === 0
     const simple = changes.every((r) => r.kind !== "hide_range" && (r.kind !== "replace" || r.summaries_done === 0))
     const overrideJson = simple && !base ? JSON.stringify(changes) : undefined
-    const metadata = metadataOf(rows)
-    const previous = snapshot?.previous
-    if (previous?.eligible && previous.metadata === metadata) {
-      const checked = yield* freshInputs(sql, pure, fork, undefined, base, overrideJson)
-      const state = inputStateOf(pure, new Map(checked.map((p) => [p.summary_id, p])))
-      if (state === previous.inputState) {
-        restore(previous)
-        kept.commit.push(() => snapshot!.save(previous, previous.characters))
-        return
-      }
-    }
+    const unproven = pure.filter((id) => cached.get(id)?.valid === undefined)
+    const proven = pure.filter((id) => cached.get(id)?.valid !== undefined)
     const proofs = [
-      ...(yield* summaryProofs(
-        sql,
-        pure.filter((id) => cached.get(id)?.valid === undefined),
-        fork,
-        undefined,
-        base,
-        overrideJson
-      )),
-      ...(yield* freshInputs(
-        sql,
-        pure.filter((id) => cached.get(id)?.valid !== undefined),
-        fork,
-        undefined,
-        base,
-        overrideJson
-      ))
+      ...(unproven.length ? yield* summaryProofs(sql, unproven, fork, undefined, base, overrideJson) : []),
+      ...(proven.length ? yield* freshInputs(sql, proven, fork, undefined, base, overrideJson) : [])
     ]
-    const inputs = yield* summaryInputs(
-      sql,
-      plain.filter((id) => !pureIds.has(id)),
-      fork,
-      undefined,
-      base
-    )
+    const impure = plain.filter((id) => !pureIds.has(id))
+    const inputs = impure.length ? yield* summaryInputs(sql, impure, fork, undefined, base) : []
+    const unread = missing.filter((id) => !cached.has(id))
     const children = [
-      ...(yield* summaryChildren(
-        sql,
-        ids.filter((id) => !cached.has(id))
-      )),
+      ...(unread.length ? yield* summaryChildren(sql, unread) : []),
       ...[...cached.values()].flatMap((entry) => entry.children)
     ]
+    // Kept arrays are shared with the store, so new rows group into new arrays only.
     const group = <A extends { summary_id: string }>(items: ReadonlyArray<A>) => {
       const groups = new Map<string, Array<A>>()
       for (const item of items) {
@@ -424,14 +479,14 @@ export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chat
     }
     const facts: SummaryFacts = {
       fork,
-      rows: new Map(rows.map((r) => [r.id, r])),
-      proofs: new Map(proofs.map((p) => [p.summary_id, p])),
-      inputs: group(inputs),
-      children: group(children)
+      rows: new Map([...(prior?.rows ?? []), ...rows.map((r) => [r.id, r] as const)]),
+      proofs: new Map([...(prior?.proofs ?? []), ...proofs.map((p) => [p.summary_id, p] as const)]),
+      inputs: new Map([...(prior?.inputs ?? []), ...group(inputs)]),
+      children: new Map([...(prior?.children ?? []), ...group(children)])
     }
     // Empty arrays are facts too; an absent changeset entry deliberately requests the slow proof.
     for (const id of plain) if (!pureIds.has(id) && !facts.inputs.has(id)) facts.inputs.set(id, [])
-    for (const id of ids) if (!facts.children.has(id)) facts.children.set(id, [])
+    for (const id of missing) if (!facts.children.has(id)) facts.children.set(id, [])
     kept.facts.push(facts)
     const visiting = new Set<string>()
     const valid = (id: string): boolean | undefined => {
@@ -484,14 +539,19 @@ export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chat
       if (answer !== undefined) kept.valid.set(id, answer)
       return answer
     }
-    for (const id of ids) valid(id)
+    for (const id of missing) valid(id)
     kept.commit.push(() => {
       for (const row of rows) {
         const old = cached.get(row.id)
         const checked = kept.valid.get(row.id)
-        if (!old || old.valid !== checked) retained?.set(row.id, stamp(row), facts.children.get(row.id) ?? [], checked)
+        if (!old || old.valid !== checked) retained.set(row.id, stamp(row), facts.children.get(row.id) ?? [], checked)
       }
     })
+    if (prior) {
+      for (const [id, data] of prior.projections) kept.projections.set(`${fork}\u0000${id}`, data)
+      for (const [id, data] of prior.summaries) kept.summaries.set(`${fork}\u0000${id}`, data)
+      for (const [id, data] of prior.ranges) kept.ranges.set(`${fork}\u0000${id}`, data)
+    }
     // Pure rows need no asynchronous per-summary work. Fold their freshness and DTOs once,
     // leaving audience/image/application proofs to readSummary when any is required.
     const materialize = (id: string): Summary | undefined => {
@@ -542,33 +602,84 @@ export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chat
       kept.projections.set(key, summary)
       return summary
     }
-    for (const id of ids) materialize(id)
-    if (snapshot)
+    for (const id of missing) materialize(id)
+    if (store)
       kept.commit.push(() => {
-        const scoped = kept.facts.filter((f) => f.fork === fork)
-        const ownedIds = new Set(scoped.flatMap((f) => [...f.rows.keys()]))
-        const inView = ([key, value]: [string, Summary]) => key.startsWith(`${fork}\u0000`) && ownedIds.has(value.id)
-        const value: FactSnapshot = {
-          summaries: new Map([...kept.summaries].filter(inView)),
-          projections: new Map([...kept.projections].filter(inView)),
-          valid: new Map([...kept.valid].filter(([id]) => ownedIds.has(id))),
-          facts: scoped,
-          metadata,
-          inputState: inputStateOf(pure, facts.proofs),
-          eligible: pure.length === rows.length,
-          characters: 0
+        // Only this fork's pure summaries are kept whole: the others' freshness reads more than facts.
+        const prefix = `${fork}\u0000`
+        const own = <A>(entries: Map<string, A>) => {
+          const out = new Map<string, A>()
+          for (const [key, value] of entries)
+            if (key.startsWith(prefix)) {
+              const id = key.slice(prefix.length)
+              if (pureIds.has(id) && facts.rows.has(id)) out.set(id, value)
+            }
+          return out
         }
-        const characters =
-          metadata.length +
-          value.inputState.length +
-          JSON.stringify([
-            [...value.summaries],
-            [...value.projections],
-            [...value.valid],
-            value.facts.map((f) => [f.fork, [...f.rows], [...f.inputs], [...f.children], [...f.proofs]])
-          ]).length
-        snapshot.save({ ...value, characters }, characters)
+        const projections = own(kept.projections)
+        const summaries = own(kept.summaries)
+        const ranges = own(kept.ranges)
+        let characters = prior?.characters ?? 0
+        for (const [id, range] of ranges) if (!prior?.ranges.has(id)) characters += JSON.stringify(range).length
+        for (const row of rows) characters += weightOf(row)
+        for (const [id, summary] of summaries) if (!prior?.summaries.has(id)) characters += fullWeight(summary)
+        characters += 64 * inputs.length + 256 * children.length
+        const leaves = here
+          ? [
+              { leaf, chain: here.chain_id, depth: here.depth, ids },
+              ...(prior?.leaves ?? []).filter((l) => l.leaf !== leaf)
+            ].slice(0, KEPT_LEAVES)
+          : (prior?.leaves ?? [])
+        // A kept leaf costs its ids, which list the path's summaries.
+        const leafCharacters = (list: ReadonlyArray<KeptLeaf>) => list.reduce((n, l) => n + 40 * l.ids.length, 0)
+        characters += leafCharacters(leaves) - leafCharacters(prior?.leaves ?? [])
+        store.save(
+          {
+            rows: facts.rows,
+            proofs: facts.proofs,
+            inputs: facts.inputs,
+            children: facts.children,
+            pure: pureIds,
+            valid: new Map([...kept.valid].filter(([id]) => facts.rows.has(id))),
+            projections,
+            summaries,
+            ranges,
+            leaves,
+            floor: Math.max(store.top, prior?.floor ?? 0),
+            characters
+          },
+          characters
+        )
       })
+  })
+
+/**
+ * Completes the primed projections of pure summaries `ids` with their inputs in one read, as
+ * `readSummary` would one summary at a time, so a pass over a whole path reads them once.
+ * Only for a fork that shows no inserted slots, whose summaries `primeSummaryReads` read.
+ */
+export const completeSummaries = (sql: SqlClient.SqlClient, chatId: string, leaf: string, ids: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const kept = yield* SummaryReads
+    if (!kept) return
+    const fork = yield* viewAt(sql, chatId, leaf)
+    const key = (id: string) => `${fork}\u0000${id}`
+    const facts = kept.facts.find((f) => f.fork === fork)
+    if (!facts) return
+    const wanted = ids.filter(
+      (id) =>
+        !kept.summaries.has(key(id)) && kept.projections.has(key(id)) && facts.rows.has(id) && !facts.inputs.has(id)
+    )
+    if (!wanted.length) return
+    const inputs = new Map<string, Array<{ slotId: string; versionId: string | null; amendCount: number }>>()
+    for (const i of yield* summaryInputs(sql, wanted, fork)) {
+      const input = { slotId: i.slot_id, versionId: i.version_id, amendCount: i.amend_count }
+      const list = inputs.get(i.summary_id)
+      if (list) list.push(input)
+      else inputs.set(i.summary_id, [input])
+    }
+    for (const id of wanted)
+      kept.summaries.set(key(id), decodeSummary({ ...kept.projections.get(key(id))!, inputs: inputs.get(id) ?? [] }))
   })
 
 export const readSummary = (

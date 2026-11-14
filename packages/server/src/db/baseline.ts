@@ -99,6 +99,111 @@ const shellSummaries: ReadonlyArray<string> = [
   `CREATE TRIGGER shell_entity_revisions_delete AFTER DELETE ON entity_revisions BEGIN ${bumpOwnerOf("OLD.entity_id")} END`
 ]
 
+/** Moves chat `chat`'s LCM stamp (an SQL expression): summary facts planners keep are stale. */
+const bumpLcm = (chat: string) => `UPDATE chats SET lcm_stamp = lcm_stamp + 1 WHERE id = ${chat};`
+/** SQL: whether slot `slot` is an input of some summary, so its effective version can change one. */
+const summaryInput = (slot: string) => `EXISTS (SELECT 1 FROM summary_inputs WHERE slot_id = ${slot})`
+/** SQL: the chat of version `version` (an id expression). */
+const versionChat = (version: string) =>
+  `(SELECT s.chat_id FROM versions v JOIN slots s ON s.id = v.slot_id WHERE v.id = ${version})`
+const versionSlot = (version: string) => `(SELECT slot_id FROM versions WHERE id = ${version})`
+const ops = ["insert", "update", "delete"] as const
+const rowOf = (op: (typeof ops)[number]) => (op === "delete" ? "OLD" : "NEW")
+
+/**
+ * The LCM stamp (db/lcmPlanCache.ts): what a reader's kept summary facts are valid for. Every
+ * write that can change a sealed summary's header, revision, lineage, validity or freshness in
+ * any fork moves its chat's stamp. Appending does not: a new slot or version is no summary's
+ * input, so the facts for a path stay those of its extension; a new summary is found by its
+ * rowid, not by the stamp. A slot or version that no summary has as an input moves nothing
+ * either, so writing, swiping and editing recent messages keep the facts. Kinds of override
+ * that never reach a summary (stars, picker hides) are left out; every other kind moves it.
+ */
+const lcmStamp: ReadonlyArray<string> = [
+  // Slot ids, chats and parents never change (slots_shape_fixed, slots_parent_same_chat).
+  `CREATE TRIGGER lcm_stamp_slots_update AFTER UPDATE ON slots WHEN ${summaryInput("NEW.id")}
+    BEGIN ${bumpLcm("NEW.chat_id")} END`,
+  `CREATE TRIGGER lcm_stamp_slots_delete AFTER DELETE ON slots BEGIN ${bumpLcm("OLD.chat_id")} END`,
+  `CREATE TRIGGER lcm_stamp_versions_update AFTER UPDATE ON versions
+    WHEN ${summaryInput("NEW.slot_id")} OR ${summaryInput("OLD.slot_id")}
+    BEGIN ${bumpLcm("(SELECT chat_id FROM slots WHERE id = NEW.slot_id)")} END`,
+  `CREATE TRIGGER lcm_stamp_versions_delete AFTER DELETE ON versions WHEN ${summaryInput("OLD.slot_id")}
+    BEGIN ${bumpLcm("(SELECT chat_id FROM slots WHERE id = OLD.slot_id)")} END`,
+  `CREATE TRIGGER lcm_stamp_version_texts_update AFTER UPDATE ON version_texts
+    WHEN ${summaryInput("(SELECT slot_id FROM versions WHERE seq = NEW.version_seq)")}
+    BEGIN ${bumpLcm("(SELECT s.chat_id FROM versions v JOIN slots s ON s.id = v.slot_id WHERE v.seq = NEW.version_seq)")} END`,
+  ...ops.flatMap((op) => [
+    `CREATE TRIGGER lcm_stamp_version_history_${op} AFTER ${op.toUpperCase()} ON version_history
+    WHEN ${summaryInput(versionSlot(`${rowOf(op)}.version_id`))}
+    BEGIN ${bumpLcm(versionChat(`${rowOf(op)}.version_id`))} END`,
+    `CREATE TRIGGER lcm_stamp_version_attachments_${op} AFTER ${op.toUpperCase()} ON version_attachments
+    WHEN ${summaryInput(versionSlot(`${rowOf(op)}.version_id`))}
+    BEGIN ${bumpLcm(versionChat(`${rowOf(op)}.version_id`))} END`,
+    // A message's own choices reach a summary only through its inputs; every other kind may.
+    `CREATE TRIGGER lcm_stamp_fork_overrides_${op} AFTER ${op.toUpperCase()} ON fork_overrides
+    WHEN ${rowOf(op)}.kind NOT IN ('star', 'picker_hide') AND (
+      ${rowOf(op)}.kind NOT IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide')
+      OR ${rowOf(op)}.slot_id IS NULL OR ${summaryInput(`${rowOf(op)}.slot_id`)}${
+        op === "update"
+          ? ` OR OLD.kind IS NOT NEW.kind OR OLD.slot_id IS NOT NEW.slot_id OR ${summaryInput("OLD.slot_id")}`
+          : ""
+      })
+    BEGIN ${bumpLcm(`${rowOf(op)}.chat_id`)} END`,
+    `CREATE TRIGGER lcm_stamp_summary_revisions_${op} AFTER ${op.toUpperCase()} ON summary_revisions
+    WHEN coalesce((SELECT sealed FROM summaries WHERE id = ${rowOf(op)}.summary_id), 0) = 1
+    BEGIN ${bumpLcm(`(SELECT chat_id FROM summaries WHERE id = ${rowOf(op)}.summary_id)`)} END`,
+    `CREATE TRIGGER lcm_stamp_summary_inputs_${op} AFTER ${op.toUpperCase()} ON summary_inputs
+    WHEN coalesce((SELECT sealed FROM summaries WHERE id = ${rowOf(op)}.summary_id), 0) = 1
+    BEGIN ${bumpLcm(`(SELECT chat_id FROM summaries WHERE id = ${rowOf(op)}.summary_id)`)} END`,
+    `CREATE TRIGGER lcm_stamp_summary_parents_${op} AFTER ${op.toUpperCase()} ON summary_parents
+    WHEN coalesce((SELECT sealed FROM summaries WHERE id = ${rowOf(op)}.summary_id), 0) = 1
+    BEGIN ${bumpLcm(`(SELECT chat_id FROM summaries WHERE id = ${rowOf(op)}.summary_id)`)} END`,
+    `CREATE TRIGGER lcm_stamp_summary_choices_${op} AFTER ${op.toUpperCase()} ON lcm_summary_choices
+    BEGIN ${bumpLcm(`(SELECT chat_id FROM summaries WHERE id = ${rowOf(op)}.summary_id)`)} END`,
+    `CREATE TRIGGER lcm_stamp_changesets_${op} AFTER ${op.toUpperCase()} ON changesets
+    BEGIN ${bumpLcm(`${rowOf(op)}.chat_id`)} END`,
+    `CREATE TRIGGER lcm_stamp_changeset_items_${op} AFTER ${op.toUpperCase()} ON changeset_items
+    BEGIN ${bumpLcm(`(SELECT chat_id FROM changesets WHERE id = ${rowOf(op)}.changeset_id)`)} END`,
+    `CREATE TRIGGER lcm_stamp_chat_merges_${op} AFTER ${op.toUpperCase()} ON chat_merges
+    BEGIN ${bumpLcm(`${rowOf(op)}.chat_id`)} END`,
+    // A published range's hide reaches the slots it holds (effectiveOverrideSql "hide").
+    `CREATE TRIGGER lcm_stamp_lcm_enable_slots_${op} AFTER ${op.toUpperCase()} ON lcm_enable_slots
+    BEGIN ${bumpLcm(`(SELECT chat_id FROM lcm_enable_runs WHERE id = ${rowOf(op)}.run_id)`)} END`
+  ]),
+  // A sealed summary changes only by these; an unsealed one is in no reader's facts until sealed,
+  // when its rowid finds it.
+  `CREATE TRIGGER lcm_stamp_summaries_update AFTER UPDATE ON summaries WHEN OLD.sealed = 1
+    BEGIN ${bumpLcm("NEW.chat_id")} ${bumpLcm("OLD.chat_id")} END`,
+  `CREATE TRIGGER lcm_stamp_summaries_delete AFTER DELETE ON summaries BEGIN ${bumpLcm("OLD.chat_id")} END`,
+  // A completed explicit rerun replaces its source (summaryRows "replacement").
+  `CREATE TRIGGER lcm_stamp_jobs_insert AFTER INSERT ON summarization_jobs
+    WHEN NEW.source_summary_id IS NOT NULL AND NEW.explicit_requested = 1 AND NEW.status = 'complete'
+    BEGIN ${bumpLcm("NEW.chat_id")} END`,
+  `CREATE TRIGGER lcm_stamp_jobs_update AFTER UPDATE ON summarization_jobs
+    WHEN (NEW.source_summary_id IS NOT NULL OR OLD.source_summary_id IS NOT NULL)
+      AND (NEW.explicit_requested = 1 OR OLD.explicit_requested = 1)
+      AND (NEW.status = 'complete' OR OLD.status = 'complete')
+    BEGIN ${bumpLcm("NEW.chat_id")} ${bumpLcm("OLD.chat_id")} END`,
+  `CREATE TRIGGER lcm_stamp_jobs_delete AFTER DELETE ON summarization_jobs
+    WHEN OLD.source_summary_id IS NOT NULL AND OLD.explicit_requested = 1 AND OLD.status = 'complete'
+    BEGIN ${bumpLcm("OLD.chat_id")} END`,
+  ...ops.map(
+    (op) => `CREATE TRIGGER lcm_stamp_lcm_enable_runs_${op} AFTER ${op.toUpperCase()} ON lcm_enable_runs
+    ${op === "update" ? "WHEN NEW.published IS NOT OLD.published OR NEW.published = 1" : `WHEN ${rowOf(op)}.published = 1`}
+    BEGIN ${bumpLcm(`${rowOf(op)}.chat_id`)} END`
+  ),
+  `CREATE TRIGGER lcm_stamp_forks_update AFTER UPDATE OF chat_id, parent_fork_id, branched_at, deleted_at, purged_at
+    ON forks BEGIN ${bumpLcm("NEW.chat_id")} ${bumpLcm("OLD.chat_id")} END`,
+  `CREATE TRIGGER lcm_stamp_forks_delete AFTER DELETE ON forks BEGIN ${bumpLcm("OLD.chat_id")} END`,
+  // Labels are dropped only with their fork or by rebuildForkLabels, which rewrites every step.
+  `CREATE TRIGGER lcm_stamp_fork_labels_delete AFTER DELETE ON fork_labels BEGIN ${bumpLcm("OLD.chat_id")} END`,
+  `CREATE TRIGGER lcm_stamp_chats_update AFTER UPDATE OF owner_user_id, deleted_at ON chats
+    BEGIN ${bumpLcm("NEW.id")} END`
+]
+
+/** The names of the LCM stamp's triggers: a reader keeps no facts on a database missing any. */
+export const lcmStampTriggers: ReadonlyArray<string> = lcmStamp.map((s) => /CREATE TRIGGER (\w+)/.exec(s)![1]!)
+
 /**
  * Parallel threads in one chat (spec/THREADS.md §4): a thread is a fork; these say which forks
  * run alongside each other from a message S. A split is frozen (its label only moves under a
@@ -527,7 +632,9 @@ export const baseline: ReadonlyArray<string> = [
     st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3)
   , deleted_at INTEGER, bin_item_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0,
     -- Moved by triggers on every write the shell's fork summaries read (fork_summaries).
-    shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT`,
+    shell_stamp INTEGER NOT NULL DEFAULT 0,
+    -- Moved by triggers on every write that can change a summary planners have read (lcmStamp below).
+    lcm_stamp INTEGER NOT NULL DEFAULT 0) STRICT`,
   `CREATE INDEX chats_st_group ON chats(owner_user_id, st_group_id) WHERE st_group_id IS NOT NULL`,
   `CREATE INDEX chats_recent ON chats(owner_user_id, last_message_at DESC) WHERE status = 'active'`,
   `CREATE TABLE slots (
@@ -2377,5 +2484,6 @@ export const baseline: ReadonlyArray<string> = [
     BEGIN ${raise("a library edit's owner never changes")}; END`,
   ...forkLabelSchema,
   ...threadSchema,
-  ...shellSummaries
+  ...shellSummaries,
+  ...lcmStamp
 ]

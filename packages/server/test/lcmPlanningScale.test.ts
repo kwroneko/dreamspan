@@ -4,10 +4,11 @@ import { join } from "node:path"
 import { loadavg } from "node:os"
 import { assert } from "@effect/vitest"
 import { Effect } from "effect"
+import { NewVersion } from "@rp/shared/chat.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 
 lcmTest(
-  "plans the 200-branch, 447962-version chat within 200 ms without retaining branch caches",
+  "plans the 200-branch, 447962-version chat within 200 ms, also after each reply is appended",
   (server) =>
     Effect.gen(function* () {
       const results: Array<unknown> = []
@@ -56,7 +57,57 @@ lcmTest(
             if (reason === undefined) assert.isBelow(ms, 200, "before-reply planning budget")
           }
         }
-        results.push({ shape, coldMs, load: loadavg(), measurements })
+        // Send, reply appended, next send: appends keep the reader's summary facts
+        // (db/lcmFactStore.ts), so the plan the next send waits for reads only what's new.
+        let leaf = position.leafSlotId
+        const turns: Array<{ before: number; maintenance: number }> = []
+        for (let turn = 0; turn < 5; turn++) {
+          const version = (writer: "human" | "model", content: string, status: "complete" | "generating") =>
+            new NewVersion({
+              speakerEntityId: null,
+              writer,
+              content,
+              status,
+              macroMode: "verbatim",
+              origin: writer === "human" ? "user_written" : "generated"
+            })
+          const user = yield* h.writer.AppendMessage({
+            userId: h.userId,
+            chatId: h.chat.id,
+            parentSlotId: leaf,
+            branch: false,
+            commitDraft: null,
+            version: version("human", `Synthetic turn ${turn}: the caravan turns toward the ridge.`, "complete")
+          })
+          const reply = yield* h.writer.AppendMessage({
+            userId: h.userId,
+            chatId: h.chat.id,
+            parentSlotId: user.slotId,
+            branch: false,
+            commitDraft: null,
+            version: version("model", "", "generating")
+          })
+          const start = performance.now()
+          yield* h.reader.PlanSummaries({ ...position, leafSlotId: user.slotId })
+          const before = performance.now() - start
+          yield* h.writer.FinishGeneration({
+            userId: h.userId,
+            versionId: reply.version.id,
+            content: `Synthetic reply ${turn}. ` + "The wind carried dust over the ridge. ".repeat(12),
+            status: "complete",
+            error: null
+          })
+          leaf = reply.slotId
+          const after = performance.now()
+          const maintained = yield* h.reader.PlanSummaries({ ...position, leafSlotId: leaf, reason: "reply" })
+          turns.push({ before, maintenance: performance.now() - after })
+          if (maintained.maintenancePins)
+            yield* h.writer.SaveLcmMaintenance({ ...position, leafSlotId: leaf, pins: maintained.maintenancePins })
+        }
+        const sorted = turns.map((t) => t.before).sort((a, b) => a - b)
+        assert.isBelow(sorted[2]!, 200, "after-append planning budget (median)")
+        assert.isBelow(sorted.at(-1)!, 300, "after-append planning budget (worst, under load)")
+        results.push({ shape, coldMs, load: loadavg(), measurements, turns })
         assert.lengthOf(h.mock.requests(), 0)
       }
       if (process.env.LCM_PLANNING_OUTPUT)

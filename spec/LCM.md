@@ -4,6 +4,8 @@
 
 **Built** (planperf1, 2026-11-14; obsolete as implementation work): the existing §2.1–§2.2 and queue/maintenance behavior now uses transaction-local batched path/freshness proofs, a bounded immutable-lineage cache and an isolated maintenance reader. Selection and job policy are unchanged; ARCHITECTURE §3 and §16 record the implementation and bounds. No Proposed decision is promoted to Decided. Planning indexes change the baseline and require a fresh deploy.
 
+**Built** (planperf2, 2026-11-14; obsolete as implementation work): readers keep each fork's summary facts between plans behind a per-chat LCM stamp that triggers move on every write that can change them, so a plan after an appended reply reads only what is new; maintenance signs ranges from the kept facts. Plans are unchanged (compared with master's reader). ARCHITECTURE §3.5, §3.7 and §16 record it. The stamp changes the baseline and requires a fresh deploy.
+
 Scope:
 - **[D]** LCM is the main feature: chats of unlimited length with a fixed, cache-friendly budget, keeping every message and every intermediate summary (DESIGN §8).
 - **[D]** Phase 3 builds the plain chat mode: the model sees only the top-level summaries, with no drill-down and no search of the original text (DESIGN §8, owner 2026-10-12). `expand_summary`, summary search and expansion handles come with agentic rollouts in phase 4.
