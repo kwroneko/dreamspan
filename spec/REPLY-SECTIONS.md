@@ -1,6 +1,6 @@
 # Tagged sections at the start of a reply
 
-Status: proposal (coordinator's design, owner request 2026-10-31), recorded in DESIGN §7.4 as [P]. Built in the same branch; once merged, the implemented behaviour lives in ARCHITECTURE §12 ("Reply sections") and this file is obsolete as a plan.
+Status: obsolete as an implementation plan. Built; the implemented behavior, including branch-local hiding and replay rules reviewed in review-thinkhide1, is documented in ARCHITECTURE.md (§12 and §15). The original proposal and decision statuses are retained below.
 
 Some prompt presets ask the model to begin its visible reply with a planning section in tags (`<think>…</think>`, `<thinking>…</thinking>`). That text is in the reply the user receives. SillyTavern's "Reasoning formatting → Auto-parse" moves such a leading section out of the body into the reasoning panel. This does the same, as a layout of text the model already returned: nothing is hidden, nothing is asked of the model.
 

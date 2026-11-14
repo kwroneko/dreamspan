@@ -84,11 +84,15 @@ export const pluginCopyApprovalTests = () =>
             await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `copy-approval-${width}-${theme}.png`) })
           }
           await approval.getByRole("button", { name: "Allow", exact: true }).click()
-          await expect(page.getByRole("article").last()).toContainText("The editable copy is saved and off.", {
+          const reply = page.getByRole("article").last()
+          await expect(reply).toContainText("The editable copy is saved and off.", {
             timeout: 60000
           })
-          const badge = page.getByRole("article").last().locator("[data-steps-badge]")
+          // Text arrives before completion folds the live steps. Open the finished reply.
+          await expect(reply.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
+          const badge = reply.locator("[data-steps-badge]")
           if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+          await expect(badge).toHaveAttribute("aria-pressed", "true")
           const copied = page.locator('[data-step="tool"]').filter({ hasText: "Copied a built-in part" })
           await expect(copied.locator("button").first()).toContainText("Completion sound (editable)")
           await expect(copied.locator("button").first()).toContainText(/Version [a-f0-9]{8}/)

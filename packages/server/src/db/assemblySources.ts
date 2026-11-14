@@ -13,9 +13,11 @@ import {
   originalSql,
   shownIn,
   slotDeletedIn,
+  thinkingHiddenIn,
   versionDeletedIn,
   viewAt
 } from "./forkState.ts"
+import { hiddenParts } from "./rows.ts"
 import { selectSummaryLayer, selectFailedRanges, type LayerView } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
@@ -168,6 +170,7 @@ interface HistoryRow {
   readonly amend_count: number
   readonly written: number
   readonly inserted?: number
+  readonly hidden_thinking: number
 }
 
 /**
@@ -406,54 +409,60 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     })
 
   const versionTarget = (slotId: string, versionId: string) =>
-    sql<{
-      depth: number
-      parent_slot_id: string | null
-      ordinal: number
-      speaker_entity_id: string | null
-      direction: string | null
-      continues: string | null
-      continued_text: string | null
-      continued_sections: string | null
-    }>`
+    Effect.flatMap(viewAt(sql, chatId, slotId), (fork) =>
+      sql<{
+        depth: number
+        parent_slot_id: string | null
+        ordinal: number
+        speaker_entity_id: string | null
+        direction: string | null
+        continues: string | null
+        continued_text: string | null
+        continued_sections: string | null
+        continued_hidden: number
+      }>`
       SELECT s.depth, s.parent_slot_id, v.ordinal, v.speaker_entity_id, v.direction,
         -- A generated version with a source continues it (ContinueVersion); the source is
         -- a version of the same slot (graphIntegrity.ts), frozen once it was written.
         CASE WHEN v.writer = 'model' AND v.origin = 'generated' THEN v.source_version_id END AS continues,
         (SELECT x.content FROM version_records x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id) AS continued_text,
         (SELECT x.reply_sections FROM version_records x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id)
-          AS continued_sections
+          AS continued_sections,
+        ${thinkingHiddenIn(sql, fork, "(SELECT CASE WHEN x.fork_id IS NULL THEN x.id ELSE x.source_version_id END FROM versions x WHERE x.id = v.source_version_id)")} AS continued_hidden
       FROM version_records v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND s.id = ${slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}
         AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
-      Effect.flatMap(([row]) =>
-        row
-          ? Effect.succeed({
-              chatId,
-              slotId,
-              versionId,
-              depth: row.depth,
-              parentSlotId: row.parent_slot_id,
-              ordinal: row.ordinal,
-              speaker: row.speaker_entity_id,
-              direction: row.direction,
-              ...(row.continues === null
-                ? {}
-                : {
-                    // The reply as it came, its leading sections in their tags (spec/REPLY-SECTIONS.md).
-                    continues: {
-                      version: row.continues,
-                      text: originalReply(
-                        row.continued_text ?? "",
-                        row.continued_sections === null ? null : (JSON.parse(row.continued_sections) as ReplySections)
-                      )
-                    }
-                  })
-            })
-          : Effect.fail(new NotFound({ entity: "version", id: versionId }))
-      ),
-      Effect.flatMap((target) => placeTarget(target, false)),
-      Effect.tap(pinTarget)
+        Effect.flatMap(([row]) =>
+          row
+            ? Effect.succeed({
+                chatId,
+                slotId,
+                versionId,
+                depth: row.depth,
+                parentSlotId: row.parent_slot_id,
+                ordinal: row.ordinal,
+                speaker: row.speaker_entity_id,
+                direction: row.direction,
+                ...(row.continues === null
+                  ? {}
+                  : {
+                      // The reply as it came, its leading sections in their tags (spec/REPLY-SECTIONS.md).
+                      continues: {
+                        version: row.continues,
+                        text: originalReply(
+                          row.continued_text ?? "",
+                          row.continued_sections === null || (row.continued_hidden & 2) !== 0
+                            ? null
+                            : (JSON.parse(row.continued_sections) as ReplySections)
+                        )
+                      }
+                    })
+              })
+            : Effect.fail(new NotFound({ entity: "version", id: versionId }))
+        ),
+        Effect.flatMap((target) => placeTarget(target, false)),
+        Effect.tap(pinTarget)
+      )
     )
 
   const viewedLeaf = "next" in settings ? (settings.cut ?? settings.leafSlotId ?? null) : null
@@ -643,6 +652,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             (SELECT count(*) FROM versions c WHERE c.slot_id=s.id AND c.fork_id IS NULL
               AND c.ordinal <= o.ordinal AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_number,
             v.speaker_entity_id, v.content, v.reply_sections, v.macro_mode, v.frozen_macros, v.created_at,
+            ${thinkingHiddenIn(sql, fork, "o.id")} AS hidden_thinking,
             (SELECT json_group_array(CASE WHEN ${imageExcludedIn(sql, fork, "o.id", "a.media_id")}
                 THEN json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height, 'excluded', json('true'))
                 ELSE json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height) END) FROM
@@ -693,6 +703,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             side: row.first_writer === "human" && row.first_origin !== "greeting" ? "user" : "assistant",
             content: row.content,
             ...sectionsOf(row.reply_sections),
+            ...(row.hidden_thinking ? { thinkingHidden: hiddenParts(row.hidden_thinking) } : {}),
             ...(row.images_json !== "[]" ? { images: JSON.parse(row.images_json) } : {}),
             macroMode: row.macro_mode,
             frozen: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),

@@ -1,4 +1,5 @@
 import { pluginDisplayCopyTests } from "./support/pluginDisplayCopies.ts"
+import { hideThinkingTests } from "./support/hideThinking.ts"
 import { pluginCopyApprovalTests } from "./support/pluginCopyApproval.ts"
 import { pluginCopyTests, copiedPresenceTests } from "./support/pluginCopies.ts"
 import { dispatcherConnectionTests } from "./support/dispatcherConnections.ts"
@@ -57,6 +58,7 @@ import { expectTextBox } from "./support/textbox.ts"
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
+if (process.env.LAYOUT_AUDIT_THINKING_ONLY === "1") hideThinkingTests()
 if (process.env.LAYOUT_AUDIT_PLUGIN_COPIES_ONLY === "1") {
   pluginDisplayCopyTests({ layoutOnly: true })
   pluginCopyTests()

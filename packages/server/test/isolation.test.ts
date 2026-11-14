@@ -1655,6 +1655,24 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.SetMessageHidden({ slotId: owner.chat.slotId, hidden: true }), "NotFound")
   },
+  SetThinkingHidden: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.SetThinkingHidden({ versionId: owner.chat.versionId, part: "reasoning", hidden: true }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.SetThinkingHidden({
+            versionId: actor.chat.versionId,
+            part: "sections",
+            forkId: owner.chat.forkId,
+            hidden: true
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
   SelectVersion: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -4965,6 +4983,14 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  GetThinkingHidden: (reader, actor, owner) =>
+    Effect.all([
+      refused(reader.GetThinkingHidden({ userId: actor.user.id, versionId: owner.chat.versionId }), "NotFound"),
+      refused(
+        reader.GetThinkingHidden({ userId: actor.user.id, versionId: actor.chat.versionId, forkId: owner.chat.forkId }),
+        "NotFound"
+      )
+    ]).pipe(Effect.asVoid),
   RecordSentContext: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       yield* refused(
