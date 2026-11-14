@@ -11,14 +11,17 @@ import {
   fillMergeTemplate,
   MERGE_BLOCK_SECTION_DEFAULT,
   MERGE_SECTION_DEFAULT,
+  type MergeNote,
   type MergeTimelines
 } from "@rp/shared/mergeApi.ts"
+import { usePlaceParam } from "../../usePlaceParam.ts"
+import { useChatPlaceKey } from "./chatPlace.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { type ComponentType, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { RadioGroup, Switch } from "../../ui/Choice.tsx"
+import { Checkbox, RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -58,6 +61,28 @@ const joined = (preview: ChatMergePreview) =>
     : preview.continues
       ? `${plural(preview.messages, "new message")} since the last join`
       : `Joins ${plural(preview.messages, "message")} since #${preview.from - 1}`
+
+const nameList = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`
+
+/** Which replies will read a note brought by the merge, in one line. */
+const noteReaders = (note: MergeNote) => {
+  const card = note.card ?? "its character"
+  switch (note.when) {
+    case "moved":
+      return `Only ${card}'s own replies read the moved passage; every reply reads the rest of the field.`
+    case "own_turn":
+      return `Only ${card}'s own replies read it.`
+    case "turn":
+      return `Only replies by ${nameList(note.names)} read it.`
+    case "not_muted":
+      return `Every reply reads it while ${note.names.length > 1 ? "one of " : ""}${nameList(note.names)} isn't muted, this chat's characters' too.`
+    default:
+      return note.kind === "card"
+        ? `Every reply reads it while ${card} is in this chat, this chat's characters' too.`
+        : "Every reply reads it, this chat's characters' too."
+  }
+}
 
 /** The cast after every source joins: each member once, added if any source adds it. */
 const unionCast = (previews: ReadonlyArray<ChatMergePreview>) => {
@@ -228,10 +253,49 @@ function SourcePicker({
   )
 }
 
+interface MergeSetup {
+  sources?: ReadonlyArray<MergeSource>
+  at?: SlotId | null
+  start?: SlotId | null
+  includeLeftOut?: boolean
+  timelines?: MergeTimelines
+  notes?: ReadonlyArray<string>
+  reader?: EntityId | null
+}
+
+const readSetup = (raw: string): MergeSetup => {
+  try {
+    const value = JSON.parse(raw) as MergeSetup
+    if (!value || typeof value !== "object") return {}
+    return {
+      sources: Array.isArray(value.sources)
+        ? value.sources
+            .filter(
+              (s) =>
+                s &&
+                typeof s.chat === "string" &&
+                typeof s.listed === "string" &&
+                typeof s.fork === "string" &&
+                typeof s.title === "string"
+            )
+            .slice(0, 32)
+        : [],
+      ...(typeof value.at === "string" || value.at === null ? { at: value.at } : {}),
+      ...(typeof value.start === "string" || value.start === null ? { start: value.start } : {}),
+      includeLeftOut: value.includeLeftOut === true,
+      timelines: value.timelines === "separate" ? "separate" : "together",
+      notes: Array.isArray(value.notes) ? value.notes.filter((n) => typeof n === "string").slice(0, 500) : [],
+      reader: typeof value.reader === "string" ? value.reader : null
+    }
+  } catch {
+    return {}
+  }
+}
+
 export function MergeChatDialog({
   session,
   at: initialAt,
-  onClose,
+  onClose: finishClose,
   threads: ThreadPicker
 }: {
   session: ChatSession
@@ -245,14 +309,27 @@ export function MergeChatDialog({
   const { cast } = useCast()
   const navigate = useNavigate()
   const [forkId] = useState(() => view.forkId ?? view.chat?.currentForkId ?? null)
-  const [sources, setSources] = useState<ReadonlyArray<MergeSource>>([])
+  const [saved, setSaved] = usePlaceParam(useChatPlaceKey("mergeSetup"), "")
+  const setup = useMemo(() => readSetup(saved), [saved])
+  const changeSetup = (next: Partial<MergeSetup>) => setSaved(JSON.stringify({ ...setup, ...next }), true)
+  const onClose = () => {
+    setSaved("", true)
+    finishClose()
+  }
+  const sourceKey = JSON.stringify(setup.sources ?? [])
+  const sources = useMemo(() => JSON.parse(sourceKey) as ReadonlyArray<MergeSource>, [sourceKey])
+  const setSources = (next: ReadonlyArray<MergeSource>) => changeSetup({ sources: next })
   const source = sources[0] ?? null
   const joining = ThreadPicker !== undefined
-  const [at, setAt] = useState<SlotId | null>(initialAt)
-  const [start, setStart] = useState<SlotId | null>(null)
-  const [includeLeftOut, setIncludeLeftOut] = useState(false)
+  const at = setup.at === undefined ? initialAt : setup.at
+  const setAt = (next: SlotId | null) => changeSetup({ at: next })
+  const start = setup.start ?? null
+  const setStart = (next: SlotId | null) => changeSetup({ start: next })
+  const includeLeftOut = setup.includeLeftOut ?? false
+  const setIncludeLeftOut = (next: boolean) => changeSetup({ includeLeftOut: next })
   /** How the characters see a join, in a chat with one shared context (spec/THREADS.md §7.1). */
-  const [timelines, setTimelines] = useState<MergeTimelines>("together")
+  const timelines = setup.timelines ?? "together"
+  const setTimelines = (next: MergeTimelines) => changeSetup({ timelines: next })
   /** Each source's preview, in order, once all are read. */
   const [read, setRead] = useState<{ readonly for: unknown; readonly previews: ReadonlyArray<ChatMergePreview> }>({
     for: null,
@@ -260,11 +337,16 @@ export function MergeChatDialog({
   })
   const [previewError, setPreviewError] = useState<AppError | null>(null)
   /** "What the model reads" for one character, with separate timelines; null: the first. */
-  const [reader_, setReaderFor] = useState<EntityId | null>(null)
+  const reader_ = setup.reader ?? null
+  const setReaderFor = (next: EntityId | null) => changeSetup({ reader: next })
   /** null: the source's own title. */
   const [title, setTitle] = useState<string | null>(null)
   const [framing, setFraming] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
+  /** The merged chat's notes ticked to bring (`MergeNote.id`). */
+  const ticked = new Set(setup.notes ?? [])
+  const setTicked = (next: ReadonlySet<string> | ((was: ReadonlySet<string>) => ReadonlySet<string>)) =>
+    changeSetup({ notes: [...(typeof next === "function" ? next(ticked) : next)] })
   const reader = useAction()
   const writer = useAction()
 
@@ -278,10 +360,10 @@ export function MergeChatDialog({
             source: { chatId: one.chat, forkId: one.fork },
             ...(start === null ? {} : { start }),
             includeLeftOut,
-            ...(joining && timelines === "separate" ? { timelines } : {})
+            ...(timelines === "separate" ? { timelines } : {})
           }))
         : [],
-    [session.id, forkId, at, sources, start, includeLeftOut, joining, timelines]
+    [session.id, forkId, at, sources, start, includeLeftOut, timelines]
   )
   const request = requests[0] ?? null
   const previewAll = () => Promise.all(requests.map((one) => reader.run((client) => client("PreviewChatMerge", one))))
@@ -354,6 +436,8 @@ export function MergeChatDialog({
   ]
 
   const ownFraming = framing === null || framing.trim() === defaultFraming ? null : framing
+  const notes = !joining && !several ? (preview?.notes ?? []) : []
+  const brought = notes.filter((note) => note.conflict === null && ticked.has(note.id)).map((note) => note.id)
   const merge = async () => {
     if (!request || !preview || !forkId) return
     const result = joining
@@ -378,6 +462,7 @@ export function MergeChatDialog({
           (client) =>
             client("MergeChat", {
               ...request,
+              ...(brought.length > 0 ? { notes: brought } : {}),
               title: shownTitle,
               framing: ownFraming,
               digest: preview.digest
@@ -455,9 +540,7 @@ export function MergeChatDialog({
                 setStale(false)
                 setTitle(null)
                 setFraming(null)
-                setStart(null)
-                setIncludeLeftOut(false)
-                setSources([next])
+                changeSetup({ sources: [next], start: null, includeLeftOut: false, notes: [], reader: null })
               }}
             />
           )}
@@ -581,7 +664,47 @@ export function MergeChatDialog({
                   ))}
                 </ul>
               </section>
-              {joining && preview.choosesTimelines === true && (
+              {notes.length > 0 && (
+                <section aria-labelledby="merge-notes-label" className="flex min-w-0 flex-col gap-2 text-sm">
+                  <span id="merge-notes-label" className="font-medium">
+                    Notes to bring
+                  </span>
+                  <p className="text-muted">
+                    Notes on in “{preview.sourceTitle}”. Each one ticked is on in this chat from the merge on.
+                  </p>
+                  {notes.map((note) => (
+                    <Checkbox
+                      key={note.id}
+                      checked={note.conflict === null && ticked.has(note.id)}
+                      disabled={note.conflict !== null}
+                      onCheckedChange={(checked) =>
+                        setTicked((was) => {
+                          const next = new Set(was)
+                          if (checked) next.add(note.id)
+                          else next.delete(note.id)
+                          return next
+                        })
+                      }
+                      hintInline={false}
+                      hint={
+                        note.conflict ??
+                        (note.kind === "chat"
+                          ? "Copies this note into this chat. The other chat keeps its own."
+                          : `Switches ${note.card ?? "the character"}'s note on in this chat.`)
+                      }
+                      description={
+                        <span className="flex min-w-0 flex-col gap-0.5 [overflow-wrap:anywhere]">
+                          <span>{note.conflict ?? noteReaders(note)}</span>
+                          {note.excerpt && <span className="text-muted">“{note.excerpt}”</span>}
+                        </span>
+                      }
+                    >
+                      {note.kind === "card" ? `${note.title} · ${note.card ?? "Character"}'s note` : note.title}
+                    </Checkbox>
+                  ))}
+                </section>
+              )}
+              {preview.choosesTimelines === true && (
                 <section aria-labelledby="join-view-label" className="flex flex-col gap-2 text-sm">
                   <span id="join-view-label" className="font-medium">
                     How the characters see it
@@ -590,27 +713,44 @@ export function MergeChatDialog({
                     aria-labelledby="join-view-label"
                     value={timelines}
                     onValueChange={setTimelines}
-                    options={[
-                      {
-                        value: "together",
-                        label: several ? "Everyone reads every thread" : "Everyone reads both threads",
-                        description: several
-                          ? "Every reply sees all of them, the other threads as sections before this one's messages since they parted."
-                          : `Every reply sees both, the other thread as a section before this one's messages since #${preview.from - 1}.`
-                      },
-                      {
-                        value: "separate",
-                        label: "Each character reads only its own thread",
-                        description: "Characters see only the thread they were in. A narrator sees every thread."
-                      }
-                    ]}
+                    options={
+                      joining
+                        ? [
+                            {
+                              value: "together",
+                              label: several ? "Everyone reads every thread" : "Everyone reads both threads",
+                              description: several
+                                ? "Every reply sees all of them, the other threads as sections before this one's messages since they parted."
+                                : `Every reply sees both, the other thread as a section before this one's messages since #${preview.from - 1}.`
+                            },
+                            {
+                              value: "separate",
+                              label: "Each character reads only its own thread",
+                              description: "Characters see only the thread they were in. A narrator sees every thread."
+                            }
+                          ]
+                        : [
+                            {
+                              value: "together",
+                              label: "Everyone reads both chats",
+                              description: "Every reply sees this chat and the merged one."
+                            },
+                            {
+                              value: "separate",
+                              label: "Each character keeps its own chat's past",
+                              description:
+                                "This chat's characters don't read the merged chat, and its characters don't read this chat's past. Everyone reads what follows the merge. A narrator reads both."
+                            }
+                          ]
+                    }
                   />
                 </section>
               )}
-              {joining && preview.choosesTimelines !== true && (
+              {preview.choosesTimelines !== true && (
                 <p className="text-sm text-muted" data-testid="join-view">
-                  Each character reads what it was present for (this chat's Context setting). A narrator reads every
-                  thread.
+                  {joining
+                    ? "Each character reads what it was present for (this chat's Context setting). A narrator reads every thread."
+                    : "Each character reads only what it was present for, in either chat (this chat's Context setting). A narrator reads both."}
                 </p>
               )}
             </>
@@ -658,7 +798,11 @@ export function MergeChatDialog({
               <div className="border-t border-border px-3 py-2">
                 <Field
                   label="For"
-                  about="With this chat's separate contexts, each character reads only what it was present for. A narrator and your own characters read it all."
+                  about={
+                    readerFor.from === undefined
+                      ? "With this chat's separate contexts, each character reads only what it was present for. A narrator and your own characters read it all."
+                      : "Each character reads only its own chat's past, and everything after the merge. A narrator and your own characters read it all."
+                  }
                 >
                   <Select
                     value={readerFor.entity as string}
@@ -678,9 +822,11 @@ export function MergeChatDialog({
             >
               {[
                 ...all.flatMap((one) => readOf(one)),
-                layout === "join"
-                  ? null
-                  : `[This ${joining ? "thread" : "chat"}'s own messages${preview.start ? ` from #${preview.start.number}` : ""}]`,
+                readerFor?.from === "merged"
+                  ? `[Of this chat before the merge, only what ${readerFor.name} was there for]`
+                  : layout === "join"
+                    ? null
+                    : `[This ${joining ? "thread" : "chat"}'s own messages${preview.start ? ` from #${preview.start.number}` : ""}]`,
                 several ? null : marker
               ]
                 .filter(Boolean)

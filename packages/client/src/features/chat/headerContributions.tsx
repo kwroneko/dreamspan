@@ -83,6 +83,7 @@ export const registerChatHeader = () => [
   }),
   chatCommands.register({
     id: "chat.merge",
+    dialogInUrl: true,
     label: "Merge another chat…",
     description: "Brings another chat's messages into this one, after the newest message.",
     order: 2.6,

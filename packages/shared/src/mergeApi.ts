@@ -50,16 +50,51 @@ export const MergeRequest = Schema.Struct({
   source: Schema.Struct({ chatId: ChatId, forkId: ForkId }),
   start: Schema.optionalKey(Schema.NullOr(SlotId)),
   includeLeftOut: Schema.Boolean,
-  timelines: Schema.optionalKey(MergeTimelines)
+  timelines: Schema.optionalKey(MergeTimelines),
+  /** The source's notes to bring (`MergeNote.id`s of the preview's `notes`); absent: none. */
+  notes: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(500)))
 })
 export type MergeRequest = typeof MergeRequest.Type
+
+/**
+ * One of the source chat's notes a merge of another chat can bring (spec/CHAT-MERGE.md §6), on
+ * at the source's merged end. A chat note (`kind` chat) is copied into this chat as a new note,
+ * on from the join; a card's note (`kind` card) on there but off here is switched on from the
+ * join. A card's moved passage and what's left of its field are one entry (`notes`, both).
+ */
+export const MergeNote = Schema.Struct({
+  id: Schema.String,
+  notes: Schema.Array(EntityId),
+  kind: Schema.Literals(["chat", "card"]),
+  title: Schema.String,
+  /** The card's name, for a card's note. */
+  card: Schema.NullOr(Schema.String),
+  /**
+   * Which replies read it: `always` every reply (a card's note: while the card is in the chat);
+   * `own_turn` the card's own; `turn` those by `names`; `not_muted` every reply while one of
+   * `names` isn't muted; `moved` a moved passage, read on the card's own turns.
+   */
+  when: Schema.Literals(["always", "own_turn", "turn", "not_muted", "moved"]),
+  names: Schema.Array(Schema.String),
+  /** The start of its text. */
+  excerpt: Schema.String,
+  /** Why it can't be brought (another note here replaces the same thing); null: it can. */
+  conflict: Schema.NullOr(Schema.String)
+})
+export type MergeNote = typeof MergeNote.Type
 
 /** What one speaker reads of a join (the preview's "For"): `section`, or nothing when `readable` is false. */
 export const MergeView = Schema.Struct({
   entity: EntityId,
   name: Schema.String,
   section: Schema.String,
-  readable: Schema.Boolean
+  readable: Schema.Boolean,
+  /**
+   * An ordinary merge kept separate in a chat with one shared context: whose past the character
+   * keeps. `here`, this chat's (and none of the merged one's it wasn't in); `merged`, the merged
+   * chat's it was there for (and none of this chat's from before the join it wasn't in); `both`.
+   */
+  from: Schema.optionalKey(Schema.Literals(["here", "merged", "both"]))
 })
 export type MergeView = typeof MergeView.Type
 
@@ -119,6 +154,8 @@ export class ChatMergePreview extends Schema.Class<ChatMergePreview>("ChatMergeP
   back: Schema.optionalKey(Schema.Array(EntityId)),
   /** With `separate`: what each character reads of it, before it's made. */
   views: Schema.optionalKey(Schema.Array(MergeView)),
+  /** Another chat's notes the merge can bring, each only when ticked (absent: a branch or thread of this chat). */
+  notes: Schema.optionalKey(Schema.Array(MergeNote)),
   /** Changes when anything the merge reads changes; the write compares it. */
   digest: Schema.String
 }) {}

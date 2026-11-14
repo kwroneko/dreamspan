@@ -494,7 +494,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const fork = forkId == null ? null : sql`(SELECT id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId})`
         const ranges =
           leafSlotId !== undefined && viewers?.includes(STRETCH_VIEW)
-            ? yield* threadStretches(sql, fork, leafSlotId)
+            ? yield* threadStretches(sql, fork, leafSlotId, viewers)
             : undefined
         return yield* readKnowers(
           sql,
