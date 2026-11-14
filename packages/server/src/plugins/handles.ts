@@ -1,5 +1,7 @@
 import { Effect, Predicate, Scope, Schema, Context, Fiber } from "effect"
 import type { PluginManifest } from "@rp/shared/plugins.ts"
+import { presenceContext } from "../agent/tools/presenceAdapter.ts"
+import type { ToolContext } from "../agent/tools.ts"
 export interface RegistrationRegistry {
   readonly get: (id: string) => { readonly id: string } | undefined
   readonly list: () => ReadonlyArray<{ readonly id: string }>
@@ -72,13 +74,19 @@ const returnedCopy = (
   return result
 }
 /** Copy registration data; functions retain closures, but never receive the kernel's live context. */
-const registrationCopy = (value: unknown, fail: () => void, scope: Scope.Scope, enabled: () => boolean): unknown => {
+const registrationCopy = (
+  value: unknown,
+  fail: () => void,
+  scope: Scope.Scope,
+  enabled: () => boolean,
+  argumentsOf: (args: Array<unknown>) => Array<unknown> = (args) => args.map((arg) => pluginArguments(arg))
+): unknown => {
   if (Schema.isSchema(value)) return value
   if (typeof value === "function")
     return (...args: Array<unknown>) => {
       if (!enabled()) throw new Error("Plugin is disabled")
       try {
-        const result: unknown = value(...args.map((arg) => pluginArguments(arg)))
+        const result: unknown = value(...argumentsOf(args))
         if (Effect.isEffect(result))
           return Effect.scoped(
             Effect.gen(function* () {
@@ -197,7 +205,22 @@ export const declaredHandles = (
         Effect.suspend(() => {
           if (name === "providerKinds" && "secretsOf" in entry)
             throw new Error("Credential callbacks are not available in API v1")
-          return claim(entry.id, registry.register(registrationCopy(entry, fail, scope, () => enabled) as never))
+          let copied = registrationCopy(entry, fail, scope, () => enabled)
+          if (name === "rolloutTools" && entry.id === "set_presence" && manifest.surfaces.includes("server:presence")) {
+            const execute = (entry as { execute?: unknown }).execute
+            if (typeof execute !== "function") throw new Error("Presence handler required")
+            copied = {
+              ...(copied as object),
+              execute: registrationCopy(
+                execute,
+                fail,
+                scope,
+                () => enabled,
+                (args) => [presenceContext(args[0] as ToolContext, () => enabled), pluginArguments(args[1])]
+              )
+            }
+          }
+          return claim(entry.id, registry.register(copied as never))
         }),
       disable: (id: string) =>
         Effect.suspend(() => {

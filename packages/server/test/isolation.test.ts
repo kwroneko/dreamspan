@@ -214,6 +214,18 @@ const userDraftOf = (owner: Party) =>
   })
 
 const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
+  ListBuiltinParts: { createOnly: "read-only built-in catalog" },
+  CopyBuiltin: {
+    adminOnly: (actor) =>
+      refused(
+        actor.api.CopyBuiltin({
+          registry: "noticeChannels",
+          id: "notifications.completion-sound",
+          pluginId: "isolated-copy"
+        }),
+        "PluginRejected"
+      )
+  },
   ListPlugins: {
     createOnly:
       "Lists instance plugins and only the caller's user folder; plugin account isolation is also covered in pluginHost."

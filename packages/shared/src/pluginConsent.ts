@@ -6,6 +6,8 @@ const surfaces: Readonly<Record<string, string>> = {
   "client:chatPanels": "Adds panels beside your chats.",
   "client:routes": "Adds pages to the app. Reload to use changed pages.",
   "client:appBanners": "Adds notices across the app.",
+  "client:noticeChannels": "Changes optional reply sounds and alerts.",
+  "server:presence": "Reads the current cast and marks characters present or away.",
   "server:rolloutTools": "Adds or changes tools the assistant can use.",
   "server:operationTools": "Changes which app actions the assistant can use.",
   "server:workshopCapabilities": "Changes the kinds of work available in workshops.",

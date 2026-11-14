@@ -255,6 +255,11 @@ const computedReviews: Record<string, string> = {
 
 /** Every filesystem read is classified; a new expression requires review. */
 const readReviews: Record<string, { reason: string; expressions: Array<string> }> = {
+  "packages/server/src/plugins/copy.ts": {
+    reason:
+      "Only the finite shipped-source catalog, matched by registry/id; validates all parents, excludes the configured data volume, refuses links and non-text/oversized files. base.path is matched to the catalog and never opened. Client src is copied by Docker for inert authenticated copies, never served as modules.",
+    expressions: ["readFile(file)"]
+  },
   "packages/server/src/plugins/reference.ts": {
     reason:
       "Shipped allowlisted agent/plugin/API source only; bounded index, confined non-link UTF-8 files, and finite API topic declarations. Source workspaces are included by final Docker COPY.",

@@ -1,5 +1,11 @@
 /** API v1 surfaces with typed browser adapters; other client registries are not public yet. */
-export const CLIENT_PLUGIN_SURFACES: ReadonlyArray<string> = ["composerControls", "chatPanels", "routes", "appBanners"]
+export const CLIENT_PLUGIN_SURFACES: ReadonlyArray<string> = [
+  "composerControls",
+  "chatPanels",
+  "routes",
+  "appBanners",
+  "noticeChannels"
+]
 export interface ClientPlugin {
   readonly scope: "instance" | "user"
   readonly id: string

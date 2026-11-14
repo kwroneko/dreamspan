@@ -13,6 +13,7 @@ export const receiveUserNotice = (notice: Notice) => {
 
 /** Optional ways to announce an unseen reply, with their settings and browser activation. */
 export const noticeChannels = makeRegistry<{
+  readonly source?: string
   readonly id: string
   readonly component: ComponentType
   readonly activate: () => void

@@ -2,6 +2,7 @@ import type { ComponentProps } from "react"
 import type { Effect } from "effect"
 import { useAction } from "./actions.tsx"
 import { Button } from "./ui/Button.tsx"
+import { Switch as AppSwitch } from "./ui/Choice.tsx"
 import { usePluginFailure } from "./pluginBoundary.tsx"
 
 function PluginButton(props: ComponentProps<typeof Button>) {
@@ -24,6 +25,24 @@ function PluginIconButton(props: ComponentProps<typeof Button>) {
 }
 /** @public Browser plugin UI facade. */
 export const ui = Object.freeze({ Button: PluginButton, IconButton: PluginIconButton })
+/** @public Stable plugin facade, also exported by /plugin-host.mjs. */
+export function Switch(props: ComponentProps<typeof AppSwitch>) {
+  const fail = usePluginFailure()
+  return (
+    <AppSwitch
+      {...props}
+      onCheckedChange={(checked) => {
+        try {
+          props.onCheckedChange(checked)
+        } catch {
+          fail()
+        }
+      }}
+    />
+  )
+}
+/** @public Stable plugin facade, also exported by /plugin-host.mjs. */
+export { Alert } from "./ui/Surface.tsx"
 function usePluginAction() {
   const action = useAction()
   return {

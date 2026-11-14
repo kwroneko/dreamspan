@@ -40,5 +40,5 @@ export { React }
 export { default } from "react"
 export { jsx, jsxs } from "react/jsx-runtime"
 export type { Activate, ClientHost, ComposerContext, PanelContext } from "../../plugin-api/src/client.ts"
-export { ui, rpc } from "./pluginUi.tsx"
+export { ui, rpc, Switch, Alert } from "./pluginUi.tsx"
 export { syncClientPlugins } from "./pluginLifecycle.ts"

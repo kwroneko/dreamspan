@@ -56,6 +56,7 @@ it("checks a synthetic plugin and rejects type, import, activation, undeclared a
     const report = await checkPlugin(data, "", id, commit)
     expect(report, `attack ${index}`).toMatchObject({ ok: false, step })
     expect(JSON.stringify(report)).not.toContain("synthetic-secret")
+    if (source.includes('from "node:fs"')) expect(report.message).toContain("file or system access")
   }
   await writeFile(join(pluginFolder(data, "", "tiny"), "index.ts"), empty + "// changed")
   expect(await checkPlugin(data, "", "tiny", good)).toMatchObject({ ok: false, step: "snapshot" })

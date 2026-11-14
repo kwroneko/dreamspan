@@ -339,6 +339,39 @@ export const smoke = async (base: string, container: string, password: string) =
       }
       requireThat((yield* api.Whoami()).id === user.id, "broken plugin disturbed the server")
       pass("one synthetic plugin enabled; broken plugin off with a visible report")
+      step = "editable built-ins use exact shipped client/server/shared sources"
+      const builtins = yield* api.ListBuiltinParts()
+      for (const [registry, id, pluginId] of [
+        ["noticeChannels", "notifications.completion-sound", "image-sound-copy"],
+        ["rolloutTools", "set_presence", "image-presence-copy"],
+        ["macros", "reverse", "image-reverse-copy"]
+      ] as const) {
+        requireThat(
+          builtins.some((part) => part.registry === registry && part.id === id && part.copyable),
+          "shipped built-in missing"
+        )
+        const made = yield* api.CopyBuiltin({ registry, id, pluginId })
+        requireThat(made.report.ok, "shipped built-in copy failed its production check")
+        const detail = yield* api.GetPlugin(made)
+        requireThat(
+          detail.pin === null && detail.original?.available && !detail.original.changed,
+          "copy must be inert with exact shipped provenance"
+        )
+      }
+      for (const path of [
+        "/packages/client/src/features/completionSoundPart.tsx",
+        "/src/features/completionSoundPart.tsx"
+      ]) {
+        for (const headers of [{}, { cookie: cookie! }]) {
+          const response = yield* Effect.promise(() => fetch(new URL(path, base), { headers }))
+          const text = yield* Effect.promise(() => response.text())
+          requireThat(
+            !text.includes("export const completionSound") && !text.includes("function CompletionSoundSettings"),
+            "shipped source was served"
+          )
+        }
+      }
+      pass("three inert built-in copies checked against shipped sources; source URLs expose no executable modules")
       step = "browser client plugins in the production image"
       for (const broken of [false, true]) {
         const id = broken ? "image-client-broken" : "image-client"

@@ -30,6 +30,33 @@ export interface PluginTool {
     args: unknown
   ) => Effect.Effect<{ readonly text: string; readonly isError?: boolean }>
 }
+/** Only the cast before this reply; no database clients, providers or credentials. */
+export interface PresenceContext {
+  readonly cast: Effect.Effect<
+    ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly modelName: string | null
+      readonly narrator: boolean
+    }>,
+    unknown
+  >
+  /** Validates membership and narrator status again; records the ordinary reversible presence effect. */
+  readonly set: (id: string, present: boolean, result: string) => Effect.Effect<string, unknown>
+}
+export interface PresenceArgs {
+  readonly character: string
+  readonly present: boolean
+}
+/** Requires server:presence as well as server:rolloutTools. Only set_presence uses this adapter. */
+export interface PresenceTool extends Omit<PluginTool, "execute"> {
+  readonly id: "set_presence"
+  readonly summarize: (args: PresenceArgs) => string
+  readonly execute: (
+    context: PresenceContext,
+    args: PresenceArgs
+  ) => Effect.Effect<{ readonly text: string; readonly isError?: boolean }, unknown>
+}
 export interface PluginCommand {
   readonly id: string
   readonly description: string
@@ -38,7 +65,7 @@ export interface PluginCommand {
   readonly execute: (input: unknown) => Effect.Effect<unknown, unknown>
 }
 export interface ServerRegistries {
-  readonly rolloutTools: Handle<PluginTool>
+  readonly rolloutTools: Handle<PluginTool | PresenceTool>
   readonly operationTools: Handle<Registration>
   readonly workshopCapabilities: Handle<Registration>
   readonly orchestrationModes: Handle<Registration>

@@ -1,3 +1,4 @@
+import { pluginCopyTests } from "./support/pluginCopies.ts"
 import { dispatcherConnectionTests } from "./support/dispatcherConnections.ts"
 import { workshopDocumentTests } from "./support/workshopDocuments.ts"
 import { workshopSummaryTests } from "./support/workshopSummaries.ts"
@@ -54,6 +55,7 @@ import { expectTextBox } from "./support/textbox.ts"
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
+if (process.env.LAYOUT_AUDIT_PLUGIN_COPIES_ONLY === "1") pluginCopyTests()
 if (process.env.LAYOUT_AUDIT_WORKSHOP_DOCUMENTS_ONLY === "1") workshopDocumentTests()
 if (process.env.LAYOUT_AUDIT_WORKSHOP_SUMMARIES_ONLY === "1") workshopSummaryTests()
 if (process.env.LAYOUT_AUDIT_DRAFT_ONLY === "1") draftRequestTests()

@@ -585,6 +585,7 @@ const rewriteInstructions = rewrite<InstructionsArgs>(
 const readTool = (
   search: boolean
 ): RolloutTool<{ chat: string; from?: number; count?: number; offset?: number; query?: string }> => ({
+  source: import.meta.url,
   id: search ? "search_chats" : "read_chat",
   storyRead: "positioned",
   label: search ? "Searched a chat" : "Read a chat",
@@ -669,6 +670,7 @@ export const historyRenameTool: RolloutTool<{
   newName: string
   entityId: string
 }> = {
+  source: import.meta.url,
   id: "history_rename",
   storyRead: "positioned",
   label: "Renamed text in history",
@@ -725,6 +727,7 @@ export const historySearchTool: RolloutTool<{
   search: import("@rp/shared/historyApi.ts").HistorySearch
   cursor?: typeof HistoryCursor.Type
 }> = {
+  source: import.meta.url,
   id: "history_search",
   storyRead: "refused",
   label: "Searched chat history",

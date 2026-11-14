@@ -134,6 +134,7 @@ interface CreateArgs {
   readonly persona?: boolean
 }
 const createCard: RolloutTool<CreateArgs> = {
+  source: import.meta.url,
   id: "create_card",
   storyRead: "library",
   label: "Created the card",
@@ -217,6 +218,7 @@ const editCard: RolloutTool<{
   readonly card: string
   readonly changes: CardChanges
 }> = {
+  source: import.meta.url,
   id: "edit_card",
   storyRead: "library",
   label: "Edited the card",
@@ -286,6 +288,7 @@ const cloneCard: RolloutTool<{
   readonly nickname?: string
   readonly version?: string
 }> = {
+  source: import.meta.url,
   id: "clone_card",
   storyRead: "library",
   label: "Cloned the card",
@@ -333,6 +336,7 @@ const startChat: RolloutTool<{
   readonly preset?: string
   readonly model?: string
 }> = {
+  source: import.meta.url,
   id: "start_chat",
   storyRead: "library",
   label: "Started the chat",
@@ -457,6 +461,7 @@ const editLibraryDocument = (kind: "preset" | "lorebook", schema: Schema.Top): R
       return { saved, doc, attachments }
     })
   return {
+    source: import.meta.url,
     id: `edit_${kind}`,
     storyRead: "library",
     label: `Edited the ${kind}`,
@@ -528,6 +533,7 @@ const prepareCardNote = (ctx: ToolContext, args: CardNoteEdit) =>
     return saved
   })
 const editCardNote: RolloutTool<CardNoteEdit> = {
+  source: import.meta.url,
   id: "edit_card_note",
   // A saved card note in the library, like edit_card: no story position (merge-batch10).
   storyRead: "library",

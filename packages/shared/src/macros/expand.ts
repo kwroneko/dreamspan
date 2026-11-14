@@ -1,3 +1,4 @@
+import { Predicate } from "effect"
 // Macro expansion (DESIGN §5.6), and the engine that does it.
 //
 // What expands depends on where the text came from and what it's for:
@@ -556,7 +557,7 @@ class Expansion {
       const usable = typeof frozen === "string" && (entry.accepts === undefined || entry.accepts(call, frozen))
       value = usable ? frozen : entry.handler(call)
     } catch (error) {
-      if (error instanceof LimitReached) throw error
+      if (error instanceof LimitReached || Predicate.isTagged(error, "PluginFault")) throw error
       // ST leaves a macro whose handler fails as written.
       return asWritten
     }
@@ -647,7 +648,7 @@ class Expansion {
     try {
       return this.variable(text, node, base)
     } catch (error) {
-      if (error instanceof LimitReached) throw error
+      if (error instanceof LimitReached || Predicate.isTagged(error, "PluginFault")) throw error
       return text.slice(node.start, node.end)
     }
   }

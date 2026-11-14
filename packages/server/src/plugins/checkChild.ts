@@ -10,6 +10,7 @@ import { runPluginChild } from "./process.ts"
 import { checkNetworkFilter } from "./checkNetwork.ts"
 import { CLIENT_PLUGIN_SURFACES } from "@rp/shared/pluginClient.ts"
 import type { PluginReport } from "@rp/shared/plugins.ts"
+import { rewriteImports } from "./importPolicy.ts"
 
 const [dataDir, owner, id, commit, folder, appStamp, previous, expectedReport, sourceMode, actorRole] =
   process.argv.slice(2) as [string, string, string, string, string, string, string, string, string, string]
@@ -30,6 +31,7 @@ try {
   step = "manifest"
   message = "Plugin manifest or declared surface is unsupported"
   const server = [
+    "presence",
     "rolloutTools",
     "operationTools",
     "workshopCapabilities",
@@ -145,33 +147,35 @@ try {
     for (const path of sources) {
       const source = program.getSourceFile(path)!
       const test = path.includes("/test/")
-      const imports = (node: ts.Node) => {
-        let spec: ts.Expression | undefined
-        if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) spec = node.moduleSpecifier
-        else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
-          spec = node.arguments[0]
-        if (spec) {
-          if (!ts.isStringLiteralLike(spec)) throw new Error("Computed plugin imports are refused")
-          const value = spec.text
-          if (
-            !value.startsWith("./") &&
-            !value.startsWith("../") &&
-            ![
-              "@rp/plugin-api/server",
-              "@rp/plugin-api/worker",
-              "@rp/plugin-api/client",
-              "react",
-              "react/jsx-runtime",
-              ...(test ? ["node:test", "node:assert/strict"] : [])
-            ].includes(value)
-          )
-            throw new Error("Undeclared dependency")
-          if (value.startsWith(".") && !resolve(path, "..", value).startsWith(folder + "/"))
-            throw new Error("Escaping import")
-        }
-        ts.forEachChild(node, imports)
+      const policy = rewriteImports(source.text, path, (value) => {
+        if (
+          !value.startsWith("./") &&
+          !value.startsWith("../") &&
+          ![
+            "@rp/plugin-api/server",
+            "@rp/plugin-api/worker",
+            "@rp/plugin-api/client",
+            "react",
+            "react/jsx-runtime",
+            ...(test ? ["node:test", "node:assert/strict"] : [])
+          ].includes(value)
+        )
+          return undefined
+        if (
+          value.includes("\\") ||
+          value.includes("%") ||
+          (value.startsWith(".") && !resolve(path, "..", value).startsWith(folder + "/"))
+        )
+          return undefined
+        return value
+      })
+      if (policy.unsupported.length) {
+        message =
+          "This plugin needs an adapter for: " +
+          policy.unsupported.join(", ") +
+          ". Read plugin_api for supported imports."
+        throw new Error("Unsupported import")
       }
-      imports(source)
     }
     // Only report plugin-local diagnostics. App/API contracts are checked by npm run check.
     const diagnostics = ts

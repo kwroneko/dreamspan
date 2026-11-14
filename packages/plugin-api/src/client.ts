@@ -1,5 +1,5 @@
 /** Browser API v1. Full plugins run as the signed-in user; these handles are not a sandbox. */
-import type { ComponentType, ComponentProps } from "react"
+import type { ComponentType, ComponentProps, ReactNode } from "react"
 export {
   Children,
   Component,
@@ -80,6 +80,13 @@ export interface BannerEntry {
   readonly order: number
   readonly component: ComponentType
 }
+/** Optional reply alerts. Receives no session, RPC client or app state. */
+export interface NoticeChannelEntry {
+  readonly id: string
+  readonly component: ComponentType
+  readonly activate: () => void
+  readonly receive: () => void
+}
 export interface ClientRegistry<A> {
   readonly register: (entry: A) => () => void
   readonly disable: (id: string) => () => void
@@ -93,10 +100,19 @@ export interface ClientHost {
     readonly chatPanels?: ClientRegistry<PanelEntry>
     readonly routes?: ClientRegistry<RouteEntry>
     readonly appBanners?: ClientRegistry<BannerEntry>
+    readonly noticeChannels?: ClientRegistry<NoticeChannelEntry>
   }
   /** Owns cleanup such as subscriptions. Runs even when activation fails or times out. */
   readonly onDispose: (dispose: () => void) => void
 }
+export declare const Switch: ComponentType<{
+  readonly checked: boolean
+  readonly onCheckedChange: (checked: boolean) => void
+  readonly children: ReactNode
+  readonly about?: ReactNode
+  readonly hint?: string
+}>
+export declare const Alert: ComponentType<{ readonly children: ReactNode }>
 export type Activate = (host: ClientHost) => void | Promise<void>
 
 interface ButtonProps extends Omit<ComponentProps<"button">, "title"> {

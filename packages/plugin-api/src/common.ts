@@ -1,7 +1,7 @@
 import type { Effect, Scope } from "effect"
 export { Effect, Schema } from "effect"
 export { registerMacro } from "@rp/shared/macros/registry.ts"
-export type { MacroEntry, MacroSpec } from "@rp/shared/macros/registry.ts"
+export type { MacroEntry, MacroSpec, DataMacroSpec } from "@rp/shared/macros/registry.ts"
 export interface Handle<A> {
   readonly register: (entry: A) => Effect.Effect<void, never, Scope.Scope>
   readonly disable: (id: string) => Effect.Effect<void, never, Scope.Scope>

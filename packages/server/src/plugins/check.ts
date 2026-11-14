@@ -9,16 +9,19 @@ import { confined, pluginFolder } from "./repo.ts"
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url))
 /** Hash the installed source/API closure as well as dependencies and generated worker stamp. */
-const pluginAppStamp = async () => {
+export const pluginAppStamp = async (dataDir: string) => {
   const hash = createHash("sha256")
+  const dataRoot = resolve(dataDir)
   const visit = async (dir: string) => {
+    if (dir === dataRoot || dir.startsWith(dataRoot + "/")) return
     for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
       const file = join(dir, entry.name)
+      if (file === dataRoot || file.startsWith(dataRoot + "/")) continue
       if (entry.isDirectory()) await visit(file)
       else if (entry.isFile()) hash.update(file.slice(root.length)).update(await readFile(file))
     }
   }
-  for (const path of ["packages/server/src", "packages/shared/src", "packages/plugin-api/src"])
+  for (const path of ["packages/server/src", "packages/shared/src", "packages/plugin-api/src", "packages/client/src"])
     await visit(join(root, path))
   hash.update(await readFile(join(root, "package-lock.json")))
   hash.update(await readFile(join(root, "packages/server/dist/workers/stamp.json")).catch(() => Buffer.from("source")))
@@ -35,7 +38,7 @@ export const checkPlugin = async (
   commit: string,
   authoring?: { readonly working: boolean; readonly admin: boolean; readonly historical?: boolean }
 ): Promise<PluginReport> => {
-  const appStamp = await pluginAppStamp()
+  const appStamp = await pluginAppStamp(dataDir)
   const report: PluginReport = {
     commit,
     appStamp,

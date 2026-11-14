@@ -260,6 +260,33 @@ export const authorRepo = async (
 }
 
 /** A durable creation intent precedes files/HEAD. A crash resumes the same deterministic first commit. */
+/** Recover this application's own creation key; no journal from the copied source is imported. */
+export const resumeAuthorCreation = async (
+  dataDir: string,
+  owner: string,
+  id: string,
+  key: string
+): Promise<AuthorResult | null> => {
+  const folder = pluginFolder(dataDir, owner, id)
+  try {
+    await confined(dataDir, folder)
+  } catch {
+    return null
+  }
+  if ((await readdir(folder)).length === 0) return null
+  await safeGit(folder)
+  const marker = join(folder, ".git/rp-create")
+  const intent = await readFile(marker, "utf8")
+    .then((t) => JSON.parse(t) as { key: string; digest: string; commit?: string; paths?: Array<string> })
+    .catch(() => null)
+  if (!intent || intent.key !== key) return null
+  const tree = intent.commit ? await commitFiles(folder, intent.commit) : await diskFiles(folder)
+  const paths = intent.paths ?? [...tree.keys()]
+  if (paths.length !== tree.size || new Set(paths).size !== tree.size || paths.some((p) => !tree.has(p))) return null
+  const files = Object.fromEntries(paths.map((path) => [path, decode(tree.get(path)!)]))
+  if (hash(files) !== intent.digest) return null
+  return createAuthorRepo(dataDir, owner, id, files, key)
+}
 export const createAuthorRepo = async (
   dataDir: string,
   owner: string,
@@ -271,7 +298,9 @@ export const createAuthorRepo = async (
   const folder = await confined(dataDir, pluginFolder(dataDir, owner, id), true)
   const marker = join(folder, ".git/rp-create")
   let intent = await readFile(marker, "utf8")
-    .then((t) => JSON.parse(t) as { key: string; digest: string; timestamp: number; commit?: string })
+    .then(
+      (t) => JSON.parse(t) as { key: string; digest: string; timestamp: number; commit?: string; paths?: Array<string> }
+    )
     .catch(() => undefined)
   if (!intent) {
     const entries = await readdir(folder)
@@ -282,7 +311,7 @@ export const createAuthorRepo = async (
     )
       throw new Error("Plugin already exists")
     await confined(dataDir, join(folder, ".git"), true)
-    intent = { key, digest: hash(files), timestamp: Math.floor(Date.now() / 1000) }
+    intent = { key, digest: hash(files), timestamp: Math.floor(Date.now() / 1000), paths: Object.keys(files) }
     await writeFile(marker, JSON.stringify(intent), { flag: "wx", mode: 0o600 })
   }
   await safeGit(folder)
