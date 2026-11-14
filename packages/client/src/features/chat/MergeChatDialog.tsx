@@ -278,10 +278,10 @@ export function MergeChatDialog({
             source: { chatId: one.chat, forkId: one.fork },
             ...(start === null ? {} : { start }),
             includeLeftOut,
-            ...(joining && timelines === "separate" ? { timelines } : {})
+            ...(timelines === "separate" ? { timelines } : {})
           }))
         : [],
-    [session.id, forkId, at, sources, start, includeLeftOut, joining, timelines]
+    [session.id, forkId, at, sources, start, includeLeftOut, timelines]
   )
   const request = requests[0] ?? null
   const previewAll = () => Promise.all(requests.map((one) => reader.run((client) => client("PreviewChatMerge", one))))
@@ -581,7 +581,7 @@ export function MergeChatDialog({
                   ))}
                 </ul>
               </section>
-              {joining && preview.choosesTimelines === true && (
+              {preview.choosesTimelines === true && (
                 <section aria-labelledby="join-view-label" className="flex flex-col gap-2 text-sm">
                   <span id="join-view-label" className="font-medium">
                     How the characters see it
@@ -590,27 +590,44 @@ export function MergeChatDialog({
                     aria-labelledby="join-view-label"
                     value={timelines}
                     onValueChange={setTimelines}
-                    options={[
-                      {
-                        value: "together",
-                        label: several ? "Everyone reads every thread" : "Everyone reads both threads",
-                        description: several
-                          ? "Every reply sees all of them, the other threads as sections before this one's messages since they parted."
-                          : `Every reply sees both, the other thread as a section before this one's messages since #${preview.from - 1}.`
-                      },
-                      {
-                        value: "separate",
-                        label: "Each character reads only its own thread",
-                        description: "Characters see only the thread they were in. A narrator sees every thread."
-                      }
-                    ]}
+                    options={
+                      joining
+                        ? [
+                            {
+                              value: "together",
+                              label: several ? "Everyone reads every thread" : "Everyone reads both threads",
+                              description: several
+                                ? "Every reply sees all of them, the other threads as sections before this one's messages since they parted."
+                                : `Every reply sees both, the other thread as a section before this one's messages since #${preview.from - 1}.`
+                            },
+                            {
+                              value: "separate",
+                              label: "Each character reads only its own thread",
+                              description: "Characters see only the thread they were in. A narrator sees every thread."
+                            }
+                          ]
+                        : [
+                            {
+                              value: "together",
+                              label: "Everyone reads both chats",
+                              description: "Every reply sees this chat and the merged one."
+                            },
+                            {
+                              value: "separate",
+                              label: "Each character keeps its own chat's past",
+                              description:
+                                "This chat's characters don't read the merged chat, and its characters don't read this chat's past. Everyone reads what follows the merge. A narrator reads both."
+                            }
+                          ]
+                    }
                   />
                 </section>
               )}
-              {joining && preview.choosesTimelines !== true && (
+              {preview.choosesTimelines !== true && (
                 <p className="text-sm text-muted" data-testid="join-view">
-                  Each character reads what it was present for (this chat's Context setting). A narrator reads every
-                  thread.
+                  {joining
+                    ? "Each character reads what it was present for (this chat's Context setting). A narrator reads every thread."
+                    : "Each character reads only what it was present for, in either chat (this chat's Context setting). A narrator reads both."}
                 </p>
               )}
             </>
@@ -658,7 +675,11 @@ export function MergeChatDialog({
               <div className="border-t border-border px-3 py-2">
                 <Field
                   label="For"
-                  about="With this chat's separate contexts, each character reads only what it was present for. A narrator and your own characters read it all."
+                  about={
+                    readerFor.from === undefined
+                      ? "With this chat's separate contexts, each character reads only what it was present for. A narrator and your own characters read it all."
+                      : "Each character reads only its own chat's past, and everything after the merge. A narrator and your own characters read it all."
+                  }
                 >
                   <Select
                     value={readerFor.entity as string}
@@ -678,9 +699,11 @@ export function MergeChatDialog({
             >
               {[
                 ...all.flatMap((one) => readOf(one)),
-                layout === "join"
-                  ? null
-                  : `[This ${joining ? "thread" : "chat"}'s own messages${preview.start ? ` from #${preview.start.number}` : ""}]`,
+                readerFor?.from === "merged"
+                  ? `[Of this chat before the merge, only what ${readerFor.name} was there for]`
+                  : layout === "join"
+                    ? null
+                    : `[This ${joining ? "thread" : "chat"}'s own messages${preview.start ? ` from #${preview.start.number}` : ""}]`,
                 several ? null : marker
               ]
                 .filter(Boolean)

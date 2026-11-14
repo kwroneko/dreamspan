@@ -155,6 +155,43 @@ for (const [width, theme] of [
     await shoot(page, `settings-${width}-${theme}`)
   })
 
+for (const [width, theme] of [
+  [1440, "light"],
+  [390, "dark"]
+] as const)
+  test(`merging another chat with each character keeping its own past (${width} ${theme})`, async ({ page }) => {
+    const suffix = `own-${width}-${theme}`
+    const { home } = await seed(suffix)
+    await open(page, `/chats/${home.chatId}`, width, theme)
+    await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Merge another chat…", exact: true }).click()
+    await pickSource(page, `Docks ${suffix}`)
+    const choice = dialog(page).getByRole("radiogroup", { name: "How the characters see it" })
+    await expect(choice.getByRole("radio", { name: /^Everyone reads both chats/ })).toBeChecked()
+    await choice.getByRole("radio", { name: /^Each character keeps its own chat's past/ }).click()
+    await expect(choice.getByRole("radio", { name: /^Each character keeps its own chat's past/ })).toBeChecked()
+    await expect(choice).toContainText("Everyone reads what follows the merge. A narrator reads both.")
+    await dialog(page).getByText("What the model reads", { exact: true }).click()
+    const reader = dialog(page).getByRole("combobox", { name: "For" })
+    const section = dialog(page).getByTestId("merge-section")
+    await reader.click()
+    await page.getByRole("option", { name: /^Kai/ }).click()
+    await expect(section).toContainText("Kai: Kai climbs the crane at dusk.")
+    await expect(section).toContainText("[Of this chat before the merge, only what Kai was there for]")
+    await reader.click()
+    await page.getByRole("option", { name: /^Mira/ }).click()
+    await expect(section).toContainText(`[Nothing of “Docks ${suffix}”: Mira wasn't there.]`)
+    await expect(section).not.toContainText("Kai climbs the crane")
+    await shoot(page, `own-past-dialog-${width}-${theme}`)
+    await dialog(page).getByRole("button", { name: "Merge", exact: true }).click()
+    await expect(dialog(page)).toHaveCount(0)
+    await expect(page.getByRole("article", { name: `Merged chat “Docks ${suffix}”`, exact: true })).toBeVisible()
+    const stored = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.ReadPath({ chatId: home.chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 50 })
+    )
+    expect(stored.entries.at(-1)?.version.origin).toBe("merge")
+  })
+
 test("a message's Merge a chat here… merges after that message", async ({ page }) => {
   const { home } = await seed("here")
   await open(page, `/chats/${home.chatId}`, 1440, "light")

@@ -149,7 +149,9 @@ export class AssemblySources extends Context.Service<
      * without it: everyone knew everything.
      */
     readonly stretches?: (
-      leaf?: string | null
+      leaf?: string | null,
+      /** The character's identities: only the stretches that apply to it (db/threadStretches.ts). */
+      viewers?: ReadonlyArray<string>
     ) => Effect.Effect<ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>, SourceError>
     readonly knowers?: (versionIds: ReadonlyArray<string>) => Effect.Effect<
       ReadonlyArray<{

@@ -59,7 +59,13 @@ export const MergeView = Schema.Struct({
   entity: EntityId,
   name: Schema.String,
   section: Schema.String,
-  readable: Schema.Boolean
+  readable: Schema.Boolean,
+  /**
+   * An ordinary merge kept separate in a chat with one shared context: whose past the character
+   * keeps. `here`, this chat's (and none of the merged one's it wasn't in); `merged`, the merged
+   * chat's it was there for (and none of this chat's from before the join it wasn't in); `both`.
+   */
+  from: Schema.optionalKey(Schema.Literals(["here", "merged", "both"]))
 })
 export type MergeView = typeof MergeView.Type
 

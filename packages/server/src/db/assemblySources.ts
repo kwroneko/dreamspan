@@ -913,9 +913,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         return count
       }),
 
-    stretches: (leaf) =>
+    stretches: (leaf, viewers) =>
       Effect.gen(function* () {
-        const ranges = yield* threadStretches(sql, yield* viewAt(sql, chatId, leaf ?? null), leaf)
+        const ranges = yield* threadStretches(sql, yield* viewAt(sql, chatId, leaf ?? null), leaf, viewers)
         if (ranges.length) stretchPins = ranges
         return ranges
       }),

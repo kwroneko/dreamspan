@@ -535,8 +535,12 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
           entity: id as EntityId,
           name: castCards.get(id)?.name ?? "Unknown",
           section: seen.rows.length === 0 && seen.partial ? "" : seen.content,
-          readable: !(seen.rows.length === 0 && seen.partial)
-        })
+          readable: !(seen.rows.length === 0 && seen.partial),
+          // Another chat kept separate: which chat's past the character keeps (db/threadStretches.ts).
+          ...(splitId === null && choosesTimelines
+            ? { from: destCast.includes(id) ? (sourceCast.includes(id) ? "both" : "here") : "merged" }
+            : {})
+        } satisfies MergeView)
       }
     }
 
@@ -618,7 +622,10 @@ const mergePlan = (sql: SqlClient.SqlClient, userId: UserId, request: MergeReque
       sourceEnd,
       base,
       start: startRow?.id ?? null,
-      stretchBefore: spanFrom > 0 ? yield* slotAtPosition(sql, pieces, spanFrom - 1) : null,
+      // Kept separate, another chat's characters lived none of this chat before the join: its
+      // stretch is the whole path (null), whatever span the layout reads beside it. A branch of
+      // this chat shares the part before the span (db/threadStretches.ts).
+      stretchBefore: sameChat && spanFrom > 0 ? yield* slotAtPosition(sql, pieces, spanFrom - 1) : null,
       rows,
       transcript,
       union,
