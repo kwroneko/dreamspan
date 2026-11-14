@@ -118,7 +118,16 @@ import {
   PathWindow
 } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
-import { BinBranch, BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
+import {
+  BinBranch,
+  BinChanged,
+  BinForkShown,
+  BinItem,
+  CannotDeleteLastFork,
+  DeletedSlots,
+  RecoveredText,
+  RestoredItems
+} from "@rp/shared/bin.ts"
 import {
   EditingOrigin,
   ObservedDeletion,
@@ -1199,6 +1208,17 @@ export class WriteOpsChat extends RpcGroup.make(
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
+   * Deletes several messages in fork `forkId` as one change (db/bin.ts `deleteMessages`): each as
+   * DeleteMessage deletes it, with its own bin item naming the group, in one transaction. In the
+   * order given (the path's, top down), which RestoreBinItems follows. NotFound for any message
+   * not live in that fork, and nothing is deleted.
+   */
+  Rpc.make("DeleteMessages", {
+    payload: { userId: UserId, forkId: ForkId, slotIds: DeletedSlots },
+    success: Schema.Array(BinItem),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
    * Deletes one fork (owner, 2026-10-27): only that fork goes, and forks made from it keep
    * their shared history. A chat's last live fork can't be deleted (`CannotDeleteLastFork`).
    */
@@ -1323,6 +1343,15 @@ export class WriteOpsChat extends RpcGroup.make(
   Rpc.make("RestoreBinItem", {
     payload: { userId: UserId, itemId: Schema.String },
     success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Puts several back in one transaction, in the order given (a multi-delete's Undo); those no
+   * longer in the bin are skipped. NotFound when none is.
+   */
+  Rpc.make("RestoreBinItems", {
+    payload: { userId: UserId, itemIds: RestoredItems },
+    success: Schema.Array(BinItem),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Deletes an item for good. The UI confirms this one. */

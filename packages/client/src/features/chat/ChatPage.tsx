@@ -919,7 +919,7 @@ function ChatSurface({
                 onOpenSummaries={openSummaries}
               />
             )}
-            <SlotOutlet slot={chatComposerNotes} props={{ view }} />
+            <SlotOutlet slot={chatComposerNotes} props={{ view, session }} />
             <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: show }} />
             <SlotOutlet slot={chatOverlays} props={{ session, view }} />
           </div>

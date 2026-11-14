@@ -3,6 +3,7 @@ import { ExternalMediaApi } from "./externalMedia.ts"
 import { SavedMediaApi } from "./savedMedia.ts"
 import { WorkshopApi } from "./workshopApi.ts"
 import { SplitChatApi } from "./splitChat.ts"
+import { MessageSelectionApi } from "./messageSelectionApi.ts"
 import { ChatContextsApi } from "./contextsApi.ts"
 import { ChatThreadsApi } from "./threadsApi.ts"
 import { ChatMergeApi } from "./mergeApi.ts"
@@ -439,6 +440,8 @@ export const AuthenticatedShellUpdatesApi = ShellUpdatesApi.middleware(Authentic
 
 /** The whole API: what the client calls and the server serves. */
 export class AuthenticatedSplitChatApi extends SplitChatApi.middleware(Authentication) {}
+/** Several messages at once: a multi-delete and its Undo (messageSelectionApi.ts). */
+export class AuthenticatedMessageSelectionApi extends MessageSelectionApi.middleware(Authentication) {}
 /** Separate contexts' away rows and their Undo (contextsApi.ts). */
 export class AuthenticatedChatContextsApi extends ChatContextsApi.middleware(Authentication) {}
 /** Parallel threads in one chat (threadsApi.ts). */
@@ -487,6 +490,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedSavedMediaApi)
   .merge(AuthenticatedSummaryRequestApi)
   .merge(AuthenticatedSplitChatApi)
+  .merge(AuthenticatedMessageSelectionApi)
   .merge(AuthenticatedChatMergeApi)
   .merge(AuthenticatedChatContextsApi)
   .merge(AuthenticatedChatThreadsApi)

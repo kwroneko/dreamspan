@@ -227,6 +227,25 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     })
 
   /**
+   * The message fork `forkId` shows nearest above `slotId`, itself if shown: where its tip went
+   * when it deleted the messages from there down (`relocateLeaf`'s walk). Null for none.
+   */
+  const shownAbove = (chatId: string, forkId: string, slotId: string | null) =>
+    Effect.gen(function* () {
+      if (slotId === null) return null
+      const kept = yield* liveGaps(sql, chatId, forkId)
+      const up = yield* sql<{ id: string; deleted: number }>`
+        WITH RECURSIVE up(id, parent, deleted, n) AS (
+          SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, forkId, "s")}, 0 FROM slots s WHERE s.id = ${slotId}
+          UNION ALL
+          SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, forkId, "s")}, up.n + 1 FROM slots s JOIN up ON s.id = up.parent
+          WHERE up.deleted
+        )
+        SELECT id, deleted FROM up ORDER BY n`
+      return up.find((slot) => !slot.deleted || kept.has(slot.id))?.id ?? null
+    })
+
+  /**
    * The live forks of the chat whose tip nothing continues below: no child that's live, or
    * deleted alone with replies left (what a path follows). Includes one before the first
    * message, which a restored first message continues. For restoring what was deleted
@@ -377,7 +396,16 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
 
   const forkOrigin = (fork: ForkRow) => ({ forkId: fork.id, forkName: fork.name })
 
-  const deleteMessage = (userId: UserId, slotId: string, forkId?: string | null) =>
+  /**
+   * One message deleted in its fork, with its bin item; the fork tips and the chat's row version
+   * are the caller's (`deleteMessage`, `deleteMessages`). `group`: the multi-delete it's part of.
+   */
+  const deleteOne = (
+    userId: UserId,
+    slotId: string,
+    forkId: string | null | undefined,
+    group?: { readonly id: string; readonly size: number }
+  ) =>
     Effect.gen(function* () {
       const slot = yield* ownedLiveSlot(userId, slotId, forkId)
       const [size] = yield* sql<{ n: number }>`
@@ -397,7 +425,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           depth: slot.depth,
           position: slot.position,
           parentSlotId: slot.parent_slot_id,
-          ...forkOrigin(slot.fork)
+          ...forkOrigin(slot.fork),
+          ...(group ? { group: group.id, groupSize: group.size } : {})
         },
         byteSize: size!.n
       })
@@ -407,12 +436,42 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         { kind: "delete_slot", targetId: slotId, slotId, valueId: null, flag: 1, binItemId: itemId }
       )
       yield* recordReduction(sql, slotId, slot.fork.id)
-      const shown = yield* forksShowing(sql, slot.chat_id, slotId, null, slot.fork.id, false)
+      const shown = yield* forksShowing(sql, slot.chat_id, slotId, null, slot.fork.id, false, true)
       if (shown.length === 0)
         yield* sql`UPDATE slots SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id = ${slotId}`
-      yield* relocateLeaf(slot.chat_id)
-      yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${slot.chat_id}`
+      return { itemId, chatId: slot.chat_id, forkId: slot.fork.id }
+    })
+
+  const deleteMessage = (userId: UserId, slotId: string, forkId?: string | null) =>
+    Effect.gen(function* () {
+      const { itemId, chatId } = yield* deleteOne(userId, slotId, forkId)
+      yield* relocateLeaf(chatId)
+      yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${chatId}`
       return itemId
+    })
+
+  /**
+   * Several messages deleted in fork `forkId` as one change (job msgactions1): each exactly as
+   * `deleteMessage` deletes it, with a bin item of its own that names the group, so the bin keeps
+   * each one and Undo restores them together (`restoreMany`). The fork's tip moves once, after.
+   * In the order given (the client's: the path's, top down), which restoring follows.
+   */
+  const deleteMessages = (userId: UserId, forkId: string, slotIds: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const group = { id: uuidv7(), size: slotIds.length }
+      const itemIds: Array<string> = []
+      let chatId: string | null = null
+      for (const slotId of slotIds) {
+        const one = yield* deleteOne(userId, slotId, forkId, group)
+        if (one.forkId !== forkId) return yield* new NotFound({ entity: "fork", id: forkId })
+        chatId = one.chatId
+        itemIds.push(one.itemId)
+      }
+      if (chatId !== null) {
+        yield* relocateLeaf(chatId)
+        yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${chatId}`
+      }
+      return itemIds
     })
 
   /**
@@ -885,7 +944,9 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           }>`SELECT parent_slot_id FROM slots WHERE id = ${slotId}`
           if (!(yield* onForkPath(sql, chatId, fork, slotId))) {
             const tip = slotId
-            if (fork.tip_slot_id === (slot?.parent_slot_id ?? null)) {
+            const parent = slot?.parent_slot_id ?? null
+            // The tip went up past messages the fork had deleted before: it comes back from there too.
+            if (fork.tip_slot_id === parent || fork.tip_slot_id === (yield* shownAbove(chatId, fork.id, parent))) {
               yield* sql`UPDATE forks SET tip_slot_id = ${tip}, row_version = row_version + 1 WHERE id = ${fork.id}`
             } else {
               yield* insertFork(sql, {
@@ -957,6 +1018,24 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       }
       for (const fork of tips) yield* followRestored(item.chat_id!, fork)
       return toBinItem(item)
+    })
+
+  /**
+   * Undo of a multi-delete (`deleteMessages`): each item restored as `restore` restores it, in
+   * the order given (the delete's, top down, so a fork's tip follows each message back down).
+   * One already restored or deleted for good from the bin is skipped; NotFound when none is left.
+   */
+  const restoreMany = (userId: UserId, itemIds: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const present = new Set(
+        (yield* sql<{
+          id: string
+        }>`SELECT id FROM bin_items WHERE user_id = ${userId} AND ${sql.in("id", itemIds)}`).map((row) => row.id)
+      )
+      const restored: Array<BinItem> = []
+      for (const itemId of itemIds) if (present.has(itemId)) restored.push(yield* restore(userId, itemId))
+      if (restored.length === 0) return yield* new NotFound({ entity: "bin item", id: itemIds[0] ?? "" })
+      return restored
     })
 
   /**
@@ -1156,17 +1235,20 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
    * go can't make room, nothing goes: the bin stays over its limits rather than losing
    * everything else to one delete, and later deletes or emptying it bring it back.
    */
-  const evictDeleted = (userId: UserId, created: string) =>
+  const evictDeleted = (userId: UserId, created: string | ReadonlyArray<string>) =>
     Effect.gen(function* () {
+      // A multi-delete's items are all just made: none of them makes room for the others.
+      const made = typeof created === "string" ? [created] : created
       const limits = yield* readBinLimits(sql, userId, defaults)
       const fits = sql<{ n: number; bytes: number }>`
         SELECT count(*) AS n, coalesce(sum(byte_size), 0) AS bytes FROM bin_items WHERE user_id = ${userId}`.pipe(
         Effect.map(([usage]) => usage!.n <= limits.deletedItems && usage!.bytes <= limits.deletedBytes)
       )
       if (yield* fits) return
-      const [newest] = yield* sql<{ byte_size: number }>`SELECT byte_size FROM bin_items WHERE id = ${created}`
+      const [newest] = yield* sql<{ n: number; bytes: number }>`
+        SELECT count(*) AS n, coalesce(sum(byte_size), 0) AS bytes FROM bin_items WHERE ${sql.in("id", made)}`
       // Not even evicting everything else would make room.
-      if (limits.deletedItems < 1 || newest!.byte_size > limits.deletedBytes) return
+      if (limits.deletedItems < newest!.n || newest!.bytes > limits.deletedBytes) return
       yield* sql
         .withTransaction(
           Effect.gen(function* () {
@@ -1174,7 +1256,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
             while (!(yield* fits)) {
               const [oldest] = yield* sql<BinRow>`
                 SELECT * FROM bin_items
-                WHERE user_id = ${userId} AND id <> ${created} AND (deleted_at, id) > (${after.deleted_at}, ${after.id})
+                WHERE user_id = ${userId} AND NOT ${sql.in("id", made)} AND (deleted_at, id) > (${after.deleted_at}, ${after.id})
                 ORDER BY deleted_at, id LIMIT 1`
               if (!oldest) return yield* new NoRoom()
               after = oldest
@@ -1334,12 +1416,14 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     deleteChat,
     deleteChatGroup,
     deleteMessage,
+    deleteMessages,
     deleteFork,
     removeThreads,
     deleteVersion,
     deleteEntity,
     deleteConnection,
     restore,
+    restoreMany,
     purge,
     emptyBin,
     evictDeleted,

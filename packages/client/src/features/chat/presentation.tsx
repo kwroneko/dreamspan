@@ -79,6 +79,11 @@ export const reasoningPanels = defineSlot<{
 export const messageStream = defineSlot<{ entry: PathEntry; session: ChatSession; place: "above" | "below" }>(
   "chat.message-stream"
 )
+/**
+ * Before a message's portrait, and first in a merged chat's header: its tick while messages are
+ * being selected to delete together (selection/). Renders nothing otherwise.
+ */
+export const messageSelect = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.select")
 /** Under a reply: the guidance it was written with (guidanceEdit.tsx). */
 export const messageDirections = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.direction")
 interface VersionNavigationContext {
@@ -143,8 +148,11 @@ export const chatOverlays = defineSlot<{ session: ChatSession; view: ChatView }>
 export const versionFailureActions = defineSlot<{ version: import("@rp/shared/chat.ts").Version }>(
   "message.failure-actions"
 )
-/** Notes about the next request just above the composer, such as its images' token estimate. */
-export const chatComposerNotes = defineSlot<{ view: ChatView }>("chat.composer-notes")
+/**
+ * Notes about the next request just above the composer, such as its images' token estimate, and
+ * bars that act on the chat there (the selected messages' Delete).
+ */
+export const chatComposerNotes = defineSlot<{ view: ChatView; session: ChatSession }>("chat.composer-notes")
 
 export const accountSettingSections = defineSlot<import("./ChatDefaults.tsx").SummaryDefaultsProps>(
   "chat.account-setting-sections"

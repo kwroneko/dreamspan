@@ -59,6 +59,7 @@ import {
   messageHeaderDetails,
   messageVersions,
   messagePreviews,
+  messageSelect,
   useVersionNavigation,
   versionFailureActions
 } from "./presentation.tsx"
@@ -938,6 +939,8 @@ export const Message = memo(function Message({
       onMouseDown={onMouseDown}
       onDoubleClick={onDoubleClick}
     >
+      {/* Its tick while messages are selected to delete together (selection/). */}
+      <SlotOutlet slot={messageSelect} props={{ entry, session }} />
       {/* The portrait, with its number, generation time and tokens under it, as in ST. */}
       <div className="flex shrink-0 flex-col items-center gap-1.5">
         {choosing ? (
