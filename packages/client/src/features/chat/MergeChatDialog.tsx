@@ -11,6 +11,7 @@ import {
   fillMergeTemplate,
   MERGE_BLOCK_SECTION_DEFAULT,
   MERGE_SECTION_DEFAULT,
+  type MergeNote,
   type MergeTimelines
 } from "@rp/shared/mergeApi.ts"
 import { useNavigate } from "@tanstack/react-router"
@@ -18,7 +19,7 @@ import { type ComponentType, useEffect, useMemo, useState, useSyncExternalStore 
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { RadioGroup, Switch } from "../../ui/Choice.tsx"
+import { Checkbox, RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -58,6 +59,28 @@ const joined = (preview: ChatMergePreview) =>
     : preview.continues
       ? `${plural(preview.messages, "new message")} since the last join`
       : `Joins ${plural(preview.messages, "message")} since #${preview.from - 1}`
+
+const nameList = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)!}`
+
+/** Which replies will read a note brought by the merge, in one line. */
+const noteReaders = (note: MergeNote) => {
+  const card = note.card ?? "its character"
+  switch (note.when) {
+    case "moved":
+      return `Only ${card}'s own replies read the moved passage; every reply reads the rest of the field.`
+    case "own_turn":
+      return `Only ${card}'s own replies read it.`
+    case "turn":
+      return `Only replies by ${nameList(note.names)} read it.`
+    case "not_muted":
+      return `Every reply reads it while ${note.names.length > 1 ? "one of " : ""}${nameList(note.names)} isn't muted, this chat's characters' too.`
+    default:
+      return note.kind === "card"
+        ? `Every reply reads it while ${card} is in this chat, this chat's characters' too.`
+        : "Every reply reads it, this chat's characters' too."
+  }
+}
 
 /** The cast after every source joins: each member once, added if any source adds it. */
 const unionCast = (previews: ReadonlyArray<ChatMergePreview>) => {
@@ -265,6 +288,8 @@ export function MergeChatDialog({
   const [title, setTitle] = useState<string | null>(null)
   const [framing, setFraming] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
+  /** The merged chat's notes ticked to bring (`MergeNote.id`). */
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set())
   const reader = useAction()
   const writer = useAction()
 
@@ -354,6 +379,8 @@ export function MergeChatDialog({
   ]
 
   const ownFraming = framing === null || framing.trim() === defaultFraming ? null : framing
+  const notes = !joining && !several ? (preview?.notes ?? []) : []
+  const brought = notes.filter((note) => note.conflict === null && ticked.has(note.id)).map((note) => note.id)
   const merge = async () => {
     if (!request || !preview || !forkId) return
     const result = joining
@@ -378,6 +405,7 @@ export function MergeChatDialog({
           (client) =>
             client("MergeChat", {
               ...request,
+              ...(brought.length > 0 ? { notes: brought } : {}),
               title: shownTitle,
               framing: ownFraming,
               digest: preview.digest
@@ -457,6 +485,7 @@ export function MergeChatDialog({
                 setFraming(null)
                 setStart(null)
                 setIncludeLeftOut(false)
+                setTicked(new Set())
                 setSources([next])
               }}
             />
@@ -581,6 +610,46 @@ export function MergeChatDialog({
                   ))}
                 </ul>
               </section>
+              {notes.length > 0 && (
+                <section aria-labelledby="merge-notes-label" className="flex min-w-0 flex-col gap-2 text-sm">
+                  <span id="merge-notes-label" className="font-medium">
+                    Notes to bring
+                  </span>
+                  <p className="text-muted">
+                    Notes on in “{preview.sourceTitle}”. Each one ticked is on in this chat from the merge on.
+                  </p>
+                  {notes.map((note) => (
+                    <Checkbox
+                      key={note.id}
+                      checked={note.conflict === null && ticked.has(note.id)}
+                      disabled={note.conflict !== null}
+                      onCheckedChange={(checked) =>
+                        setTicked((was) => {
+                          const next = new Set(was)
+                          if (checked) next.add(note.id)
+                          else next.delete(note.id)
+                          return next
+                        })
+                      }
+                      hintInline={false}
+                      hint={
+                        note.conflict ??
+                        (note.kind === "chat"
+                          ? "Copies this note into this chat. The other chat keeps its own."
+                          : `Switches ${note.card ?? "the character"}'s note on in this chat.`)
+                      }
+                      description={
+                        <span className="flex min-w-0 flex-col gap-0.5 [overflow-wrap:anywhere]">
+                          <span>{note.conflict ?? noteReaders(note)}</span>
+                          {note.excerpt && <span className="text-muted">“{note.excerpt}”</span>}
+                        </span>
+                      }
+                    >
+                      {note.kind === "card" ? `${note.title} · ${note.card ?? "Character"}'s note` : note.title}
+                    </Checkbox>
+                  ))}
+                </section>
+              )}
               {preview.choosesTimelines === true && (
                 <section aria-labelledby="join-view-label" className="flex flex-col gap-2 text-sm">
                   <span id="join-view-label" className="font-medium">

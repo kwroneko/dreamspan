@@ -1195,6 +1195,19 @@ test.describe("synthetic library and every app surface", () => {
                   })
                 parent = sent.entry!.slotId
               }
+              // A note on there, with a long title and text, for "Notes to bring".
+              const note = yield* api.CreateChatNote({
+                chatId: made.id,
+                forkId: made.currentForkId!,
+                title: "Harbor rules for every crew that docks after dark, written long to test wrapping",
+                content:
+                  "No boat leaves after the second bell, and every crane stays locked until the harbor master signs the night ledger in person."
+              })
+              yield* api.ChangeCast({
+                chatId: made.id,
+                slotId: parent,
+                change: { _tag: "Note", entityId: note.entityId, active: true }
+              })
               return made
             })
           )
@@ -1210,13 +1223,19 @@ test.describe("synthetic library and every app surface", () => {
             .getByRole("button", { name: source.title, exact: true })
             .click()
           await expect(dialog.getByTestId("merge-relation")).toBeVisible()
+          await dialog.getByRole("checkbox", { name: /^Harbor rules/ }).click()
+          await dialog.getByRole("radio", { name: /^Each character keeps its own chat's past/ }).click()
           await dialog.getByText("What the model reads", { exact: true }).click()
           await audit("chatmerge-dialog", '[role="dialog"]')
           await dialog.getByRole("button", { name: "Merge", exact: true }).click()
           await expect(dialog).toHaveCount(0)
           const row = page.locator("article[data-merge]").last()
-          await row.getByRole("button", { name: /^Merged “/ }).click()
-          await expect(row.getByRole("list", { name: /^Messages of / })).toBeVisible()
+          // The row can re-render as the merge's events arrive; open it once it has settled.
+          await expect(async () => {
+            const toggle = row.getByRole("button", { name: /^Merged “/ })
+            if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
+            await expect(row.getByRole("list", { name: /^Messages of / })).toBeVisible({ timeout: 2000 })
+          }).toPass({ timeout: 15000 })
           await audit("chatmerge-timeline", "article[data-merge]")
           await openPanel(page, "This chat")
           await expect(page.getByRole("radiogroup", { name: "Merged chats" })).toBeVisible()
