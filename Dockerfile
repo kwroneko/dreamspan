@@ -11,7 +11,7 @@ RUN npm ci
 
 FROM deps AS build
 COPY . .
-RUN npm run build
+RUN MIMALLOC_ALLOW_THP=0 npm run build
 
 FROM node:24.22.1-trixie-slim AS prod-deps
 WORKDIR /app

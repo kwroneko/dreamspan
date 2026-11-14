@@ -24,7 +24,13 @@ interface Result {
 const run = ({ name, command }: (typeof steps)[number]) =>
   new Promise<Result>((done) => {
     const started = performance.now()
-    const child = spawn(command, { shell: true, stdio: ["ignore", name === live ? "inherit" : "pipe", "pipe"] })
+    const child = spawn(command, {
+      shell: true,
+      // Native worker-bundle setup uses rolldown too; avoid huge-page compaction here
+      // as well as in the bounded product children (plugins/processSupervisor.ts).
+      env: { ...process.env, MIMALLOC_ALLOW_THP: "0" },
+      stdio: ["ignore", name === live ? "inherit" : "pipe", "pipe"]
+    })
     let output = ""
     child.stdout?.on("data", (chunk) => (output += chunk))
     child.stderr.on("data", (chunk) => (name === live ? process.stderr.write(chunk) : (output += chunk)))
