@@ -2887,7 +2887,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
       path: Schema.String,
       chatId: ChatId,
       stamp: Schema.String,
-      claim: Schema.NullOr(Schema.Struct({ recordId: Schema.String, parentRecordId: Schema.optionalKey(Schema.String) })),
+      claim: Schema.NullOr(
+        Schema.Struct({ recordId: Schema.String, parentRecordId: Schema.optionalKey(Schema.String) })
+      ),
       start: Schema.NullOr(
         Schema.Struct({
           parentRecordId: Schema.String,

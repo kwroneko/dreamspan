@@ -71,10 +71,7 @@ const refusedIn = (api: Api, importId: string) =>
   )
 
 const entries = (api: Api, chatId: ChatId) =>
-  Effect.map(
-    api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 200 }),
-    (read) => read.entries
-  )
+  Effect.map(api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 200 }), (read) => read.entries)
 
 const stamps = (api: Api) =>
   Effect.gen(function* () {
@@ -91,7 +88,12 @@ const staged = Effect.map(
 const imported = (title: string) =>
   Effect.gen(function* () {
     const path = `chats/Alice/${title}.jsonl`
-    const { api } = yield* importStFolder(new Map([["characters/Alice.png", CARD], [path, lines(6)]]))
+    const { api } = yield* importStFolder(
+      new Map([
+        ["characters/Alice.png", CARD],
+        [path, lines(6)]
+      ])
+    )
     const chat = (yield* api.ListChats({ limit: 200, before: null })).find((c) => c.title === title)!
     const bytes = lines(8)
     const plan = yield* check(api, new Map([[path, bytes]]))
@@ -111,7 +113,8 @@ type Change = (api: Api, chatId: ChatId) => Effect.Effect<unknown, unknown>
 const changes: ReadonlyArray<readonly [string, Change]> = [
   [
     "hide",
-    (api, chatId) => Effect.flatMap(entries(api, chatId), (rows) => api.SetMessageHidden({ slotId: rows[1]!.slotId, hidden: true }))
+    (api, chatId) =>
+      Effect.flatMap(entries(api, chatId), (rows) => api.SetMessageHidden({ slotId: rows[1]!.slotId, hidden: true }))
   ],
   [
     "edit",
@@ -138,7 +141,10 @@ const changes: ReadonlyArray<readonly [string, Change]> = [
         })
       })
   ],
-  ["delete", (api, chatId) => Effect.flatMap(entries(api, chatId), (rows) => api.DeleteMessage({ slotId: rows[5]!.slotId }))],
+  [
+    "delete",
+    (api, chatId) => Effect.flatMap(entries(api, chatId), (rows) => api.DeleteMessage({ slotId: rows[5]!.slotId }))
+  ],
   [
     "send",
     (api, chatId) =>
@@ -251,7 +257,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         )
         yield* api.FinishStImport({ importId, notSent: [] })
         const added = (yield* stImportGraph(config.dataDir, chat.id)).filter((row) => !before.has(row.id))
-        const fromFile = new Set(added.filter((row) => row.content === "m6" || row.content === "m7").map((row) => row.id))
+        const fromFile = new Set(
+          added.filter((row) => row.content === "m6" || row.content === "m7").map((row) => row.id)
+        )
         const sent = added.filter((row) => row.content === "Raced")
         const refused = yield* refusedIn(api, importId)
         assert.lengthOf(sent, 1)

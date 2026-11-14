@@ -18,7 +18,7 @@ export const stStateHash = (value: unknown) => createHash("sha256").update(JSON.
 export const stIndexSlot = (index: number) => `st-index:${index}` as SlotId
 
 /** The slot `stIndexSlot` stands for, given the file's slots in order. Others are as they are. */
-export const resolveStSlot = (slot: SlotId, slotIds: ReadonlyArray<SlotId>): SlotId => {
+const resolveStSlot = (slot: SlotId, slotIds: ReadonlyArray<SlotId>): SlotId => {
   if (!slot.startsWith("st-index:")) return slot
   const resolved = slotIds[Number(slot.slice("st-index:".length))]
   if (resolved === undefined) throw new Error(`no slot for ${slot}`)

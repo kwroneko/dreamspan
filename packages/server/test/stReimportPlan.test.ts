@@ -204,8 +204,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const hidden = yield* stImportGraph(config.dataDir, main.id)
       const held = yield* jobEnded(
         api,
-        (yield* api.StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } }))
-          .importId
+        (yield* api.StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } })).importId
       )
       assert.strictEqual(held.job.status, "complete")
       assert.deepStrictEqual(
@@ -441,8 +440,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       // The import reads the file once, and holds the bytes it parses to the bytes checked.
       const done = yield* jobEnded(
         api,
-        (yield* api.StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } }))
-          .importId
+        (yield* api.StartStPathImport({ path: root, prefix: PREFIX, plan: { planId: plan.planId, skip: [] } })).importId
       )
       assert.deepStrictEqual(
         (done.report?.issues ?? []).filter((issue) => issue.code === ST_CHANGED_SINCE_CHECK).map((issue) => issue.path),

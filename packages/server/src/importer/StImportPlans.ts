@@ -365,7 +365,8 @@ export class StImportPlans extends Context.Service<
           const now = yield* reader.StImportPlanStamp({ userId: plan.user.id })
           if (plan.status !== "running") return
           const moved = plan.files.some(
-            (file) => file.target !== "bin" && file.target !== "greeting" && now[file.chatId] !== plan.stamps[file.chatId]
+            (file) =>
+              file.target !== "bin" && file.target !== "greeting" && now[file.chatId] !== plan.stamps[file.chatId]
           )
           plan.currentFile = null
           plan.expected = plan.files.length
@@ -398,7 +399,13 @@ export class StImportPlans extends Context.Service<
                 // What the import makes of it, which a branch of it goes into.
                 plan.records.set(
                   entry.path,
-                  madeRecord(entry.path, routed.into?.chatId ?? `new:${entry.path}`, routed.into !== undefined, null, "")
+                  madeRecord(
+                    entry.path,
+                    routed.into?.chatId ?? `new:${entry.path}`,
+                    routed.into !== undefined,
+                    null,
+                    ""
+                  )
                 )
               }
               if (routed._tag === "bin" && !plan.byPath.has(entry.path)) {
@@ -694,7 +701,7 @@ export class StImportPlans extends Context.Service<
         const read: Array<StPlanEntry> = []
         const chats = new Map<string, number>()
         const rounds = stSendRounds(entries)
-        for (let step = rounds.next(); !step.done; ) {
+        for (let step = rounds.next(); !step.done;) {
           const { entry } = step.value
           const routed = route(ahead, stamps, step.value)
           if (routed._tag === "deferred") {
@@ -753,7 +760,8 @@ export class StImportPlans extends Context.Service<
             bytesTotal: ahead.read.reduce((sum, entry) => sum + entry.size, 0),
             overlays: new Map(
               ahead.shared.map(
-                (chatId) => [chatId, { slots: [], versions: [], selects: [], json: null, jsonFork: null } as Overlay] as const
+                (chatId) =>
+                  [chatId, { slots: [], versions: [], selects: [], json: null, jsonFork: null } as Overlay] as const
               )
             ),
             overlayItems: 0,
@@ -821,7 +829,11 @@ export class StImportPlans extends Context.Service<
             const file = plan.byPath.get(path)
             // Mapped elsewhere once the files before it were read (a parent that turned out
             // to hold only a greeting), or read already: nothing more of it is needed.
-            if (file === undefined ? plan.routed.get(path) === "other" : file.status === "done" || file.status === "failed")
+            if (
+              file === undefined
+                ? plan.routed.get(path) === "other"
+                : file.status === "done" || file.status === "failed"
+            )
               return "done" as const
             if (file === undefined || plan.reading !== file) {
               // Sent out of the order asked: the files before it weren't.

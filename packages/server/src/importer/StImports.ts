@@ -1321,8 +1321,7 @@ export class StImports extends Context.Service<
        */
       const sameRoute = (exact: StPlanExpect, progress: ChatProgress, expected: StPlanExpectFile | undefined) => {
         const own = progress.target
-        if (expected === undefined)
-          return own === null && (progress.into === null || !exact.stamps.has(progress.into))
+        if (expected === undefined) return own === null && (progress.into === null || !exact.stamps.has(progress.into))
         return own === null
           ? expected.recordId === null && progress.into === expected.chatId && progress.fork !== null
           : own.recordId === expected.recordId && own.chatId === expected.chatId

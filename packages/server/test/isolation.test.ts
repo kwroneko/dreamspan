@@ -4641,7 +4641,13 @@ const storage: Record<
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
       yield* refused(
-        writer.StImportStage({ userId: actor.user.id, lease: importId, path: "chats/A/B.jsonl", seq: 0, batchJson: null }),
+        writer.StImportStage({
+          userId: actor.user.id,
+          lease: importId,
+          path: "chats/A/B.jsonl",
+          seq: 0,
+          batchJson: null
+        }),
         "ImportLeaseLost"
       )
     }),

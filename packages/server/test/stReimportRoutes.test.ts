@@ -92,7 +92,8 @@ const tree = (seed: number) => {
   const pick = random(seed)
   const first = new Map<string, Chat>()
   const roots = 1 + Math.floor(pick() * 2)
-  for (let r = 0; r < roots; r++) first.set(`Root${r}`, { lines: own(`root${r}`, 0, 3 + Math.floor(pick() * 5)), parent: null })
+  for (let r = 0; r < roots; r++)
+    first.set(`Root${r}`, { lines: own(`root${r}`, 0, 3 + Math.floor(pick() * 5)), parent: null })
   // Branches already imported, one or two deep.
   for (let b = 0; b < Math.floor(pick() * 3); b++) {
     const names = [...first.keys()]
@@ -110,7 +111,9 @@ const tree = (seed: number) => {
     }
   }
   // New branches, nested up to four deep under a file here, a new one, or one not in the folder.
-  const depth = new Map<string, number>([...second.keys()].map((name) => [name, second.get(name)!.parent === null ? 0 : 1]))
+  const depth = new Map<string, number>(
+    [...second.keys()].map((name) => [name, second.get(name)!.parent === null ? 0 : 1])
+  )
   for (let n = 0; n < 2 + Math.floor(pick() * 5); n++) {
     const name = `New${n}`
     const roll = pick()
@@ -132,7 +135,8 @@ const tree = (seed: number) => {
     const [name, chat] = [...second].find(([, c]) => c.parent === null)!
     second.delete(name)
     second.set(`${name} renamed`, chat)
-    for (const other of second.values()) if (other.parent === name) (other as { parent: string | null }).parent = `${name} renamed`
+    for (const other of second.values())
+      if (other.parent === name) (other as { parent: string | null }).parent = `${name} renamed`
   }
   return { first, second }
 }
@@ -148,16 +152,39 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "600 seconds" }
       const chat = (yield* api.ListChats({ limit: 200, before: null })).find((c) => c.title === "Base")!
       const side: Chat = { lines: [...base.lines.slice(0, 2), ...own("side", 2, 4)], parent: "Base" }
       const nested: Chat = { lines: [...side.lines.slice(0, 4), ...own("nested", 4, 4)], parent: "Side" }
-      write(root, new Map([["Base", base], ["Side", side], ["Nested", nested]]), "")
+      write(
+        root,
+        new Map([
+          ["Base", base],
+          ["Side", side],
+          ["Nested", nested]
+        ]),
+        ""
+      )
       const plan = yield* planEnded(api, (yield* api.StartStImportPlan({ folder: { root, prefix: "" } })).plan.planId)
       assert.strictEqual(plan.status, "done")
       assert.deepStrictEqual(
         plan.files.map((file) => [file.path, file.target, file.chatId, { ...file.counts }]),
         [
-          ["chats/Alice/Base.jsonl", "existing", chat.id, { unchanged: 4, newMessages: 0, newSwipes: 0, selected: 0, kept: 0, branches: 0 }],
-          ["chats/Alice/Side.jsonl", "branch", chat.id, { unchanged: 2, newMessages: 4, newSwipes: 0, selected: 0, kept: 0, branches: 1 }],
+          [
+            "chats/Alice/Base.jsonl",
+            "existing",
+            chat.id,
+            { unchanged: 4, newMessages: 0, newSwipes: 0, selected: 0, kept: 0, branches: 0 }
+          ],
+          [
+            "chats/Alice/Side.jsonl",
+            "branch",
+            chat.id,
+            { unchanged: 2, newMessages: 4, newSwipes: 0, selected: 0, kept: 0, branches: 1 }
+          ],
           // Its first four are Side's, which Side's file brings in this same import.
-          ["chats/Alice/Nested.jsonl", "branch", chat.id, { unchanged: 4, newMessages: 4, newSwipes: 0, selected: 0, kept: 0, branches: 1 }]
+          [
+            "chats/Alice/Nested.jsonl",
+            "branch",
+            chat.id,
+            { unchanged: 4, newMessages: 4, newSwipes: 0, selected: 0, kept: 0, branches: 1 }
+          ]
         ]
       )
       assert.strictEqual(plan.newChats, 0)
@@ -193,7 +220,11 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "600 seconds" }
         const chats = [...new Set(plan.files.flatMap((file) => (file.chatId === null ? [] : [file.chatId])))]
         const before = new Map<string, ReadonlyArray<{ id: string; content: string }>>()
         for (const chatId of chats) before.set(chatId, yield* stImportGraph(config.dataDir, chatId))
-        const { importId } = yield* api.StartStPathImport({ path: root, prefix: "", plan: { planId: plan.planId, skip: [] } })
+        const { importId } = yield* api.StartStPathImport({
+          path: root,
+          prefix: "",
+          plan: { planId: plan.planId, skip: [] }
+        })
         const done = yield* jobEnded(api, importId)
         assert.strictEqual(done.job.status, "complete", `seed ${seed}`)
         const refused = (done.report?.issues ?? []).filter((issue) => issue.code === ST_CHANGED_SINCE_CHECK)

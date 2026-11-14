@@ -93,7 +93,7 @@ export const sendStFile = (
  * A browser's re-import check of chat files, in the order the import sends them: the files
  * listed, those it asks for sent in its order, to the end. The check's id, once it's done.
  */
-export const checkUpload = (
+const checkUpload = (
   api: Api,
   chats: ReadonlyArray<{ readonly path: string; readonly bytes: Uint8Array; readonly mainChat: string | null }>
 ) =>

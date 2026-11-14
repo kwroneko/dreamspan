@@ -310,7 +310,17 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
   /** The record and, unless it goes into `into`, the chat of a chat file's first import. */
   /** `once`: refused (`ImportLeaseLost`) if the file has a record already, as a confirmed write is. */
   const startChat = (
-    { userId, source, title, createdAt, chatId: into, lease, parentRecordId, arrival, groupId }: Payload<"StImportStartChat">,
+    {
+      userId,
+      source,
+      title,
+      createdAt,
+      chatId: into,
+      lease,
+      parentRecordId,
+      arrival,
+      groupId
+    }: Payload<"StImportStartChat">,
     once = false
   ) =>
     Effect.gen(function* () {
@@ -387,7 +397,10 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
     })
 
   /** When the batch's cards, and the chat, first showed up: from its messages' dates. */
-  const arrivalsOf = (messages: ReadonlyArray<StPlacedMessage>, arrivalRefs: Readonly<Record<string, string>> | undefined) => {
+  const arrivalsOf = (
+    messages: ReadonlyArray<StPlacedMessage>,
+    arrivalRefs: Readonly<Record<string, string>> | undefined
+  ) => {
     const arrivals = new Map<string, number>()
     for (const message of messages) {
       if (message.arrivalAt == null) continue
@@ -874,8 +887,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
     StImportCommitChat: (input) =>
       Effect.gen(function* () {
         const { userId, lease, path, finish } = input
-        const changed = () =>
-          new StImportPlanChanged({ message: "Changed since the check. Not imported." })
+        const changed = () => new StImportPlanChanged({ message: "Changed since the check. Not imported." })
         yield* current(userId, lease, path)
         // The chat as the check read it, or as this run's own writes left it: else nothing.
         if ((yield* stImportChatStamp(sql, userId, input.chatId)) !== input.stamp) return yield* changed()
@@ -927,7 +939,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         // Placed as the check showed, message by message, or not at all.
         if (
           input.expect !== null &&
-          (!sameCounts(counts, input.expect.counts) || digest !== input.expect.digest || keepsTip !== input.expect.keepsTip)
+          (!sameCounts(counts, input.expect.counts) ||
+            digest !== input.expect.digest ||
+            keepsTip !== input.expect.keepsTip)
         )
           return yield* changed()
         const { position, applies, leaf } = stFinishAt({ ...finish, ...progress })
@@ -971,7 +985,14 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           const slot = slotIds[index]
           if (slot !== undefined) slots[index] = slot
         }
-        return { chatId: input.chatId, recordId, stamp: stamp!, progress: { ...progress }, slots, notes: finished.notes }
+        return {
+          chatId: input.chatId,
+          recordId,
+          stamp: stamp!,
+          progress: { ...progress },
+          slots,
+          notes: finished.notes
+        }
       }).pipe(transaction(sql, "StImportCommitChat")),
 
     // The import's hidden messages up to a slot shown again, in the fork through it (a `hide`

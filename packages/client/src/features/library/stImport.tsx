@@ -163,7 +163,7 @@ const sendUpload = async (
   // The rounds a path import and the re-import preview go by too (`stSendRounds`).
   const sendAll = async () => {
     const rounds = stSendRounds(files)
-    for (let step = rounds.next(); !step.done; ) {
+    for (let step = rounds.next(); !step.done;) {
       const { entry, orphan } = step.value
       if (stoppedUploads.has(importId)) return false
       const answer = await send(entry, orphan ? { orphan: true } : {})
@@ -708,9 +708,7 @@ function StartForm({ open, close, again }: StImportSectionProps & { close: (() =
 
   const scan = async (path = folderPath.trim()) => {
     setScanning(true)
-    const scanned = await action
-      .run((client) => client("ScanStFolder", { path }))
-      .finally(() => setScanning(false))
+    const scanned = await action.run((client) => client("ScanStFolder", { path })).finally(() => setScanning(false))
     if (!scanned.ok) return
     try {
       localStorage.setItem(LAST_FOLDER, scanned.value.root)
