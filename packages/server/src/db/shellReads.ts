@@ -1,4 +1,5 @@
 import { makeShellEpoch } from "./shellEpoch.ts"
+import { ActiveStateModules } from "./stateModules.ts"
 import { shownInSql } from "./forkState.ts"
 import type { SplitChatLink } from "@rp/shared/splitChat.ts"
 import {
@@ -50,11 +51,17 @@ import { shownSplits } from "./threads.ts"
 export const makeShellReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   /** The last computation and the database version it read (one connection per reader worker). */
-  let memo: { readonly userId: string; readonly version: number; readonly state: ShellState } | null = null
+  let memo: {
+    readonly userId: string
+    readonly version: number
+    readonly modules: string
+    readonly state: ShellState
+  } | null = null
   // Only bounded refreshes may use the foreground lane. Initial, wide, deep and
   // insertion-heavy reads retain the background lane's reserved reply reader.
   const liveReady = (userId: string) =>
     Effect.gen(function* () {
+      if ((yield* ActiveStateModules) !== "") return false
       const userStamp = yield* summaryStamps(sql, userId)
       const rows = yield* sql<{ id: string; chat_id: string; messages: number | null; stale: number }>`
       SELECT f.id, f.chat_id, s.messages,
@@ -79,6 +86,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
     })
   const shellState = (userId: string, recompute: boolean | undefined, chatId?: string) =>
     Effect.gen(function* () {
+      const modules = yield* ActiveStateModules
       // The stamps first, which also opens the transaction's snapshot: the version read next is its own.
       const userStamp = yield* summaryStamps(sql, userId)
       const [{ data_version: version }] = (yield* sql<{ data_version: number }>`PRAGMA data_version`) as [
@@ -89,6 +97,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         recompute !== true &&
         memo !== null &&
         memo.userId === userId &&
+        memo.modules === modules &&
         memo.version === version
       )
         return memo.state
@@ -195,7 +204,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       // It shows its last stored summary, stale or not, or none, until StImportFinishChat
       // stores its summary; the shell marks it "import unfinished" meanwhile.
       const importing = (row: { title: string }) => importState(row.title).unfinished
-      if (recompute !== true) {
+      if (recompute !== true && modules === "") {
         for (const row of joinedRows) {
           if (
             row.lists === null ||
@@ -506,15 +515,18 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         chatIndex: new Map(perChat(forks).map((f) => [f.chat.id, f])),
         pinnedChats,
         pinsCollapsed: prefs?.pins_collapsed === 1,
-        fresh: [...fresh].map(([chatId, list]) => ({
-          chatId,
-          stamp: chatById.get(chatId)!.shell_stamp,
-          userStamp,
-          forks: JSON.stringify(list)
-        }))
+        fresh:
+          modules !== ""
+            ? []
+            : [...fresh].map(([chatId, list]) => ({
+                chatId,
+                stamp: chatById.get(chatId)!.shell_stamp,
+                userStamp,
+                forks: JSON.stringify(list)
+              }))
       }
       // With what it walked: a caller that didn't store it gets it again (storing moves the version).
-      if (chatId === undefined && recompute !== true) memo = { userId, version, state }
+      if (chatId === undefined && recompute !== true) memo = { userId, version, modules, state }
       return state
     })
   // Only bounded metadata in the foreground; complex groups/titles use the

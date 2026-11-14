@@ -86,6 +86,10 @@ export const register = () => [
   branchControlParts.register({
     id: "threads",
     order: 10,
+    ready: ({ view }) => {
+      const forkId = shownForkOf(view)
+      return view.chat !== null && view.cast !== null && forkId !== null && threadSetsNow(view.chat.id, forkId) !== null
+    },
     trigger: ({ view }) => {
       const set = setsOf(view)[0]
       const thread = set && ownThread(set)

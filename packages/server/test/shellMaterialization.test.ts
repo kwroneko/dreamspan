@@ -5,6 +5,18 @@ import { makeShellMaterialization } from "../src/db/shellMaterialization.ts"
 
 const owner = "synthetic-owner" as UserId
 
+it.effect("completed account snapshots have a bounded retention window", () =>
+  Effect.gen(function* () {
+    let calls = 0
+    const shared = yield* makeShellMaterialization(() => Effect.sync(() => ++calls))
+    const users = Array.from({ length: 17 }, (_, n) => `synthetic-${n}` as UserId)
+    for (const user of users) yield* shared.get(user, "same-epoch")
+    assert.strictEqual(yield* shared.get(users.at(-1)!, "same-epoch"), 17)
+    assert.strictEqual(calls, 17, "recent accounts still share their snapshot")
+    assert.strictEqual(yield* shared.get(users[0]!, "same-epoch"), 18, "old completed accounts release their data")
+  }).pipe(Effect.scoped)
+)
+
 it.effect("overlapping shell views and a replacement navigation share work after all original waiters leave", () =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>()

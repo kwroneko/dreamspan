@@ -27,6 +27,7 @@ import { withoutPurged } from "./stateRefs.ts"
 import { settleSummaries } from "./summaryValidity.ts"
 import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 import { placesOf, threadCandidates } from "./threads.ts"
+import { ActiveStateModules } from "./stateModules.ts"
 import type { ThreadPlace } from "@rp/shared/threads.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
@@ -467,14 +468,17 @@ export const chatForkSummaries = (
 ) =>
   Effect.gen(function* () {
     const userStamp = yield* summaryStamps(sql, userId)
-    const stored = yield* sql<{
-      fork_id: string
-      end_at: number | null
-      split_at: number | null
-      split_after: number | null
-      preview: string
-      threads_json: string
-    }>`SELECT s.fork_id, s.end_at, s.split_at, s.split_after, s.preview, s.threads_json
+    const stored =
+      (yield* ActiveStateModules) !== ""
+        ? []
+        : yield* sql<{
+            fork_id: string
+            end_at: number | null
+            split_at: number | null
+            split_after: number | null
+            preview: string
+            threads_json: string
+          }>`SELECT s.fork_id, s.end_at, s.split_at, s.split_after, s.preview, s.threads_json
       FROM fork_summaries s JOIN chats c ON c.id = s.chat_id
       WHERE s.chat_id = ${chatId} AND s.format = ${FORK_SUMMARY_FORMAT} AND s.stamp = c.shell_stamp
         AND s.user_stamp = ${userStamp}`
@@ -517,6 +521,9 @@ export interface ChatSummaries {
  */
 export const storeSummaries = (sql: SqlClient.SqlClient, userId: string, chats: ReadonlyArray<ChatSummaries>) =>
   Effect.gen(function* () {
+    // On-disk summaries describe core reducers. A scoped plugin fold must never
+    // overwrite them and survive the plugin's disposal or another worker's read.
+    if ((yield* ActiveStateModules) !== "") return
     if (chats.length === 0) return
     const claims = JSON.stringify(chats.map((c) => [c.chatId, c.stamp, c.userStamp]))
     const current = new Set(

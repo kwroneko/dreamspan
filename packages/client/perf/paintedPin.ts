@@ -17,6 +17,9 @@ export const observePaintedPin = async (page: Page, failureImage?: string) => {
     return { x: rect.left, y: rect.top, width: rect.width }
   })
   await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+  // Screencast can begin with the compositor's previous surface even after rAF.
+  // Force the marker's first presentation before observing subsequent frames.
+  await page.screenshot()
   const cdp = await page.context().newCDPSession(page)
   const pending = new Set<Promise<void>>()
   const measured = { frames: 0, missing: 0, maximumPx: 0, errors: [] as string[] }

@@ -11,6 +11,7 @@ export const PoolOps = RpcGroup.make(
   Rpc.make("ListForks"),
   Rpc.make("ShellMaterialize"),
   Rpc.make("GetDisplayPrefs", { success: Schema.Number }),
+  Rpc.make("GetSessionUser", { success: Schema.Number }),
   Rpc.make("ListStImports", { success: Schema.Number }),
   /** Ends the worker thread, as a crash would. */
   Rpc.make("Crash"),

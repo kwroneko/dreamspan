@@ -114,6 +114,54 @@ const stopLog = () => {
 }
 
 describe("reader pool", () => {
+  it.live("session lookup cannot leave another account's short RPC behind a history queue", () => {
+    const gate = makeGate()
+    return Effect.gen(function* () {
+      const reader = yield* Readers
+      const done: string[] = []
+      const busy = yield* Effect.forkChild(reader.Hold())
+      yield* gate.holding.pipe(stalls("the reader never started"))
+      const history = yield* Effect.forEach(Array.from({ length: 32 }), () =>
+        Effect.forkChild(reader.Count({ n: 1 }).pipe(Effect.tap(() => Effect.sync(() => done.push("history")))))
+      )
+      yield* Effect.sleep("100 millis")
+      const auth = yield* Effect.forkChild(
+        reader.GetSessionUser().pipe(Effect.tap(() => Effect.sync(() => done.push("auth"))))
+      )
+      yield* Effect.sleep("100 millis")
+      yield* gate.release
+      yield* Fiber.join(busy)
+      yield* Fiber.join(auth)
+      yield* Effect.forEach(history, Fiber.join)
+      assert.strictEqual(done[0], "auth", "authentication is itself part of the short RPC path")
+    }).pipe(Effect.ensuring(gate.release), Effect.provide(readers(1, { gate, ...readerScheduling(1) })))
+  })
+  for (const priority of ["first", "short"] as const)
+    it.live(`a stream of ${priority} reads cannot starve an older ordinary read`, () => {
+      const gate = makeGate()
+      return Effect.gen(function* () {
+        const reader = yield* Readers
+        const done: Array<string> = []
+        const busy = yield* Effect.forkChild(reader.Hold())
+        yield* gate.holding.pipe(stalls("the reader never started"))
+        const ordinary = yield* Effect.forkChild(
+          reader.ShellMaterialize().pipe(Effect.tap(() => Effect.sync(() => done.push("ordinary"))))
+        )
+        const urgent = yield* Effect.forEach(Array.from({ length: 32 }), () =>
+          Effect.forkChild(reader.GetDisplayPrefs().pipe(Effect.tap(() => Effect.sync(() => done.push("urgent")))))
+        )
+        yield* Effect.sleep("100 millis")
+        yield* gate.release
+        yield* Fiber.join(busy)
+        yield* Fiber.join(ordinary)
+        yield* Effect.forEach(urgent, Fiber.join)
+        assert.isAtMost(done.indexOf("ordinary"), 8, "at most eight priority reads may pass eligible older work")
+        assert.strictEqual(done.length, 33)
+      }).pipe(
+        Effect.ensuring(gate.release),
+        Effect.provide(readers(1, { gate, [priority]: new Set(["GetDisplayPrefs"]) }))
+      )
+    })
   it.live("the production navigation policy keeps preferences and import notices ahead of held graph reads", () => {
     const gate = makeGate()
     return Effect.gen(function* () {

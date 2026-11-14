@@ -112,6 +112,7 @@ const REPLY_READS: ReadonlySet<string> = new Set([
 
 /** Startup preferences/import notices must not sit behind paged history reads. */
 const SHORT_READS: ReadonlySet<string> = new Set([
+  "GetSessionUser",
   "GetDisplayPrefs",
   "ListStImports",
   "ShellEpoch",

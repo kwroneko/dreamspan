@@ -40,6 +40,8 @@ interface JobDeadline {
 }
 
 const RESPAWN_MS = 1000
+/** Priority is a bounded preference: the oldest eligible read gets every ninth dispatch. */
+const PRIORITY_BURST = 8
 
 // As in Effect's worker protocol: messages cross by structured clone.
 const codecFor = Schema.toCodecJson as RpcSerialization.CodecFor
@@ -131,6 +133,7 @@ export const layer = (
         const platform = yield* Worker.WorkerPlatform
         const readers: Array<Reader> = []
         const queue: Array<Job> = []
+        let priorityBurst = 0
         const started = Deferred.makeUnsafe<void, RpcClientError.RpcClientError>()
         const diedBeforeStart = new Set<number>()
 
@@ -147,17 +150,15 @@ export const layer = (
                 background !== undefined &&
                 readers.filter((r) => r.job !== undefined && background.tags.has(r.job.request.tag)).length >=
                   background.max
-              const ahead = first === undefined ? -1 : queue.findIndex((job) => first.has(job.request.tag))
-              const light = short === undefined ? -1 : queue.findIndex((job) => short.has(job.request.tag))
-              const next =
-                ahead >= 0
-                  ? ahead
-                  : light >= 0
-                    ? light
-                    : held
-                      ? queue.findIndex((job) => !background.tags.has(job.request.tag))
-                      : 0
+              const eligible = (job: Job) => !held || !background.tags.has(job.request.tag)
+              const oldest = queue.findIndex(eligible)
+              const ahead =
+                first === undefined ? -1 : queue.findIndex((job) => eligible(job) && first.has(job.request.tag))
+              const light =
+                short === undefined ? -1 : queue.findIndex((job) => eligible(job) && short.has(job.request.tag))
+              const next = priorityBurst >= PRIORITY_BURST ? oldest : ahead >= 0 ? ahead : light >= 0 ? light : oldest
               if (next === -1) break
+              priorityBurst = next === oldest ? 0 : priorityBurst + 1
               const job = queue.splice(next, 1)[0]!
               // Reserved before sending, so a concurrent dispatch can't pick the same reader;
               // released again if the send fails.
