@@ -2,7 +2,9 @@
 // (combine1115): the summary model chosen for the account, for a chat and for one branch
 // (smallui1), and a merge of another chat kept separate with its Undo (merge2). Kept facts hold
 // no model, setting or audience projection, so each of these must plan from warm readers exactly
-// as from facts read afresh. Synthetic data; the mock provider is never called.
+// as from facts read afresh. A request never reuses a stale summary over an input its branch
+// deleted (msgactions1), with warm readers and across a separate merge. Synthetic data; the mock
+// provider is never called.
 import { assert } from "@effect/vitest"
 import { Effect } from "effect"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
@@ -24,6 +26,103 @@ const stamps = (h: Harness, chatId: string) => ({
   ),
   forget: fixtureSql(h.dataDir, [{ sql: "UPDATE chats SET lcm_stamp=lcm_stamp+1 WHERE id=?", params: [chatId] }])
 })
+
+/** The text of a reply's request by `speaker` after `parent` in `forkId` (a placeholder on a branch of its own). */
+const requestText = (h: Harness, chatId: string, forkId: ForkId, parent: SlotId, speaker: EntityId | null = null) =>
+  Effect.gen(function* () {
+    const placeholder = yield* h.writer.AppendMessage({
+      userId: h.userId,
+      chatId: chatId as ChatId,
+      forkId,
+      parentSlotId: parent,
+      branch: true,
+      commitDraft: null,
+      version: new NewVersion({
+        speakerEntityId: speaker,
+        writer: "model",
+        content: "",
+        status: "generating",
+        macroMode: "verbatim",
+        origin: "generated"
+      })
+    })
+    const built = yield* h.reader.AssembleContext({
+      userId: h.userId,
+      chatId: chatId as ChatId,
+      forkId: placeholder.forkId,
+      slotId: placeholder.slotId,
+      versionId: placeholder.version.id,
+      now: 1,
+      timeZone: "UTC",
+      frozen: null
+    })
+    return JSON.stringify((JSON.parse(built.snapshot) as { request: { messages: unknown } }).request.messages)
+  })
+
+lcmTest(
+  "deleting a summarized range's inputs on a warm branch leaves no stale summary text and plans as fresh",
+  (server) =>
+    Effect.gen(function* () {
+      const h = yield* lcmHarness(server, { messages: 80, message: (n) => `Message ${n}. ${filler}` })
+      const main = h.chat.currentForkId! as ForkId
+      const leaf = h.rows.at(-1)!.slotId as SlotId
+      const inputs = h.rows.map((r) => ({ slotId: r.slotId, versionId: r.version.id, amendCount: 0 }))
+      const left = yield* completeFixture(h.dataDir, h.writer, h.userId, h.chat.id, inputs.slice(0, 4), [], " LEFTMARK")
+      const right = yield* completeFixture(
+        h.dataDir,
+        h.writer,
+        h.userId,
+        h.chat.id,
+        inputs.slice(4, 8),
+        [],
+        " RIGHTMARK"
+      )
+      yield* completeFixture(h.dataDir, h.writer, h.userId, h.chat.id, [], [left, right], " TOPMARK")
+      // A branch made before the deletion keeps its summaries.
+      const tab = (yield* h.writer.CreateFork({
+        userId: h.userId,
+        chatId: h.chat.id,
+        fromForkId: main,
+        atSlotId: leaf
+      })).fork.id as ForkId
+      const { read: stamp, forget } = stamps(h, h.chat.id)
+      const plans = (forkId: ForkId) =>
+        Effect.all([
+          h.reader.PlanSummaries({ userId: h.userId, chatId: h.chat.id, forkId, leafSlotId: leaf }),
+          h.reader.PlanSummaries({ userId: h.userId, chatId: h.chat.id, forkId, leafSlotId: leaf, reason: "reply" })
+        ])
+      const compare = (name: string) =>
+        Effect.gen(function* () {
+          const kept = yield* Effect.all([plans(main), plans(tab)])
+          yield* forget
+          assert.deepStrictEqual(kept, yield* Effect.all([plans(main), plans(tab)]), `${name}: kept plans as fresh`)
+        })
+      const marks = /LEFTMARK|TOPMARK/
+      yield* Effect.all([plans(main), plans(tab)])
+      assert.match(yield* requestText(h, h.chat.id, main, leaf), marks, "the summaries are used before the deletion")
+      // Warm readers, then two inputs of the first summary deleted at once on this branch.
+      yield* Effect.all([plans(main), plans(tab)])
+      const before = yield* stamp
+      const items = yield* h.writer.DeleteMessages({
+        userId: h.userId,
+        forkId: main,
+        slotIds: [h.rows[1]!.slotId, h.rows[2]!.slotId]
+      })
+      assert.isAbove(yield* stamp, before, "deleting summarized inputs moves the stamp")
+      yield* compare("after deleting summarized inputs")
+      const text = yield* requestText(h, h.chat.id, main, leaf)
+      assert.notMatch(text, marks, "no stale summary over a deleted input, through its condensation")
+      assert.notInclude(text, "Message 1. ")
+      assert.match(yield* requestText(h, h.chat.id, tab, leaf), marks, "the other branch keeps its summaries")
+      // Undo: restored, the summaries are fresh and used again.
+      yield* Effect.all([plans(main), plans(tab)])
+      yield* h.writer.RestoreBinItems({ userId: h.userId, itemIds: items.map((i) => i.id) })
+      yield* compare("after restoring them")
+      assert.match(yield* requestText(h, h.chat.id, main, leaf), marks)
+      assert.lengthOf(h.mock.requests(), 0)
+    }),
+  { timeout: 180_000 }
+)
 
 lcmTest(
   "the account, chat and branch summary model plan the same from kept facts as from fresh ones",
@@ -222,9 +321,9 @@ lcmTest(
         )
       for (let n = 0; n < 16; n++) yield* say(ledger, main, mira, `HOME Mira ${n}. ${filler}`)
       const inputs = h.rows.map((r) => ({ slotId: r.slotId, versionId: r.version.id, amendCount: 0 }))
-      const left = yield* completeFixture(h.dataDir, writer, userId, ledger, inputs.slice(0, 6))
+      const left = yield* completeFixture(h.dataDir, writer, userId, ledger, inputs.slice(0, 6), [], " HOMELEFTMARK")
       const right = yield* completeFixture(h.dataDir, writer, userId, ledger, inputs.slice(6, 12))
-      yield* completeFixture(h.dataDir, writer, userId, ledger, [], [left, right])
+      yield* completeFixture(h.dataDir, writer, userId, ledger, [], [left, right], " HOMETOPMARK")
       // A branch made before the merge, which never shows it.
       const childAt = h.rows[18]!.slotId as SlotId
       const child = (yield* writer.CreateFork({ userId, chatId: ledger, fromForkId: main, atSlotId: childAt })).fork
@@ -316,6 +415,28 @@ lcmTest(
       for (let n = 0; n < 6; n++) yield* say(ledger, main, n % 2 ? kai : mira, `After ${n}. ${filler}`)
       assert.strictEqual(yield* stamp, appended)
       yield* compare("after messages following the merge")
+
+      // A summarized destination input deleted after the join: no character's request keeps the
+      // stale summary (or its condensation), and kept facts plan as fresh ones.
+      const home = /HOMELEFTMARK|HOMETOPMARK/
+      const tip = (yield* tipOf(ledger, main))!
+      assert.match(yield* requestText(h, ledger, main, tip, mira), home, "Mira reads the Ledger's summaries")
+      assert.notMatch(yield* requestText(h, ledger, main, tip, kai), home, "Kai never reads them")
+      yield* both
+      const deleting = yield* stamp
+      const binned = yield* writer.DeleteMessages({ userId, forkId: main, slotIds: [h.rows[3]!.slotId] })
+      assert.isAbove(yield* stamp, deleting, "deleting a summarized input moves the stamp")
+      yield* compare("after deleting a summarized input across the merge")
+      for (const speaker of [mira, kai])
+        assert.notMatch(
+          yield* requestText(h, ledger, main, tip, speaker),
+          home,
+          "no stale summary over the deleted input"
+        )
+      yield* both
+      yield* writer.RestoreBinItems({ userId, itemIds: binned.map((i) => i.id) })
+      yield* compare("after restoring it")
+      assert.match(yield* requestText(h, ledger, main, tip, mira), home)
 
       // Undo: the join deleted on the branch that made it.
       yield* both
