@@ -2,7 +2,6 @@
 import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { pathToFileURL } from "node:url"
 import {
   PluginRejected,
   type PluginPin,
@@ -22,7 +21,7 @@ import { StateModules } from "../db/stateModules.ts"
 import { AssemblyModules } from "../assembler/modules.ts"
 import { Notices } from "../chat/Notices.ts"
 import { Network } from "../net/Network.ts"
-import { checkPlugin, readBuild, readClientBuild } from "./check.ts"
+import { checkPlugin, readBuild, readClientBuild, readRuntimeBuild } from "./check.ts"
 import { declaredHandles, type RegistrationRegistry } from "./handles.ts"
 import { makePluginAuthoring } from "../agent/tools/plugins.ts"
 import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
@@ -157,7 +156,7 @@ export class PluginHost extends Context.Service<
         })
       const activate = (actor: User, owner: string, id: string, commit: string, report: PluginReport) =>
         Effect.gen(function* () {
-          const { folder, manifest } = yield* attempt(() => readBuild(config.dataDir, owner, id, commit))
+          const { manifest, server, worker } = yield* attempt(() => readRuntimeBuild(config.dataDir, owner, id, commit))
           const scope = yield* Scope.make()
           const fail = () => {
             Effect.runFork(
@@ -177,9 +176,7 @@ export class PluginHost extends Context.Service<
           }
           const effect = Effect.gen(function* () {
             if (manifest.server) {
-              const module = yield* attempt(
-                () => import(pathToFileURL(join(folder, "server.mjs")).href) as Promise<{ activate: Activate }>
-              )
+              const module = yield* attempt(() => import(server!) as Promise<{ activate: Activate }>)
               const fetch = network.fetchFor({ mode: "inherit" }, (route) => {
                 Effect.runFork(Effect.logInfo(`Plugin ${id} network request via ${route.via}`))
               })
@@ -212,7 +209,7 @@ export class PluginHost extends Context.Service<
               )
             }
             if (manifest.worker) {
-              const module = pathToFileURL(join(folder, "worker-bridge.mjs")).href
+              const module = worker!
               yield* states.onFailure(id, fail)
               yield* states.register({ id: `plugin:${id}`, module, exportName: "state" })
               yield* assemblies.register({ id: `plugin:${id}`, module, exportName: "assembly" })

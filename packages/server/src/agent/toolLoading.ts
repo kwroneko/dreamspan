@@ -131,6 +131,7 @@ export const runSkills = (
 
 /** The model the run is sent to, as far as the decision needs it. */
 export interface WireTarget {
+  readonly openaiDirect?: boolean
   readonly provider?: string
   readonly toolLoading?: "auto" | "every" | "dispatcher"
   readonly kind: string
@@ -173,6 +174,9 @@ const measuredClaude = /^(?:claude-(?:sonnet|haiku)-4-5(?:-\d{8})?|claude-(?:son
 const measuredRouterClaude = /^anthropic\/claude-(?:(?:sonnet|haiku)-4\.5|(?:sonnet|opus|haiku)-5\.5)$/
 const measuredRouterUpstreams: ReadonlySet<string> = new Set(["anthropic", "google-vertex"])
 
+// A provider label alone cannot establish a direct connection: users can override its URL.
+const directOpenAI = (t: WireTarget) => t.provider === "openai" && t.openaiDirect === true
+
 export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
   {
     id: "anthropic-messages",
@@ -190,9 +194,7 @@ export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
   {
     id: "openai-responses",
     supports: (t) =>
-      t.provider === "openai" &&
-      t.kind === "openai-responses" &&
-      /^(?:gpt-5\.4(?:-pro)?|gpt-5\.4-mini)(?:-\d{4}-\d{2}-\d{2})?$/.test(t.key),
+      directOpenAI(t) && t.kind === "openai-responses" && /^(?:gpt-5\.4(?:-pro)?|gpt-5\.4-mini)$/.test(t.key),
     declaresDeferred: false
   },
   {
@@ -204,7 +206,7 @@ export const builtinToolLoadingWires: ReadonlyArray<ToolLoadingWire> = [
       if (t.toolLoading === "dispatcher") return true
       // TOOL-LOADING §§11.1, 16: measured Chat ids only; Responses nano remains every-tool.
       if (
-        t.provider === "openai" &&
+        directOpenAI(t) &&
         t.kind === "openai-chat" &&
         t.api === "openai-completions" &&
         ["gpt-5.4-nano", "gpt-5.4-mini"].includes(t.key)

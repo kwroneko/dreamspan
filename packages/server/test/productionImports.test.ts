@@ -234,8 +234,8 @@ const developmentImports = new Set(["./dev/fakeCardSource.ts", "./dev/fakeSavedM
 const computedReviews: Record<string, string> = {
   "packages/client/src/plugins.tsx: import(/* @vite-ignore */ url)":
     "Canonical same-origin checked client module URLs built only from authenticated enabled-commit descriptors; no content or arbitrary caller import path.",
-  'packages/server/src/plugins/Host.ts: import(pathToFileURL(join(folder, "server.mjs")).href)':
-    "Only explicit admin-enabled, checked server bundle URLs in the confined plugin build tree; never content.",
+  "packages/server/src/plugins/Host.ts: import(server!)":
+    "Only explicit admin-enabled executable bytes captured from process-attested, hash-verified approved artifacts as a data URL; no mutable file path is imported.",
   "packages/server/src/plugins/probeChild.ts: import(pathToFileURL(join(folder, `${side}.mjs`)).href)":
     "Checked synthetic/admin-authorized server and worker bundles, in a bounded clean-environment permission child.",
 
@@ -307,7 +307,8 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       'readFile(join(root, "packages/server/dist/workers/stamp.json"))',
       'readFile(join(staging, "check.json"), "utf8")',
       'readFile(join(build, "check.json"))',
-      'readFile(join(folder, "rp-plugin.json"), "utf8")',
+      'readFile(reportFile, "utf8")',
+      'readFile(file, "utf8")',
       'readFile(join(folder, "check.json"), "utf8")'
     ]
   },

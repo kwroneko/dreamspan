@@ -110,7 +110,7 @@ Plugins attach metadata without changing the kernel's formats:
 
 ## 4. Plugins are git repositories [D, details P]
 
-- **Where they live:** each plugin is a repo under `DATA_DIR/plugins/`. Enabling a plugin pins a commit and its checked artifacts, so nothing changes under the user without a new commit being approved. Repository edits, new commits, checks and Undo of repository work keep the approved build running. A working-tree edit is never executed by the runtime.
+- **Where they live:** each plugin is a repo under `DATA_DIR/plugins/`. Enabling a plugin pins a commit and its checked artifacts, so nothing changes under the user without a new commit being approved. Repository edits, new commits, checks and Undo of repository work keep the approved build running. A working-tree edit is never executed by the runtime. **Independent review, 2026-11-14 (built, obsolete as a proposal):** server and worker imports capture verified artifact bytes as data URLs; worker snapshots never reopen mutable build paths, including after respawn. Browser serving verifies every generated artifact as well as the recorded source.
 - **Upstream and local edits:**
   - A registry install tracks its upstream remote. Edits the user's agent makes are commits on a local branch.
   - An upstream update is fetched and merged. On conflicts the agent resolves them, much like a ref that follows another in the library.

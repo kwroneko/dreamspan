@@ -98,30 +98,69 @@ export const checkPlugin = async (
 }
 export const readBuild = async (dataDir: string, owner: string, id: string, commit: string) => {
   const folder = await confined(dataDir, buildFolder(dataDir, owner, id, commit))
-  const manifest = Schema.decodeUnknownSync(PluginManifest)(
-    JSON.parse(await readFile(join(folder, "rp-plugin.json"), "utf8"))
-  )
+  const file = join(folder, "rp-plugin.json")
+  const info = await lstat(file)
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 524288)
+    throw new Error("Invalid manifest")
+  const manifest = Schema.decodeUnknownSync(PluginManifest)(JSON.parse(await readFile(file, "utf8")))
   return { folder, manifest }
+}
+
+/** Capture executable bytes once; worker respawns never reopen mutable build paths. */
+export const readRuntimeBuild = async (dataDir: string, owner: string, id: string, commit: string) => {
+  const { manifest, artifacts } = await readApprovedBuild(dataDir, owner, id, commit)
+  const moduleUrl = (bytes: Buffer) => `data:text/javascript;base64,${bytes.toString("base64")}#${commit}`
+  const server = manifest.server ? moduleUrl(artifacts.get("server.mjs")!) : undefined
+  const worker = manifest.worker
+    ? moduleUrl(
+        Buffer.from(
+          `import { installWorkerState, installWorkerAssembly } from ${JSON.stringify(new URL("./workerHost.ts", import.meta.url).href)};
+import { activate } from ${JSON.stringify(moduleUrl(artifacts.get("worker.mjs")!))};
+const manifest = ${JSON.stringify(manifest)};
+export const state = installWorkerState(manifest,activate);
+export const assembly = installWorkerAssembly(manifest,activate);
+`
+        )
+      )
+    : undefined
+  return { manifest, server, worker }
+}
+
+const readApprovedBuild = async (dataDir: string, owner: string, id: string, commit: string) => {
+  const { folder, manifest } = await readBuild(dataDir, owner, id, commit)
+  const reportFile = join(folder, "check.json")
+  const info = await lstat(reportFile)
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 524288)
+    throw new Error("Invalid report")
+  const encoded = await readFile(reportFile, "utf8")
+  if (checkedReports.get(folder) !== createHash("sha256").update(encoded).digest("hex"))
+    throw new Error("Unattested plugin build")
+  const report = JSON.parse(encoded) as PluginReport & { artifacts: Record<string, string> }
+  if (!report.ok || report.commit !== commit) throw new Error("Unchecked entry")
+  const { repoTask } = await import("./repoTask.ts")
+  await repoTask(dataDir, { op: "verify", owner, id, commit, approved: true })
+  const artifacts = new Map<string, Buffer>()
+  for (const name of Object.keys(report.artifacts)) {
+    if (!/^(?:server|worker|client|worker-bridge|test-[0-9]+)\.mjs$/.test(name)) throw new Error("Invalid artifact")
+    const file = join(folder, name)
+    const info = await lstat(file)
+    if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 16 * 1024 * 1024)
+      throw new Error("Invalid artifact")
+    const bytes = await readFile(file)
+    if (createHash("sha256").update(bytes).digest("hex") !== report.artifacts[name])
+      throw new Error("Changed plugin artifact")
+    if (["server.mjs", "worker.mjs", "client.mjs"].includes(name)) artifacts.set(name, bytes)
+  }
+  for (const side of ["server", "worker", "client"] as const)
+    if (manifest[side] && !artifacts.has(`${side}.mjs`)) throw new Error("Missing plugin artifact")
+  return { manifest, artifacts }
 }
 
 /** Read only a generated browser entry attested by this process, after checking its source again. */
 export const readClientBuild = async (dataDir: string, owner: string, id: string, commit: string) => {
-  const { folder, manifest } = await readBuild(dataDir, owner, id, commit)
-  const encoded = await readFile(join(folder, "check.json"), "utf8")
-  if (checkedReports.get(folder) !== createHash("sha256").update(encoded).digest("hex"))
-    throw new Error("Unattested plugin build")
-  const report = JSON.parse(encoded) as PluginReport & { artifacts: Record<string, string> }
-  if (!report.ok || report.commit !== commit || !manifest.client) throw new Error("Unchecked client entry")
-  const { repoTask } = await import("./repoTask.ts")
-  await repoTask(dataDir, { op: "verify", owner, id, commit, approved: true })
-  const file = join(folder, "client.mjs")
-  const info = await lstat(file)
-  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 16 * 1024 * 1024)
-    throw new Error("Invalid client artifact")
-  const bytes = await readFile(file)
-  if (createHash("sha256").update(bytes).digest("hex") !== report.artifacts["client.mjs"])
-    throw new Error("Changed plugin artifact")
-  return { manifest, bytes }
+  const { manifest, artifacts } = await readApprovedBuild(dataDir, owner, id, commit)
+  if (!manifest.client) throw new Error("Unchecked client entry")
+  return { manifest, bytes: artifacts.get("client.mjs")! }
 }
 
 /** Stored checksums remain operator-trusted across restarts; any altered approved output is a fault. */

@@ -478,3 +478,14 @@ it("retries only the explicit tool/effort refusal before output on Chat Completi
     )
   )
 })
+
+it("reports the selected and sent reasoning effort when compatibility changes it", () => {
+  const tools = [{ type: "function", function: { name: "look", parameters: {} } }]
+  const result = shim("openai", "openai-completions", "gpt-5.4-nano", { tools, reasoning_effort: "low" })
+  assert.deepEqual(result.notices, [
+    "Reasoning effort “low” was changed to “none” for this request because this model refuses reasoning with tools. Your saved setting is unchanged."
+  ])
+  const accepted = shim("openai", "openai-completions", "accepts-reasoning", { tools, reasoning_effort: "low" })
+  assert.deepEqual(accepted.payload, { tools, reasoning_effort: "low" })
+  assert.deepEqual(accepted.notices, [])
+})

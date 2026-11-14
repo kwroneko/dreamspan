@@ -800,6 +800,8 @@ export interface PresetInput {
 
 /** The model a generation uses, and what assembly needs to know about it. */
 export interface ModelInput {
+  /** Non-secret endpoint classification; no transport address enters the snapshot. */
+  readonly openaiDirect?: boolean
   /** Connection provider identity, kept separately from its API kind. */
   readonly provider?: string
   readonly connectionId: string

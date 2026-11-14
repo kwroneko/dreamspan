@@ -693,6 +693,7 @@ for (const change of [
       )
       const run = yield* api.GetRunContext({ versionId: next.entry.version.id })
       assert.isUndefined(run.continuity?.parentVersionId)
+      if (change === "fenced") assert.include(run.continuity?.reason ?? "", "full input cost")
       assert.match(
         run.continuity?.reason ?? "",
         change === "budget"
@@ -700,7 +701,7 @@ for (const change of [
           : change === "missing"
             ? /no saved transcript/
             : change === "fenced"
-              ? /earlier assembler/
+              ? /app changed how requests are built/
               : change === "preset"
                 ? /preset changed/
                 : change === "model-settings"

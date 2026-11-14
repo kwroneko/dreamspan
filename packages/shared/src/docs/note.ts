@@ -23,7 +23,10 @@ export const cutOwnTurnText = (text: string, at: number, length: number): string
   const whitespace = left + right
   const lines = whitespace.match(/\r\n|[\r\n]/g) ?? []
   const separator = lines.length ? lines[0]!.repeat(Math.min(2, lines.length)) : whitespace ? " " : ""
-  return head + separator + tail
+  // Keep the retained line's indentation. Removing a line inside a list must not
+  // turn its indented continuation into a new paragraph outside that list.
+  const indent = lines.length ? (right.match(/(?:^|[\r\n])([^\S\r\n]*)$/)?.[1] ?? "") : ""
+  return head + separator + indent + tail
 }
 
 /** A move may select text within HTML or whole elements/macros, never cut their syntax. */

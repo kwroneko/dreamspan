@@ -151,18 +151,34 @@ export const applyShims = (
   payload: Record<string, unknown>,
   target: RequestTarget,
   retryError?: ProviderError
-): { readonly payload: Record<string, unknown>; readonly applied: ReadonlyArray<string> } => {
+): {
+  readonly payload: Record<string, unknown>
+  readonly applied: ReadonlyArray<string>
+  readonly notices: ReadonlyArray<string>
+} => {
   const applied: Array<string> = []
+  const notices: Array<string> = []
   let current = payload
   for (const shim of shims) {
     const on = { provider: target.provider ?? target.kind, api: target.api }
     if (!shim.payload || !shimApplies(shim, on, target.model ?? "")) continue
     if (shim.retryWhen && (!retryError || !shim.retryWhen(retryError))) continue
     if (routeShim(shim) && !pinsRoute(shim, current)) continue
+    const before = effortOf(current)
     current = shim.payload(current, { target })
+    const after = effortOf(current)
+    if (
+      before !== after &&
+      after === "none" &&
+      typeof before === "string" &&
+      /^(?:minimal|low|medium|high|xhigh|max)$/.test(before)
+    )
+      notices.push(
+        `Reasoning effort “${before}” was changed to “none” for this request because this model refuses reasoning with tools. Your saved setting is unchanged.`
+      )
     applied.push(shim.id)
   }
-  return { payload: current, applied }
+  return { payload: current, applied, notices }
 }
 
 /** Only explicit, pre-output compatibility refusals can request a single corrected attempt. */

@@ -1562,8 +1562,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                     initial
                   )
                   // Then what the provider refuses or needs for this model (compatibility shims).
-                  const shimmed = applyShims(registry.shims.list(), transformed, target, retryError).payload
-                  const final = limitImages(shimmed, effective.maxImages.value)
+                  const shimmed = applyShims(registry.shims.list(), transformed, target, retryError)
+                  const final = limitImages(shimmed.payload, effective.maxImages.value)
                   await Effect.runPromise(open(final), { signal })
                   const policy = documentedCachePolicy(
                     { provider: prepared.cacheContract ?? "", api: prepared.api, model: model.key },
@@ -1614,7 +1614,16 @@ export const layer = (options: ProvidersOptions = {}) =>
                                 ? inspectWire(
                                     wire,
                                     request.inspection.request,
-                                    request.inspection.display,
+                                    {
+                                      ...request.inspection.display,
+                                      issues: [
+                                        ...request.inspection.display.issues,
+                                        ...shimmed.notices.map((message) => ({
+                                          kind: "compatibility" as const,
+                                          message
+                                        }))
+                                      ]
+                                    },
                                     prepared.scrub
                                   )
                                 : wire

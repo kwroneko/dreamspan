@@ -32,6 +32,9 @@ describe("whitespace at a moved passage", () => {
     ["First.\n\nSecret.", "Secret.", "First."],
     ["  Unchanged  prose.\n  First. Secret. Last.  ", "Secret.", "  Unchanged  prose.\n  First. Last.  "],
     ["preSECRETfix", "SECRET", "prefix"],
+    ["- Keep\n  Secret.\n  Continue", "Secret.\n", "- Keep\n  Continue"],
+    ["- Keep\r\n  Secret.\r\n  Continue", "Secret.\r\n", "- Keep\r\n  Continue"],
+    ["{{char}} Secret. <b>Last.</b>", "Secret.", "{{char}} <b>Last.</b>"],
     ["Secret.", "Secret.", ""],
     ["First.\r\n\r\nSecret.\r\n\r\nLast.", "Secret.", "First.\r\n\r\nLast."]
   ])
