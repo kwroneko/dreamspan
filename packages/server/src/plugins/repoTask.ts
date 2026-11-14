@@ -32,7 +32,13 @@ export type RepoRequest =
       readonly message: string
     }
   | { readonly op: "info"; readonly owner: string; readonly id: string; readonly selected?: string }
-  | { readonly op: "verify"; readonly owner: string; readonly id: string; readonly commit: string }
+  | {
+      readonly op: "verify"
+      readonly owner: string
+      readonly id: string
+      readonly commit: string
+      readonly approved?: boolean
+    }
   | { readonly op: "versions"; readonly owner: string; readonly id: string; readonly extra: ReadonlyArray<string> }
   | { readonly op: "log"; readonly owner: string; readonly id: string }
   | {

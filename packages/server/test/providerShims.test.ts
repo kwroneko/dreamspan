@@ -445,3 +445,47 @@ it("Google thinking rules stay provider-local and prevent forbidden off/budget c
   })
   assert.include(upstream.fixed!, "thinkingLevels")
 })
+
+it("retries only the explicit tool/effort refusal before output on Chat Completions", async () => {
+  const { hasRetryShim } = await import("../src/providers/shims.ts")
+  const { providerError } = await import("../src/providers/errors.ts")
+  const refusal = "Function tools with reasoning_effort are not supported; set reasoning_effort to 'none'."
+  const target = {
+    kind: "openai-chat",
+    provider: "openai",
+    api: "openai-completions",
+    model: "unknown-synthetic-model"
+  }
+  assert.isTrue(hasRetryShim(builtinShims, target, providerError("bad_request", refusal, { status: 400 })))
+  for (const error of [
+    providerError("bad_request", "Other invalid argument", { status: 400 }),
+    providerError("auth", refusal, { status: 401 }),
+    providerError("bad_request", refusal, { status: 400, afterTokens: true })
+  ])
+    assert.isFalse(hasRetryShim(builtinShims, target, error))
+  assert.isFalse(
+    hasRetryShim(
+      builtinShims,
+      { ...target, api: "openai-responses" },
+      providerError("bad_request", refusal, { status: 400 })
+    )
+  )
+  assert.isFalse(
+    hasRetryShim(
+      builtinShims,
+      { ...target, provider: "openrouter" },
+      providerError("bad_request", refusal, { status: 400 })
+    )
+  )
+})
+
+it("reports the selected and sent reasoning effort when compatibility changes it", () => {
+  const tools = [{ type: "function", function: { name: "look", parameters: {} } }]
+  const result = shim("openai", "openai-completions", "gpt-5.4-nano", { tools, reasoning_effort: "low" })
+  assert.deepEqual(result.notices, [
+    "Reasoning effort “low” was changed to “none” for this request because this model refuses reasoning with tools. Your saved setting is unchanged."
+  ])
+  const accepted = shim("openai", "openai-completions", "accepts-reasoning", { tools, reasoning_effort: "low" })
+  assert.deepEqual(accepted.payload, { tools, reasoning_effort: "low" })
+  assert.deepEqual(accepted.notices, [])
+})

@@ -3,7 +3,6 @@ import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
 import { randomUUID } from "node:crypto"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { pathToFileURL } from "node:url"
 import {
   PluginRejected,
   type PluginPin,
@@ -26,7 +25,7 @@ import { StateModules } from "../db/stateModules.ts"
 import { AssemblyModules } from "../assembler/modules.ts"
 import { Notices } from "../chat/Notices.ts"
 import { Network } from "../net/Network.ts"
-import { checkPlugin, readBuild, readClientBuild } from "./check.ts"
+import { checkPlugin, readBuild, readClientBuild, readRuntimeBuild } from "./check.ts"
 import { declaredHandles, type RegistrationRegistry } from "./handles.ts"
 import { makePluginAuthoring } from "../agent/tools/plugins.ts"
 import type { RolloutEffect } from "@rp/shared/workshopApi.ts"
@@ -169,7 +168,7 @@ export class PluginHost extends Context.Service<
         })
       const activate = (actor: User, owner: string, id: string, commit: string, report: PluginReport) =>
         Effect.gen(function* () {
-          const { folder, manifest } = yield* attempt(() => readBuild(config.dataDir, owner, id, commit))
+          const { manifest, server, worker } = yield* attempt(() => readRuntimeBuild(config.dataDir, owner, id, commit))
           for (const [key, other] of replacements) {
             if (key === keyOf(owner, id) || (owner && other.owner && owner !== other.owner)) continue
             if (manifest.replaces.some((part) => other.parts.includes(part)))
@@ -196,9 +195,7 @@ export class PluginHost extends Context.Service<
           }
           const effect = Effect.gen(function* () {
             if (manifest.server) {
-              const module = yield* attempt(
-                () => import(pathToFileURL(join(folder, "server.mjs")).href) as Promise<{ activate: Activate }>
-              )
+              const module = yield* attempt(() => import(server!) as Promise<{ activate: Activate }>)
               const fetch = network.fetchFor({ mode: "inherit" }, (route) => {
                 Effect.runFork(Effect.logInfo(`Plugin ${id} network request via ${route.via}`))
               })
@@ -231,7 +228,7 @@ export class PluginHost extends Context.Service<
               )
             }
             if (manifest.worker) {
-              const module = pathToFileURL(join(folder, "worker-bridge.mjs")).href
+              const module = worker!
               yield* states.onFailure(id, fail)
               yield* states.register({ id: `plugin:${id}`, module, exportName: "state" })
               yield* assemblies.register({ id: `plugin:${id}`, module, exportName: "assembly" })
@@ -500,6 +497,33 @@ export class PluginHost extends Context.Service<
               yield* authorize
               const build = yield* attempt(() =>
                 readClientBuild(config.dataDir, target.scope === "instance" ? "" : actor.id, target.id, target.commit)
+              ).pipe(
+                Effect.tapError(() =>
+                  Semaphore.withPermit(lock)(
+                    Effect.gen(function* () {
+                      const owner = target.scope === "instance" ? "" : actor.id
+                      const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
+                      if (pins.value[target.id]?.commit === target.commit && !pins.value[target.id]?.suspended) {
+                        const users = yield* reader.ListUsers()
+                        const admin =
+                          users.find(
+                            (u) => u.id === pins.value[target.id]!.enabledBy && u.role === "admin" && !u.disabled
+                          ) ?? users.find((u) => u.role === "admin" && !u.disabled)
+                        if (admin)
+                          yield* suspend(admin, owner, target.id, {
+                            commit: target.commit,
+                            appStamp: "",
+                            ok: false,
+                            step: "snapshot",
+                            message:
+                              "The approved plugin files changed. Check this version before turning it on again.",
+                            at: Date.now()
+                          })
+                        else yield* close(owner, target.id)
+                      }
+                    })
+                  )
+                )
               )
               // A disable/update admitted during the file check wins before any bytes are returned.
               yield* authorize
@@ -583,19 +607,6 @@ export class PluginHost extends Context.Service<
           Semaphore.withPermit(lock)(
             Effect.gen(function* () {
               const owner = yield* authorize(actor, target, true)
-              // Editing a pinned repo immediately turns it off; applying any new commit is explicit.
-              yield* close(owner, target.id)
-              const pins = yield* reader.GetPluginPins({ userId: actor.id, owner })
-              const pin = pins.value[target.id]
-              if (pin)
-                yield* suspend(actor, owner, target.id, {
-                  commit: pin.commit,
-                  appStamp: "",
-                  ok: false,
-                  step: "snapshot",
-                  message: "Plugin changed; turn on its new version to apply it",
-                  at: Date.now()
-                })
               return yield* attempt(() =>
                 repoTask<string>(config.dataDir, { op: "save", owner, id: target.id, files, initial: false, message })
               )
@@ -660,7 +671,7 @@ export class PluginHost extends Context.Service<
                 appStamp: "",
                 ok: false,
                 step: "snapshot",
-                message: "Plugin changed; turn on its new version to apply it",
+                message: "Plugin turned off",
                 at: Date.now()
               })
           } else yield* close(owner, target.id)
@@ -698,7 +709,14 @@ export class PluginHost extends Context.Service<
             continue
           }
           const user: User = { id: actor.id, handle: actor.handle, displayName: actor.displayName, role: actor.role }
-          const report = yield* attempt(() => checkPlugin(config.dataDir, owner, id, pin.commit))
+          const report = yield* attempt(() =>
+            checkPlugin(config.dataDir, owner, id, pin.commit, {
+              working: false,
+              admin: true,
+              historical: true,
+              approved: true
+            })
+          )
           reports.set(keyOf(owner, id), report)
           if (!report.ok) {
             yield* suspend(user, owner, id, report)

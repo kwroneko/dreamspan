@@ -1,7 +1,7 @@
 import { Predicate } from "effect"
 import { isMacroLimit } from "@rp/shared/macros/expand.ts"
 // API v1's cooperative call boundary. VM timeout bounds synchronous callbacks, not trust.
-import { Script } from "node:vm"
+import { createContext, Script } from "node:vm"
 import type { MacroCall, MacroEntry, MacroVariablesV1 } from "@rp/shared/macros/registry.ts"
 import type { ChatMessage } from "@rp/shared/macros/context.ts"
 
@@ -135,19 +135,25 @@ const macroCallV1 = (
 export const adaptMacroV1 = (entry: MacroEntry, enabled: () => boolean, fail: () => void): MacroEntry => {
   const saved = copy(entry)
   const message = messageProjection()
+  // The VM only invokes a host closure. Reuse its empty realm rather than creating one
+  // for every call; retain the deadline for projection, callbacks and result validation.
+  // Nested resolver calls restore the enclosing invocation even when they fail.
+  let pending: (() => unknown) | undefined
+  const realm = createContext({ invoke: () => pending!() })
   const wrap =
     <A>(fn: (call: MacroCall, ...args: string[]) => A) =>
     (call: MacroCall, ...args: string[]): A => {
       if (!enabled()) throw new Error("Plugin is disabled")
+      const previous = pending
       try {
-        return invoke.runInNewContext(
-          { invoke: () => fn(macroCallV1(call, enabled, message), ...args) },
-          { timeout: 100 }
-        ) as A
+        pending = () => fn(macroCallV1(call, enabled, message), ...args)
+        return invoke.runInContext(realm, { timeout: 100 }) as A
       } catch (error) {
         if (isMacroLimit(error) || Predicate.isTagged(error, "PluginFault")) throw error
         fail()
         throw new Error("Plugin macro failed")
+      } finally {
+        pending = previous
       }
     }
   return Object.freeze({

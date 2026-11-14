@@ -138,7 +138,8 @@ export const ContextIssue = Schema.Struct({
     // Separate contexts (spec/CHARACTER-CONTEXT.md §9.2 C3).
     "context_view_missing",
     "summaries_withheld",
-    "note_replacement"
+    "note_replacement",
+    "compatibility"
   ]),
   message: Schema.String
 })

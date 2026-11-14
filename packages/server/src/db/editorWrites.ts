@@ -5,7 +5,7 @@ import { makeSnippetWrites } from "./snippetWrites.ts"
 // The editors' write handlers (ARCHITECTURE.md "Editing the library"). They run in the
 // writer worker, each as one transaction, through the library's own steps (libraryWrites.ts),
 // so every change flows on to the refs that follow the edited one.
-import { OWN_TURN_FRAMING, ownTurnSelectionError, NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
+import { OWN_TURN_FRAMING, ownTurnSelectionError, cutOwnTurnText, NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
 import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import {
   applyDrafts,
@@ -809,7 +809,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           ...(previous?.doc ?? base),
           title: previous?.doc.title ?? label.replace("Moved from", "Shared"),
           on_by_default: true,
-          content: source.slice(0, at) + source.slice(at + length),
+          content: cutOwnTurnText(source, at, length),
           replaces: { kind: "card_field", field }
         }
         const conflict = yield* replacementConflict(

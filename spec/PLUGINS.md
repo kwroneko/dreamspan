@@ -1,5 +1,8 @@
 # Plugins: threat model and structure
 
+**Built fixes1114 (2026-11-14; obsolete as an implementation proposal):** coordinator ruling: the enabled version is the checked build of its approved commit. New working-tree or committed work keeps that build running until explicit replacement approval or Turn off. Altered approved Git objects/build files remain faults. See ARCHITECTURE §17. This settles this enabled-version behavior only; other Proposed/Open decisions are unchanged.
+
+
 **Status**: Proposed, 2026-10-11. The owner's statements of 2026-10-11 are marked **[D]**. Supersedes the recommendation in [CORDIS.md](CORDIS.md), whose evaluation of Cordis itself still stands. Building the plugin system is PLAN phase 6. §8 lists what has to shape the code before then. Implemented registry groundwork in §8 is obsolete as an implementation proposal (2026-10-30; ARCHITECTURE §3.8, §5, §6, §11, §15, §16): shared registries, provider kinds/transforms/costs, state modules in database workers, execution/planning/summary strategies, assembler stages/macros/role projections/source descriptors, format/import/export/parser workflows, and client features/routes/slots. These are swappable registrations; Remote plugin installation and in-app agent authoring remain unbuilt; the P3 status below records consent UI. Built [P] details remain [P]. The loader, consent and agent authoring are designed as a delta to this spec in [WORKSHOP.md](WORKSHOP.md) §5–§6 (proposed, 2026-11-12).
 
 
@@ -112,7 +115,7 @@ Plugins attach metadata without changing the kernel's formats:
 
 ## 4. Plugins are git repositories [D, details P]
 
-- **Where they live:** each plugin is a repo under `DATA_DIR/plugins/`. Enabling a plugin pins a commit, so nothing changes under the user without a new commit being enabled.
+- **Where they live:** each plugin is a repo under `DATA_DIR/plugins/`. Enabling a plugin pins a commit and its checked artifacts, so nothing changes under the user without a new commit being approved. Repository edits, new commits, checks and Undo of repository work keep the approved build running. A working-tree edit is never executed by the runtime. **Independent review, 2026-11-14 (built, obsolete as a proposal):** server and worker imports capture verified artifact bytes as data URLs; worker snapshots never reopen mutable build paths, including after respawn. Browser serving verifies every generated artifact as well as the recorded source.
 - **Upstream and local edits:**
   - A registry install tracks its upstream remote. Edits the user's agent makes are commits on a local branch.
   - An upstream update is fetched and merged. On conflicts the agent resolves them, much like a ref that follows another in the library.
@@ -120,6 +123,7 @@ Plugins attach metadata without changing the kernel's formats:
 - **Agent-written plugins** are repos from the start, with each change a commit.
 - **Folders and zips** become a repo with an initial commit on import.
 - **Built-in features can be forked into a repo:** the module's source is exported as a plugin that replaces the built-in id, and the user's agent changes it from there. The built-in keeps updating, and the fork shows when its base changed.
+- **Runtime verification sequences (implemented 2026-11-14):** approve A → edit/check/commit B → A keeps running, including after reload/restart → approve B to replace A, or decline to retain A. Separately approve A → alter its checked artifacts or recorded tree → suspend with a fault banner. These are the same two sequences as WORKSHOP §6.3; ordinary repository work cannot suspend A.
 - **When an update breaks a plugin:**
   - The plugin is type-checked and bundled against the running version at startup. If it no longer compiles or fails to load, it's disabled and reported; the app keeps running.
   - The user's agent can repair it from the changelog and the types, committing the fix. Agents make repairs as cheap as they make forks, which is what makes the internal tier affordable.

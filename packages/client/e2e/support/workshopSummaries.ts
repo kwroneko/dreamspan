@@ -106,7 +106,7 @@ export function workshopSummaryTests() {
           // The live values, entered in the visible fields: the maximum below the old target
           // lowers it (and says so), then the target is set.
           await set(recent.getByRole("textbox", { name: "Maximum", exact: true }), "2200")
-          await expect(recent.getByRole("status")).toContainText("Target lowered to")
+          await expect(recent.getByRole("status").filter({ hasText: "Target lowered to" })).toBeVisible()
           await set(recent.getByRole("textbox", { name: "Target", exact: true }), "1000")
           await expect(settings).toContainText("Chunk size now: 500 tokens.")
           await expect
@@ -118,6 +118,8 @@ export function workshopSummaryTests() {
               { intervals: [500] }
             )
             .toEqual([1000, 2200, 0])
+          await expect(recent).toContainText("Summary pending for the next reply.")
+          await expect(recent).toContainText("older messages and tool steps")
           await expectLayout(page, info, `workshop-summary-settings-${width}-${theme}`, {
             scope: '[aria-label="Summary settings"]'
           })

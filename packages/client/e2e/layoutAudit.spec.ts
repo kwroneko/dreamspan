@@ -1,3 +1,4 @@
+import { pluginCopyApprovalTests } from "./support/pluginCopyApproval.ts"
 import { pluginCopyTests, copiedPresenceTests } from "./support/pluginCopies.ts"
 import { dispatcherConnectionTests } from "./support/dispatcherConnections.ts"
 import { workshopDocumentTests } from "./support/workshopDocuments.ts"
@@ -58,6 +59,7 @@ test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_
 if (process.env.LAYOUT_AUDIT_PLUGIN_COPIES_ONLY === "1") {
   pluginCopyTests()
   copiedPresenceTests()
+  pluginCopyApprovalTests()
 }
 if (process.env.LAYOUT_AUDIT_WORKSHOP_DOCUMENTS_ONLY === "1") workshopDocumentTests()
 if (process.env.LAYOUT_AUDIT_WORKSHOP_SUMMARIES_ONLY === "1") workshopSummaryTests()
@@ -1027,6 +1029,7 @@ test.describe("synthetic library and every app surface", () => {
           const card = await openPanel(page, cardName)
           await expect(card.locator("[data-card-tokens]")).toBeVisible()
           await audit("panel-card-header", "[data-card-header]")
+          await expect(card.getByRole("button", { name: "About Description", exact: true })).toBeVisible()
           await audit("panel-card-definition", "[data-card-tabs] [role=tabpanel]")
           const preset = await openPanel(page, "Prompt preset")
           await expect(preset.getByRole("list", { name: "Preset blocks" })).toBeVisible()

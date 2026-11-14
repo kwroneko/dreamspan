@@ -194,9 +194,10 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
         ctx.cache.set(preparedKey(ctx), prepared)
         return {
           plugin: { id: target.id, commit: selected.commit },
+          presentation: { title: selected.manifest.name, subtitle: `Version ${selected.commit.slice(0, 8)}` },
           title: `Turn on ${selected.manifest.name}?`,
           rows: [
-            { label: "Version", value: selected.commit },
+            { label: "Version", value: selected.commit.slice(0, 8) },
             { label: "Saved change", value: selected.message },
             ...pluginConsent(selected.manifest, target.scope).map((value, i) => ({
               label: i === 0 ? "Runs" : "Access " + i,
@@ -342,7 +343,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
         )
         if (report.ok && actor.role === "admin")
           checked.set(checkKey(owner, target.id), { tree: snapshot.tree!, commit: result.commit! })
-        return yield* record(
+        const saved = yield* record(
           ctx,
           data(JSON.stringify({ plugin: (owner ? "" : "instance:") + target.id, ...result, report })),
           [
@@ -352,7 +353,43 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
             })
           ]
         )
-      })
+        const selected = yield* attempt(() =>
+          repoTask<Pick<typeof PluginDetails.Type, "manifest">>(dataDir, {
+            op: "info",
+            owner,
+            id: target.id,
+            selected: result.commit!
+          })
+        )
+        return {
+          ...saved,
+          ...(selected.manifest
+            ? {
+                presentation: { title: selected.manifest.name, subtitle: `Version ${result.commit!.slice(0, 8)}` }
+              }
+            : {})
+        }
+      }),
+    {
+      describe: (ctx, args) =>
+        Effect.gen(function* () {
+          const actor = yield* proof(ctx, "plugins.write", false, true)
+          if (args.registry === undefined && args.id === undefined) return { title: "List built-in parts?", rows: [] }
+          const part = builtinCopy(String(args.registry), String(args.id))
+          if (!part)
+            return yield* refused("This part does not have a copy adapter yet. Read plugin_api for supported parts.")
+          ownerOf(actor, { scope: part.side === "client" ? "user" : "instance", id: part.id })
+          const name = `${part.label} (editable)`
+          return {
+            title: `Make an editable copy of ${part.label}?`,
+            presentation: { title: name },
+            rows: [
+              { label: "Plugin", value: name },
+              { label: "Starts", value: "Off. Turning it on requires a separate review." }
+            ]
+          }
+        })
+    }
   )
   add(
     "plugin_create",
@@ -464,8 +501,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
         key: operationKey(ctx, args),
         ...(action === "edit" ? { edits: args.edits ?? [{ old_str: args.old_str, new_str: args.new_str }] } : {})
       } as AuthorRequest
-      const preview = yield* repo(owner, target.id, { ...request, preview: true })
-      if (!preview.recovered) yield* deps.dirty(actor, target)
+      yield* repo(owner, target.id, { ...request, preview: true })
       const prior = checked.get(checkKey(owner, target.id))
       const result = yield* repo(owner, target.id, request)
       if (action !== "commit" || prior?.tree !== result.tree) checked.delete(checkKey(owner, target.id))
@@ -565,14 +601,16 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           expectedRevision: prepared.revision
         })
         if (!report.ok) return { text: data(JSON.stringify(report)), isError: true }
-        return yield* record(ctx, JSON.stringify({ enabled: prepared.commit, plugin: args.plugin }), [
+        const saved = yield* record(ctx, JSON.stringify({ enabled: prepared.commit, plugin: args.plugin }), [
           effects("plugin.enable", prepared.target, `Turned on ${prepared.name}`, {
             enabled: prepared.commit,
             previous: prepared.before
           })
         ])
+        return { ...saved, presentation: { title: prepared.name, subtitle: `Version ${prepared.commit.slice(0, 8)}` } }
       }),
     {
+      titleField: "plugin",
       approval: "always",
       adminOnly: true,
       describe: (ctx, args) =>
@@ -644,8 +682,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           const key = `undo:${effect.rolloutId}:${effect.toolCallId}:${effect.seq}`
           if (typeof recipe.journal === "string") {
             const request: AuthorRequest = { action: "undo", undo: recipe.journal, key }
-            const preview = yield* repo(owner, target.id, { ...request, preview: true })
-            if (!preview.recovered) yield* deps.dirty(actor, target)
+            yield* repo(owner, target.id, { ...request, preview: true })
             yield* repo(owner, target.id, request)
           } else if (effect.kind === "plugin.enable" || effect.kind === "plugin.create") {
             const details = yield* hostDetails(actor, target)

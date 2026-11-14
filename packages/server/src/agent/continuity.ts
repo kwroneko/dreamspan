@@ -96,7 +96,8 @@ export const previousRun = Effect.fnUntraced(function* (
     return { reason: "The story changed, so this request was put together again without earlier story reads." } as const
   if (snapshot.assemblerVersion !== ASSEMBLER_VERSION)
     return {
-      reason: "The previous request used an earlier assembler, so this request was put together again."
+      reason:
+        "The app changed how requests are built, so this request was put together again. A changed tool list may make it read the chat again once at full input cost."
     } as const
   if (!stored.transcript || !snapshot.continuity)
     return { reason: "The previous run has no saved transcript, so this request was put together again." } as const
@@ -147,7 +148,8 @@ export const previousRun = Effect.fnUntraced(function* (
       !isDeepStrictEqual(snapshot.inputs.cards, fresh.inputs.cards)
     )
       return {
-        reason: "The cards, skills or available tools changed, so this request was put together again."
+        reason:
+          "The cards, skills or available tools changed, so this request was put together again. A changed tool list may make it read the chat again once at full input cost."
       } as const
   }
   if (stored.effectsReason) return { reason: stored.effectsReason } as const

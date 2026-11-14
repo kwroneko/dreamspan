@@ -1,17 +1,19 @@
 import { test, expect, type Page, type TestInfo } from "@playwright/test"
-import { readFile, mkdir } from "node:fs/promises"
+import { readFile, writeFile, mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { createHash } from "node:crypto"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
-import { asUser } from "./rpc.ts"
+import { asUser, withCookie, loginCookie } from "./rpc.ts"
 import { pluginFolder } from "../../../server/src/plugins/repo.ts"
 import { startMockProvider, sse } from "../../../server/test/support/mockProvider.ts"
 import { expectLayout } from "./layoutAudit.ts"
 
 export const pluginCopyTests = () => {
   const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "80", FAKE_GENERATOR_TOKENS: "20" })
-  const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+  let adminCookie: Promise<string> | undefined
+  const admin = async <A>(use: Parameters<typeof withCookie<A>>[2]) =>
+    withCookie(server(), await (adminCookie ??= loginCookie(server(), ADMIN.handle, ADMIN.password)), use)
   const shot = async (page: Page, info: TestInfo, name: string) => {
     await expect(page.getByText("Reading plugin status…", { exact: true })).toHaveCount(0, { timeout: 60000 })
     await expectLayout(page, info, name)
@@ -36,10 +38,10 @@ export const pluginCopyTests = () => {
   test.setTimeout(240000)
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const)
-      test(`editable sound ${width} ${theme}`, async ({ page }, info) => {
+      test(`editable sound ${width} ${theme}`, async ({ page, context }, info) => {
         await page.setViewportSize({ width, height: 1000 })
         await page.emulateMedia({ colorScheme: theme })
-        await page.addInitScript((theme) => {
+        await context.addInitScript((theme) => {
           localStorage.setItem("rp.theme", theme)
           Object.assign(window, { frequencies: [] })
           const create = AudioContext.prototype.createOscillator
@@ -122,8 +124,74 @@ export const pluginCopyTests = () => {
         await reply()
         await expect.poll(() => frequencies(page)).toContain(880)
         await shot(page, info, "copied-sound")
+        const approved = (await admin((api) => api.GetPlugin(target))).pin!.commit
+        const assetUrl = `${server().url}/plugins/user/${pluginId}/${approved}/client.mjs`
+        const approvedBytes = await (await page.request.get(assetUrl)).text()
+        await writeFile(join(folder, "src/part/completionSound.ts"), 'throw new Error("UNAPPROVED sound");\n')
+        expect(await (await page.request.get(assetUrl)).text()).toBe(approvedBytes)
+        // A new tab also evaluates the approved replacement while the repository is dirty.
+        const other = await context.newPage()
+        await other.routeWebSocket("**/rpc", (socket) => {
+          const upstream = socket.connectToServer()
+          socket.onMessage((message) => upstream.send(message))
+          upstream.onMessage((message) => {
+            if (!message.toString().includes('"PluginsChanged"')) return socket.send(message)
+            // Preserve stream acknowledgments while withholding only descriptor notices.
+            // Dropping the entire chunk would block all subsequent reply notifications.
+            const frame = JSON.parse(message.toString())
+            if (frame._tag === "Chunk") {
+              frame.values = frame.values.map((batch: Array<{ _tag: string }>) =>
+                batch.filter((notice) => notice._tag !== "PluginsChanged")
+              )
+              socket.send(JSON.stringify(frame))
+            } else socket.send(message)
+          })
+        })
+        await other.goto(`${server().url}/settings/notifications`)
+        await other.getByRole("heading", { name: "Notifications", exact: true }).click()
+        await reply()
+        await expect.poll(() => frequencies(other)).toContain(880)
+        // Checking and saving new source grants no authority to replace the running version.
+        await writeFile(join(folder, "src/part/completionSound.ts"), helper.replace("660, at", "990, at"))
+        expect(await admin((api) => api.CheckPlugin({ ...target, commit: approved }))).toMatchObject({ ok: false })
+        const newer = await admin((api) =>
+          api.CommitPlugin({
+            ...target,
+            files: {},
+            message: "Unapproved next completion tone"
+          })
+        )
+        expect(await admin((api) => api.CheckPlugin({ ...target, commit: newer }))).toMatchObject({ ok: true })
+        expect(await (await page.request.get(assetUrl)).text()).toBe(approvedBytes)
+        expect((await page.request.get(`${server().url}/plugins/user/${pluginId}/${newer}/client.mjs`)).ok()).toBe(
+          false
+        )
         await page.goto(`${server().url}/settings/plugins/user~${pluginId}`)
+        await page
+          .getByRole("listitem")
+          .filter({ hasText: "Unapproved next completion tone" })
+          .getByRole("button", { name: "Turn on", exact: true })
+          .click()
+        await expect(page.getByRole("dialog")).toContainText("Replaces Completion sound.")
+        await expect(page.getByRole("dialog")).toContainText("Completion sound (editable)")
+        await reply()
+        expect(await frequencies(other)).not.toContain(990)
+        expect((await admin((api) => api.GetPlugin(target))).pin).toMatchObject({ commit: approved })
+        await shot(page, info, "new-version-consent")
+        await page.getByRole("dialog").getByRole("button", { name: "Not now", exact: true }).click()
         await page.getByRole("button", { name: "Turn off", exact: true }).click()
+        const reload = other.getByRole("status", { name: "Plugins", exact: true })
+        await expect(reload).toContainText("Plugins changed. Reload to apply.")
+        await Promise.all([
+          other.waitForEvent("load"),
+          reload.getByRole("button", { name: "Reload", exact: true }).click()
+        ])
+        await expect(other.getByRole("switch", { name: /^Completion sound/ })).toBeChecked()
+        await other.getByRole("heading", { name: "Notifications", exact: true }).click()
+        await reply()
+        await expect.poll(() => frequencies(other)).toContain(660)
+        expect(await frequencies(other)).not.toContain(880)
+        await other.close()
         await expect(page.getByText("Your account · Off", { exact: true })).toBeVisible()
         await page.goto(`${server().url}/settings/notifications`)
         await expect(page.getByRole("switch", { name: /^Completion sound/ })).toBeChecked()

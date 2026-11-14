@@ -10,6 +10,25 @@ export const NOTE_SCHEMA_VERSION = 1
 export const OWN_TURN_FRAMING =
   "[Background on {{char}}, as the story began. Where the story since then shows {{char}} differently, the story wins.]"
 
+/** The shared field after cutting a passage for an own-turn note. */
+export const cutOwnTurnText = (text: string, at: number, length: number): string => {
+  const before = text.slice(0, at),
+    after = text.slice(at + length)
+  const left = before.match(/\s*$/)![0],
+    right = after.match(/^\s*/)![0]
+  const head = before.slice(0, before.length - left.length),
+    tail = after.slice(right.length)
+  if (!head) return tail
+  if (!tail) return head
+  const whitespace = left + right
+  const lines = whitespace.match(/\r\n|[\r\n]/g) ?? []
+  const separator = lines.length ? lines[0]!.repeat(Math.min(2, lines.length)) : whitespace ? " " : ""
+  // Keep the retained line's indentation. Removing a line inside a list must not
+  // turn its indented continuation into a new paragraph outside that list.
+  const indent = lines.length ? (right.match(/(?:^|[\r\n])([^\S\r\n]*)$/)?.[1] ?? "") : ""
+  return head + separator + indent + tail
+}
+
 /** A move may select text within HTML or whole elements/macros, never cut their syntax. */
 export const ownTurnSelectionError = (text: string, at: number, length: number): string | null => {
   const end = at + length

@@ -674,7 +674,7 @@ function SuspendedNotice({ plugin }: { plugin: View }) {
         </>
       }
     >
-      <p>The app couldn't run this plugin. Its data is kept.</p>
+      <p>This approved version failed a check or stopped working. Its data is kept.</p>
       <Recovery plugin={plugin} />
     </Alert>
   )

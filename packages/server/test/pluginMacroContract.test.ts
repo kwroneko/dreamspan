@@ -395,3 +395,45 @@ it.each([
     )
   )
 )
+
+it("reused VM calls preserve nested resolvers, stable macro effects and changing contexts", () =>
+  Effect.runSync(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup()
+        let calls = 0
+        const base = registry.get("char")!
+        yield* registry.register(
+          adaptMacroV1(
+            {
+              ...base,
+              // Volatile false does not imply purity: identical arguments can still write
+              // variables, consume once(), or resolve a different causal expansion.
+              volatile: false,
+              handler: (call) => {
+                calls++
+                call.variables.local.add("visits", 1)
+                return call.resolve("{{reverse::cba}}") + ":" + call.context.names.char + ":" + call.once("seen")
+              }
+            },
+            () => true,
+            () => {
+              throw new PluginFault("reuse")
+            }
+          )
+        )
+        expect(
+          run(registry, "{{char}} {{char}}", {
+            context: { ...context, variables: { local: { visits: 0 }, global: {} } }
+          })
+        ).toMatchObject({
+          text: "abc:Mira:true abc:Mira:false",
+          variables: { local: { visits: 2 } }
+        })
+        expect(
+          run(registry, "{{char}}", { context: { ...context, names: { user: "Aster", char: "Wren" } } })
+        ).toMatchObject({ text: "abc:Wren:true" })
+        expect(calls).toBe(3)
+      })
+    )
+  ))

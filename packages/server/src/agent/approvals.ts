@@ -159,6 +159,7 @@ export const makePermit =
       const prompt: ApprovalPrompt = {
         // Only a call on the story is bound to the asking tab's position; a library or
         // setting change can be allowed from any tab.
+        ...(described?.presentation ? { presentation: described.presentation } : {}),
         ...(described?.plugin ? { plugin: described.plugin } : {}),
         ...(described?.storyAt ? { storyAt: described.storyAt } : {}),
         ...(described?.storyScope ? { storyScope: described.storyScope } : {}),

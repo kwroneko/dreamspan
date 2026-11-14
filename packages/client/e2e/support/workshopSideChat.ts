@@ -457,6 +457,13 @@ export function workshopSideChatChangesTests() {
           const changes = side.locator("[data-side-chat-changes]")
           await expect(changes).toContainText("Original")
           await expect(changes).toContainText("messages 1–1")
+          const rewrite = changes.locator('[data-effect-kind="changeset.apply"]')
+          await expect(rewrite).toContainText("Changes story · Branch “Original” · messages 1–1")
+          await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            api.NameFork({ forkId: original, name: "Harbor path" })
+          )
+          await expect(rewrite).toContainText("Changes story · Branch “Harbor path” · messages 1–1")
+
           await expect(changes).not.toContainText(original)
           await expectLayout(page, info, `side-changes-${width}-${theme}`, { scope: "[data-side-chat]" })
           if (shots) {

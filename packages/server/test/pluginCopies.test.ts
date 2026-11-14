@@ -1,9 +1,11 @@
 // Process-spawn and real worker integration; synthetic source and loopback scripted transport only.
 import { expect, it } from "vitest"
 import { Effect } from "effect"
-import { readFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { client, serverLayer, testConfig } from "./support/config.ts"
+import { argsDigest } from "../src/agent/approvals.ts"
+import { PluginHost } from "../src/plugins/Host.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { pluginFolder } from "../src/plugins/repo.ts"
@@ -87,6 +89,14 @@ it("copies, changes and runs set_presence, refuses a second replacement, then re
           message: "Explain the copied presence change"
         })
         expect(yield* api.EnablePlugin({ ...made, commit, consent: true })).toMatchObject({ ok: true })
+        const running = execution.rolloutTools.get("set_presence")!
+        const file = join(pluginFolder(config.dataDir, "", made.id), path)
+        yield* Effect.promise(() => writeFile(file, 'throw new Error("UNAPPROVED presence");\n'))
+        expect((yield* api.GetPlugin(made)).pin).toMatchObject({ commit })
+        expect(execution.rolloutTools.get("set_presence")).toBe(running)
+        yield* api.CommitPlugin({ ...made, files: { [path]: source }, message: "Unapproved newer presence" })
+        expect((yield* api.GetPlugin(made)).pin?.suspended).toBeUndefined()
+        expect(execution.rolloutTools.get("set_presence")).toBe(running)
         const other = yield* api.CopyBuiltin({
           registry: "rolloutTools",
           id: "set_presence",
@@ -221,10 +231,16 @@ it("assistant copies are confined, inert, journalled and require the existing ex
         const listed = yield* tool.execute(ctx, {} as never)
         expect(listed.text).toContain('"copyable":true')
         const args = { registry: "noticeChannels", id: "notifications.completion-sound", pluginId: "assistant-copy" }
+        expect(tool.describe).toBeTypeOf("function")
+        const copyQuestion = yield* tool.describe!(ctx, args as never)
+        expect(copyQuestion.presentation?.title).toBe("Completion sound (editable)")
+        expect(copyQuestion.title).toContain("Completion sound")
         const result = yield* tool.execute(ctx, args as never)
         expect(result.isError, result.text).not.toBe(true)
+        expect(result.presentation).toMatchObject({ title: "Completion sound (editable)" })
         const again = yield* tool.execute(ctx, args as never)
         expect(again.text).toBe(result.text)
+        expect(again.presentation).toEqual(result.presentation)
         expect((yield* api.GetPlugin({ scope: "user", id: args.pluginId })).pin).toBeNull()
         const detail = yield* api.GetPlugin({ scope: "user", id: args.pluginId })
         expect(
@@ -240,16 +256,88 @@ it("assistant copies are confined, inert, journalled and require the existing ex
           (yield* tool.execute({ ...ctx, rolloutId: "another-owner-run", toolCallId: "wrong-run" }, args as never))
             .isError
         ).toBe(true)
+        const enable = execution.rolloutTools.get("plugin_enable")!
+        const enableCtx = { ...ctx, toolCallId: "enable-copy" }
+        const enableArgs = { plugin: args.pluginId, commit: detail.commit }
+        const described = yield* enable.describe!(enableCtx, enableArgs as never)
+        expect(described.presentation?.title).toBe("Completion sound (editable)")
+        expect(JSON.stringify(described.rows)).toContain("Replaces Completion sound.")
+        const digest = argsDigest({ tool: "plugin_enable", capability: "plugins.apply", args: enableArgs })
+        yield* writer.RequestToolApproval({
+          userId: user.id,
+          rolloutId,
+          toolCallId: enableCtx.toolCallId,
+          digest,
+          capability: "plugins.apply",
+          prompt: {
+            ...described,
+            rolloutId,
+            toolCallId: enableCtx.toolCallId,
+            digest,
+            capability: "plugins.apply",
+            capabilityLabel: "Turn plugins on",
+            uncertain: false
+          }
+        })
+        yield* api.AnswerToolApproval({ rolloutId, toolCallId: enableCtx.toolCallId, digest, answer: "allow" })
+        yield* writer.SettleToolApproval({
+          userId: user.id,
+          rolloutId,
+          toolCallId: enableCtx.toolCallId,
+          status: "used"
+        })
+        const enabled = yield* enable.execute({ ...enableCtx, approvalDigest: digest }, enableArgs as never)
+        expect(enabled.isError, enabled.text).not.toBe(true)
+        expect(enabled.presentation?.title).toBe("Completion sound (editable)")
+        const host = yield* PluginHost
+        const target = { scope: "user" as const, id: args.pluginId, commit: detail.commit! }
+        const bytes = yield* host.clientAsset(user, target)
+        const helperPath = "src/part/completionSound.ts"
+        const source = yield* Effect.promise(() =>
+          readFile(join(pluginFolder(config.dataDir, user.id, args.pluginId), helperPath), "utf8")
+        )
+        const written = yield* execution.rolloutTools
+          .get("plugin_write")!
+          .execute({ ...ctx, toolCallId: "write-copy" }, {
+            plugin: args.pluginId,
+            path: helperPath,
+            content: source.replace("660, at", "990, at")
+          } as never)
+        expect(written.isError, written.text).not.toBe(true)
+        expect(yield* host.clientAsset(user, target)).toEqual(bytes)
+        const saved = yield* execution.rolloutTools
+          .get("plugin_commit")!
+          .execute({ ...ctx, toolCallId: "commit-copy" }, {
+            plugin: args.pluginId,
+            message: "Unapproved copied sound"
+          } as never)
+        expect(saved.isError, saved.text).not.toBe(true)
+        const checked = yield* execution.rolloutTools
+          .get("plugin_check")!
+          .execute({ ...ctx, toolCallId: "check-copy" }, { plugin: args.pluginId } as never)
+        expect(checked.isError, checked.text).not.toBe(true)
+        const next = yield* api.GetPlugin(target)
+        const pending = yield* enable.describe!({ ...ctx, toolCallId: "next-copy" }, {
+          plugin: args.pluginId,
+          commit: next.commit
+        } as never)
+        expect(JSON.stringify(pending.rows)).toContain("Replaces Completion sound.")
+        expect(next.pin?.commit).toBe(detail.commit)
+        expect(yield* host.clientAsset(user, target)).toEqual(bytes)
         const effects = yield* api.ListRolloutEffects({ chatId: chat.id })
+        yield* api.UndoRolloutEffect(effects.find((e) => e.kind === "plugin.commit")!)
+        expect(yield* host.clientAsset(user, target)).toEqual(bytes)
+        yield* api.UndoRolloutEffect(effects.find((e) => e.kind === "plugin.enable")!)
+        expect((yield* api.ListClientPlugins()).some((p) => p.id === args.pluginId)).toBe(false)
         expect(effects.filter((e) => e.kind === "plugin.create")).toHaveLength(1)
         yield* api.UndoRolloutEffect(effects.find((e) => e.kind === "plugin.create")!)
         const retained = yield* api.GetPlugin({ scope: "user", id: args.pluginId })
-        expect(retained.commit).toBe(detail.commit)
+        expect(retained.versions.some((v) => v.commit === detail.commit)).toBe(true)
         expect(retained.pin === null || !!retained.pin.suspended).toBe(true)
       }).pipe(Effect.provide(serverLayer(config)))
     )
   )
-}, 120000)
+}, 180000)
 
 it("the data-only reverse macro copy checks, replaces worker assembly and restores on disable", async () => {
   const config = testConfig()
@@ -292,6 +380,14 @@ it("the data-only reverse macro copy checks, replaces worker assembly and restor
         })
         expect(requests.at(-1)).toContain("Macro:Edited cba")
         expect((yield* api.GetPlugin(made)).original).toMatchObject({ changed: false, available: true })
+        const file = join(pluginFolder(config.dataDir, "", made.id), path)
+        yield* Effect.promise(() => writeFile(file, 'throw new Error("UNAPPROVED macro");\n'))
+        yield* generate()
+        expect(requests.at(-1)).toContain("Macro:Edited cba")
+        yield* api.CommitPlugin({ ...made, files: { [path]: source }, message: "Unapproved newer reverse" })
+        yield* generate()
+        expect(requests.at(-1)).toContain("Macro:Edited cba")
+        expect((yield* api.GetPlugin(made)).pin?.suspended).toBeUndefined()
         yield* api.DisablePlugin(made)
         yield* generate()
         expect(requests.at(-1)).toContain("Macro:cba")
@@ -312,10 +408,45 @@ it("the data-only reverse macro copy checks, replaces worker assembly and restor
         expect(detail.pin?.suspended).toBeDefined()
         yield* generate()
         expect(requests.at(-1)).toContain("Macro:cba")
+        // A fresh worker cannot reopen tampered bytes; restart verification suspends
+        // the approved pin and restores the built-in instead of running the sentinel.
+        const restored = yield* api.CommitPlugin({
+          ...made,
+          files: { [path]: source.replace("Array.from(call.args[0]!)", '"Edited " + Array.from(call.args[0]!)') },
+          message: "Restore copied macro source"
+        })
+        expect(yield* api.EnablePlugin({ ...made, commit: restored, consent: true })).toMatchObject({ ok: true })
+        yield* Effect.promise(() =>
+          writeFile(
+            join(config.dataDir, "plugins/.builds/instance", made.id, restored, "worker.mjs"),
+            'throw new Error("UNAPPROVED copied macro artifact");'
+          )
+        )
+        yield* generate()
+        expect(requests.at(-1)).toContain("Macro:Edited cba")
       }).pipe(Effect.provide(serverLayer(config)))
     )
   )
-}, 90000)
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const api = yield* client()
+        expect((yield* api.GetPlugin({ scope: "instance", id: "reverse-copy" })).pin?.suspended).toBeDefined()
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() => startMockProvider((_request, res) => sse(res, completionChunks(["Synthetic."], {})))),
+          (m) => Effect.promise(() => m.close())
+        )
+        yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {},
+          greeting: "Macro:{{reverse::abc}}"
+        })
+        expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Macro:cba")
+        expect(JSON.stringify(mock.requests())).not.toContain("UNAPPROVED")
+      }).pipe(Effect.provide(serverLayer(config)))
+    )
+  )
+}, 150000)
 
 it("startup keeps the earliest replacement and visibly suspends a later conflicting pin", async () => {
   const config = testConfig()
@@ -337,6 +468,18 @@ it("startup keeps the earliest replacement and visibly suspends a later conflict
           pluginId: "late-copy"
         })
         expect(yield* api.EnablePlugin({ ...a, consent: true })).toMatchObject({ ok: true })
+        // Startup selects the approved copy even with a newer saved tree and dirty source.
+        yield* api.CommitPlugin({
+          ...a,
+          files: { "NOTICE.md": "Unapproved new copy notice" },
+          message: "Newer unapproved copy"
+        })
+        yield* Effect.promise(() =>
+          writeFile(
+            join(pluginFolder(config.dataDir, user.id, a.id), "src/client.tsx"),
+            'throw new Error("UNAPPROVED startup copy");\n'
+          )
+        )
         const pins = yield* reader.GetPluginPins({ userId: user.id, owner: user.id })
         // A retained pre-P5/operator settings state can contain competing declarations.
         yield* writer.SetPluginPins({
@@ -361,6 +504,21 @@ it("startup keeps the earliest replacement and visibly suspends a later conflict
         expect((yield* api.GetPlugin({ scope: "user", id: "late-copy" })).pin?.suspended?.reason).toBe(
           "Another enabled plugin already replaces this part. Turn it off first."
         )
+        const user = yield* api.Whoami()
+        const host = yield* PluginHost
+        const target = { scope: "user" as const, id: "early-copy", commit: clients[0]!.commit }
+        expect((yield* host.clientAsset(user, target)).length).toBeGreaterThan(0)
+        yield* Effect.promise(() =>
+          writeFile(
+            join(config.dataDir, "plugins/.builds", user.id, target.id, target.commit, "client.mjs"),
+            'throw new Error("TAMPERED approved sound");'
+          )
+        )
+        expect((yield* host.clientAsset(user, target).pipe(Effect.exit))._tag).toBe("Failure")
+        expect((yield* api.GetPlugin(target)).pin?.suspended).toBeDefined()
+        expect(
+          (yield* api.ListBuiltinParts()).find((p) => p.id === "notifications.completion-sound")?.replacedBy
+        ).toEqual([])
         yield* api.DisablePlugin({ scope: "user", id: "early-copy" })
         expect(yield* api.ListClientPlugins()).toEqual([])
       }).pipe(Effect.provide(serverLayer(config)))
@@ -480,15 +638,61 @@ export const activate:Activate=host=>host.registries.rolloutTools!.register(repl
             ok: false,
             message: "Another enabled plugin already replaces this part. Turn it off first."
           })
+          // Neither a dirty repository nor its newer committed source selects runtime bytes.
+          yield* Effect.promise(() =>
+            writeFile(
+              join(pluginFolder(config.dataDir, "", made.id), "src/server.ts"),
+              'throw new Error("UNAPPROVED story tool");'
+            )
+          )
           yield* generate()
           expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Copied: ")
+          yield* api.CommitPlugin({
+            ...made,
+            files: { "src/server.ts": 'throw new Error("UNAPPROVED newer story tool");' },
+            message: "Unapproved newer tool"
+          })
+          yield* generate()
+          expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Copied: ")
+          expect((yield* api.GetPlugin(made)).pin?.suspended).toBeUndefined()
           expect(frozenTool(execution.rolloutTools.get(id)!).label).toContain("(plugin)")
           yield* api.DisablePlugin(made)
           expect(execution.rolloutTools.get(id)).toBe(original)
           const at = mock.requests().length
           yield* generate()
           expect(mock.requests()[at]!.raw).toBe(before)
+          if (id === "read_messages") {
+            // Return HEAD to the approved tree only to re-enable the exact checked version.
+            yield* api.CommitPlugin({
+              ...made,
+              files: { "src/server.ts": source },
+              message: "Restore copied tool source"
+            })
+            const ready = yield* api.GetPlugin(made)
+            expect(yield* api.EnablePlugin({ ...made, commit: ready.commit!, consent: true })).toMatchObject({
+              ok: true
+            })
+            yield* Effect.promise(() =>
+              writeFile(
+                join(config.dataDir, "plugins/.builds/instance", made.id, ready.commit!, "server.mjs"),
+                'throw new Error("UNAPPROVED copied tool artifact");'
+              )
+            )
+            yield* generate()
+            expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Copied: ")
+          }
         }).pipe(Effect.provide(serverLayer(config)))
       )
     )
+    if (id === "read_messages")
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const api = yield* client(),
+              execution = yield* ExecutionRegistry
+            expect((yield* api.GetPlugin({ scope: "instance", id: "read-messages-copy" })).pin?.suspended).toBeDefined()
+            expect(frozenTool(execution.rolloutTools.get(id)!).label).not.toContain("(plugin)")
+          }).pipe(Effect.provide(serverLayer(config)))
+        )
+      )
   }, 180000)

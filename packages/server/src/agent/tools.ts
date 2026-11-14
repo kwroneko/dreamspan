@@ -67,6 +67,8 @@ export interface ToolContext {
 
 /** What a tool returns to the model: text, or a failure the model can correct. */
 export interface ToolOutput {
+  /** Display metadata only, kept in the transcript but never sent to a model. */
+  readonly presentation?: NonNullable<ApprovalPrompt["presentation"]>
   /** Non-atomic tools may record their already-applied changes with their result. */
   readonly effects?: ReadonlyArray<RolloutEffectRecord>
   readonly text: string
@@ -128,7 +130,10 @@ export interface RolloutTool<A = never> {
   readonly describe?: (
     context: ToolContext,
     args: A
-  ) => Effect.Effect<Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin">, unknown>
+  ) => Effect.Effect<
+    Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin" | "presentation">,
+    unknown
+  >
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
 }
 

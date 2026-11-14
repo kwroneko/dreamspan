@@ -41,7 +41,7 @@ layer(serverLayer(testConfig()))("moving card text to notes", (it) => {
         "[Background on {{char}}, as the story began. Where the story since then shows {{char}} differently, the story wins.]\n\nShe fears the sea."
       )
       assert.deepStrictEqual(own.doc.placement, { mode: "section", section: "own_turn", role: "system" })
-      assert.strictEqual(replacement.doc.content, "Mira wears blue. ")
+      assert.strictEqual(replacement.doc.content, "Mira wears blue.")
       assert.deepStrictEqual(replacement.doc.replaces, { kind: "card_field", field: "description" })
       assert.strictEqual(own.doc.move_group, replacement.doc.move_group)
       assert.strictEqual(
@@ -77,7 +77,7 @@ layer(serverLayer(testConfig()))("moving card text to notes", (it) => {
         slotId: null,
         change: { _tag: "Note", entityId: own.ref.entityId, active: false }
       })
-      yield* api.MoveToOwnTurnNote({ ...args, text: "Mira wears blue. ", at: 11, length: 4 })
+      yield* api.MoveToOwnTurnNote({ ...args, text: "Mira wears blue.", at: 11, length: 4 })
       assert.isTrue(
         (yield* api.ListChatNotes({ chatId: chat.id, slotId: null })).every((n) => !n.active),
         "new moves inherit the group’s existing chat switch"
@@ -198,7 +198,7 @@ layer(serverLayer(testConfig()))("own-turn move review", (it) => {
       assert.strictEqual(refused.undone, 0)
       assert.strictEqual(
         (yield* api.ListCardNotes({ cardRefId: card.id })).find((n) => n.doc.replaces)?.doc.content,
-        "Blue.\n\n"
+        "Blue."
       )
       const shared = (yield* api.ListCardNotes({ cardRefId: card.id })).find((n) => n.doc.replaces)!
       yield* writer.EditRef({

@@ -59,7 +59,19 @@ test.beforeAll(async () => {
     req.on("end", () => {
       if (req.url?.startsWith("/v1/chat/completions")) {
         const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          reasoning_effort?: string
           messages: Array<{ role: string; tool_call_id?: string }>
+        }
+        if (body.reasoning_effort && body.reasoning_effort !== "none") {
+          res.writeHead(400, { "content-type": "application/json" })
+          return res.end(
+            JSON.stringify({
+              error: {
+                message: "Function tools with reasoning_effort are not supported; set reasoning_effort to 'none'.",
+                type: "invalid_request_error"
+              }
+            })
+          )
         }
         const answered = body.messages.filter((m) => m.role === "tool").at(-1)?.tool_call_id
         const name = !answered ? "load_skill" : "call_tool"
@@ -155,7 +167,7 @@ for (const transport of ["native", "dispatcher"] as const)
             const model = yield* api.AddUserModel({
               connectionId: connection.id,
               key: transport === "native" ? "claude-sonnet-4-5" : "mock",
-              overrides: {}
+              overrides: transport === "dispatcher" ? { settings: { samplers: { reasoning_effort: "low" } } } : {}
             })
             yield* api.ChangeGenerationDefaults({ change: { model: { connection: connection.id, model: model.id } } })
             const chat = yield* api.CreateWorkshop({ title: `Tool loading ${width} ${theme}` })
@@ -177,6 +189,14 @@ for (const transport of ["native", "dispatcher"] as const)
         await server().restart()
         await page.goto(`${server().url}/chats/${run.chatId}/context/${entry.version.id}#run-steps`)
 
+        if (transport === "dispatcher") {
+          await expect(
+            page.getByText(
+              "Reasoning effort “low” was changed to “none” for this request because this model refuses reasoning with tools. Your saved setting is unchanged."
+            )
+          ).toBeVisible({ timeout: 30_000 })
+          await expectLayout(page, info, `reasoning-notice-${width}-${theme}`)
+        }
         const tools = page.getByRole("region", { name: "Tools offered" })
         const sentFirst = tools.getByRole("region", { name: "Sent from the start" })
         const loaded = tools.getByRole("region", { name: "Loaded during the run" })

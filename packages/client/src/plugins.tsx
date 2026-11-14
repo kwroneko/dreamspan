@@ -25,7 +25,7 @@ import { Popover } from "./ui/Popover.tsx"
 import { useAction } from "./actions.tsx"
 import { sessionAtom } from "./session.ts"
 import { flushOpenEditors } from "./features/editor/openEditors.ts"
-import { installPluginSync } from "./pluginLifecycle.ts"
+import { installPluginSync, listenForPluginChanges } from "./pluginLifecycle.ts"
 import { pluginComponent } from "./pluginBoundary.tsx"
 import type { Registry } from "./registry.ts"
 
@@ -487,6 +487,7 @@ function PluginBanners() {
 }
 export const startClientPlugins = async () => {
   installPluginSync(syncClientPlugins)
+  listenForPluginChanges(checkChanges)
   shellSearchKeys.register({ id: "plugins.host", keys: ["plugins"] })
   appBanners.register({ id: "plugins.host", order: -100, component: PluginBanners })
   userNoticeReceivers.register({

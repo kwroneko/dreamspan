@@ -215,6 +215,7 @@ function Pair({
   maximum,
   now,
   scaled,
+  pendingSummary = false,
   misfits,
   write,
   disabled
@@ -228,6 +229,7 @@ function Pair({
   maximum: "recentMax" | "layerMax"
   now: number | null
   scaled: { target: number; maximum: number; clamped: boolean } | null
+  pendingSummary?: boolean
   misfits: ReadonlyArray<Misfit>
   write: Write
   disabled: boolean
@@ -284,6 +286,12 @@ function Pair({
           </p>
         )}
       </div>
+      {pendingSummary && (
+        <p className="text-sm text-muted" role="status">
+          Summary pending for the next reply. It will send summaries of older messages and tool steps, then the recent
+          text. A single message or unread tool result may still exceed the maximum.
+        </p>
+      )}
       {lowered !== null && resolved[target] === lowered && (
         <p role="status" className="text-sm text-muted">
           Target lowered to {tokens(lowered)} to stay below the maximum.
@@ -479,6 +487,12 @@ export function LcmFields({
         target="recentTarget"
         maximum="recentMax"
         now={now?.recent ?? null}
+        pendingSummary={
+          transcriptOnly &&
+          resolved.enabled &&
+          now !== null &&
+          now.recent > (fitted?.recent.maximum ?? resolved.recentMax)
+        }
         scaled={fitted?.recent ?? null}
         misfits={fit}
         write={write}

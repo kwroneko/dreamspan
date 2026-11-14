@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { readFile, writeFile, mkdir } from "node:fs/promises"
+import { readFile, writeFile, mkdir, symlink, link, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { expect, it, describe } from "vitest"
 import { Effect } from "effect"
@@ -120,7 +120,7 @@ it("survives SIGKILL between file publication and the settings write without ena
   )
 }, 45_000)
 describe("plugin lifecycle", () => {
-  it("enables explicitly, restores scoped entries, and keeps startup healthy when a pinned tree changes", async () => {
+  it("keeps the approved commit running after a working-tree edit and restart", async () => {
     const data = tempDir("plugin-lifecycle"),
       config = testConfig({ dataDir: data })
     let commit = ""
@@ -143,14 +143,28 @@ describe("plugin lifecycle", () => {
         Effect.gen(function* () {
           const api = yield* client()
           const plugin = yield* api.GetPlugin({ scope: "instance", id: "lifecycle" })
-          expect(plugin.pin?.suspended).toBeDefined()
-          expect(plugin.report?.ok).toBe(false)
+          expect(plugin.pin?.suspended).toBeUndefined()
+          expect(plugin.report?.ok).toBe(true)
           expect(JSON.stringify(plugin)).not.toContain("synthetic-secret")
           expect(yield* api.ListClientPlugins()).toEqual([])
         }).pipe(Effect.provide(serverLayer(config)))
       )
     )
     expect(await readFile(join(pluginFolder(data, "", "lifecycle"), "index.ts"), "utf8")).toContain("throw")
+    await writeFile(
+      join(data, "plugins/.builds/instance/lifecycle", commit, "server.mjs"),
+      "throw new Error('altered approved artifact')"
+    )
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const api = yield* client()
+          const plugin = yield* api.GetPlugin({ scope: "instance", id: "lifecycle" })
+          expect(plugin.pin?.suspended).toBeDefined()
+          expect(plugin.report?.ok).toBe(false)
+        }).pipe(Effect.provide(serverLayer(config)))
+      )
+    )
     await mkdir(join(data, "plugins/.builds"), { recursive: true })
   }, 90_000)
 })
@@ -184,6 +198,30 @@ for (const workers of ["source", "bundle"] as const)
           const report = yield* api.EnablePlugin({ scope: "instance", id: "integrated", commit, consent: true })
           expect(report, JSON.stringify(report)).toMatchObject({ ok: true })
           expect(execution.rolloutTools.get("synthetic_tool")).toBeDefined()
+          // A newly started worker must use the approved bytes captured at activation.
+          // Its first import cannot trust a mutable build path (the main process has ESM cached).
+          const { StateModules } = yield* Effect.promise(() => import("../src/db/stateModules.ts"))
+          const modules = yield* StateModules
+          const module = modules.list().find((m) => m.id === "plugin:integrated")!.module
+          yield* Effect.promise(() =>
+            writeFile(
+              join(config.dataDir, "plugins/.builds/instance/integrated", commit, "worker.mjs"),
+              "throw new Error('unapproved-worker-executed')"
+            )
+          )
+          const loaded = yield* Effect.promise(
+            () =>
+              new Promise<number | null>((resolve, reject) => {
+                const child = spawn(
+                  process.execPath,
+                  ["--input-type=module", "-e", `await import(${JSON.stringify(module)})`],
+                  { stdio: "ignore", env: {} }
+                )
+                child.once("error", reject)
+                child.once("close", resolve)
+              })
+          )
+          expect(loaded).toBe(0)
           expect((yield* reader.RoleProjections()).some((p) => p.id === "integrated/roles")).toBe(true)
           const chat = yield* writer.CreateChat({
             userId: user.id,
@@ -739,5 +777,37 @@ it("checks browser JSX against the shipped API and serves only attested unchange
   await expect(readClientBuild(data, "", id, commit)).rejects.toThrow("artifact")
   await writeFile(join(folder, "client.mjs"), output.bytes)
   await writeFile(join(pluginFolder(data, "", id), "client.tsx"), source + "\n// changed tree")
+  expect((await readClientBuild(data, "", id, commit)).bytes).toEqual(output.bytes)
+  // Working-tree links and a moved HEAD are unrelated to the approved source.
+  const work = join(pluginFolder(data, "", id), "client.tsx")
+  const outside = join(data, "synthetic-other.tsx")
+  await writeFile(outside, source + "\n// not approved")
+  await unlink(work)
+  await symlink(outside, work)
+  expect((await readClientBuild(data, "", id, commit)).bytes).toEqual(output.bytes)
+  await unlink(work)
+  await writeFile(work, source)
+  const artifact = join(folder, "client.mjs")
+  const artifactCopy = join(data, "synthetic-other.mjs")
+  await writeFile(artifactCopy, output.bytes)
+  for (const makeLink of [symlink, link]) {
+    await unlink(artifact)
+    await makeLink(artifactCopy, artifact)
+    await expect(readClientBuild(data, "", id, commit)).rejects.toThrow("artifact")
+    await unlink(artifact)
+    await writeFile(artifact, output.bytes)
+  }
+  const reportFile = join(folder, "check.json")
+  const reportText = await readFile(reportFile, "utf8")
+  const forged = JSON.parse(reportText)
+  const replacement = Buffer.from("throw new Error('unapproved browser output')")
+  const { createHash } = await import("node:crypto")
+  forged.artifacts["client.mjs"] = createHash("sha256").update(replacement).digest("hex")
+  await writeFile(artifact, replacement)
+  await writeFile(reportFile, JSON.stringify(forged))
+  await expect(readClientBuild(data, "", id, commit)).rejects.toThrow("Unattested")
+  await writeFile(artifact, output.bytes)
+  await writeFile(reportFile, reportText)
+  await writeFile(join(folder, "client.tsx"), source + "\n// altered approved tree")
   await expect(readClientBuild(data, "", id, commit)).rejects.toThrow()
 }, 90_000)
