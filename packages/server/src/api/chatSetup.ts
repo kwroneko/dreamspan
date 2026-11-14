@@ -93,6 +93,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "agent.enabled", value: { on: change.on } }
     case "AgentTools":
       return { key: "agent.tools", value: { tools: change.tools } }
+    case "SendPresence":
+      return { key: "agent.send_presence", value: { mode: change.mode } }
     case "DecisionPoints":
       return { key: "decision.points", value: { off: [...new Set(change.off)] } }
     case "AgentPermission":
@@ -459,6 +461,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       ...(state.cardsRotation === true ? { cardsRotation: true } : {}),
       ...(state.htmlDepth === null ? {} : { htmlDepth: state.htmlDepth }),
       ...(state.agentTools ? { agentTools: state.agentTools } : {}),
+      ...(state.sendPresence ? { sendPresence: state.sendPresence } : {}),
       ...(state.decisionsOff?.length ? { decisionsOff: state.decisionsOff } : {}),
       roleProjections,
       ...(state.mergeLayout === null ? {} : { mergeLayout: state.mergeLayout }),

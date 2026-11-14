@@ -3225,6 +3225,31 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Struct({ result: Schema.String, replayed: Schema.Boolean }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * Who is in the scene for the message a rollout is sending (`send_message`'s `present`; DESIGN
+   * §3.5 [D]), in one transaction, keyed by the tool call like every rollout effect: the
+   * generating version's own presence record (`presence_json`: who of its cast knows this
+   * message) and, attached to the version, an `away.set` for each character whose presence
+   * changes, so the next message starts from it and a swipe takes it back. `present` holds card
+   * ids, each of which must be in the cast the version recorded (NotFound otherwise). The
+   * speaker is always present; a narrator, and a card the user plays, are left as they are.
+   * A call already receipted writes nothing and answers `replayed`.
+   */
+  Rpc.make("DeclareRolloutPresence", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      present: Schema.Array(EntityId).check(Schema.isMaxLength(500))
+    },
+    success: Schema.Struct({
+      /** The characters now away who weren't, and those back who were away. */
+      left: Schema.Array(EntityId),
+      back: Schema.Array(EntityId),
+      replayed: Schema.Boolean
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("SaveRolloutTranscript", {
     payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
     success: Schema.Void,

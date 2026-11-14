@@ -367,6 +367,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   htmlDepth: Schema.optionalKey(HtmlDepth),
   /** The tools agent replies offer (`agent.tools`); absent: the default list. */
   agentTools: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Whether a reply's send tool says who is present (`agent.send_presence`); absent: it doesn't. */
+  sendPresence: Schema.optionalKey(Schema.Literals(["optional", "required"])),
   /** The decision points this chat turns off (`decision.points`), by id; absent: none. */
   decisionsOff: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Active and departed cards, including former personas, to retain historical names and portraits. */
@@ -427,6 +429,8 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("AgentTools", {
     tools: Schema.NullOr(Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100)))
   }),
+  /** Whether a reply's send tool says who is present, from here on (`agent.send_presence`). */
+  Schema.TaggedStruct("SendPresence", { mode: Schema.Literals(["off", "optional", "required"]) }),
   /** The decision points off in this chat from here on (`decision.points`), by id: the whole list. */
   Schema.TaggedStruct("DecisionPoints", {
     off: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100))

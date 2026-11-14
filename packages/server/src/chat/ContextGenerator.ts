@@ -38,6 +38,7 @@ import {
   type FrozenTool,
   frozenTool,
   sendMessageDefinition,
+  sendMessageWithPresence,
   severalMessageDefinition,
   prepareToolSnapshots,
   toolWriter
@@ -445,7 +446,13 @@ export const layer = Layer.effect(
           const contractTools =
             plan.contract === "final_text"
               ? []
-              : [plan.contract === "several" ? severalMessageDefinition : sendMessageDefinition]
+              : [
+                  plan.contract === "several"
+                    ? severalMessageDefinition
+                    : plan.sendPresence
+                      ? sendMessageWithPresence(plan.sendPresence)
+                      : sendMessageDefinition
+                ]
           const frozenTools: ReadonlyArray<FrozenTool> = [
             ...frozenOffer(offer.tools, offer.deferred, frozenTool),
             ...contractTools,
