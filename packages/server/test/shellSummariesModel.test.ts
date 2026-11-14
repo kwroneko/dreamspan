@@ -2,7 +2,7 @@
 // forks sharing prefixes takes seeded sequences of the writes the shell's walk reads (appends,
 // branches, swipes, selections, edits, deletes and restores in a fork or for all of them,
 // purges, insertions, hides, state events in one fork or for the chat, fork deletion and
-// restore). After each write a read serves what was stored where it can, and it must equal one
+// restore), metadata, threads/joins and their Undo, and foreign-account writes. After each write a read serves what was stored where it can, and it must equal one
 // computed from scratch: a summary a write made wrong but left valid fails it. Writes that a
 // step's random choice makes invalid fail and roll back, which must leave every summary right
 // too. `npm test` runs one seed; `npm run test:slow` runs more (SHELL_MODEL_SEEDS, _STEPS, _SEED;
@@ -10,7 +10,7 @@
 import { appendFileSync } from "node:fs"
 import { assert, describe, it } from "@effect/vitest"
 import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import { Effect, Exit } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"
 import type { ShellLibraryRead } from "../src/db/ops.ts"
 import { cardDoc } from "./support/docs.ts"
@@ -59,7 +59,16 @@ const kinds = [
   "chatEvent",
   "swap",
   "switch",
-  "deleteFork"
+  "deleteFork",
+  "rename",
+  "splitChat",
+  "archive",
+  "binCard",
+  "threads",
+  "undoThreads",
+  "renameThread",
+  "merge",
+  "foreignWrite"
 ] as const
 
 const run = (seed: number, steps: number) =>
@@ -100,6 +109,15 @@ const run = (seed: number, steps: number) =>
       participants: [ids[2]!],
       greeting: null
     })
+    const foreignUser = yield* writer.EnsureUser({ handle: "bea", displayName: "Bea" })
+    const foreignChat = yield* writer.CreateChat({
+      userId: foreignUser.id,
+      kind: "rp",
+      status: "active",
+      title: "Foreign",
+      participants: [],
+      greeting: null
+    })
     const version = (content: string, speaker: EntityId | null) =>
       new NewVersion({
         speakerEntityId: speaker,
@@ -113,6 +131,7 @@ const run = (seed: number, steps: number) =>
     const versions = new Map<SlotId, Array<VersionId>>()
     const bin: Array<string> = []
     const forkBin: Array<string> = []
+    const threadSplits: Array<string> = []
     let n = 0
     const text = () => `m${n++} ${random().toString(36).slice(2, 8)}`
 
@@ -307,6 +326,109 @@ const run = (seed: number, steps: number) =>
             forkBin.push((yield* writer.DeleteFork({ userId, forkId })).id)
             return
           }
+          case "rename": {
+            yield* writer.RenameChats({ userId, chats: [{ chatId: chat.id, from: null }], name: text() })
+            if (forkId !== null) yield* writer.SetForkName({ userId, forkId, name: text() })
+            return
+          }
+          case "splitChat": {
+            if (forkId !== null) yield* writer.SetSplitChat({ userId, forkId, split: random() < 0.5 })
+            return
+          }
+          case "archive": {
+            yield* writer.SetEntityArchived({ userId, entityId: pick(ids)!, archived: random() < 0.5 })
+            return
+          }
+          case "binCard": {
+            const item = yield* writer.DeleteEntity({ userId, entityId: pick(ids)! })
+            bin.push(item.id)
+            return
+          }
+          case "threads": {
+            if (forkId === null) return
+            const slotId = yield* slotIn(forkId)
+            if (slotId === null) return
+            const shown = yield* reader.GetSlot({ userId, slotId, forkId })
+            const split = yield* writer.StartThreads({
+              userId,
+              chatId: chat.id,
+              forkId,
+              slotId,
+              expectedRowVersion: shown.entry.rowVersion,
+              threads: [
+                { name: "Harbor", cast: [ids[0]!], writesAs: null },
+                { name: "Tower", cast: [ids[1]!], writesAs: null }
+              ]
+            })
+            threadSplits.push(split.splitId)
+            return
+          }
+          case "undoThreads": {
+            const splitId = pick(threadSplits)
+            if (splitId !== undefined) bin.push((yield* writer.UndoThreads({ userId, chatId: chat.id, splitId })).id)
+            return
+          }
+          case "renameThread": {
+            if (forkId === null) return
+            const split = pick(yield* reader.ThreadsOf({ userId, chatId: chat.id, forkId }))
+            if (split === undefined) return
+            const member = pick(split.threads)!
+            yield* writer.RenameThread({
+              userId,
+              chatId: chat.id,
+              splitId: split.splitId,
+              ordinal: member.ordinal,
+              name: text(),
+              rowVersion: member.rowVersion
+            })
+            return
+          }
+          case "merge": {
+            if (forkId === null) return
+            const source = pick(yield* forks())
+            if (source === undefined || source.id === forkId) return
+            const request = {
+              userId,
+              chatId: chat.id,
+              forkId,
+              at: null,
+              source: { chatId: chat.id, forkId: source.id },
+              includeLeftOut: true
+            }
+            const preview = yield* reader.PreviewChatMerge(request)
+            const title = text()
+            const merged =
+              preview.thread && random() < 0.5
+                ? (yield* writer.JoinThreads({
+                    userId,
+                    chatId: chat.id,
+                    forkId,
+                    at: null,
+                    includeLeftOut: true,
+                    joins: [{ forkId: source.id, title, framing: null, digest: preview.digest }]
+                  }))[0]!
+                : yield* writer.MergeChat({ ...request, title, framing: null, digest: preview.digest })
+            if (random() < 0.5) bin.push((yield* writer.DeleteMessage({ userId, slotId: merged.slotId, forkId })).id)
+            return
+          }
+          case "foreignWrite": {
+            const before = yield* reader.ShellLibrary({ userId })
+            yield* writer.AppendMessage({
+              userId: foreignUser.id,
+              chatId: foreignChat.id,
+              parentSlotId: null,
+              branch: true,
+              version: version(text(), null),
+              commitDraft: null
+            })
+            const after = yield* reader.ShellLibrary({ userId })
+            assert.deepStrictEqual(
+              after,
+              before,
+              "another account cannot invalidate or change this account's summaries"
+            )
+            return
+          }
         }
       })
 
@@ -316,6 +438,10 @@ const run = (seed: number, steps: number) =>
         const first = yield* reader.ShellLibrary({ userId })
         const scratch = yield* reader.ShellLibrary({ userId, recompute: true })
         assert.deepStrictEqual(library(first), library(scratch), label)
+        const foreign = yield* reader.ShellLibrary({ userId: foreignUser.id })
+        const foreignScratch = yield* reader.ShellLibrary({ userId: foreignUser.id, recompute: true })
+        assert.deepStrictEqual(library(foreign), library(foreignScratch), `${label}: other account`)
+        yield* writer.StoreForkSummaries({ userId: foreignUser.id, chats: foreign.fresh })
         if (random() < 0.85) yield* writer.StoreForkSummaries({ userId, chats: first.fresh })
       })
 
@@ -324,6 +450,7 @@ const run = (seed: number, steps: number) =>
     for (let i = 0; i < steps; i++) {
       const kind = pick(kinds)!
       const exit = yield* Effect.exit(step(kind))
+      if (Exit.isFailure(exit) && Cause.hasDies(exit.cause)) return yield* Effect.failCause(exit.cause)
       done.push(`${kind}${Exit.isSuccess(exit) ? "" : "!"}`)
       // Reads now and then let several writes go by before one.
       if (random() < 0.8) yield* check(`seed ${seed}, step ${i}: ${done.slice(-6).join(" ")}`)
