@@ -8,6 +8,8 @@ const surfaces: Readonly<Record<string, string>> = {
   "client:routes": "Adds pages to the app. Reload to use changed pages.",
   "client:appBanners": "Adds notices across the app.",
   "client:noticeChannels": "Changes optional reply sounds and alerts.",
+  "server:notes": "Reads visible notes and switches only notes the assistant may change.",
+  "server:history": "Reads only earlier messages and summaries visible to the current character.",
   "server:presence": "Reads the current cast and marks characters present or away.",
   "server:rolloutTools": "Adds or changes tools the assistant can use.",
   "server:operationTools": "Changes which app actions the assistant can use.",
@@ -52,6 +54,9 @@ export const pluginConsent = (manifest: PluginManifest, scope: "instance" | "use
     })
   ),
   ...(manifest.replaces.some((part) => /^(rolloutTools|macros):/.test(part)) ? ["Changes what the model sees."] : []),
+  ...(manifest.surfaces.includes("worker:macros")
+    ? ["Copied macros can reduce prompt cache reuse. Their text is treated as changing on every reply."]
+    : []),
   ...(hasServerCode(manifest) ? ["Can send data to other sites."] : []),
   ...(scope === "instance" ? ["Applies to every user of this app."] : [])
 ]

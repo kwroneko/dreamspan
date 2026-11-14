@@ -38,7 +38,7 @@ export interface MacroCall {
    */
   readonly expandTemplate: (text: string, scope: string) => string
   /** The macro registered under a name, in any case. */
-  readonly lookup: (name: string) => MacroEntry | undefined
+  readonly lookup: (name: string) => Pick<MacroEntry, "id" | "name" | "minArgs" | "maxArgs"> | undefined
   /** The macros at the top level of a text, as ST's extractMacroInfo reports them. */
   readonly macrosIn: (text: string) => ReadonlyArray<MacroInfo>
   /** A number in [0, 1), from the expansion's random source. */
@@ -48,13 +48,15 @@ export interface MacroCall {
   /** True the first time a key is seen in this expansion (for one-shot macros). */
   readonly once: (key: string) => boolean
   /** The chat's (`local`) and global variables. Writes come back as effects. */
-  readonly variables: { readonly local: VariableScope; readonly global: VariableScope }
+  readonly variables: { readonly local: MacroVariablesV1; readonly global: MacroVariablesV1 }
   /**
    * Counts work against the expansion's limit before doing it: characters about to be built,
    * or a die rolled. Past the limit the whole expansion fails.
    */
   readonly charge: (size: number) => void
 }
+
+export type MacroVariablesV1 = Pick<VariableScope, "get" | "has" | "set" | "add" | "delete" | "getAt" | "setAt">
 
 export interface MacroInfo {
   readonly name: string
@@ -66,6 +68,10 @@ export interface MacroInfo {
 
 export interface MacroSpec {
   readonly source?: string
+  /** Host-owned: plugin code conservatively invalidates prefix reuse, including frozen draws. */
+  readonly cacheVolatile?: true
+  /** Host-owned provenance, never model text. */
+  readonly replacement?: { readonly plugin: string; readonly name: string }
   /** Values insert text; directives change text, flow or variable state. */
   readonly kind: "value" | "directive"
   /** A letter, then letters, digits, "_" or "-"; or "//". Matched case-insensitively. */

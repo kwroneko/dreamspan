@@ -285,7 +285,11 @@ it("the data-only reverse macro copy checks, replaces worker assembly and restor
             model: {},
             greeting: "Macro:{{reverse::abc}}"
           })
-        yield* generate()
+        const replaced = yield* generate()
+        expect((yield* api.GetRunContext({ versionId: replaced.version.id })).issues).toContainEqual({
+          kind: "plugin_replacement",
+          message: "{{reverse}} replaced by Reverse text macro (editable) (plugin)."
+        })
         expect(requests.at(-1)).toContain("Macro:Edited cba")
         expect((yield* api.GetPlugin(made)).original).toMatchObject({ changed: false, available: true })
         yield* api.DisablePlugin(made)
@@ -363,3 +367,78 @@ it("startup keeps the earliest replacement and visibly suspends a later conflict
     )
   )
 }, 150000)
+
+for (const [id, entry, args] of [
+  ["search_chat", "searchChat", { query: "Synthetic" }],
+  ["read_messages", "readMessages", { from: 1 }],
+  ["expand_summary", "expandSummary", { messages: "1–1" }],
+  ["search_summaries", "searchSummaries", { query: "Synthetic" }],
+  ["list_notes", "listNotes", {}],
+  ["switch_note", "switchNote", { note: "Synthetic", on: false }]
+] as const)
+  it(`copies, edits and runs ${id}, then restores exact request bytes`, async () => {
+    const config = testConfig()
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const api = yield* client(),
+            execution = yield* ExecutionRegistry
+          const original = execution.rolloutTools.get(id)!
+          const mock = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startMockProvider((request, res) => {
+                const done = ((request.body?.messages ?? []) as Array<{ role: string }>).some((m) => m.role === "tool")
+                sse(res, done ? chunks("send_message", { message: "Synthetic reply." }) : chunks(id, args))
+              })
+            ),
+            (m) => Effect.promise(() => m.close())
+          )
+          const generate = () =>
+            generateReply(api, {
+              connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+              model: {},
+              greeting: "Synthetic earlier text",
+              state: [
+                { key: "agent.enabled", value: { on: true } },
+                { key: "agent.tools", value: { tools: [id] } }
+              ]
+            })
+          yield* generate()
+          const before = mock.requests()[0]!.raw
+          const made = yield* api.CopyBuiltin({
+            registry: "rolloutTools",
+            id,
+            pluginId: `${id.replaceAll("_", "-")}-copy`
+          })
+          expect(made.report, JSON.stringify(made.report)).toMatchObject({ ok: true })
+          const source = `import {Effect,type Activate} from "@rp/plugin-api/server"
+import {${entry}} from "./part/${id.endsWith("notes") || id === "switch_note" ? "notesPart" : "historyPart"}.ts"
+const replacement:typeof ${entry}={...${entry},execute:(context,args)=>Effect.map(${entry}.execute(context,args),out=>({...out,text:"Copied: "+out.text}))}
+export const activate:Activate=host=>host.registries.rolloutTools!.register(replacement)`
+          const commit = yield* api.CommitPlugin({
+            ...made,
+            files: { "src/server.ts": source },
+            message: "Explain copied output"
+          })
+          expect(yield* api.EnablePlugin({ ...made, commit, consent: true })).toMatchObject({ ok: true })
+          const other = yield* api.CopyBuiltin({
+            registry: "rolloutTools",
+            id,
+            pluginId: `${id.replaceAll("_", "-")}-other`
+          })
+          expect(yield* api.EnablePlugin({ ...other, consent: true })).toMatchObject({
+            ok: false,
+            message: "Another enabled plugin already replaces this part. Turn it off first."
+          })
+          yield* generate()
+          expect(JSON.stringify(mock.requests().at(-1)!.body)).toContain("Copied: ")
+          expect(frozenTool(execution.rolloutTools.get(id)!).label).toContain("(plugin)")
+          yield* api.DisablePlugin(made)
+          expect(execution.rolloutTools.get(id)).toBe(original)
+          const at = mock.requests().length
+          yield* generate()
+          expect(mock.requests()[at]!.raw).toBe(before)
+        }).pipe(Effect.provide(serverLayer(config)))
+      )
+    )
+  }, 180000)

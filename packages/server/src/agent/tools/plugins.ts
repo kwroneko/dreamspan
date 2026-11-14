@@ -1,3 +1,4 @@
+import { builtinCopyStem } from "@rp/shared/builtinParts.ts"
 // Workshop plugin tools: registered by the host, never generic RPC exposures. Loading grants no authority.
 import { randomUUID } from "node:crypto"
 import { Type, type TSchema } from "@earendil-works/pi-ai"
@@ -15,7 +16,7 @@ import { checkPlugin } from "../../plugins/check.ts"
 import { appSource, pluginApiDocs } from "../../plugins/reference.ts"
 import { argsDigest } from "../approvals.ts"
 import { budgetResult, ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
-import { builtinCopy } from "../../plugins/builtins.ts"
+import { builtinCopy, builtinCopyListing } from "../../plugins/builtins.ts"
 
 export const PLUGIN_TOOLS = [
   "plugin_list",
@@ -311,16 +312,13 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
     (ctx, args, actor) =>
       Effect.gen(function* () {
         if (args.registry === undefined && args.id === undefined)
-          return { text: data(JSON.stringify(yield* host.builtinParts(actor))) }
+          return { text: data(JSON.stringify(builtinCopyListing(yield* host.builtinParts(actor)))) }
         const part = builtinCopy(String(args.registry), String(args.id))
         if (!part)
           return yield* refused("This part does not have a copy adapter yet. Read plugin_api for supported parts.")
         const target: Target = {
           scope: part.side !== "client" ? "instance" : "user",
-          id:
-            typeof args.pluginId === "string"
-              ? args.pluginId
-              : part.id.replace(/^notifications\./, "").replaceAll("_", "-") + "-copy"
+          id: typeof args.pluginId === "string" ? args.pluginId : builtinCopyStem(part.id) + "-copy"
         }
         const owner = ownerOf(actor, target)
         const result = yield* attempt(() =>

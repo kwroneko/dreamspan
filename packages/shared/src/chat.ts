@@ -123,6 +123,7 @@ export const ContextIssue = Schema.Struct({
     "images_unsupported",
     "images_limited",
     "macro_limit",
+    "plugin_replacement",
     "history_truncated",
     "summary_failed",
     "examples_truncated",

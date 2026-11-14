@@ -1,6 +1,6 @@
 // ST's variable macros (public/scripts/macros/definitions/variable-macros.js at 06bde939).
 // Writes go to the expansion's variables and come back as effects.
-import type { MacroCall, MacroSpec } from "../registry.ts"
+import type { MacroCall, MacroContractV1 } from "../../../../plugin-api/src/macros.ts"
 import { normalize, type VarScope } from "../variables.ts"
 
 const name = { name: "name" } as const
@@ -9,7 +9,7 @@ const key = { name: "key" } as const
 
 const scope = (call: MacroCall, which: VarScope) => call.variables[which]
 
-const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec> => [
+const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroContractV1> => [
   {
     source: import.meta.url,
     kind: "directive",
@@ -91,4 +91,4 @@ const family = (which: VarScope, infix: "" | "global"): ReadonlyArray<MacroSpec>
   }
 ]
 
-export const variableMacros: ReadonlyArray<MacroSpec> = [...family("local", ""), ...family("global", "global")]
+export const variableMacros: ReadonlyArray<MacroContractV1> = [...family("local", ""), ...family("global", "global")]

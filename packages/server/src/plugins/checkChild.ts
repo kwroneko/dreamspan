@@ -33,6 +33,8 @@ try {
   message = "Plugin manifest or declared surface is unsupported"
   const server = [
     "presence",
+    "history",
+    "notes",
     "rolloutTools",
     "operationTools",
     "workshopCapabilities",

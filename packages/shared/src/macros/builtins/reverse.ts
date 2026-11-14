@@ -1,4 +1,4 @@
-import type { DataMacroSpec } from "../registry.ts"
+import type { DataMacroSpec } from "../../../../plugin-api/src/macros.ts"
 
 /** Reverse Unicode code points, preserving the built-in macro's behaviour. */
 export const reverseMacro: DataMacroSpec = {

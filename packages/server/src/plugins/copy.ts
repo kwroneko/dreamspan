@@ -75,7 +75,10 @@ export const prepareBuiltinCopy = async (registry: string, id: string, pluginId:
       surfaces: part.surfaces,
       overrides: [],
       network: false,
-      replaces: [`${registry}:${id}`],
+      replaces: [
+        `${registry}:${id}`,
+        ...("aliases" in part ? part.aliases.map((alias) => `${registry}:${alias}`) : [])
+      ],
       base: { app, path: part.path, sha256: digest }
     },
     null,
@@ -85,7 +88,7 @@ export const prepareBuiltinCopy = async (registry: string, id: string, pluginId:
   files[`src/${part.side}.${part.side === "client" ? "tsx" : "ts"}`] =
     `import { ${part.side === "worker" ? "Effect, registerMacro, " : part.side === "server" ? "Effect, " : ""}type Activate } from "${api}"\n` +
     `import { ${part.entry} } from "./part/${posix.basename(part.path)}"\n` +
-    `export const activate: Activate = (host) => ${part.side !== "client" ? "Effect.asVoid(" : "{"}${part.side === "worker" ? `registerMacro(host.registries.macros!, ${part.entry})` : `host.registries.${registry}!.register(${part.entry})`}${part.side !== "client" ? ")" : ";}"}\n`
+    `export const activate: Activate = (host) => ${part.side !== "client" ? "Effect.asVoid(" : "{"}${part.side === "worker" ? `registerMacro(host.registries.macros!, ${part.entry}${"macroName" in part ? `.find(p => p.name === ${JSON.stringify(part.macroName)})!` : ""})` : `host.registries.${registry}!.register(${part.entry})`}${part.side !== "client" ? ")" : ";}"}\n`
   return { files, side: part.side }
 }
 export const copyBuiltin = async (

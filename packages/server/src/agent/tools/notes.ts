@@ -1,3 +1,4 @@
+import { listNotes as listNotesPart, switchNote as switchNotePart } from "./notesPart.ts"
 // The note tools (spec/AGENTIC.md §4.5): what notes the chat has at the position; switching one
 // on or off, writing a new one and editing one, each from the next message on, attached to the
 // reply being written so a swipe takes it back. Changing a note is something the user allows
@@ -151,66 +152,70 @@ export const noteRefusal = (note: NoteView) =>
       ? `“${note.title}” shows a shared note, which only its editor changes.`
       : null
 
-export const listNotes: RolloutTool<Record<string, never>> = {
-  source: import.meta.url,
-  id: "list_notes",
-  label: "Looked at the notes",
-  explanation: "List this chat's notes",
-  effect: "read",
-  description:
-    "Lists the chat's notes and its characters' notes: title, whose it is, whether it's on, and whether you may change it. On notes are already in your context.",
-  parameters: Type.Object({}),
-  execute: (context) =>
-    safely(
-      "list_notes",
-      Effect.gen(function* () {
-        const { notes } = yield* notesAt(context)
-        if (notes.length === 0) return { text: "The chat has no notes." }
-        return {
-          text: notes
-            .map(
-              (n) =>
-                `“${n.title}” (${n.owner}'s; ${n.active ? "on" : "off"}${n.editable && !n.linked ? "; you may change it" : ""})${
-                  n.active ? "" : `: ${n.content.replace(/\s+/g, " ").slice(0, 200)}`
-                }`
-            )
-            .join("\n")
-        }
-      })
+export const notesContextV1 = (
+  context: ToolContext,
+  enabled: () => boolean = () => true
+): import("../../../../plugin-api/src/server.ts").NotesContextV1 => {
+  const live = Effect.sync(() => {
+    if (!enabled()) throw new Error("Plugin is disabled")
+  })
+  const notes = Effect.gen(function* () {
+    yield* live
+    const read = yield* notesAt(context)
+    yield* live
+    return Object.freeze(
+      read.notes.map((n) =>
+        Object.freeze({
+          entity: n.entity,
+          title: n.title,
+          owner: n.owner,
+          active: n.active,
+          editable: n.editable,
+          linked: n.linked,
+          content: n.content
+        })
+      )
     )
-}
-
-export const switchNote: RolloutTool<{ readonly note: string; readonly on: boolean }> = {
-  source: import.meta.url,
-  id: "switch_note",
-  label: "Switched a note",
-  explanation: "Switch the notes you let it change",
-  effect: "chat_state",
-  description:
-    "Turns one of the notes on or off from the next message on, by its title (list_notes gives them). Only notes you may change.",
-  parameters: Type.Object({
-    note: Type.String({ description: "The note's title." }),
-    on: Type.Boolean({ description: "True to turn it on." })
-  }),
-  summarize: ({ note, on }) => `“${note}”: ${on ? "on" : "off"}`,
-  execute: (context, { note, on }) =>
-    safely(
-      "switch_note",
+  })
+  return Object.freeze({
+    notes,
+    switch: (entity: string, on: boolean, result: string) =>
       Effect.gen(function* () {
-        const target = named((yield* notesAt(context)).notes, note)
-        if ("isError" in target) return target
-        if (!target.editable) return { text: `You may not change “${target.title}”.`, isError: true }
-        const { result } = yield* context.writer.ApplyRolloutEffect({
+        const visible = yield* notes
+        if (
+          typeof on !== "boolean" ||
+          typeof result !== "string" ||
+          result.length > 15000 ||
+          !visible.some((n) => n.entity === entity && n.editable)
+        )
+          return yield* Effect.fail(new Error("Invalid note switch"))
+        yield* live
+        const saved = yield* context.writer.ApplyRolloutEffect({
           userId: context.userId,
           rolloutId: context.rolloutId,
           toolCallId: context.toolCallId,
-          events: [{ key: on ? "note.activate" : "note.deactivate", value: { note: target.entity } }],
-          result: `“${target.title}” is ${on ? "on" : "off"} from the next message on.`
+          events: [{ key: on ? "note.activate" : "note.deactivate", value: { note: entity as EntityId } }],
+          result
         })
-        return { text: result }
+        return saved.result
       })
-    )
+  })
 }
+export const notesReadContextV1 = (context: ToolContext, enabled: () => boolean = () => true) =>
+  Object.freeze({ notes: notesContextV1(context, enabled).notes })
+const wrapNotes = <A>(part: import("../../../../plugin-api/src/server.ts").NoteToolV1<A>): RolloutTool<A> => ({
+  ...part,
+  parameters: part.parameters as RolloutTool["parameters"],
+  execute: (context, args) =>
+    safely(
+      part.id,
+      part.id === "list_notes"
+        ? part.execute(notesReadContextV1(context), args)
+        : part.execute(notesContextV1(context), args)
+    )
+})
+export const listNotes = wrapNotes(listNotesPart)
+export const switchNote = wrapNotes(switchNotePart)
 
 /** The card named `character` among the chat's cast, by its in-chat name. */
 export const castMember = (context: ToolContext, state: ChatState, character: string) =>

@@ -7,10 +7,10 @@
 //   fall back to its text-completion system prompt, which doesn't exist here, so it's empty.
 //   `{{defaultSystemPrompt}}` is that missing prompt, so it's always empty.
 // - `{{chatStart}}` and `{{exampleSeparator}}` are ST's default context template's "***".
-import type { MacroSpec } from "../registry.ts"
+import type { MacroContractV1 } from "../../../../plugin-api/src/macros.ts"
 import { cardField } from "./character.ts"
 
-const empty = (name: string, ...aliases: ReadonlyArray<string>): MacroSpec => ({
+const empty = (name: string, ...aliases: ReadonlyArray<string>): MacroContractV1 => ({
   source: import.meta.url,
   kind: "value",
   name,
@@ -18,7 +18,7 @@ const empty = (name: string, ...aliases: ReadonlyArray<string>): MacroSpec => ({
   handler: () => ""
 })
 
-export const promptMacros: ReadonlyArray<MacroSpec> = [
+export const promptMacros: ReadonlyArray<MacroContractV1> = [
   empty("instructStoryStringPrefix"),
   empty("instructStoryStringSuffix"),
   empty("instructUserPrefix", "instructInput"),
