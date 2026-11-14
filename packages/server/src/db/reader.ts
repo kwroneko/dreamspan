@@ -35,6 +35,7 @@ import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
 import { makeReadHandlers } from "./reads.ts"
 import { makeStImportReadHandlers } from "./stImportReads.ts"
+import { makeStImportPlanReadHandlers } from "./stImportPlanReads.ts"
 
 const { dbPath, binLimits } = workerData as { readonly dbPath: string; readonly binLimits?: BinLimits }
 
@@ -60,6 +61,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               makeChatSetupReadHandlers,
               // --- ST data folder import (ARCHITECTURE.md §13)
               makeStImportReadHandlers,
+              makeStImportPlanReadHandlers,
               makeEditorReadHandlers,
               makeAssemblyReadHandlers,
               makeInspectorReadHandlers,
@@ -83,6 +85,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               imports,
               chatSetup,
               stImport,
+              stImportPlan,
               editor,
               assembly,
               inspector,
@@ -109,6 +112,7 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                       ...imports,
                       ...chatSetup,
                       ...stImport,
+                      ...stImportPlan,
                       ...editor,
                       ...assembly,
                       ...inspector,

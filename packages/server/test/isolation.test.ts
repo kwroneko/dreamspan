@@ -2745,6 +2745,35 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   StartStPathImport: {
     adminOnly: (actor) => refused(actor.api.StartStPathImport({ path: "/", prefix: "" }), "Forbidden")
   },
+  StartStImportPlan: {
+    // A picked folder's preview reads only the caller's chats; one named by its path reads files.
+    adminOnly: (actor) => refused(actor.api.StartStImportPlan({ folder: { root: "/", prefix: "" } }), "Forbidden")
+  },
+  GetStImportPlan: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { plan } = yield* owner.api.StartStImportPlan({ files: [] })
+        yield* refused(actor.api.GetStImportPlan({ planId: plan.planId }), "NotFound")
+      })
+  },
+  GetStImportPlanMessages: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { plan } = yield* owner.api.StartStImportPlan({ files: [] })
+        yield* refused(
+          actor.api.GetStImportPlanMessages({ planId: plan.planId, path: "chats/A/A.jsonl", offset: 0 }),
+          "NotFound"
+        )
+      })
+  },
+  CancelStImportPlan: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { plan } = yield* owner.api.StartStImportPlan({ files: [] })
+        yield* refused(actor.api.CancelStImportPlan({ planId: plan.planId }), "NotFound")
+        assert.strictEqual((yield* owner.api.GetStImportPlan({ planId: plan.planId })).planId, plan.planId)
+      })
+  },
   LinkStImportChat: {
     adminOnly: (actor, owner) =>
       Effect.gen(function* () {

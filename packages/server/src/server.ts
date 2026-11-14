@@ -12,6 +12,7 @@ import {
   AuthenticatedWorkshopApi,
   AuthenticatedChatEventsApi,
   AuthenticatedMessageVersionApi,
+  AuthenticatedStImportPlanApi,
   AuthenticatedChatMergeApi,
   AuthenticatedDecisionApi,
   AuthenticatedProviderListApi,
@@ -91,7 +92,7 @@ import { makeNoticeHandlers } from "./api/notices.ts"
 import { makeInspectorHandlers } from "./api/inspector.ts"
 import { Notices } from "./chat/Notices.ts"
 import { makeProviderHandlers, makeProviderListHandlers } from "./api/providers.ts"
-import { makeStImportHandlers } from "./api/stImport.ts"
+import { makeStImportHandlers, makeStImportPlanHandlers } from "./api/stImport.ts"
 import {
   imageRoute as SourceImageRoute,
   makeCardSourceHandlers,
@@ -113,6 +114,7 @@ import * as Formats from "./importer/Formats.ts"
 import * as ImportRoutes from "./importer/routes.ts"
 import { MediaHolds } from "./importer/MediaHolds.ts"
 import { StImportJobs } from "./importer/StImportJobs.ts"
+import { StImportPlans } from "./importer/StImportPlans.ts"
 import { StImports } from "./importer/StImports.ts"
 import {
   crossSiteProblem,
@@ -188,6 +190,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedOwnTurnNoteApi.toLayer(makeOwnTurnNoteHandlers),
   AuthenticatedWorkshopPresetApi.toLayer(makeWorkshopPresetHandlers),
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
+  AuthenticatedStImportPlanApi.toLayer(makeStImportPlanHandlers),
   AuthenticatedShellUpdatesApi.toLayer(
     Effect.map(makeChatSetupHandlers, ({ WatchShellCards, WatchShellForks }) => ({
       WatchShellCards,
@@ -721,6 +724,8 @@ export const serverWith = <E>(
     // Provided on, so a plugin can register folder handlers into it (PLUGINS §8).
     // Import jobs (StImportJobs) run the path imports in their own scope, past any request.
     Layer.provideMerge(StImportJobs.layer),
+    // The re-import preview (StImportPlans): a dry run of the import over a folder, nothing written.
+    Layer.provideMerge(StImportPlans.layer),
     Layer.provideMerge(StImports.layer),
     Layer.provide(
       // The estimate waits while a reply is written (CacheWarmth.hold).

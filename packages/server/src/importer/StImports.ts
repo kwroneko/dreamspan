@@ -45,6 +45,14 @@ import { stGalleryFolder } from "@rp/shared/stFolder.ts"
 import { storeMedia } from "./mediaFiles.ts"
 import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from "./ops.ts"
 import { Report } from "./stReport.ts"
+import { stChatTarget } from "./stChatTarget.ts"
+import { StImportPlanChanged } from "@rp/shared/stReimportPlan.ts"
+
+/** A re-import preview the user confirmed: the chats it read, and their stamp then. */
+export interface StPlanExpect {
+  readonly chatIds: ReadonlyArray<string>
+  readonly stamp: string
+}
 import {
   type CardInfo,
   chatStateChange,
@@ -280,7 +288,15 @@ const result = (outcome: StFileResult["outcome"], message = "") => new StFileRes
 export class StImports extends Context.Service<
   StImports,
   {
-    readonly start: (user: User, unsupported: ReadonlyArray<string>) => Effect.Effect<string, ServerError>
+    /**
+     * Starts the user's import run. `expect`: the re-import preview the user confirmed, which
+     * refuses the run (`StImportPlanChanged`) if the chats changed since.
+     */
+    readonly start: (
+      user: User,
+      unsupported: ReadonlyArray<string>,
+      expect?: StPlanExpect
+    ) => Effect.Effect<string, ServerError | StImportPlanChanged>
     readonly report: (user: User, importId: string) => Effect.Effect<StImportReport, NotFound>
     /** One uploaded file, or one part of a chat file. */
     readonly file: (
@@ -324,7 +340,7 @@ export class StImports extends Context.Service<
         return Effect.succeed(session)
       }
 
-      const start = (user: User, unsupported: ReadonlyArray<string>) =>
+      const start = (user: User, unsupported: ReadonlyArray<string>, expect: StPlanExpect | undefined) =>
         Effect.gen(function* () {
           const sources = yield* reader.StImportSources({ userId: user.id })
           const session: Session = {
@@ -383,7 +399,11 @@ export class StImports extends Context.Service<
             }
           }
           // Every run before it is over: none of them writes any more (ARCHITECTURE.md §13).
-          yield* writer.StImportBegin({ userId: user.id, importId: session.id })
+          yield* writer.StImportBegin({
+            userId: user.id,
+            importId: session.id,
+            ...(expect === undefined ? {} : { expect })
+          })
           sessions.set(user.id, session)
           return session.id
         })
@@ -1021,8 +1041,10 @@ export class StImports extends Context.Service<
         const header = part.header
         const mainChat = header?.mainChat ?? null
         const parentPath = mainChat === null ? null : stParentPath(file, mainChat)
-        const own = session.records.get(path)
-        if (own?.binned) {
+        // Where it goes, as the re-import preview also works it out (stChatTarget.ts).
+        const target = stChatTarget(session.records, path, parentPath, request.orphan)
+        const own = target._tag === "bin" ? target.own : target._tag === "chat" ? target.own : undefined
+        if (target._tag === "bin") {
           report.count(file.kind, "skipped")
           report.issue(
             path,
@@ -1081,10 +1103,9 @@ export class StImports extends Context.Service<
         }
         report.links.delete(path)
 
-        const parent = parentPath === null ? undefined : session.records.get(parentPath)
-        const parentLive = parent !== undefined && !parent.binned ? parent : undefined
-        if (own === undefined && parentPath !== null && parentLive === undefined) {
-          if (!request.orphan) return result("deferred", "Its parent chat isn't in yet.")
+        if (target._tag === "deferred") return result("deferred", "Its parent chat isn't in yet.")
+        const { parent, parentLive, branch, into } = target
+        if (target.orphan) {
           report.issue(
             path,
             "info",
@@ -1092,9 +1113,6 @@ export class StImports extends Context.Service<
             "This branch's parent chat wasn't in the folder, so it became a chat of its own."
           )
         }
-        // A branch is a file that went into another file's chat; an orphan is a chat of its own.
-        const branch = own !== undefined ? own.merged : parentLive !== undefined
-        const into = own === undefined && branch ? parentLive! : undefined
         // ST's record of the chat it opens the card or group on, which the chat opens on here.
         const stCurrent =
           file.kind === "group_chat"
@@ -1508,12 +1526,14 @@ export class StImports extends Context.Service<
       }
 
       return StImports.of({
-        start: (user, unsupported) =>
-          start(user, unsupported).pipe(
-            Effect.catch((error) =>
-              Effect.logError("starting an ST import failed", error).pipe(
-                Effect.andThen(Effect.fail(new ServerError({ message: "The import couldn't start." })))
-              )
+        start: (user, unsupported, expect) =>
+          start(user, unsupported, expect).pipe(
+            Effect.catch((error): Effect.Effect<never, ServerError | StImportPlanChanged> =>
+              error instanceof StImportPlanChanged
+                ? Effect.fail(error)
+                : Effect.logError("starting an ST import failed", error).pipe(
+                    Effect.andThen(Effect.fail(new ServerError({ message: "The import couldn't start." })))
+                  )
             )
           ),
         report: (user, importId) =>

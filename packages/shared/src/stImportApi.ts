@@ -7,6 +7,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, EntityId, SlotId } from "./chat.ts"
 import { Forbidden, NotFound, ServerError } from "./errors.ts"
 import { ImportIssueLevel } from "./importReport.ts"
+import { StImportPlan, StImportPlanChanged, StPlanId, StPlanMessage } from "./stReimportPlan.ts"
 
 export const StImportId = Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/))
 
@@ -109,6 +110,24 @@ export class StFolderUnreadable extends Schema.TaggedError<StFolderUnreadable>()
 }) {}
 
 const FolderPath = Schema.String.check(Schema.isMaxLength(4096))
+
+/** A chat file of a folder picked in a browser, for the re-import preview: its path in the ST user's folder. */
+const StPlanEntryInput = Schema.Struct({
+  path: FolderPath,
+  size: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+  modifiedMs: Schema.NullOr(Schema.Number),
+  mainChat: Schema.NullOr(FolderPath)
+})
+
+/**
+ * The re-import preview the user confirmed, and the chat files they chose to skip. The import
+ * starts only if the chats the preview read haven't changed since (`StImportPlanChanged`).
+ */
+export const StPlanChoice = Schema.Struct({
+  planId: StPlanId,
+  skip: Schema.Array(FolderPath).check(Schema.isMaxLength(50_000))
+})
+export type StPlanChoice = typeof StPlanChoice.Type
 
 /**
  * Where an import job is (ARCHITECTURE.md §13): `interrupted` when the server stopped
@@ -236,19 +255,20 @@ export class StImportApi extends RpcGroup.make(
       /** For the job's row: the folder's name, and how many files and bytes the browser will send. */
       source: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
       files: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-      bytes: Schema.optionalKey(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)))
+      bytes: Schema.optionalKey(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))),
+      plan: Schema.optionalKey(StPlanChoice)
     },
     success: Schema.Struct({ importId: StImportId }),
-    error: Schema.Union([StImportBusy, ServerError])
+    error: Schema.Union([StImportBusy, StImportPlanChanged, ServerError])
   }),
   /**
    * Imports the ST user's folder `prefix` (one of `findStRoots`) of the folder at `path` on
    * the server, as a job that runs there until it's done, whatever the browser does. Admin only.
    */
   Rpc.make("StartStPathImport", {
-    payload: { path: FolderPath, prefix: FolderPath },
+    payload: { path: FolderPath, prefix: FolderPath, plan: Schema.optionalKey(StPlanChoice) },
     success: Schema.Struct({ importId: StImportId }),
-    error: Schema.Union([Forbidden, StFolderUnreadable, StImportBusy, ServerError])
+    error: Schema.Union([Forbidden, StFolderUnreadable, StImportBusy, StImportPlanChanged, ServerError])
   }),
   /** The browser has sent every file of an upload: the job is complete, with the files it couldn't send. */
   Rpc.make("FinishStImport", {
@@ -304,6 +324,45 @@ export class StImportApi extends RpcGroup.make(
     payload: { chatId: ChatId, throughSlotId: SlotId, importId: Schema.optionalKey(StImportId) },
     success: Schema.Struct({ unhidden: Schema.Int }),
     error: Schema.Union([NotFound, ServerError])
+  })
+) {}
+
+/**
+ * The re-import preview (ARCHITECTURE.md §13), a group of its own: one handler layer over
+ * all of AppCoreApi exceeds TypeScript's instantiation depth.
+ */
+export class StImportPlanApi extends RpcGroup.make(
+  /**
+   * Works out the re-import preview (ARCHITECTURE.md §13): for the chat files that go into
+   * chats already here, what the import would do, with nothing written. `folder`: one named
+   * by its path, read on the server (admin only, as reading it is). `files`: a folder picked in
+   * the browser, its chat files in the import's order; `wanted` names those to send to
+   * `POST /st-import/plan-file`. Ends the caller's earlier preview.
+   */
+  Rpc.make("StartStImportPlan", {
+    payload: {
+      folder: Schema.optionalKey(Schema.Struct({ root: FolderPath, prefix: FolderPath })),
+      files: Schema.optionalKey(Schema.Array(StPlanEntryInput).check(Schema.isMaxLength(50_000)))
+    },
+    success: Schema.Struct({ plan: StImportPlan, wanted: Schema.Array(Schema.String) }),
+    error: Schema.Union([Forbidden, StFolderUnreadable, ServerError])
+  }),
+  Rpc.make("GetStImportPlan", {
+    payload: { planId: StPlanId },
+    success: StImportPlan,
+    error: NotFound
+  }),
+  /** A page of one file's changed messages. */
+  Rpc.make("GetStImportPlanMessages", {
+    payload: { planId: StPlanId, path: FolderPath, offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) },
+    success: Schema.Struct({ messages: Schema.Array(StPlanMessage), total: Schema.Int }),
+    error: NotFound
+  }),
+  /** Stops working out the preview; what it found so far stays readable. */
+  Rpc.make("CancelStImportPlan", {
+    payload: { planId: StPlanId },
+    success: Schema.Void,
+    error: NotFound
   })
 ) {}
 

@@ -1,6 +1,7 @@
 // Sending an ST data folder picked in the browser (ARCHITECTURE.md §13): which of its files
 // go, in what order (the plan the server uses for a folder it reads, `@rp/shared/stPlan.ts`),
-// and each one over HTTP, a chat in parts cut at line ends. A folder named by its path is
+// and each one over HTTP, a chat in parts cut at line ends; and the chat files a re-import
+// preview asks for (`POST /st-import/plan-file`), the same way. A folder named by its path is
 // imported on the server instead (StartStPathImport): nothing of it passes through here.
 import { findStRoots, ST_CHAT_PART_BYTES, type StRoot } from "@rp/shared/stFolder.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -35,22 +36,33 @@ export const orderedPlan = async (found: ReadonlyArray<StFound>, prefix: string)
     if (entry.kind === "chat" || entry.kind === "group_chat")
       mainChats.set(entry.path, stMainChat(await entry.item.file.slice(0, ST_HEAD_BYTES).text()))
   }
-  return { send: orderStBranches(send, (entry) => mainChats.get(entry.path) ?? null), unsupported }
+  return { send: orderStBranches(send, (entry) => mainChats.get(entry.path) ?? null), unsupported, mainChats }
 }
 
 /** The server's answer to one file: `Gone` when the import is over (cancelled, or another started). */
-export type StSent =
-  | { readonly _tag: "Done"; readonly result: StFileResult }
+export type StSent = Answer<StFileResult>
+
+const decode = Schema.decodeUnknownSync(StFileResult)
+
+/** The preview's answer to a part: `restart` when it lost the chat's earlier parts. */
+const PlanFileResult = Schema.Struct({ outcome: Schema.Literals(["continue", "done", "restart"]) })
+const decodePlan = Schema.decodeUnknownSync(PlanFileResult)
+
+type Answer<A> =
+  | { readonly _tag: "Done"; readonly result: A }
   | { readonly _tag: "Failed"; readonly message: string }
   | { readonly _tag: "Unauthorized" }
   | { readonly _tag: "Gone" }
 
-const decode = Schema.decodeUnknownSync(StFileResult)
-
-const post = async (query: URLSearchParams, body: Blob | Uint8Array<ArrayBuffer>): Promise<StSent> => {
+const post = async <A>(
+  url: string,
+  query: URLSearchParams,
+  body: Blob | Uint8Array<ArrayBuffer>,
+  read: (json: unknown) => A
+): Promise<Answer<A>> => {
   let response: Response
   try {
-    response = await fetch(`/st-import/file?${query}`, {
+    response = await fetch(`${url}?${query}`, {
       method: "POST",
       headers: { "content-type": "application/octet-stream" },
       body
@@ -62,7 +74,7 @@ const post = async (query: URLSearchParams, body: Blob | Uint8Array<ArrayBuffer>
   if (response.status === 404) return { _tag: "Gone" }
   if (!response.ok) return { _tag: "Failed", message: await failure(response, "import the file") }
   try {
-    return { _tag: "Done", result: decode(await response.json()) }
+    return { _tag: "Done", result: read(await response.json()) }
   } catch {
     return { _tag: "Failed", message: "The server's answer couldn't be read." }
   }
@@ -95,10 +107,32 @@ export const sendStFile = async (
     })
   const file = entry.item.file
   if (entry.kind !== "chat" && entry.kind !== "group_chat") {
-    const answer = await post(query({}), file)
+    const answer = await post("/st-import/file", query({}), file, decode)
     onBytes(file.size)
     return answer
   }
+  return sendParts("/st-import/file", query, file, decode, (result) => result.outcome === "continue", onBytes)
+}
+
+/** One chat file a re-import preview asked for, in parts as an import sends it. */
+export const sendStPlanFile = (planId: string, entry: StFolderFile, onBytes: (sent: number) => void) =>
+  sendParts(
+    "/st-import/plan-file",
+    (more) => new URLSearchParams({ plan: planId, path: entry.path, ...more }),
+    entry.item.file,
+    decodePlan,
+    (result) => result.outcome === "continue",
+    onBytes
+  )
+
+const sendParts = async <A>(
+  url: string,
+  query: (more: Record<string, string>) => URLSearchParams,
+  file: File,
+  read: (json: unknown) => A,
+  more: (result: A) => boolean,
+  onBytes: (sent: number) => void
+): Promise<Answer<A>> => {
   let start = 0
   let part = 0
   for (;;) {
@@ -111,10 +145,10 @@ export const sendStFile = async (
       bytes = bytes.subarray(0, end + 1)
       last = start + bytes.byteLength >= file.size
     }
-    const answer = await post(query({ part: String(part), last: last ? "1" : "0" }), bytes)
+    const answer = await post(url, query({ part: String(part), last: last ? "1" : "0" }), bytes, read)
     start += bytes.byteLength
     onBytes(start)
-    if (answer._tag !== "Done" || answer.result.outcome !== "continue") return answer
+    if (answer._tag !== "Done" || !more(answer.result)) return answer
     if (last) return { _tag: "Failed", message: "The server wanted more of a chat that had ended." }
     part++
   }

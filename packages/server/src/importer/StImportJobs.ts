@@ -25,13 +25,15 @@ import {
   type StImportStatus,
   StNotSent
 } from "@rp/shared/stImportApi.ts"
-import { orderStBranches, type StPlanned, stPlan } from "@rp/shared/stPlan.ts"
-import type { StFolderEntry } from "@rp/shared/stImportApi.ts"
+import { type StPlanned, stPlan } from "@rp/shared/stPlan.ts"
+import type { StFolderEntry, StPlanChoice } from "@rp/shared/stImportApi.ts"
 import { Cause, Context, Effect, Exit, Layer, Option, Schedule, Schema, Semaphore, type Types } from "effect"
 import { Notices } from "../chat/Notices.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { readStFolderFile, scanStFolder, statStFolderFile } from "./stFolderDisk.ts"
 import { StImports } from "./StImports.ts"
+import { StImportPlans, stFolderPlanFiles } from "./StImportPlans.ts"
+import type { StImportPlanChanged } from "@rp/shared/stReimportPlan.ts"
 import { visibleReport } from "./stReport.ts"
 
 /** Progress is written, and the user's tabs told, at most this often per job. */
@@ -94,14 +96,17 @@ export class StImportJobs extends Context.Service<
     readonly startPath: (
       user: User,
       path: string,
-      prefix: string
-    ) => Effect.Effect<string, StFolderUnreadable | StImportBusy | ServerError>
+      prefix: string,
+      /** The re-import preview the user confirmed, and the chat files they skip. */
+      choice?: StPlanChoice
+    ) => Effect.Effect<string, StFolderUnreadable | StImportBusy | StImportPlanChanged | ServerError>
     /** Starts an import a browser sends (StartStImport), with its job. */
     readonly startUpload: (
       user: User,
       unsupported: ReadonlyArray<string>,
-      info: { readonly source: string; readonly files: number; readonly bytes: number }
-    ) => Effect.Effect<string, StImportBusy | ServerError>
+      info: { readonly source: string; readonly files: number; readonly bytes: number },
+      choice?: StPlanChoice
+    ) => Effect.Effect<string, StImportBusy | StImportPlanChanged | ServerError>
     /** A file, or a part of one, of an upload arrived and was taken: `failed` when the server failed it. */
     readonly arrived: (
       user: User,
@@ -135,6 +140,7 @@ export class StImportJobs extends Context.Service<
     StImportJobs,
     Effect.gen(function* () {
       const imports = yield* StImports
+      const plans = yield* StImportPlans
       const reader = yield* Reader
       const writer = yield* Writer
       const notices = yield* Notices
@@ -431,22 +437,24 @@ export class StImportJobs extends Context.Service<
           )
         )
 
-      const startPath = (user: User, path: string, prefix: string) =>
+      const startPath = (user: User, path: string, prefix: string, choice?: StPlanChoice) =>
         Effect.gen(function* () {
           const scanned = yield* scanStFolder(path)
           if (!findStRoots(scanned.files.map((file) => file.path)).some((root) => root.prefix === prefix))
             return yield* new StFolderUnreadable({ message: "That ST user's folder isn't in this folder." })
-          const plan = stPlan(scanned.files, prefix)
+          const { plan, root, files: all, entries } = stFolderPlanFiles(scanned, prefix)
           if (plan.send.length === 0)
             return yield* new StFolderUnreadable({ message: "That ST user's folder has nothing the import reads." })
-          // Read from the ST user's folder, where the plan's paths are.
-          const root = prefix === "" ? scanned.root : `${scanned.root}/${prefix.slice(0, -1)}`
-          const files = orderStBranches(plan.send, (entry) => entry.item.mainChat)
+          // The preview the user confirmed, checked against the folder as it is now; the files
+          // they chose to skip don't go.
+          const expect = choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, entries)
+          const skip = new Set(choice?.skip ?? [])
+          const files = all.filter((file) => !skip.has(file.path))
           return yield* starting.withPermits(1)(
             Effect.gen(function* () {
               yield* busy(user)
               yield* supersede(user)
-              const importId = yield* imports.start(user, plan.unsupported)
+              const importId = yield* imports.start(user, plan.unsupported, expect)
               const live = yield* begin(
                 user,
                 importId,
@@ -466,13 +474,16 @@ export class StImportJobs extends Context.Service<
       const startUpload = (
         user: User,
         unsupported: ReadonlyArray<string>,
-        info: { readonly source: string; readonly files: number; readonly bytes: number }
+        info: { readonly source: string; readonly files: number; readonly bytes: number },
+        choice?: StPlanChoice
       ) =>
         starting.withPermits(1)(
           Effect.gen(function* () {
+            // The browser leaves out the files the user chose to skip.
+            const expect = choice === undefined ? undefined : yield* plans.confirm(user, choice.planId, null)
             yield* busy(user)
             yield* supersede(user)
-            const importId = yield* imports.start(user, unsupported)
+            const importId = yield* imports.start(user, unsupported, expect)
             yield* begin(user, importId, "upload", info.source, null, "", info.files, info.bytes).pipe(
               stored("Starting the import")
             )
@@ -594,7 +605,7 @@ export class StImportJobs extends Context.Service<
       /** A run that knows the folder again, for linking a chat of an import whose run is gone. */
       const rebuild = (user: User, root: string, card: EntityId | "none") =>
         Effect.gen(function* () {
-          const helper = yield* imports.start(user, [])
+          const helper = yield* imports.start(user, []).pipe(Effect.catchTag("StImportPlanChanged", Effect.die))
           const scanned = yield* scanStFolder(root)
           const cards = new Set(card === "none" ? [] : imports.sourcesOf(user, helper, card))
           // What a chat links to: the settings, personas, lorebooks, presets, groups, and the chosen card.

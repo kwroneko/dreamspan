@@ -137,6 +137,7 @@ import {
 } from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import { StImportJob } from "@rp/shared/stImportApi.ts"
+import { StImportPlanChanged, StPlanCounts, StPlanMessage } from "@rp/shared/stReimportPlan.ts"
 import {
   CardFamily,
   Doc,
@@ -2636,10 +2637,19 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
   }),
+  /**
+   * Makes `importId` the user's current run. With `expect` (the re-import preview the user
+   * confirmed), refused with `StImportPlanChanged`, and nothing written, unless the chats and
+   * import records read the same stamp as when the preview was worked out (`stImportPlanStamp`).
+   */
   Rpc.make("StImportBegin", {
-    payload: { userId: UserId, importId: Schema.String },
+    payload: {
+      userId: UserId,
+      importId: Schema.String,
+      expect: Schema.optionalKey(Schema.Struct({ chatIds: Schema.Array(Schema.String), stamp: Schema.String }))
+    },
     success: Schema.Void,
-    error: StorageError
+    error: Schema.Union([StImportPlanChanged, StorageError])
   }),
   // --- ST import jobs (stImportJobs.ts): what the import page lists.
   /** A new job, running; an upload of the user's still running ends as interrupted (a new run fences it). */
@@ -4233,6 +4243,70 @@ export class ReadOps extends RpcGroup.make(
         })
       )
     }),
+    error: StorageError
+  }),
+  /**
+   * The re-import preview's dry run of one batch of a chat file (stImportPlanReads.ts): the
+   * writer's matcher (`placeStMessages`) with writes that only count. `recordId` is the file's
+   * own record, read as `StImportClaim` would leave it; with `branch`, it's the parent file's
+   * record, and the file is matched as a new branch of that file's fork would be. `parent` is
+   * where the batch goes on from (the last matched slot), `carry` what earlier batches left in
+   * the record. Nothing is written.
+   */
+  Rpc.make("StImportPlanBatch", {
+    payload: {
+      userId: UserId,
+      recordId: Schema.String,
+      branch: Schema.Boolean,
+      parent: Schema.NullOr(Schema.Struct({ id: Schema.String, depth: Schema.Int })),
+      matching: Schema.Boolean,
+      strict: Schema.Boolean,
+      carry: Schema.NullOr(
+        Schema.Struct({
+          keepTip: Schema.Boolean,
+          branchDeleted: Schema.Boolean,
+          last: Schema.NullOr(Schema.String)
+        })
+      ),
+      messagesJson: Schema.String,
+      /** The batch's first message's position in the file. */
+      firstIndex: Schema.Int,
+      /** At most this many changed messages come back in detail. */
+      detailLimit: Schema.Int,
+      /**
+       * What the preview's earlier files would have written to the chat, as JSON
+       * (`PlaceOverlay`, stImportPlace.ts), when other files of the folder go into it too.
+       */
+      overlayJson: Schema.NullOr(Schema.String),
+      /** Ids for the slots and versions the batch would add, unique in the preview. */
+      virtualPrefix: Schema.String,
+      /** Return what the batch would write (`written`), for the chat's later files. */
+      track: Schema.Boolean
+    },
+    success: Schema.Struct({
+      chatId: ChatId,
+      chatTitle: Schema.String,
+      /** Where the next batch goes on from; `virtual` once the rest is new. */
+      cursor: Schema.NullOr(Schema.Struct({ id: Schema.String, depth: Schema.Int, virtual: Schema.Boolean })),
+      matching: Schema.Boolean,
+      counts: StPlanCounts,
+      carry: Schema.Struct({
+        keepTip: Schema.Boolean,
+        branchDeleted: Schema.Boolean,
+        last: Schema.NullOr(Schema.String)
+      }),
+      messages: Schema.Array(StPlanMessage),
+      /** Changed messages in the batch, including those past `detailLimit`. */
+      changed: Schema.Int,
+      /** With `track`: what the batch would write, as a `PlaceOverlay` in JSON. */
+      written: Schema.NullOr(Schema.String)
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** What a re-import preview was worked out against (stImportPlanStamp.ts). */
+  Rpc.make("StImportPlanStamp", {
+    payload: { userId: UserId, chatIds: Schema.Array(Schema.String) },
+    success: Schema.String,
     error: StorageError
   }),
   /** The user's chat an ST import made with the latest message, not in the bin; null for none. */

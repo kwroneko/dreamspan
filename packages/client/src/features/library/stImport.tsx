@@ -16,7 +16,8 @@ import type {
   StImportJob,
   StImportJobDetail,
   StImportReport,
-  StLinkChoice
+  StLinkChoice,
+  StPlanChoice
 } from "@rp/shared/stImportApi.ts"
 import { type StSentKind, stPlan, stPlanKinds } from "@rp/shared/stPlan.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
@@ -40,6 +41,7 @@ import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
+import { ReimportPlan } from "./stReimportPlan.tsx"
 import { FolderBrowser } from "./FolderBrowser.tsx"
 import { type StImportSectionProps, stImportSections } from "./slots.ts"
 import { askMediaApproval } from "../savedMedia/approval.ts"
@@ -666,6 +668,9 @@ function StartForm({ open, close }: StImportSectionProps & { close: (() => void)
   const [prefix, setPrefix] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const [scanning, setScanning] = useState(false)
+  // The re-import preview's choice once its check is done; a new round checks again.
+  const [planChoice, setPlanChoice] = useState<StPlanChoice | null>(null)
+  const [planRound, setPlanRound] = useState(0)
 
   const choose = (next: Chosen | null) => {
     const users = next === null ? [] : stRoots(next.files.map((file) => file.path))
@@ -699,26 +704,42 @@ function StartForm({ open, close }: StImportSectionProps & { close: (() => void)
 
   const runImport = async () => {
     if (chosen === null || prefix === null) return
+    if (planChoice === null) return
+    const plan = planChoice
     setStarting(true)
+    // Refused because the chats or the folder changed since the check: it's worked out again.
+    const recheck = (tag: string) => {
+      if (tag === "StImportPlanChanged") setPlanRound((round) => round + 1)
+    }
     try {
       if (chosen._tag === "Path") {
         const started = await action.run(
-          (client) => client("StartStPathImport", { path: chosen.root, prefix }),
+          (client) => client("StartStPathImport", { path: chosen.root, prefix, plan }),
           [ST_IMPORTS]
         )
-        if (!started.ok) return
+        if (!started.ok) return recheck(started.error.tag)
         choose(null)
         open(started.value.importId)
         return
       }
-      const { send, unsupported } = await orderedPlan(chosen.files, prefix)
+      const ordered = await orderedPlan(chosen.files, prefix)
+      const { unsupported } = ordered
+      // The chat files the user chose to skip in the preview aren't sent.
+      const skipped = new Set(plan.skip)
+      const send = ordered.send.filter((entry) => !skipped.has(entry.path))
       const bytes = send.reduce((sum, entry) => sum + entry.size, 0)
       const started = await action.run(
         (client) =>
-          client("StartStImport", { unsupported, source: pickedName(chosen.files, prefix), files: send.length, bytes }),
+          client("StartStImport", {
+            unsupported,
+            source: pickedName(chosen.files, prefix),
+            files: send.length,
+            bytes,
+            plan
+          }),
         [ST_IMPORTS]
       )
-      if (!started.ok) return
+      if (!started.ok) return recheck(started.error.tag)
       const { importId } = started.value
       uploads.set(importId, new Map(send.map((entry) => [entry.path, entry])))
       choose(null)
@@ -838,6 +859,17 @@ function StartForm({ open, close }: StImportSectionProps & { close: (() => void)
                 folder={chosen?._tag === "Path" && prefix !== null ? { root: chosen.root, prefix } : null}
               />
             )}
+            {plan && chosen !== null && prefix !== null && (
+              <ReimportPlan
+                source={
+                  chosen._tag === "Path"
+                    ? { _tag: "Path", root: chosen.root, prefix }
+                    : { _tag: "Picked", found: chosen.files, prefix }
+                }
+                round={planRound}
+                onChoice={setPlanChoice}
+              />
+            )}
             {chosen?._tag === "Path" ? (
               <p className="text-sm text-muted">You can close this tab after starting the import.</p>
             ) : (
@@ -846,17 +878,22 @@ function StartForm({ open, close }: StImportSectionProps & { close: (() => void)
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 variant="primary"
-                disabled={plan === null || plan.send.length === 0 || running}
+                disabled={plan === null || plan.send.length === 0 || running || planChoice === null}
                 pending={starting}
-                hint="Adds what’s new, and takes in what changed since an earlier import."
+                hint="Adds what’s new, and takes in what changed since an earlier import, as shown above."
                 onClick={() => void runImport()}
               >
                 Import
               </Button>
-              {running && (
+              {running ? (
                 <span className="text-sm text-muted">
                   One import at a time: this one can start when the running one is done.
                 </span>
+              ) : (
+                planChoice === null &&
+                plan !== null && (
+                  <span className="text-sm text-muted">Import is available once the check above is done.</span>
+                )
               )}
             </div>
           </div>

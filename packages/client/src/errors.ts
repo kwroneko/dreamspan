@@ -17,6 +17,7 @@ import {
 import { ForkNotesChanged, GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
 import { EditConflict, EditRefused, InvalidDocument } from "@rp/shared/editorApi.ts"
 import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
+import { StImportPlanChanged } from "@rp/shared/stReimportPlan.ts"
 import { MergeChanged, MergeRefused } from "@rp/shared/mergeApi.ts"
 import { NotResumable } from "@rp/shared/agent.ts"
 import { ApprovalRefused, EffectUndoRefused, GrantRefused } from "@rp/shared/workshopApi.ts"
@@ -84,6 +85,7 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof AccountRejected) return make("AccountRejected", sentence(error.message), error.reason)
   if (error instanceof Forbidden) return make("Forbidden", sentence(error.message))
   if (error instanceof StFolderUnreadable) return make("StFolderUnreadable", sentence(error.message))
+  if (error instanceof StImportPlanChanged) return make("StImportPlanChanged", sentence(error.message))
   if (error instanceof InvalidNetworkSettings) {
     return make("InvalidNetworkSettings", "These settings can't be used:", null, error.problems.map(sentence))
   }
