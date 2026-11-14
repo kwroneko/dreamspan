@@ -205,7 +205,7 @@ This ranks the regressions found in the tasks above, not every optional ST exten
 
 1. **Less story per screen: −29.4% desktop, −34.0% phone.** Add a compact density setting, reduce row gaps/header height and make single-version footers unobtrusive. **Not addressed by R4.**
 
-2. **Group reply control is too weak.** Put reply choice/order at the composer and expose group strategies/automation. **Partly addressed by r4a** (choice and round-robin; ST's other strategies/Auto Mode remain).
+2. **Group reply control is too weak.** Put reply choice/order at the composer and expose group strategies/automation. **Partly addressed by r4a** (choice and round-robin; ST's other strategies/Auto Mode remain). **Auto Mode addressed by orchestr1** (2026-11-14): bounded auto replies from the composer (ARCHITECTURE §12, Auto replies).
 
 3. **Plain Generate writes the selected persona instead of asking the group to answer.** Separate clearly named persona generation from the ordinary reply action. **Addressed by r4a.**
 

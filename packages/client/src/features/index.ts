@@ -11,6 +11,7 @@ import * as cardSources from "./cardSources/index.tsx"
 import * as cardExport from "./cardExport/index.tsx"
 import * as cardImport from "./cardImport/index.tsx"
 import * as accounts from "./accounts.tsx"
+import * as autoRun from "./autoRun/index.tsx"
 import * as bin from "./bin/index.ts"
 import * as characters from "./characters/index.ts"
 import * as chat from "./chat/index.tsx"
@@ -62,6 +63,7 @@ export const registerFeatures = () => {
   pickers.register()
   insertMessage.register()
   threads.register()
+  autoRun.register()
 
   snippets.register()
   bin.register()
