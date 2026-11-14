@@ -1,3 +1,4 @@
+import { resolveSummaryModel } from "./summaryModel.ts"
 import { prepareTextTokens } from "./textTokens.ts"
 import { mergeLayoutStage } from "./merges.ts"
 import { gapLinesStage } from "./gapLines.ts"
@@ -238,7 +239,18 @@ const modelStage: AssemblerStage = {
   run: (assembly) =>
     Effect.gen(function* () {
       const sources = yield* AssemblySources
-      assembly.model = yield* sources.model(need(assembly, "state").modelBindings[""] ?? null)
+      const bindings = need(assembly, "state").modelBindings
+      // A summary is written with the summary model: the chat's own, else the account's, else the chat's.
+      if (assembly.request.summarizing) {
+        const resolved = yield* resolveSummaryModel(sources, bindings)
+        assembly.model = resolved.model
+        if (resolved.unavailable)
+          assembly.issues.push({
+            kind: "summary_model_unavailable",
+            message:
+              "A chosen summary model is unavailable. This summary uses the next available account or chat model."
+          })
+      } else assembly.model = yield* sources.model(bindings[""] ?? null)
       return assembly
     })
 }

@@ -1,5 +1,6 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDefaultPersona } from "../characters/defaultPersona.tsx"
+import { CardVersion } from "./CardVersion.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { useChatCards } from "./chatCards.ts"
 // The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who you play (the persona, who
@@ -150,6 +151,7 @@ function Member({
             {name}
           </button>
         </Tooltip>
+        <CardVersion card={card} />
         {(writing || muted || away || narrator || card.inBin) && (
           <span className="flex flex-wrap items-center gap-1">
             {writing && <Badge tone="success">writing…</Badge>}
@@ -246,6 +248,7 @@ function You({
         ) : (
           <span className="font-medium">No persona</span>
         )}
+        {card && <CardVersion card={card} />}
       </div>
       {children}
     </div>
@@ -391,6 +394,7 @@ function PendingMember({
             {name}
           </button>
         </Tooltip>
+        <CardVersion card={card} />
       </div>
       <Menu trigger={<IconButton icon="more" label={`More for ${name}`} />} label={name} keepMounted>
         <MenuItem

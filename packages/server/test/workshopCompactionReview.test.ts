@@ -122,6 +122,7 @@ it.effect("does not summarize again on each following request, and preserves its
     const { compact, sent } = setup(8192)
     const first = yield* compact()
     assert.isAbove(activeRunSummaries(first).length, 0)
+    assert.strictEqual((activeRunSummaries(first)[0] as unknown as { model?: string }).model, "synthetic-summary")
     const calls = sent.length
     const second = yield* compact([...first])
     assert.lengthOf(sent, calls)

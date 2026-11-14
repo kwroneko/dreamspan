@@ -141,6 +141,7 @@ export function workshopSummaryTests() {
             .first()
             .click()
           await expect(layer).toContainText(WORKSHOP_MEMORY)
+          await expect(layer).toContainText("Written with workshop-small")
           await expectLayout(page, info, `workshop-summary-layer-${width}-${theme}`, {
             scope: '[aria-label="Run summaries"]'
           })

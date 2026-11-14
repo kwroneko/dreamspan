@@ -1,3 +1,4 @@
+import { resolveSummaryModel } from "../assembler/summaryModel.ts"
 import { lcmPath } from "./lcmPath.ts"
 import { CALL_TOOL, dispatcherMessages } from "../agent/dispatcher.ts"
 import { recoveredOperationText } from "./operationReceipts.ts"
@@ -112,7 +113,7 @@ const transcriptEntries = (
       return [
         {
           role: "app",
-          text: `Summarized transcript ${m.from}–${m.through - 1}. Original steps remain available.\n${m.content}`
+          text: `Summarized transcript ${m.from}–${m.through - 1}${m.model ? ` with ${m.model}` : " (model not recorded)"}. Original steps remain available.\n${m.content}`
         }
       ]
     if (m.role === "rpUser") {
@@ -609,8 +610,9 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         const sources = sqlSources(sql, { userId, chatId, next: true, leafSlotId })
         const base = yield* Effect.map(AssemblySources, (s) => s).pipe(Effect.provide(sources.layer))
         const state = foldState((yield* base.events(leafSlotId)).map((e) => e.event))
-        const settings = resolveLcm(state.lcm, yield* base.lcmDefaults!())
-        const model = yield* base.model(state.modelBindings.summarizer ?? state.modelBindings[""] ?? null)
+        const account = yield* base.lcmDefaults!()
+        const settings = resolveLcm(state.lcm, account)
+        const { model } = yield* resolveSummaryModel(base, state.modelBindings)
         const candidates = yield* sql<{
           rollout: string
           call: string

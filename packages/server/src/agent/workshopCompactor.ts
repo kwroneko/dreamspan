@@ -286,6 +286,7 @@ export const workshopCompactor: RunCompactor = {
           from,
           through,
           content,
+          model: settings.model.key,
           changes: settings.changes,
           timestamp: Date.now()
         }

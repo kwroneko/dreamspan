@@ -1,16 +1,21 @@
 // The version picker (DESIGN §3.1): a message's versions, built for dozens. Each one has a
 // compact preview (its start, who wrote it or with which model, when), a star and a hide;
 // hidden ones leave the arrows' cycle and are listed apart. A filter shows only the starred,
-// and two can be compared side by side. The counter `k/n` opens it: a popover on a wide
-// screen, a sheet on a phone.
+// and two can be compared side by side. A text filter finds versions by what they say and a
+// sort orders them (written, newest, longest, shortest, starred first); both are this tab's
+// while the message is on screen, never stored. The counter `k/n` opens it: a popover on a
+// wide screen, a sheet on a phone.
 import { positionOf } from "./position.ts"
+import { Atom } from "effect/reactivity"
 import { useAtomValue } from "@effect/atom-react"
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
+import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
+import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
@@ -32,16 +37,79 @@ export const useNarrow = () => useSyncExternalStore(subscribeNarrow, () => match
 
 const fullTime = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" })
 
-/** A version's start as plain words: Markdown's marks would only take room in two lines. */
-const preview = (text: string) => {
-  const flat = text
+/** A version's text as plain words: Markdown's marks would only take room in two lines. */
+export const plain = (text: string) =>
+  text
     .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+\.)\s+/gm, "")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\[\]]*)\]\([^()]*\)/g, "$1")
+    .replace(/\s+/g, " ")
     .replace(/(^|\s)\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?(?=\s|$)/g, " ")
     .replace(/[*_`~|]+/g, "")
     .replace(/\s+/g, " ")
     .trim()
+
+/** A version's start as plain words. */
+const preview = (text: string) => {
+  const flat = plain(text)
   return flat === "" ? "(empty)" : flat.length > 240 ? `${flat.slice(0, 240)}…` : flat
+}
+
+/** Where `query` (lower case) is in `text`, ignoring case; -1 when it isn't. */
+const findIn = (text: string, query: string) => text.toLowerCase().indexOf(query)
+
+/** The plain words around the first place `query` is in them, with it marked; the start when it isn't there. */
+function Found({ text, query }: { text: string; query: string }) {
+  const flat = plain(text)
+  const at = query === "" ? -1 : findIn(flat, query)
+  if (at < 0) return <>{preview(text)}</>
+  const start = Math.max(0, at - 60)
+  const end = Math.min(flat.length, start + 240)
+  return (
+    <>
+      {start > 0 && "…"}
+      {flat.slice(start, at)}
+      <mark className="rounded-sm bg-warning/30 text-text">{flat.slice(at, at + query.length)}</mark>
+      {flat.slice(at + query.length, end)}
+      {end < flat.length && "…"}
+    </>
+  )
+}
+
+const VERSION_SORTS = ["written", "newest", "longest", "shortest", "starred"] as const
+type VersionSort = (typeof VERSION_SORTS)[number]
+const SORTS: Record<VersionSort, { label: string; hint: string }> = {
+  written: { label: "Order written", hint: "Lists versions in the order they were written" },
+  newest: { label: "Newest first", hint: "Lists the latest versions first" },
+  longest: { label: "Longest first", hint: "Lists the longest versions first" },
+  shortest: { label: "Shortest first", hint: "Lists the shortest versions first" },
+  starred: { label: "Starred first", hint: "Lists starred versions first, then the rest in the order written" }
+}
+
+/** What the list shows of a message's versions: those with the text (any case), in the sort's order. */
+export const arrange = (
+  versions: ReadonlyArray<Version>,
+  query: string,
+  sort: VersionSort,
+  textOf: (version: Version) => string = (version) => version.content
+): ReadonlyArray<Version> => {
+  const needle = query.trim().toLowerCase()
+  const order = new Map(versions.map((v, i) => [v.id, i]))
+  const found = needle === "" ? [...versions] : versions.filter((v) => findIn(textOf(v), needle) >= 0)
+  const written = (a: Version, b: Version) => order.get(a.id)! - order.get(b.id)!
+  const by: Record<VersionSort, (a: Version, b: Version) => number> = {
+    written,
+    newest: (a, b) => b.createdAt - a.createdAt || written(a, b),
+    longest: (a, b) => textOf(b).length - textOf(a).length || written(a, b),
+    shortest: (a, b) => textOf(a).length - textOf(b).length || written(a, b),
+    starred: (a, b) => Number(b.starred) - Number(a.starred) || written(a, b)
+  }
+  return found.sort(by[sort])
+}
+
+/** The picker's text filter and sort: kept while the message is on screen in this tab. */
+interface PickerView {
+  readonly query: string
+  readonly sort: VersionSort
 }
 
 /** Who wrote a version, or with which model: what tells versions apart besides their text. */
@@ -84,6 +152,7 @@ interface PickerProps {
 /** One version in the list: pick it, star it, hide it (or show it again); or tick it to compare. */
 function Row({
   version,
+  query,
   number,
   current,
   writer,
@@ -94,6 +163,7 @@ function Row({
   onFlag
 }: {
   version: Version
+  query: string
   number: number
   current: boolean
   writer: string
@@ -123,12 +193,15 @@ function Row({
         )}
         <StatusBadges version={version} />
       </span>
-      <span className="line-clamp-2 text-sm [overflow-wrap:anywhere]">{preview(text)}</span>
+      <span className="line-clamp-2 text-sm [overflow-wrap:anywhere]">
+        <Found text={text} query={query} />
+      </span>
     </>
   )
   return (
     <li
       data-version={version.id}
+      data-layout-audit-ignore="inset: A list row whose thin border only marks the shown or ticked version, and its pick button, star and hide fill the row"
       className={`flex items-start gap-1 rounded-md border ${
         current ? "border-accent bg-accent/5" : ticked ? "border-focus" : "border-transparent hover:bg-surface-raised"
       }`}
@@ -189,9 +262,35 @@ function PickerBody({
   onPick,
   onFlag,
   onCompare,
-  open
-}: PickerProps & { onCompare: (pair: readonly [Version["id"], Version["id"]]) => void; open: boolean }) {
+  open,
+  view,
+  onView
+}: PickerProps & {
+  onCompare: (pair: readonly [Version["id"], Version["id"]]) => void
+  open: boolean
+  view: PickerView
+  onView: (view: PickerView) => void
+}) {
+  // Subscribe here as well as in rows: a filtered-out streaming row must enter the results
+  // when its new text matches, and length sorts must follow that same visible text.
+  const live = useAtomValue(
+    useMemo(
+      () =>
+        Atom.make(
+          (get) =>
+            new Map(
+              (versions ?? [])
+                .filter((v) => v.status === "generating")
+                .map((v) => [v.id, get(liveText(v.id)) ?? v.content])
+            )
+        ),
+      [versions]
+    )
+  )
   const [filter, setFilter] = useState<"all" | "starred">("all")
+  // Typing stays quick with fifty long versions: the list follows a moment behind.
+  const query = useDeferredValue(view.query)
+  const needle = query.trim().toLowerCase()
   const [ticked, setTicked] = useState<ReadonlyArray<Version["id"]> | null>(null)
   const list = useRef<HTMLDivElement>(null)
   // Opened, it scrolls to the version that's shown, in the middle of the list.
@@ -209,7 +308,9 @@ function PickerBody({
   const numbers = new Map(versions.map((v, i) => [v.id, i + 1]))
   const numberOf = (id: Version["id"]) => numbers.get(id)
   const starred = versions.filter((v) => v.starred).length
-  const wanted = versions.filter((v) => filter === "all" || v.starred)
+  const wanted = arrange(versions, needle, view.sort, (v) => live.get(v.id) ?? v.content).filter(
+    (v) => filter === "all" || v.starred
+  )
   const shown = wanted.filter((v) => !v.hidden)
   const hidden = wanted.filter((v) => v.hidden)
   const comparing = ticked !== null
@@ -225,6 +326,7 @@ function PickerBody({
     <Row
       key={version.id}
       version={version}
+      query={needle}
       number={numbers.get(version.id)!}
       current={version.id === entry.version.id}
       writer={writerOf(version, numberOf)}
@@ -277,13 +379,54 @@ function PickerBody({
           </Button>
         )}
       </div>
+      <div className="flex min-w-0 items-center gap-2">
+        <Input
+          type="search"
+          aria-label="Find in versions"
+          placeholder="Find in versions"
+          className="h-8 min-w-0 flex-1"
+          value={view.query}
+          onChange={(e) => onView({ ...view, query: e.currentTarget.value })}
+        />
+        <Menu
+          label="Sort versions"
+          hint="Chooses how versions are ordered"
+          align="end"
+          trigger={
+            <Button
+              hint="Chooses how versions are ordered."
+              variant="ghost"
+              className="h-8 shrink-0 gap-1 px-2"
+              aria-label={`Sort versions: ${SORTS[view.sort].label}`}
+            >
+              {SORTS[view.sort].label}
+              <Icon name="down" />
+            </Button>
+          }
+        >
+          {VERSION_SORTS.map((sort) => (
+            <MenuCheckboxItem
+              key={sort}
+              checked={sort === view.sort}
+              onCheckedChange={() => onView({ ...view, sort })}
+              description={SORTS[sort].hint}
+            >
+              {SORTS[sort].label}
+            </MenuCheckboxItem>
+          ))}
+        </Menu>
+      </div>
       {comparing && (
         <p className="text-sm text-muted" role="status">
           Tick two versions to compare them side by side{ticked.length === 1 ? ": one more" : "."}
         </p>
       )}
       <div ref={list} className="relative -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
-        {shown.length === 0 && filter === "starred" && hidden.length === 0 ? (
+        {shown.length === 0 && hidden.length === 0 && needle !== "" ? (
+          <p className="py-2 text-sm text-muted">
+            No {filter === "starred" ? "starred " : ""}version has “{query.trim()}”.
+          </p>
+        ) : shown.length === 0 && filter === "starred" && hidden.length === 0 ? (
           <p className="py-2 text-sm text-muted">No starred versions yet. Star one with its ☆ button.</p>
         ) : (
           <ol className="flex flex-col gap-0.5" aria-label="Versions">
@@ -396,6 +539,7 @@ export function VersionPicker({
   const narrow = useNarrow()
   const [open, setOpen] = useState(false)
   const [pairIds, setPairIds] = useState<readonly [Version["id"], Version["id"]] | null>(null)
+  const [view, setView] = useState<PickerView>({ query: "", sort: "written" })
   // Keep identities, not snapshots: completion replaces content and metadata in the list.
   const first = versions?.find((version) => version.id === pairIds?.[0])
   const second = versions?.find((version) => version.id === pairIds?.[1])
@@ -418,6 +562,8 @@ export function VersionPicker({
       entry={entry}
       versions={versions}
       open={open}
+      view={view}
+      onView={setView}
       onPick={(version) => {
         setOpen(false)
         onPick(version)
