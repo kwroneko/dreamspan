@@ -28,6 +28,62 @@ export const restoreItem = (registry: AtomRegistry.AtomRegistry, itemId: string,
     })
   )
 
+/** Restores a multi-delete's items in one change, in the order given (its Undo). */
+const restoreItems = (registry: AtomRegistry.AtomRegistry, itemIds: ReadonlyArray<string>) =>
+  Effect.runPromiseExit(
+    Effect.gen(function* () {
+      const services = yield* AtomRegistry.getResult(registry, AppClient.runtime)
+      const items = yield* Context.get(services, AppClient)("RestoreBinItems", { itemIds })
+      Context.get(
+        services as unknown as Context.Context<Reactivity.Reactivity>,
+        Reactivity.Reactivity
+      ).invalidateUnsafe(RESTORED_KEYS)
+      return items
+    })
+  )
+
+/**
+ * The toast for several messages deleted together (selection/): one line for them all, and one
+ * Undo that puts them all back, with what else it offers (`more`) before Open the bin.
+ */
+export const useDeletedManyToast = () => {
+  const registry = useContext(RegistryContext)
+  const navigate = useNavigate()
+  return useCallback(
+    (
+      items: ReadonlyArray<BinItem>,
+      more: ReadonlyArray<{ readonly label: string; readonly hint?: string; readonly onClick: () => void }> = []
+    ) =>
+      showToast({
+        title:
+          items.length === 1
+            ? `${binTitle(items[0]!)} moved to the bin.`
+            : `${items.length} messages moved to the bin.`,
+        timeout: 10_000,
+        actions: [
+          {
+            label: "Undo",
+            hint: items.length === 1 ? "Puts the message back where it was." : "Puts them all back where they were.",
+            onClick: () =>
+              void restoreItems(
+                registry,
+                items.map((item) => item.id)
+              ).then((exit) => {
+                if (exit._tag === "Failure") showToast({ title: describeCause(exit.cause).message })
+              })
+          },
+          ...more,
+          {
+            label: "Open the bin",
+            hint: "Shows deleted items you can restore.",
+            onClick: () => void navigate({ to: "/bin" })
+          }
+        ]
+      }),
+    [registry, navigate]
+  )
+}
+
 /** Shows the toast for something just deleted. */
 export const useDeletedToast = () => {
   const registry = useContext(RegistryContext)
@@ -57,7 +113,11 @@ export const useDeletedToast = () => {
               })
           },
           ...more,
-          { label: "Open the bin", onClick: () => void navigate({ to: "/bin" }) }
+          {
+            label: "Open the bin",
+            hint: "Shows deleted items you can restore.",
+            onClick: () => void navigate({ to: "/bin" })
+          }
         ]
       }),
     [registry, navigate]

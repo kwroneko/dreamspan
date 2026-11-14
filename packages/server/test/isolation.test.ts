@@ -2000,6 +2000,20 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   DeleteMessage: {
     probe: (actor, owner) => refused(actor.api.DeleteMessage({ slotId: owner.chat.slotId }), "NotFound")
   },
+  DeleteMessages: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Theirs in their fork, and theirs named beside one's own in one's own fork.
+        yield* refused(
+          actor.api.DeleteMessages({ forkId: owner.chat.forkId, slotIds: [owner.chat.slotId] }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.DeleteMessages({ forkId: actor.chat.forkId, slotIds: [actor.chat.slotId, owner.chat.slotId] }),
+          "NotFound"
+        )
+      })
+  },
   InsertMessage: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -3617,6 +3631,9 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   },
   RestoreBinItem: {
     probe: (actor, owner) => refused(actor.api.RestoreBinItem({ itemId: owner.binItemId }), "NotFound")
+  },
+  RestoreBinItems: {
+    probe: (actor, owner) => refused(actor.api.RestoreBinItems({ itemIds: [owner.binItemId] }), "NotFound")
   },
   PurgeBinItem: {
     probe: (actor, owner) => refused(actor.api.PurgeBinItem({ itemId: owner.binItemId }), "NotFound")

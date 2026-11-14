@@ -15,7 +15,9 @@ import { Spinner } from "../../ui/Spinner.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
+import { SlotOutlet } from "../../slots.tsx"
 import { MessageActions } from "./messageActions.tsx"
+import { messageSelect } from "./presentation.tsx"
 import type { ChatSession, Outcome } from "./session.ts"
 
 const PAGE = 50
@@ -96,6 +98,7 @@ export function MergedChatRow({ entry, session }: { entry: PathEntry; session: C
       className="group flex min-w-0 flex-col gap-1 rounded-lg border border-dashed border-border px-3 py-2"
     >
       <header className="flex min-h-8 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <SlotOutlet slot={messageSelect} props={{ entry, session }} />
         <Tooltip
           label={
             thread
