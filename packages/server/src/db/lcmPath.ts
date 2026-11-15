@@ -154,9 +154,14 @@ const wholePath = (
     if (!owned) return yield* new NotFound({ entity: "chat path", id: leaf })
     const fork = yield* viewAt(sql, chatId, leaf)
     const changes = yield* messageView(sql, fork)
-    // A fork's own choices join as a table, unless a published range's hide needs its probe.
+    const { pieces } = yield* lcmView(sql, chatId, fork)
+    // Display windows with insertions underestimate the outer path's size: SQLite scans
+    // the first choices alias for every position. Keep their indexed fork-step probes.
+    // Structural paths can join choices, unless a published range's hide needs its probe.
     const overrides =
-      changes.length > 0 && changes.every((c) => c.kind !== "hide_range") ? JSON.stringify(changes) : undefined
+      pieces === null && changes.length > 0 && changes.every((c) => c.kind !== "hide_range")
+        ? JSON.stringify(changes)
+        : undefined
     const columns = overrides === undefined ? lcmPathColumns(sql, fork, changes.length === 0) : choiceColumns(sql)
     const choices = overrides === undefined ? sql`` : sql`, ${choicesCte(sql, overrides)}`
     const decode = (rows: ReadonlyArray<LcmSlot & { images_json: string }>) =>
@@ -164,7 +169,6 @@ const wholePath = (
         ...row,
         images: row.versionId ? (JSON.parse(images_json) as RequestImage[]) : []
       }))
-    const { pieces } = yield* lcmView(sql, chatId, fork)
     const end = pieces === null ? null : positionIn(pieces, (yield* placesOf(sql, chatId, [leaf])).get(leaf))
     if (pieces === null || end === null)
       return decode(

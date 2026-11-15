@@ -40,7 +40,14 @@ it.live("classifies every RPC and registered command; a new unclassified operati
       "ListMediaApproval",
       "LookupSavedMedia",
       "RetrySavedMedia",
-      "PurgeBinItem"
+      "PurgeBinItem",
+      "WriteForMe",
+      "GetDraftRunContext",
+      "GetLastDraftRollout",
+      "StartStImportPlan",
+      "GetStImportPlan",
+      "GetStImportPlanMessages",
+      "CancelStImportPlan"
     ]
     for (const tag of protectedTags) {
       if (!AppApi.requests.has(tag as never)) continue
@@ -48,6 +55,7 @@ it.live("classifies every RPC and registered command; a new unclassified operati
       assert.isFalse(exposures.some((e) => "rpc" in e.operation && e.operation.rpc === tag))
     }
     assert.notInclude(exposedCastChanges, "AgentPermission")
+    assert.notInclude(exposedCastChanges, "SendPresence")
     assert.strictEqual(builtinOperationExposures.length, 21)
   }).pipe(Effect.provide(serverLayer(testConfig())))
 )

@@ -158,12 +158,14 @@ for (const width of [1440, 390])
       await page.reload()
       await expect(notice).toBeVisible()
       await notice.getByRole("button", { name: "Go back", exact: true }).click()
-      await expect(notice).toHaveCount(0)
+      // A cold rollback checks the plugin before refreshing the notice. Wait for
+      // the restored pin under its existing operation budget, then check the UI.
       await expect
         .poll(async () => (await admin((api) => api.GetPlugin({ scope: "instance", id }))).pin?.commit, {
           timeout: 60_000
         })
         .toBe(first)
+      await expect(notice).toHaveCount(0)
       await shot(page, info, "recovered")
       await admin((api) => api.DisablePlugin({ scope: "instance", id }))
     })

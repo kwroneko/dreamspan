@@ -229,7 +229,8 @@ it("assistant copies are confined, inert, journalled and require the existing ex
         const tool = execution.rolloutTools.get("plugin_copy_builtin")!
         expect(tool.effect).toBe("library")
         const listed = yield* tool.execute(ctx, {} as never)
-        expect(listed.text).toContain('"copyable":true')
+        expect(listed.text).toContain("<tool_data>")
+        expect(listed.text).toContain("&quot;copyable&quot;:true")
         const args = { registry: "noticeChannels", id: "notifications.completion-sound", pluginId: "assistant-copy" }
         expect(tool.describe).toBeTypeOf("function")
         const copyQuestion = yield* tool.describe!(ctx, args as never)
