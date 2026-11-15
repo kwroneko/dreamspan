@@ -20,6 +20,8 @@ const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMI
 const seed = (suffix: string, extraThreads = 0) =>
   admin((api) =>
     Effect.gen(function* () {
+      if (process.env.READING_THREAD_DENSITY === "compact")
+        yield* api.SetDisplayPrefs({ prefs: { chatDensity: "compact" } })
       const chat = yield* api.CreateChat({ title: `Harbor ${suffix}` })
       const card = (name: string) => api.CreateCard({ label: `Synthetic ${name}`, name })
       const [mira, wren, ash] = yield* Effect.all([card("Mira"), card("Wren"), card("Ash")])
@@ -219,3 +221,13 @@ for (const width of [1440, 390])
         ).toContainText("Wren")
       }
     })
+
+// Reading-mode review: the same join/return and linked-message flows in Compact,
+// without changing the normal default-density gate.
+test.afterEach(async ({ page }, info) => {
+  if (process.env.READING_THREAD_DENSITY !== "compact" || !process.env.SCREENSHOT_DIR || info.status !== "passed")
+    return
+  await page.screenshot({
+    path: `${process.env.SCREENSHOT_DIR}/compact-${info.title.replace(/[^a-z0-9]+/gi, "-")}.png`
+  })
+})

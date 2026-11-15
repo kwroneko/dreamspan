@@ -212,9 +212,7 @@ for (const width of [1440, 390] as const)
         if (!phone) {
           const seen = await stopWatching(page)
           note(info, "reading place", `${width} ${theme} to ${density}: worst frame ${seen.worst.toFixed(1)} px off`)
-          // One frame may show the text a line off while the rows are measured again; never
-          // another part of the chat.
-          expect(seen.worst).toBeLessThan(40)
+          expect(seen.worst).toBeLessThan(2)
         }
       }
       if (!phone) await closePanel(page)
@@ -253,7 +251,7 @@ for (const width of [1440, 390] as const)
       await middle.scrollIntoViewIfNeeded()
       await page.waitForTimeout(300)
       if (phone) {
-        expect((await footer(middle)).display).toBe("none")
+        expect((await footer(middle)).opacity).toBe("0")
         await middle.locator(".markdown").first().tap()
         const toolbar = middle.getByRole("toolbar", { name: "Message actions" })
         await expect(toolbar).toBeVisible()
@@ -262,7 +260,7 @@ for (const width of [1440, 390] as const)
         // Revealed, every control is a touch target as large as in Comfortable.
         for (const button of await middle.locator(".message-footer button").all()) {
           const box = (await button.boundingBox())!
-          expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(28)
+          expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44)
         }
         await expect(versions(middle)).toBeInViewport({ ratio: 1 })
         await expectLayout(page, info, `compact revealed ${width} ${theme}`, { hovered: true })
@@ -272,7 +270,7 @@ for (const width of [1440, 390] as const)
         await page.keyboard.press("Escape")
         await middle.locator(".markdown").first().tap()
         await expect(middle.getByRole("toolbar", { name: "Message actions" })).toHaveCount(0)
-        expect((await footer(middle)).display).toBe("none")
+        expect((await footer(middle)).opacity).toBe("0")
       } else {
         await page.mouse.move(0, 0)
         await expect.poll(async () => (await footer(middle)).opacity).toBe("0")

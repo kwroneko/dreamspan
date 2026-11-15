@@ -253,14 +253,36 @@ main:has(> [data-fill]) {
  */
 @media (width < 40rem) {
   [data-chat-density="compact"] .message-footer:not([data-keep]) {
-    display: none;
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  [data-chat-density="compact"] article:focus-within > * > .message-footer:not([data-keep]) {
+    position: static;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (pointer: coarse) {
+  [data-chat-density="compact"] .message-footer footer {
+    flex-wrap: wrap;
+  }
+  [data-chat-density="compact"] .message-footer :is(button, a) {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 @media (width >= 40rem) and (hover: hover) {
+  /* The footer itself has no flow box. Keep its lower corner clear even when the body
+     fills the portrait height: text, links, images and thinking panels must stay readable.
+     This clearance is constant on hover/focus, so revealing controls never moves rows. */
+  [data-chat-density="compact"] .message-content:has(> .message-footer:not([data-keep])) {
+    padding-bottom: 2.25rem;
+  }
   [data-chat-density="compact"] .message-footer:not([data-keep]) {
     position: absolute;
-    right: 0.5rem;
-    bottom: 0.25rem;
+    right: 0.75rem;
+    bottom: 0.5rem;
     z-index: 1;
     border: 1px solid var(--border);
     border-radius: 0.375rem;

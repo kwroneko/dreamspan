@@ -2,6 +2,8 @@ import { assert, it } from "@effect/vitest"
 import { CHAT_WIDTH, DEFAULT_DISPLAY_PREFS, DisplayPrefsChange } from "@rp/shared/chatApi.ts"
 import { Effect, Schema } from "effect"
 import { client, testConfig, withServer } from "./support/config.ts"
+import { generateReply, eventually, finished } from "./support/generation.ts"
+import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
 it.live("model pins, recent choices and sort persist per account and merge independent devices", () =>
@@ -203,4 +205,38 @@ it.live("explanation dismissals merge by box id and stay within the account", ()
     })
     assert.deepStrictEqual((yield* bob.GetDisplayPrefs({})).dismissedInfo, {})
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)
+
+it.live("message spacing leaves the complete model request byte-identical", () =>
+  Effect.gen(function* () {
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() => startMockProvider((_request, res) => sse(res, completionChunks(["Noted."], {})))),
+      (m) => Effect.promise(() => m.close())
+    )
+    const api = yield* client()
+    const { chat, version, events } = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: {},
+      greeting: "Synthetic harbor greeting.",
+      content: "The tide rose."
+    })
+    const before = mock
+      .requests()
+      .filter((r) => r.path.endsWith("/chat/completions"))
+      .at(-1)!.raw
+    assert.isString(before)
+    yield* api.SetDisplayPrefs({ prefs: { chatDensity: "compact" } })
+    const row = (yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 }))
+      .entries[0]!
+    assert.strictEqual(row.version.id, version.id)
+    const again = yield* api.Regenerate({ slotId: row.slotId, expectedRowVersion: row.rowVersion })
+    yield* eventually(() => finished(events, again.version.id) !== undefined)
+    assert.strictEqual(
+      mock
+        .requests()
+        .filter((r) => r.path.endsWith("/chat/completions"))
+        .at(-1)!.raw,
+      before
+    )
+  }).pipe(Effect.scoped, withServer(testConfig()))
 )

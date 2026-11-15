@@ -18,6 +18,7 @@ import {
   type PointerEvent,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -65,6 +66,7 @@ import {
 } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { popupOpen } from "../../ui/openPopups.ts"
+import { ChatDensityContext } from "./ChatDensity.tsx"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
@@ -501,7 +503,7 @@ function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: O
 function Branches({ entry, onBranch }: { entry: PathEntry; onBranch: (entry: PathEntry, index: number) => void }) {
   return (
     <div
-      className="flex shrink-0 items-center rounded-md border border-border compact:sm:pointer-fine:[&_button]:size-5.5"
+      className="flex shrink-0 items-center rounded-md border border-border compact:sm:pointer-fine:[&_button]:size-6"
       role="group"
       aria-label={`Branches: ${entry.branchIndex + 1} of ${entry.branchCount}`}
       data-layout-audit-ignore="inset: Joined branch controls share a single outer border"
@@ -627,6 +629,7 @@ export const Message = memo(function Message({
   onScrollIntoView: () => void
 }) {
   useRenderCount("rowRenders")
+  const density = useContext(ChatDensityContext)
   const cast = useCast()
   const { version } = entry
   const [error, setError] = useState<AppError | null>(null)
@@ -926,8 +929,19 @@ export const Message = memo(function Message({
     />
   )
 
+  const keepFooter = latest || generating || revealed || editing !== null || savedAs !== null
+
   return (
     <article
+      onFocusCapture={(event) => {
+        if (
+          density === "compact" &&
+          !revealed &&
+          window.matchMedia("(max-width: 639px)").matches &&
+          event.target.matches(":focus-visible")
+        )
+          onReveal(entry.slotId)
+      }}
       aria-label={model ? "Reply" : "Your message"}
       data-slot={entry.slotId}
       data-summarized={context?.kind === "summarized" || undefined}
@@ -975,7 +989,9 @@ export const Message = memo(function Message({
           <MessageDetails details={details.portrait} {...detailProps} />
         </div>
       </div>
-      <div className={`flex min-w-0 flex-1 flex-col gap-1 compact:gap-0.5 ${hidden ? "opacity-60" : ""}`}>
+      <div
+        className={`message-content flex min-w-0 flex-1 flex-col gap-1 compact:gap-0.5 ${hidden ? "opacity-60" : ""}`}
+      >
         {/* A chat in a narrow column (the workshop in a story's panel, `@container/chat`) wraps as a phone's does. */}
         <header className="flex min-h-8 min-w-0 items-center compact:min-h-6 gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1 @max-[30rem]/chat:flex-wrap @max-[30rem]/chat:gap-y-1">
           {choosing ? (
@@ -1095,9 +1111,17 @@ export const Message = memo(function Message({
         <div
           ref={footer}
           className="message-footer flex flex-col gap-1"
-          data-keep={latest || generating || revealed || editing !== null || savedAs !== null || undefined}
-          data-layout-overlay="With compact spacing, a message's version controls lie over its corner while it's pointed at"
-          data-layout-audit-ignore="inset: With compact spacing the version controls fill their own small backing over the message's corner"
+          data-keep={keepFooter || undefined}
+          data-layout-overlay={
+            density === "compact" && !keepFooter
+              ? "Compact version controls occupy the message's reserved lower corner"
+              : undefined
+          }
+          data-layout-audit-ignore={
+            density === "compact" && !keepFooter
+              ? "inset: Joined compact version controls share their backing border"
+              : undefined
+          }
         >
           {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
           <footer className="flex min-h-8 items-center">

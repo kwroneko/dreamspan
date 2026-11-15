@@ -46,6 +46,7 @@ import { CastContext, castView } from "./cast.ts"
 import { ChatSidePanel, type PanelTab, rememberPanel, usePanel } from "./ChatPanels.tsx"
 import { ChatHeader } from "./ChatHeader.tsx"
 import { densityMetrics, readingAnchor, type ReadingAnchor, readingDrift, readingInset } from "./readingPlace.ts"
+import { ChatDensityContext } from "./ChatDensity.tsx"
 import { castCharacters, chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
@@ -176,6 +177,20 @@ export function MessageList({
           : null
   /** The message whose actions show after a tap, on a narrow screen. */
   const [revealed, setRevealed] = useState<SlotId | null>(null)
+  useEffect(() => {
+    if (spacing !== "compact" || revealed === null) return
+    const dismiss = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return
+      const message = event.target.closest("article[data-slot]")
+      // Portalled menus and pickers still belong to the revealed message.
+      if (message?.getAttribute("data-slot") === revealed || event.target.closest("[data-layout-overlay]")) return
+      setRevealed(null)
+    }
+    // Dismiss after the tapped control handles its click. Shrinking the previous row on
+    // pointerdown could move that control away before pointerup and swallow the action.
+    document.addEventListener("click", dismiss)
+    return () => document.removeEventListener("click", dismiss)
+  }, [spacing, revealed])
   let historyDivider = -1
   if (budget && entries.length > 0) {
     const start = history.historyStart
@@ -287,6 +302,7 @@ export function MessageList({
   // and the list is put back around it once the rows are laid out again, and again over the
   // next frames as they're measured. At the end of the chat the list stays at the end.
   const reading = useRef<{ key: string; anchor: ReadingAnchor } | "end" | null>(null)
+  const correctReading = useRef<(() => void) | null>(null)
   useLayoutEffect(() => {
     if (prefs.chatDensity === spacing) return
     const list = parent.current
@@ -295,8 +311,6 @@ export function MessageList({
     reading.current = anchor !== null && row !== undefined ? { key: row.key, anchor } : list === null ? null : "end"
     // Heights measured at the other spacing are wrong for rows that aren't shown: those go back
     // to estimates, so each is measured afresh, and the list corrected for it, when it's reached.
-    const shown = new Set(virtualizer.getVirtualItems().map((item) => item.key))
-    for (const key of [...virtualizer.itemSizeCache.keys()]) if (!shown.has(key)) virtualizer.itemSizeCache.delete(key)
     setSpacing(prefs.chatDensity)
   }, [prefs.chatDensity, spacing, follow, view.follow, rows, virtualizer])
   useLayoutEffect(() => {
@@ -304,6 +318,8 @@ export function MessageList({
     const kept = reading.current
     reading.current = null
     if (list === null || kept === null) return
+    // Use the public reset so both the size cache and its memoized measurements invalidate.
+    virtualizer.measure()
     if (kept === "end") {
       virtualizer.scrollToEnd()
       return
@@ -332,6 +348,7 @@ export function MessageList({
     const started = performance.now()
     const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
     const stop = () => {
+      correctReading.current = null
       cancelAnimationFrame(frame)
       for (const event of inputs) list.removeEventListener(event, stop)
     }
@@ -344,11 +361,18 @@ export function MessageList({
       if (steady < 4 && performance.now() - started < 1000) frame = requestAnimationFrame(settle)
       else stop()
     }
+    correctReading.current = () => {
+      const drift = readingDrift(list, kept.anchor, row)
+      if (drift !== null && Math.abs(drift) >= 0.5) moveBy(drift)
+    }
     for (const event of inputs) list.addEventListener(event, stop, { passive: true })
     frame = requestAnimationFrame(settle)
     return stop
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per spacing change, with the rows of that render
   }, [spacing])
+  // resizeItem schedules a commit with new row positions. Correct after that commit, before
+  // paint; waiting only for rAF allows its old DOM positions to show for one frame.
+  useLayoutEffect(() => correctReading.current?.())
 
   // A new window opens at the asked-for message, or at the bottom.
   // With summaries in the chat, a link waits for the layer: placed among the originals first,
@@ -506,6 +530,9 @@ export function MessageList({
     // Capture runs before the virtualizer's own listener, whose render may follow at once.
     const onScroll = () => {
       if (!atEnd()) hold(false)
+      // Capture reaching the end before the virtualizer measures its newly mounted rows.
+      // Their corrected estimates can grow the list beyond END_PX in that same commit.
+      else if (spacing === "compact" && !revealing.current && performance.now() - intent.current > 300) hold(true)
     }
     list.addEventListener("wheel", onWheel, { passive: true })
     list.addEventListener("touchmove", letGo, { passive: true })
@@ -522,7 +549,7 @@ export function MessageList({
       list.removeEventListener("pointerdown", onPointerDown)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
-  }, [hold])
+  }, [hold, spacing])
   useEffect(() => {
     const list = parent.current
     if (list === null || entries.length === 0 || !view.follow) return
@@ -650,42 +677,44 @@ export function MessageList({
   )
 
   return (
-    <TooltipProvider>
-      <div
-        ref={parent}
-        data-testid={embedded ? "side-chat-messages" : "messages"}
-        data-chat-density={spacing}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
-      >
-        <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>
-          {showRail && (
-            <SlotOutlet
-              slot={timelineRails}
-              props={{ entries, rows: railRows, lcm, position, onOpen: onOpenSummaries }}
-            />
-          )}
-          {items.map((item) => {
-            const row = rows[item.index]!
-            return (
-              <div
-                key={item.key}
-                data-index={item.index}
-                ref={virtualizer.measureElement}
-                className="chat-row absolute left-0 w-full"
-                // Placed by `top`, not a transform: a transformed row would keep a reply's sticky
-                // Stop (Message.tsx) from holding to the bottom of the view.
-                style={{
-                  top: item.start,
-                  ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
-                }}
-              >
-                {row.render({ session, anchor, renderMessage, onOpenSummaries })}
-              </div>
-            )
-          })}
+    <ChatDensityContext value={spacing}>
+      <TooltipProvider>
+        <div
+          ref={parent}
+          data-testid={embedded ? "side-chat-messages" : "messages"}
+          data-chat-density={spacing}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+        >
+          <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>
+            {showRail && (
+              <SlotOutlet
+                slot={timelineRails}
+                props={{ entries, rows: railRows, lcm, position, onOpen: onOpenSummaries }}
+              />
+            )}
+            {items.map((item) => {
+              const row = rows[item.index]!
+              return (
+                <div
+                  key={item.key}
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  className="chat-row absolute left-0 w-full"
+                  // Placed by `top`, not a transform: a transformed row would keep a reply's sticky
+                  // Stop (Message.tsx) from holding to the bottom of the view.
+                  style={{
+                    top: item.start,
+                    ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
+                  }}
+                >
+                  {row.render({ session, anchor, renderMessage, onOpenSummaries })}
+                </div>
+              )
+            })}
+          </div>
         </div>
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </ChatDensityContext>
   )
 }
 

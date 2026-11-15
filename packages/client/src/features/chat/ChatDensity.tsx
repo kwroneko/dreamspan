@@ -7,6 +7,11 @@
 import { RadioGroup } from "../../ui/Choice.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
+import { createContext } from "react"
+import type { ChatDensity } from "./readingPlace.ts"
+
+/** The spacing actually laid out by this list, including during preference handover. */
+export const ChatDensityContext = createContext<ChatDensity>("comfortable")
 
 export function ChatDensitySetting() {
   const viewer = useViewPrefs()
@@ -17,12 +22,16 @@ export function ChatDensitySetting() {
         disabled={!viewer.ready}
         onValueChange={(chatDensity) => void viewer.change({ chatDensity })}
         options={[
-          { value: "comfortable", label: "Comfortable", description: "Roomy spacing, with every control in view." },
+          {
+            value: "comfortable",
+            label: "Comfortable",
+            description: "Roomy spacing, with version arrows always shown."
+          },
           {
             value: "compact",
             label: "Compact",
             description:
-              "Fits more of the story on screen. A message's version arrows show when you point at it or tap it; the newest message always shows them."
+              "Fits more of the story on screen. Version arrows show on hover, focus or a tap; the newest message always shows them."
           }
         ]}
       />

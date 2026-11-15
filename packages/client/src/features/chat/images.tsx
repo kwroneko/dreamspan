@@ -775,15 +775,20 @@ function ContextToggle({
         ? `Put image ${index + 1} back into the context`
         : `Take image ${index + 1} out of the context`
   return (
-    <ToggleIconButton
-      label={label}
-      hint={rule !== null ? label : `Click to ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
-      icon={out ? "eyeOff" : "eye"}
-      pressed={out}
-      disabled={rule !== null || busy}
-      onClick={onToggle}
-      className="tile-toggle absolute top-1 right-1"
-    />
+    <span
+      data-layout-overlay="The image context toggle occupies the thumbnail's corner"
+      className="absolute top-1 right-1 flex"
+    >
+      <ToggleIconButton
+        label={label}
+        hint={rule !== null ? label : `Click to ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
+        icon={out ? "eyeOff" : "eye"}
+        pressed={out}
+        disabled={rule !== null || busy}
+        onClick={onToggle}
+        className="tile-toggle"
+      />
+    </span>
   )
 }
 
