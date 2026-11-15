@@ -130,9 +130,41 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
     }).pipe(Effect.catch(failRead))
 })
 
+const readNote: RolloutTool<{ readonly note: string }> = {
+  source: import.meta.url,
+  id: "read_note",
+  storyRead: "library",
+  label: "Read a note",
+  explanation: "Read a shared note or a card's note from your library.",
+  effect: "read",
+  capability: "library.read",
+  description:
+    "Reads the saved head of a shared note or a card's note, by library id, entity id or its one name. Returns its revision and document. Unsaved drafts are not included. A chat's own notes are read with list_chat_notes.",
+  parameters: Type.Object({ note: Type.String({ description: "The note's name or id." }) }),
+  summarize: ({ note }) => note,
+  execute: (context, { note }) =>
+    Effect.gen(function* () {
+      const found = yield* resolveLibrary(context, "note", String(note))
+      if ("error" in found) return { text: found.error, isError: true }
+      const snapshot = yield* context.reader.OpenEditor({ userId: context.userId, refId: found.ref.id })
+      // A chat's note is story text at a branch's position: only the positioned read shows it.
+      if ((snapshot.doc.owner as { chat?: unknown } | undefined)?.chat !== undefined)
+        return { text: "That note belongs to one chat. Read it with list_chat_notes.", isError: true }
+      return {
+        frame: toolResultFrame({
+          id: snapshot.ref.id,
+          entityId: snapshot.ref.entityId,
+          revision: snapshot.ref.headRevisionId
+        }),
+        text: JSON.stringify({ ...identity(snapshot.ref), revision: snapshot.ref.headRevisionId, doc: snapshot.doc })
+      }
+    }).pipe(Effect.catch(failRead))
+}
+
 export const libraryTools: ReadonlyArray<RolloutTool<never>> = [
   listLibrary,
   readTool("card"),
   readTool("preset"),
-  readTool("lorebook")
+  readTool("lorebook"),
+  readNote
 ].map((tool) => ({ ...tool, replyTool: false as const }))

@@ -15,6 +15,12 @@ import type { EntityKind, LibraryRef } from "@rp/shared/library.ts"
 import type { ToolContext, WorkshopStoryRead } from "../tools.ts"
 import type { OperationExposure } from "../operations.ts"
 import { resolveLibrary } from "../tools/library.ts"
+import { chatNotesAt } from "../../chat/chatNotesAt.ts"
+import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
+import type { SharedNote } from "@rp/shared/editorApi.ts"
+import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import type { StImportJob, StImportReport } from "@rp/shared/stImportApi.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
 
 const name = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
 const label = Schema.String.check(Schema.isMaxLength(200))
@@ -96,8 +102,56 @@ const storyReads: Readonly<Record<string, WorkshopStoryRead>> = {
   move_card_text: "library",
   change_generation_defaults: "account",
   read_settings: "account",
-  change_setting: "account"
+  change_setting: "account",
+  // Notes of the library (a card's, a shared one) and files into it: no story position.
+  list_shared_notes: "library",
+  create_card_note: "library",
+  create_shared_note: "library",
+  unlink_note: "library",
+  delete_note: "library",
+  set_persona: "library",
+  list_export_formats: "library",
+  import_library_file: "library",
+  // A chat's notes are read and made where the tab shows its story.
+  list_chat_notes: "positioned",
+  create_chat_note: "positioned",
+  // Import jobs name files from every chat of the account.
+  list_imports: "refused",
+  read_import: "refused"
 }
+/** One page of an app-built list: the offset to ask for next stays outside the quoted rows. */
+const pageArgs = {
+  offset: optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100_000 }))),
+  limit: optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 })))
+}
+const paged = <T>(rows: ReadonlyArray<T>, args: Record<string, unknown>, fallback = 20) => {
+  const offset = Number(args.offset ?? 0)
+  const entries = rows.slice(offset, offset + Number(args.limit ?? fallback))
+  const remaining = Math.max(0, rows.length - offset - entries.length)
+  return { entries, remaining, offset, nextOffset: remaining > 0 ? offset + entries.length : null }
+}
+const cut = (value: unknown, limit: number) => {
+  const text = String(value ?? "")
+  return text.length > limit ? { content: text.slice(0, limit), contentCut: true } : { content: text }
+}
+const savedRef = (ref: LibraryRef) => ({
+  id: ref.id,
+  entityId: ref.entityId,
+  revision: ref.headRevisionId,
+  kind: ref.kind,
+  name: ref.label
+})
+const noteText = Schema.String.check(Schema.isMaxLength(workshopLimits.textChars))
+/** A note of the library by id or by its one name. A chat's own notes are named at their chat. */
+const libraryNote = (ctx: ToolContext, value: unknown) =>
+  Effect.gen(function* () {
+    const ref = yield* library(ctx, "note", value)
+    const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: ref.id })
+    const owner = (saved.doc.owner ?? {}) as { card?: string; chat?: string; shared?: string }
+    if (owner.chat !== undefined)
+      return yield* fail("That note belongs to one chat. Use list_chat_notes and the chat's own Notes.")
+    return { ref, saved, owner }
+  })
 const exposure = (
   id: string,
   rpc: string,
@@ -138,7 +192,11 @@ const changeSchemas = [
   Schema.TaggedStruct("ReplyOrder", { order: name }),
   Schema.TaggedStruct("Join", { entityId: name }),
   Schema.TaggedStruct("Leave", { entityId: name }),
-  Schema.TaggedStruct("Swap", { entityId: name, replaces: name })
+  Schema.TaggedStruct("Swap", { entityId: name, replaces: name }),
+  Schema.TaggedStruct("Note", {
+    note: name.annotate({ description: "A note of this chat or of one of its cards, by id from list_chat_notes." }),
+    active: Schema.Boolean
+  })
 ]
 export const exposedCastChanges = changeSchemas.map((s) => s.fields._tag.ast.literal)
 
@@ -153,6 +211,28 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
       Effect.gen(function* () {
         const position = yield* chatPayload(ctx, args)
         const change = { ...(args.change as Record<string, unknown>) }
+        if (change._tag === "Note") {
+          // The switch is this branch's, at the position shown: other branches keep theirs.
+          const notes = yield* chatNotesAt(ctx.reader, ctx.userId, position)
+          const wanted = String(change.note)
+          const byId = notes.filter((n) => n.ref.id === wanted || n.ref.entityId === wanted)
+          const found = byId.length
+            ? byId
+            : notes.filter((n) => String(n.doc.title ?? n.ref.label).toLocaleLowerCase() === wanted.toLocaleLowerCase())
+          if (found.length !== 1) return yield* fail("Choose one note by its id from list_chat_notes.")
+          const note = found[0]!
+          if (typeof note.doc.move_group === "string")
+            return yield* fail("This note is part of a moved group. Switch the group in the chat's Notes.")
+          if (note.active === change.active)
+            return yield* fail(`That note is already ${change.active ? "on" : "off"} at this position.`)
+          return {
+            ...position,
+            change: yield* Schema.decodeUnknownEffect(CastChange)(
+              { _tag: "Note", entityId: note.ref.entityId, active: change.active },
+              { onExcessProperty: "error" }
+            )
+          }
+        }
         for (const key of ["entityId", "replaces"])
           if (change[key]) change[key] = (yield* library(ctx, "card", change[key])).entityId
         if (change.ref)
@@ -416,6 +496,259 @@ export const builtinOperationExposures: readonly OperationExposure[] = [
         return { key: setting.key, value: args.value, expectedRevision: setting.revision }
       })
   },
+  // --- Notes (DESIGN §4.1): the Notes editors' own operations.
+  exposure("list_shared_notes", "ListSharedNotes", "library.read", "read", "List your shared notes", {
+    label: "Looked through your shared notes",
+    description:
+      "Lists your shared notes: the named texts a card's or a chat's note can show. Returns ids, titles, the start of each text and how many notes show it. Page with offset. Read one in full with read_note.",
+    parameters: Schema.Struct({ query: optional(label), ...pageArgs }),
+    adapt: (args) => Effect.succeed(args.query === undefined ? {} : { query: args.query }),
+    summarize: (args) => String(args.query ?? "shared notes"),
+    render: (result, args) =>
+      JSON.stringify(
+        paged(
+          (result as ReadonlyArray<SharedNote>).map((note) => ({
+            ...savedRef(note.ref),
+            title: note.title,
+            excerpt: note.excerpt,
+            usedBy: note.usedBy
+          })),
+          args
+        )
+      )
+  }),
+  exposure("list_chat_notes", "ListChatNotes", "chats.read", "read", "Read a chat's notes", {
+    label: "Read a chat's notes",
+    description:
+      "Lists the notes a chat sends at the position shown: its own and its cards', each with whether it is on there. Long texts are cut; page with offset. Switch one with change_chat.",
+    parameters: Schema.Struct({ chat: name, ...pageArgs }),
+    adapt: (args, ctx) =>
+      Effect.gen(function* () {
+        const payload = yield* chatPayload(ctx, args)
+        yield* checkStoryReadScope(ctx, payload.chatId)
+        return payload
+      }),
+    summarize: (args) => String(args.chat),
+    render: (result, args) =>
+      JSON.stringify(
+        paged(
+          (result as ReadonlyArray<ChatNote>).map((note) => ({
+            ...savedRef(note.ref),
+            title: String(note.doc.title ?? note.ref.label),
+            card: note.card,
+            active: note.active,
+            showsSharedNote: note.linked !== null,
+            ...cut(note.doc.content, 4000)
+          })),
+          args,
+          10
+        )
+      )
+  }),
+  exposure("create_card_note", "CreateCardNote", "library.write", "library", "Add a note to a card", {
+    description:
+      "Adds an empty note to a saved card, off in chats until it is switched on. With shared_note, the new note shows that shared note's text instead. Write its text with edit_card_note. Undo moves it to the bin if untouched.",
+    parameters: Schema.Struct({ card: name, title: name, shared_note: optional(name) }),
+    adapt: (args, ctx) =>
+      Effect.gen(function* () {
+        const card = yield* library(ctx, "card", args.card)
+        if (args.shared_note === undefined) return { cardRefId: card.id, title: args.title }
+        const shared = yield* libraryNote(ctx, args.shared_note)
+        if (shared.owner.shared === undefined) return yield* fail("That note is not a shared note.")
+        return { cardRefId: card.id, title: args.title, link: shared.ref.entityId }
+      }),
+    describe: (payload, ctx) =>
+      ctx.reader.OpenEditor({ userId: ctx.userId, refId: payload.cardRefId as RefId }).pipe(
+        Effect.map(({ ref }) => ({
+          title: `Add the note “${String(payload.title)}” to the card “${ref.label}”`,
+          rows: payload.link ? [{ label: "Shows", value: "The text of a shared note" }] : []
+        }))
+      ),
+    summarize: (args) => String(args.title),
+    render: (result) => JSON.stringify(savedRef(result as LibraryRef))
+  }),
+  exposure("create_shared_note", "CreateSharedNote", "library.write", "library", "Create a shared note", {
+    description:
+      "Creates a shared note: a named text that notes of cards and chats can show. Nothing shows it until a note is linked to it. Undo moves it to the bin if untouched.",
+    parameters: Schema.Struct({ title: name, content: noteText }),
+    describe: (payload) =>
+      Effect.succeed({
+        title: `Create the shared note “${String(payload.title)}”`,
+        rows: [{ label: "Text", value: String(payload.content) }]
+      }),
+    summarize: (args) => String(args.title),
+    render: (result) => JSON.stringify(savedRef(result as LibraryRef))
+  }),
+  exposure("create_chat_note", "CreateChatNote", "chats.setup", "setup", "Add a note to a chat", {
+    description:
+      "Adds a note of a chat's own, with optional text. It is listed in every branch of that chat and is on only where change_chat switches it on. Undo moves it to the bin if untouched.",
+    parameters: Schema.Struct({ chat: name, title: name, content: optional(noteText) }),
+    adapt: (args, ctx) =>
+      chatPayload(ctx, args).pipe(
+        Effect.map(({ chatId, forkId }) => ({
+          chatId,
+          forkId,
+          title: args.title,
+          ...(args.content === undefined ? {} : { content: args.content })
+        }))
+      ),
+    summarize: (args) => String(args.title),
+    render: (result) => JSON.stringify(savedRef(result as LibraryRef))
+  }),
+  exposure("unlink_note", "UnlinkNote", "library.write", "library", "Unlink a card's note from its shared note", {
+    description:
+      "Turns a card's note that shows a shared note into its own copy of that text. The shared note is kept. Undo restores the link if the note is untouched.",
+    parameters: Schema.Struct({ note: name }),
+    adapt: (args, ctx) =>
+      Effect.gen(function* () {
+        const note = yield* libraryNote(ctx, args.note)
+        if (note.owner.card === undefined || typeof note.saved.doc.link !== "string")
+          return yield* fail("That note does not show a shared note.")
+        return { noteRefId: note.ref.id }
+      }),
+    describe: (payload, ctx) =>
+      ctx.reader
+        .OpenEditor({ userId: ctx.userId, refId: payload.noteRefId as RefId })
+        .pipe(Effect.map(({ ref }) => ({ title: `Unlink the note “${ref.label}” from its shared note`, rows: [] }))),
+    summarize: (args) => String(args.note),
+    render: (result) => JSON.stringify(savedRef(result as LibraryRef))
+  }),
+  exposure("delete_note", "DeleteNote", "library.write", "library", "Move a note to the bin", {
+    description:
+      "Moves a card's note or a shared note to the bin. Notes showing a binned shared note send nothing until it is restored. Undo takes it back out of the bin. A chat's own notes are deleted in that chat.",
+    parameters: Schema.Struct({ note: name }),
+    adapt: (args, ctx) => libraryNote(ctx, args.note).pipe(Effect.map((note) => ({ noteRefId: note.ref.id }))),
+    describe: (payload, ctx) =>
+      ctx.reader
+        .OpenEditor({ userId: ctx.userId, refId: payload.noteRefId as RefId })
+        .pipe(Effect.map(({ ref }) => ({ title: `Move the note “${ref.label}” to the bin`, rows: [] }))),
+    summarize: (args) => String(args.note),
+    render: () => JSON.stringify({ inBin: true })
+  }),
+  exposure("set_persona", "SetPersona", "library.write", "library", "Mark a card as a persona, or not", {
+    description:
+      "Sets whether a saved card is one of your personas: a card you can play as. The card's text is not changed. Has Undo.",
+    parameters: Schema.Struct({ card: name, persona: Schema.Boolean }),
+    adapt: (args, ctx) =>
+      library(ctx, "card", args.card).pipe(Effect.map((ref) => ({ entityId: ref.entityId, persona: args.persona }))),
+    describe: (payload, ctx) =>
+      ctx.reader.CastCards({ userId: ctx.userId, entityIds: [payload.entityId as EntityId] }).pipe(
+        Effect.map(([card]) => ({
+          title: `${payload.persona ? "Make" : "Stop making"} “${card?.name ?? "this card"}” a persona`,
+          rows: []
+        }))
+      ),
+    summarize: (args) => String(args.card),
+    render: (_result, args) => JSON.stringify({ persona: args.persona })
+  }),
+  // --- Files (ARCHITECTURE.md §11.4, §13).
+  exposure("list_export_formats", "ListExportFormats", "library.read", "read", "List export formats", {
+    label: "Looked up export formats",
+    description:
+      "Lists the file formats a card, preset or lorebook can be exported as, with what each file holds. Exports themselves are downloads the user starts from the library.",
+    parameters: Schema.Struct({}),
+    adapt: () => Effect.succeed(undefined),
+    describe: () => Effect.succeed({ title: "List export formats", rows: [] }),
+    render: (result) =>
+      JSON.stringify({
+        formats: (result as ReadonlyArray<typeof ExportFormatInfo.Type>).map((format) => ({
+          format: format.id,
+          kind: format.kind,
+          label: format.label,
+          extension: format.extension,
+          holds: format.media,
+          ...(format.description ? { description: format.description } : {})
+        }))
+      })
+  }),
+  {
+    ...exposure("import_library_file", "ImportFile", "library.write", "library", "Import a file into your library"),
+    operation: { command: "library.import" },
+    description:
+      "Imports one card, preset or lorebook from a file's text (JSON), as a new library entry. It never replaces an existing entry, fetches nothing, and reads only the text given. Scripts and HTML in it stay off and unapproved until the user turns them on. Files with pictures are imported from the library page. Undo moves what it made to the bin if untouched.",
+    parameters: Schema.Struct({
+      name: name.annotate({ description: "The file's name, with its extension: mira.json." }),
+      content: Schema.String.check(Schema.isMinLength(1))
+    }),
+    describe: (payload) =>
+      Effect.succeed({
+        title: `Import the file “${String(payload.name)}”`,
+        rows: [
+          { label: "File text", value: String(payload.content) },
+          { label: "Executable content", value: executableNotice }
+        ]
+      }),
+    summarize: (args) => String(args.name),
+    render: (result) => {
+      const done = result as {
+        report: { format: string | null; issues: ReadonlyArray<{ level: string; message: string }> }
+        library: { ref: LibraryRef; note: LibraryRef | null } | null
+      }
+      return JSON.stringify({
+        ...(done.library ? savedRef(done.library.ref) : { imported: false }),
+        ...(done.library?.note ? { note: done.library.note.id } : {}),
+        format: done.report.format,
+        issues: done.report.issues.slice(0, 20).map((issue) => ({ level: issue.level, message: issue.message }))
+      })
+    }
+  },
+  exposure("list_imports", "ListStImports", "chats.read", "read", "List your folder imports", {
+    label: "Looked at your folder imports",
+    description:
+      "Lists your imports of whole folders: status, progress and how many entries and chats each added. Read one's report with read_import. Starting, stopping and clearing imports is done on the import page.",
+    parameters: Schema.Struct(pageArgs),
+    adapt: (_args, ctx) => checkStoryReadScope(ctx).pipe(Effect.as(undefined)),
+    describe: () => Effect.succeed({ title: "List your folder imports", rows: [] }),
+    summarize: () => "imports",
+    render: (result, args) =>
+      JSON.stringify(
+        paged(
+          (result as ReadonlyArray<StImportJob>).map((job) => ({
+            id: job.id,
+            status: job.status,
+            startedAt: job.startedAt,
+            finishedAt: job.finishedAt,
+            filesDone: job.filesDone,
+            filesTotal: job.filesTotal,
+            counts: job.counts,
+            attention: job.attention,
+            failed: job.error !== null
+          })),
+          args
+        )
+      )
+  }),
+  exposure("read_import", "GetStImportReport", "chats.read", "read", "Read a folder import's report", {
+    label: "Read an import's report",
+    description:
+      "Reads one folder import's report: what was added, updated and skipped by kind, and its issues, a page at a time with offset.",
+    parameters: Schema.Struct({ import: name, ...pageArgs }),
+    adapt: (args, ctx) => checkStoryReadScope(ctx).pipe(Effect.as({ importId: args.import })),
+    describe: () => Effect.succeed({ title: "Read a folder import's report", rows: [] }),
+    summarize: () => "import report",
+    render: (result, args) => {
+      const report = result as StImportReport
+      return JSON.stringify({
+        counts: report.counts,
+        messages: report.messages,
+        summaries: report.summaries,
+        greetingOnly: report.greetingOnly,
+        unsupported: report.unsupported,
+        chatsToLink: report.links.length,
+        hiddenRuns: report.hiddenRuns.length,
+        dropped: report.dropped,
+        ...paged(
+          report.issues.map((issue) => ({
+            level: issue.level,
+            code: issue.code,
+            file: issue.path,
+            message: issue.message
+          })),
+          args
+        )
+      })
+    }
+  }),
   exposure(
     "generate_reply",
     "Generate",

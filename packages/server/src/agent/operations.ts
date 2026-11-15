@@ -165,7 +165,8 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
                 chats?: ReadonlyArray<{ id: string; title: string }>
               }
             | undefined
-          const rows = Object.entries(payload as object)
+          // An operation without a payload (a plain list) has nothing to show here.
+          const rows = Object.entries((payload ?? {}) as object)
             .filter(([label]) => !proof?.storyAt || !["chatId", "forkId", "slotId", "leaf"].includes(label))
             .map(([label, value]) => ({
               label,

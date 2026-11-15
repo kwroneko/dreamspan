@@ -141,7 +141,8 @@ const refPolicy = (id: string): OperationPolicy =>
         {
           RenameRef: "Renamed a library entry",
           SetRefArchived: "Changed a library entry's archive status",
-          RestoreRevision: "Restored a library revision"
+          RestoreRevision: "Restored a library revision",
+          UnlinkNote: "Unlinked a note from its shared note"
         } as Record<string, string>
       )[id] ?? "Changed a library entry",
     capability: "library.write",
@@ -212,7 +213,9 @@ const allowedStateKeys = new Set([
   "agent.tools",
   "cards.rotation",
   "reply.order",
-  "card.swap"
+  "card.swap",
+  "note.activate",
+  "note.deactivate"
 ])
 const statePolicy = (id: string): OperationPolicy =>
   policy<StateInput, Effect.Success<ReturnType<typeof stateSnapshot>>>({
@@ -269,6 +272,10 @@ const statePolicy = (id: string): OperationPolicy =>
           if (c.key === "agent.tools") push(c.key, { tools: old.agentTools })
           if (c.key === "cards.rotation") push(c.key, { on: old.cardsRotation ?? false })
           if (c.key === "reply.order") push(c.key, old.replyOrder ?? "natural")
+          // The tool only ever flips a note's switch (its adapter refuses a no-op), so the
+          // opposite event puts back what the chat sent before, on this branch only.
+          if (c.key === "note.activate") push("note.deactivate", c.value)
+          if (c.key === "note.deactivate") push("note.activate", c.value)
         }
         yield* ops.AddStateEvents!({
           userId,
@@ -281,6 +288,72 @@ const statePolicy = (id: string): OperationPolicy =>
         return {}
       })
   })
+/** A card slot's link to a shared note, as a saved edit of that slot: Undo restores its revision. */
+const unlinkPolicy = (): OperationPolicy => {
+  const base = refPolicy("UnlinkNote") as unknown as Policy<{ refId: RefId }, RefSnapshot>
+  const at = (input: Input<"UnlinkNote">) => ({ refId: input.noteRefId })
+  const elsewhere = "Unlink a chat's own note in that chat's Notes."
+  return policy<Input<"UnlinkNote">, RefSnapshot>({
+    ...base,
+    target: (input, after) => base.target(at(input), after),
+    before: (sql, userId, input) =>
+      Effect.gen(function* () {
+        // A chat's own note is unlinked on one branch by a branch-local revision, which this
+        // library undo cannot put back.
+        if (input.chatNote !== undefined) return yield* refuseOperation(elsewhere)
+        const snapshot = yield* refSnapshot(sql, userId, at(input))
+        if (snapshot.ref.kind !== "note") return yield* new NotFound({ entity: "note", id: input.noteRefId })
+        const [owner] = yield* sql<{ chat: string | null }>`SELECT json_extract(doc_json, '$.owner.chat') AS chat
+          FROM entity_revisions WHERE id = ${snapshot.ref.head_revision_id}`
+        if (owner?.chat) return yield* refuseOperation(elsewhere)
+        return snapshot
+      }),
+    undo: (sql, ops, userId, input, before, after) => base.undo(sql, ops, userId, at(input), before, after)
+  })
+}
+const noteBinSnapshot = (sql: SqlClient.SqlClient, userId: UserId, input: { entityId: string }) =>
+  Effect.gen(function* () {
+    const [row] = yield* sql<{
+      kind: string
+      deleted_at: number | null
+      refId: string
+      head: string
+      row_version: number
+      label: string
+      chat: string | null
+    }>`SELECT e.kind, e.deleted_at, r.id AS refId, r.head_revision_id AS head, r.row_version, r.label,
+        json_extract(h.doc_json, '$.owner.chat') AS chat
+      FROM entities e JOIN entity_refs r ON r.entity_id = e.id JOIN entity_revisions h ON h.id = r.head_revision_id
+      WHERE e.id = ${input.entityId} AND e.owner_user_id = ${userId} AND e.purged_at IS NULL ORDER BY r.id LIMIT 1`
+    if (!row || row.kind !== "note") return yield* new NotFound({ entity: "note", id: input.entityId })
+    // Branches are independent: a chat's own note is in every branch of its chat.
+    if (row.chat)
+      return yield* refuseOperation("A chat's own note is in every branch of that chat. Delete it in the chat's Notes.")
+    const [item] = yield* sql<{ id: string }>`SELECT id FROM bin_items
+      WHERE user_id = ${userId} AND kind = 'entity' AND target_id = ${input.entityId} ORDER BY id DESC LIMIT 1`
+    return {
+      entityId: input.entityId,
+      refId: row.refId,
+      label: row.label,
+      deleted: row.deleted_at !== null,
+      head: row.head,
+      rowVersion: row.row_version,
+      item: item?.id ?? null
+    }
+  })
+const personaSnapshot = (sql: SqlClient.SqlClient, userId: UserId, input: { entityId: string }) =>
+  Effect.gen(function* () {
+    const [card] = yield* sql<{ id: RefId }>`SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+      WHERE e.id = ${input.entityId} AND e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL
+      ORDER BY r.id LIMIT 1`
+    if (!card) return yield* new NotFound({ entity: "card", id: input.entityId })
+    const snapshot = yield* refSnapshot(sql, userId, { refId: card.id })
+    const tagged = yield* sql`SELECT 1 FROM entity_tags WHERE entity_id = ${input.entityId} AND tag = 'persona'`
+    return { ...snapshot, persona: tagged.length > 0 }
+  })
+type PersonaSnapshot = Effect.Success<ReturnType<typeof personaSnapshot>>
+const personaMatches = (current: PersonaSnapshot, expected: PersonaSnapshot) =>
+  current.persona === expected.persona && refSnapshotMatches(current, expected)
 const ownTurnSnapshot = (sql: SqlClient.SqlClient, userId: UserId, input: { cardRefId: RefId }) =>
   Effect.gen(function* () {
     const card = yield* refSnapshot(sql, userId, { refId: input.cardRefId })
@@ -335,6 +408,37 @@ export const operationPolicies = makeRegistry<OperationPolicy>([
   refPolicy("RenameRef"),
   refPolicy("SetRefArchived"),
   refPolicy("RestoreRevision"),
+  unlinkPolicy(),
+  policy<Input<"DeleteEntity">, Effect.Success<ReturnType<typeof noteBinSnapshot>>>({
+    id: "DeleteEntity",
+    label: "Moved a note to the bin",
+    capability: "library.write",
+    kind: "library.delete",
+    targetKind: "entity",
+    target: (input) => input.entityId,
+    before: noteBinSnapshot,
+    undo: (_sql, ops, userId, _input, _before, after) =>
+      after.item === null
+        ? Effect.fail(refuseOperation("This note is no longer in the bin."))
+        : ops.RestoreBinItem!({ userId, itemId: after.item }).pipe(Effect.as({}))
+  }),
+  policy<Input<"SetPersona">, PersonaSnapshot>({
+    id: "SetPersona",
+    label: "Changed whether a card is a persona",
+    capability: "library.write",
+    kind: "library.revise",
+    targetKind: "entity",
+    target: (input) => input.entityId,
+    before: personaSnapshot,
+    matches: personaMatches,
+    undo: (sql, ops, userId, input, before) =>
+      Effect.gen(function* () {
+        yield* ops.SetPersona!({ userId, entityId: input.entityId, persona: before.persona })
+        // The flag is a tag: the card's document and head stay as they are.
+        const now = yield* personaSnapshot(sql, userId, input)
+        return { restoredHead: now.ref.head_revision_id, restoredRowVersion: now.ref.row_version }
+      })
+  }),
   policy<Input<"RenameChats">, Effect.Success<ReturnType<typeof snapshotChat>>>({
     id: "RenameChats",
     label: "Renamed a chat",

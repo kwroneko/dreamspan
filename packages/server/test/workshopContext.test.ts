@@ -178,8 +178,10 @@ describe("workshop context", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  // 36k: the combined workshop toolset (presets, lorebooks and chat rewrites too) leaves turn two room to carry.
-  for (const window of [24_000, 36_000])
+  // 41k: the combined workshop toolset (presets, lorebooks, chat rewrites, and wsb3's notes and
+  // files tools) leaves turn two room to carry, and turn three still has to leave a result out.
+  // Measured with every tool sent: 40k to 42k behave so, 39k rebuilds, 43k leaves nothing out.
+  for (const window of [24_000, 41_000])
     it.live(`elision and protected newest results with a ${window} window`, () => {
       const config = testConfig()
       return Effect.gen(function* () {

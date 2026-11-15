@@ -56,7 +56,7 @@ it.live("classifies every RPC and registered command; a new unclassified operati
     }
     assert.notInclude(exposedCastChanges, "AgentPermission")
     assert.notInclude(exposedCastChanges, "SendPresence")
-    assert.strictEqual(builtinOperationExposures.length, 21)
+    assert.strictEqual(builtinOperationExposures.length, 33)
   }).pipe(Effect.provide(serverLayer(testConfig())))
 )
 

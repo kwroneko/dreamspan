@@ -50,7 +50,7 @@ it("every unavailable story tool refuses both declared replacement and disable",
         const unavailable = execution.rolloutTools
           .list()
           .filter((tool) => !builtinCopies.some((part) => part.registry === "rolloutTools" && part.id === tool.id))
-        expect(unavailable).toHaveLength(35)
+        expect(unavailable).toHaveLength(37)
         for (const original of unavailable) {
           expect(builtinReplacement(`rolloutTools:${original.id}`)).toBeUndefined()
           const registry = makeRegistry([original])

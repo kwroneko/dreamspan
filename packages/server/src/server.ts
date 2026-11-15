@@ -6,6 +6,7 @@ import { ExternalMedia, externalMediaRoute, makeExternalMediaHandlers } from "./
 import { AuthenticatedExternalMediaApi, AuthenticatedSavedMediaApi } from "@rp/shared/api.ts"
 import { makeSavedMediaHandlers, SavedMedia, savedMediaRoute } from "./api/savedMedia.ts"
 import { operationWriter, installOperationRuntime } from "./agent/operations.ts"
+import { installLibraryImport } from "./agent/libraryImport.ts"
 import { makeWorkshopHandlers } from "./api/workshop.ts"
 import {
   AuthenticatedAgentApi,
@@ -233,6 +234,7 @@ const Handlers = Layer.effectDiscard(
   Effect.gen(function* () {
     const execution = yield* ExecutionRegistry
     yield* installOperationRuntime(execution.operationRuntime, yield* Commands)
+    yield* installLibraryImport(yield* Commands)
   })
 ).pipe(
   Layer.provideMerge(

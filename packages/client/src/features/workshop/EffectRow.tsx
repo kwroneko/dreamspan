@@ -17,6 +17,7 @@ import {
   effectKey,
   effectState,
   openHint,
+  opensNow,
   openTarget,
   undoable,
   undoHint,
@@ -29,8 +30,8 @@ export function EffectRow({ effect, when = false }: { effect: RolloutEffect; whe
   // A newer read of the same change wins over what the last undo returned.
   const current = shown.undoneAt !== null && effect.undoneAt === null ? shown : effect
   const target = openTarget(current)
-  // A made item that's undone is in the bin: there's nothing to open.
-  const opens = target !== null && !(current.undoneAt !== null && current.kind !== "library.revise")
+  // A made item that's undone is in the bin, as a deleted one is until its undo: there's nothing to open.
+  const opens = target !== null && opensNow(current)
   const state = effectState(current)
   const undo = async () => {
     const result = await action.run(

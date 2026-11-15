@@ -871,7 +871,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
         return { notes: [savedOwn, replaced], editId }
       }).pipe(transaction(sql, "MoveToOwnTurnNote")),
 
-    CreateCardNote: ({ userId, cardRefId, title, link, chatNote }) =>
+    CreateCardNote: ({ userId, cardRefId, title, link, chatNote, agentOriginRef }) =>
       Effect.gen(function* () {
         const card = yield* lib.ownedRef(userId, cardRefId)
         if (card.kind !== "card") return yield* new NotFound({ entity: "card", id: cardRefId })
@@ -887,15 +887,15 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           subtitle: "",
           doc: steps.encode(newCardNote(card.entity_id as EntityId, label, link)),
           schemaVersion: NOTE_SCHEMA_VERSION,
-          origin: "user",
-          originRef: null,
+          origin: agentOriginRef === undefined ? "user" : "agent",
+          originRef: agentOriginRef ?? null,
           sourcePath: null,
           sourceHash: null
         })
         return toLibraryRef(note)
       }).pipe(transaction(sql, "CreateCardNote")),
 
-    CreateChatNote: ({ userId, chatId, title, link, forkId, replaces, content }) =>
+    CreateChatNote: ({ userId, chatId, title, link, forkId, replaces, content, agentOriginRef }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ id: ChatId }>`
           SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -917,15 +917,15 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           subtitle: "",
           doc: steps.encode(doc),
           schemaVersion: NOTE_SCHEMA_VERSION,
-          origin: "user",
-          originRef: null,
+          origin: agentOriginRef === undefined ? "user" : "agent",
+          originRef: agentOriginRef ?? null,
           sourcePath: null,
           sourceHash: null
         })
         return toLibraryRef(note)
       }).pipe(inFork(sql, chatId, forkId, null), transaction(sql, "CreateChatNote")),
 
-    CreateSharedNote: ({ userId, title, content, fromNoteRefId, chatNote }) =>
+    CreateSharedNote: ({ userId, title, content, fromNoteRefId, chatNote, agentOriginRef }) =>
       Effect.gen(function* () {
         const from = fromNoteRefId === undefined ? null : yield* noteSlot(userId, fromNoteRefId, chatNote)
         if (from && from.doc.link !== undefined)
@@ -940,8 +940,8 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           subtitle: "",
           doc: steps.encode(newSharedNote(label, from ? String(from.doc.content ?? "") : content)),
           schemaVersion: NOTE_SCHEMA_VERSION,
-          origin: "user",
-          originRef: null,
+          origin: agentOriginRef === undefined ? "user" : "agent",
+          originRef: agentOriginRef ?? null,
           sourcePath: null,
           sourceHash: null
         })

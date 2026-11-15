@@ -70,6 +70,8 @@ const encode = (input: Doc): EncodedDoc => {
       : input
   return { json: JSON.stringify(doc), hash: docHash(doc), searchText: searchText(doc) }
 }
+/** For a document changed in the writer before it is stored (a workshop tool's import). */
+export const encodeLibraryDoc = encode
 
 /** The URIs a card document's `assets` name. */
 const assetUris = (assets: unknown) =>

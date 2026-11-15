@@ -343,6 +343,7 @@ describe("workshop setup effects", () => {
             "create_card",
             "edit_card",
             "edit_card_note",
+            "edit_library_note",
             "edit_preset",
             "edit_lorebook",
             "clone_card",

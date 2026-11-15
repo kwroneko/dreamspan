@@ -70,7 +70,15 @@ export const undoHint = (effect: RolloutEffect) =>
               ? "Moves the item it made to the bin."
               : effect.kind === "library.revise"
                 ? "Puts the item back as it was before, as a new revision."
-                : "Undoes this change."
+                : effect.kind === "library.delete"
+                  ? "Takes it back out of the bin."
+                  : "Undoes this change."
+
+/** Open is offered while the item is there to open: one in the bin (made and undone, or deleted) isn't. */
+export const opensNow = (effect: RolloutEffect) =>
+  effect.kind === "library.delete"
+    ? effect.undoneAt !== null
+    : !(effect.undoneAt !== null && effect.kind !== "library.revise")
 
 /** The changes one reply's run made, as the Changes tab groups them. */
 export interface ReplyChanges {

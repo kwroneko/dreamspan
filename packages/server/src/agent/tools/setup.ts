@@ -201,7 +201,10 @@ type CardChanges = ReadonlyArray<{
   readonly text?: string
   readonly find?: string
   readonly replace?: string
+  readonly items?: ReadonlyArray<string>
 }>
+/** The other greetings, as one text an approval can show before and after. */
+const greetingsShown = (value: unknown) => (Array.isArray(value) ? value.map(String).join("\n\n---\n\n") : "")
 /** A card's saved document with the changes made, or why they can't be. */
 const changed = (saved: Record<string, unknown>, changes: CardChanges) => {
   const doc = { ...saved }
@@ -209,6 +212,11 @@ const changed = (saved: Record<string, unknown>, changes: CardChanges) => {
     const field =
       ({ first_message: "first_mes", example_messages: "mes_example" } as Record<string, string>)[change.field] ??
       change.field
+    if (change.items !== undefined) {
+      if (field !== "alternate_greetings") return { error: "Only alternate_greetings takes a list of items." }
+      doc[field] = [...change.items]
+      continue
+    }
     if (!fields.includes(field)) return { error: `The text field ${change.field} cannot be edited by this tool.` }
     if (change.text !== undefined) doc[field] = change.text
     else {
@@ -233,7 +241,7 @@ const editCard: RolloutTool<{
   effect: "library",
   capability: "library.write",
   description:
-    "Edits a library card by name or id. Each change replaces a whole text field with text, or one exact find with replace. A find must occur exactly once. All changes save together on the head read; a moved head is an error. Does not grant permissions or approvals. Unsaved drafts remain unsaved.",
+    "Edits a library card by name or id. Each change replaces a whole text field with text, or one exact find with replace, or sets alternate_greetings to a whole list with items. A find must occur exactly once. All changes save together on the head read; a moved head is an error. Does not grant permissions or approvals. Unsaved drafts remain unsaved.",
   parameters: Type.Object(
     {
       card: name,
@@ -242,6 +250,10 @@ const editCard: RolloutTool<{
           Type.Object({ field: name, text }, strict),
           Type.Object(
             { field: name, find: Type.String({ minLength: 1, maxLength: limits.textChars }), replace: text },
+            strict
+          ),
+          Type.Object(
+            { field: Type.Literal("alternate_greetings"), items: Type.Array(text, { maxItems: limits.listItems }) },
             strict
           )
         ]),
@@ -265,6 +277,9 @@ const editCard: RolloutTool<{
       const changes = Object.keys(result.doc)
         .filter((field) => fields.includes(field) && String(saved.doc[field] ?? "") !== String(result.doc[field] ?? ""))
         .map((field) => ({ field, before: String(saved.doc[field] ?? ""), after: String(result.doc[field] ?? "") }))
+      const greetings = [greetingsShown(saved.doc.alternate_greetings), greetingsShown(result.doc.alternate_greetings)]
+      if (greetings[0] !== greetings[1])
+        changes.push({ field: "alternate_greetings", before: greetings[0]!, after: greetings[1]! })
       return { title, rows: [], changes }
     }),
   execute: (ctx, args) =>
@@ -578,9 +593,90 @@ const editCardNote: RolloutTool<CardNoteEdit> = {
       })
     )
 }
+type LibraryNoteEdit = { readonly note: string; readonly content?: string; readonly on_by_default?: boolean }
+const prepareLibraryNote = (ctx: ToolContext, args: LibraryNoteEdit) =>
+  Effect.gen(function* () {
+    if (args.content === undefined && args.on_by_default === undefined)
+      return yield* Effect.fail(new ToolInputRefused("Give the note's new text, or whether it is on by default."))
+    const pinned = targets(ctx)?.get(`note:${args.note}`)
+    const found = pinned ? { ref: pinned } : yield* resolveLibrary(ctx, "note", args.note)
+    if ("error" in found) return yield* Effect.fail(new ToolInputRefused(found.error))
+    const saved = yield* ctx.reader.OpenEditor({ userId: ctx.userId, refId: found.ref.id })
+    const owner = (saved.doc.owner ?? {}) as { readonly card?: string; readonly chat?: string }
+    if (saved.ref.kind !== "note" || owner.chat !== undefined)
+      return yield* Effect.fail(
+        new ToolInputRefused("That note belongs to one chat. Change it in the chat's Notes, on the branch it is for.")
+      )
+    if (args.content !== undefined && saved.doc.link)
+      return yield* Effect.fail(
+        new ToolInputRefused("This note shows a shared note's text. Edit the shared note, or unlink this one first.")
+      )
+    if (args.on_by_default !== undefined && owner.card === undefined)
+      return yield* Effect.fail(new ToolInputRefused("Only a card's note is on or off by default."))
+    remember(ctx, "note", args.note, saved.ref)
+    return {
+      saved,
+      doc: {
+        ...saved.doc,
+        ...(args.content === undefined ? {} : { content: args.content }),
+        ...(args.on_by_default === undefined ? {} : { on_by_default: args.on_by_default })
+      }
+    }
+  })
+const editLibraryNote: RolloutTool<LibraryNoteEdit> = {
+  source: import.meta.url,
+  id: "edit_library_note",
+  // The workshop's only: never one of a story's reply tools.
+  replyTool: false,
+  storyRead: "library",
+  label: "Edited a note",
+  titleField: "note",
+  explanation: "Edit a shared note or a card's note, with Undo.",
+  effect: "library",
+  capability: "library.write",
+  description:
+    "Edits one saved note of the library by id or by its one name: a shared note's text, a card note's text, or whether a card's note is on by default in chats. Read it first. Its placement and conditions are kept. Unsaved drafts remain unsaved. A chat's own notes are changed in that chat.",
+  parameters: Type.Object(
+    { note: name, content: Type.Optional(text), on_by_default: Type.Optional(Type.Boolean()) },
+    strict
+  ),
+  summarize: ({ note }) => note,
+  describe: (ctx, args) =>
+    Effect.gen(function* () {
+      const prepared = yield* prepareLibraryNote(ctx, args)
+      ctx.cache.set(`approval:library-note:${ctx.toolCallId}`, prepared)
+      return {
+        title: `Edit the note “${prepared.saved.ref.label}”`,
+        rows:
+          args.on_by_default === undefined
+            ? []
+            : [{ label: "On by default in chats", value: args.on_by_default ? "Yes" : "No" }],
+        ...(args.content === undefined
+          ? {}
+          : { changes: [{ field: "Text", before: String(prepared.saved.doc.content ?? ""), after: args.content }] })
+      }
+    }),
+  execute: (ctx, args) =>
+    safely(
+      Effect.gen(function* () {
+        const prepared =
+          (ctx.cache.get(`approval:library-note:${ctx.toolCallId}`) as
+            Effect.Success<ReturnType<typeof prepareLibraryNote>> | undefined) ?? (yield* prepareLibraryNote(ctx, args))
+        return {
+          text: yield* ctx.writer.AgentReviseEntity({
+            ...key(ctx),
+            refId: prepared.saved.ref.id,
+            expectedRowVersion: prepared.saved.ref.rowVersion,
+            doc: prepared.doc
+          })
+        }
+      })
+    )
+}
 export const libraryEditCard = receiptFirst(editCard)
 export const setupTools: ReadonlyArray<RolloutTool<never>> = [
   receiptFirst(editCardNote),
+  receiptFirst(editLibraryNote),
   receiptFirst(createCard),
   receiptFirst(cloneCard),
   receiptFirst(startChat),
