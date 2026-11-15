@@ -26,6 +26,8 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { PICTURE_TOGGLE, Tooltip } from "../../ui/Tooltip.tsx"
 import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
 import type { CardSort } from "./cardRecency.ts"
+import { type FamilyPlace, groupFamilies } from "./cardFamilies.ts"
+import { Icon } from "../../ui/Icon.tsx"
 
 /** A fork row with its cast's cards, which the wire names once in `people`. */
 export type ShellFork = Omit<ShellForkRow, "cast" | "added" | "thread"> & {
@@ -331,6 +333,7 @@ export function CharacterGrid({
   pick,
   status,
   markPersonas = false,
+  families,
   className,
   children
 }: {
@@ -339,12 +342,18 @@ export function CharacterGrid({
   pick?: TilePick
   status?: ReadonlyMap<string, string>
   markPersonas?: boolean
+  /**
+   * "Group forks" (cardFamilies.ts): a card and its forks are one tile, which `expanded` (a
+   * family's id) opens to its members; `onToggle` opens one or closes it (null). Absent: every card its own tile.
+   */
+  families?: CardFamilies | undefined
   className: string
   children?: ReactNode
 }) {
+  const tiles = families ? groupFamilies(cards, families.expanded) : cards.map((card) => ({ card }))
   return (
     <div aria-label="Characters" className={className}>
-      {cards.map((c) => (
+      {tiles.map(({ card: c, ...tile }) => (
         <CharacterTile
           key={c.card.entityId}
           card={c}
@@ -352,10 +361,54 @@ export function CharacterGrid({
           {...(pick ? { pick } : {})}
           status={status?.get(c.card.entityId)}
           marked={markPersonas && c.persona}
+          {...("family" in tile && tile.family && families ? { family: tile.family, onFamily: families.onToggle } : {})}
         />
       ))}
       {children}
     </div>
+  )
+}
+
+export interface CardFamilies {
+  readonly expanded: string | null
+  readonly onToggle: (family: string | null) => void
+}
+
+/**
+ * Under a family's tile: how many cards it stands for, and the control that lists them after it.
+ * Shaped as the fork badge beside it.
+ */
+function FamilyToggle({
+  label,
+  family,
+  onToggle
+}: {
+  label: string
+  family: FamilyPlace
+  onToggle: (family: string | null) => void
+}) {
+  const others = family.count - 1
+  return (
+    <Tooltip
+      label={
+        family.expanded
+          ? "Click to show this family as one tile again."
+          : `Click to show the ${others === 1 ? "other card" : `${others} other cards`} of this family: its forks and the card they came from.`
+      }
+    >
+      <button
+        type="button"
+        data-family-toggle
+        aria-expanded={family.expanded}
+        aria-label={`${label}: ${family.count} cards in this family`}
+        className="inline-flex h-5 shrink-0 items-center justify-center gap-1 rounded-full border border-border px-2 text-xs font-medium whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus aria-expanded:border-accent aria-expanded:text-text"
+        onClick={() => onToggle(family.expanded ? null : family.id)}
+      >
+        <Icon name="family" size={12} />
+        {family.count} cards
+        <Icon name={family.expanded ? "down" : "right"} size={12} />
+      </button>
+    </Tooltip>
   )
 }
 
@@ -408,7 +461,9 @@ function CharacterTile({
   sort = "name",
   pick,
   status,
-  marked
+  marked,
+  family,
+  onFamily
 }: {
   card: ShellCard
   sort?: CardSort
@@ -416,6 +471,9 @@ function CharacterTile({
   status: string | undefined
   /** A persona in a mixed list: the "Persona" badge on its picture. */
   marked: boolean
+  /** Its place in a family shown as one tile (cardFamilies.ts). */
+  family?: FamilyPlace
+  onFamily?: (family: string | null) => void
 }) {
   const open = useOpenCharacter()
   const besideHref = useRouter().buildLocation(characterLink(card)).href
@@ -447,7 +505,8 @@ function CharacterTile({
   // picker's own editor, bound to its chat; a click still does what it does.
   const editor = pick?.href?.(card) ?? `/library/${encodeURIComponent(c.refId)}`
   const onDragStart = (event: DragEvent) => carryOnDrag(event.dataTransfer, CARD_DRAG.id, editor)
-  const tileClass = `${pick?.onOpen ? TILE_OPEN_CLASS : TILE_CLASS} ${!pick?.onOpen && (state.done || state.pending) ? "cursor-default" : "hover:border-focus"}`
+  // An open family's tiles share the accent border, so its members read as one group in the grid.
+  const tileClass = `${pick?.onOpen ? TILE_OPEN_CLASS : TILE_CLASS} ${!pick?.onOpen && (state.done || state.pending) ? "cursor-default" : "hover:border-focus"} ${family?.expanded ? "border-accent!" : ""}`
   const button = !pick ? (
     // A link to the chat it opens, so it opens in a new browser tab too.
     <Link
@@ -491,6 +550,7 @@ function CharacterTile({
   )
   return (
     <div
+      {...(family ? { "data-family": family.id, "data-family-head": family.head } : {})}
       className={`${TILE_SURFACE_CLASS} ${pick?.onOpen ? "overflow-hidden rounded-lg border border-border bg-surface" : ""}`}
     >
       {pick ? (
@@ -557,6 +617,7 @@ function CharacterTile({
           {state.mark}
         </span>
       )}
+      {family?.head && onFamily && <FamilyToggle label={c.label} family={family} onToggle={onFamily} />}
       {card.persona ? (
         <div className="flex items-start gap-2 p-2">
           <div className="flex min-w-0 flex-1 flex-wrap gap-1">

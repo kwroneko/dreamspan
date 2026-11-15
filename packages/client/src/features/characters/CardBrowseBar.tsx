@@ -3,7 +3,13 @@
 // The home page lays the same parts out with CardGridControls. A card source shown (the
 // left panel's) takes over the sort, and Filters ends the row.
 import { type SourceBrowse, SourceFiltersButton, SourceSortControl } from "../cardSources/browse.tsx"
-import { type CardBrowse, CardFilterControl, CardSortControl, IncludePersonas } from "./cardBrowse.tsx"
+import {
+  type CardBrowse,
+  CardFilterControl,
+  CardSortControl,
+  GroupFamiliesToggle,
+  IncludePersonas
+} from "./cardBrowse.tsx"
 import { browsable, type ShellLibrary, useGroupCount } from "./shellData.tsx"
 
 type SourceProps = {
@@ -45,6 +51,7 @@ export function CardBrowseBar({
   onChange,
   groups = false,
   includePersonas = false,
+  families = false,
   sources,
   onSource,
   filtersId = ""
@@ -56,6 +63,8 @@ export function CardBrowseBar({
   groups?: boolean
   /** Offer Include personas at the end of the row, where the filter lists characters. */
   includePersonas?: boolean
+  /** Offer Group forks after it, where the list can show a card's family as one tile. */
+  families?: boolean
   /** The Filters panel's id, for its button. */
   filtersId?: string
 } & SourceProps) {
@@ -94,6 +103,7 @@ export function CardBrowseBar({
         <>
           <CardSortControl compact sort={browse.sort} reversed={browse.reversed} onChange={onChange} />
           {includePersonas && <IncludePersonas browse={browse} onChange={onChange} />}
+          {families && <GroupFamiliesToggle browse={browse} />}
         </>
       )}
     </div>

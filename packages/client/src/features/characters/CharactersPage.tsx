@@ -8,7 +8,7 @@ import { EmptyState } from "../../ui/Surface.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
 import { homeIntro } from "./homeSlots.ts"
-import { browseCards, mixesPersonas } from "./cardBrowse.tsx"
+import { browseCards, mixesPersonas, useGroupedFamilies } from "./cardBrowse.tsx"
 import { useHomeBrowse } from "./useHomeBrowse.ts"
 import type { HomeBrowse } from "./homeSearch.ts"
 import { SourceChips, SourceFiltersPanel, SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
@@ -100,6 +100,8 @@ function LocalCards({
   needle: string
   cards: ReturnType<typeof browseCards>
 }) {
+  const [, setBrowse] = useHomeBrowse()
+  const grouped = useGroupedFamilies(search)
   return (
     <>
       {browse.filter === "personas" && (
@@ -111,7 +113,13 @@ function LocalCards({
       {browse.filter === "groups" ? (
         <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} />
       ) : (
-        <CharacterGrid cards={cards} sort={browse.sort} markPersonas={mixesPersonas(browse)} className={COLUMNS}>
+        <CharacterGrid
+          cards={cards}
+          sort={browse.sort}
+          markPersonas={mixesPersonas(browse)}
+          families={grouped ? { expanded: browse.family, onToggle: (family) => setBrowse({ family }) } : undefined}
+          className={COLUMNS}
+        >
           {!cards.length && (
             <EmptyState
               title={

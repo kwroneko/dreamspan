@@ -16,6 +16,8 @@ export const homeSearch = [
   "personas",
   "q",
   "pinsSort",
+  // The family shown open under Group forks (cardFamilies.ts).
+  "family",
   "sq",
   "stags",
   "sxtags",
@@ -37,6 +39,8 @@ export interface RemoteBrowse {
 export interface HomeBrowse extends CardBrowse {
   readonly search: string
   readonly pinsSort: "recent" | "created" | "name"
+  /** The fork family listed open (its first card's id), under Group forks; null: every family one tile. */
+  readonly family: string | null
   /** The card source shown instead of the user's cards, or null. */
   readonly source: string | null
   readonly remote: RemoteBrowse
@@ -71,6 +75,7 @@ export const readHomeSearch = (search: Record<string, unknown>): HomeBrowse => {
     withPersonas: search.personas === true,
     search: typeof search.q === "string" ? search.q : "",
     pinsSort: (["recent", "created", "name"] as const).find((v) => v === search.pinsSort) ?? "recent",
+    family: typeof search.family === "string" && search.family !== "" ? search.family.slice(0, 64) : null,
     source,
     remote: {
       text: typeof search.sq === "string" ? search.sq : "",
@@ -91,6 +96,7 @@ export const writeHomeSearch = (state: HomeBrowse) => ({
   personas: state.withPersonas || undefined,
   q: state.search || undefined,
   pinsSort: state.pinsSort === "recent" ? undefined : state.pinsSort,
+  family: state.family ?? undefined,
   sq: state.remote.text || undefined,
   stags: state.remote.tags.length ? state.remote.tags : undefined,
   sxtags: state.remote.excludeTags.length ? state.remote.excludeTags : undefined,

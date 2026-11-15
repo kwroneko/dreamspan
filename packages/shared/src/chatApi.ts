@@ -151,6 +151,8 @@ const displayFields = {
   sidebarCards: CardSwitcherView,
   homeCards: CardSwitcherView,
   castCards: CardSwitcherView,
+  /** "Group forks": the character grids show a card and its forks as one tile that expands. */
+  cardFamilies: Schema.Boolean,
   /**
    * "Only keep one image open at a time" (owner, 2026-11-02): a portrait's click replaces the
    * one beside the chat instead of opening on top of it.
@@ -197,6 +199,7 @@ export const DisplayPrefsChange = Schema.Struct({
   sidebarCards: Schema.optionalKey(displayFields.sidebarCards),
   homeCards: Schema.optionalKey(displayFields.homeCards),
   castCards: Schema.optionalKey(displayFields.castCards),
+  cardFamilies: Schema.optionalKey(displayFields.cardFamilies),
   singlePortrait: Schema.optionalKey(displayFields.singlePortrait),
   /** Merged by id with what's stored, so a write names only the choices it changes. */
   messageToolbar: Schema.optionalKey(displayFields.messageToolbar),
@@ -232,6 +235,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   sidebarCards: { sort: "recent", reversed: false, withPersonas: false },
   homeCards: { sort: "recent", reversed: false, withPersonas: false },
   castCards: { sort: "recent", reversed: false, withPersonas: false },
+  cardFamilies: false,
   singlePortrait: false,
   messageToolbar: {},
   dismissedInfo: {},

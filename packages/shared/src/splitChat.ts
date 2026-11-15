@@ -23,6 +23,8 @@ export const SplitChatLink = Schema.Struct({
   forkId: ForkId,
   rootForkId: ForkId,
   title: Schema.String,
+  /** The group's own picture (SetChatPicture), a media id; absent: its characters' faces. */
+  picture: Schema.optionalKey(Schema.String),
   slotId: Schema.NullOr(SlotId),
   /** Where a split group's first branch parts from the chat it was split from; null for an original group. */
   split: Schema.NullOr(ForkSplit)
@@ -47,6 +49,18 @@ export class SplitChatApi extends RpcGroup.make(
   Rpc.make("GetSplitChats", {
     payload: { chatId: ChatId, forkId: Schema.NullOr(ForkId) },
     success: SplitChats,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * Gives a chat its own picture, shown in lists and its header in place of its characters'
+   * faces; null removes it. `chatId` is the chat as lists name it (`SplitChatLink.id`), so a
+   * chat split off from another has its own. `mediaId`: an image the user uploaded
+   * (`POST /chat/image`). Returns the picture it had, for Undo. Here, with the split chats,
+   * so the core group stays under TypeScript's instantiation limit.
+   */
+  Rpc.make("SetChatPicture", {
+    payload: { chatId: ChatId, mediaId: Schema.NullOr(Schema.String.check(Schema.isMaxLength(64))) },
+    success: Schema.Struct({ previous: Schema.NullOr(Schema.String) }),
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("SetSplitChat", {

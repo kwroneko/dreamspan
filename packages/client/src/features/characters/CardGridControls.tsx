@@ -4,7 +4,13 @@
 import { useId, useLayoutEffect, useRef } from "react"
 import { Input } from "../../ui/Field.tsx"
 import { type SourceBrowse, SourceFiltersButton, SourceSortControl } from "../cardSources/browse.tsx"
-import { type CardBrowse, CardFilterControl, CardSortControl, IncludePersonas } from "./cardBrowse.tsx"
+import {
+  type CardBrowse,
+  CardFilterControl,
+  CardSortControl,
+  GroupFamiliesToggle,
+  IncludePersonas
+} from "./cardBrowse.tsx"
 import { browsable, type ShellLibrary, useGroupCount } from "./shellData.tsx"
 
 export function CardGridControls({
@@ -113,6 +119,7 @@ export function CardGridControls({
                   className="items-start! [&>button]:mt-[3px]"
                 />
                 <IncludePersonas browse={browse} onChange={onChange} />
+                <GroupFamiliesToggle browse={browse} />
               </>
             )}
           </div>

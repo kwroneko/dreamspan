@@ -269,6 +269,34 @@ export function IncludePersonas({
   )
 }
 
+/**
+ * Group forks: a card and the cards forked from it as one tile, which expands to them
+ * (cardFamilies.ts). One choice for the account, off until chosen. Kept in place but invisible
+ * where no cards are grouped (Groups), so the controls around it don't shift.
+ */
+export function GroupFamiliesToggle({ browse }: { browse: CardBrowse }) {
+  const { prefs, change } = useViewPrefs()
+  const on = prefs.cardFamilies
+  return (
+    <IconButton
+      label="Group forks"
+      hint={
+        on
+          ? "Click to list every card on its own"
+          : "Click to show a card and its forks as one tile, which opens to list them"
+      }
+      icon="family"
+      aria-pressed={on}
+      data-group-families
+      className={`${browse.filter === "groups" ? "invisible" : ""} ${on ? "" : "text-text!"} aria-pressed:bg-surface-raised aria-pressed:text-accent`}
+      onClick={() => void change({ cardFamilies: !on })}
+    />
+  )
+}
+
+/** Whether a place's list groups families now: the account's choice, and no search (a search lists each card it finds). */
+export const useGroupedFamilies = (search: string) => useViewPrefs().prefs.cardFamilies && search.trim() === ""
+
 const SORT_LABELS: Record<CardSort, { label: string; hint: string }> = {
   recent: { label: "Recent", hint: "By the latest message in any of its chats; characters never used come last" },
   created: {

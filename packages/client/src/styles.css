@@ -809,6 +809,12 @@ main:has(> [data-fill]) {
   position: relative;
   z-index: 1;
 }
+/* A chat's own picture fills the box of the slots its characters' faces take (ShellBrowser's
+ * ForkRow), whatever size the row gives them. */
+[data-portrait-slot] [data-portrait] {
+  width: 100% !important;
+  height: 100% !important;
+}
 /* Only the count tile overlaps; every portrait remains fully visible. Content
  * sizing lets larger counts grow their exposed sliver without hiding digits. */
 [data-row-portraits] > .fork-row-overflow {
@@ -823,7 +829,8 @@ main:has(> [data-fill]) {
     flex-direction: column;
     align-items: stretch;
   }
-  .fork-row-open:has([data-row-portraits] > :nth-child(2)) :is([data-portrait], [data-portrait-overflow]) {
+  .fork-row-open:has([data-row-portraits] > :nth-child(2))
+    :is([data-portrait-slot], [data-portrait], [data-portrait-overflow]) {
     width: 1.5rem;
     height: 2.25rem;
     font-size: 0.625rem;
@@ -854,7 +861,7 @@ main:has(> [data-fill]) {
     flex-direction: column;
     align-items: stretch;
   }
-  .fork-row-open:has([data-row-portraits]) :is([data-portrait], [data-portrait-overflow]) {
+  .fork-row-open:has([data-row-portraits]) :is([data-portrait-slot], [data-portrait], [data-portrait-overflow]) {
     width: 1.5rem;
     height: 2.25rem;
     font-size: 0.625rem;

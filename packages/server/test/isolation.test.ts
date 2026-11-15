@@ -564,6 +564,17 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.SetChatPin({ chatId: owner.chat.chatId, leaf: owner.chat.slotId, pinned: true }), "NotFound")
   },
+  SetChatPicture: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Neither another user's chat, nor another user's image on a chat of one's own.
+        yield* refused(actor.api.SetChatPicture({ chatId: owner.chat.chatId, mediaId: null }), "NotFound")
+        yield* refused(
+          actor.api.SetChatPicture({ chatId: actor.quiet.chatId, mediaId: owner.editor.avatarMediaId }),
+          "NotFound"
+        )
+      })
+  },
   SetHomePinsCollapsed: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

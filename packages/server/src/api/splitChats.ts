@@ -40,6 +40,13 @@ export const makeSplitChatHandlers = Effect.gen(function* () {
       }).pipe(Effect.uninterruptible, internal("DeleteChatGroup")),
     GetSplitChats: (payload: { chatId: ChatId; forkId: ForkId | null }) =>
       Effect.flatMap(userId, (id) => reader.GetSplitChats({ userId: id, ...payload })).pipe(internal("GetSplitChats")),
+    SetChatPicture: (payload: { chatId: ChatId; mediaId: string | null }) =>
+      Effect.gen(function* () {
+        const { chat, previous } = yield* writer.SetChatPicture({ ...payload, userId: yield* userId })
+        // Other tabs' lists and headers read again.
+        hub.publish(chat.id, { _tag: "Chat", chat })
+        return { previous }
+      }).pipe(internal("SetChatPicture")),
     SetSplitChat: (payload: { forkId: ForkId; split: boolean; title?: typeof SplitChatTitle.Type }) =>
       Effect.gen(function* () {
         const id = yield* userId

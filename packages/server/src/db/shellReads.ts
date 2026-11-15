@@ -229,6 +229,27 @@ const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection):
   }
 }
 
+/**
+ * Each related card's family: its first card, up the parents (the walk ends at a parent that
+ * isn't itself a fork, or at a cycle the writer should have refused). Cards on their own are absent.
+ */
+export const cardFamilies = (forked: ReadonlyArray<{ readonly id: string; readonly parent: string }>) => {
+  const parent = new Map(forked.map((row) => [row.id, row.parent]))
+  const family = new Map<string, string>()
+  for (const { id } of forked) {
+    const path: Array<string> = []
+    let at = id
+    while (!family.has(at) && parent.has(at) && !path.includes(at)) {
+      path.push(at)
+      at = parent.get(at)!
+    }
+    const root = family.get(at) ?? at
+    family.set(at, root)
+    for (const member of path) family.set(member, root)
+  }
+  return family
+}
+
 export const makeShellReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   /** The last computation and the database version it read (one connection per reader worker). */
@@ -338,9 +359,12 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         split_after: number | null
         parent_fork_id: string | null
         base_slot_id: string | null
+        fork_cover: string | null
+        chat_cover: string | null
         lists: string | null
       }>`
           SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, f.parent_fork_id, f.base_slot_id,
+            f.cover_media_id AS fork_cover, c.cover_media_id AS chat_cover,
             c.title, c.kind, c.current_fork_id, c.created_at AS chat_created_at, coalesce(c.added_at, c.created_at) AS chat_added_at,
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
             s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
@@ -359,7 +383,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             current_fork_id: r.current_fork_id,
             created_at: r.chat_created_at,
             added_at: r.chat_added_at,
-            shell_stamp: r.shell_stamp
+            shell_stamp: r.shell_stamp,
+            cover: r.chat_cover
           }
         ])
       )
@@ -477,6 +502,9 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         )
         if (markers.has(id) && root?.pinned_at !== null) pinnedChats.add(id)
       }
+      // A chat's own picture: a split-off chat's is its first branch's, never the chat's it left.
+      const pictureOf = (groupId: string, chatCover: string | null) =>
+        markers.has(groupId) ? (byFork.get(groupId)?.fork_cover ?? null) : chatCover
       // A chat's Recent is the latest of its forks' (below), and how many forks it has.
       const chatRecent = new Map<string, number>()
       const branchCount = new Map<string, number>()
@@ -496,6 +524,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         }
         const s = stored.get(record.id)!
         const cast = s.cast.flatMap((id) => byCard.get(id) ?? [])
+        const picture = pictureOf(groupId, physical.cover)
         // Its last shown message; without one, its chat's start (an imported chat's ST date,
         // never the import's time). The user's activity in it counts too (`last_chatted_at`: a
         // send, a swipe, an edit, and making it by Branch from here), so the chat the user just
@@ -512,7 +541,13 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           sourceChatId: record.chat_id as ChatId,
           preview: s.preview,
           messages: s.messages,
-          chat: { id: row.id as ChatId, kind: row.kind, title: row.title, createdAt: row.created_at },
+          chat: {
+            id: row.id as ChatId,
+            kind: row.kind,
+            title: row.title,
+            createdAt: row.created_at,
+            ...(picture === null ? {} : { picture })
+          },
           leaf: s.leaf as SlotId | null,
           name: record.name ?? chatName(importState(row.title).title, cast).name,
           chatName: titles.get(groupId)!,
@@ -573,6 +608,12 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         for (const a of f.activity) if (joined.has(a.entityId)) usageOf(a.entityId).spoke.push({ f, a })
       }
       const favourites = new Set((yield* readFavourites(sql, userId)).on)
+      // Fork families (`libraryFamily`'s relation), for every card in one indexed read: only
+      // cards that are a fork are visited. A binned or purged card between two keeps them together.
+      const forked = yield* sql<{ id: string; parent: string }>`
+        SELECT id, forked_from_entity_id AS parent FROM entities
+        WHERE forked_from_entity_id IS NOT NULL AND owner_user_id = ${userId} AND kind = 'card'`
+      const familyOf = cardFamilies(forked)
       const shellCards = metadata
         .filter((m) => byCard.has(m.id))
         .map((m) => {
@@ -621,6 +662,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               favourite: favourites.has(m.id),
               archivedAt: m.archived_at,
               persona: m.persona === 1,
+              ...(familyOf.has(m.id) ? { family: familyOf.get(m.id) as EntityId } : {}),
               open:
                 open === undefined
                   ? null
@@ -648,6 +690,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           forkId: current.id as ForkId,
           rootForkId: id as ForkId,
           title: titles.get(id)!,
+          ...(pictureOf(id, current.chat_cover) === null ? {} : { picture: pictureOf(id, current.chat_cover)! }),
           slotId: (markers.has(id) ? (root?.base_slot_id ?? null) : null) as SlotId | null,
           split: markers.has(id) ? (stored.get(id)?.split ?? null) : null
         })

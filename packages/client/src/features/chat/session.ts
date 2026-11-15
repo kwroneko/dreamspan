@@ -2079,6 +2079,16 @@ export class ChatSession {
     return result
   }
 
+  /**
+   * Gives a chat its own picture, or none (null). `chatId` is the chat as lists name it (a chat
+   * split off has its own). Lists and headers read again; the answer has the picture before, for Undo.
+   */
+  async setPicture(chatId: ChatId, mediaId: string | null) {
+    const result = await this.call((client) => client("SetChatPicture", { chatId, mediaId }))
+    if (result.ok) this.invalidate(["chats"])
+    return result
+  }
+
   /** Has the queries with these reactivity keys (the chat list, the home grid) read again. */
   private invalidate(keys: ReadonlyArray<string>) {
     void Effect.runPromise(

@@ -774,6 +774,16 @@ export class WriteOpsChat extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * The chat's own picture, shown in place of its characters' faces; null: none. `chatId` is
+   * the chat as lists name it: a chat, or the first branch of one split off (as SetChatPin).
+   * `mediaId` must be an image the user holds. Returns the picture it had, for Undo.
+   */
+  Rpc.make("SetChatPicture", {
+    payload: { userId: UserId, chatId: ChatId, mediaId: Schema.NullOr(Schema.String) },
+    success: Schema.Struct({ chat: Chat, previous: Schema.NullOr(Schema.String) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("SetHomePinsCollapsed", {
     payload: { userId: UserId, collapsed: Schema.Boolean },
     success: Schema.Void,

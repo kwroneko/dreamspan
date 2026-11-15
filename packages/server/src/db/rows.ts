@@ -71,6 +71,7 @@ export interface ChatRow {
   readonly row_version: number
   readonly created_at: number
   readonly last_message_at: number | null
+  readonly cover_media_id?: string | null
 }
 
 export const toChat = (row: ChatRow) =>
@@ -83,7 +84,8 @@ export const toChat = (row: ChatRow) =>
     currentForkId: row.current_fork_id as ForkId | null,
     rowVersion: row.row_version,
     createdAt: row.created_at,
-    lastMessageAt: row.last_message_at
+    lastMessageAt: row.last_message_at,
+    ...(row.cover_media_id ? { pictureMediaId: row.cover_media_id } : {})
   })
 
 export interface ForkRow {

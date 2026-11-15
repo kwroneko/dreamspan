@@ -13,7 +13,7 @@ import { type MouseEvent, useEffect, useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { carryLink, CHAT_DRAG } from "../../ui/appDrags.ts"
-import { AvatarStack } from "../../ui/Avatar.tsx"
+import { Avatar, AvatarStack } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
@@ -103,14 +103,18 @@ function Row({
             active ? "bg-surface-raised" : "hover:bg-surface-raised/60"
           }`}
         >
-          <AvatarStack
-            faces={characters.map((card) => ({
-              id: card.entityId,
-              name: card.name,
-              mediaId: card.avatarMediaId,
-              crop: card.avatarCrop
-            }))}
-          />
+          {chat.pictureMediaId ? (
+            <Avatar id={chat.id} name={name.name} mediaId={chat.pictureMediaId} size="lg" />
+          ) : (
+            <AvatarStack
+              faces={characters.map((card) => ({
+                id: card.entityId,
+                name: card.name,
+                mediaId: card.avatarMediaId,
+                crop: card.avatarCrop
+              }))}
+            />
+          )}
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="flex min-w-0 items-baseline gap-2">
               <span

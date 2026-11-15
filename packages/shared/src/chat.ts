@@ -37,7 +37,9 @@ export class Chat extends Schema.Class<Chat>("Chat")({
   currentForkId: Schema.NullOr(ForkId),
   rowVersion: Schema.Int,
   createdAt: Schema.Number,
-  lastMessageAt: Schema.NullOr(Schema.Number)
+  lastMessageAt: Schema.NullOr(Schema.Number),
+  /** The chat's own picture (SetChatPicture), a media id; absent: its characters' faces. */
+  pictureMediaId: Schema.optionalKey(Schema.String)
 }) {}
 
 /**

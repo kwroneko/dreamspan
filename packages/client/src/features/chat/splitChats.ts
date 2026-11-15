@@ -13,6 +13,14 @@ const reads = Atom.family((key: string) =>
       })
 )
 
+/** The own picture of the chat shown (the group the viewed branch is in), a media id; null: none. */
+export function useChatPicture(view: {
+  readonly chat: { readonly id: ChatId } | null
+  readonly forkId: string | null
+}) {
+  return useSplitChats(view.chat?.id ?? null, view.forkId)?.group.picture ?? null
+}
+
 export function useSplitChats(chatId: ChatId | null, forkId: string | null | undefined) {
   const result = useAtomValue(reads(chatId === null ? "" : JSON.stringify({ chatId, forkId: forkId ?? null })))
   return AsyncResult.isSuccess(result) ? result.value : null

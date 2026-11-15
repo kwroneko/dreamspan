@@ -18,6 +18,7 @@ export const sidebarSearch = [
   // The chat search looks through message text (MessageSearch.tsx).
   "sideIn",
   "sidePinsSort",
+  "sideFamily",
   // A card source's query (spec/CARD-SOURCES.md §3.2).
   "sideSq",
   "sideStags",
