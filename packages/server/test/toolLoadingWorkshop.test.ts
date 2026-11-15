@@ -125,7 +125,7 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
     )
     // Called before it was loaded: refused, and nothing was read.
     const refused = lastResult(bodies[1]!)!
-    assert.include(JSON.stringify(refused), "isn't loaded yet")
+    assert.include(JSON.stringify(refused), "isn&apos;t loaded yet")
     // The load point carries the reference the provider expands.
     const load = lastResult(bodies[2]!)!
     assert.deepStrictEqual(

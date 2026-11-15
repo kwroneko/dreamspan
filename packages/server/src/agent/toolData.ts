@@ -11,6 +11,12 @@ export const escapeToolData = (text: string): string =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&apos;")
+    // Keep invisible direction changes and non-UTF-8 code units visible/reversible.
+    // A valid surrogate pair remains one character; lone halves must survive transport.
+    .replace(
+      /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]|[\ud800-\udfff]/gu,
+      (char) => `&#x${char.charCodeAt(0).toString(16)};`
+    )
 
 /** App-owned opening/closing framing, with the same escaping for every quoted body. */
 export const dataEnvelope = (text: string, open: string, close: string) => `${open}\n${escapeToolData(text)}\n${close}`
@@ -68,6 +74,7 @@ export const toolResultFrame = (value: unknown): string => {
           "forkId",
           "slotId",
           "versionId",
+          "version",
           "refId",
           "headRevisionId",
           "next",
@@ -87,15 +94,27 @@ export const toolResultFrame = (value: unknown): string => {
           "messages",
           "summaries",
           "offset",
+          "nextOffset",
           "limit",
           "next",
           "older"
         ].includes(key) &&
-        typeof field === "number" &&
-        Number.isSafeInteger(field)
+        ((typeof field === "number" && Number.isSafeInteger(field)) || (key === "nextOffset" && field === null))
       )
         kept[key] = field
-      else if (["entries", "revisions", "chats", "cards"].includes(key) && Array.isArray(field))
+      else if (key === "next" && field !== null && typeof field === "object" && !Array.isArray(field)) {
+        const cursor = field as Record<string, unknown>
+        if (
+          ["version_replace", "summary_revision"].includes(String(cursor.kind)) &&
+          Number.isSafeInteger(cursor.seq) &&
+          (cursor.depth === undefined || Number.isSafeInteger(cursor.depth))
+        )
+          kept[key] = {
+            kind: cursor.kind,
+            seq: cursor.seq,
+            ...(cursor.depth === undefined ? {} : { depth: cursor.depth })
+          }
+      } else if (["entries", "revisions", "chats", "cards", "messages"].includes(key) && Array.isArray(field))
         kept[key] = field.map(project)
     }
     return kept

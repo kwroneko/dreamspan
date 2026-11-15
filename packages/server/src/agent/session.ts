@@ -6,7 +6,13 @@ import { outsideEffect, UNCERTAIN_EFFECT } from "./effects.ts"
 // proxy, transforms and inspector capture apply. The loop's output is the same chunk stream a
 // plain reply yields, so reply parsers, live rewrites and the version's persistence treat both
 // alike (DESIGN §7.2: one commit pipeline). The transcript is flushed as each turn ends.
-import { Agent, type AgentMessage, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core"
+import {
+  Agent,
+  type AgentMessage,
+  type AgentTool,
+  type AgentToolResult,
+  type StreamFn
+} from "@earendil-works/pi-agent-core"
 import {
   createAssistantMessageEventStream,
   type Api,
@@ -491,6 +497,27 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
 
       const workshopData = execution.chatKinds.get(run.kind ?? "")?.allowsOutside === true
       const cache = new Map<string, unknown>()
+      const deliveredContent = new WeakSet<object>()
+      // The engine itself produces unknown-tool, schema and thrown-execution errors,
+      // bypassing both the registered executor and its before/after hooks. Quote these
+      // at completion, before the engine constructs its durable result message.
+      const quoteRuntimeFailure = (result: AgentToolResult<unknown>, isError: boolean, call: string) => {
+        if (!workshopData || !isError || deliveredContent.has(result.content)) return
+        const text = result.content.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("")
+        // Fixed refusals with syntax-constrained identifiers contain no retrieved prose.
+        if (text === BAD_ARGS || /^Tool [a-zA-Z0-9_-]{1,150} not found$/.test(text)) return
+        const full = toolData(text)
+        const step =
+          stepsOf(agent.state.messages, frozen, false)
+            .filter((s) => s.kind === "tool")
+            .findLastIndex((s) => s.id === call) + 1
+        const recovery = `[Result shortened. read_run with message 0 and from_step=${Math.max(1, step)} recovers it; follow its page cursors for the rest.]`
+        const sent =
+          full.length > TOOL_RESULT_CHARS ? toolDataPage(full, { more: () => recovery }).text || recovery : full
+        result.content = [{ type: "text", text: full }]
+        if (sent !== full) result.details = { ...(result.details as object | null), sentText: sent }
+        deliveredContent.add(result.content)
+      }
       const context = (toolCallId: string) => ({
         ...(workshopData
           ? {
@@ -665,7 +692,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           // frozen definitions. Every other fresh workshop result crosses the same data boundary.
           const quote =
             workshopData &&
-            !(["tool_search", "load_skill"].includes(tool.id) && !raw.isError) &&
+            !(["tool_search", "load_skill"].includes(tool.id) && !raw.isError && !raw.dataOnly) &&
             !raw.replayed &&
             ![BAD_ARGS, missingTool(tool.id)].includes(raw.text)
           const result =
@@ -724,8 +751,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             }
             resultTokens += await textTokens(sentText)
           }
+          const content = [{ type: "text" as const, text: fullText }]
+          deliveredContent.add(content)
           return {
-            content: [{ type: "text", text: fullText }],
+            content,
             // What a loading call loaded is part of the transcript: replay derives the loaded set from it.
             details:
               sentText !== fullText || result.loaded?.length || result.presentation
@@ -997,6 +1026,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         }
       }
       agent.subscribe((event) => {
+        if (event.type === "tool_execution_end") quoteRuntimeFailure(event.result, event.isError, event.toolCallId)
         if (event.type === "turn_end" || event.type === "agent_end")
           void flush().then(() => showSteps(event.type === "agent_end"))
         if (event.type === "message_end" || event.type === "tool_execution_end" || event.type === "turn_end")
@@ -1084,6 +1114,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     details: null,
                     isError: true
                   }
+          if (!receipt) quoteRuntimeFailure(result, result.isError === true, call.id)
           agent.state.messages = [
             ...agent.state.messages,
             {

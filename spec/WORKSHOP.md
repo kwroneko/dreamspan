@@ -1,4 +1,4 @@
-**Built wsmark1 (2026-11-15):** The data-only tool-result boundary and complete original-step recovery subset of §§4/6.3 is implemented and obsolete as an implementation proposal; see ARCHITECTURE §16 “Workshop result boundaries and recovery”. Existing consent, skill instruction channels and tool definitions are unchanged. No Proposed/Open policy is promoted to Decided.
+**Built wsmark1; reviewed review-wsmark1 (2026-11-15):** The data-only tool-result boundary and complete original-step recovery subset of §§4/6.3 is implemented and obsolete as an implementation proposal; see ARCHITECTURE §16 “Workshop result boundaries and recovery”. Existing consent, skill instruction channels and tool definitions are unchanged. No Proposed/Open policy is promoted to Decided.
 
 **Reviewed review-worklcm1 (2026-11-13):** The implemented transcript-summary subset is hardened for wrapped/nested credential data, causal Undo notes and impossible summary-model windows. The same subset remains obsolete as a proposal; ARCHITECTURE §16 records behavior and crash/wire gates. No additional Proposed item is promoted to Decided.
 

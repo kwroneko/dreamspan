@@ -1041,7 +1041,10 @@ describe("workshop chat rewrites", () => {
         capability: "chats.read",
         mode: "allow"
       })
-      const first = JSON.parse((yield* f.run("read_chat", { chat: f.chat.id, from: 11, count: 1 })).text)
+      const firstResult = yield* f.run("read_chat", { chat: f.chat.id, from: 11, count: 1 })
+      assert.include(firstResult.frame ?? "", "nextOffset")
+      assert.notInclude(firstResult.frame ?? "", "Untrusted chat")
+      const first = JSON.parse(firstResult.text)
       assert.strictEqual(first.next, 11)
       assert.strictEqual(first.nextOffset, 6000)
       const second = JSON.parse(

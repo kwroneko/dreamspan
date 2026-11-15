@@ -235,8 +235,11 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
               /* Plain app prose. */
             }
           }
+          // Result handlers (including plugin adapters) return data, never assertions
+          // that formatting/replay already happened or app-owned recovery framing.
+          const { dataOnly: _dataOnly, replayed: _replayed, frame: _frame, ...outputData } = output
           const final: ToolOutput = {
-            ...output,
+            ...outputData,
             text: ctx.formatResult ? ctx.formatResult(output.text, frame) : budgetResult(output.text),
             ...(ctx.formatResult ? { dataOnly: true as const } : {}),
             ...(frame ? { frame } : {}),

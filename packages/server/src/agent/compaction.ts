@@ -1,4 +1,5 @@
 import { escapeToolData } from "./toolData.ts"
+import { decodeToolData } from "@rp/shared/toolData.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { Message } from "@earendil-works/pi-ai"
 
@@ -49,12 +50,7 @@ export const summarySafeText = (text: string): string => {
           if (!close) parts.push("<tool_data>\n[partial quoted data withheld; read_run recovers the original]")
           else if (depth >= 32) parts.push("<tool_data>\n[redacted nested data]\n</tool_data>")
           else {
-            const decoded = body
-              .replaceAll("&apos;", "'")
-              .replaceAll("&quot;", '\"')
-              .replaceAll("&gt;", ">")
-              .replaceAll("&lt;", "<")
-              .replaceAll("&amp;", "&")
+            const decoded = decodeToolData(body)
             parts.push(`<tool_data>\n${escapeToolData(String(walk(decoded, depth + 1)))}\n</tool_data>`)
           }
           copied = match.index + match[0].length

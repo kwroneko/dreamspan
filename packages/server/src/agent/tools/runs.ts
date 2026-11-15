@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { escapeToolData, toolDataPage, TOOL_RESULT_CHARS } from "../toolData.ts"
+import { toolDataPage, TOOL_RESULT_CHARS } from "../toolData.ts"
 // The way back to a run's tool results (spec/WORKSHOP-CONTEXT.md §3.2), reference-harness's
 // read_session_transcript as a delta: a message's own steps, read from the run that wrote it.
 // Causal: only messages on the path before the one being generated, each cut at its own post.
@@ -161,15 +161,53 @@ const readRun: RolloutTool<{
           ? run.steps
           : run.steps.map((s) => (readsStory(s.tool) ? { ...s, args: {}, result: STORY_WITHHELD } : s))
         const words = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean)
+        // Ordinary story tools retain their existing result bytes. Only the workshop
+        // executor opts new calls into the data boundary and within-result paging.
+        if (!context.formatResult) {
+          const chosen = steps.filter(
+            (s) =>
+              s.n >= from_step &&
+              (call === undefined || s.id === call) &&
+              words.every((w) => `${JSON.stringify(s.args)}\n${s.result ?? ""}`.toLowerCase().includes(w))
+          )
+          if (chosen.length === 0)
+            return { text: `No step of message ${message} matches (it has ${steps.length}).`, isError: true }
+          const shown: Array<string> = []
+          let used = 0
+          for (const s of chosen) {
+            const part = `<step n="${s.n}" call="${s.id}" tool="${s.tool}"${s.status === "error" ? ' failed="true"' : ""}>\n${JSON.stringify(s.args)}\n<result>\n${s.result ?? "(no result)"}\n</result>\n</step>`
+            if (shown.length > 0 && used + tokensOf(part) > max_tokens) break
+            shown.push(part)
+            used += tokensOf(part)
+          }
+          const left = chosen.length - shown.length
+          const next = chosen[shown.length]?.n
+          return {
+            text: `${shown.join("\n")}${left > 0 ? `\n[${left} more steps: read_run with from_step=${next}.]` : ""}`
+          }
+        }
         // `call` is already a string in the frozen definition. Continuation cursors use it
         // without changing any tool declaration in an existing chat's provider prefix.
         const cursor = steps.some((s) => s.id === call)
           ? undefined
           : call?.match(/^page:v1:(\d+):(\d+):([a-f0-9]{24})$/)
-        const payload = (s: (typeof steps)[number]) => `${JSON.stringify(s.args)}\n${s.result ?? "(no result)"}`
+        // Provider call ids and plugin tool names are source text too, not app metadata.
+        const payload = (s: (typeof steps)[number]) =>
+          `${JSON.stringify({ call: s.id, tool: s.tool })}\n${JSON.stringify(s.args)}\n${s.result ?? "(no result)"}`
         const fingerprint = (s: (typeof steps)[number]) =>
           createHash("sha256")
-            .update(JSON.stringify([s.n, s.id, s.tool, payload(s)]))
+            .update(
+              JSON.stringify([
+                context.userId,
+                context.chatId,
+                context.forkId,
+                entry?.version.id ?? context.rolloutId,
+                s.n,
+                s.id,
+                s.tool,
+                payload(s)
+              ])
+            )
             .digest("hex")
             .slice(0, 24)
         const chosen = steps.filter(
@@ -200,7 +238,7 @@ const readRun: RolloutTool<{
           const stamp = fingerprint(step)
           const content = payload(step)
           const offset = cursor ? Number(cursor[2]) : 0
-          const frame = `<step n="${step.n}" call="${escapeToolData(step.id.slice(0, 24))}" tool="${escapeToolData(step.tool.slice(0, 24))}"${step.status === "error" ? ' failed="true"' : ""} identity_prefixes="${step.id.length > 24 || step.tool.length > 24}" offset="${offset}" total_characters="${content.length}" />`
+          const frame = `<step n="${step.n}"${step.status === "error" ? ' failed="true"' : ""} offset="${offset}" total_characters="${content.length}" />`
           const next = chosen.find((s) => s.n > step.n)?.n ?? (cursor ? steps.find((s) => s.n > step.n)?.n : undefined)
           const following =
             next === undefined ? "" : `\n[More steps: read_run with message ${message} and from_step=${next}.]`
