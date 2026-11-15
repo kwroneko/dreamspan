@@ -5,7 +5,7 @@ import { ADMIN, type TestServer } from "./server.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 
 /** Entirely synthetic, also used for the review preview. */
-export const seedCardArchive = (server: TestServer) =>
+export const seedCardArchive = (server: TestServer, forkFamily = false) =>
   asUser(server, ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       const userId = (yield* api.Whoami()).id
@@ -13,8 +13,8 @@ export const seedCardArchive = (server: TestServer) =>
       const now = Date.now()
       yield* fixtureSql(server.dataDir, [
         {
-          sql: "INSERT INTO entities(id,owner_user_id,kind,created_at,archived_at) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<199) SELECT printf('archive-e-%03d',i), ?, 'card', ? - (45 + (i%4)*100)*86400000, CASE WHEN i<=5 THEN ? END FROM n",
-          params: [userId, now, now]
+          sql: "INSERT INTO entities(id,owner_user_id,kind,created_at,archived_at,forked_from_entity_id) WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<199) SELECT printf('archive-e-%03d',i), ?, 'card', ? - (45 + (i%4)*100)*86400000, CASE WHEN i<=5 THEN ? END, CASE WHEN ?=1 AND i IN(9,12) THEN 'archive-e-008' END FROM n",
+          params: [userId, now, now, forkFamily ? 1 : 0]
         },
         {
           sql: "INSERT INTO entity_revisions(id,entity_id,doc_json,doc_hash,schema_version,origin,created_at) SELECT 'archive-v-'||e.id, e.id, json_set(src.doc_json,'$.name','Pilot '||substr(e.id,-3),'$.description','A synthetic explorer of imagined islands.'), e.id, src.schema_version, 'import', e.created_at FROM entities e, entity_revisions src WHERE src.id=? AND e.id LIKE 'archive-e-%'",

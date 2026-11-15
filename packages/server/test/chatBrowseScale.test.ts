@@ -1,5 +1,6 @@
 // Synthetic cached summaries: 1,000 chats with 100 branches each. Browsing never walks
 // their messages, and sends only the requested chats. SQLite runs in the fixture worker.
+import { writeFileSync } from "node:fs"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { CHAT_SORTS } from "@rp/shared/chatBrowse.ts"
@@ -22,6 +23,12 @@ it.live(
         SELECT printf('scale-%04d', i), ?, 'rp', 'active', printf('Chat %04d', 999-i), 1000+i FROM n`,
           params: [me.id]
         },
+        {
+          sql: `INSERT INTO media_assets(id, sha256, mime, width, height, byte_size, path, created_at)
+          VALUES ('synthetic-cover', printf('%064d',0), 'image/png', 1, 1, 67, 'media/00/' || printf('%064d',0), 1)`
+        },
+        { sql: "INSERT INTO media_refs(media_id, owner_user_id) VALUES ('synthetic-cover', ?)", params: [me.id] },
+        { sql: "UPDATE chats SET cover_media_id = 'synthetic-cover'" },
         {
           sql: `INSERT INTO forks (id, chat_id, parent_fork_id, created_at, pinned_at)
         WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<99)
@@ -48,11 +55,15 @@ it.live(
         sort: "recent" as const,
         sections: [{ id: "chats" as const, limit: 20 }]
       }
+      const sorts: Record<string, number> = {}
       for (const sort of CHAT_SORTS) {
         const started = performance.now()
         const result = yield* api.GetShellForks({ ...view, browse: { filter: "branches", sort, reversed: false } })
         const elapsed = performance.now() - started
-        console.log(`Chats browse ${sort}, 100,000 branches: ${elapsed.toFixed(0)} ms`)
+        sorts[sort] = elapsed
+        process.stdout.write(`Chats browse with pictures ${sort}, 100,000 branches: ${elapsed.toFixed(0)} ms\n`)
+        if (process.env.SHELL_PICTURES_CONTROL !== "1")
+          assert.isTrue(result.sections[0]!.rows.every((row) => row.chat.picture === "synthetic-cover"))
         assert.strictEqual(result.sections[0]!.total, 1000)
         assert.lengthOf(result.sections[0]!.rows, 20)
         assert.isTrue(result.sections[0]!.rows.every((f) => f.branches === 100 && f.current))
@@ -68,6 +79,22 @@ it.live(
         // Cold includes the existing shell materialization; warm sorts reuse it.
         assert.isBelow(elapsed, sort === "recent" ? 15_000 : 3000)
       }
+      const warm: Array<number> = []
+      for (let i = 0; i < 9; i++) {
+        const start = performance.now()
+        yield* api.GetShellForks(view)
+        warm.push(performance.now() - start)
+      }
+      const measured = JSON.stringify({
+        chats: 1000,
+        branches: 100000,
+        pictures: 1000,
+        sorts,
+        warmMs: warm,
+        warmMedianMs: [...warm].sort((a, b) => a - b)[4]
+      })
+      process.stdout.write(`${measured}\n`)
+      if (process.env.CHAT_BROWSE_SCALE_OUT) writeFileSync(process.env.CHAT_BROWSE_SCALE_OUT, `${measured}\n`)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   },
   120_000

@@ -34,7 +34,7 @@ import { IconButton, PICTURE_TOGGLE, Tooltip } from "../../ui/Tooltip.tsx"
 import { forkLabel, formatMoment, OPENS_HERE_HINT } from "../chat/forks.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
-import { browseCards, mixesPersonas } from "./cardBrowse.tsx"
+import { browseCards, mixesPersonas, useGroupedFamilies } from "./cardBrowse.tsx"
 import { useSidebarBrowse } from "./useSidebarBrowse.ts"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
 import { SourceChips, SourceFiltersPanel, SourceResults, useSourceBrowse } from "../cardSources/browse.tsx"
@@ -170,7 +170,11 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
           className="flex w-full flex-1 flex-col text-left"
         >
           <span className="aspect-[2/3] w-full">
-            <GroupFaces members={fork.cast} />
+            {fork.chat.picture ? (
+              <Avatar id={fork.chat.id} name={fork.chatName} mediaId={fork.chat.picture} size="fill" />
+            ) : (
+              <GroupFaces members={fork.cast} />
+            )}
           </span>
           <span className="flex w-full min-w-0 flex-1 flex-col gap-1 p-2.5">
             <span
@@ -555,17 +559,40 @@ export function ForkRow({
                     data-layout-audit-ignore="overlap: The count tile sits partly behind the last fully visible portrait; gap: Portraits have a positive gap while the count tile intentionally overlaps the last portrait"
                     className="relative flex w-fit shrink-0 gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   >
-                    {fork.cast.slice(0, 2).map((c) => (
-                      <Avatar
-                        key={c.entityId}
-                        id={c.entityId}
-                        name={c.name}
-                        mediaId={c.avatarMediaId}
-                        crop={c.avatarCrop}
-                        size="md"
-                      />
-                    ))}
-                    <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow" />
+                    {fork.chat.picture ? (
+                      // Keep the same reserved slots at every container breakpoint. Only the
+                      // first holds the picture, so its portrait cutout keeps its shape.
+                      <>
+                        {Array.from({ length: Math.max(1, Math.min(2, fork.cast.length)) }, (_, i) => (
+                          <span key={i} data-portrait-slot className="h-12 w-8 shrink-0">
+                            {i === 0 && (
+                              <Avatar
+                                id={fork.chat.id}
+                                name={fork.chatName}
+                                mediaId={fork.chat.picture ?? null}
+                                size="md"
+                              />
+                            )}
+                          </span>
+                        ))}
+                        <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow invisible" />
+                      </>
+                    ) : (
+                      <>
+                        {fork.cast.length === 0 && <span data-portrait-slot className="h-12 w-8 shrink-0" />}
+                        {fork.cast.slice(0, 2).map((c) => (
+                          <Avatar
+                            key={c.entityId}
+                            id={c.entityId}
+                            name={c.name}
+                            mediaId={c.avatarMediaId}
+                            crop={c.avatarCrop}
+                            size="md"
+                          />
+                        ))}
+                        <PortraitOverflow remaining={fork.cast.length - 2} className="fork-row-overflow" />
+                      </>
+                    )}
                   </span>
                 </Tooltip>
               )}
@@ -974,6 +1001,7 @@ function Browser() {
   const [browse, setBrowse] = useSidebarBrowse()
   const [chatBrowse, setChatBrowse] = useChatBrowse()
   const search = browse.search
+  const grouped = useGroupedFamilies(search)
   const setSearch = (search: string) => setBrowse({ search })
   // A card source shown in the character grid; asked nothing unless it's shown (§5.1).
   const sources = useSourceBrowse(grid ? browse.source : null, browse.remote, (remote, options) =>
@@ -1160,6 +1188,7 @@ function Browser() {
           onChange={setBrowse}
           groups
           includePersonas
+          families
           sources={sources}
           onSource={(id) => setBrowse({ source: id })}
           filtersId="side-source-filters"
@@ -1175,7 +1204,7 @@ function Browser() {
       <div
         ref={listRef}
         data-shell-list
-        className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
+        className={`@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable] ${grid && !source ? "-mt-2 pt-2 scroll-py-2" : ""}`}
       >
         {grid && source ? (
           // The source's cards only: never mixed with the user's (spec/CARD-SOURCES.md §3.2).
@@ -1202,6 +1231,9 @@ function Browser() {
                 cards={browseCards(browsable(data), browse, needle)}
                 sort={browse.sort}
                 markPersonas={mixesPersonas(browse)}
+                families={
+                  grouped ? { expanded: browse.family, onToggle: (family) => setBrowse({ family }) } : undefined
+                }
                 className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
               />
               <SlotOutlet

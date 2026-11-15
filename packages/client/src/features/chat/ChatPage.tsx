@@ -41,6 +41,7 @@ import { showToast } from "../../ui/Toast.tsx"
 import { useLookingAt } from "../notices.tsx"
 import { useSidePanelPlace, useTabFocused, useTabMeta } from "../workbench/tab.tsx"
 import { tabPortrait } from "./tabPortrait.tsx"
+import { useChatPicture } from "./splitChats.ts"
 import { useSession } from "../../session.ts"
 import { CastContext, castView } from "./cast.ts"
 import { ChatSidePanel, type PanelTab, rememberPanel, usePanel } from "./ChatPanels.tsx"
@@ -1007,7 +1008,14 @@ function ChatSurface({
   const title = chatDisplayName(view)
   const place = useSidePanelPlace(wide)
   const panelOpen = panel !== null && place.show
-  useTabMeta(undefined, tabPortrait(castCharacters(view)))
+  const pictured = useChatPicture(view)
+  useTabMeta(
+    undefined,
+    tabPortrait(
+      castCharacters(view),
+      pictured && view.chat ? { id: view.chat.id, name: title, mediaId: pictured } : null
+    )
+  )
   const kindRoot = kindRootProps(useChatKindLook(view.chat?.kind))
   // A kind without summaries (a workshop) isn't offered them when it outgrows its context.
   const summariesAllowed = summarizes(view.chat)

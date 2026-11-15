@@ -1,3 +1,6 @@
+import { cardGrouping } from "./cardGrouping.tsx"
+import { groupFamilies } from "./cardFamilies.ts"
+import { GroupFamiliesToggle } from "./cardBrowse.tsx"
 import { ArchivedMatches } from "./ArchivedMatches.tsx"
 import { ArchiveUnused } from "./ArchiveUnused.tsx"
 import { archivedCardActions, cardSearchExtras } from "./homeSlots.ts"
@@ -25,6 +28,7 @@ import { CardChatsLink, CastChatsLink } from "./chatLinks.tsx"
 import { castMemberNavigation } from "../chat/presentation.tsx"
 
 export const register = () => {
+  cardGrouping.register({ id: "forks", group: groupFamilies, control: GroupFamiliesToggle })
   cardContributions.register({
     id: "cards.archive-toggle",
     placement: "archive-toggle",

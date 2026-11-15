@@ -17,8 +17,8 @@ type Scope = "branch" | "all"
 /** What the file can't hold, so nobody expects it back from a re-import. */
 const leftOut = (format: ExportFormat) =>
   format === "txt"
-    ? "Only the shown text; no pictures, reasoning, notes, summaries, deleted messages, or privacy and thread boundaries."
-    : "Not in the file: pictures, notes, summaries, edit history, deleted messages or branches, version marks, who wrote each version, status, and privacy or thread boundaries. Separate contexts and away periods become one transcript; changes during export may appear."
+    ? "Only the shown text; no pictures (the chat’s own picture included), reasoning, notes, summaries, deleted messages, or privacy and thread boundaries."
+    : "Not in the file: pictures (the chat’s own picture included), notes, summaries, edit history, deleted messages or branches, version marks, who wrote each version, status, and privacy or thread boundaries. Separate contexts and away periods become one transcript; changes during export may appear."
 
 export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
   const { session, view } = context

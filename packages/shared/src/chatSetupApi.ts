@@ -136,6 +136,11 @@ export class ShellCard extends Schema.Class<ShellCard>("ShellCard")({
   /** Null: the card is in no chat yet, and its tile starts one. */
   open: Schema.NullOr(ShellOpen),
   /**
+   * Its fork family, when it is a fork or has one: the family's first card (`CardFamily.rootEntityId`),
+   * the same for every member, binned ones between them included. Absent for a card on its own.
+   */
+  family: Schema.optionalKey(EntityId),
+  /**
    * Its Recent: the latest activity in any chat it joined (a fork's `recentAt`), imported dates
    * included, as ST's date_last_chat; null while it has none. (`card.lastMessageAt` is its own last turn.)
    */
@@ -152,7 +157,9 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
     id: ChatId,
     kind: Schema.String,
     title: Schema.String,
-    createdAt: Schema.optionalKey(Schema.Number)
+    createdAt: Schema.optionalKey(Schema.Number),
+    /** The chat's own picture (SetChatPicture), a media id; absent: its characters' faces. */
+    picture: Schema.optionalKey(Schema.String)
   }),
   leaf: Schema.NullOr(SlotId),
   /** The fork's name, else its chat's. */

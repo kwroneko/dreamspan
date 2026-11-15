@@ -1,3 +1,4 @@
+import { CardGroupingControl } from "./cardGrouping.tsx"
 // Shared by the registered home and sidebar character grids. Measure intrinsic controls,
 // then let container queries place them without depending on the window or sidebar width.
 // A card source shown takes over the search, the sort and a Filters button at the row's end.
@@ -113,6 +114,7 @@ export function CardGridControls({
                   className="items-start! [&>button]:mt-[3px]"
                 />
                 <IncludePersonas browse={browse} onChange={onChange} />
+                <CardGroupingControl browse={browse} />
               </>
             )}
           </div>

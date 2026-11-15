@@ -78,6 +78,7 @@ interface Party {
   readonly chat: OwnChat
   /** A chat with one message and nothing generating in it. */
   readonly quiet: { readonly chatId: ChatId; readonly slotId: SlotId }
+  readonly pictureSplit: { readonly chatId: ChatId; readonly forkId: ForkId }
   /** A card, in the persona folder, with a greeting. */
   readonly cardId: EntityId
   /** A message queued behind the generating reply. */
@@ -587,6 +588,33 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   SetChatPin: {
     probe: (actor, owner) =>
       refused(actor.api.SetChatPin({ chatId: owner.chat.chatId, leaf: owner.chat.slotId, pinned: true }), "NotFound")
+  },
+  SetChatPicture: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        for (const suffix of ["", "&width=32"]) {
+          const path = `/library/media?id=${owner.editor.avatarMediaId}${suffix}`
+          assert.strictEqual((yield* httpGet(owner, path)).status, 200)
+          assert.strictEqual((yield* httpGet(actor, path)).status, 404)
+        }
+        yield* refused(actor.api.SetChatPicture({ chatId: owner.chat.chatId, mediaId: null }), "NotFound")
+        yield* refused(
+          actor.api.SetChatPicture({ chatId: owner.chat.chatId, mediaId: owner.editor.avatarMediaId }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SetChatPicture({ chatId: actor.quiet.chatId, mediaId: owner.editor.avatarMediaId }),
+          "NotFound"
+        )
+        yield* refused(actor.api.GetSplitChats({ chatId: owner.chat.chatId, forkId: null }), "NotFound")
+        const splitId = owner.pictureSplit.forkId as unknown as ChatId
+        yield* refused(actor.api.SetChatPicture({ chatId: splitId, mediaId: null }), "NotFound")
+        yield* refused(actor.api.SetChatPicture({ chatId: splitId, mediaId: owner.editor.avatarMediaId }), "NotFound")
+        yield* refused(
+          actor.api.GetSplitChats({ chatId: owner.pictureSplit.chatId, forkId: owner.pictureSplit.forkId }),
+          "NotFound"
+        )
+      })
   },
   SetHomePinsCollapsed: {
     probe: (actor, owner) =>
@@ -4382,6 +4410,20 @@ const seed = Effect.gen(function* () {
         lease: importId
       })
       const notices = yield* Notices
+      // Seed pictures and a split before the isolation probes take their no-mutation snapshots.
+      yield* api.SetChatPicture({ chatId: chat.id, mediaId: opened.doc.avatar_media_id as string })
+      const pictureChat = yield* api.CreateChat({ title: "Private pictured split" })
+      const pictureFork = yield* api.CreateFork({
+        chatId: pictureChat.id,
+        fromForkId: pictureChat.currentForkId!,
+        atSlotId: null,
+        name: "Private split"
+      })
+      yield* api.SetSplitChat({ forkId: pictureFork.fork.id, split: true })
+      yield* api.SetChatPicture({
+        chatId: pictureFork.fork.id as unknown as ChatId,
+        mediaId: opened.doc.avatar_media_id as string
+      })
       return {
         importRecordId: importRecord.recordId,
         binItemId: binItem.id,
@@ -4409,6 +4451,7 @@ const seed = Effect.gen(function* () {
           rolloutId: inspectorRollout
         },
         quiet: { chatId: quiet.id, slotId: quietSent.entry.slotId },
+        pictureSplit: { chatId: pictureChat.id, forkId: pictureFork.fork.id },
         connectionId: connection.id,
         credentialId: credential.id,
         modelId: model.id,

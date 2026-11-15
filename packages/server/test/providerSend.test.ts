@@ -10,16 +10,9 @@ import { Effect, Stream } from "effect"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { eventually, finished } from "./support/generation.ts"
-import { png } from "./formats/support.ts"
+import { sizedPng } from "./formats/support.ts"
 import { anthropicSse, type Recorded, startMockProvider } from "./support/mockProvider.ts"
 import { countingModelKey } from "../src/providers/countingModel.ts"
-
-const sized = (width: number, height: number) => {
-  const bytes = Buffer.from(png())
-  bytes.writeUInt32BE(width, 16)
-  bytes.writeUInt32BE(height, 20)
-  return bytes
-}
 
 const upload = (bytes: Uint8Array) =>
   Effect.gen(function* () {
@@ -115,7 +108,7 @@ describe("what reaches a provider", () => {
         Effect.forkScoped
       )
       const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
-      const image = yield* upload(sized(1000, 1000))
+      const image = yield* upload(sizedPng(1000, 1000))
       yield* api.SetComposerImage({
         chatId: chat.id,
         draftId: draft.id,
@@ -189,7 +182,7 @@ describe("what reaches a provider", () => {
         Effect.forkScoped
       )
       const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
-      const image = yield* upload(sized(1000, 1000))
+      const image = yield* upload(sizedPng(1000, 1000))
       yield* api.SetComposerImage({
         chatId: chat.id,
         draftId: draft.id,

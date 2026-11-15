@@ -2155,6 +2155,8 @@ export const baseline: ReadonlyArray<string> = [
     -- The fork it was made from; null for a chat's first. Its place in the fork tree is in fork_labels.
     parent_fork_id TEXT REFERENCES forks(id) DEFERRABLE INITIALLY DEFERRED,
     split_chat INTEGER NOT NULL DEFAULT 0 CHECK (split_chat IN (0, 1)),
+    -- The picture of the chat split off at this fork (split_chat = 1); the original chat's is chats.cover_media_id.
+    cover_media_id TEXT REFERENCES media_assets(id),
     -- The chat's state_seq when it was made.
     branched_at INTEGER NOT NULL DEFAULT 0,
     -- The message it was made at: its history is root to base, then what it appends.

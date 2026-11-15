@@ -95,6 +95,9 @@ const BranchControl = deferred<Parameters<typeof import("./BranchControl.tsx").B
 )
 const Composer = lazy(() => import("./Composer.tsx").then((m) => ({ default: m.Composer })))
 const Summary = lazy(() => import("./TimelineSummary.tsx").then((m) => ({ default: m.TimelineSummary })))
+const ChatPictureSetting = deferred<Parameters<typeof import("./ChatPicture.tsx").ChatPictureSetting>[0]>(() =>
+  import("./ChatPicture.tsx").then((m) => ({ default: m.ChatPictureSetting }))
+)
 const ChatIdentity = deferred<Parameters<typeof import("./ThisChatTab.tsx").ChatIdentity>[0]>(() =>
   import("./ThisChatTab.tsx").then((m) => ({ default: m.ChatIdentity }))
 )
@@ -156,6 +159,7 @@ export const registerPresentation = () => [
   pendingCastSections.register({ id: "cast.add-characters", order: 10, component: PendingCastAddSection }),
   // This chat leads with what a person touches; what few need comes after, collapsed.
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
+  chatSettingSections.register({ id: "settings.picture", order: 2, component: ChatPictureSetting }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
   chatSettingSections.register({ id: "settings.context", order: 15, component: ContextSetting }),
   chatSettingSections.register({ id: "settings.external-media", order: 17, component: ChatExternalMedia }),

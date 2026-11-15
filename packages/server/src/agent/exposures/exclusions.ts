@@ -268,6 +268,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetExternalMedia: "User-only security, consent, account, credential or network configuration.",
   SetGenerationDefaults: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetGlobalRegex: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  SetChatPicture: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetHomePinsCollapsed: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetHtmlApproval: "User-only security, consent, account, credential or network configuration.",
   SetImageExcluded: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",

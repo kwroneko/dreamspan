@@ -306,6 +306,9 @@ export function ChatHeader({
   return (
     <ChatHeaderFrame
       characters={characters}
+      picture={
+        split?.group.picture && name ? { id: split.group.id, name: name.name, mediaId: split.group.picture } : null
+      }
       loading={loading}
       title={
         <>
@@ -374,12 +377,15 @@ export function PendingChatHeader({
 /** The header's row, the same for a saved chat and one not made yet. */
 function ChatHeaderFrame({
   characters,
+  picture = null,
   loading,
   title,
   about,
   actions
 }: {
   characters: ReadonlyArray<CastCard>
+  /** The chat's own picture, shown in place of its characters' faces. */
+  picture?: { readonly id: string; readonly name: string; readonly mediaId: string } | null
   loading: boolean
   title: ReactNode
   about: string | null
@@ -417,6 +423,20 @@ function ChatHeaderFrame({
         </Tooltip>
         {loading ? (
           <span className="h-12 w-8 shrink-0 animate-pulse rounded-sm bg-surface-raised motion-reduce:animate-none @max-[40rem]/header:hidden" />
+        ) : picture ? (
+          <Tooltip label="This chat’s picture. Opens This chat in the side panel." side="bottom">
+            <button
+              type="button"
+              data-chat-picture
+              aria-label="Show this chat’s settings"
+              className="inline-flex shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus @max-[40rem]/header:hidden"
+              onClick={() =>
+                void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel: "chat" }) })
+              }
+            >
+              <Avatar id={picture.id} name={picture.name} mediaId={picture.mediaId} size="md" />
+            </button>
+          </Tooltip>
         ) : (
           characters.length > 0 && (
             <div
