@@ -5,7 +5,7 @@
 import { assert, it } from "@effect/vitest"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Effect, Layer, type Scope } from "effect"
+import { Effect, Layer, Stream, type Scope } from "effect"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
 import { ProviderRegistry } from "../src/providers/registry.ts"
 import { Writer } from "../src/db/Database.ts"
@@ -581,5 +581,79 @@ live(
     )
     yield* refused(token, "settings")
     yield* refused(token, "settings")
+  })
+)
+
+// stack1115: draft ledger writes are bookkeeping, while changes to sent history/configuration
+// invalidate the handle even when another branch supplied that operation.
+live(
+  "Write for me is not an Auto turn, preserves its token, and cannot revive it after a foreign edit",
+  Effect.gen(function* () {
+    const { api, made, turn, refused, requests, tip } = yield* scene
+    const token = yield* turn(null)
+    const before = yield* api.GetChat({ chatId: made.chat.id })
+    const cast = yield* api.GetCast({ chatId: made.chat.id, slotId: null })
+    const draft = yield* api.OpenComposer({ chatId: made.chat.id, forkId: made.chat.currentForkId })
+    const target = {
+      kind: "draft" as const,
+      chatId: made.chat.id,
+      forkId: made.chat.currentForkId!,
+      leafSlotId: tip(),
+      draftId: draft.id
+    }
+    const count = requests().length
+    yield* api.WriteForMe({ target }).pipe(Stream.runDrain)
+    assert.strictEqual(requests().length, count + 1)
+    assert.include(requests().at(-1)!.raw!, "Tobin")
+    assert.deepStrictEqual(yield* api.GetChat({ chatId: made.chat.id }), before)
+    assert.deepStrictEqual(yield* api.GetCast({ chatId: made.chat.id, slotId: null }), cast)
+    const next = yield* turn(token)
+    yield* api.SetMessageHidden({ slotId: made.sent.slotId, hidden: true })
+    // A successful draft's FinishRollout cannot be mistaken for the Auto reply's own save.
+    yield* api.WriteForMe({ target: { ...target, leafSlotId: tip() } }).pipe(Stream.runDrain)
+    yield* refused(next, "changed")
+    yield* refused(token, "replayed")
+  })
+)
+
+live(
+  "multi-delete and summary-model choices end Auto; composer writes keep it going",
+  Effect.gen(function* () {
+    const { api, made, turn, refused, ended } = yield* scene
+    const forkId = made.chat.currentForkId!
+    const draft = yield* api.OpenComposer({ chatId: made.chat.id, forkId })
+    const first = yield* turn(null)
+    yield* api.SaveComposer({
+      chatId: made.chat.id,
+      draftId: draft.id,
+      rowVersion: draft.rowVersion,
+      session: draft.session,
+      next: false,
+      operationId: "stack-draft",
+      content: "Unsent text"
+    })
+    yield* turn(first)
+    yield* ended(
+      "summary model",
+      api.ChangeCast({
+        chatId: made.chat.id,
+        forkId,
+        slotId: null,
+        change: { _tag: "SummaryModel", model: { connection: made.connection.id, model: made.model.id } }
+      })
+    )
+    yield* ended(
+      "account summary model",
+      api.ChangeGenerationDefaults({
+        change: { summarizer: { connection: made.connection.id, model: made.model.id } }
+      }),
+      "settings"
+    )
+    const token = yield* turn(null)
+    const items = yield* api.DeleteMessages({ forkId, slotIds: [made.sent.slotId, made.version.slotId] })
+    yield* refused(token, "changed")
+    const restoreToken = yield* turn(null)
+    yield* api.RestoreBinItems({ itemIds: items.map((i) => i.id) })
+    yield* refused(restoreToken, "changed")
   })
 )

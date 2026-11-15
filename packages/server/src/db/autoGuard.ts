@@ -149,6 +149,17 @@ const statements: ReadonlyArray<string> = [
   `CREATE TEMP TABLE IF NOT EXISTS auto_touches (kind TEXT NOT NULL, chat_id TEXT, ref TEXT)`,
   // A new message is on no branch's path until a tip moves; an inserted one sits below its anchor.
   trigger("slot_insert", "INSERT", "slots", touch(SLOT, "NEW.chat_id", "NEW.parent_slot_id"), "NEW.inserted = 1"),
+  // Imported suffixes can sit beside a local continuation without moving its tip. Versions
+  // are inserted before their new slots, so version_insert cannot place them yet. Publication
+  // of imported content ends every run in that chat; staging never writes either table.
+  trigger(
+    "import_slot",
+    "INSERT",
+    "slots",
+    touch(CHAT, "NEW.chat_id"),
+    "EXISTS (SELECT 1 FROM versions WHERE id = NEW.selected_version_id AND origin = 'imported')"
+  ),
+  trigger("import_version", "INSERT", "versions", touch(CHAT, slotChat("NEW.slot_id")), "NEW.origin = 'imported'"),
   trigger(
     "slot",
     `UPDATE OF ${SLOT_COLUMNS.join(", ")}`,

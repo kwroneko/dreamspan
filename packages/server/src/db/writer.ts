@@ -23,7 +23,8 @@ import { RpcServer } from "effect/rpc"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "./connection.ts"
 import { Migrations } from "./migrations.ts"
-import { WriteOps } from "./ops.ts"
+import { WriteOps, WriteOpsChat, WriteOpsLibrary } from "./ops.ts"
+import type { OpsOf } from "./opsOf.ts"
 import { defaultBinLimits, type BinLimits } from "@rp/shared/bin.ts"
 import { makeAccountWriteHandlers } from "./accounts.ts"
 import { makeBin } from "./bin.ts"
@@ -51,7 +52,7 @@ const {
   readonly binLimits?: BinLimits
 }
 
-const handlers = WriteOps.toLayer(
+const handlers = Layer.unwrap(
   Effect.gen(function* () {
     // After the migrations, which make the tables it watches.
     yield* installStorageKindValidation
@@ -128,11 +129,12 @@ const handlers = WriteOps.toLayer(
       )
     )
     // Each says who is writing, for the Auto runs its writes reach (db/autoGuard.ts).
-    return attributed(served)
+    const tracked = attributed(served)
+    return Layer.merge(WriteOpsChat.toLayer(Effect.succeed(tracked)), WriteOpsLibrary.toLayer(Effect.succeed(tracked)))
   })
 )
 
-RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
+RpcServer.layer<OpsOf<typeof WriteOps>>(WriteOps, { concurrency: 1 }).pipe(
   Layer.provide(handlers),
   Layer.provide(Migrations),
   Layer.provide(writerConnection(dbPath)),

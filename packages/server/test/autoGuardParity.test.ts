@@ -45,7 +45,7 @@ it.live(
           requests[name] = mock
             .requests()
             .filter((request) => request.path === "/v1/chat/completions")
-            .map((request) => request.body)
+            .map((request) => request.raw)
         }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
       }
       if (process.env.AUTO_GUARD_PARITY_OUT)

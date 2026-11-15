@@ -295,3 +295,49 @@ it.effect("device settings and ordinary bookkeeping leave authorization intact",
     })
   )
 )
+
+// stack1115: both import writers insert their new versions before inserting the slots,
+// and can preserve a local continuation rather than moving this run's fork tip.
+for (const kind of ["new suffix", "alternative"] as const)
+  it.effect(`imported ${kind} publication fences Auto even without moving the local tip`, () =>
+    run(
+      Effect.gen(function* () {
+        const { sql, start, write, refused } = yield* setup
+        const token = yield* start
+        yield* write(
+          "StImportCommitChat",
+          {},
+          Effect.gen(function* () {
+            const slot = kind === "alternative" ? "s" : "imported-slot"
+            yield* sql`INSERT INTO version_records (id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,authoring_fork_id)
+          VALUES ('imported-version',${slot},${kind === "alternative" ? 1 : 0},'complete','model','Imported content','verbatim','imported',2,2,'chat')`
+            if (kind === "new suffix")
+              yield* sql`INSERT INTO slots (id,chat_id,fork_id,parent_slot_id,depth,selected_version_id,created_at)
+            VALUES ('imported-slot','chat','chat','s',1,'imported-version',2)`
+          })
+        )
+        yield* refused(token)
+      })
+    )
+  )
+
+it.effect("publishing imported content in another chat leaves the Auto handle valid", () =>
+  run(
+    Effect.gen(function* () {
+      const { sql, start, write } = yield* setup
+      yield* sql`INSERT INTO chats (id,owner_user_id,kind,status,created_at) VALUES ('other','u','rp','active',1)`
+      const token = yield* start
+      yield* write(
+        "StImportCommitBatch",
+        {},
+        Effect.gen(function* () {
+          yield* sql`INSERT INTO version_records (id,slot_id,ordinal,status,writer,content,macro_mode,origin,created_at,updated_at,authoring_fork_id)
+        VALUES ('other-version','other-slot',0,'complete','model','Imported elsewhere','verbatim','imported',2,2,'other')`
+          yield* sql`INSERT INTO slots (id,chat_id,fork_id,depth,selected_version_id,created_at)
+        VALUES ('other-slot','other','other',0,'other-version',2)`
+        })
+      )
+      yield* checkAutoTurn(sql, at, token)
+    })
+  )
+)

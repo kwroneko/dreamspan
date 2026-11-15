@@ -5,11 +5,11 @@
 // character's later request has only what it was there for, in a plain group chat and after
 // threads were joined; a wrong name is refused and corrected; the write happens once.
 import { assert, describe, it } from "@effect/vitest"
-import type { EntityId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import { NewVersion, type EntityId, type ForkId, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { awayAt } from "@rp/shared/knowledge.ts"
 import { foldState, type StateEventData } from "@rp/shared/state.ts"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -229,6 +229,7 @@ const scene = (
       made,
       ids,
       bodies,
+      requests: mock.requests,
       say,
       turn,
       swipe,
@@ -611,5 +612,108 @@ it.live(
       yield* f.autoTurn(first, "Mira", { message: "Mira answers.", present: ["Mira", "Wren", "Ash"] })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
+  120_000
+)
+
+// stack1115: a real send_message presence record followed by a separate-history join.
+it.live(
+  "Write for me after present and a separate merge sends the user view without changing presence",
+  () =>
+    run((dataDir) =>
+      Effect.gen(function* () {
+        const t = yield* scene(dataDir, "required", [{ message: "PRIVATEVAULT739", present: ["Mira", "Ash"] }])
+        const source = yield* t.writer.CreateChat({
+          userId: t.userId,
+          kind: "rp",
+          status: "active",
+          title: "Pier",
+          participants: [t.ids.Ash!],
+          greeting: null
+        })
+        yield* t.writer.AppendMessage({
+          userId: t.userId,
+          chatId: source.id,
+          forkId: source.currentForkId!,
+          parentSlotId: null,
+          branch: false,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: t.ids.Ash!,
+            writer: "model",
+            content: "PIERONLY456",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "generated"
+          })
+        })
+        const merge = {
+          chatId: t.chatId,
+          forkId: t.forkId,
+          at: null,
+          source: { chatId: source.id, forkId: source.currentForkId! },
+          includeLeftOut: true,
+          timelines: "separate" as const
+        }
+        const preview = yield* t.api.PreviewChatMerge(merge)
+        yield* t.api.MergeChat({ ...merge, title: preview.sourceTitle, framing: null, digest: preview.digest })
+        const chat = yield* t.api.GetChat({ chatId: t.chatId })
+        const cast = yield* t.api.GetCast({ chatId: t.chatId, forkId: t.forkId, slotId: null })
+        const path = yield* t.api.ReadPath({
+          chatId: t.chatId,
+          forkId: t.forkId,
+          leafSlotId: null,
+          range: { _tag: "Bottom" },
+          limit: 100
+        })
+        const draft = yield* t.api.OpenComposer({ chatId: t.chatId, forkId: t.forkId })
+        const target = {
+          kind: "draft" as const,
+          chatId: t.chatId,
+          forkId: t.forkId,
+          leafSlotId: chat.activeLeafSlotId,
+          draftId: draft.id
+        }
+        yield* t.api.WriteForMe({ target }).pipe(Stream.runDrain)
+        const raw = t.requests().at(-1)!.raw!
+        assert.include(raw, "PRIVATEVAULT739")
+        assert.include(raw, "PIERONLY456")
+        assert.include(raw, "Tobin")
+        assert.isUndefined(JSON.parse(raw).tools)
+        assert.deepStrictEqual(yield* t.api.GetChat({ chatId: t.chatId }), chat)
+        assert.deepStrictEqual(yield* t.api.GetCast({ chatId: t.chatId, forkId: t.forkId, slotId: null }), cast)
+        assert.deepStrictEqual(
+          yield* t.api.ReadPath({
+            chatId: t.chatId,
+            forkId: t.forkId,
+            leafSlotId: null,
+            range: { _tag: "Bottom" },
+            limit: 100
+          }),
+          path
+        )
+        // Disable the agent planner to compare to the ordinary plain user-turn transport.
+        yield* t.api.ChangeCast({
+          chatId: t.chatId,
+          forkId: t.forkId,
+          slotId: null,
+          change: { _tag: "AgentEnabled", on: false }
+        })
+        const sent = yield* posted(
+          t.api.Generate({
+            chatId: t.chatId,
+            forkId: t.forkId,
+            parentSlotId: chat.activeLeafSlotId,
+            branch: false,
+            speakerEntityId: cast.playedByMe[0]!
+          })
+        )
+        yield* eventually(() => finished(t.made.events, sent.entry.version.id) !== undefined)
+        assert.strictEqual(
+          t.requests().at(-1)!.raw,
+          raw,
+          "draft bytes equal the stored user turn at the same causal boundary"
+        )
+      })
+    ),
   120_000
 )
