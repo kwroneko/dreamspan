@@ -210,6 +210,10 @@ export interface CardPickerProps extends PickerBodyProps {
   /** "New card…" at the end of the list. */
   readonly create?: NewDocument | undefined
   readonly createPersona?: NewDocument | undefined
+  /** Lists personas alone, with no filter to change it: for choosing who the user is. */
+  readonly personasOnly?: boolean | undefined
+  /** A row's first tooltip line where choosing does something else than opening it in an editor. */
+  readonly rowHint?: ((card: { readonly persona: boolean; readonly current: boolean }) => string) | undefined
 }
 
 /** The registered card and persona switcher body (`card.picker`). */
@@ -272,11 +276,13 @@ export function CardPicker({
   createPersona,
   onChosen,
   focus,
-  focusRef
+  focusRef,
+  personasOnly = false,
+  rowHint
 }: CardPickerProps) {
   const shell = useAtomValue(shellAtom)
   const [remembered, update] = useCardSwitcherView()
-  const [filter, setFilter] = useState<CardBrowse["filter"]>(persona ? "personas" : "all")
+  const [filter, setFilter] = useState<CardBrowse["filter"]>(persona || personasOnly ? "personas" : "all")
   const browse: CardBrowse = { ...remembered, filter }
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
@@ -298,9 +304,11 @@ export function CardPicker({
     ),
     ...(marked && card.persona ? { badge: <PersonaBadge /> } : {}),
     tooltip: lines([
-      card.card.refId === value
-        ? "Shown in this editor"
-        : `Opens this ${card.persona ? "persona" : "card"} in this editor`,
+      rowHint
+        ? rowHint({ persona: card.persona, current: card.card.refId === value })
+        : card.card.refId === value
+          ? "Shown in this editor"
+          : `Opens this ${card.persona ? "persona" : "card"} in this editor`,
       `Created ${exactTime(card.createdAt)}`,
       card.recentAt === null ? "In no chat yet" : `Last chat ${exactTime(card.recentAt)}`
     ])
@@ -315,7 +323,7 @@ export function CardPicker({
         inputRef={focus === "search" ? focusRef : search}
         controls={listId}
       />
-      {data && (
+      {data && !personasOnly && (
         <CardBrowseBar
           data={data}
           browse={browse}

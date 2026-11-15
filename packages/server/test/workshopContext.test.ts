@@ -178,8 +178,9 @@ describe("workshop context", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  // 36k: the combined workshop toolset (presets, lorebooks and chat rewrites too) leaves turn two room to carry.
-  for (const window of [24_000, 36_000])
+  // 37k: the combined workshop toolset (presets, lorebooks and chat rewrites too, and load_skill with its
+  // index) leaves turn two room to carry.
+  for (const window of [24_000, 37_000])
     it.live(`elision and protected newest results with a ${window} window`, () => {
       const config = testConfig()
       return Effect.gen(function* () {

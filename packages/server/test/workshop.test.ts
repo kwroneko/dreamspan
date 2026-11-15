@@ -244,6 +244,8 @@ describe("workshop", () => {
           ...PLUGIN_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
+          // Every tool from the start still offers the skills' instructions (spec/TOOL-LOADING.md §5).
+          "load_skill",
           "send_message"
         ])
         assert.deepStrictEqual(bodies[1]!.tools, first.tools)
@@ -528,6 +530,8 @@ describe("workshop", () => {
           ...PLUGIN_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
+          // Every tool from the start still offers the skills' instructions (spec/TOOL-LOADING.md §5).
+          "load_skill",
           "send_message"
         ]
       )

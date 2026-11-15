@@ -30,14 +30,18 @@ describe("workshop card and persona", () => {
       assert.isEmpty(yield* api.ListLibrary({ kind: "card" }))
       assert.isEmpty(yield* api.ListLibrary({ kind: "preset" }))
       assert.isNull((yield* api.GetWorkshopDefaults({})).persona)
+      // The start card says the first workshop makes one; afterwards it doesn't.
+      assert.isTrue((yield* api.GetWorkshopDefaults({})).makesPersona)
       const first = yield* api.CreateWorkshop({})
       const persona = (yield* api.GetWorkshopDefaults({})).persona!
+      assert.isUndefined((yield* api.GetWorkshopDefaults({})).makesPersona)
       assert.deepStrictEqual((yield* stateOf(api, first)).playedByMe, [persona])
       yield* (yield* Writer).DeleteEntity({ userId: me.id, entityId: persona as EntityId })
       for (let n = 0; n < 2; n++) {
         const next = yield* api.CreateWorkshop({})
         assert.isEmpty((yield* stateOf(api, next)).playedByMe)
         assert.isNull((yield* api.GetWorkshopDefaults({})).persona)
+        assert.isUndefined((yield* api.GetWorkshopDefaults({})).makesPersona)
         assert.lengthOf(yield* api.ListLibrary({ kind: "card" }), 1)
       }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

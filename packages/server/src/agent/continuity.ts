@@ -143,7 +143,10 @@ export const previousRun = Effect.fnUntraced(function* (
     } as const
   // Loading results belong to this exact catalog and skill material. A new card or edited
   // skill must not acquire the previous run's loads, instructions or cached personality.
-  if (snapshot.agent?.tools.some((t) => t.deferred) || fresh.agent?.tools.some((t) => t.deferred)) {
+  // Every-tool runs offer skills too (load_skill without deferred tools), under the same rule.
+  const loads = (s: ContinuousSnapshot) =>
+    s.agent?.tools.some((t) => t.deferred) === true || (s.agent?.cardSkills?.length ?? 0) > 0
+  if (loads(snapshot) || loads(fresh)) {
     if (
       !isDeepStrictEqual(snapshot.agent?.tools, fresh.agent?.tools) ||
       !isDeepStrictEqual(snapshot.agent?.cardSkills, fresh.agent?.cardSkills) ||

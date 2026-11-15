@@ -1,4 +1,4 @@
-**Built/superseded worklcm1 (2026-11-13):** The owner closed WORKSHOP §10 question 4: “the agent NEEDS LCM summaries. It was INVENTED FOR CODING AGENTS.” ARCHITECTURE §16, “Workshop transcript summaries”, replaces §2's old default elision/timeline-only summary policy: new workshops enable model-sized LCM, completed summaries include agent steps, a run compacts before its next request, and tool results share an aggregate turn budget. The `summaries` marker in §4.2 is now filled. These implemented portions and §7 question 2 are obsolete as implementation proposals; the remaining skills markers and creation pickers retain their status.
+**Built/superseded worklcm1 (2026-11-13):** The owner closed WORKSHOP §10 question 4: “the agent NEEDS LCM summaries. It was INVENTED FOR CODING AGENTS.” ARCHITECTURE §16, “Workshop transcript summaries”, replaces §2's old default elision/timeline-only summary policy: new workshops enable model-sized LCM, completed summaries include agent steps, a run compacts before its next request, and tool results share an aggregate turn budget. The `summaries` marker in §4.2 is now filled. These implemented portions and §7 question 2 are obsolete as implementation proposals. The skills markers and creation pickers were built by wsb2 (2026-11-15, §6) and are obsolete as proposals too.
 
 # Workshop context: window, long runs, history tools, the preset
 
@@ -143,8 +143,8 @@ The seeded **Workshop** preset is an ordinary library preset (`entity_revisions.
 | Assistant | The card the user talks to: its description, personality and the rest of its card slots | `charDefinitions` and the other card markers, as in a story preset. **[D]** the card stays ("it can just be a regular card") |
 | Workspace instructions | The user's standing instructions for working in this app ("my cards use second person", "never touch presets marked Final"), as reference-harness's `AGENTS.md` | A prompt, `workspaceInstructions`, whose text is the user's own |
 | Summaries | Where the summary layer goes | A marker, `summaries`; until the assembler fills it, the layer goes before the history as in stories |
-| Skills | The list of skills the assistant can load | A marker, `skillsIndex`, for `job/toolload1` to fill |
-| Card skills | Skills and instructions the assistant's card carries | A marker, `cardSkills`, for the same |
+| Skills | The installed skills the assistant can load, each with what it's for | A marker, `skillsIndex` (built, wsb2) |
+| Card skills | The names of the skills the assistant's card carries; their instructions reach the model only once the user allows one | A marker, `cardSkills` (built, wsb2) |
 | History | The conversation | `chatHistory`, `newestMessage` |
 | Workshop instructions | Tools, contract, what's turned off | The `workshop-instructions` stage |
 
@@ -153,7 +153,7 @@ The pieces are ordinary prompt entries a preset can move, turn off or leave out 
 ### 4.3 The workshop's card and persona [P]
 
 - **Seeds are a registry** (`workshopSeeds`, `db/workshopSeeds.ts`): each seed is a card or a preset, made once per user as an ordinary library item; the one marked default of each kind is what new workshops start with. More assistant cards are added as entries ("We will likely supply some default ones of our own"). The registry is read in the writer worker, so a plugin's registration on the main thread doesn't reach it yet.
-- **The card** is any card. `CreateWorkshop { card? }` starts with the chosen one (its greeting is the first message), else the default. Afterwards the Cast tab changes it as in any chat (Join the new card, Leave the old one). The start card has no picker yet (§6).
+- **The card** is any card. `CreateWorkshop { card? }` starts with the chosen one (its greeting is the first message), else the default. Afterwards the Cast tab changes it as in any chat (Join the new card, Leave the old one). The start card's Assistant choice picks it for that workshop (built, wsb2).
 - **The workshop persona** **[D]** is independent of the story default. `workshop.defaults.persona` holds it. The first workshop makes one, a persona card named after the account's display name (`builtin:workshop-persona@1`); it is never made again, also after the user clears or deletes it (no persona then). A persona's menu has "Set as workshop persona" / "Clear workshop persona" beside the story default's item; neither changes the other. `CreateWorkshop { persona? }` starts one workshop with another; changing the persona in a workshop's Cast changes only that workshop. Example: the story default is Tobin; the user sets Ana as workshop persona; a new story starts as Tobin, a new workshop as Ana, and switching that workshop to Tobin leaves the next workshop as Ana.
 
 ### 4.4 Converting a story preset [D capability, P details]
@@ -172,7 +172,8 @@ No new tables or columns: elided transcripts are ordinary `rollouts.transcript` 
 ## 6. Built (workctx1)
 
 - §1.2 (`assembly.response = "model"`), §1.3 (the picker's window), §1.4 (no 4,095 default), §2.2–§2.4 (the trigger, elision, workshop summaries), §3.2–§3.3 (`read_run`, the workshop's history tools and their variants), step lines with message numbers, §4.2's pieces in the seeded preset (off), §4.3 (seeds registry, card and persona at creation, the workshop persona and its menu items), §4.4 (the conversion and its dialog). See ARCHITECTURE §16, "Workshop context".
-- Not built: §2.5; filling the `summaries`, `skillsIndex` and `cardSkills` markers; a card and persona picker on the workshop start card (the server takes both).
+- Built (wsb2, 2026-11-15; obsolete as proposals, ARCHITECTURE §16 "Workshop skills in every mode"): the `skillsIndex` and `cardSkills` markers, filled with the run's skills where the preset has them on (the seeded preset keeps them off); the start card's Assistant and You choices, kept in the URL, for that workshop only. The `summaries` marker was filled by worklcm1.
+- Not built: §2.5.
 
 ## 7. Open questions
 

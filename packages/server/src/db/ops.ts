@@ -4778,7 +4778,23 @@ export class ReadOps extends RpcGroup.make(
           speakerCardOnly: Schema.Boolean,
           workshop: Schema.optionalKey(Schema.Boolean),
           stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-          response: Schema.optionalKey(Schema.Literals(["model"]))
+          response: Schema.optionalKey(Schema.Literals(["model"])),
+          /** The run's skills for the preset's skill markers (spec/WORKSHOP-CONTEXT.md §4.2). */
+          skills: Schema.optionalKey(
+            Schema.Struct({
+              kind: Schema.String,
+              registered: Schema.Array(
+                Schema.Struct({
+                  id: Schema.String,
+                  description: Schema.String,
+                  tools: Schema.Array(Schema.String),
+                  kinds: Schema.optionalKey(Schema.Array(Schema.String)),
+                  always: Schema.optionalKey(Schema.Boolean)
+                })
+              ),
+              loadable: Schema.Array(Schema.String)
+            })
+          )
         })
       ),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */

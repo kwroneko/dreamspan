@@ -19,6 +19,9 @@ const top =
   (path: FieldPath) =>
     fields.includes(String(path[0]))
 
+/** A card's skills (`extensions.rp_harness`), which the Extra tab's Skills section edits. */
+const skills = (path: FieldPath) => path[0] === "extensions" && path[1] === "rp_harness"
+
 type Panel = "definition" | "greetings" | "metadata" | "lorebook" | "notes" | "extra"
 
 const panel = (name: Panel) => {
@@ -57,7 +60,7 @@ export const registerCardTabs = () => [
     description:
       "What isn't prompt text: creator's notes, tags, creator, talkativeness in group chats, where the card came from.",
     component: panel("metadata"),
-    holds: top("creator_notes", "tags", "creator", "extensions")
+    holds: (path) => top("creator_notes", "tags", "creator", "extensions")(path) && !skills(path)
   }),
   cardEditorTabs.register({
     id: CARD_TAB_LOREBOOK,
@@ -78,8 +81,8 @@ export const registerCardTabs = () => [
     id: CARD_TAB_EXTRA,
     order: 60,
     label: "Extra",
-    description: "Regex scripts and anything else the card carries.",
+    description: "Regex scripts, skills and anything else the card carries.",
     component: panel("extra"),
-    holds: top("regex")
+    holds: (path) => top("regex")(path) || skills(path)
   })
 ]

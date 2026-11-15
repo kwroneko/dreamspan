@@ -298,6 +298,8 @@ export const compose = (input: {
     relative(id)
   }
   relative("personaDescription")
+  // A workshop's skill markers (spec/WORKSHOP-CONTEXT.md §4.2): empty, and so unsent, without a run's skills.
+  for (const id of ["skillsIndex", "cardSkills"]) if (collection[index(id)]?.content) relative(id)
   const control = input.control ?? []
   spend(control.reduce((n, m) => n + countMessage(m), 0))
   const userRelative = collection
