@@ -45,7 +45,14 @@ import { useSession } from "../../session.ts"
 import { CastContext, castView } from "./cast.ts"
 import { ChatSidePanel, type PanelTab, rememberPanel, usePanel } from "./ChatPanels.tsx"
 import { ChatHeader } from "./ChatHeader.tsx"
-import { densityMetrics, readingAnchor, type ReadingAnchor, readingDrift, readingInset } from "./readingPlace.ts"
+import {
+  adjustForReading,
+  densityMetrics,
+  readingAnchor,
+  type ReadingAnchor,
+  readingDrift,
+  readingInset
+} from "./readingPlace.ts"
 import { ChatDensityContext } from "./ChatDensity.tsx"
 import { castCharacters, chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
@@ -306,7 +313,7 @@ export function MessageList({
     const previous = virtualizer.shouldAdjustScrollPositionOnItemSizeChange
     virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
       if (readingRow === null || !list.contains(readingRow)) remember()
-      return readingRow !== null && item.index < Number(readingRow.dataset.index)
+      return adjustForReading(item, virtualizer, readingRow === null ? null : Number(readingRow.dataset.index))
     }
     // Scroll events follow the virtualizer's committed positions, including after
     // a resize batch; a real scroll picks the new reading row in the same way.

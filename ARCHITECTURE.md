@@ -3867,3 +3867,14 @@ The picked-folder re-import browser fixture waits for the newly selected import 
 before asserting its exact committed message count. A prior Imported report or a cleared refusal
 list can appear before the asynchronous upload publishes; reusing a fixture session exposes this
 ordering independently of login latency. The count/refusal assertions and deadlines stay intact.
+
+**Prepend anchoring correction (stack3).** The text-reading resize predicate retains TanStack’s
+native first-measure compensation for an unmeasured row above the fold (`adjustForReading` in
+`readingPlace.ts`). A fast older-page prepend can measure new rows before the DOM’s previous
+row indices commit; comparing only those indices suppressed estimate-to-actual corrections.
+Already measured rows keep the existing reading-text anchor for late marker/footer growth.
+The helper reads the installed virtualizer’s public size cache and logical offset/adjustment;
+it does not clear or write caches. A real-Virtualizer unit and eight ordinary-client quick
+prepend cases at both spacings, widths and themes guard this handover and retain one marker
+read. The 6,000-message/99-page prepend study verifies the unchanged 2 px anchor bound in both
+spacings; delayed-marker and density-switch frame bounds remain unchanged.

@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 // The reader's place across a change of message spacing (job reading1): the first text reaching
 // below the list's top edge is the anchor, and its drift is measured against where it was.
+import { Virtualizer } from "@tanstack/react-virtual"
 import { expect, it } from "vitest"
-import { densityMetrics, readingAnchor, readingDrift, readingInset } from "../src/features/chat/readingPlace.ts"
+import {
+  adjustForReading,
+  densityMetrics,
+  readingAnchor,
+  readingDrift,
+  readingInset
+} from "../src/features/chat/readingPlace.ts"
 
 const place = (element: Element, top: number, height: number) => {
   element.getBoundingClientRect = () =>
@@ -113,4 +120,34 @@ it("measures how far the anchor moved, by its block, or by its row until the tex
   // starts 30 px into its row.
   expect(readingInset(after, anchor, 0)).toBe(35)
   expect(readingInset(after, anchor, 7)).toBe(40)
+})
+
+it("native first measurements keep an estimated prefix anchored before the DOM row indices commit", () => {
+  const writes: number[] = []
+  const virtualizer = new Virtualizer<HTMLDivElement, Element>({
+    count: 20,
+    getScrollElement: () => null,
+    estimateSize: () => 100,
+    initialOffset: 150,
+    initialRect: { width: 400, height: 100 },
+    observeElementRect: () => () => {},
+    observeElementOffset: () => () => {},
+    scrollToFn: (offset, { adjustments }) => {
+      writes.push(offset + (adjustments ?? 0))
+    }
+  })
+  virtualizer.getVirtualItems()
+  // A prepend has updated the virtual positions, while the old first row still says index 0.
+  let readingRow = 0
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => adjustForReading(item, virtualizer, readingRow)
+  virtualizer.resizeItem(0, 200)
+  expect(virtualizer.scrollOffset).toBe(250)
+  expect(writes).toEqual([250])
+  // A new row below the fold doesn't move reading; a later marker above it still does.
+  virtualizer.resizeItem(3, 300)
+  expect(writes).toEqual([250])
+  readingRow = 1
+  virtualizer.resizeItem(0, 250)
+  expect(virtualizer.scrollOffset).toBe(300)
+  expect(writes).toEqual([250, 300])
 })

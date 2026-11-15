@@ -1,4 +1,4 @@
-**Built stack3 (2026-11-15):** §3.4’s existing chat-settings markers include branch decision switches and reply presence mode. Actual present-list changes retain the existing away/return rows. This combined Compact-reading implementation is obsolete as a proposal; ARCHITECTURE records the seams. No decision status changes.
+**Built stack3 (2026-11-15):** §3.4’s existing chat-settings markers include branch decision switches and reply presence mode. Actual present-list changes retain the existing away/return rows. The combined reading implementation also preserves native first-measure anchoring during older-page prepends. This combined Compact-reading implementation is obsolete as a proposal; ARCHITECTURE records the seams. No decision status changes.
 
 **Built review-reimport3 (2026-11-15):** §1.4 retains atomic existing-chat files with reader-prepared writes; new chats write bounded batches after complete staging, with Stop waiting for a started write, explicit partial-failure reporting, and unfinished search labels. ARCHITECTURE §13 records the independent review and limits. No decision status changes.
 

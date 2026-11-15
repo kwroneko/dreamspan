@@ -506,3 +506,49 @@ for (const width of [1440, 390] as const)
       await shoot(page, `compact-workshop-${width}-${theme}`)
       await setDensity("comfortable")
     })
+
+for (const density of ["comfortable", "compact"] as const)
+  for (const width of [1440, 390] as const)
+    for (const theme of ["light", "dark"] as const)
+      test(`older pages keep their first text while new rows are measured (${density}, ${width}px, ${theme})`, async ({
+        page
+      }, info) => {
+        test.setTimeout(120_000)
+        await setDensity(density)
+        const chat = await seed(`Prepend ${density} ${width} ${theme}`, 180)
+        let markerReads = 0
+        await page.routeWebSocket(/\/rpc$/, (socket) => {
+          const upstream = socket.connectToServer()
+          upstream.onMessage((data) => socket.send(data))
+          socket.onMessage((data) => {
+            if (typeof data === "string" && (JSON.parse(data) as { tag?: string }).tag === "GetStateMarks")
+              markerReads++
+            upstream.send(data)
+          })
+        })
+        await open(page, width, theme, `${server().url}/chats/${chat.chatId}`)
+        await expect(article(page, 180)).toBeInViewport()
+        await expect(list(page).locator(`[data-state-markers="${chat.tip}"]`)).toBeVisible()
+        await list(page).hover()
+        await page.mouse.wheel(0, -600)
+        await expect.poll(() => fromEnd(page)).toBeGreaterThan(100)
+        await page.waitForTimeout(200)
+        await list(page).evaluate((el) => el.scrollTo({ top: 0 }))
+        await expect
+          .poll(() => article(page, 121).evaluate((el) => Number(el.closest<HTMLElement>(".chat-row")!.dataset.index)))
+          .toBe(60)
+        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+        const drift = await article(page, 121).evaluate((el) => {
+          const row = el.closest(".chat-row")!
+          const list = el.closest('[data-testid="messages"]')!
+          return Math.abs(row.getBoundingClientRect().top - list.getBoundingClientRect().top - 16)
+        })
+        note(info, "prepend reading place", `${density} ${width} ${theme}: ${drift.toFixed(1)} px off`)
+        expect(drift).toBeLessThanOrEqual(2)
+        expect(markerReads).toBe(1)
+        await expectLayout(page, info, `prepend ${density} ${width} ${theme}`)
+        await page.screenshot({
+          path: info.outputPath(`prepend-${density}-${width}-${theme}.png`),
+          animations: "disabled"
+        })
+      })

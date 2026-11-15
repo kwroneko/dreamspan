@@ -1,6 +1,7 @@
 // What the message list needs for the account's message spacing (ChatDensity.tsx): its numbers
 // for the virtualizer, and the reader's place, noted before the spacing changes and found again
 // after, so the text being read stays where it is on screen.
+import type { VirtualItem, Virtualizer } from "@tanstack/react-virtual"
 import type { DisplayPrefs } from "@rp/shared/chatApi.ts"
 
 export type ChatDensity = DisplayPrefs["chatDensity"]
@@ -72,4 +73,18 @@ export const readingInset = (list: HTMLElement, anchor: ReadingAnchor, row: numb
   return block === undefined || element === null
     ? -anchor.rowOffset
     : block.getBoundingClientRect().top - element.getBoundingClientRect().top - anchor.offset
+}
+
+/** Whether a row resize moves what is being read (the native virtualizer owns the correction). */
+export const adjustForReading = (
+  item: VirtualItem,
+  virtualizer: Virtualizer<HTMLDivElement, Element>,
+  readingRow: number | null
+): boolean => {
+  // Match TanStack's native first-measure rule: a newly prepended estimate above the fold
+  // must be corrected even while the DOM still carries the previous window's row indices.
+  // Already measured rows keep the text anchor used for late marker/footer growth.
+  if (!virtualizer.itemSizeCache.has(item.key))
+    return item.start < (virtualizer.scrollOffset ?? 0) + virtualizer.scrollAdjustments
+  return readingRow !== null && item.index < readingRow
 }
