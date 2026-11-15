@@ -12,6 +12,7 @@ type Transferables = Parameters<RpcClient.Protocol["Service"]["send"]>[2]
 interface Job {
   readonly clientId: number
   readonly request: RpcMessage.RequestEncoded
+  readonly affinity: string | undefined
   readonly transferables: Transferables
   /** The request already stopped a reader once. */
   readonly crashed: boolean
@@ -109,7 +110,9 @@ export const layer = (
     jobDeadline,
     background,
     first,
-    short
+    short,
+    isolated,
+    affinity
   }: {
     name?: string
     retryCrashed?: boolean
@@ -124,6 +127,10 @@ export const layer = (
     first?: ReadonlySet<string>
     /** Bounded independent reads, after replies and before ordinary queued reads. */
     short?: ReadonlySet<string>
+    /** These reads get one separate reader; they never occupy an ordinary reader, even with size 1. */
+    isolated?: (request: RpcMessage.RequestEncoded) => boolean
+    /** Prefer the reader that last completed this key, only while it is idle. Never reserves capacity. */
+    affinity?: (request: RpcMessage.RequestEncoded) => string | undefined
   } = {}
 ) =>
   Layer.effect(
@@ -134,6 +141,8 @@ export const layer = (
         const readers: Array<Reader> = []
         const queue: Array<Job> = []
         let priorityBurst = 0
+        // Routing hints, not request data. Bounded independently of the workers' fact LRUs.
+        const routes = new Map<string, number>()
         const started = Deferred.makeUnsafe<void, RpcClientError.RpcClientError>()
         const diedBeforeStart = new Set<number>()
 
@@ -150,14 +159,32 @@ export const layer = (
                 background !== undefined &&
                 readers.filter((r) => r.job !== undefined && background.tags.has(r.job.request.tag)).length >=
                   background.max
-              const eligible = (job: Job) => !held || !background.tags.has(job.request.tag)
+              // One predicate for every candidate below: the isolated reader takes only isolated
+              // reads (and they nothing else), a read waits briefly for its idle preferred reader,
+              // and held-back background reads stay queued.
+              const eligible = (job: Job) => {
+                if ((isolated?.(job.request) === true) !== (reader.id === size)) return false
+                if (held && background.tags.has(job.request.tag)) return false
+                const preferred = job.affinity === undefined ? undefined : routes.get(job.affinity)
+                return (
+                  preferred === undefined ||
+                  preferred === reader.id ||
+                  !readers.some(
+                    (r) =>
+                      r.id === preferred && r.ready && r.job === undefined && (r.id === size) === (reader.id === size)
+                  )
+                )
+              }
               const oldest = queue.findIndex(eligible)
               const ahead =
                 first === undefined ? -1 : queue.findIndex((job) => eligible(job) && first.has(job.request.tag))
               const light =
                 short === undefined ? -1 : queue.findIndex((job) => eligible(job) && short.has(job.request.tag))
               const next = priorityBurst >= PRIORITY_BURST ? oldest : ahead >= 0 ? ahead : light >= 0 ? light : oldest
-              if (next === -1) break
+              if (next === -1) {
+                i++
+                continue
+              }
               priorityBurst = next === oldest ? 0 : priorityBurst + 1
               const job = queue.splice(next, 1)[0]!
               // Reserved before sending, so a concurrent dispatch can't pick the same reader;
@@ -175,7 +202,9 @@ export const layer = (
                     jobDeadline.terminate(reader.id)
                   }, jobDeadline.ms)
                 }
-                i++
+                // A preferred reader later in the array may now be busy: revisit earlier
+                // idle readers so another queued request can immediately fall back to them.
+                i = 0
               }
             }
           })
@@ -185,6 +214,11 @@ export const layer = (
           const job = reader.job!
           reader.job = undefined
           clearTimeout(reader.deadline)
+          if (job.affinity !== undefined && response.exit._tag === "Success") {
+            routes.delete(job.affinity)
+            routes.set(job.affinity, reader.id)
+            if (routes.size > 4096) routes.delete(routes.keys().next().value!)
+          }
           return Effect.andThen(writeResponse(job.clientId, response), dispatch)
         }
 
@@ -220,7 +254,7 @@ export const layer = (
         const onStart = (reader: Reader) =>
           Effect.suspend(() => {
             reader.ready = true
-            Deferred.doneUnsafe(started, Exit.void)
+            if (reader.id < size) Deferred.doneUnsafe(started, Exit.void)
             return dispatch
           })
 
@@ -228,6 +262,7 @@ export const layer = (
           if (Cause.hasInterruptsOnly(cause)) return Effect.void
           const wasReady = reader.ready
           reader.ready = false
+          for (const [key, id] of routes) if (id === reader.id) routes.delete(key)
           clearTimeout(reader.deadline)
           const timedOut = reader.timedOut
           reader.timedOut = false
@@ -253,8 +288,15 @@ export const layer = (
           }
           // A respawn that fails while no reader is up may never succeed, so queued requests
           // fail instead of waiting on it.
-          if (!wasReady && !readers.some((other) => other.ready)) failed.push(...queue.splice(0))
-          if (!wasReady && !Deferred.isDoneUnsafe(started)) {
+          if (!wasReady) {
+            for (let n = queue.length - 1; n >= 0; n--) {
+              const job = queue[n]!
+              const separate = isolated?.(job.request) === true
+              if (!readers.some((other) => other.ready && (other.id === size) === separate))
+                failed.push(...queue.splice(n, 1))
+            }
+          }
+          if (!wasReady && reader.id < size && !Deferred.isDoneUnsafe(started)) {
             diedBeforeStart.add(reader.id)
             if (diedBeforeStart.size === size) Deferred.doneUnsafe(started, Exit.fail(error))
           }
@@ -270,7 +312,7 @@ export const layer = (
           )
         }
 
-        for (let id = 0; id < size; id++) {
+        for (let id = 0; id < size + (isolated ? 1 : 0); id++) {
           const reader: Reader = {
             id,
             worker: yield* platform.spawn<RpcMessage.FromServerEncoded, RpcMessage.FromClientEncoded>(id),
@@ -309,6 +351,7 @@ export const layer = (
               queue.push({
                 clientId,
                 request: message,
+                affinity: affinity?.(message),
                 // A buffer listed twice, e.g. one file used twice in a document, fails the send.
                 transferables: transferables && [...new Set(transferables)],
                 crashed: false,

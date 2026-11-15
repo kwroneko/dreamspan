@@ -37,6 +37,13 @@ for (const viewport of [
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(1)
     await versions.getByRole("button", { name: /choose a version/ }).click()
     const picker = page.getByRole("dialog", { name: "Versions of message #2", exact: true })
+    // A word already visible in the live reply must match while it is still streaming.
+    await expect.poll(async () => (await reply.locator(".markdown").innerText()).length).toBeGreaterThan(40)
+    const word = (await reply.locator(".markdown").innerText()).match(/[a-zA-Z]{4,}/)![0]!
+    const find = picker.getByRole("searchbox", { name: "Find in versions" })
+    await find.fill(word)
+    await expect(picker.getByRole("button", { name: /^Version 2,/ })).toBeVisible()
+    await find.fill("")
     await picker.getByRole("button", { name: "Compare", exact: true }).click()
     await picker.getByRole("checkbox", { name: "Compare version 1", exact: true }).click()
     await picker.getByRole("checkbox", { name: "Compare version 2", exact: true }).click()

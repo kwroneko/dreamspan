@@ -15,7 +15,7 @@ import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 74
+export const ASSEMBLER_VERSION = 78
 
 export type Role = "system" | "user" | "assistant"
 

@@ -33,7 +33,8 @@ const turnOn = async (page: Page) => {
 }
 const confirm = async (page: Page) => {
   await page.getByRole("dialog").getByRole("button", { name: "Turn on", exact: true }).click()
-  await expect(page.getByRole("dialog")).toHaveCount(0)
+  // Cold check, activation and client sync took 7.5 s alone and exceeded 10 s under load.
+  await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 30_000 })
 }
 const details = (id: string, scope = "instance") => `${server().url}/settings/plugins/${scope}~${id}?plugins=off`
 

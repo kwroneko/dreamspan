@@ -37,6 +37,9 @@ export const readerConnection = (filename: string) =>
       // 256 MB: a long path's slot, version and step pages at hundreds of forks (spec/FORK-COST.md §2.3).
       // SQLite allocates it as pages are read, so small libraries don't pay it.
       yield* sql.unsafe("PRAGMA cache_size = -262144")
+      // Eligible main-database pages can be read without copying them into SQLite's page cache.
+      // WAL pages still use the ordinary read path (ARCHITECTURE.md §3.5).
+      yield* sql.unsafe("PRAGMA mmap_size = 2147418112")
     })
   ).pipe(Layer.provideMerge(SqliteClient.layer({ filename, readonly: true })))
 

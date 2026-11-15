@@ -53,7 +53,9 @@ const readers = (
     heldStart = () => false,
     background,
     first,
-    short
+    short,
+    isolated,
+    affinity
   }: {
     script?: (spawn: number) => URL
     gate?: Gate
@@ -61,6 +63,8 @@ const readers = (
     background?: { readonly tags: ReadonlySet<string>; readonly max: number }
     first?: ReadonlySet<string>
     short?: ReadonlySet<string>
+    isolated?: (request: import("effect/rpc").RpcMessage.RequestEncoded) => boolean
+    affinity?: (request: import("effect/rpc").RpcMessage.RequestEncoded) => string | undefined
   } = {}
 ) => {
   let spawns = 0
@@ -70,7 +74,9 @@ const readers = (
         retryCrashed: true,
         ...(background ? { background } : {}),
         ...(first ? { first } : {}),
-        ...(short ? { short } : {})
+        ...(short ? { short } : {}),
+        ...(isolated ? { isolated } : {}),
+        ...(affinity ? { affinity } : {})
       })
     ),
     Layer.provide(
@@ -180,6 +186,42 @@ describe("reader pool", () => {
       yield* Fiber.join(shell)
     }).pipe(Effect.ensuring(gate.release), Effect.provide(readers(2, { gate, ...readerScheduling(2) })))
   })
+  for (const size of [1, 2])
+    it.live(`maintenance has its own reader with ${size} interactive readers`, () => {
+      const gate = makeGate()
+      return Effect.gen(function* () {
+        const { Hold, Count } = yield* Readers
+        const maintenance = yield* Effect.forkChild(Hold())
+        yield* gate.holding
+        // No release until the interactive read answers: sharing a reader would deadlock.
+        yield* Count({ n: 1 })
+        yield* gate.release
+        yield* Fiber.join(maintenance)
+      }).pipe(Effect.provide(readers(size, { gate, isolated: (request) => request.tag === "Hold" })), Effect.scoped)
+    })
+
+  for (const priority of ["first", "short"] as const)
+    it.live(`a ${priority} maintenance read still never takes an interactive reader`, () => {
+      const gate = makeGate()
+      return Effect.gen(function* () {
+        const { Hold, Count } = yield* Readers
+        const running = yield* Effect.forkChild(Hold())
+        yield* gate.holding.pipe(stalls("the maintenance read never started"))
+        const queued = yield* Effect.forkChild(Hold())
+        yield* Effect.sleep("100 millis")
+        yield* Count({ n: 1 }).pipe(stalls("an interactive read waited for maintenance"))
+        assert.strictEqual(Atomics.load(gate.cells, 1), 1, "the second maintenance read waited for its own reader")
+        yield* gate.release
+        yield* Fiber.join(running)
+        yield* Fiber.join(queued)
+      }).pipe(
+        Effect.ensuring(gate.release),
+        Effect.provide(
+          readers(1, { gate, isolated: (request) => request.tag === "Hold", [priority]: new Set(["Hold"]) })
+        )
+      )
+    })
+
   it.live(
     "background reads leave a reader free: others behind them go first",
     () => {

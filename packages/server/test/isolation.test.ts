@@ -1192,6 +1192,7 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         yield* refused(actor.api.ChangeGenerationDefaults({ change: { preset: owner.refId } }), "NotFound")
         yield* refused(actor.api.ChangeGenerationDefaults({ change: { judge: theirs } }), "NotFound")
         yield* refused(actor.api.ChangeGenerationDefaults({ change: { fallback: theirs } }), "NotFound")
+        yield* refused(actor.api.ChangeGenerationDefaults({ change: { summarizer: theirs } }), "NotFound")
         // Another user's model on the caller's own connection is no better.
         yield* refused(
           actor.api.ChangeGenerationDefaults({
@@ -2000,6 +2001,20 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   DeleteMessage: {
     probe: (actor, owner) => refused(actor.api.DeleteMessage({ slotId: owner.chat.slotId }), "NotFound")
   },
+  DeleteMessages: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Theirs in their fork, and theirs named beside one's own in one's own fork.
+        yield* refused(
+          actor.api.DeleteMessages({ forkId: owner.chat.forkId, slotIds: [owner.chat.slotId] }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.DeleteMessages({ forkId: actor.chat.forkId, slotIds: [actor.chat.slotId, owner.chat.slotId] }),
+          "NotFound"
+        )
+      })
+  },
   InsertMessage: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -2634,6 +2649,14 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
           "NotFound"
         )
         // Their card, connection or preset into the actor's own chat.
+        for (const model of [
+          { connection: owner.connectionId, model: owner.modelId },
+          { connection: actor.connectionId, model: owner.modelId }
+        ])
+          yield* refused(
+            actor.api.ChangeCast({ chatId: actor.chat.chatId, slotId: null, change: { _tag: "SummaryModel", model } }),
+            "NotFound"
+          )
         yield* refused(
           actor.api.ChangeCast({ chatId: actor.chat.chatId, slotId: null, change: join(owner.cardId) }),
           "NotFound"
@@ -3617,6 +3640,9 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   },
   RestoreBinItem: {
     probe: (actor, owner) => refused(actor.api.RestoreBinItem({ itemId: owner.binItemId }), "NotFound")
+  },
+  RestoreBinItems: {
+    probe: (actor, owner) => refused(actor.api.RestoreBinItems({ itemIds: [owner.binItemId] }), "NotFound")
   },
   PurgeBinItem: {
     probe: (actor, owner) => refused(actor.api.PurgeBinItem({ itemId: owner.binItemId }), "NotFound")

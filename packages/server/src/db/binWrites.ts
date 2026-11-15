@@ -33,6 +33,13 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
       DeleteChat: ({ userId, chatId }) => deleting("DeleteChat", userId, bin.deleteChat(userId, chatId)),
       DeleteMessage: ({ userId, slotId, forkId }) =>
         deleting("DeleteMessage", userId, bin.deleteMessage(userId, slotId, forkId)),
+      DeleteMessages: ({ userId, forkId, slotIds }) =>
+        Effect.gen(function* () {
+          const itemIds = yield* bin.deleteMessages(userId, forkId, slotIds)
+          yield* bin.evictDeleted(userId, itemIds)
+          const rows = yield* bin.loadItems(userId, itemIds)
+          return rows.map(toBinItem)
+        }).pipe(transaction(sql, "DeleteMessages")),
       DeleteFork: ({ userId, forkId }) => deleting("DeleteFork", userId, bin.deleteFork(userId, forkId)),
       DeleteVersion: ({ userId, versionId, forkId }) =>
         deleting("DeleteVersion", userId, bin.deleteVersion(userId, versionId, forkId)),
@@ -40,6 +47,8 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
       DeleteConnection: ({ userId, connectionId }) =>
         deleting("DeleteConnection", userId, bin.deleteConnection(userId, connectionId)),
       RestoreBinItem: ({ userId, itemId }) => bin.restore(userId, itemId).pipe(transaction(sql, "RestoreBinItem")),
+      RestoreBinItems: ({ userId, itemIds }) =>
+        bin.restoreMany(userId, itemIds).pipe(transaction(sql, "RestoreBinItems")),
       PurgeBinItem: ({ userId, itemId, expectedForkIds }) =>
         bin.purge(userId, itemId, expectedForkIds).pipe(transaction(sql, "PurgeBinItem")),
       EmptyBin: ({ userId, itemIds, expectedForkIds }) =>

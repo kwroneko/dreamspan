@@ -149,7 +149,9 @@ export class AssemblySources extends Context.Service<
      * without it: everyone knew everything.
      */
     readonly stretches?: (
-      leaf?: string | null
+      leaf?: string | null,
+      /** The character's identities: only the stretches that apply to it (db/threadStretches.ts). */
+      viewers?: ReadonlyArray<string>
     ) => Effect.Effect<ReadonlyArray<{ readonly chain: string; readonly lo: number; readonly hi: number }>, SourceError>
     readonly knowers?: (versionIds: ReadonlyArray<string>) => Effect.Effect<
       ReadonlyArray<{
@@ -259,6 +261,11 @@ export interface Scripted {
   /** The scripts that changed it, in the order they ran; absent: none. */
   readonly applied?: ReadonlyArray<ScriptRef>
 }
+
+/** Layouts can expand one stored version into several independently scripted pieces. */
+export const projectedScriptKey = (entry: Pick<ProjectedEntry, "piece">) => `projected:${entry.piece}`
+export const projectedScript = (scripted: ReadonlyMap<string, Scripted> | undefined, entry: ProjectedEntry) =>
+  scripted?.get(projectedScriptKey(entry)) ?? scripted?.get(entry.entry.versionId)
 
 /** A message of the path with its role and name in this context. */
 export interface ProjectedEntry {

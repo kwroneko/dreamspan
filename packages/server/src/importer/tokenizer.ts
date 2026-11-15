@@ -1,3 +1,4 @@
+import { makeTokenMemo } from "./localTokenMemo.ts"
 import { Tokenizer } from "@huggingface/tokenizers"
 // Local text tokenizers, run in the format workers' interactive lane (ARCHITECTURE §6 "Text
 // tokens"): OpenAI's BPE encodings through tiktoken's Wasm binding. An encoding's ranks
@@ -18,6 +19,9 @@ export const LOCAL_ENCODINGS = [
   "gemma2"
 ] as const
 export type LocalEncoding = (typeof LOCAL_ENCODINGS)[number]
+
+// At most 4M UTF-16 code units and 20,000 entries across local encodings.
+const memoized = makeTokenMemo()
 
 const encoders = new Map<LocalEncoding, Promise<Tiktoken>>()
 
@@ -84,14 +88,23 @@ const runsInPieces =
 export const prepareTokenizer = async (encoding: LocalEncoding): Promise<(text: string) => number> => {
   if (encoding === "llama3") {
     const { default: tokenizer } = await import("llama3-tokenizer-js")
-    return runsInPieces((text) => (text === "" ? 0 : tokenizer.encode(text, { bos: false, eos: false }).length))
+    return memoized(
+      encoding,
+      runsInPieces((text) => (text === "" ? 0 : tokenizer.encode(text, { bos: false, eos: false }).length))
+    )
   }
   if (encoding !== "o200k_base" && encoding !== "cl100k_base") {
     const tokenizer = await hfEncoder(encoding)
-    return runsInPieces((text) => (text === "" ? 0 : tokenizer.encode(text, { add_special_tokens: false }).ids.length))
+    return memoized(
+      encoding,
+      runsInPieces((text) => (text === "" ? 0 : tokenizer.encode(text, { add_special_tokens: false }).ids.length))
+    )
   }
   const tiktoken = await encoder(encoding)
-  return runsInPieces((text) => (text === "" ? 0 : tiktoken.encode(text, [], []).length))
+  return memoized(
+    encoding,
+    runsInPieces((text) => (text === "" ? 0 : tiktoken.encode(text, [], []).length))
+  )
 }
 
 /** Batch counting and assembly use the same loaded tokenizer. */

@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import { type ResourceLimits, Worker } from "node:worker_threads"
 import { NodeWorker } from "@effect/platform-node"
 import { Cause, Context, Effect, Layer, Schema, Semaphore } from "effect"
-import { RpcClient, type RpcClientError } from "effect/rpc"
+import { RpcClient, type RpcClientError, type RpcMessage } from "effect/rpc"
 import { Worker as Workers } from "effect/workers"
 import { type BinLimits, defaultBinLimits } from "@rp/shared/bin.ts"
 import { acquireInstanceLock, checkFilesystem, databaseFile } from "./connection.ts"
@@ -104,6 +104,7 @@ const BACKGROUND_READS: ReadonlySet<string> = new Set([
  * queued, as browsing reads the history in pages. All are small but the assembly.
  */
 const REPLY_READS: ReadonlySet<string> = new Set([
+  "PlanSummaries",
   "GetSlot",
   "AssembleContext",
   "ResolveConnection",
@@ -122,11 +123,29 @@ const SHORT_READS: ReadonlySet<string> = new Set([
   "ThreadsOfFast"
 ])
 
+/** A maintenance plan (a `reason`): it runs on the separate reader, never on an ordinary one. */
+const maintenancePlan = (request: RpcMessage.RequestEncoded) =>
+  request.tag === "PlanSummaries" &&
+  typeof request.payload === "object" &&
+  request.payload !== null &&
+  "reason" in request.payload &&
+  request.payload.reason !== undefined
+
 /** One production policy, also exercised with held worker requests in the liveness tests. */
 export const readerScheduling = (readers: number) => ({
   background: { tags: BACKGROUND_READS, max: Math.max(1, readers - 1) },
   first: REPLY_READS,
-  short: SHORT_READS
+  short: SHORT_READS,
+  // A chat's plans keep to the reader that holds its kept facts, while that reader is idle.
+  affinity: (request: RpcMessage.RequestEncoded) =>
+    request.tag === "PlanSummaries" &&
+    typeof request.payload === "object" &&
+    request.payload !== null &&
+    "userId" in request.payload &&
+    "chatId" in request.payload
+      ? JSON.stringify([request.payload.userId, request.payload.chatId, maintenancePlan(request)])
+      : undefined,
+  isolated: maintenancePlan
 })
 
 /** The writer's and readers' entry points. */

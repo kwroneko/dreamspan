@@ -274,7 +274,8 @@ export function ChatSidePanel({
             label: t.label,
             avatar: t.avatar,
             icon: t.descriptor.icon,
-            note: t.note
+            note: t.note,
+            keepLabel: t.keepLabel
           }))}
           value={tab}
           onValueChange={onTab}

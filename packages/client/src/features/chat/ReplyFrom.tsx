@@ -1,3 +1,4 @@
+import { cardChoiceLabel } from "./CardVersion.tsx"
 // Who replies next (ST-GRIPES E4): the strip's "Next: Aria ▾" chip, Auto (the chat's
 // reply order, ST's natural order unless the Cast tab says otherwise: replyPolicy.ts), No one (what
 // you send gets no reply, until you choose otherwise; DESIGN §2.3) or one of the cast for one
@@ -67,7 +68,10 @@ export function NextReplyChip({
   // No one is a choice even with one character; with none, only to go back to Auto.
   const disabled = candidates.length === 0 && !noReplies
   const off = noReplies && picked === null
-  const name = (id: EntityId) => nameOf(view, id) ?? "?"
+  const name = (id: EntityId) => {
+    const card = view.cards.get(id)
+    return card ? cardChoiceLabel(card) : (nameOf(view, id) ?? "?")
+  }
   const replier = off ? null : (picked ?? next?.id ?? null)
   const who = replier === null ? (loading && !off ? "…" : "no one") : name(replier)
   // The whole round, in turn: the chip says "Next: Mira, Tobin, Wren", the hint as a sentence.
