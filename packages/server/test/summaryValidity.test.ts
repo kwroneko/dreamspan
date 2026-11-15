@@ -1,6 +1,6 @@
 // Which forks' shell summaries a write reaches (db/summaryValidity.ts), on a migrated database
-// written directly: each write in its own write transaction, then the forks whose summary's
-// stamp no longer matches the chat's. The tree: r → a → b → c (main's tip), x under a (X's
+// written directly: each write in its own write transaction, then the forks whose summary is
+// no longer valid (`summaryValidSql`). The tree: r → a → b → c (main's tip), x under a (X's
 // tip), y under b (Y's tip). Main is the chat's first fork (its id is the chat's); X and Y
 // were made from it at its sequence number 5.
 import { join } from "node:path"
@@ -9,8 +9,14 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
+import { storeSummaries } from "../src/db/forkSummaries.ts"
 import { migrations } from "../src/db/migrations.ts"
-import { settleSummaries, trackSummaryTouches } from "../src/db/summaryValidity.ts"
+import {
+  FORK_SUMMARY_FORMAT,
+  settleSummaries,
+  summaryValidSql,
+  trackSummaryTouches
+} from "../src/db/summaryValidity.ts"
 import { transaction } from "../src/db/tx.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -56,11 +62,13 @@ const setup = Effect.gen(function* () {
     yield* sql`DELETE FROM fork_summaries`
     yield* sql`INSERT INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, messages, leaf,
         end_at, cast_json, joined_json, departed_json, activity_json)
-      SELECT f.id, f.chat_id, 1, c.shell_stamp, 0, '', 0, NULL, NULL, '[]', '[]', '[]', '[]'
+      SELECT f.id, f.chat_id, ${FORK_SUMMARY_FORMAT}, c.shell_stamp, 0, '', 0, NULL, NULL, '[]', '[]', '[]', '[]'
       FROM forks f JOIN chats c ON c.id = f.chat_id`
   })
   const stale = sql<{ fork_id: string }>`SELECT s.fork_id FROM fork_summaries s JOIN chats c ON c.id = s.chat_id
-    WHERE s.stamp <> c.shell_stamp ORDER BY s.fork_id`.pipe(Effect.map((rows) => rows.map((r) => r.fork_id)))
+    WHERE NOT ${sql.literal(summaryValidSql("s", "c", "0"))} ORDER BY s.fork_id`.pipe(
+    Effect.map((rows) => rows.map((r) => r.fork_id))
+  )
   /** The forks `write`, as one write operation, leaves stale. */
   const reached = (write: Effect.Effect<unknown, unknown>) =>
     Effect.gen(function* () {
@@ -211,6 +219,126 @@ describe("per-fork summary validity", () => {
         assert.isTrue(Exit.isFailure(failed))
         yield* sql`UPDATE slots SET created_at = 6 WHERE id = 'y'`.pipe(transaction(sql, "Test"))
         assert.deepStrictEqual(yield* stale, ["Y"])
+      })
+    )
+  )
+
+  /** A summary of each fork as a read at chat stamp `stamp` would hand it to `storeSummaries`. */
+  const claim = (stamp: number, forks: ReadonlyArray<string>) => [
+    {
+      chatId: "main",
+      stamp,
+      userStamp: 0,
+      forks: JSON.stringify(
+        forks.map((forkId) => ({
+          forkId,
+          chatId: "main",
+          preview: forkId,
+          messages: 1,
+          leaf: null,
+          endAt: null,
+          split: null,
+          cast: [],
+          added: [],
+          joined: [],
+          departed: [],
+          activity: [],
+          threads: []
+        }))
+      )
+    }
+  ]
+  const chatStamp = (sql: SqlClient.SqlClient) =>
+    Effect.map(sql<{ s: number }>`SELECT shell_stamp AS s FROM chats WHERE id = 'main'`, ([row]) => row!.s)
+
+  it.effect("a summary computed before a write to another fork is stored; one the write reached isn't", () =>
+    run(
+      Effect.gen(function* () {
+        const { sql, allValid } = yield* setup
+        yield* allValid
+        const before = yield* chatStamp(sql)
+        yield* sql`DELETE FROM fork_summaries`
+        // Reaches X only, after the read at `before` began.
+        yield* sql`UPDATE slots SET created_at = 7 WHERE id = 'x'`.pipe(transaction(sql, "Test"))
+        assert.isAbove(yield* chatStamp(sql), before)
+        yield* storeSummaries(sql, "u", claim(before, FORKS)).pipe(transaction(sql, "Test"))
+        const stored = yield* sql<{ fork_id: string; stamp: number }>`SELECT fork_id, stamp FROM fork_summaries
+          ORDER BY fork_id`
+        assert.deepStrictEqual(
+          stored.map((row) => row.fork_id),
+          ["Y", "main"]
+        )
+        assert.isTrue(stored.every((row) => row.stamp === before))
+        const valid = yield* sql<{
+          fork_id: string
+        }>`SELECT s.fork_id FROM fork_summaries s JOIN chats c ON c.id = s.chat_id
+          WHERE ${sql.literal(summaryValidSql("s", "c", "0"))} ORDER BY s.fork_id`
+        assert.deepStrictEqual(
+          valid.map((row) => row.fork_id),
+          ["Y", "main"]
+        )
+      })
+    )
+  )
+
+  it.effect("settling a write moves only the stamps of the forks it reaches", () =>
+    run(
+      Effect.gen(function* () {
+        const { sql, allValid } = yield* setup
+        yield* allValid
+        const stamps = sql<{ fork_id: string; stamp: number }>`SELECT fork_id, stamp FROM fork_shell_stamps
+          ORDER BY fork_id`
+        const before = yield* stamps
+        yield* sql`UPDATE slots SET created_at = 8 WHERE id = 'y'`.pipe(transaction(sql, "Test"))
+        const after = yield* stamps
+        const now = yield* chatStamp(sql)
+        assert.deepStrictEqual(
+          after,
+          before.map((row) => (row.fork_id === "Y" ? { ...row, stamp: now } : row))
+        )
+      })
+    )
+  )
+
+  it.effect("a stamp moved without notes stales the whole chat until a noted write", () =>
+    run(
+      Effect.gen(function* () {
+        const { sql, allValid, stale } = yield* setup
+        yield* allValid
+        // As another connection would: the stamp moves, nothing is noted.
+        yield* sql`UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = 'main'`
+        yield* sql`DELETE FROM shell_moved`
+        yield* sql`DELETE FROM shell_touches`
+        assert.deepStrictEqual(yield* stale, [...FORKS].sort())
+        // A summary computed after the move can't be told from one computed before it until
+        // the stamps are noted again: storing reaches every fork first.
+        const now = yield* chatStamp(sql)
+        yield* storeSummaries(sql, "u", claim(now - 1, ["main"])).pipe(transaction(sql, "Test"))
+        assert.deepStrictEqual(yield* stale, [...FORKS].sort())
+        yield* storeSummaries(sql, "u", claim(now, FORKS)).pipe(transaction(sql, "Test"))
+        assert.deepStrictEqual(yield* stale, [])
+        // A noted write that reaches X alone, after another unnoted move: every fork.
+        yield* sql`UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = 'main'`
+        yield* sql`DELETE FROM shell_moved`
+        yield* sql`UPDATE slots SET created_at = 9 WHERE id = 'x'`.pipe(transaction(sql, "Test"))
+        assert.deepStrictEqual(yield* stale, [...FORKS].sort())
+      })
+    )
+  )
+  it.effect("a summary computed at the chat's stamp now is valid before any write was noted", () =>
+    run(
+      Effect.gen(function* () {
+        const { sql, allValid, stale } = yield* setup
+        // As summaries stored by another connection, or before the notes were installed.
+        yield* allValid
+        yield* sql`DELETE FROM chat_shell_tracked`
+        yield* sql`DELETE FROM fork_shell_stamps`
+        assert.deepStrictEqual(yield* stale, [])
+        // One computed before an unnoted move isn't.
+        yield* sql`UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = 'main'`
+        yield* sql`DELETE FROM shell_moved`
+        yield* sql`DELETE FROM shell_touches`
+        assert.deepStrictEqual(yield* stale, [...FORKS].sort())
       })
     )
   )

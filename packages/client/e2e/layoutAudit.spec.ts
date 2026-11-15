@@ -52,7 +52,7 @@ import { portraitPng } from "./support/portrait.ts"
 import { writeScaleFolder } from "./support/stScaleFolder.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { modelCatalog } from "./support/modelCatalog.ts"
-import { messageMenu } from "./support/message.ts"
+import { messageMenu, showActions } from "./support/message.ts"
 import { pluginFiles } from "./support/plugin.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
@@ -894,6 +894,19 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.locator("main")).toBeVisible()
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
+        }
+        if (process.env.LAYOUT_AUDIT_MESSAGE_TOOLBAR_ONLY === "1") {
+          await page.goto(`${server.url}/chats/${chatId}`)
+          const message = page.locator("article[data-slot]").first()
+          await expect(message).toBeVisible()
+          await showActions(message)
+          const toolbar = message.getByRole("toolbar", { name: "Message actions" }).locator("visible=true")
+          await expect(toolbar).toBeVisible()
+          await audit("message-toolbar", '[data-testid="messages"]')
+          await toolbar.getByRole("button", { name: "More actions" }).click()
+          await expect(page.getByRole("menu", { name: "More actions" })).toBeVisible()
+          await audit("message-toolbar-menu", '[role="menu"]')
+          return
         }
         if (process.env.LAYOUT_AUDIT_SUITEFIX2_ONLY === "1") {
           await go("suitefix2-pending", `/cards/${cardId}/chat`)

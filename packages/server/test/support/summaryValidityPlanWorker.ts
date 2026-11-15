@@ -18,7 +18,8 @@ const plans = await Effect.runPromise(
       apply(target, self, args) {
         const statement = Reflect.apply(target, self, args) as ReturnType<typeof sql.unsafe>
         const [query, bindings] = statement.compile()
-        if (!query.includes("INSERT INTO shell_touches") && !query.includes("UPDATE fork_summaries")) return statement
+        if (!query.includes("INSERT INTO shell_touches") && !query.includes("INSERT INTO fork_shell_stamps"))
+          return statement
         return sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, bindings).pipe(
           Effect.tap((rows) => Effect.sync(() => plans.push(rows))),
           Effect.as([])

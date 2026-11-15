@@ -210,39 +210,39 @@ interface SlotPosition {
 }
 
 /**
- * Walks up a path (`ancestorsAt`), counted in this worker. A walk from the leaf costs its
- * distance from it, so a page of `Newer` takes at most one, however many branches it
+ * Ancestor lookups (`ancestorsAt`), counted in this worker. A page of `Newer` takes
+ * at most one, however many branches it
  * crosses: the tests check the count.
  */
 export const pathWalks = { up: 0 }
 
 /**
- * The ancestors of `from` at these depths (none above `from.depth`), by depth: one walk
- * up to the smallest, so it costs the depth difference.
+ * The ancestors of `from` at these depths (none above `from.depth`), by depth.
+ * Follow chain heads to the smallest depth, then seek the requested positions without
+ * visiting every message between the window and the leaf.
  */
 const ancestorsAt = (sql: SqlClient.SqlClient, from: SlotPosition, depths: ReadonlyArray<number>) =>
-  sql<SlotPosition>`
-    WITH RECURSIVE up(id, parent, depth) AS (
-      SELECT id, parent_slot_id, depth FROM slots WHERE id = ${from.id}
-      UNION ALL
-      SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN up ON s.id = up.parent
-      WHERE up.depth > ${Math.min(...depths)}
-    )
-    SELECT id, depth FROM up WHERE ${sql.in("depth", depths)}`.pipe(
-    Effect.map((rows) => {
-      pathWalks.up++
-      return new Map(rows.map((row) => [row.depth, row.id]))
-    })
-  )
+  Effect.gen(function* () {
+    pathWalks.up++
+    if (depths.length === 0 || Math.min(...depths) > from.depth) return new Map<number, SlotId>()
+    const [slot] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM slots WHERE id = ${from.id}`
+    if (!slot) return new Map<number, SlotId>()
+    const rows = yield* sql<SlotPosition>`
+      ${pathSegments(sql, slot.chat_id, from.id, from.depth - Math.min(...depths) + 1)}
+      SELECT s.id, s.depth FROM segments g CROSS JOIN json_each(${JSON.stringify(depths)}) wanted
+      CROSS JOIN slots s ON s.chain_id = g.chain_id AND s.depth = wanted.value
+      WHERE wanted.value BETWEEN g.lo AND g.hi`
+    return new Map(rows.map((row) => [row.depth, row.id]))
+  })
 
 /**
  * Walks down from `after` towards `leaf`, at most `limit` slots, and returns the last
  * slot reached (null for none). `after` comes from a window the client read, so it's on
  * the path: a run of only children needs no check. At the first branch, the rest of
  * the window is the leaf's ancestors, found in one walk up from it. The cost is the
- * window's length, plus the distance from the leaf once if the window has a branch
+ * window's length, plus the chain heads from the leaf once if the window has a branch
  * (each branch walking up on its own cost seven seconds for 60 of them 99,000 messages
- * from the leaf). Checking `after` itself would cost its distance from the leaf on
+ * from the leaf). Checking `after` itself would repeat that lookup on
  * every page, so it isn't: a slot of this chat that isn't on the path walks down its
  * own branch instead, which shows the caller only its own chat.
  */

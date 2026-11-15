@@ -60,7 +60,14 @@ import {
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { AwayMark, StateMarks } from "@rp/shared/contextsApi.ts"
 import { StartedThreads, ThreadName, ThreadSet, ThreadStarts, ThreadsRefused } from "@rp/shared/threads.ts"
-import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
+import {
+  RoleProjectionOption,
+  ShellCards,
+  ShellFork,
+  ShellForks,
+  ShellForksView,
+  ShellLibrary
+} from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
   LcmCoverage,
@@ -545,6 +552,23 @@ const ChatSummariesAt = Schema.Struct({
 
 /** `ShellLibrary` and the summaries the read had to compute, which the caller stores (never sent to the client). */
 export const ShellLibraryRead = Schema.Struct({ ...ShellLibrary.fields, fresh: Schema.Array(ChatSummariesAt) })
+/** One complete, consistent display snapshot, shared before any summary persistence. */
+export const ShellSnapshotRead = Schema.Struct({
+  ...ShellCards.fields,
+  forks: Schema.Array(ShellFork),
+  people: Schema.Array(CastCard),
+  pinnedChats: Schema.Array(Schema.String),
+  labels: Schema.Array(
+    Schema.Struct({
+      forkId: Schema.String,
+      thread: Schema.Struct({
+        name: Schema.NullOr(Schema.String),
+        cast: Schema.Array(EntityId)
+      })
+    })
+  ),
+  fresh: Schema.Array(ChatSummariesAt)
+})
 /** `ShellCards` and `ShellForks` with the summaries the read computed, as `ShellLibraryRead`. */
 const ShellCardsRead = Schema.Struct({ ...ShellCards.fields, fresh: Schema.Array(ChatSummariesAt) })
 const ShellForksRead = Schema.Struct({ ...ShellForks.fields, fresh: Schema.Array(ChatSummariesAt) })
@@ -3763,6 +3787,25 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(MergedMessage),
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("GetSplitChatsFast", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
+    success: Schema.NullOr(SplitChats),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * `GetSplitChats` from the stored summaries alone, walking nothing: for a chat with no split
+   * chats, whose name doesn't need the cast of a fork not read yet. Null when it would.
+   */
+  Rpc.make("GetSplitChatsPartial", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
+    success: Schema.NullOr(SplitChats),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ThreadsOfFast", {
+    payload: { userId: UserId, chatId: ChatId, forkId: ForkId },
+    success: Schema.NullOr(Schema.Array(ThreadSet)),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("GetSplitChats", {
     payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
     success: SplitChats,
@@ -3804,6 +3847,32 @@ export class ReadOps extends RpcGroup.make(
   historyReadRpcs[2]
     .setPayload(Schema.Struct({ ...historyReadRpcs[2].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
+  Rpc.make("ShellEpoch", { payload: { userId: UserId }, success: Schema.String, error: StorageError }),
+  Rpc.make("ShellMaterialize", {
+    payload: { userId: UserId },
+    success: ShellSnapshotRead,
+    error: StorageError
+  }),
+  /**
+   * `ShellMaterialize` from the stored summaries alone, while the first pass hasn't stored them
+   * all: a fork without a valid one is a `pending` row. Walks nothing, so it is an ordinary read.
+   */
+  Rpc.make("ShellMaterializePartial", {
+    payload: { userId: UserId },
+    success: ShellSnapshotRead,
+    error: StorageError
+  }),
+  /**
+   * Some of the user's stale fork summaries, computed for `StoreForkSummaries` (about a second's
+   * worth, a chat's forks together), and how many stay stale: `ShellMaterialize` stores them part
+   * by part before it reads the whole library, and a chat's branch reads (`ListForks`, the slow
+   * `GetSplitChats` and `ThreadsOf`) that chat's alone (`chatId`) before they read (db/shellReads.ts).
+   */
+  Rpc.make("ShellSummarizeStale", {
+    payload: { userId: UserId, chatId: Schema.optionalKey(ChatId) },
+    success: Schema.Struct({ chats: Schema.Array(ChatSummariesAt), remaining: Schema.Int }),
+    error: StorageError
+  }),
   Rpc.make("ShellLibrary", {
     /** `recompute`: ignore every stored summary (tests compare the two). */
     payload: { userId: UserId, recompute: Schema.optionalKey(Schema.Boolean) },

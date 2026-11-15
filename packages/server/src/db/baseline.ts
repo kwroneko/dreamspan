@@ -56,6 +56,18 @@ const shellSummaries: ReadonlyArray<string> = [
     threads_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(threads_json) AND json_type(threads_json) = 'array')
   ) STRICT`,
   `CREATE TABLE shell_user_stamps (user_id TEXT PRIMARY KEY, stamp INTEGER NOT NULL) STRICT`,
+  // The chat stamp at which a write last reached the fork's summary (db/summaryValidity.ts):
+  // one computed at that stamp or later is valid. No row: none since the chat's first noted write.
+  `CREATE TABLE fork_shell_stamps (
+    fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE,
+    stamp INTEGER NOT NULL
+  ) STRICT, WITHOUT ROWID`,
+  // The chat's stamp after the last write whose reach the writer noted. While it is the chat's
+  // stamp, every move of the stamp since a summary was computed reached its fork's stamp above.
+  `CREATE TABLE chat_shell_tracked (
+    chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+    stamp INTEGER NOT NULL
+  ) STRICT, WITHOUT ROWID`,
   `CREATE TRIGGER shell_slots_insert AFTER INSERT ON slots BEGIN ${bumpChat("NEW.chat_id")} END`,
   // Not chain_id: the database assigns it once, in the inserting statement.
   `CREATE TRIGGER shell_slots_update AFTER UPDATE OF chat_id, parent_slot_id, depth, selected_version_id, created_at,
@@ -665,7 +677,8 @@ export const baseline: ReadonlyArray<string> = [
     CHECK ((parent_slot_id IS NULL) = (depth = 0))
   ) STRICT`,
   `CREATE INDEX slots_parent ON slots(parent_slot_id)`,
-  `CREATE INDEX slots_chat_depth ON slots(chat_id, depth)`,
+  // Cover the plain shell tree: cold library reads need no scattered slot records.
+  `CREATE INDEX slots_chat_depth ON slots(chat_id, depth, id, parent_slot_id, created_at, deleted_at, purged_at, selected_version_id)`,
   // Hot graph/flag reads never visit the payload's overflow pages.
   `CREATE TABLE versions (
     seq INTEGER PRIMARY KEY REFERENCES version_texts(version_seq) DEFERRABLE INITIALLY DEFERRED,
@@ -697,8 +710,7 @@ export const baseline: ReadonlyArray<string> = [
     fork_id TEXT,
     -- Creation provenance, distinct from the fork owning a replacement copy. Fork deletion
     -- retains tombstones; chat deletion removes both versions and forks in one transaction.
-    authoring_fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
-    UNIQUE (slot_id, ordinal)
+    authoring_fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED
   ) STRICT`,
   `CREATE TABLE version_texts (
     version_seq INTEGER PRIMARY KEY REFERENCES versions(seq) ON DELETE CASCADE,
@@ -795,6 +807,23 @@ export const baseline: ReadonlyArray<string> = [
   // Startup's InterruptGenerations finds the few generating versions without scanning every
   // message: 8.5 s at 500,000 messages before (fux1).
   `CREATE INDEX versions_generating ON versions(id) WHERE status = 'generating'`,
+  // Every retained swipe's identity, by slot: participation reads all of a slot's swipes from
+  // these pages. It is the slot's only version index: a second slot-keyed one (a UNIQUE
+  // constraint's) doubled the pages a bulk rewrite dirties, one new swipe in each of thousands of
+  // slots (perfshell3), so the trigger below keeps ordinals unique by probing this one
+  // (versions_identity_fixed keeps slot and ordinal from changing after insert).
+  `CREATE INDEX versions_shell ON versions(slot_id, ordinal, id, purged_at)`,
+  // The shown version's shell metadata, by id (the shell joins on slot and id): a new version's
+  // id sorts after the old ones, so a bulk rewrite appends to these pages instead of dirtying one
+  // per slot.
+  `CREATE INDEX versions_shell_meta ON versions(id, slot_id, purged_at, status, speaker_entity_id, origin, created_at, content_length)`,
+  `CREATE TRIGGER versions_slot_ordinal_unique BEFORE INSERT ON versions
+    WHEN EXISTS (SELECT 1 FROM versions WHERE slot_id = NEW.slot_id AND ordinal = NEW.ordinal)
+    BEGIN SELECT RAISE(ABORT, 'UNIQUE constraint failed: versions.slot_id, versions.ordinal'); END`,
+  // Human authors are sparse among model swipes; include the predicate columns too
+  // so SQLite can answer from the index without opening version records.
+  `CREATE INDEX versions_slot_human_authors ON versions(slot_id, writer, speaker_entity_id, origin, created_at, purged_at, ordinal)
+    WHERE writer = 'human' AND speaker_entity_id IS NOT NULL AND purged_at IS NULL`,
   // An indexed projection of each version's cast and author; no join event establishes
   // historical participation. Copies carry cast_json with their other version fields.
   `CREATE TABLE version_participants (
@@ -2092,6 +2121,9 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, PRIMARY KEY(user_id, chat_id)) STRICT`,
   `CREATE INDEX chats_owner_live ON chats(owner_user_id, id) WHERE deleted_at IS NULL`,
   `CREATE UNIQUE INDEX slots_chain ON slots(chain_id, depth)`,
+  // Overridden shell paths use the same metadata as a shared tree, by chain range.
+  // Keep the separate unique chain/depth constraint intact.
+  `CREATE INDEX slots_shell_chain ON slots(chain_id, depth, id, chat_id, parent_slot_id, created_at, deleted_at, purged_at, selected_version_id)`,
   `CREATE INDEX slots_chain_cover ON slots(chain_id, depth, id, parent_slot_id)`,
   `CREATE INDEX versions_lcm_inputs ON versions(id, slot_id, status, content_length, deleted_at, purged_at)`,
   `CREATE INDEX state_events_chain ON state_events(chat_id, slot_chain_id, slot_depth)`,

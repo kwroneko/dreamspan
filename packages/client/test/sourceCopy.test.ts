@@ -1,9 +1,10 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { decodeString } from "micromark-util-decode-string"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { StMarkdown } from "../src/ui/StMarkdown.tsx"
 import { fixMarkdownMapped } from "../src/ui/stFormatting.ts"
+import * as stFormatting from "../src/ui/stFormatting.ts"
 import { selectedSource, type SourceMap } from "../src/ui/sourcePositions.ts"
 import { messageCopyHandlers } from "../src/ui/messageCopy.tsx"
 
@@ -35,6 +36,45 @@ function copied(text: string, value: string, from = 0, to = value.length) {
 }
 
 describe("rendered message source offsets", () => {
+  it.each(["current", "prefix"])(
+    "keeps contiguous copy-map serialization independent of a reply's length: %s",
+    (state) => {
+      const stringify = vi.spyOn(JSON, "stringify")
+      const materialized = vi.spyOn(stFormatting, "fixMarkdownMapped")
+      try {
+        const text = "A synthetic road continues beside the harbor. ".repeat(1200)
+        const { leaves } = rendered(text, state === "prefix" ? text + "The next streamed token." : text)
+        expect(
+          leaves
+            .map((leaf) => leaf.value)
+            .join("")
+            .trimEnd()
+        ).toBe(text.trimEnd())
+        // Processor options used to serialize two offsets per character on every streamed update.
+        const characters = stringify.mock.calls.reduce(
+          (n, [value]) =>
+            n +
+            (Array.isArray(value) &&
+            value.length > 100 &&
+            value.every((v) => v === null || (Array.isArray(v) && v.length === 2))
+              ? value.length
+              : 0),
+          0
+        )
+        expect(characters).toBe(0)
+        expect(
+          materialized.mock.results.reduce(
+            (n, result) => n + (result.type === "return" ? result.value.offsets.length : 0),
+            0
+          )
+        ).toBe(0)
+      } finally {
+        stringify.mockRestore()
+        materialized.mockRestore()
+      }
+    }
+  )
+
   it.each(['"words"', "“words”", "«words»", "「words」", "『words』", "＂words＂"])(
     "keeps quote glyphs: %s",
     (quote) => {

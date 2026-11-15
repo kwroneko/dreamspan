@@ -219,7 +219,7 @@ export const maintain = (
     const unsigned = candidates.filter((s) => s.level === 1 && !kept?.ranges.has(rangeKey(s)))
     const path =
       candidates.length && (kept === null || unsigned.length > MAX_RANGE_READS)
-        ? yield* lcmPath(sql, userId, chatId, leaf, undefined, Number.MAX_SAFE_INTEGER, identities)
+        ? yield* lcmPath(sql, userId, chatId, leaf, undefined, Number.MAX_SAFE_INTEGER, identities, false)
         : []
     const sent = (range: Effect.Success<ReturnType<typeof lcmPath>>) =>
       // The images a slot sends are part of what a later pass may not repair unauthorized.
@@ -231,7 +231,16 @@ export const maintain = (
         sent(
           path.length
             ? path.slice(s.from - 1, s.to)
-            : yield* lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities)
+            : yield* lcmPath(
+                sql,
+                userId,
+                chatId,
+                s.lastSlotId,
+                s.firstSlotId,
+                Number.MAX_SAFE_INTEGER,
+                identities,
+                false
+              )
         )
       )
     const rangeOf = (s: Summary) => ranges.get(s.id) ?? kept?.ranges.get(rangeKey(s))
@@ -240,7 +249,7 @@ export const maintain = (
       const range = path.slice(s.from - 1, s.to)
       return range[0]?.id === s.firstSlotId && range.at(-1)?.id === s.lastSlotId
         ? Effect.succeed(range)
-        : lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities)
+        : lcmPath(sql, userId, chatId, s.lastSlotId, s.firstSlotId, Number.MAX_SAFE_INTEGER, identities, false)
     }
     for (const s of candidates)
       if (s.level === 1 && s.status !== "superseded" && (!s.fresh || forced.has(s.id)))
@@ -269,7 +278,16 @@ export const maintain = (
     for (const s of candidates) signature(s)
     if (kept) for (const [id, range] of ranges) kept.ranges.set(`${fork}\u0000${id}`, range)
     for (const retry of retries) {
-      const chain = yield* lcmPath(sql, userId, chatId, retry.last, retry.first, Number.MAX_SAFE_INTEGER, identities)
+      const chain = yield* lcmPath(
+        sql,
+        userId,
+        chatId,
+        retry.last,
+        retry.first,
+        Number.MAX_SAFE_INTEGER,
+        identities,
+        false
+      )
       signatures[`retry:${retry.ask.id}`] = createHash("sha256")
         .update(JSON.stringify([chain.map(slotInput), retry.children.map((id) => byId.get(id)?.revisionId)]))
         .digest("hex")
@@ -382,8 +400,9 @@ export const maintain = (
       ...(yield* Effect.forEach(
         authorizedRetries.filter((r) => r.level === 1),
         (r) =>
-          Effect.map(lcmPath(sql, userId, chatId, r.last, r.first, Number.MAX_SAFE_INTEGER, identities), (chain) =>
-            chunkFor(chain, r.ask)
+          Effect.map(
+            lcmPath(sql, userId, chatId, r.last, r.first, Number.MAX_SAFE_INTEGER, identities, false),
+            (chain) => chunkFor(chain, r.ask)
           )
       )).flat(),
       ...[...plan.resummarize]

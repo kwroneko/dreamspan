@@ -67,7 +67,11 @@ export function useDisplayed(
     () => (needsContext ? session.castAfter(parentSlotId) : undefined),
     [session, parentSlotId, needsContext]
   )
-  const positionCast = useSyncExternalStore(session.subscribePositions, read)
+  const subscribe = useCallback(
+    (listener: () => void) => session.subscribePosition(parentSlotId, listener),
+    [session, parentSlotId]
+  )
+  const positionCast = useSyncExternalStore(subscribe, read)
   // The speaker card's own fields, for `{{description}}` and the like, as the preview had them.
   const readFields = useCallback(
     () => (!needsContext || version.speakerEntityId === null ? undefined : session.cardFields(version.speakerEntityId)),

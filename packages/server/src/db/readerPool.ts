@@ -41,6 +41,8 @@ interface JobDeadline {
 }
 
 const RESPAWN_MS = 1000
+/** Priority is a bounded preference: the oldest eligible read gets every ninth dispatch. */
+const PRIORITY_BURST = 8
 
 // As in Effect's worker protocol: messages cross by structured clone.
 const codecFor = Schema.toCodecJson as RpcSerialization.CodecFor
@@ -108,6 +110,7 @@ export const layer = (
     jobDeadline,
     background,
     first,
+    short,
     isolated,
     affinity
   }: {
@@ -122,6 +125,8 @@ export const layer = (
     background?: { readonly tags: ReadonlySet<string>; readonly max: number }
     /** Requests (by tag) that go ahead of everything else queued: what a reply waits on. */
     first?: ReadonlySet<string>
+    /** Bounded independent reads, after replies and before ordinary queued reads. */
+    short?: ReadonlySet<string>
     /** These reads get one separate reader; they never occupy an ordinary reader, even with size 1. */
     isolated?: (request: RpcMessage.RequestEncoded) => boolean
     /** Prefer the reader that last completed this key, only while it is idle. Never reserves capacity. */
@@ -135,6 +140,7 @@ export const layer = (
         const platform = yield* Worker.WorkerPlatform
         const readers: Array<Reader> = []
         const queue: Array<Job> = []
+        let priorityBurst = 0
         // Routing hints, not request data. Bounded independently of the workers' fact LRUs.
         const routes = new Map<string, number>()
         const started = Deferred.makeUnsafe<void, RpcClientError.RpcClientError>()
@@ -153,8 +159,12 @@ export const layer = (
                 background !== undefined &&
                 readers.filter((r) => r.job !== undefined && background.tags.has(r.job.request.tag)).length >=
                   background.max
+              // One predicate for every candidate below: the isolated reader takes only isolated
+              // reads (and they nothing else), a read waits briefly for its idle preferred reader,
+              // and held-back background reads stay queued.
               const eligible = (job: Job) => {
                 if ((isolated?.(job.request) === true) !== (reader.id === size)) return false
+                if (held && background.tags.has(job.request.tag)) return false
                 const preferred = job.affinity === undefined ? undefined : routes.get(job.affinity)
                 return (
                   preferred === undefined ||
@@ -165,16 +175,17 @@ export const layer = (
                   )
                 )
               }
+              const oldest = queue.findIndex(eligible)
               const ahead =
                 first === undefined ? -1 : queue.findIndex((job) => eligible(job) && first.has(job.request.tag))
-              const next =
-                ahead >= 0
-                  ? ahead
-                  : queue.findIndex((job) => eligible(job) && (!held || !background!.tags.has(job.request.tag)))
+              const light =
+                short === undefined ? -1 : queue.findIndex((job) => eligible(job) && short.has(job.request.tag))
+              const next = priorityBurst >= PRIORITY_BURST ? oldest : ahead >= 0 ? ahead : light >= 0 ? light : oldest
               if (next === -1) {
                 i++
                 continue
               }
+              priorityBurst = next === oldest ? 0 : priorityBurst + 1
               const job = queue.splice(next, 1)[0]!
               // Reserved before sending, so a concurrent dispatch can't pick the same reader;
               // released again if the send fails.

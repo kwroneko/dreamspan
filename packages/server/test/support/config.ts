@@ -1,13 +1,13 @@
+import { TransportApi, TransportJson, type TransportRpcs } from "@rp/shared/transportApi.ts"
 import { Summarizer } from "../../src/lcm/Summarizer.ts"
 import * as ContextGenerator from "../../src/chat/ContextGenerator.ts"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
 import { Effect, Layer, Option } from "effect"
 import { HttpServer } from "effect/http"
-import { RpcClient, RpcSerialization, type RpcGroup } from "effect/rpc"
+import { RpcClient, type RpcGroup } from "effect/rpc"
 import { Socket } from "effect/socket"
 import { PasswordCost } from "../../src/auth/passwords.ts"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
@@ -31,6 +31,7 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   formatWorkers: 1,
   thumbnailWorkers: 1,
   dbAllowNetworkFs: false,
+  shellPassPauseMs: 0,
   // The run's own bundles unless TEST_DB_WORKERS=source (bundles.ts); tests of the source
   // entry points ask for source.
   dbWorkers: testWorkerMode,
@@ -87,7 +88,7 @@ export const serverPort = Effect.map(HttpServer.HttpServer, ({ address }) => {
  * proxy or a cookie. Connecting to one of this machine's other addresses makes the
  * connection come from it.
  */
-const testApi: RpcGroup.RpcGroup<AppRpcs> = AppApi
+const testApi: RpcGroup.RpcGroup<TransportRpcs> = TransportApi
 export const client = (headers: Record<string, string> = {}, address = "127.0.0.1") =>
   Effect.flatMap(serverPort, (port) => clientAt(port, headers, address))
 
@@ -102,7 +103,7 @@ export const clientAt = (port: number, headers: Record<string, string> = {}, add
             (url) => new WebSocket(url, { headers } as unknown as string[]) as unknown as globalThis.WebSocket
           )
         ),
-        Layer.provide(RpcSerialization.layerJson)
+        Layer.provide(TransportJson)
       )
     )
     return yield* RpcClient.make(testApi).pipe(Effect.provide(protocol))

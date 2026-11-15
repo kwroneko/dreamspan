@@ -19,6 +19,11 @@ const AppConfigFromEnv = Config.all({
     Config.withDefault(2)
   ),
   dbAllowNetworkFs: Config.Boolean(serverEnvironment.DB_ALLOW_NETWORK_FS).pipe(Config.withDefault(false)),
+  /** A wait between the shell's background parts (db/Database.ts `storeStaleParts`); tests hold a pass half done with it. */
+  shellPassPauseMs: Config.schema(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    serverEnvironment.SHELL_PASS_PAUSE_MS
+  ).pipe(Config.withDefault(0)),
   /** Format workers (importer/Formats.ts): how many uploads are parsed, or exports written, at once. */
   formatWorkers: Config.schema(
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),

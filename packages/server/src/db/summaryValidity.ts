@@ -1,10 +1,17 @@
 // Which forks' shell summaries a write left right (db/forkSummaries.ts). The triggers in
-// db/baseline.ts move a chat's `shell_stamp` on every write its summaries read, so a summary is
-// valid while its `stamp` is the chat's. Alone, that makes one fork's write stale every fork of
-// the chat: a chat with hundreds of branches walked them all again. Here the writer's own
-// connection also notes what each write touched (TEMP triggers: nothing in the database file
-// changes), and at the end of every write transaction moves the stamp of each summary the
-// touched rows can't reach on to the chat's new one. What a summary reads, and who it reaches:
+// db/baseline.ts move a chat's `shell_stamp` on every write its summaries read. Alone, that
+// makes one fork's write stale every fork of the chat: a chat with hundreds of branches walked
+// them all again, and a walk that took longer than the chat's next write could never be stored.
+// Here the writer's own connection also notes what each write touched (TEMP triggers: nothing
+// in the database file changes), and at the end of every write transaction moves the
+// `fork_shell_stamps` row of each fork the touched rows reach to the chat's new stamp. A summary
+// computed at a chat stamp at or after its fork's is valid (`summaryValidSql`), so a write costs
+// the forks it reaches, and a summary computed meanwhile for any other fork can still be
+// stored. `chat_shell_tracked` keeps the chat's stamp after the last noted write: a move it
+// didn't note (another connection, a write before the notes were installed) reaches every
+// fork of the chat at the next noted write, and until then only a summary computed at the
+// chat's stamp now is valid. What a
+// summary reads, and who it reaches:
 // - a slot's shown fields (`slots` columns, its versions): the forks whose tip is it or below it.
 //   A new slot reaches none (no fork's path holds it until a fork's tip moves, below);
 //   Every retained version contributes participation, even an unselected alternative.
@@ -21,8 +28,7 @@
 //   rule too: a new fork's exclusion after its base changes no existing fork's display.
 // - anything else (a moved slot, an insertion, a chat-wide event, an event changed in place):
 //   every fork of the chat, as before.
-// A summary that wasn't valid when the write began stays stale. Only the writer writes; a
-// write on another connection notes nothing, so summaries from before it never match again.
+// A summary that wasn't valid when the write began stays stale.
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { pointAtSql } from "./forkLabels.ts"
@@ -51,6 +57,26 @@ const overrideTouch = (row: string) =>
   touch(FORK, `${row}.chat_id`, `${row}.fork_id`, `${row}.seq`, `${row}.kind IN ${READ_OVERRIDES}`)
 
 const slotChat = (slot: string) => `(SELECT chat_id FROM slots WHERE id = ${slot})`
+
+/** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
+// Valid per fork (fork_shell_stamps), not while the chat's stamp stays put.
+export const FORK_SUMMARY_FORMAT = 10
+
+/** SQL: whether summary row `s` was computed at or after its fork's last noted change. */
+const afterForkSql = (s: string) =>
+  `${s}.stamp >= coalesce((SELECT sv_f.stamp FROM fork_shell_stamps sv_f WHERE sv_f.fork_id = ${s}.fork_id), 0)`
+
+/**
+ * SQL: whether summary row `s` (a `fork_summaries` alias) of a fork of chat `c` (a `chats`
+ * alias) is valid for an owner whose stamp is `userStamp` (an SQL expression): the current
+ * format and owner stamp, and either computed at the chat's stamp now (nothing it reads has
+ * changed since, noted or not), or computed at or after its fork's last noted change with every
+ * move of the chat's stamp noted since.
+ */
+export const summaryValidSql = (s: string, c: string, userStamp: string) => `(${s}.format = ${FORK_SUMMARY_FORMAT}
+  AND ${s}.user_stamp = ${userStamp} AND (${s}.stamp = ${c}.shell_stamp OR (${s}.stamp < ${c}.shell_stamp
+  AND ${afterForkSql(s)}
+  AND (SELECT sv_c.stamp FROM chat_shell_tracked sv_c WHERE sv_c.chat_id = ${c}.id) IS ${c}.shell_stamp)))`
 
 const statements: ReadonlyArray<string> = [
   `CREATE TEMP TABLE IF NOT EXISTS shell_moved (chat_id TEXT PRIMARY KEY, stamp INTEGER NOT NULL)`,
@@ -153,15 +179,18 @@ export const trackSummaryTouches = (sql: SqlClient.SqlClient) =>
   })
 
 /**
- * Moves the stamp of every summary of a chat this transaction's writes moved that they can't
- * reach on to the chat's stamp now, and forgets the notes. Run inside the write's transaction:
- * at its end (`transaction` in tx.ts), and before a write computes summaries itself.
+ * Moves the stamp of every fork of a chat this transaction's writes moved that they reach to
+ * the chat's stamp now (every fork, where they can reach any, or where a move went unnoted),
+ * notes the chat's stamp as tracked, and forgets the notes. Run inside the write's
+ * transaction: at its end (`transaction` in tx.ts), and before a write computes summaries itself.
  */
 export const settleSummaries = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     if (!tracking) return
     const moved = yield* sql<{ chat_id: string; stamp: number }>`SELECT chat_id, stamp FROM shell_moved`
     if (moved.length > 0) {
+      // Resolve sparse touches before their versions: a covering index must not turn
+      // settlement into a scan of every version in the database.
       // An alternative changes every fork's historical participation only when it
       // adds evidence. Its selection is already tracked by the fork override.
       // In particular, editing an old shared message must not walk every frozen
@@ -179,8 +208,10 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
       // Decide once per moved chat. Inlining this scans all touches again for every
       // touched version below; pinning many swipes would make settlement quadratic.
       yield* sql`WITH RECURSIVE
+        -- A chat whose stamp moved unnoted before this write is reached whole.
         kept(chat_id, stamp) AS MATERIALIZED (
-          SELECT m.chat_id, m.stamp FROM shell_moved m WHERE NOT EXISTS (
+          SELECT m.chat_id, m.stamp FROM shell_moved m
+          WHERE (SELECT stamp FROM chat_shell_tracked WHERE chat_id = m.chat_id) = m.stamp AND NOT EXISTS (
             SELECT 1 FROM shell_touches t WHERE t.chat_id = m.chat_id AND (t.kind = ${CHAT}
               -- Only inserted slots can be shown off the structural path. A
               -- normal reply still reaches its forks by chain intervals even
@@ -238,31 +269,43 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
           UNION SELECT h.fork, s.id FROM shifted h JOIN slots s ON s.parent_slot_id = h.id),
         reached(id) AS (
           SELECT t.ref FROM shell_touches t WHERE t.kind IN (${SELF}, ${FORK})
-          UNION ALL SELECT f.id FROM shell_touches t JOIN forks f ON f.parent_fork_id = t.ref
+          -- Touches first, here and for the shifted slots below: the other order scanned every
+          -- fork, probing the touches for each (300 ms of a 5,000-message rename's settlement).
+          UNION ALL SELECT f.id FROM shell_touches t CROSS JOIN forks f ON f.parent_fork_id = t.ref
             WHERE t.kind = ${KIN} OR (t.kind = ${TIP} AND EXISTS (
               -- Moving to/from an inserted tip can change the display end.
               -- Normal structural tip moves use the shifted chain below.
               SELECT 1 FROM slots s WHERE s.id IN (t.from_slot, t.to_slot) AND s.inserted = 1))
-          UNION ALL SELECT f.id FROM shifted h JOIN forks f ON f.parent_fork_id = h.fork AND f.tip_slot_id = h.id
-          UNION ALL SELECT g.fork_id FROM segments g JOIN touched t ON t.chat_id = g.chat_id
-            AND t.chain_id = g.chain_id AND t.depth BETWEEN g.lo AND g.hi
-            JOIN slots affected ON affected.id = t.slot_id
+          UNION ALL SELECT f.id FROM shifted h CROSS JOIN forks f ON f.parent_fork_id = h.fork AND f.tip_slot_id = h.id
+          -- Once per segment, up to its first reaching touch: a bulk rewrite touches thousands
+          -- of slots each segment holds, and pairing them all costs touches × forks.
+          UNION ALL SELECT g.fork_id FROM segments g WHERE EXISTS (
+            SELECT 1 FROM touched t JOIN slots affected ON affected.id = t.slot_id
+            WHERE t.chat_id = g.chat_id AND t.chain_id = g.chain_id AND t.depth BETWEEN g.lo AND g.hi
             -- A newly human-authored alternative matters only when this fork
             -- doesn't already record that author's same or later turn.
-            WHERE (t.version_id IS NULL OR ${sql.literal(shownInSql("g.fork_id", "affected"))} = t.version_id)
+            AND (t.version_id IS NULL OR ${sql.literal(shownInSql("g.fork_id", "affected"))} = t.version_id)
+              -- Only a summary valid before this write can say the author's turn is recorded.
               AND (t.author IS NULL OR NOT EXISTS (
               SELECT 1 FROM fork_summaries fs, json_each(fs.activity_json) a WHERE fs.fork_id = g.fork_id
+                AND fs.format = ${FORK_SUMMARY_FORMAT} AND ${sql.literal(afterForkSql("fs"))}
+                AND fs.user_stamp = coalesce((SELECT u.stamp FROM chats ch JOIN shell_user_stamps u
+                  ON u.user_id = ch.owner_user_id WHERE ch.id = fs.chat_id), 0)
                 AND a.value ->> 'entityId' = t.author AND (a.value ->> 'at' > t.at
-                  OR (a.value ->> 'at' = t.at AND a.value ->> 'slot' = t.slot_id))))
+                  OR (a.value ->> 'at' = t.at AND a.value ->> 'slot' = t.slot_id)))))
           -- The writer's range from its point at that number: one range of fork_labels_point.
           UNION ALL SELECT x.fork_id FROM written w JOIN fork_labels wl ON wl.fork_id = w.ref
             JOIN fork_labels x ON x.chat_id = w.chat_id
               AND x.point >= CASE WHEN w.seq IS NULL THEN wl.base ELSE ${sql.literal(pointAtSql("w.ref", "w.seq"))} END
               AND x.point < wl.label_end)
-        UPDATE fork_summaries SET stamp = (SELECT c.shell_stamp FROM chats c WHERE c.id = fork_summaries.chat_id)
-        WHERE fork_id IN (
-          SELECT s.fork_id FROM kept k JOIN fork_summaries s ON s.chat_id = k.chat_id AND s.stamp = k.stamp
-          WHERE s.fork_id NOT IN (SELECT id FROM reached))`
+        INSERT INTO fork_shell_stamps (fork_id, stamp)
+        SELECT f.id, c.shell_stamp FROM shell_moved m JOIN chats c ON c.id = m.chat_id
+          CROSS JOIN forks f ON f.chat_id = m.chat_id
+        WHERE m.chat_id NOT IN (SELECT chat_id FROM kept) OR f.id IN (SELECT id FROM reached)
+        ON CONFLICT (fork_id) DO UPDATE SET stamp = excluded.stamp`
+      yield* sql`INSERT INTO chat_shell_tracked (chat_id, stamp)
+        SELECT m.chat_id, c.shell_stamp FROM shell_moved m JOIN chats c ON c.id = m.chat_id WHERE 1
+        ON CONFLICT (chat_id) DO UPDATE SET stamp = excluded.stamp`
       yield* sql`DELETE FROM shell_moved`
     }
     yield* sql`DELETE FROM shell_touches`

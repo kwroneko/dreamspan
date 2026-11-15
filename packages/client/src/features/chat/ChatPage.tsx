@@ -293,9 +293,15 @@ export function MessageList({
   // paint itself; a scroll event would make the adapter call flushSync during that commit.
   const syncOffset = useCallback(() => {
     const list = parent.current
-    if (list !== null && Math.abs((virtualizer.scrollOffset ?? 0) - list.scrollTop) >= 1)
-      offsetChanged.current?.(list.scrollTop, false)
-  }, [virtualizer])
+    if (list === null) return
+    const actual = list.scrollTop
+    const expected = virtualizer.scrollOffset ?? 0
+    if (Math.abs(expected - actual) < 1) return
+    // A native jump can precede its deferred scroll event. Let go before a render's
+    // follow effect can pull it back; a clamp at the end still keeps following.
+    if (actual < expected && list.scrollHeight - actual - list.clientHeight > END_PX) hold(false)
+    offsetChanged.current?.(actual, false)
+  }, [virtualizer, hold])
   useLayoutEffect(syncOffset)
 
   // Contributions can grow below a partly visible earlier row whose text is already

@@ -128,23 +128,28 @@ export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId, view?
   }) =>
     Effect.gen(function* () {
       const pieces = view!.pieces!
-      const inputs = yield* sql<{ ordinal: number; slot_id: string; version_valid: number }>`
+      const facts = (yield* SummaryReads)?.facts.find((f) => f.fork === view!.fork && f.rows.has(summary.id))
+      const inputs =
+        facts?.inputs.get(summary.id) ??
+        (yield* sql<{ ordinal: number; slot_id: string; version_valid: number }>`
         SELECT i.ordinal, i.slot_id, i.version_id IS NULL OR EXISTS(SELECT 1 FROM versions v WHERE v.id=i.version_id AND v.slot_id=i.slot_id) AS version_valid
-        FROM summary_inputs i WHERE i.summary_id=${summary.id} ORDER BY i.ordinal`
-      const children = yield* sql<{
-        ordinal: number
-        parent_id: string
-        level: number
-        first_slot_id: string
-        last_slot_id: string
-        slot_count: number
-        chat_id: string
-        status: string
-        revision_valid: number
-      }>`
+        FROM summary_inputs i WHERE i.summary_id=${summary.id} ORDER BY i.ordinal`)
+      const children =
+        facts?.children.get(summary.id) ??
+        (yield* sql<{
+          ordinal: number
+          parent_id: string
+          level: number
+          first_slot_id: string
+          last_slot_id: string
+          slot_count: number
+          chat_id: string
+          status: string
+          revision_valid: number
+        }>`
         SELECT p.ordinal,p.parent_id,c.level,c.first_slot_id,c.last_slot_id,c.slot_count,c.chat_id,c.status,
           EXISTS(SELECT 1 FROM summary_revisions r WHERE r.id=p.parent_revision_id AND r.summary_id=c.id) AS revision_valid
-        FROM summary_parents p LEFT JOIN summaries c ON c.id=p.parent_id WHERE p.summary_id=${summary.id} ORDER BY p.ordinal`
+        FROM summary_parents p LEFT JOIN summaries c ON c.id=p.parent_id WHERE p.summary_id=${summary.id} ORDER BY p.ordinal`)
       const places = yield* placesOf(sql, summary.chat_id, [
         summary.first_slot_id,
         summary.last_slot_id,

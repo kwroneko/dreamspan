@@ -1,14 +1,14 @@
-import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
+import { TransportApi, TransportJson, type TransportRpcs } from "@rp/shared/transportApi.ts"
 import { Effect, Layer } from "effect"
 import { AtomRpc } from "effect/reactivity"
-import { RpcClient, type RpcGroup, RpcSerialization } from "effect/rpc"
+import { RpcClient, type RpcGroup } from "effect/rpc"
 import { Socket } from "effect/socket"
 
 const url = Effect.sync(() => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/rpc`)
 
 // Inferring the RPC union from the group itself is too deep for TypeScript at this many RPCs (TS2589);
-// `AppRpcs` reads it off the group's `requests` instead, as the e2e and perf clients do.
-const group: RpcGroup.RpcGroup<AppRpcs> = AppApi
+// `TransportRpcs` reads it off the group's `requests` instead, as the e2e and perf clients do.
+const group: RpcGroup.RpcGroup<TransportRpcs> = TransportApi
 
 /** The one connection to the server. Reconnects on transient socket errors. */
 export class AppClient extends AtomRpc.Service<AppClient>()("rp/AppClient", {
@@ -24,6 +24,6 @@ export class AppClient extends AtomRpc.Service<AppClient>()("rp/AppClient", {
         return socket
       })
     ),
-    Layer.provide(RpcSerialization.layerJson)
+    Layer.provide(TransportJson)
   )
 }) {}

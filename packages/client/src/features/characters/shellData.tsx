@@ -111,7 +111,7 @@ const shellForksAtom = Atom.family((key: string) =>
         )
       )
     ),
-    (data) => ({ rows: withCast(data), filterCounts: data.filterCounts })
+    (data) => ({ rows: withCast(data), filterCounts: data.filterCounts, progress: data.loading ?? null })
   )
 )
 /** Rows shown at first, and added by each "Show more". */
@@ -136,7 +136,11 @@ export function useShellForks(view: ShellForksView) {
   ])
   const [last, setLast] = useState<{
     lists: string
-    data: { rows: ReadonlyMap<ShellSection, ShellRows>; filterCounts: ShellForks["filterCounts"] }
+    data: {
+      rows: ReadonlyMap<ShellSection, ShellRows>
+      filterCounts: ShellForks["filterCounts"]
+      progress: ShellForks["loading"] | null
+    }
   } | null>(null)
   // Kept as React's "state from the previous render": set again only when the answer changes.
   if (AsyncResult.isSuccess(result) && (last?.data !== result.value || last.lists !== lists))
@@ -149,6 +153,11 @@ export function useShellForks(view: ShellForksView) {
     waiting: !AsyncResult.isSuccess(result) || result.waiting,
     failure: AsyncResult.isFailure(result) ? result : null,
     filterCounts: data?.filterCounts ?? null,
+    /**
+     * While the server is still reading some of the scope's forks (a cold library): how many of
+     * them are ready. Their rows are listed already, `pending`, and fill in as they are read.
+     */
+    progress: data?.progress ?? null,
     section: (id: ShellSection) => data?.rows.get(id) ?? empty
   }
 }

@@ -159,6 +159,8 @@ The comparative spike React vs Svelte is therefore **no longer proposed**. It's 
 
 ## 7. Performance harness: the first client deliverable [P]
 
+**Built subset (perfshell1, 2026-11-13; obsolete as implementation proposals):** cold navigation independent of shared shell materialization, exact display projections, and the coordinator-approved burst observation after resize/follow delivery with a presented-frame guard are documented in ARCHITECTURE §3.1 and §12. The existing budgets, scenario counts, sampling duration and timeouts remain unchanged. WebKit, real-phone and CI coverage below retain their original status.
+
 Because performance is an absolute priority **[D]**, the harness comes before the chat UI. Chat work then lands against it.
 - **Synthetic fixtures:** a 100k-message chat with realistic markdown, long and short messages, versions and some HTML messages. Generated, never derived from real chats (CLAUDE.md "Privacy").
 - **Mock server:** the real RPC protocol (EFFECT.md §5) with a fake provider that streams at configurable rates: 6+ concurrent streams, parallel swipes under one slot, bursty and slow streams. The stress rate is **300 tok/s per stream**, matching the owner's local model (10k tok/s prefill, 300 tok/s decode at batch size 1). The Effect spike's `measure.ts` is the starting point.

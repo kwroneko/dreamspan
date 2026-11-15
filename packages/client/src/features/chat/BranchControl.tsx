@@ -404,13 +404,14 @@ export function BranchControl(props: BranchControlProps) {
     if (open) reload()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- read again each time it opens
   }, [open])
-  const many = forks !== null && forks.length > 1
   // A part may name what's shown otherwise: "Thread: At the docks".
   const context: BranchControlContext | null = forks === null ? null : { session, view, forks, shown }
-  const named = context === null ? null : (parts.map((part) => part.trigger?.(context) ?? null).find(Boolean) ?? null)
+  const ready = context !== null && parts.every((part) => part.ready?.(context) ?? true)
+  const many = ready && forks !== null && forks.length > 1
+  const named = !ready ? null : (parts.map((part) => part.trigger?.(context) ?? null).find(Boolean) ?? null)
   const kind = named?.kind ?? "Branch"
   const icon = named?.icon ?? "branch"
-  const label = named?.label ?? (shown ? branchLabel(shown) : "Branch")
+  const label = !ready ? "Loading…" : (named?.label ?? (shown ? branchLabel(shown) : "Branch"))
   // Sending in a branch that isn't the one the chat opens on makes it that; the header says which it is.
   const off = shown !== undefined && !shown.current
   // Its place in the list as the list orders it.
@@ -430,12 +431,12 @@ export function BranchControl(props: BranchControlProps) {
               ? named.hint
               : many
                 ? "Switches between this chat’s branches."
-                : forks === null
-                  ? "Loading branches…"
+                : !ready
+                  ? "Loading…"
                   : "No other branches yet."
           }
           type="button"
-          aria-label={`${kind}: ${label}, ${place}: switch ${kind.toLowerCase()}`}
+          aria-label={!ready ? "Loading…" : `${kind}: ${label}, ${place}: switch ${kind.toLowerCase()}`}
           onClick={() => setOpen(true)}
           className="inline-flex h-8 max-w-32 min-w-7 shrink! items-center gap-1 rounded-md px-1.5 text-sm text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
         >
@@ -457,18 +458,18 @@ export function BranchControl(props: BranchControlProps) {
           {/* A narrow header (a split frame) keeps the icon, the name moving to the explanation:
               never a name cut to a letter or two. */}
           <span className="min-w-16 truncate @max-[32rem]/header:hidden">
-            <span className="text-muted @max-[40rem]/header:hidden">{kind}: </span>
+            {ready && <span className="text-muted @max-[40rem]/header:hidden">{kind}: </span>}
             {label}
             {off && <span className="text-xs text-muted"> · not where it opens</span>}
           </span>
           <Icon name="down" size={14} className="shrink-0 text-muted" />
         </>
       }
-      triggerLabel={`${kind}: ${label}, ${place}: switch ${kind.toLowerCase()}`}
+      triggerLabel={!ready ? "Loading…" : `${kind}: ${label}, ${place}: switch ${kind.toLowerCase()}`}
       triggerDisabled={!many}
       hint={
-        forks === null
-          ? "Loading branches…"
+        !ready
+          ? "Loading…"
           : named
             ? named.hint
             : `Branch “${label}”${off ? " (not where the chat opens)" : ""}. ${many ? "Switch to another of this chat’s branches, or rename or delete them." : "No other branches yet."}`

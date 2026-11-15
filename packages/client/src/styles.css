@@ -969,22 +969,40 @@ main:has(> [data-fill]) {
 .branch-list-row:has([data-added-portraits]) > [data-row-text] {
   grid-column: 2 / 3;
 }
+.branch-list-row[data-reserve-added] > [data-row-text] {
+  grid-column: 2 / 3;
+}
+.branch-list-row > [data-added-space],
+.branch-list-row > [data-added-portraits] {
+  grid-column: 1;
+  grid-row: 1;
+}
+.branch-list-row[data-reserve-added] [data-row-when] {
+  min-height: 2rem;
+}
+.branch-list-row[data-reserve-added] > [data-added-portraits] {
+  min-width: 6rem;
+  min-height: 1.875rem;
+}
 /* The corner actions as on a chat row: the pin at the top right, the bottom right free for Split off. */
 .branch-list-row > [data-row-actions] {
   grid-column: 3;
   grid-row: 1;
 }
 @container fork-row (width < 16rem) {
+  .branch-list-row > [data-added-space],
   .branch-list-row > [data-added-portraits] {
     grid-column: 1 / 3;
     grid-row: 1;
     justify-self: start;
   }
-  .branch-list-row:has([data-added-portraits]) > [data-row-text] {
+  .branch-list-row:has([data-added-portraits]) > [data-row-text],
+  .branch-list-row[data-reserve-added] > [data-row-text] {
     grid-column: 1 / 3;
     grid-row: 2;
   }
-  .branch-list-row:has([data-added-portraits]) > [data-row-actions] {
+  .branch-list-row:has([data-added-portraits]) > [data-row-actions],
+  .branch-list-row[data-reserve-added] > [data-row-actions] {
     grid-row: 1 / 3;
   }
 }

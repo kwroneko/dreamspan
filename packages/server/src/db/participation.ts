@@ -63,14 +63,16 @@ export const presenceBefore = Effect.fnUntraced(function* (
 export const presenceJson = (presence: VersionPresence | null) => (presence === null ? null : JSON.stringify(presence))
 
 /** Every retained swipe at a position is evidence, selected or not. Copies retain its cast. */
-export const slotParticipantsSql = (slot: string) => `(SELECT json_group_array(DISTINCT p.entity_id)
+export const slotParticipantsSql = (slot: string) => `(SELECT json_group_array(entity_id) FROM (
+  SELECT p.entity_id
   FROM versions pv JOIN version_participants p ON p.version_id = pv.id
     JOIN entities pe ON pe.id = p.entity_id AND pe.purged_at IS NULL
-  WHERE pv.slot_id = ${slot}.id AND pv.purged_at IS NULL)`
+  WHERE pv.slot_id = ${slot}.id AND pv.purged_at IS NULL
+  GROUP BY p.entity_id ORDER BY min(pv.ordinal), p.entity_id))`
 
 /** Human-authored alternatives count as use even when another swipe is selected. */
 export const slotHumanAuthorsSql = (slot: string) => `(SELECT json_group_array(json_object(
   'entity', v.speaker_entity_id, 'at', CASE WHEN v.origin IN ('edited', 'changeset')
-    THEN ${slot}.created_at ELSE v.created_at END))
+    THEN ${slot}.created_at ELSE v.created_at END) ORDER BY v.ordinal)
   FROM versions v WHERE v.slot_id = ${slot}.id AND v.writer = 'human'
     AND v.speaker_entity_id IS NOT NULL AND v.purged_at IS NULL)`

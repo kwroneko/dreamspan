@@ -7,6 +7,12 @@ export const PoolOps = RpcGroup.make(
   Rpc.make("Count", { payload: { n: Schema.Number }, success: Schema.Number }),
   /** Blocks the worker thread, as a query would, until readerPool.test.ts releases it. */
   Rpc.make("Hold"),
+  /** Production scheduling names, with held handlers instead of long graph walks. */
+  Rpc.make("ListForks"),
+  Rpc.make("ShellMaterialize"),
+  Rpc.make("GetDisplayPrefs", { success: Schema.Number }),
+  Rpc.make("GetSessionUser", { success: Schema.Number }),
+  Rpc.make("ListStImports", { success: Schema.Number }),
   /** Ends the worker thread, as a crash would. */
   Rpc.make("Crash"),
   /** Ends the first thread that runs it, as a crash would; a later run returns its thread id. */

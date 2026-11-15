@@ -249,6 +249,7 @@ type InputRow = Effect.Success<ReturnType<typeof inputRowsGeneric>>[number]
 type ChildRow = Effect.Success<ReturnType<typeof summaryChildren>>[number]
 interface SummaryFacts {
   readonly fork: string | null
+  readonly view?: LcmView
   readonly rows: Map<string, SummaryRow>
   readonly proofs: Map<string, { count: number; valid: number | null; fresh: number }>
   readonly inputs: Map<string, ReadonlyArray<InputRow>>
@@ -419,7 +420,54 @@ export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chat
     const kept = yield* SummaryReads
     const fork = yield* viewAt(sql, chatId, leaf)
     if (!kept || kept.facts.some((f) => f.fork === fork)) return
-    if ((yield* lcmView(sql, chatId, fork)).pieces !== null) return
+    const view = yield* lcmView(sql, chatId, fork)
+    if (view.pieces !== null) {
+      // Display paths still use their independent lineage/freshness checks. Batch only
+      // the database facts, scoped to this transaction, including inserted endpoints.
+      const [last] = yield* sql<{
+        id: string
+        chain_id: string
+        depth: number
+      }>`SELECT id,chain_id,depth FROM slots WHERE id=${leaf} AND chat_id=${chatId}`
+      const end = last ? positionOf(view.pieces, { id: last.id, chainId: last.chain_id, depth: last.depth }) : null
+      const inserted = view.pieces.flatMap((p) =>
+        p.kind === "inserted" && end !== null && p.start <= end ? [p.slotId] : []
+      )
+      const ids = (yield* sql<{ id: string }>` ${pathSegments(sql, chatId, leaf, null)}, endpoints(id) AS (
+        SELECT s.id FROM segments g CROSS JOIN slots s ON s.chain_id=g.chain_id AND s.depth BETWEEN g.lo AND g.hi
+        UNION SELECT value FROM json_each(${JSON.stringify(inserted)})
+      ), wanted(id) AS (
+        SELECT s.id FROM endpoints e CROSS JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id=e.id
+          WHERE s.chat_id=${chatId} AND s.sealed=1
+        UNION SELECT p.parent_id FROM wanted w CROSS JOIN summary_parents p ON p.summary_id=w.id
+      ) SELECT id FROM wanted`).map((r) => r.id)
+      if (ids.length === 0) return
+      const rows = yield* summaryRows(sql, userId, ids, fork)
+      // Preservation proofs for changeset revisions depend on their application.
+      const plain = rows.filter((r) => r.origin !== "changeset").map((r) => r.id)
+      const inputs = plain.length ? yield* summaryInputs(sql, plain, fork) : []
+      const children = yield* summaryChildren(
+        sql,
+        rows.map((r) => r.id)
+      )
+      const group = <A extends { summary_id: string }>(items: ReadonlyArray<A>, all: ReadonlyArray<string>) => {
+        const groups = new Map(all.map((id) => [id, [] as Array<A>]))
+        for (const item of items) groups.get(item.summary_id)!.push(item)
+        return groups
+      }
+      kept.facts.push({
+        fork,
+        view,
+        rows: new Map(rows.map((r) => [r.id, r])),
+        proofs: new Map(),
+        inputs: group(inputs, plain),
+        children: group(
+          children,
+          rows.map((r) => r.id)
+        )
+      })
+      return
+    }
     const retained = yield* lineageCache<ChildRow>(sql)
     // Corruption fixtures with relaxed storage invariants keep the independent row-by-row proof.
     if (!retained) return
@@ -705,9 +753,8 @@ export const readSummary = (
       const fork = yield* viewAt(sql, owner?.chat_id ?? "", null)
       let shown = views.find((v) => v.fork === fork)
       if (shown === undefined) {
-        shown = (yield* SummaryReads)?.facts.some((f) => f.fork === fork && f.rows.has(summaryId))
-          ? { fork, pieces: null }
-          : yield* lcmView(sql, owner?.chat_id ?? "", fork)
+        const facts = (yield* SummaryReads)?.facts.find((f) => f.fork === fork && f.rows.has(summaryId))
+        shown = facts ? (facts.view ?? { fork, pieces: null }) : yield* lcmView(sql, owner?.chat_id ?? "", fork)
         views = [...views, shown]
       }
       // A summary read as it is now, in a fork that shows no inserted slots, is the same all operation long.

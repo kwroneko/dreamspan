@@ -28,7 +28,16 @@ export const perf = {
   /** Each answered call's time in ms, newest last, the last 5,000. */
   displayCallMs: [] as number[],
   /** The open chat's window: what the harness reports when a scenario gets stuck. */
-  window: { loaded: 0, first: "", older: false, newer: false, paging: false, loading: false, error: "" }
+  window: {
+    castReady: false,
+    loaded: 0,
+    first: "",
+    older: false,
+    newer: false,
+    paging: false,
+    loading: false,
+    error: ""
+  }
 }
 
 /** The versions whose message body is mounted, so an update to one can be told from one off screen. */

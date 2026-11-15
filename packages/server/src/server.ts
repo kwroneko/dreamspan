@@ -1,3 +1,4 @@
+import { TransportApi, type TransportRpcs } from "@rp/shared/transportApi.ts"
 import { pluginRoutes } from "./plugins/serve.ts"
 import { PluginHost } from "./plugins/Host.ts"
 import { makePluginHandlers } from "./api/plugins.ts"
@@ -49,8 +50,6 @@ import type { Socket } from "node:net"
 import type { Duplex } from "node:stream"
 import { NodeHttpServer } from "@effect/platform-node"
 import {
-  AppApi,
-  type AppRpcs,
   AppCoreApi,
   AuthenticatedGalleryApi,
   AuthenticatedOwnTurnNoteApi,
@@ -283,7 +282,7 @@ const TransportHeadersOnly = Layer.effect(
   )
 )
 
-const serverApi: RpcGroup.RpcGroup<AppRpcs> = AppApi
+const serverApi: RpcGroup.RpcGroup<TransportRpcs> = TransportApi
 const RpcRoute = RpcServer.layerHttp({ group: serverApi, path: "/rpc", protocol: "websocket" }).pipe(
   Layer.provide([Handlers, AuthenticationLive, TransportHeadersOnly])
 )
@@ -588,7 +587,8 @@ const DatabaseLive = Layer.unwrap(
       dataDir: config.dataDir,
       readers: config.dbReaders,
       allowNetworkFs: config.dbAllowNetworkFs,
-      workers: config.dbWorkers
+      workers: config.dbWorkers,
+      shellPassPauseMs: config.shellPassPauseMs
     })
   )
 )

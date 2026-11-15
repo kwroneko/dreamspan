@@ -15,6 +15,9 @@ const Sources = Schema.Array(ModuleSource)
 const Snapshot = Schema.Struct({ modules: Sources, schemaModule: Schema.String })
 const HEADER = "rp-state-modules"
 
+/** Display folds and persisted summaries must agree with the active reducer stack. */
+export const ActiveStateModules = Context.Reference<string>("rp/db/ActiveStateModules", { defaultValue: () => "" })
+
 /** Passing the registry also works when the worker bundles its own copy of shared/state. */
 export type InstallStateModule = (
   keys: typeof stateKeys,
@@ -127,16 +130,18 @@ export const stateModuleHandlers = <A extends object>(handlers: A): A => {
         Effect.scoped(
           Effect.gen(function* () {
             const encoded = options.headers[HEADER]
+            let identity = ""
             if (encoded !== undefined) {
               const snapshot = Schema.decodeUnknownSync(Snapshot)(JSON.parse(encoded))
               if (snapshot.modules.length > 0) {
+                identity = JSON.stringify(snapshot.modules)
                 // Dynamic plugins import the installed Effect package. Use its interpreter for
                 // their schemas, even when this worker bundles another copy of Effect.
                 const native = yield* Effect.promise(() => import(snapshot.schemaModule) as Promise<typeof Schema>)
                 for (const source of snapshot.modules) yield* install(source, native.is)
               }
             }
-            return yield* (call as Call)(input, options)
+            return yield* (call as Call)(input, options).pipe(Effect.provideService(ActiveStateModules, identity))
           })
         )
     ])

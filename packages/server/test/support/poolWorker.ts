@@ -32,6 +32,11 @@ RpcServer.layer(PoolOps, { concurrency: 1, disableFatalDefects: true }).pipe(
           return threadId
         }),
       Hold: () => Effect.sync(hold),
+      ListForks: () => Effect.sync(hold),
+      ShellMaterialize: () => Effect.sync(hold),
+      GetDisplayPrefs: () => Effect.succeed(threadId),
+      GetSessionUser: () => Effect.succeed(threadId),
+      ListStImports: () => Effect.succeed(threadId),
       HoldThenCrash: () =>
         Effect.sync(() => {
           hold()

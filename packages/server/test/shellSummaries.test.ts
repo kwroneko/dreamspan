@@ -10,6 +10,7 @@ import { client, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { testWorkers } from "./support/bundles.ts"
+import { libraryView, snapshotState } from "../src/db/shellViews.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
 const database = () => Database.layer({ dataDir: tempDir("shell"), readers: 2, allowNetworkFs: false, ...testWorkers })
@@ -82,6 +83,12 @@ const setup = Effect.gen(function* () {
       const cached = yield* reader.ShellLibrary({ userId })
       assert.deepStrictEqual(cached.fresh, [], `${label}: nothing left to compute`)
       const scratch = yield* reader.ShellLibrary({ userId, recompute: true })
+      const shared = libraryView(snapshotState(yield* reader.ShellMaterialize({ userId })).state)
+      assert.strictEqual(
+        JSON.stringify(library(shared)),
+        JSON.stringify(library(scratch)),
+        `${label}: shared snapshot bytes`
+      )
       assert.deepStrictEqual(library(cached), library(scratch), label)
       assert.deepStrictEqual(library(first), library(scratch), label)
       return scratch

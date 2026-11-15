@@ -6,7 +6,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { inject } from "vitest"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Option, Schedule } from "effect"
 import { RpcClient, RpcClientError } from "effect/rpc"
-import { workerThreads, writerProtocol } from "../src/db/Database.ts"
+import { readerScheduling, workerThreads, writerProtocol } from "../src/db/Database.ts"
 import * as ReaderPool from "../src/db/readerPool.ts"
 import { PoolOps } from "./support/poolOps.ts"
 import { stalls } from "./support/liveness.ts"
@@ -53,14 +53,18 @@ const readers = (
     heldStart = () => false,
     background,
     first,
-    isolated
+    short,
+    isolated,
+    affinity
   }: {
     script?: (spawn: number) => URL
     gate?: Gate
     heldStart?: (spawn: number) => boolean
     background?: { readonly tags: ReadonlySet<string>; readonly max: number }
     first?: ReadonlySet<string>
+    short?: ReadonlySet<string>
     isolated?: (request: import("effect/rpc").RpcMessage.RequestEncoded) => boolean
+    affinity?: (request: import("effect/rpc").RpcMessage.RequestEncoded) => string | undefined
   } = {}
 ) => {
   let spawns = 0
@@ -70,7 +74,9 @@ const readers = (
         retryCrashed: true,
         ...(background ? { background } : {}),
         ...(first ? { first } : {}),
-        ...(isolated ? { isolated } : {})
+        ...(short ? { short } : {}),
+        ...(isolated ? { isolated } : {}),
+        ...(affinity ? { affinity } : {})
       })
     ),
     Layer.provide(
@@ -114,6 +120,72 @@ const stopLog = () => {
 }
 
 describe("reader pool", () => {
+  it.live("session lookup cannot leave another account's short RPC behind a history queue", () => {
+    const gate = makeGate()
+    return Effect.gen(function* () {
+      const reader = yield* Readers
+      const done: string[] = []
+      const busy = yield* Effect.forkChild(reader.Hold())
+      yield* gate.holding.pipe(stalls("the reader never started"))
+      const history = yield* Effect.forEach(Array.from({ length: 32 }), () =>
+        Effect.forkChild(reader.Count({ n: 1 }).pipe(Effect.tap(() => Effect.sync(() => done.push("history")))))
+      )
+      yield* Effect.sleep("100 millis")
+      const auth = yield* Effect.forkChild(
+        reader.GetSessionUser().pipe(Effect.tap(() => Effect.sync(() => done.push("auth"))))
+      )
+      yield* Effect.sleep("100 millis")
+      yield* gate.release
+      yield* Fiber.join(busy)
+      yield* Fiber.join(auth)
+      yield* Effect.forEach(history, Fiber.join)
+      assert.strictEqual(done[0], "auth", "authentication is itself part of the short RPC path")
+    }).pipe(Effect.ensuring(gate.release), Effect.provide(readers(1, { gate, ...readerScheduling(1) })))
+  })
+  for (const priority of ["first", "short"] as const)
+    it.live(`a stream of ${priority} reads cannot starve an older ordinary read`, () => {
+      const gate = makeGate()
+      return Effect.gen(function* () {
+        const reader = yield* Readers
+        const done: Array<string> = []
+        const busy = yield* Effect.forkChild(reader.Hold())
+        yield* gate.holding.pipe(stalls("the reader never started"))
+        const ordinary = yield* Effect.forkChild(
+          reader.ShellMaterialize().pipe(Effect.tap(() => Effect.sync(() => done.push("ordinary"))))
+        )
+        const urgent = yield* Effect.forEach(Array.from({ length: 32 }), () =>
+          Effect.forkChild(reader.GetDisplayPrefs().pipe(Effect.tap(() => Effect.sync(() => done.push("urgent")))))
+        )
+        yield* Effect.sleep("100 millis")
+        yield* gate.release
+        yield* Fiber.join(busy)
+        yield* Fiber.join(ordinary)
+        yield* Effect.forEach(urgent, Fiber.join)
+        assert.isAtMost(done.indexOf("ordinary"), 8, "at most eight priority reads may pass eligible older work")
+        assert.strictEqual(done.length, 33)
+      }).pipe(
+        Effect.ensuring(gate.release),
+        Effect.provide(readers(1, { gate, [priority]: new Set(["GetDisplayPrefs"]) }))
+      )
+    })
+  it.live("the production navigation policy keeps preferences and import notices ahead of held graph reads", () => {
+    const gate = makeGate()
+    return Effect.gen(function* () {
+      const reader = yield* Readers
+      yield* bothUp
+      const forks = yield* Effect.forkChild(reader.ListForks())
+      const heldThread = yield* gate.holding.pipe(stalls("the navigation read never started"))
+      const shell = yield* Effect.forkChild(reader.ShellMaterialize())
+      const prefs = yield* reader.GetDisplayPrefs().pipe(stalls("preferences waited for a long navigation read"))
+      const imports = yield* reader.ListStImports().pipe(stalls("import notices waited for a long navigation read"))
+      assert.notStrictEqual(prefs, heldThread)
+      assert.notStrictEqual(imports, heldThread)
+      assert.strictEqual(Atomics.load(gate.cells, 1), 1)
+      yield* gate.release
+      yield* Fiber.join(forks)
+      yield* Fiber.join(shell)
+    }).pipe(Effect.ensuring(gate.release), Effect.provide(readers(2, { gate, ...readerScheduling(2) })))
+  })
   for (const size of [1, 2])
     it.live(`maintenance has its own reader with ${size} interactive readers`, () => {
       const gate = makeGate()
@@ -126,6 +198,28 @@ describe("reader pool", () => {
         yield* gate.release
         yield* Fiber.join(maintenance)
       }).pipe(Effect.provide(readers(size, { gate, isolated: (request) => request.tag === "Hold" })), Effect.scoped)
+    })
+
+  for (const priority of ["first", "short"] as const)
+    it.live(`a ${priority} maintenance read still never takes an interactive reader`, () => {
+      const gate = makeGate()
+      return Effect.gen(function* () {
+        const { Hold, Count } = yield* Readers
+        const running = yield* Effect.forkChild(Hold())
+        yield* gate.holding.pipe(stalls("the maintenance read never started"))
+        const queued = yield* Effect.forkChild(Hold())
+        yield* Effect.sleep("100 millis")
+        yield* Count({ n: 1 }).pipe(stalls("an interactive read waited for maintenance"))
+        assert.strictEqual(Atomics.load(gate.cells, 1), 1, "the second maintenance read waited for its own reader")
+        yield* gate.release
+        yield* Fiber.join(running)
+        yield* Fiber.join(queued)
+      }).pipe(
+        Effect.ensuring(gate.release),
+        Effect.provide(
+          readers(1, { gate, isolated: (request) => request.tag === "Hold", [priority]: new Set(["Hold"]) })
+        )
+      )
     })
 
   it.live(
@@ -158,9 +252,28 @@ describe("reader pool", () => {
     30_000
   )
 
-  for (const ahead of [false, true])
+  it.live("short reads finish while a long read and further long reads remain blocked", () => {
+    const gate = makeGate()
+    return Effect.gen(function* () {
+      const { Hold } = yield* Readers
+      yield* bothUp
+      const long = yield* Effect.forkChild(Hold())
+      yield* gate.holding.pipe(stalls("the long read never started"))
+      const waiting = yield* Effect.forEach(Array.from({ length: 8 }), () => Effect.forkChild(Hold()))
+      yield* lightReads
+      assert.strictEqual(Atomics.load(gate.cells, 1), 1, "no long read occupied the reserved reader")
+      yield* gate.release
+      yield* Fiber.join(long)
+      yield* Effect.forEach(waiting, Fiber.join)
+    }).pipe(
+      Effect.ensuring(gate.release),
+      Effect.provide(readers(2, { gate, background: { tags: new Set(["Hold"]), max: 1 }, short: new Set(["Count"]) }))
+    )
+  })
+
+  for (const ahead of ["fifo", "reply", "short"] as const)
     it.live(
-      ahead ? "a reply's reads go ahead of what was queued before them" : "reads otherwise go in order",
+      ahead === "fifo" ? "reads otherwise go in order" : `${ahead} reads go ahead of what was queued before them`,
       () => {
         const gate = makeGate()
         return Effect.gen(function* () {
@@ -181,10 +294,16 @@ describe("reader pool", () => {
           yield* Fiber.join(busy)
           yield* Fiber.join(browsing)
           yield* Fiber.join(reply)
-          assert.deepStrictEqual(done, ahead ? ["reply", "browsing"] : ["browsing", "reply"])
+          assert.deepStrictEqual(done, ahead !== "fifo" ? ["reply", "browsing"] : ["browsing", "reply"])
         }).pipe(
           Effect.ensuring(gate.release),
-          Effect.provide(readers(1, { gate, ...(ahead ? { first: new Set(["Count"]) } : {}) }))
+          Effect.provide(
+            readers(1, {
+              gate,
+              ...(ahead === "reply" ? { first: new Set(["Count"]) } : {}),
+              ...(ahead === "short" ? { short: new Set(["Count"]) } : {})
+            })
+          )
         )
       },
       30_000

@@ -27,7 +27,7 @@ import { DIRECTION_PROMPT } from "@rp/shared/endOfRequest.ts"
 import { type FieldPath, textField } from "@rp/shared/editing.ts"
 import { Link } from "@tanstack/react-router"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
@@ -318,16 +318,16 @@ function PromptBlock({
   entry,
   handle,
   collapsed,
-  toggle,
-  remove,
+  toggle: onToggle,
+  remove: onRemove,
   context,
   definitions,
   layout,
   optionsOpen,
-  toggleOptions,
-  actions,
-  autoFocus = false,
-  aboveBreakpoint = false
+  toggleOptions: onToggleOptions,
+  actions: rowActions,
+  autoFocus: focusOnMount,
+  aboveBreakpoint: beforeBreakpoint
 }: {
   store: EditorStore
   entry: PromptOrderEntry
@@ -346,6 +346,31 @@ function PromptBlock({
   autoFocus?: boolean
   aboveBreakpoint?: boolean
 }) {
+  // Parameter default patterns make the current React Compiler skip this whole block.
+  const autoFocus = focusOnMount ?? false
+  const aboveBreakpoint = beforeBreakpoint ?? false
+  // SortableList's closures include the current index. Keep child controls stable while
+  // dispatching through the latest committed row, including after a reorder.
+  const latest = useRef({ onToggle, onRemove, onToggleOptions, rowActions })
+  useLayoutEffect(() => {
+    latest.current = { onToggle, onRemove, onToggleOptions, rowActions }
+  })
+  const toggle = useCallback(() => latest.current.onToggle(), [])
+  const remove = useCallback(() => latest.current.onRemove(), [])
+  const toggleOptions = useCallback(() => latest.current.onToggleOptions(), [])
+  const canOpenLarge = rowActions.openLarge !== undefined
+  const canDefine = rowActions.definitionsBelow !== undefined
+  const canAddOwnTurn = rowActions.ownTurnBelow !== undefined
+  const actions = useMemo<RowActions>(
+    () => ({
+      openLarge: canOpenLarge ? () => latest.current.rowActions.openLarge?.() : undefined,
+      insertAbove: () => latest.current.rowActions.insertAbove(),
+      insertBelow: () => latest.current.rowActions.insertBelow(),
+      ownTurnBelow: canAddOwnTurn ? () => latest.current.rowActions.ownTurnBelow?.() : undefined,
+      definitionsBelow: canDefine ? () => latest.current.rowActions.definitionsBelow?.() : undefined
+    }),
+    [canOpenLarge, canDefine, canAddOwnTurn]
+  )
   const path = at(entry.identifier)
   const namePath = [...path, "name"]
   const prompt = useValue<PresetPrompt | undefined>(store, path) ?? newestMessage
@@ -496,7 +521,7 @@ function PromptBlock({
       hint="More actions for this prompt."
       trigger={<BlockMenuButton label={`Actions for ${name}`} />}
     >
-      {actions.openLarge && (
+      {canOpenLarge && (
         <MenuItem
           icon="expand"
           onClick={actions.openLarge}
@@ -511,7 +536,7 @@ function PromptBlock({
       <MenuItem icon="plus" onClick={actions.insertBelow} description="A new empty prompt just below this one">
         Insert a prompt below
       </MenuItem>
-      {actions.ownTurnBelow && (
+      {canAddOwnTurn && (
         <MenuItem
           icon="note"
           onClick={actions.ownTurnBelow}
@@ -520,7 +545,7 @@ function PromptBlock({
           Insert Own-turn notes below
         </MenuItem>
       )}
-      {actions.definitionsBelow && (
+      {canDefine && (
         <MenuItem icon="insert" onClick={actions.definitionsBelow} description={DEFINITIONS_HINT}>
           Insert a {DEFINITIONS_LABEL.toLowerCase()} below
         </MenuItem>

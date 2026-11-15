@@ -36,6 +36,8 @@ export interface BranchSectionProps extends BranchControlContext {
 export const branchControlParts = makeRegistry<{
   readonly id: string
   readonly order: number
+  /** False keeps the control in its loading state until this part knows the viewed line. */
+  readonly ready?: (context: BranchControlContext) => boolean
   /** The first part to answer names the trigger; null: not this part's. */
   readonly trigger?: (context: BranchControlContext) => BranchTrigger | null
   /** A prefix identifying the viewed line in browser and workbench tabs. */

@@ -43,12 +43,16 @@ const choicesCte = (sql: SqlClient.SqlClient, overrides: string) => sql`choices 
   )`
 
 /** `lcmPathColumns` reading a fork's overrides from `choices` (`choicesCte`): the same values. */
-const choiceColumns = (sql: SqlClient.SqlClient) => {
+const choiceColumns = (sql: SqlClient.SqlClient, includeContent = true) => {
   const live = sql`s.deleted_at IS NULL AND s.purged_at IS NULL AND coalesce(ds.flag,0)=0 AND coalesce(h.flag,s.context_excluded)=0
         AND v.deleted_at IS NULL AND v.purged_at IS NULL AND coalesce(dv.flag,0)=0`
   return sql`p.id, s.parent_slot_id AS parent, s.depth, p.position, s.parent_slot_id AS previous, s.inserted,
       CASE WHEN ${live} AND v.status NOT IN ('generating','failed') AND (v.content_length > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
-      CASE WHEN ${live} AND v.status NOT IN ('generating','failed') THEN CASE WHEN v.content_length > 0 THEN t.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
+      ${
+        includeContent
+          ? sql`CASE WHEN ${live} AND v.status NOT IN ('generating','failed') THEN CASE WHEN v.content_length > 0 THEN t.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,`
+          : sql`'' AS content,`
+      }
       (SELECT json_group_array(json_object('mediaId',m.id,'sha256',m.sha256,'width',m.width,'height',m.height))
         FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND coalesce((SELECT ie.flag FROM choices ie
           WHERE ie.kind='image_exclude' AND ie.target_id=(${sql.literal(originalSql("v"))}) || ':' || a.media_id),0) <> 1 ORDER BY a.ordinal) AS images_json,
@@ -62,8 +66,12 @@ const choiceColumns = (sql: SqlClient.SqlClient) => {
       LEFT JOIN choices ds ON ds.kind='delete_slot' AND ds.target_id=s.id
       LEFT JOIN choices h ON h.kind='hide' AND h.target_id=s.id
       LEFT JOIN choices dv ON dv.kind='delete_version' AND dv.target_id=${sql.literal(originalSql("v"))}
-      LEFT JOIN version_texts t ON t.version_seq = v.seq AND v.content_length > 0
-        AND v.status NOT IN ('generating','failed') AND ${live}
+      ${
+        includeContent
+          ? sql`LEFT JOIN version_texts t ON t.version_seq = v.seq AND v.content_length > 0
+        AND v.status NOT IN ('generating','failed') AND ${live}`
+          : sql``
+      }
       ORDER BY p.position`
 }
 
@@ -72,21 +80,30 @@ const choiceColumns = (sql: SqlClient.SqlClient) => {
 export const lcmPathColumns = (
   sql: SqlClient.SqlClient,
   fork: string | null,
-  base = false
+  base = false,
+  includeContent = true
 ) => sql`p.id, s.parent_slot_id AS parent, s.depth, p.position, s.parent_slot_id AS previous, s.inserted,
       CASE WHEN NOT ${base ? sql`(s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL)` : slotDeletedIn(sql, fork, "s")} AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0
         AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND (v.content_length > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
-      CASE WHEN NOT ${base ? sql`(s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL)` : slotDeletedIn(sql, fork, "s")} AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0
-        AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN CASE WHEN v.content_length > 0 THEN t.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
+      ${
+        includeContent
+          ? sql`CASE WHEN NOT ${base ? sql`(s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL)` : slotDeletedIn(sql, fork, "s")} AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0
+        AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN CASE WHEN v.content_length > 0 THEN t.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,`
+          : sql`'' AS content,`
+      }
       (SELECT json_group_array(json_object('mediaId',m.id,'sha256',m.sha256,'width',m.width,'height',m.height))
         FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND NOT ${base ? sql`0` : imageExcludedIn(sql, fork, `(${originalSql("v")})`, "a.media_id")} ORDER BY a.ordinal) AS images_json,
       (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
       coalesce(v.status = 'generating',0) AS generating,
       (SELECT count(*) FROM slots child WHERE child.parent_slot_id = p.id AND child.deleted_at IS NULL AND child.inserted = 0) AS children
       FROM path p JOIN slots s ON s.id = p.id LEFT JOIN versions v ON v.id = ${base ? sql`s.selected_version_id` : shownIn(sql, fork, "s")}
-      LEFT JOIN version_texts t ON t.version_seq = v.seq AND v.content_length > 0
+      ${
+        includeContent
+          ? sql`LEFT JOIN version_texts t ON t.version_seq = v.seq AND v.content_length > 0
         AND v.status NOT IN ('generating','failed') AND NOT ${base ? sql`(s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL)` : slotDeletedIn(sql, fork, "s")}
-        AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0 AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")}
+        AND ${base ? sql`s.context_excluded` : contextExcludedIn(sql, fork)} = 0 AND NOT ${base ? sql`(v.deleted_at IS NOT NULL OR v.purged_at IS NOT NULL)` : shownVersionDeletedIn(sql, fork, "v")}`
+          : sql``
+      }
       ORDER BY p.position`
 
 /**
@@ -103,13 +120,15 @@ export const lcmPath = (
   leaf: string,
   first?: string,
   limit = Number.MAX_SAFE_INTEGER,
-  identities?: ReadonlyArray<string>
+  identities?: ReadonlyArray<string>,
+  /** Maintenance pins identities and revisions, without reading the messages' prose. */
+  includeContent = true
 ) =>
   identities === undefined
-    ? wholePath(sql, userId, chatId, leaf, first, limit)
+    ? wholePath(sql, userId, chatId, leaf, first, limit, includeContent)
     : Effect.gen(function* () {
         // A view's path (db/lcmAudience.ts): a message its character didn't know is absent.
-        const path = yield* wholePath(sql, userId, chatId, leaf, first, limit)
+        const path = yield* wholePath(sql, userId, chatId, leaf, first, limit, includeContent)
         const versions = path.flatMap((slot) => (slot.versionId === null ? [] : [slot.versionId]))
         const known = yield* knownVersions(sql, versions, identities, yield* viewAt(sql, chatId, leaf))
         // A partial join is rendered from the same frozen rows as a reply. It remains a
@@ -146,7 +165,8 @@ const wholePath = (
   chatId: string,
   leaf: string,
   first?: string,
-  limit = Number.MAX_SAFE_INTEGER
+  limit = Number.MAX_SAFE_INTEGER,
+  includeContent = true
 ) =>
   Effect.gen(function* () {
     const [owned] = yield* sql`SELECT s.id FROM slots s JOIN chats c ON c.id = s.chat_id
@@ -162,7 +182,10 @@ const wholePath = (
       pieces === null && changes.length > 0 && changes.every((c) => c.kind !== "hide_range")
         ? JSON.stringify(changes)
         : undefined
-    const columns = overrides === undefined ? lcmPathColumns(sql, fork, changes.length === 0) : choiceColumns(sql)
+    const columns =
+      overrides === undefined
+        ? lcmPathColumns(sql, fork, changes.length === 0, includeContent)
+        : choiceColumns(sql, includeContent)
     const choices = overrides === undefined ? sql`` : sql`, ${choicesCte(sql, overrides)}`
     const decode = (rows: ReadonlyArray<LcmSlot & { images_json: string }>) =>
       rows.map(({ images_json, ...row }) => ({

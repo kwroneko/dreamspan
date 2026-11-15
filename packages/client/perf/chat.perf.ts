@@ -11,6 +11,7 @@ import { Effect } from "effect"
 import { budgets } from "./budgets.ts"
 import { type Fixture, prepare } from "./fixtures.ts"
 import { type PerfServer, startServer, withClient } from "./support.ts"
+import { observePaintedPin } from "./paintedPin.ts"
 
 let server: PerfServer
 let fixture: Fixture
@@ -21,6 +22,7 @@ const scrollPages = Number(process.env.PERF_SCROLL_PAGES) || Number.POSITIVE_INF
 test.beforeAll(async () => {
   const prepared = await prepare()
   fixture = prepared.fixture
+  console.log(JSON.stringify({ fixtureShape: fixture.shape }))
   dataDir = prepared.dataDir
   server = await startServer(dataDir)
   // PERF_DENSITY=compact runs every scenario at the account's compact message spacing.
@@ -147,6 +149,23 @@ const onScreen = (page: Page, slot: string | null = null) =>
       })
       throw new Error(`not on screen: ${JSON.stringify(state)}`, { cause: error })
     })
+
+/**
+ * Waits until the chat the URL names is shown: its surface is no longer the outgoing one, which
+ * stays on screen, busy, until the new chat's first read finishes (`OpenChat`), and its last
+ * message is on screen. `onScreen` alone passes on the outgoing surface.
+ */
+const arrived = async (page: Page) => {
+  await page.waitForFunction(
+    () => document.querySelector('[aria-busy="true"] [data-testid=messages]') === null,
+    undefined,
+    {
+      timeout: 60_000,
+      polling: 50
+    }
+  )
+  await onScreen(page)
+}
 
 /** Regenerates the last `count` replies of a chat: that many streams at once. */
 const startStreams = (chatId: string, count: number) =>
@@ -475,11 +494,15 @@ test("swipe through versions", async ({ page }) => {
   const from = await now(page)
   for (let i = 0; i < 3; i++) {
     await row.getByRole("button", { name: "Previous version" }).click()
-    await expect(row.getByText(`${3 - i} / 4`)).toBeVisible()
+    await expect(
+      row.getByRole("button", { name: `Version ${3 - i} of 4: choose a version`, exact: true })
+    ).toBeVisible()
   }
   for (let i = 0; i < 3; i++) {
     await row.getByRole("button", { name: "Next version" }).click()
-    await expect(row.getByText(`${2 + i} / 4`)).toBeVisible()
+    await expect(
+      row.getByRole("button", { name: `Version ${2 + i} of 4: choose a version`, exact: true })
+    ).toBeVisible()
   }
   const measured = await since(page, from)
   const clicks = measured.events.filter((e) => e.name === "click" || e.name === "pointerup" || e.name === "pointerdown")
@@ -518,6 +541,11 @@ test("switch the chat panel's tabs in the 100,000-message chat", async ({ page }
   await onScreen(page)
   const toolTabs = page.getByRole("tablist", { name: "Chat panel" })
   await expect(toolTabs).toBeVisible()
+  // Initial cast data changes rows independently of switching tabs. Start once it settles.
+  await page.waitForFunction(
+    () => (window as unknown as { __rpPerf?: { window: { castReady: boolean } } }).__rpPerf?.window.castReady
+  )
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
   // The panel loads every tab's code once it's idle.
   await page.waitForTimeout(2000)
   await page.evaluate(() => ((window as unknown as { __tabs: { codeWaits: number } }).__tabs.codeWaits = 0))
@@ -579,13 +607,16 @@ test("switch chats mid-stream", async ({ page }) => {
   await page.waitForTimeout(1500)
   const from = await now(page)
   let started = Date.now()
-  await page.getByRole("link", { name: "← Chats" }).click()
-  await page.getByRole("link", { name: fixture.short[0]!.title }).click()
-  await onScreen(page)
+  await page
+    .getByRole("link", { name: `Open chat ${fixture.short[0]!.title}`, exact: true })
+    .first()
+    .click()
+  // The short chat itself, not the streaming one kept on screen while it loads: Back from the
+  // latter never left, so it measured nothing.
+  await arrived(page)
   const awayMs = Date.now() - started
   await page.waitForTimeout(1000)
   started = Date.now()
-  await page.goBack()
   await page.goBack()
   await expect(page.getByText("generating", { exact: true }).first()).toBeVisible()
   const backMs = Date.now() - started
@@ -633,6 +664,48 @@ const fromEndSamples = async (page: Page, ms: number) => {
     samples.push(await messages(page).evaluate((list) => list.scrollHeight - list.scrollTop - list.clientHeight))
   }
   return samples
+}
+
+/** The same 100 ms samples, observing the distance delivered after resize/follow.
+ * Keep every corrected distance between samples so a delivered excursion is retained. */
+const afterFollowSamples = async (page: Page, ms: number) => {
+  await messages(page).evaluate((list) => {
+    let last = list.scrollHeight - list.scrollTop - list.clientHeight
+    let delivered: number[] = []
+    let deliveries = 0
+    const observer = new ResizeObserver(() =>
+      queueMicrotask(() => {
+        last = list.scrollHeight - list.scrollTop - list.clientHeight
+        delivered.push(last)
+        deliveries++
+      })
+    )
+    observer.observe([...list.querySelectorAll("[data-index]")].at(-1)!)
+    Object.assign(window, {
+      __burstPin: {
+        take: () => {
+          const value = Math.max(last, ...delivered)
+          delivered = []
+          return value
+        },
+        stop: () => {
+          observer.disconnect()
+          return deliveries
+        }
+      }
+    })
+  })
+  const samples: number[] = []
+  for (let elapsed = 0; elapsed < ms; elapsed += 100) {
+    await page.waitForTimeout(100)
+    samples.push(
+      await page.evaluate(() => (window as unknown as { __burstPin: { take: () => number } }).__burstPin.take())
+    )
+  }
+  const deliveries = await page.evaluate(() =>
+    (window as unknown as { __burstPin: { stop: () => number } }).__burstPin.stop()
+  )
+  return { samples, deliveries }
 }
 
 /**
@@ -695,6 +768,8 @@ test("a long reply, past 4,000 tokens", async ({ page }) => {
     pinnedPx: round(Math.max(...fromEnd)),
     ...frameStats(measured)
   })
+  // An ended or stalled stream must not pass by measuring an idle browser.
+  expect(updates).toBeGreaterThanOrEqual(20)
   expect(words1).toBeGreaterThan(words0)
   expect(bodies / updates).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
   expect(scriptMsPerSecond).toBeLessThanOrEqual(budgets.longReplyScriptMsPerSecond)
@@ -723,7 +798,9 @@ test("parallel swipes under one slot", async ({ page }) => {
   )
   const row = page.locator(`article[data-slot="${swipes.slot}"]`)
   await expect(row.getByText("generating", { exact: true })).toBeVisible()
-  await expect(row.getByRole("group", { name: "Versions" })).toHaveText(`‹${swipes.versions}›`)
+  await expect(
+    row.getByRole("button", { name: `Version ${swipes.versions} of ${swipes.versions}: choose a version`, exact: true })
+  ).toBeVisible()
   await page.waitForTimeout(1000)
   const from = await now(page)
   const counters0 = await counters(page)
@@ -736,7 +813,12 @@ test("parallel swipes under one slot", async ({ page }) => {
 
   // The one before, still generating off screen, kept its text: it shows it, and it grows.
   await row.getByRole("button", { name: "Previous version" }).click()
-  await expect(row.getByText(`${swipes.versions - 1} / ${swipes.versions}`)).toBeVisible()
+  await expect(
+    row.getByRole("button", {
+      name: `Version ${swipes.versions - 1} of ${swipes.versions}: choose a version`,
+      exact: true
+    })
+  ).toBeVisible()
   const length = async () => ((await row.locator(".markdown").textContent()) ?? "").length
   const before = await length()
   await page.waitForTimeout(800)
@@ -775,16 +857,22 @@ test("a bursty stream: 300 tokens at once, every second", async ({ page }) => {
     await page.goto(paced.url)
     await onScreen(page)
     await page.waitForTimeout(1500)
+    const painted = await observePaintedPin(page, test.info().outputPath("painted-pin-jump.jpg"))
     const from = await now(page)
     const counters0 = await counters(page)
-    const fromEnd = await fromEndSamples(page, 5000)
+    const { samples: fromEnd, deliveries } = await afterFollowSamples(page, 5000)
     const measured = await since(page, from)
+    const presented = await painted.stop()
     const updates = measured.perf.shownUpdates! - counters0.shownUpdates!
     const bodies = measured.perf.liveBodyRenders! - counters0.liveBodyRenders!
     record("bursty", {
       updates,
       bodyRendersPerUpdate: round(bodies / Math.max(1, updates)),
       pinnedPx: round(Math.max(...fromEnd)),
+      afterFollowDeliveries: deliveries,
+      paintedFrames: presented.frames,
+      paintedPinPx: round(presented.maximumPx),
+      paintedMissing: presented.missing,
       gaps: measured.perf.gaps ?? 0,
       ...frameStats(measured)
     })
@@ -793,6 +881,11 @@ test("a bursty stream: 300 tokens at once, every second", async ({ page }) => {
     expect(updates).toBeLessThanOrEqual(7)
     expect(bodies / updates).toBeLessThanOrEqual(budgets.bodyRendersPerUpdate)
     expect(Math.max(...fromEnd)).toBeLessThanOrEqual(budgets.pinnedPx)
+    expect(deliveries).toBeGreaterThan(0)
+    expect(presented.errors).toEqual([])
+    expect(presented.frames).toBeGreaterThan(0)
+    expect(presented.missing).toBe(0)
+    expect(presented.maximumPx).toBeLessThanOrEqual(budgets.pinnedPx)
     expect(measured.perf.gaps ?? 0).toBe(budgets.gaps)
     expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.longFramesOver100)
   } finally {

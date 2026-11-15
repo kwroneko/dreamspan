@@ -92,8 +92,53 @@ export function selectedSource(map: SourceMap, from: number, to: number): readon
 const OPAQUE = new Set(["textarea", "option", "optgroup", "select", "title", "svg", "math", "style", "script"])
 const TABLE_PARTS = new Set(["table", "thead", "tbody", "tfoot", "tr", "colgroup"])
 
+/** A range of formatted characters with consecutive original offsets, or no source. */
+export interface SourceRun {
+  readonly from: number
+  readonly to: number
+  readonly source: number | null
+}
+
+/** Pack one block directly from formatting's runs; ordinary text has no per-character work. */
+export function packSourceRuns(runs: ReadonlyArray<SourceRun>, start: number, end: number): string {
+  let lo = 0
+  let hi = runs.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (runs[mid]!.to <= start) lo = mid + 1
+    else hi = mid
+  }
+  const first = runs[lo]
+  if (first && first.from <= start && first.to >= end && first.source !== null)
+    return JSON.stringify({ start: first.source + start - first.from, length: end - start })
+  const offsets: SourceChar[] = []
+  for (let index = start; index < end; index++) {
+    while (lo < runs.length && runs[lo]!.to <= index) lo++
+    const run = runs[lo]
+    const source = run && run.from <= index && run.source !== null ? run.source + index - run.from : null
+    offsets.push(source === null ? null : [source, source + 1])
+  }
+  return packSourceOffsets(offsets)
+}
+
+/** A contiguous block needs one start, rather than two numbers per character in a processor key. */
+export type SourceOffsets = ReadonlyArray<SourceChar> | { readonly start: number; readonly length: number }
+
+export function packSourceOffsets(offsets: ReadonlyArray<SourceChar>): string {
+  const start = offsets[0]?.[0]
+  if (start !== undefined && offsets.every((range, i) => range?.[0] === start + i && range[1] === start + i + 1))
+    return JSON.stringify({ start, length: offsets.length })
+  return JSON.stringify(offsets)
+}
+
 /** Trusted metadata is attached after sanitizing; source HTML never supplies it. */
-export function sourcePositions({ offsets }: { offsets: ReadonlyArray<SourceChar> }) {
+export function sourcePositions({ offsets }: { offsets: SourceOffsets }) {
+  const at = (index: number): SourceChar =>
+    "start" in offsets
+      ? index >= 0 && index < offsets.length
+        ? [offsets.start + index, offsets.start + index + 1]
+        : null
+      : (offsets[index] ?? null)
   return (tree: PositionedNode, file: { value: unknown }) => {
     const source = String(file.value)
     interface Leaf {
@@ -108,9 +153,9 @@ export function sourcePositions({ offsets }: { offsets: ReadonlyArray<SourceChar
     const sourceRange = (start: number, end: number): readonly [number, number] | null => {
       let first = start
       let last = end - 1
-      while (first <= last && !offsets[first]) first++
-      while (last >= first && !offsets[last]) last--
-      return first <= last ? [offsets[first]![0], offsets[last]![1]] : null
+      while (first <= last && !at(first)) first++
+      while (last >= first && !at(last)) last--
+      return first <= last ? [at(first)![0], at(last)![1]] : null
     }
     const visit = (node: PositionedNode, parent?: PositionedNode) => {
       const before = leaves.length

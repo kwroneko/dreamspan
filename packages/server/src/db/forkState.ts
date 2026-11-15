@@ -24,8 +24,13 @@ const ForkView = Context.Reference<string | null>("rp/ForkView", { defaultValue:
 export type ForkRef = string | null | Statement.Fragment
 
 /** SQL: the step of `kind` for `target` in force at fork `fork`'s point: one probe of `fork_steps`. */
-const stepSql = (kind: string, fork: string, target: string) => `(SELECT fx_s.override_id FROM fork_steps fx_s
-    WHERE fx_s.kind = '${kind}' AND fx_s.target_id = ${target} AND fx_s.label <= ${pointSql(fork)}
+const stepSql = (
+  kind: string,
+  fork: string,
+  target: string,
+  point = pointSql(fork)
+) => `(SELECT fx_s.override_id FROM fork_steps fx_s
+    WHERE fx_s.kind = '${kind}' AND fx_s.target_id = ${target} AND fx_s.label <= ${point}
     ORDER BY fx_s.label DESC LIMIT 1)`
 
 /**
@@ -35,18 +40,18 @@ const stepSql = (kind: string, fork: string, target: string) => `(SELECT fx_s.ov
  * range holding it (`hide_range`), each one probe; the one written nearest the fork wins (the
  * writer with the longer base is the deeper one in the lineage), the newest of one writer's.
  */
-export const effectiveOverrideSql = (kind: string, fork: string, target: string) => {
-  if (kind !== "hide") return stepSql(kind, fork, target)
+export const effectiveOverrideSql = (kind: string, fork: string, target: string, point?: string) => {
+  if (kind !== "hide") return stepSql(kind, fork, target, point)
   return `(SELECT id FROM (
     SELECT fx_o.id, length(fx_ol.base) AS depth, fx_o.seq FROM fork_overrides fx_o
       JOIN fork_labels fx_ol ON fx_ol.fork_id = fx_o.fork_id
-    WHERE fx_o.id = ${stepSql("hide", fork, target)}
+    WHERE fx_o.id = ${stepSql("hide", fork, target, point)}
     UNION ALL
     SELECT fx_o.id, length(fx_ol.base) AS depth, fx_o.seq
     FROM lcm_enable_slots fx_es JOIN lcm_enable_runs fx_er ON fx_er.id = fx_es.run_id
       CROSS JOIN fork_overrides fx_o JOIN fork_labels fx_ol ON fx_ol.fork_id = fx_o.fork_id
     WHERE fx_es.slot_id = ${target} AND fx_es.shown = 1 AND fx_er.published = 1
-      AND fx_o.id = ${stepSql("hide_range", fork, "fx_es.run_id")}
+      AND fx_o.id = ${stepSql("hide_range", fork, "fx_es.run_id", point)}
   ) ORDER BY depth DESC, seq DESC LIMIT 1)`
 }
 
@@ -55,9 +60,9 @@ export const effectiveOverrideSql = (kind: string, fork: string, target: string)
  * because no live fork showed it, `markUnseen` in bin.ts), emptied for good, or deleted in the
  * fork's own view (`delete_slot`). A flag of 0 is a restore.
  */
-export const slotDeletedInSql = (fork: string, s: string) =>
+export const slotDeletedInSql = (fork: string, s: string, point?: string) =>
   `(${s}.deleted_at IS NOT NULL OR ${s}.purged_at IS NOT NULL OR coalesce((SELECT flag FROM fork_overrides
-    WHERE id = ${effectiveOverrideSql("delete_slot", fork, `${s}.id`)}), 0) = 1)`
+    WHERE id = ${effectiveOverrideSql("delete_slot", fork, `${s}.id`, point)}), 0) = 1)`
 
 /** SQL: whether version `o`, one of a message's own versions, is deleted in the fork `fork` (`slotDeletedInSql`'s rule). */
 export const versionDeletedInSql = (fork: string, o: string) =>
@@ -77,6 +82,15 @@ export const shownVersionDeletedIn = (sql: SqlClient.SqlClient, fork: ForkRef, v
 export const selectedInSql = (fork: string, s: string) =>
   `coalesce((SELECT value_id FROM fork_overrides WHERE id = ${effectiveOverrideSql("select", fork, `${s}.id`)}),
     ${s}.selected_version_id)`
+
+/**
+ * SQL from `FROM` on: the chat's versions being written now. Through the partial index of
+ * generating versions: with covering slot/version indexes, the planner otherwise walks every
+ * version of the chat (360 ms for 170,000 versions).
+ */
+export const generatingIn = (sql: SqlClient.SqlClient, chatId: string) =>
+  sql`versions v INDEXED BY versions_generating CROSS JOIN slots s ON s.id = v.slot_id
+    WHERE v.status = 'generating' AND s.chat_id = ${chatId}`
 
 /**
  * SQL: the message's own version that version row `v` is or stands in for. A fork's own

@@ -80,6 +80,17 @@ export const makeThreadReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const castAt = (chatId: string, forkId: string, slotId: string) => threadCastAt(sql, chatId, forkId, slotId)
   return {
+    ThreadsOfFast: ({ userId, chatId, forkId }) =>
+      Effect.gen(function* () {
+        const [chat] =
+          yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const [fork] =
+          yield* sql`SELECT 1 FROM forks WHERE id = ${forkId} AND chat_id = ${chatId} AND deleted_at IS NULL`
+        if (!fork) return yield* new NotFound({ entity: "fork", id: forkId })
+        const [split] = yield* sql`SELECT 1 FROM thread_splits WHERE chat_id = ${chatId} LIMIT 1`
+        return split ? null : []
+      }).pipe(query("ThreadsOfFast")),
     ThreadsOf: ({ userId, chatId, forkId }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ id: string }>`SELECT id FROM chats
@@ -91,6 +102,10 @@ export const makeThreadReadHandlers = Effect.gen(function* () {
           ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
         const asked = rows.find((row) => row.id === forkId)
         if (!asked) return yield* new NotFound({ entity: "fork", id: forkId })
+        // A chat with no thread sets cannot acquire membership through a fork label.
+        // Ownership and the requested live fork were checked before this shortcut.
+        const [split] = yield* sql`SELECT 1 FROM thread_splits WHERE chat_id = ${chatId} LIMIT 1`
+        if (!split) return []
         const summaries = yield* chatForkSummaries(sql, userId, chatId, rows)
         const placesOf = (id: string) => summaries.get(id)?.threads ?? []
         const shown = shownSplits(rows.map((row) => placesOf(row.id)))

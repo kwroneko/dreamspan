@@ -75,15 +75,29 @@ function ChatTitle({
   const shown = name?.name ?? "Chat"
   const begin = async () => {
     if (view.chat === null) return
+    const forkId = view.forkId
+    const stillHere = () => session.snapshot().forkId === forkId
+    let current = split
+    if (current === null) {
+      const resolved = await session.call((client) => client("GetSplitChats", { chatId: session.id, forkId }))
+      if (!resolved.ok) {
+        showToast({ title: "Couldn't read this chat's name", description: resolved.error.message })
+        return
+      }
+      current = resolved.value
+    }
+    if (!stillHere()) return
+    const initial = name?.name ?? current.group.title
     setGroup(null)
     setScope("chat")
     write.clear()
-    if (split && split.group.id !== split.group.chatId) {
-      setDraft(shown)
+    setDraft(initial)
+    if (current.group.id !== current.group.chatId) {
       setEditing(true)
       return
     }
     const result = await session.call((client) => client("ListGroupChats", { chatId: view.chat!.id }))
+    if (!stillHere()) return
     if (!result.ok && result.error.tag !== "NotFound") {
       showToast({ title: "Couldn't check this chat's group", description: result.error.message })
       return
@@ -91,7 +105,6 @@ function ChatTitle({
     const found = result.ok ? result.value : null
     setGroup(found)
     if (found !== null && found.chats.length > 1) return setOpen(true)
-    setDraft(shown)
     setEditing(true)
   }
   const handled = useRef(request)
@@ -112,7 +125,7 @@ function ChatTitle({
     else input.current?.focus()
   }
   const many = group !== null && group.chats.length > 1
-  if (view.chat === null)
+  if (view.chat === null || name === null)
     return (
       <span
         role="status"
@@ -180,7 +193,7 @@ function ChatTitle({
         onOpenChange={setOpen}
         title="Rename chat"
         label="Name"
-        initial={shown}
+        initial={draft}
         description={
           <>
             Leave it empty to name it after its characters.
@@ -280,7 +293,10 @@ export function ChatHeader({
   const characters = castCharacters(view)
   const [renameRequest, setRenameRequest] = useState(0)
   const split = useSplitChats(view.chat?.id ?? null, view.forkId)
-  const baseName = view.chat ? chatName(importState(view.chat.title).title, characters, view.chat.createdAt) : null
+  const baseName =
+    view.chat && view.cast && split
+      ? chatName(importState(view.chat.title).title, characters, view.chat.createdAt)
+      : null
   const name =
     baseName && split && split.group.id !== split.group.chatId ? { ...baseName, name: split.group.title } : baseName
   const line = useBranchTabTitle(view)

@@ -11,7 +11,8 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { openOnPlainClick } from "../../ui/links.ts"
-import { useAtomRefresh } from "@effect/atom-react"
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
 import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useMemo, useRef, useState } from "react"
 import { carryLink, CHAT_DRAG } from "../../ui/appDrags.ts"
@@ -42,7 +43,7 @@ import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
 import { characterChatActions, sidebarFoot } from "./homeSlots.ts"
 import { SlotOutlet } from "../../slots.tsx"
-import { Loading } from "../../ui/Spinner.tsx"
+import { Loading, LoadingProgress, PlaceholderBar } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { WindowedList } from "../../ui/WindowedList.tsx"
 import { listNames } from "../chat/cast.ts"
@@ -58,8 +59,7 @@ import {
   sidebarCleared,
   useShellForks,
   useShellNavigation,
-  type ShellFork,
-  type ShellLibrary
+  type ShellFork
 } from "./shellData.tsx"
 
 export function PinButton({
@@ -268,9 +268,41 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
   const label = thread ? shellThreadLabel(thread) : shellBranchLabel(fork)
   const kind = thread ? "thread" : "branch"
   const addedNames = `Added characters: ${fork.added.map((c) => c.name).join(", ")}`
+  // Not read yet (a cold library's first pass): its name if it has one, quiet bars for the
+  // rest, in the lines' own boxes, so the row keeps its height as it fills in.
+  const pending = fork.pending === true
+  // Keep the boxes a cold row reserved until it unmounts. Its added characters
+  // are unknown until the pass reaches it; revealing them must not move the list.
+  const [reserveAdded, setReserveAdded] = useState(pending)
+  if (pending && !reserveAdded) setReserveAdded(true)
+  const nameless = pending && !fork.named && !fork.original
+  const title = nameless ? <PlaceholderBar className="inline-block w-28 align-middle" /> : label
+  const openLabel = nameless ? `Open ${kind}, still loading` : `Open ${kind} ${label}${kindLabel}`
+  const body = pending ? (
+    <>
+      <span className="block min-h-8 pt-1">
+        <PlaceholderBar className="w-full" />
+        <PlaceholderBar className="mt-2 w-2/3" />
+      </span>
+      <span data-row-when className="block min-h-4 pt-1">
+        <PlaceholderBar className="w-24" />
+      </span>
+    </>
+  ) : (
+    <>
+      <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
+        {fork.preview || "No messages yet"}
+      </span>
+      <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
+        Last message {formatMoment(fork.endAt ?? fork.createdAt)}
+      </span>
+    </>
+  )
   return (
     <div
       data-fork-row
+      data-fork-pending={pending || undefined}
+      data-reserve-added={reserveAdded || undefined}
       {...kindRowProps(kindLook)}
       onClick={(event) => {
         // A dialog opened from the row is portalled elsewhere; its clicks still bubble here.
@@ -279,6 +311,9 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
       }}
       className={`fork-row branch-list-row @container/fork-row relative grid w-full shrink-0 max-w-controls min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${here ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
     >
+      {reserveAdded && fork.added.length === 0 && (
+        <span aria-hidden="true" data-added-space className="pointer-events-none block h-7.5 w-24" />
+      )}
       {fork.added.length > 0 && (
         <Tooltip label={addedNames}>
           <span
@@ -329,12 +364,12 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
               }}
             >
               <span data-chat-title className="min-w-0 truncate font-medium">
-                {label}
+                {title}
               </span>
             </InlineRename>
           ) : (
             <span data-chat-title className="min-w-0 flex-1 truncate font-medium">
-              {label}
+              {title}
             </span>
           )}
           {!renaming && <KindBadge kind={fork.chat.kind} />}
@@ -346,46 +381,38 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
           )}
         </div>
         <ContextMenu
-          label={`Actions for ${kind} ${label}`}
+          label={nameless ? `Actions for this ${kind}` : `Actions for ${kind} ${label}`}
           open={menu}
           onOpenChange={setMenu}
           trigger={
             <Tooltip
-              label={`Opens this ${kind}${here ? ", shown now" : ""}.${fork.current && fork.branches > 1 ? ` ${OPENS_HERE_HINT}` : ""}`}
+              label={`Opens this ${kind}${here ? ", shown now" : ""}.${fork.current && fork.branches > 1 ? ` ${OPENS_HERE_HINT}` : ""}${pending ? " Its last message is still loading." : ""}`}
             >
               {thread ? (
                 <Link
                   {...forkLink(fork)}
                   onClick={openOnPlainClick(open)}
-                  aria-label={`Open ${kind} ${label}${kindLabel}`}
+                  aria-label={openLabel}
                   aria-current={here ? "page" : undefined}
+                  aria-busy={pending || undefined}
                   data-chat-id={fork.chat.id}
                   data-fork-id={fork.forkId}
                   className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 >
-                  <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
-                    {fork.preview || "No messages yet"}
-                  </span>
-                  <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
-                    Last message {formatMoment(fork.endAt ?? fork.createdAt)}
-                  </span>
+                  {body}
                 </Link>
               ) : (
                 <button
                   type="button"
                   onClick={open}
-                  aria-label={`Open ${kind} ${label}${kindLabel}`}
+                  aria-label={openLabel}
                   aria-current={here ? "page" : undefined}
+                  aria-busy={pending || undefined}
                   data-chat-id={fork.chat.id}
                   data-fork-id={fork.forkId}
                   className="block w-full min-w-0 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 >
-                  <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
-                    {fork.preview || "No messages yet"}
-                  </span>
-                  <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
-                    Last message {formatMoment(fork.endAt ?? fork.createdAt)}
-                  </span>
+                  {body}
                 </button>
               )}
             </Tooltip>
@@ -464,6 +491,9 @@ export function ForkRow({
   const kindBadge = kindLook?.badge
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = fork.thread ? `Thread: ${shellThreadLabel(fork.thread)}` : shellBranchLabel(fork)
+  // Not read yet (a cold library's first pass): its chat's name when that doesn't come from
+  // its cast (the server sends none then), quiet bars for the rest, in the lines' own boxes.
+  const pending = fork.pending === true
   // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
   // rows of several chats mix, the chat's name, with a named branch's name after it
   // and an unnamed one's label under it once the chat has more than one.
@@ -472,6 +502,8 @@ export function ForkRow({
     : perFork && (fork.thread || fork.named)
       ? `${fork.chatName} › ${label}`
       : fork.chatName
+  const nameless = pending && fork.chatName === ""
+  const shownTitle = nameless ? "this chat" : title
   const branchLine = !branchOnly && perFork && !fork.thread && !fork.named && fork.branches > 1 ? label : null
   const last = perFork ? (fork.endAt ?? fork.createdAt) : fork.chatRecentAt
   // The branch its chat opens on, among several, as the header's list marks it.
@@ -479,16 +511,17 @@ export function ForkRow({
   return (
     <div
       data-fork-row
+      data-fork-pending={pending || undefined}
       {...kindRowProps(kindLook)}
       className={`fork-row @container/fork-row relative flex w-full shrink-0 max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <ContextMenu
-        label={`Actions for ${title}`}
+        label={`Actions for ${shownTitle}`}
         open={menu}
         onOpenChange={setMenu}
         trigger={
           <Tooltip
-            label={`${title}. ${
+            label={`${nameless ? "Still loading" : title}. ${
               perFork
                 ? `Opens this ${fork.thread ? "thread" : "branch"}${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
                 : "Opens the chat on the branch you last used."
@@ -498,13 +531,22 @@ export function ForkRow({
               {...forkLink(fork)}
               onClick={openOnPlainClick(open)}
               onDragStart={carryChat}
-              aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}${kindBadge ? `, ${kindBadge.label}` : ""}`}
+              aria-label={
+                nameless
+                  ? `Open ${branchOnly ? "branch" : "chat"}, still loading`
+                  : `Open ${branchOnly ? "branch" : "chat"} ${title}${kindBadge ? `, ${kindBadge.label}` : ""}`
+              }
               aria-current={here ? "page" : undefined}
+              aria-busy={pending || undefined}
               data-chat-id={fork.chat.id}
               data-fork-id={fork.forkId}
               className="fork-row-open flex min-w-0 flex-1 items-center self-stretch gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
-              {!branchOnly && (
+              {!branchOnly && pending && (
+                // A portrait's box (Avatar's md), so the text doesn't move when the cast is read.
+                <span aria-hidden="true" data-row-portraits className="block h-12 w-8 shrink-0 rounded-sm bg-border" />
+              )}
+              {!branchOnly && !pending && (
                 <Tooltip label={`Characters: ${fork.cast.map((c) => c.name).join(", ")}`}>
                   <span
                     tabIndex={0}
@@ -533,7 +575,9 @@ export function ForkRow({
                   data-chat-title
                   className="line-clamp-2 text-sm text-ellipsis break-normal [overflow-wrap:normal]"
                 >
-                  <span className="font-medium">{title}</span>
+                  <span className="font-medium">
+                    {nameless ? <PlaceholderBar className="inline-block w-32 align-middle" /> : title}
+                  </span>
                   {/* A workshop says so where it's named (spec/WORKSHOP.md §2.5). */}{" "}
                   <KindBadge kind={fork.chat.kind} inLink />
                   {opensHere && (
@@ -556,7 +600,7 @@ export function ForkRow({
                     with {fork.cast.map((c) => c.label).join(", ")}
                   </span>
                 )}
-                {details && (
+                {details && !pending && (
                   <span data-chat-meta className="text-xs text-muted [overflow-wrap:anywhere]">
                     started{" "}
                     {formatDay(
@@ -566,9 +610,21 @@ export function ForkRow({
                     · {fork.messages.toLocaleString()} {fork.messages === 1 ? "message" : "messages"}
                   </span>
                 )}
-                <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
-                  {fork.preview || "No messages yet"}
-                </span>
+                {details && pending && (
+                  <span data-chat-meta className="block min-h-4 pt-1">
+                    <PlaceholderBar className="w-36" />
+                  </span>
+                )}
+                {pending ? (
+                  <span className="block min-h-8 pt-1">
+                    <PlaceholderBar className="w-full" />
+                    <PlaceholderBar className="mt-2 w-2/3" />
+                  </span>
+                ) : (
+                  <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
+                    {fork.preview || "No messages yet"}
+                  </span>
+                )}
                 {relation !== null && (
                   <span data-row-relation className="text-xs text-muted">
                     {/* Wraps only between its two parts. */}
@@ -576,10 +632,16 @@ export function ForkRow({
                     <span className="whitespace-nowrap">{relation[1]}</span>
                   </span>
                 )}
-                <span data-row-when className="mt-auto text-xs text-muted">
-                  {perFork ? "Last message " : ""}
-                  {perFork ? formatMoment(last) : formatWhen(last)}
-                </span>
+                {pending ? (
+                  <span data-row-when className="mt-auto block min-h-4 pt-1">
+                    <PlaceholderBar className="w-24" />
+                  </span>
+                ) : (
+                  <span data-row-when className="mt-auto text-xs text-muted">
+                    {perFork ? "Last message " : ""}
+                    {perFork ? formatMoment(last) : formatWhen(last)}
+                  </span>
+                )}
               </span>
             </Link>
           </Tooltip>
@@ -668,7 +730,8 @@ export function OpenChatBranches() {
   const { height, min, max, change, reset, collapsed, expanded, toggle } = useBranchHeight("branch")
   const open = expanded && !collapsed
   if (!visible) return null
-  const chatLabel = rows[0]!.chatName
+  // Empty while its name waits for a fork's cast the first pass hasn't read (shellReads.ts).
+  const chatLabel = rows[0]!.chatName || "this chat"
   return (
     <section
       inert={waiting}
@@ -712,6 +775,15 @@ export function OpenChatBranches() {
             </span>
           </button>
         </Tooltip>
+        {/* In the header's own line, so the rows don't move when it goes. */}
+        {ready && forks.progress && (
+          <LoadingProgress
+            noun="branches"
+            ready={forks.progress.ready}
+            total={forks.progress.total}
+            className="shrink-0"
+          />
+        )}
         <IconButton
           label="List these branches in the panel"
           hint="Show these branches in the sidebar"
@@ -895,7 +967,9 @@ const SECTIONS = {
   ]
 } as const satisfies Record<string, ReadonlyArray<readonly [ShellSection, string]>>
 
-function Browser({ data }: { data: ShellLibrary }) {
+function Browser() {
+  const result = useAtomValue(shellAtom)
+  const data = AsyncResult.isSuccess(result) ? result.value : undefined
   const { scope, setScope, grid, setGrid } = useShellNavigation()
   const [browse, setBrowse] = useSidebarBrowse()
   const [chatBrowse, setChatBrowse] = useChatBrowse()
@@ -910,9 +984,8 @@ function Browser({ data }: { data: ShellLibrary }) {
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const selected = useSplitChats((params.chatId ?? null) as ChatId | null, shown)?.group.id ?? params.chatId
   const listRef = useRef<HTMLDivElement>(null)
-  useSplitReveal(listRef, selected)
-  const card = [...data.cards, ...data.personas].find((c) => c.card.entityId === scope.entity)
-  const cardLabel = card ? card.card.label : "Character not found"
+  const card = data && [...data.cards, ...data.personas].find((c) => c.card.entityId === scope.entity)
+  const cardLabel = card ? card.card.label : data ? "Character not found" : "…"
   const needle = search.trim().toLowerCase()
   const kind = scope.chat ? "chat" : scope.entity ? "character" : "all"
   // The search looks through message text (MessageSearch.tsx): only in the list of all chats.
@@ -939,10 +1012,21 @@ function Browser({ data }: { data: ShellLibrary }) {
     ...(!grid && kind !== "chat" ? { browse: chatBrowse } : {}),
     sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
   })
+  // The lists show once their rows are read: a cold library's cards wait for every fork's
+  // walk, which the rows don't (they fill in as it goes).
+  useSplitReveal(listRef, forks.loading ? undefined : selected)
+  // Subscribe to rows alongside cards, before displaying either. Waiting for cards
+  // first can put the rows in another epoch behind unrelated browsing work.
+  if (!data && grid)
+    return (
+      <AsyncView atom={shellAtom} loading="Loading chats…" still="Still loading your chats…">
+        {() => null}
+      </AsyncView>
+    )
   // The chat by its name, which all its branches share.
   const chatRows = scope.chat ? sections.flatMap(([id]) => forks.section(id).rows) : []
   const chat = chatRows[0]
-  const chatLabel = !chat ? (forks.loading ? "…" : "Chat not found") : chat.chatName
+  const chatLabel = !chat ? (forks.loading ? "…" : "Chat not found") : chat.chatName || "…"
   const section = (id: ShellSection, title: string) => {
     const { rows, total } = forks.section(id)
     return (
@@ -1047,15 +1131,29 @@ function Browser({ data }: { data: ShellLibrary }) {
               </span>
             </>
           )}
+          {/* On the breadcrumbs' own line, so the rows don't move when it goes. */}
+          {forks.progress && (
+            <LoadingProgress
+              noun={kind === "chat" ? "branches" : "chats"}
+              ready={forks.progress.ready}
+              total={forks.progress.total}
+              className="ms-auto shrink-0"
+            />
+          )}
         </nav>
+      )}
+      {!grid && needle !== "" && forks.progress && (
+        <p role="note" className="text-xs text-muted">
+          Until every {kind === "chat" ? "branch" : "chat"} has loaded, the ones still loading are found by name only.
+        </p>
       )}
       {!grid && kind !== "chat" && !messages && (
         <SlotOutlet
           slot={sidebarChatBrowse}
-          props={{ browse: chatBrowse, counts: forks.filterCounts, onChange: setChatBrowse }}
+          props={{ browse: chatBrowse, counts: forks.progress ? null : forks.filterCounts, onChange: setChatBrowse }}
         />
       )}
-      {grid && (
+      {grid && data && (
         <CardBrowseBar
           data={data}
           browse={browse}
@@ -1089,7 +1187,7 @@ function Browser({ data }: { data: ShellLibrary }) {
               className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
             />
           </div>
-        ) : grid ? (
+        ) : grid && data ? (
           // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
           browse.filter === "groups" ? (
             <GroupGrid
@@ -1123,7 +1221,7 @@ function Browser({ data }: { data: ShellLibrary }) {
               <SlotOutlet slot={characterChatActions} props={{ entityId: card.card.entityId, label: cardLabel }} />
             )}
             {/* A chat's own pins are among its named and pinned branches. */}
-            {kind !== "chat" && (
+            {kind !== "chat" && data && (
               <PinnedChats
                 pinsCollapsed={data.pinsCollapsed}
                 browse={chatBrowse}
@@ -1151,9 +1249,7 @@ export function ShellBrowser() {
   // Holds the panel's height while loading too, so the navigation below doesn't jump.
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <AsyncView atom={shellAtom} loading="Loading chats…" still="Still loading your chats…">
-        {(data) => <Browser data={data} />}
-      </AsyncView>
+      <Browser />
     </div>
   )
 }

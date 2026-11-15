@@ -87,6 +87,10 @@ const open = async (page: Page, extra = "") => {
   if (!extra.includes("editor=")) await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
 }
 const reload = async (page: Page) => {
+  // A fresh desktop link first encodes the account’s remembered sidebar defaults.
+  // Capture the canonical URL, rather than racing that initial replacement.
+  if ((page.viewportSize()?.width ?? 0) >= 1024)
+    await expect.poll(() => page.evaluate(() => history.state?.sidebarBrowse === true)).toBe(true)
   const url = page.url()
   await page.reload()
   expect(page.url()).toBe(url)
