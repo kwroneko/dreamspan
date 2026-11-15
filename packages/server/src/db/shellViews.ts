@@ -266,7 +266,11 @@ export const forksView = (state: ShellState, view: ShellForksView, availableLabe
     view.chat !== null
       ? state.forks.filter((f) => f.chat.id === view.chat)
       : perChat(state.forks.filter((f) => chatIds === null || chatIds.has(f.chat.id)))
-  const waiting = listed.reduce((n, f) => n + (f.pending === true ? 1 : 0), 0)
+  const pendingChats = new Set(state.forks.filter((f) => f.pending === true).map((f) => f.chat.id))
+  const waiting = listed.reduce(
+    (n, f) => n + (view.chat !== null ? Number(f.pending === true) : Number(pendingChats.has(f.chat.id))),
+    0
+  )
   return {
     filterCounts,
     ...(waiting > 0 ? { loading: { ready: listed.length - waiting, total: listed.length } } : {}),

@@ -20,6 +20,7 @@ import {
 import { makeRegistry } from "../../registry.ts"
 import { usePlaceNotice, usePlaceParam } from "../../usePlaceParam.ts"
 import { useChatPlaceKey } from "./chatPlace.ts"
+import { MessageActionFit } from "./messageActionFit.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
@@ -235,14 +236,20 @@ const pinHint = (label: string, pinned: boolean, shown: boolean) =>
  * same icon button size. ResizeObserver supplies both widths without forcing
  * a layout for every message while React is still mounting the other rows.
  */
-function useFit(pinned: string) {
+function useFit(pinned: string, count: number) {
   const root = useRef<HTMLDivElement>(null)
-  const [fit, setFit] = useState(Number.POSITIVE_INFINITY)
+  const [measurement] = useState(() => new MessageActionFit())
+  const fit = useSyncExternalStore(
+    measurement.subscribe,
+    () => measurement.visible(count),
+    () => count
+  )
   useEffect(() => {
     const element = root.current
     if (element === null) return
     const more = element.querySelector<HTMLElement>(":scope > [data-more]")
-    const measure = (width: number, button: number) => setFit(Math.max(0, Math.floor((width - button) / button)))
+    const measure = (width: number, button: number) =>
+      measurement.setCapacity(Math.max(0, Math.floor((width - button) / button)))
     if (typeof ResizeObserver === "undefined") {
       measure(element.clientWidth, more?.offsetWidth || 32)
       return
@@ -259,7 +266,7 @@ function useFit(pinned: string) {
     observer.observe(element)
     if (more) observer.observe(more)
     return () => observer.disconnect()
-  }, [pinned])
+  }, [measurement, pinned])
   return { root, fit }
 }
 
@@ -275,7 +282,7 @@ export function MessageActions({ context, className = "" }: { context: MessageAc
   const pins = useSyncExternalStore(messageActionPins.subscribe, messageActionPins.snapshot, messageActionPins.snapshot)
   const actions = availableMessageActions(context, snapshot)
   const pinned = actions.filter((action) => isPinned(action, pins.choices))
-  const { root, fit } = useFit(pinned.map((action) => action.id).join(" "))
+  const { root, fit } = useFit(pinned.map((action) => action.id).join(" "), pinned.length)
   const [dialog, setDialog] = useState<MessageAction | null>(null)
   const [, setPlace] = usePlaceParam(useChatPlaceKey("messageDialog"), "")
   const versionId = context.entry.version.id

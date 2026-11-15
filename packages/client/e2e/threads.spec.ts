@@ -508,6 +508,9 @@ test("nested Start and Undo settle while another tab stays in a sibling thread",
     .locator(`[data-threads-row="${nested.splitId}"]`)
     .getByRole("button", { name: "Undo starting the threads from #6" })
     .click()
+  // Start the unchanged quiet window after Undo has completed in the UI. A slow
+  // write can otherwise consume the first second and make its normal refreshes fail it.
+  await expect(page.locator(`[data-threads-row="${nested.splitId}"]`)).toHaveCount(0)
   await expectSettled(page, sent, "nested Undo", undoBefore)
   await expectSettled(second, siblingSent, "sibling after nested Undo", siblingUndo)
   await expect(trigger(second, "Thread", "Outer docks")).toBeVisible()

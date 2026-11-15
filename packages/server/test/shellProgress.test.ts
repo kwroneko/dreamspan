@@ -1,10 +1,12 @@
+import { Worker } from "node:worker_threads"
+import { databaseFile } from "../src/db/connection.ts"
 // A cold library's branch lists fill in while the first pass goes on (ARCHITECTURE.md §12): the
 // rows of forks not read yet are `pending`, never wrong, and the pass reads each chat's current
 // fork first, then the forks nearest it in its branch list. Synthetic fixtures, real workers.
 import { assert, describe, it } from "@effect/vitest"
 import { type ChatId, type EntityId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { ShellForksView } from "@rp/shared/chatSetupApi.ts"
-import { Effect, Stream } from "effect"
+import { Effect, Exit, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { forksView, libraryView, snapshotState, wire } from "../src/db/shellViews.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -77,7 +79,7 @@ const setup = (title: string, branches: number) =>
     }
     // Chatting in main makes it the chat's current fork again.
     yield* append(parent, "Main goes on.", null, main)
-    return { writer, reader, userId, chat, main, forks }
+    return { writer, reader, userId, chat, main, forks, mira }
   })
 
 const chatView = (chat: ChatId, search = ""): ShellForksView => ({
@@ -156,6 +158,212 @@ describe("a cold library's branch lists", () => {
       assert.strictEqual(JSON.stringify(filled), JSON.stringify(scratch), "the filled-in rows are the full read's")
     }).pipe(Effect.provide(database()))
   )
+
+  it.live("a chat stays loading until all its branches are read, including after mutations", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, main, forks } = yield* setup("Harbor", 6)
+      const first = yield* reader.ShellSummarizeStale({ userId })
+      yield* writer.StoreForkSummaries({ userId, chats: first.chats })
+      const partial = () => Effect.map(reader.ShellMaterializePartial({ userId }), snapshotState)
+      const allView: ShellForksView = { ...chatView(chat.id), chat: null }
+      let state = yield* partial()
+      assert.deepStrictEqual(
+        forksView(state.state, allView, state.labels).loading,
+        { ready: 0, total: 1 },
+        "the current fork is ready, but the chat still has unknown branch data"
+      )
+      const old = yield* reader.ShellSummarizeStale({ userId })
+      yield* writer.SetForkName({ userId, forkId: forks[1]!, name: "New name" })
+      const made = yield* writer.CreateFork({ userId, chatId: chat.id, fromForkId: main, atSlotId: null })
+      yield* writer.DeleteFork({ userId, forkId: forks[2]! })
+      // A result computed before the write is never shown as current after it.
+      yield* writer.StoreForkSummaries({ userId, chats: old.chats })
+      state = yield* partial()
+      assert.isFalse(state.state.forks.some((f) => f.forkId === forks[2]))
+      assert.isTrue(state.state.forks.some((f) => f.forkId === made.fork.id))
+      assert.strictEqual(state.state.forks.find((f) => f.forkId === forks[1])!.name, "New name")
+      const scratch = yield* reader.ShellLibrary({ userId, recompute: true })
+      for (const row of state.state.forks.filter((f) => !f.pending)) {
+        assert.deepStrictEqual(
+          wire(row),
+          scratch.forks.find((f) => f.forkId === row.forkId)
+        )
+      }
+      yield* writer.DeleteChat({ userId, chatId: chat.id })
+      state = yield* partial()
+      assert.lengthOf(state.state.forks, 0)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("partial operations and guessed ids never cross accounts", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, main } = yield* setup("Private harbor", 4)
+      const foreign = (yield* writer.EnsureUser({ handle: "bea", displayName: "Bea" })).id
+      const before = yield* reader.ShellMaterializePartial({ userId })
+      assert.lengthOf((yield* reader.ShellMaterializePartial({ userId: foreign })).forks, 0)
+      assert.deepStrictEqual(yield* reader.ShellSummarizeStale({ userId: foreign, chatId: chat.id }), {
+        chats: [],
+        remaining: 0
+      })
+      for (const read of [reader.GetSplitChatsFast, reader.GetSplitChatsPartial]) {
+        const refused = yield* read({ userId: foreign, chatId: chat.id, forkId: main }).pipe(Effect.exit)
+        assert.isTrue(Exit.isFailure(refused))
+      }
+      const guessed = forksView(
+        snapshotState(yield* reader.ShellMaterializePartial({ userId: foreign })).state,
+        chatView(chat.id),
+        new Map()
+      )
+      assert.isTrue(guessed.sections.every((s) => s.rows.length === 0 && s.total === 0))
+      const part = yield* reader.ShellSummarizeStale({ userId })
+      yield* writer.StoreForkSummaries({ userId: foreign, chats: part.chats })
+      assert.deepStrictEqual(yield* reader.ShellMaterializePartial({ userId }), before)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("pending thread rows keep their classification and exact branch counts", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, main, mira } = yield* setup("Harbor", 4)
+      const wren = yield* writer.CreateEntity({
+        userId,
+        kind: "card",
+        label: "Wren",
+        subtitle: "",
+        doc: cardDoc("Wren"),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      yield* writer.AddStateEvent({
+        userId,
+        chatId: chat.id,
+        forkId: main,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "participant.join", value: { entity: wren.entityId } }
+      })
+      const path = yield* reader.GetPath({ userId, chatId: chat.id, forkId: main, leafSlotId: null, limit: 100 })
+      const tip = path.entries.at(-1)!
+      yield* writer.StartThreads({
+        userId,
+        chatId: chat.id,
+        forkId: main,
+        slotId: tip.slotId,
+        expectedRowVersion: tip.rowVersion,
+        threads: [
+          { name: "Mira's thread", cast: [mira.entityId], writesAs: null },
+          { name: "Wren's thread", cast: [wren.entityId], writesAs: null }
+        ]
+      })
+      const partial = snapshotState(yield* reader.ShellMaterializePartial({ userId }))
+      const full = yield* reader.ShellLibrary({ userId, recompute: true })
+      for (const row of partial.state.forks) {
+        const exact = full.forks.find((f) => f.forkId === row.forkId)!
+        assert.deepStrictEqual(row.threads, exact.threads, "pending rows never classify a thread as a branch")
+        assert.strictEqual(row.branches, exact.branches)
+      }
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("pending endpoints skip deleted tips and include messages inserted after a tip", () =>
+    Effect.gen(function* () {
+      const { writer, reader, userId, chat, main, forks } = yield* setup("Harbor", 4)
+      const path = yield* reader.GetPath({ userId, chatId: chat.id, forkId: main, leafSlotId: null, limit: 100 })
+      yield* writer.DeleteMessage({ userId, forkId: main, slotId: path.entries.at(-1)!.slotId })
+      const sameEnds = () =>
+        Effect.gen(function* () {
+          const partial = snapshotState(yield* reader.ShellMaterializePartial({ userId }))
+          const full = yield* reader.ShellLibrary({ userId, recompute: true })
+          for (const row of partial.state.forks)
+            assert.strictEqual(
+              row.endAt,
+              full.forks.find((f) => f.forkId === row.forkId)!.endAt,
+              "filling a row never changes its ordering date"
+            )
+        })
+      yield* sameEnds()
+      const visible = yield* reader.GetPath({ userId, chatId: chat.id, forkId: main, leafSlotId: null, limit: 100 })
+      const tip = visible.entries.at(-1)!
+      yield* writer.InsertMessage({
+        userId,
+        chatId: chat.id,
+        forkId: main,
+        anchorSlotId: tip.slotId,
+        expectedRowVersion: tip.rowVersion,
+        body: { _tag: "Write", speaker: null, content: "Inserted at the display end" }
+      })
+      yield* sameEnds()
+      const other = yield* reader.GetPath({ userId, chatId: chat.id, forkId: forks[0]!, leafSlotId: null, limit: 100 })
+      const otherTip = other.entries.at(-1)!
+      yield* writer.InsertMessage({
+        userId,
+        chatId: chat.id,
+        forkId: forks[0]!,
+        anchorSlotId: otherTip.slotId,
+        expectedRowVersion: otherTip.rowVersion,
+        body: { _tag: "Write", speaker: null, content: "Inserted after a live structural tip" }
+      })
+      yield* sameEnds()
+      const empty = yield* writer.CreateChat({
+        userId,
+        kind: "rp",
+        status: "active",
+        title: "First insertion",
+        participants: [],
+        greeting: null
+      })
+      yield* writer.InsertMessage({
+        userId,
+        chatId: empty.id,
+        forkId: empty.currentForkId!,
+        anchorSlotId: null,
+        expectedRowVersion: 0,
+        body: { _tag: "Write", speaker: null, content: "An insertion with no structural tip" }
+      })
+      yield* sameEnds()
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("pending endpoints inspect each chat's insertion anchors once", () => {
+    const dataDir = tempDir("partial-anchors")
+    return Effect.gen(function* () {
+      const { writer, reader, userId, chat, main } = yield* setup("Harbor", 6)
+      const path = yield* reader.GetPath({ userId, chatId: chat.id, forkId: main, leafSlotId: null, limit: 100 })
+      const anchor = path.entries[0]!.slotId
+      for (let n = 0; n < 2; n++) {
+        const entry = yield* reader.GetSlot({ userId, slotId: anchor, forkId: main })
+        yield* writer.InsertMessage({
+          userId,
+          chatId: chat.id,
+          forkId: main,
+          anchorSlotId: anchor,
+          expectedRowVersion: entry.entry.rowVersion,
+          body: { _tag: "Write", speaker: null, content: `Early insertion ${n}` }
+        })
+      }
+      const counted = yield* Effect.promise(
+        () =>
+          new Promise<{ visits: number }>((resolve, reject) => {
+            const worker = new Worker(new URL("./support/partialAnchorProbeWorker.ts", import.meta.url), {
+              workerData: { file: databaseFile(dataDir), userId }
+            })
+            let result: { visits: number } | undefined
+            worker.once("message", (value) => {
+              result = value
+            })
+            worker.once("error", reject)
+            worker.once("exit", (code) =>
+              code === 0 && result ? resolve(result) : reject(new Error(`anchor probe exited ${code}`))
+            )
+          })
+      )
+      assert.equal(counted.visits, 2, "each anchor is read once, independent of the number of pending forks")
+    }).pipe(
+      Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers })),
+      Effect.scoped
+    )
+  })
 
   it.live("an untitled chat's branch list opens once its current fork is read, its name never guessed", () =>
     Effect.gen(function* () {

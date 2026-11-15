@@ -26,6 +26,7 @@ const coldChat = (title: string) =>
   asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title })
+      const added = yield* api.CreateCard({ label: "Wren", name: "Wren" })
       const main = chat.currentForkId as ForkId
       const slots: Array<SlotId> = []
       let parent: SlotId | null = null
@@ -47,6 +48,13 @@ const coldChat = (title: string) =>
         const at = slots[n % slots.length]!
         const { fork } = yield* api.CreateFork({ chatId: chat.id, fromForkId: main, atSlotId: at })
         forks.push(fork.id)
+        if (n === 3)
+          yield* api.ChangeCast({
+            chatId: chat.id,
+            forkId: fork.id,
+            slotId: at,
+            change: { _tag: "Join", entityId: added.entityId }
+          })
         const sent = yield* api.SendMessage({
           chatId: chat.id,
           forkId: fork.id,
@@ -91,7 +99,17 @@ const boxes = (rows: Locator) =>
       elements.map((row) => {
         const box = row.getBoundingClientRect()
         const id = row.querySelector<HTMLElement>("[data-fork-id]")?.dataset.forkId ?? ""
-        return [id, [Math.round(box.top), Math.round(box.height), Math.round(box.width)]]
+        const text = row.querySelector("[data-row-text]")!.getBoundingClientRect()
+        return [
+          id,
+          [
+            Math.round(box.top),
+            Math.round(box.height),
+            Math.round(box.width),
+            Math.round(text.top),
+            Math.round(text.left)
+          ]
+        ]
       })
     )
   )
@@ -128,6 +146,14 @@ for (const width of [1440, 390])
       const current = list.locator(`[data-fork-row]:has([data-fork-id="${fixture.main}"])`)
       await expect(current).not.toHaveAttribute("data-fork-pending")
       await expect(current).toContainText("Main line goes on.")
+      const search = panel.getByRole("textbox", { name: "Find a chat", exact: true })
+      await search.fill("Lighthouse")
+      await expect(rows).toHaveCount(1)
+      await expect(panel.getByRole("note")).toContainText("found by name only")
+      await search.fill("Only in branch 3.")
+      await expect(rows).toHaveCount(0)
+      await search.fill("")
+      await expect(rows).toHaveCount(BRANCHES + 1)
       await expectLayout(page, info, `branch progress mid-pass ${width} ${theme}`)
       await shots(page, `mid-pass-${width}-${theme}`)
       const before = await boxes(rows)
@@ -164,6 +190,22 @@ test("a branch opens while the pass reads it, and a second tab fills in too", as
   await second.goto(url)
   const secondPanel = second.getByRole("complementary", { name: "Sidebar", exact: true })
   await expect(secondPanel.locator("[data-shell-list] [data-fork-row]")).toHaveCount(BRANCHES + 1)
+  // Mutations while the pass is paused reach both subscriptions, without reviving old rows.
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      yield* api.NameFork({ forkId: target, name: "Renamed while loading" })
+      yield* api.DeleteFork({ forkId: fixture.forks[0]! })
+      yield* api.CreateFork({ chatId: fixture.chat.id, fromForkId: fixture.main, atSlotId: null })
+    })
+  )
+  for (const p of [panel, secondPanel]) {
+    await expect(p.locator(`[data-fork-row]:has([data-fork-id="${fixture.forks[0]}"])`)).toHaveCount(0)
+    await expect(p.locator(`[data-fork-row]:has([data-fork-id="${target}"])`)).toContainText("Renamed while loading")
+    await expect(p.locator("[data-shell-list] [data-fork-row]")).toHaveCount(BRANCHES + 1)
+  }
+  // Completed parts survive a process restart; both existing tabs reconnect mid-pass.
+  await server().pause()
+  await server().restart()
   for (const p of [panel, secondPanel]) {
     await expect(p.getByRole("status").filter({ hasText: /^Loading branches…/ })).toHaveCount(0, {
       timeout: PAUSE_MS * 3
@@ -171,5 +213,23 @@ test("a branch opens while the pass reads it, and a second tab fills in too", as
     await expect(p.locator("[data-fork-pending]")).toHaveCount(0)
   }
   await expect(row).toContainText("Only in branch 7.")
+  await second.close()
+})
+
+test("a chat deleted mid-pass disappears from both tabs", async ({ page, context }) => {
+  test.setTimeout(180_000)
+  const fixture = await coldChat("Deleted while loading")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${fixture.chat.id}?forks=${fixture.chat.id}`)
+  const second = await context.newPage()
+  await second.goto(page.url())
+  for (const p of [page, second]) {
+    await expect(p.locator("[data-shell-list] [data-fork-pending]")).not.toHaveCount(0)
+  }
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteChat({ chatId: fixture.chat.id }))
+  for (const p of [page, second]) {
+    await expect(p.locator(`[data-shell-list] [data-chat-id="${fixture.chat.id}"]`)).toHaveCount(0)
+    await expect(p.getByRole("status").filter({ hasText: /^Loading branches…/ })).toHaveCount(0)
+  }
   await second.close()
 })

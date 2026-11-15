@@ -271,6 +271,10 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
   // Not read yet (a cold library's first pass): its name if it has one, quiet bars for the
   // rest, in the lines' own boxes, so the row keeps its height as it fills in.
   const pending = fork.pending === true
+  // Keep the boxes a cold row reserved until it unmounts. Its added characters
+  // are unknown until the pass reaches it; revealing them must not move the list.
+  const [reserveAdded, setReserveAdded] = useState(pending)
+  if (pending && !reserveAdded) setReserveAdded(true)
   const nameless = pending && !fork.named && !fork.original
   const title = nameless ? <PlaceholderBar className="inline-block w-28 align-middle" /> : label
   const openLabel = nameless ? `Open ${kind}, still loading` : `Open ${kind} ${label}${kindLabel}`
@@ -298,6 +302,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
     <div
       data-fork-row
       data-fork-pending={pending || undefined}
+      data-reserve-added={reserveAdded || undefined}
       {...kindRowProps(kindLook)}
       onClick={(event) => {
         // A dialog opened from the row is portalled elsewhere; its clicks still bubble here.
@@ -306,6 +311,9 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
       }}
       className={`fork-row branch-list-row @container/fork-row relative grid w-full shrink-0 max-w-controls min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md border p-2 ${here ? "border-accent bg-surface-raised" : "border-border hover:bg-surface-raised"}`}
     >
+      {reserveAdded && fork.added.length === 0 && (
+        <span aria-hidden="true" data-added-space className="pointer-events-none block h-7.5 w-24" />
+      )}
       {fork.added.length > 0 && (
         <Tooltip label={addedNames}>
           <span
@@ -1142,7 +1150,7 @@ function Browser() {
       {!grid && kind !== "chat" && !messages && (
         <SlotOutlet
           slot={sidebarChatBrowse}
-          props={{ browse: chatBrowse, counts: forks.filterCounts, onChange: setChatBrowse }}
+          props={{ browse: chatBrowse, counts: forks.progress ? null : forks.filterCounts, onChange: setChatBrowse }}
         />
       )}
       {grid && data && (

@@ -1,6 +1,7 @@
 import { makeShellEpoch } from "./shellEpoch.ts"
 import { ActiveStateModules } from "./stateModules.ts"
-import { shownInSql } from "./forkState.ts"
+import { shownIn, shownInSql, slotDeletedIn, slotDeletedInSql } from "./forkState.ts"
+import { pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import type { SplitChatLink } from "@rp/shared/splitChat.ts"
 import {
   type ShellState,
@@ -53,7 +54,7 @@ import type { ReadOps } from "./ops.ts"
 import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
 import { threadLabels } from "./threadReads.ts"
-import { shownSplits } from "./threads.ts"
+import { placesOf, shownSplits, threadCandidates } from "./threads.ts"
 
 export const makeShellReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -266,23 +267,53 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       // stale ones are walked, and their walks need their full rows.
       const stale = records.flatMap((r) => (stored.has(r.id) ? [] : [r.id]))
       const pending = new Set(partial ? stale : [])
-      if (partial && stale.length > 0)
-        // Where its row will sort: its tip's shown message, as the walk ends it unless an
-        // override hides that message (then the walk moves it; rare). Nothing else is guessed.
-        for (const row of yield* sql<{ id: string; chat_id: string; end_at: number | null }>`
-            SELECT f.id, f.chat_id,
-              CASE WHEN s.deleted_at IS NULL AND v.deleted_at IS NULL
-                THEN CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END END AS end_at
-            FROM json_each(${JSON.stringify(stale)}) j CROSS JOIN forks f ON f.id = j.value
-            LEFT JOIN slots s ON s.id = f.tip_slot_id
-            LEFT JOIN versions v ON v.slot_id = s.id AND v.id = ${sql.literal(shownInSql("f.id", "s"))}`)
+      if (partial && stale.length > 0) {
+        // Usually the endpoint is one metadata lookup. A deleted tip or an insertion
+        // at its end needs an indexed backward seek through its display intervals.
+        const ends = yield* sql<{ id: string; chat_id: string; end_at: number | null; exact: number }>`
+          WITH waiting AS MATERIALIZED (
+            SELECT f.id,f.chat_id,f.tip_slot_id FROM json_each(${JSON.stringify(stale)}) j
+              CROSS JOIN forks f ON f.id=j.value
+          ), insert_ends AS MATERIALIZED (
+            SELECT o.chat_id,max(coalesce(o.slot_depth,-1)) AS hi
+            FROM (SELECT DISTINCT chat_id FROM waiting) c
+              CROSS JOIN fork_overrides o ON o.chat_id=c.chat_id AND o.kind='insert'
+            GROUP BY o.chat_id
+          )
+          SELECT f.id, f.chat_id,
+            CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS end_at,
+            ((s.id IS NOT NULL AND NOT ${sql.literal(slotDeletedInSql("f.id", "s"))}) OR f.tip_slot_id IS NULL)
+              AND (x.chat_id IS NULL OR (f.tip_slot_id IS NOT NULL AND x.hi<s.depth)) AS exact
+          FROM waiting f LEFT JOIN insert_ends x ON x.chat_id=f.chat_id
+          LEFT JOIN slots s ON s.id=f.tip_slot_id
+          LEFT JOIN versions v ON v.slot_id=s.id AND v.id=${sql.literal(shownInSql("f.id", "s"))}`
+        for (const row of ends) {
+          let endAt = row.end_at
+          if (!row.exact) {
+            const fork = joinedRows.find((f) => f.id === row.id)!
+            const pieces = yield* pathPieces(sql, fork.chat_id, fork.id, fork.tip_slot_id)
+            endAt = null
+            for (const piece of pieces.toReversed()) {
+              const [last] = yield* sql<{ at: number }>`SELECT
+                  CASE WHEN v.origin IN ('edited','changeset') THEN s.created_at ELSE v.created_at END AS at
+                FROM slots s INDEXED BY slots_chain JOIN versions v ON v.slot_id=s.id AND v.id=${shownIn(sql, fork.id, "s")}
+                WHERE s.chat_id=${fork.chat_id} AND s.chain_id=${piece.chainId}
+                  AND s.depth BETWEEN ${piece.kind === "run" ? piece.lo : piece.depth} AND ${piece.kind === "run" ? piece.hi : piece.depth}
+                  AND NOT ${slotDeletedIn(sql, fork.id, "s")}
+                ORDER BY s.depth DESC LIMIT 1`
+              if (last) {
+                endAt = last.at
+                break
+              }
+            }
+          }
           stored.set(row.id, {
             forkId: row.id,
             chatId: row.chat_id,
             preview: "",
             messages: 0,
             leaf: null,
-            endAt: row.end_at,
+            endAt,
             split: null,
             cast: [],
             added: [],
@@ -291,6 +322,27 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             activity: [],
             threads: []
           })
+        }
+      }
+      if (partial && stale.length > 0) {
+        // Thread membership is metadata plus indexed path intervals. An unknown cast or
+        // preview must not make a thread appear as an extra branch while its row loads.
+        const candidates = yield* threadCandidates(sql, stale)
+        for (const id of new Set(candidates.map((c) => c.forkId))) {
+          const fork = joinedRows.find((r) => r.id === id)!
+          const pieces = yield* pathPieces(sql, fork.chat_id, fork.id, fork.tip_slot_id)
+          const positions = new Map<string, number>()
+          for (const candidate of candidates.filter((c) => c.forkId === id)) {
+            const place = yield* slotPlace(sql, fork.chat_id, candidate.slotId)
+            const at = place ? positionOf(pieces, place) : null
+            if (at !== null) positions.set(candidate.slotId, at)
+          }
+          stored.set(id, {
+            ...stored.get(id)!,
+            threads: placesOf(candidates, id, (slot) => positions.has(slot), positions)
+          })
+        }
+      }
       const staleRecords =
         stale.length === 0 || partial
           ? []
