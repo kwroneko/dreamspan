@@ -6,6 +6,10 @@
 import { Schema } from "effect"
 import { ChatId } from "./chat.ts"
 
+/** A confirmed file must be planned completely before entering its atomic write. */
+export const ST_UNPLANNED_CHAT_MESSAGE =
+  "This chat's interrupted import needs repair before it can finish. Nothing from this file was imported."
+
 export const StPlanId = Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/))
 
 /**

@@ -7,12 +7,14 @@
 import { assert, layer } from "@effect/vitest"
 import { vi } from "vitest"
 import type { ChatId } from "@rp/shared/chat.ts"
-import { ST_CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
-import { Effect, Exit, Schema } from "effect"
+import { NewVersion } from "@rp/shared/chat.ts"
+import type { ContextSnapshot } from "../src/assembler/types.ts"
+import { ST_CHANGED_SINCE_CHECK, ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
+import { Deferred, Effect, Exit, Fiber, Schema } from "effect"
 import { StFileResult } from "@rp/shared/stImportApi.ts"
 import { StImports } from "../src/importer/StImports.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
-import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { client, post, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { card, header, jsonl, message } from "./support/stFolder.ts"
 import { stImportGraph } from "./support/stImportGraph.ts"
@@ -198,6 +200,91 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
+  it.effect("refuses a legacy interrupted-copy file before staging or changing its chat", () =>
+    Effect.gen(function* () {
+      const { api, path, chat, bytes, importId } = yield* imported("Legacy copy")
+      yield* api.CancelStImport({ importId })
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "UPDATE jobs SET payload_json = json_set(payload_json, '$.forkPrior', json_extract(payload_json, '$.end')) WHERE kind = 'st-import-chat' AND json_extract(payload_json, '$.source') = ?",
+          params: [path]
+        }
+      ])
+      const plan = yield* check(api, new Map([[path, bytes]]))
+      const run = yield* api.StartStImport({ unsupported: [], plan: { planId: plan.planId, skip: [] } })
+      yield* sendStFile(run.importId, "characters/Alice.png", CARD)
+      const before = yield* stImportGraph(config.dataDir, chat.id)
+      const beforeStamp = (yield* stamps(api))[chat.id]
+      const answer = yield* sendStFile(run.importId, path, bytes)
+      assert.strictEqual(answer.outcome, "failed")
+      assert.strictEqual(answer.message, ST_UNPLANNED_CHAT_MESSAGE)
+      yield* api.FinishStImport({ importId: run.importId, notSent: [] })
+      assert.isTrue(
+        (yield* api.GetStImportReport({ importId: run.importId })).issues.some(
+          (issue) => issue.code === "st.chat_unplanned"
+        )
+      )
+      assert.deepStrictEqual(yield* stImportGraph(config.dataDir, chat.id), before)
+      assert.strictEqual((yield* stamps(api))[chat.id], beforeStamp)
+      assert.strictEqual(yield* staged, 0)
+    })
+  )
+
+  it.effect("rolls the whole file back if a preallocated reader id collides with a concurrent write", () =>
+    Effect.gen(function* () {
+      const { api, path, chat, bytes, importId } = yield* imported("Id collision")
+      yield* api.CancelStImport({ importId })
+      const records = new TextDecoder()
+        .decode(bytes)
+        .split("\n")
+        .map((line) => JSON.parse(line))
+      records[3].swipes.push("another imported swipe")
+      const changed = jsonl(records)
+      const plan = yield* check(api, new Map([[path, changed]]))
+      const run = yield* api.StartStImport({ unsupported: [], plan: { planId: plan.planId, skip: [] } })
+      yield* sendStFile(run.importId, "characters/Alice.png", CARD)
+      const before = yield* stImportGraph(config.dataDir, chat.id)
+      const writer = yield* Writer
+      const original = writer.StImportStage
+      let other: ChatId | undefined
+      const hook = vi.spyOn(writer, "StImportStage").mockImplementation((input) =>
+        Effect.gen(function* () {
+          if (input.batchJson !== null) {
+            const batch = JSON.parse(input.batchJson)
+            const version = batch.plan?.ops.find((op: { k: string }) => op.k === "v")
+            if (version !== undefined) {
+              const concurrent = yield* api.CreateChat({ title: "Concurrent collision" }).pipe(Effect.orDie)
+              other = concurrent.id
+              const sent = yield* posted(
+                api.SendMessage({
+                  chatId: concurrent.id,
+                  parentSlotId: null,
+                  branch: false,
+                  content: "Other account-owned chat"
+                })
+              ).pipe(Effect.orDie)
+              // Simulate the cryptographically improbable collision after the reader chose
+              // the id and before the final write. The real unique constraint must refuse it.
+              version.id = sent.entry.version.id
+              return yield* original({ ...input, batchJson: JSON.stringify(batch) })
+            }
+          }
+          return yield* original(input)
+        })
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(sendStFile(run.importId, path, changed))))
+      yield* api.CancelStImport({ importId: run.importId })
+      assert.deepStrictEqual(yield* stImportGraph(config.dataDir, chat.id), before)
+      assert.isDefined(other)
+      assert.deepStrictEqual(
+        (yield* entries(api, other!)).map((row) => row.version.content),
+        ["Other account-owned chat"]
+      )
+      assert.strictEqual(yield* staged, 0)
+    })
+  )
+
   it.effect("takes the checked bytes however the parts fall", () =>
     Effect.gen(function* () {
       const { api, path, chat, bytes, importId } = yield* imported("In parts")
@@ -207,6 +294,177 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       yield* api.FinishStImport({ importId, notSent: [] })
       assert.deepStrictEqual(yield* refusedIn(api, importId), [])
       assert.lengthOf(yield* entries(api, chat.id), 8)
+    })
+  )
+
+  for (const change of [false, true])
+    it.effect(`holds changed planned batches until the whole existing file ${change ? "is refused" : "commits"}`, () =>
+      Effect.gen(function* () {
+        const title = `Planned batches ${change}`
+        const path = `chats/Alice/${title}.jsonl`
+        const { api } = yield* importStFolder(
+          new Map([
+            ["characters/Alice.png", CARD],
+            [path, lines(205)]
+          ])
+        )
+        const chat = (yield* api.ListChats({ limit: 200, before: null })).find((c) => c.title === title)!
+        const records = new TextDecoder()
+          .decode(lines(208))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+        records[3].swipe_id = 1
+        records[3].mes = "m2b"
+        const bytes = jsonl(records)
+        const plan = yield* check(api, new Map([[path, bytes]]))
+        const run = yield* api.StartStImport({ unsupported: [], plan: { planId: plan.planId, skip: [] } })
+        yield* sendStFile(run.importId, "characters/Alice.png", CARD)
+        const prefix = jsonl(records.slice(0, 151))
+        const cut = prefix.byteLength
+        assert.strictEqual(
+          (yield* sendFile(run.importId, path, bytes.subarray(0, cut), { part: "0", last: "0" })).status,
+          200
+        )
+        const [held] = yield* fixtureSql(
+          config.dataDir,
+          [
+            {
+              sql: "SELECT json_extract(batch_json, '$.plan') AS plan FROM st_import_stage WHERE import_id = ? ORDER BY seq",
+              params: [run.importId]
+            }
+          ],
+          { readOnly: true }
+        )
+        assert.isAtLeast(held!.length, 2)
+        assert.isTrue(held!.every((row) => typeof row.plan === "string"))
+        const before = yield* stImportGraph(config.dataDir, chat.id)
+        const start = () =>
+          api.ReadPath({
+            chatId: chat.id,
+            leafSlotId: null,
+            range: { _tag: "Around", slot: before[0]!.id as never },
+            limit: 20
+          })
+        assert.strictEqual((yield* start()).entries[2]!.version.content, "m2")
+        // Writes to another chat allocate ids while this reader's ids remain staged.
+        const other = yield* api.CreateChat({ title: "Concurrent id allocations" })
+        yield* posted(api.SendMessage({ chatId: other.id, parentSlotId: null, branch: false, content: "Other chat" }))
+        if (change) yield* api.RenameChat({ chatId: chat.id, name: "Changed between planned batches" })
+        const answer = yield* sendStFile(run.importId, path, bytes.subarray(cut), { part: "1" })
+        yield* api.FinishStImport({ importId: run.importId, notSent: [] })
+        assert.strictEqual(answer.outcome, change ? "skipped" : "updated")
+        if (change) {
+          assert.deepStrictEqual(yield* stImportGraph(config.dataDir, chat.id), before)
+          assert.deepStrictEqual(yield* refusedIn(api, run.importId), [path])
+        } else {
+          const graph = yield* stImportGraph(config.dataDir, chat.id)
+          assert.strictEqual(new Set(graph.map((row) => row.id)).size, 208)
+          assert.strictEqual((yield* start()).entries[2]!.version.content, "m2b")
+        }
+        assert.strictEqual(yield* staged, 0)
+      })
+    )
+
+  it.effect("reads current sidebar, planning and causal request data before post-commit summaries are stored", () =>
+    Effect.gen(function* () {
+      const { api, path, chat, bytes, importId } = yield* imported("Summary window")
+      yield* api.GetShellLibrary()
+      const reader = yield* Reader
+      const writer = yield* Writer
+      const userId = (yield* api.Whoami()).id
+      const entered = Deferred.makeUnsafe<void>()
+      const release = Deferred.makeUnsafe<void>()
+      const original = reader.StImportChatSummaries
+      const hook = vi
+        .spyOn(reader, "StImportChatSummaries")
+        .mockImplementation((input) =>
+          Effect.andThen(Deferred.succeed(entered, undefined), Effect.andThen(Deferred.await(release), original(input)))
+        )
+      yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const sending = yield* Effect.forkScoped(sendStFile(importId, path, bytes))
+      yield* Deferred.await(entered)
+      assert.strictEqual(yield* staged, 0)
+      const rows = yield* entries(api, chat.id)
+      assert.lengthOf(rows, 8)
+      const cached = yield* reader.ShellLibrary({ userId })
+      const computed = yield* reader.ShellLibrary({ userId, recompute: true })
+      assert.deepStrictEqual({ ...cached, fresh: [] }, { ...computed, fresh: [] })
+      const record = (yield* reader.StImportSources({ userId })).chats.find((r) => r.source === path)!
+      const next = yield* reader.StImportPlanBatch({
+        userId,
+        recordId: record.recordId,
+        branch: false,
+        parent: null,
+        carry: null,
+        matching: true,
+        strict: false,
+        messagesJson: JSON.stringify(
+          Array.from({ length: 8 }, (_, i) => ({
+            user: i % 2 === 1,
+            hidden: false,
+            speaker: null,
+            selected: 0,
+            versions: (i === 2 ? ["m2", "m2b"] : [`m${i}`]).map((content) => ({
+              content,
+              reasoning: null,
+              at: Date.UTC(2025, 0, 1, 10, i)
+            }))
+          }))
+        ),
+        firstIndex: 0,
+        detailLimit: 0,
+        digest: "",
+        overlayJson: null,
+        virtualPrefix: "virtual:window:",
+        track: false
+      })
+      assert.strictEqual(next.counts.unchanged, 8)
+      assert.strictEqual(next.counts.newMessages, 0)
+      // A stale sidebar cache must not name an automatic chat using its old cast.
+      yield* fixtureSql(config.dataDir, [
+        { sql: "UPDATE chats SET title = '' WHERE id = ?", params: [chat.id] },
+        { sql: "UPDATE fork_summaries SET cast_json = '[]', stamp = -1 WHERE chat_id = ?", params: [chat.id] }
+      ])
+      const found = yield* reader.SearchMessages({ userId, text: "m7", cursor: null, limit: 200 })
+      assert.strictEqual(found.hits.find((hit) => hit.chatId === chat.id)!.chatName, "Alice")
+      for (const [parent, future] of [
+        [rows[1]!, true],
+        [rows[7]!, false]
+      ] as const) {
+        const target = yield* writer.AppendMessage({
+          userId,
+          chatId: chat.id,
+          parentSlotId: parent.slotId,
+          branch: true,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: "model",
+            content: "",
+            status: "generating",
+            macroMode: "verbatim",
+            origin: "generated"
+          }),
+          commitDraft: null
+        })
+        const { snapshot } = yield* reader.AssembleContext({
+          userId,
+          chatId: chat.id,
+          slotId: target.slotId,
+          versionId: target.version.id,
+          now: Date.UTC(2026, 0, 1),
+          timeZone: "UTC",
+          frozen: null
+        })
+        const sent = JSON.stringify((JSON.parse(snapshot) as ContextSnapshot).request)
+        assert.include(sent, "m1")
+        if (future) assert.notInclude(sent, "m7")
+        else assert.include(sent, "m7")
+      }
+      yield* Deferred.succeed(release, undefined)
+      assert.strictEqual((yield* Fiber.join(sending)).outcome, "updated")
+      yield* api.FinishStImport({ importId, notSent: [] })
     })
   )
 
@@ -429,6 +687,105 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       return { api, path, bytes, importId: run.importId }
     })
 
+  for (const action of ["open and continue", "bin", "supersede"] as const)
+    it.effect(`keeps a partially written new chat coherent when another tab chooses to ${action}`, () =>
+      Effect.gen(function* () {
+        const title = `Writing ${action}`
+        const { api, path, bytes, importId } = yield* freshRun(title)
+        const writer = yield* Writer
+        const reader = yield* Reader
+        const userId = (yield* api.Whoami()).id
+        const entered = Deferred.makeUnsafe<void>()
+        const release = Deferred.makeUnsafe<void>()
+        const original = writer.StImportCommitBatch
+        let first = true
+        const hook = vi.spyOn(writer, "StImportCommitBatch").mockImplementation((input) =>
+          original(input).pipe(
+            Effect.tap(() => {
+              if (!first) return Effect.void
+              first = false
+              return Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(release))
+            })
+          )
+        )
+        yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+        yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+        const sending = yield* Effect.forkScoped(sendStFile(importId, path, bytes, {}, 400))
+        yield* Deferred.await(entered)
+        const chat = (yield* api.ListChats({ limit: 200, before: null })).find(
+          (c) => c.title === `${title} (import unfinished)`
+        )!
+        assert.isDefined(chat)
+        const partial = yield* entries(api, chat.id)
+        assert.isAbove(partial.length, 0)
+        assert.isBelow(partial.length, 40)
+        // Visible unfinished chats expose only their committed messages on every read surface.
+        assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).title, `${title} (import unfinished)`)
+        const search = yield* reader.SearchMessages({ userId, text: "m0", cursor: null, limit: 200 })
+        assert.isTrue(search.hits.some((hit) => hit.chatId === chat.id && hit.chatName.includes("import unfinished")))
+        const exported = yield* post("/library/chat-export", {
+          chatId: chat.id,
+          forkId: null,
+          scope: "branch",
+          format: "txt"
+        })
+        assert.strictEqual(exported.status, 200)
+        const text = yield* Effect.promise(() => exported.text())
+        assert.include(text, "m0")
+        assert.notInclude(text, "m39")
+        const cached = yield* reader.ShellLibrary({ userId })
+        const computed = yield* reader.ShellLibrary({ userId, recompute: true })
+        // The sidebar deliberately defers a growing unfinished chat's expensive walk;
+        // its marker remains, and an explicit recomputation sees only committed rows.
+        assert.strictEqual(
+          cached.forks.find((fork) => fork.sourceChatId === chat.id)!.chat.title,
+          `${title} (import unfinished)`
+        )
+        assert.strictEqual(computed.forks.find((fork) => fork.sourceChatId === chat.id)!.messages, partial.length)
+        let continued: string | undefined
+        let next: { importId: string } | undefined
+        if (action === "open and continue") {
+          continued = (yield* posted(
+            api.SendMessage({
+              chatId: chat.id,
+              parentSlotId: partial.at(-1)!.slotId,
+              branch: false,
+              content: "Continued during import"
+            })
+          )).entry.slotId
+        } else if (action === "bin") yield* api.DeleteChat({ chatId: chat.id })
+        else next = yield* api.StartStImport({ unsupported: [] })
+        yield* Deferred.succeed(release, undefined)
+        const answer = yield* Fiber.join(sending)
+        if (action === "open and continue") {
+          assert.strictEqual(answer.outcome, "added")
+          assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, continued)
+          assert.strictEqual(new Set((yield* stImportGraph(config.dataDir, chat.id)).map((row) => row.id)).size, 41)
+          yield* api.FinishStImport({ importId, notSent: [] })
+        } else {
+          assert.strictEqual(answer.outcome, "failed")
+          assert.strictEqual(
+            answer.message,
+            "This chat stopped part way and shows as unfinished. Import it again to finish it."
+          )
+          assert.strictEqual(
+            new Set((yield* stImportGraph(config.dataDir, chat.id)).map((row) => row.id)).size,
+            partial.length
+          )
+          if (next !== undefined) {
+            yield* sendStFile(next.importId, "characters/Alice.png", CARD)
+            yield* sendStFile(next.importId, path, bytes)
+            yield* api.FinishStImport({ importId: next.importId, notSent: [] })
+            assert.lengthOf(yield* entries(api, chat.id), 40)
+          } else {
+            assert.isFalse((yield* api.ListChats({ limit: 200, before: null })).some((c) => c.id === chat.id))
+            yield* api.CancelStImport({ importId })
+          }
+        }
+        assert.strictEqual(yield* staged, 0)
+      })
+    )
+
   it.effect("writes a confirmed new chat batch by batch, then finishes it", () =>
     Effect.gen(function* () {
       const { api, path, bytes, importId } = yield* freshRun("Bounded")
@@ -462,7 +819,16 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           )
         )
       )
-      assert.isTrue(Exit.isFailure(failed))
+      assert.isTrue(Exit.isSuccess(failed), "a partial write must return its unfinished explanation")
+      if (Exit.isFailure(failed)) return
+      assert.strictEqual(failed.value.outcome, "failed")
+      assert.strictEqual(
+        failed.value.message,
+        "This chat stopped part way and shows as unfinished. Import it again to finish it."
+      )
+      assert.isTrue(
+        (yield* api.GetStImportReport({ importId })).issues.some((issue) => issue.code === "st.chat_unfinished")
+      )
       yield* api.CancelStImport({ importId }).pipe(Effect.ignore)
       const listed = yield* api.ListChats({ limit: 200, before: null })
       // Shown as unfinished, with the batches written before the failure.
@@ -473,7 +839,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.isAbove(partial, 0)
       assert.isBelow(partial, 30)
       assert.strictEqual(yield* staged, 0)
-      const again = yield* api.StartStImport({ unsupported: [] })
+      const resumePlan = yield* check(api, new Map([[path, bytes]]))
+      assert.strictEqual(resumePlan.files[0]!.target, "unfinished")
+      const again = yield* api.StartStImport({ unsupported: [], plan: { planId: resumePlan.planId, skip: [] } })
       yield* sendStFile(again.importId, "characters/Alice.png", CARD)
       yield* sendStFile(again.importId, path, bytes)
       yield* api.FinishStImport({ importId: again.importId, notSent: [] })
@@ -484,6 +852,87 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       )
       assert.lengthOf(yield* entries(api, chat.id), 40)
       assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).title, "Part way")
+      const control = yield* importStFolder(
+        new Map([
+          ["characters/Alice.png", CARD],
+          ["chats/Alice/Part way control.jsonl", bytes]
+        ]),
+        { checked: true, partBytes: 400 }
+      )
+      const controlChat = (yield* control.api.ListChats({ limit: 200, before: null })).find(
+        (c) => c.title === "Part way control"
+      )!
+      const semanticState = (id: string) =>
+        fixtureSql(
+          config.dataDir,
+          [
+            {
+              sql: `SELECT s.depth, v.ordinal, v.writer, v.speaker_entity_id, v.status, v.origin, v.macro_mode,
+            v.content, v.reasoning, v.reply_sections, v.recorded_model_json, v.recorded_generation_json,
+            v.cast_json, v.presence_json, v.created_at, v.updated_at, s.context_excluded,
+            s.deleted_at, s.purged_at, v.id = s.selected_version_id AS selected
+          FROM slots s JOIN version_records v ON v.slot_id = s.id WHERE s.chat_id = ? ORDER BY s.depth, v.ordinal`,
+              params: [id]
+            },
+            {
+              sql: "SELECT e.key, e.value_json, e.origin, s.depth FROM state_events e LEFT JOIN slots s ON s.id = e.slot_id WHERE e.chat_id = ? ORDER BY e.seq",
+              params: [id]
+            },
+            {
+              sql: "SELECT s.depth AS tip, f.deleted_at, f.name FROM forks f LEFT JOIN slots s ON s.id = f.tip_slot_id WHERE f.chat_id = ?",
+              params: [id]
+            }
+          ],
+          { readOnly: true }
+        )
+      assert.deepStrictEqual(yield* semanticState(chat.id), yield* semanticState(controlChat.id))
+    })
+  )
+
+  it.effect("Stop lets a new chat already being written finish before ending the upload", () =>
+    Effect.gen(function* () {
+      const { api, path, bytes, importId } = yield* freshRun("Stop while writing")
+      const writer = yield* Writer
+      const imports = yield* StImports
+      const entered = Deferred.makeUnsafe<void>()
+      const release = Deferred.makeUnsafe<void>()
+      const cancelEntered = Deferred.makeUnsafe<void>()
+      const stop = imports.stopAfterChatWrite
+      const stopHook = vi
+        .spyOn(imports, "stopAfterChatWrite")
+        .mockImplementation((...args) => Effect.andThen(Deferred.succeed(cancelEntered, undefined), stop(...args)))
+      const original = writer.StImportCommitBatch
+      let first = true
+      const hook = vi.spyOn(writer, "StImportCommitBatch").mockImplementation((input) =>
+        original(input).pipe(
+          Effect.tap(() => {
+            if (!first) return Effect.void
+            first = false
+            return Effect.andThen(Deferred.succeed(entered, undefined), Deferred.await(release))
+          })
+        )
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => hook.mockRestore()))
+      yield* Effect.addFinalizer(() => Effect.sync(() => stopHook.mockRestore()))
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
+      const sending = yield* Effect.forkScoped(sendStFile(importId, path, bytes, {}, 400))
+      yield* Deferred.await(entered)
+      const chat = (yield* api.ListChats({ limit: 200, before: null })).find(
+        (c) => c.title === "Stop while writing (import unfinished)"
+      )!
+      assert.isDefined(chat)
+      const cancelling = yield* Effect.forkScoped(api.CancelStImport({ importId }))
+      yield* Deferred.await(cancelEntered)
+      yield* Deferred.succeed(release, undefined)
+      const answer = yield* Fiber.join(sending)
+      yield* Fiber.join(cancelling)
+      assert.strictEqual(answer.outcome, "added")
+      assert.lengthOf(yield* entries(api, chat.id), 40)
+      assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).title, "Stop while writing")
+      const detail = yield* api.GetStImport({ importId })
+      assert.strictEqual(detail.job.status, "cancelled")
+      assert.strictEqual(detail.report!.counts.chat!.added, 1)
+      assert.strictEqual(yield* staged, 0)
     })
   )
 

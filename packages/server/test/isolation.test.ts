@@ -4718,6 +4718,57 @@ const storage: Record<
       const mine = yield* actor.api.StartStImport({ unsupported: [] })
       yield* refused(commit(mine.importId), "StImportPlanChanged")
     }),
+  StImportChatSummaries: (reader, actor, owner) =>
+    Effect.map(reader.StImportChatSummaries({ userId: actor.user.id, chatId: owner.chat.chatId }), (value) =>
+      assert.isNull(value)
+    ),
+  StImportPlanBatch: (reader, actor, owner) =>
+    refused(
+      reader.StImportPlanBatch({
+        userId: actor.user.id,
+        recordId: owner.importRecordId,
+        branch: false,
+        parent: null,
+        carry: null,
+        matching: true,
+        strict: false,
+        messagesJson: "[]",
+        firstIndex: 0,
+        detailLimit: 0,
+        digest: "",
+        overlayJson: null,
+        virtualPrefix: "virtual:foreign:",
+        track: false,
+        plan: true
+      }),
+      "NotFound"
+    ),
+  StImportCommitBatch: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const theirs = yield* owner.api.StartStImport({ unsupported: [] })
+      const mine = yield* actor.api.StartStImport({ unsupported: [] })
+      const path = "chats/Synthetic/Batch.jsonl"
+      const batchJson = JSON.stringify({ messagesJson: "[]", speakers: {} })
+      yield* writer.StImportStage({ userId: owner.user.id, lease: theirs.importId, path, seq: 0, batchJson })
+      const commit = (lease: string, chatId = owner.chat.chatId) =>
+        writer.StImportCommitBatch({
+          userId: actor.user.id,
+          lease,
+          path,
+          seq: 0,
+          chatId,
+          recordId: owner.importRecordId,
+          advanceLeaf: true,
+          parentSlotId: null,
+          castJson: "[]"
+        })
+      yield* refused(commit(theirs.importId), "ImportLeaseLost")
+      yield* writer.StImportStage({ userId: actor.user.id, lease: mine.importId, path, seq: 0, batchJson })
+      yield* refused(commit(mine.importId), "NotFound")
+      yield* refused(commit(mine.importId, actor.chat.chatId), "NotFound")
+      yield* writer.StImportStage({ userId: owner.user.id, lease: theirs.importId, path, seq: 0, batchJson: null })
+      yield* writer.StImportStage({ userId: actor.user.id, lease: mine.importId, path, seq: 0, batchJson: null })
+    }),
   StImportSummarySettings: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })

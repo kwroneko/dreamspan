@@ -56,7 +56,7 @@ import {
 } from "./stImportProgress.ts"
 import { newEvent, type PlaceEvent } from "./stImportPlace.ts"
 import { planTipRef, type StPlanTip, stepPlanTip } from "./stImportPlanOps.ts"
-import { StImportPlanChanged } from "@rp/shared/stReimportPlan.ts"
+import { StImportPlanChanged, ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
 import { DEFAULT_PERSONA, DEFAULT_PRESET, newChatLcmSettings, ownedPersona, ownedPreset } from "./generationSettings.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
@@ -1199,6 +1199,14 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         // A file the reader planned whole goes in as its plan says.
         if (input.chatId !== null && decoded.length > 0 && decoded.every(({ batch }) => batch.plan !== undefined))
           return yield* commitPlanned(input, decoded)
+        // The public confirmed importer refuses these before staging. Fence direct or
+        // delayed internal calls too: matching a legacy suffix copy here can hold the
+        // sole writer for minutes. Refusal preserves the entire existing file's state.
+        if (input.chatId !== null && decoded.some(({ batch }) => batch.plan === undefined))
+          return yield* Effect.gen(function* () {
+            yield* stagingCurrent(userId, lease, path)
+            return yield* new StImportPlanChanged({ message: ST_UNPLANNED_CHAT_MESSAGE })
+          }).pipe(transaction(sql, "StImportCommitChat"))
         const batches = decoded.map(({ batch, messages }) => ({
           batch,
           messages,

@@ -31,7 +31,7 @@ import {
 import { createHash } from "node:crypto"
 import { lstat, rm } from "node:fs/promises"
 import { join } from "node:path"
-import { Context, Effect, Exit, Layer, Schedule, Schema } from "effect"
+import { Context, Deferred, Effect, Exit, Layer, Schedule, Schema } from "effect"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { AppConfig } from "../config.ts"
@@ -50,7 +50,7 @@ import { stepWriteProgress, stFinishAt, stIndexSlot, type StStagedBatch } from "
 import type { StBatchPlan } from "../db/stImportPlanOps.ts"
 import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import { stBytesHash, type StPlanExpect, type StPlanExpectFile, stPartsHash } from "./stPlanExpect.ts"
-import { ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
+import { ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK, ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
 import {
   type CardInfo,
   chatStateChange,
@@ -225,7 +225,7 @@ interface ChatProgress {
   stagedChars: number
   /**
    * Where the reader's plan of the file's next batch goes on from (stImportPlanOps.ts): what the
-   * batches planned so far leave. Null once a batch can't be planned: the writer matches it.
+   * batches planned so far leave. A batch that cannot be planned refuses the file.
    */
   prepared: {
     parent: { id: string; depth: number } | null
@@ -342,6 +342,8 @@ export class StImports extends Context.Service<
     readonly exists: (user: User, importId: string) => boolean
     /** Ends the user's import if it's this one: its files are refused from now on. */
     readonly end: (user: User, importId: string) => void
+    /** Refuses later files and lets an already started new-chat write finish before Stop. */
+    readonly stopAfterChatWrite: (user: User, importId: string) => Effect.Effect<void>
     /** Where the import found the library entry of an entity, by an earlier import's records too. */
     readonly sourcesOf: (user: User, importId: string, entityId: EntityId) => ReadonlyArray<string>
     /** The folder-file handlers by kind, for a plugin to register into, wrap or disable. */
@@ -359,13 +361,20 @@ export class StImports extends Context.Service<
       const { holding } = yield* MediaHolds
       const hub = yield* ChatHub
       const sessions = new Map<string, Session>()
+      const stopping = new Set<string>()
+      const chatWrites = new Map<string, Deferred.Deferred<void>>()
       const handlers = makeRegistry<StFolderHandler>()
 
       yield* removeOldStaging(config.dataDir)
 
-      const sessionOf = (user: User, importId: string) => {
+      const sessionOf = (user: User, importId: string, readingReport = false) => {
         const session = sessions.get(user.id)
-        if (session === undefined || session.id !== importId || Date.now() - session.touched > IDLE_MS) {
+        if (
+          session === undefined ||
+          session.id !== importId ||
+          (stopping.has(importId) && !readingReport) ||
+          Date.now() - session.touched > IDLE_MS
+        ) {
           return Effect.fail(new NotFound({ entity: "import", id: importId }))
         }
         session.touched = Date.now()
@@ -931,15 +940,19 @@ export class StImports extends Context.Service<
               digest: prepared.digest
             })
             const plan = planned.planJson === undefined ? undefined : (JSON.parse(planned.planJson) as StBatchPlan)
+            if (plan === undefined) {
+              session.report.issue(progress.path, "error", "st.chat_unplanned", ST_UNPLANNED_CHAT_MESSAGE)
+              session.report.count(progress.countAs, "failed")
+              return yield* new StImportFailed({ reason: ST_UNPLANNED_CHAT_MESSAGE })
+            }
             fields = {
               ...fields,
               cached: planned.unchangedSlots ?? [],
               messagesJson: planned.compactJson ?? fields.messagesJson,
-              ...(plan === undefined ? {} : { plan })
+              plan
             }
-            // Without a plan the writer matches what's left itself.
             progress.prepared =
-              plan !== undefined && planned.cursor !== null
+              planned.cursor !== null
                 ? {
                     parent: { id: planned.cursor.id, depth: planned.cursor.depth },
                     carry: planned.carry,
@@ -1222,8 +1235,8 @@ export class StImports extends Context.Service<
         )
 
       /**
-       * A confirmed import's new chat, once its last part is in and matches the bytes the check
-       * read: all of it was held, so nothing was written yet. Its record and chat are claimed
+       * A confirmed import's new chat, once its last part is in: all of it was held, so nothing
+       * was written yet. New-file contents were not previewed. Its record and chat are claimed
        * once, while the run goes on (a Stop before then writes nothing); then its batches go in a
        * transaction each, as an import writes a new chat, so no one write holds the writer for
        * long; then its finish. Once started it goes on to the end, Stop or not. One that stops
@@ -1233,6 +1246,9 @@ export class StImports extends Context.Service<
       const commitNewChat = (session: Session, user: User, progress: ChatProgress) =>
         Effect.gen(function* () {
           const castJson = castOf(stateChangeOf(session, progress).events)
+          // Set before dispatching the claim: Stop can arrive while its reply is in flight.
+          // The chat handler releases this only after the file's report has been updated.
+          chatWrites.set(session.id, Deferred.makeUnsafe<void>())
           const target = yield* startChat(session, user, progress, true)
           const stopped = () =>
             Effect.sync(() => {
@@ -1271,7 +1287,14 @@ export class StImports extends Context.Service<
             const outcome = yield* finishChat(session, user, progress, target, { count, castJson })
             yield* storeSummaries(user, target.chatId)
             return outcome
-          }).pipe(Effect.catchTags({ ImportLeaseLost: stopped, NotFound: stopped }))
+          }).pipe(
+            Effect.catchTags({
+              ImportLeaseLost: stopped,
+              NotFound: stopped,
+              StorageError: (error) =>
+                Effect.andThen(Effect.logWarning("writing a new imported chat stopped part way", error), stopped())
+            })
+          )
         })
 
       /**
@@ -1743,7 +1766,14 @@ export class StImports extends Context.Service<
               // A chat left between parts is the only one kept; one that failed, or whose
               // request was interrupted, gives back what it held.
               Effect.onExit((exit) =>
-                Exit.isFailure(exit) && session.chat?.path === path ? dropChat(session) : Effect.void
+                Effect.gen(function* () {
+                  if (Exit.isFailure(exit) && session.chat?.path === path) yield* dropChat(session)
+                  const writing = chatWrites.get(session.id)
+                  if (writing !== undefined) {
+                    chatWrites.delete(session.id)
+                    yield* Deferred.succeed(writing, undefined)
+                  }
+                })
               ),
               Effect.catchTag("StImportFailed", (error) =>
                 error.reason === undefined ? Effect.fail(error) : Effect.succeed(result("failed", error.reason))
@@ -1955,7 +1985,7 @@ export class StImports extends Context.Service<
             )
           ),
         report: (user, importId) =>
-          Effect.map(sessionOf(user, importId), (session) => session.report.build(globalWorldIssues(session))),
+          Effect.map(sessionOf(user, importId, true), (session) => session.report.build(globalWorldIssues(session))),
         file: (user, importId, path, bytes, request) =>
           file(user, importId, path, bytes, request).pipe(
             Effect.catch((error): Effect.Effect<never, NotFound | StImportFailed> =>
@@ -1968,7 +1998,15 @@ export class StImports extends Context.Service<
         exists: (user, importId) => sessions.get(user.id)?.id === importId,
         end: (user, importId) => {
           if (sessions.get(user.id)?.id === importId) sessions.delete(user.id)
+          stopping.delete(importId)
         },
+        stopAfterChatWrite: (user, importId) =>
+          Effect.suspend(() => {
+            if (sessions.get(user.id)?.id !== importId) return Effect.void
+            stopping.add(importId)
+            const writing = chatWrites.get(importId)
+            return writing === undefined ? Effect.void : Deferred.await(writing)
+          }),
         sourcesOf: (user, importId, entityId) => {
           const session = sessions.get(user.id)
           if (session?.id !== importId) return []

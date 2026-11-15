@@ -592,6 +592,7 @@ export class StImportJobs extends Context.Service<
           // An upload stops now: the files still on their way are refused. A path import
           // stops after the file it's on.
           if (live.mode === "upload") {
+            yield* imports.stopAfterChatWrite(user, importId)
             yield* end(live, "cancelled", null)
             imports.end(user, importId)
           }

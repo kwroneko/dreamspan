@@ -5,6 +5,7 @@
 // The first import is checked and confirmed too, so both a new 20,000-message chat and the
 // re-import's few new messages are measured as the writer pause a concurrent write sees.
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs"
+import { loadavg } from "node:os"
 import { join } from "node:path"
 import { assert, it as plain, layer } from "@effect/vitest"
 import type { SlotId } from "@rp/shared/chat.ts"
@@ -89,6 +90,7 @@ if (process.env.ST_REIMPORT_OWNER_SCALE !== "1") {
       const sorted = [...samples].sort((a, b) => a - b)
       return {
         plan: done,
+        refusedUnplanned: result.report!.issues.some((issue) => issue.code === "st.chat_unplanned"),
         checkMs,
         importMs,
         peakStaged,
@@ -167,6 +169,15 @@ if (process.env.ST_REIMPORT_OWNER_SCALE !== "1") {
           { readOnly: true }
         )
         assert.isTrue(bases!.some((row) => row.depth === DEPTH && row.n === 200))
+        // No current import creates forkPrior. Opt in to the persisted legacy marker to
+        // measure the unplanned path too; this same-path variant needs no suffix copies.
+        if (process.env.ST_REIMPORT_OWNER_FALLBACK === "1")
+          yield* fixtureSql(config.dataDir, [
+            {
+              sql: "UPDATE jobs SET payload_json = json_set(payload_json, '$.forkPrior', json_extract(payload_json, '$.end')) WHERE kind = 'st-import-chat' AND json_extract(payload_json, '$.chatId') = ?",
+              params: [chat.id]
+            }
+          ])
         appendFileSync(
           file,
           [MESSAGES, MESSAGES + 1, MESSAGES + 2]
@@ -208,11 +219,18 @@ if (process.env.ST_REIMPORT_OWNER_SCALE !== "1") {
           range: { _tag: "Bottom" },
           limit: 3
         })
-        assert.deepStrictEqual(
-          after.entries.map((entry) => entry.version.content),
-          [`New ${MESSAGES}`, `New ${MESSAGES + 1}`, `New ${MESSAGES + 2}`]
-        )
+        if (process.env.ST_REIMPORT_OWNER_FALLBACK === "1") {
+          assert.isTrue(again.refusedUnplanned)
+          assert.isTrue(after.entries.every((entry) => !entry.version.content.startsWith("New ")))
+        } else
+          assert.deepStrictEqual(
+            after.entries.map((entry) => entry.version.content),
+            [`New ${MESSAGES}`, `New ${MESSAGES + 1}`, `New ${MESSAGES + 2}`]
+          )
         const measured = {
+          loadAverage: loadavg(),
+          fallback: process.env.ST_REIMPORT_OWNER_FALLBACK === "1",
+          refusedUnplanned: again.refusedUnplanned,
           messages: MESSAGES,
           versions,
           forks: 201,

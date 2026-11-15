@@ -41,6 +41,14 @@ test.beforeAll(async () => {
         content: "Nobody mentions the tower here.",
         reply: false
       })
+      const unfinished = yield* api.CreateChat({ title: "Unfinished harbour (import unfinished)" })
+      yield* api.SendMessage({
+        chatId: unfinished.id,
+        parentSlotId: null,
+        branch: false,
+        content: "unfinishedsignal from a partial import",
+        reply: false
+      })
       return { chatId, forkId: fork.fork.id, branchSlot: sent.entry.slotId, sharedSlot: first }
     })
   )
@@ -84,6 +92,15 @@ for (const width of [1440, 390])
         scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
       })
       await page.screenshot({ path: info.outputPath(`results-${width}-${theme}.png`) })
+
+      await field.fill("unfinishedsignal")
+      await expect(hits).toHaveCount(1)
+      await expect(hits.first()).toContainText("Unfinished harbour (import unfinished)")
+      await expectLayout(page, info, `unfinished-message-search-${width}-${theme}`, {
+        scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
+      })
+      await field.fill("lighthouse")
+      await expect(hits).toHaveCount(2)
 
       // A reload shows the same search.
       await page.reload()

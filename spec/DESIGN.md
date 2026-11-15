@@ -1,4 +1,6 @@
-**Built review-reimport2 (2026-11-14):** §1.4's checked re-imports stage new chats atomically as well, clean up partial and abandoned files, and certify reader-prepared unchanged prefixes in the final file transaction. The preview discloses new-chat estimates and unresolved card links. This implementation record is obsolete as a proposal; see ARCHITECTURE §13. No decision status changes.
+**Built review-reimport3 (2026-11-15):** §1.4 retains atomic existing-chat files with reader-prepared writes; new chats write bounded batches after complete staging, with Stop waiting for a started write, explicit partial-failure reporting, and unfinished search labels. ARCHITECTURE §13 records the independent review and limits. No decision status changes.
+
+**Built review-reimport2 (2026-11-14):** §1.4's checked re-imports stage whole new-chat files before writing, clean up partial and abandoned files, and certify reader-prepared unchanged prefixes in the final file transaction. The preview discloses new-chat estimates and unresolved card links. This implementation record is obsolete as a proposal; see ARCHITECTURE §13. No decision status changes.
 
 **Built 2026-11-14 (review-smallui1):** The standard card name/version mapping in §4 is also used for compact cast-tab and Next choices; speaker/persona rows retain their version subtitles. Summary-model configuration follows the coordinator's Q17 ruling; its implementation and review are recorded in ARCHITECTURE §16. No Proposed item is promoted by this note.
 

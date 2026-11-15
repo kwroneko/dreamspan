@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { Worker } from "node:worker_threads"
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
+import { ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
 import { build } from "rolldown"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -18,13 +19,22 @@ import { tempDir } from "./support/tempDir.ts"
 // Matched in the transaction (batches without a reader's plan), or applied from the plans the
 // reader made: the pause follows the batches' writes in either.
 const paths = [
-  { planned: false, needle: "stepWriteProgress(progress, written, finish.prevEnd, finish.hiddenRun, [])" },
-  { planned: true, needle: "const ref = planTipRef(payload)" }
+  {
+    planned: false,
+    afterCommit: false,
+    needle: "stepWriteProgress(progress, written, finish.prevEnd, finish.hiddenRun, [])"
+  },
+  { planned: true, afterCommit: false, needle: "const ref = planTipRef(payload)" },
+  { planned: true, afterCommit: true, needle: "" }
 ]
 
-for (const { planned, needle } of paths)
+for (const { planned, needle, afterCommit } of paths)
   it.effect(
-    `a killed final writer rolls back every batch${planned ? " it applies from the reader's plans" : ""}; restart removes abandoned stages`,
+    !planned
+      ? "an unplanned confirmed file is refused without any writes; restart clears its abandoned stages"
+      : afterCommit
+        ? "a crash after commit retains the whole file; restart recomputes stale sidebar summaries"
+        : `a killed final writer rolls back every batch${planned ? " it applies from the reader's plans" : ""}; restart removes abandoned stages`,
     () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -108,7 +118,7 @@ for (const { planned, needle } of paths)
                   batchJson: JSON.stringify({ messagesJson, speakers: {}, ...(planned ? { plan } : {}) })
                 })
               }
-              return {
+              const input = {
                 userId,
                 lease,
                 path,
@@ -140,15 +150,37 @@ for (const { planned, needle } of paths)
                 slotsAt: [],
                 expect: null
               }
+              if (!planned) {
+                const error = yield* writer.StImportCommitChat(input).pipe(Effect.flip)
+                assert.strictEqual(error._tag, "StImportPlanChanged")
+                assert.strictEqual(error.message, ST_UNPLANNED_CHAT_MESSAGE)
+              }
+              return input
             }).pipe(Effect.provide(serverLayer(config)))
           )
           const before = yield* stImportGraph(config.dataDir, input.chatId)
+          if (!planned) {
+            assert.strictEqual(new Set(before.map((row) => row.id)).size, 6)
+            yield* Effect.scoped(
+              Effect.gen(function* () {
+                yield* client()
+                const [staged] = yield* fixtureSql(
+                  config.dataDir,
+                  [{ sql: "SELECT count(*) AS n FROM st_import_stage" }],
+                  { readOnly: true }
+                )
+                assert.strictEqual(staged![0]!.n, 0)
+                assert.deepStrictEqual(yield* stImportGraph(config.dataDir, input.chatId), before)
+              }).pipe(Effect.provide(serverLayer(config)))
+            )
+            return
+          }
           const dir = tempDir("st-crash-writer")
           const entry = join(dir, "entry.mjs")
           const root = new URL("../src/", import.meta.url)
           writeFileSync(
             entry,
-            `import { workerData } from 'node:worker_threads';
+            `import { workerData, parentPort } from 'node:worker_threads';
       import { Effect } from ${JSON.stringify(new URL("../../../node_modules/effect/dist/index.js", import.meta.url).pathname)};
       import { writerConnection } from ${JSON.stringify(new URL("db/connection.ts", root).pathname)};
       import { makeStImportWriteHandlers } from ${JSON.stringify(new URL("db/stImportWrites.ts", root).pathname)};
@@ -156,6 +188,7 @@ for (const { planned, needle } of paths)
       Effect.runPromise(Effect.gen(function* () {
         const handlers = yield* makeStImportWriteHandlers(makeStImportPrefix());
         yield* handlers.StImportCommitChat(workerData.input);
+        ${afterCommit ? "parentPort.postMessage('written-in-transaction'); Atomics.wait(workerData.gate, 0, 0);" : ""}
         throw new Error('commit escaped its pause');
       }).pipe(Effect.provide(writerConnection(workerData.dbPath))));`
           )
@@ -172,6 +205,10 @@ for (const { planned, needle } of paths)
                   name: "pause-after-first-write",
                   transform(code, id) {
                     if (!id.endsWith("/db/stImportWrites.ts")) return
+                    if (afterCommit) {
+                      instrumented = true
+                      return
+                    }
                     assert.include(code, needle)
                     instrumented = true
                     return (
@@ -202,7 +239,9 @@ for (const { planned, needle } of paths)
               })
           )
           yield* Effect.promise(() => worker.terminate())
-          assert.deepStrictEqual(yield* stImportGraph(config.dataDir, input.chatId), before)
+          const committed = yield* stImportGraph(config.dataDir, input.chatId)
+          if (afterCommit) assert.strictEqual(new Set(committed.map((row) => row.id)).size, 300)
+          else assert.deepStrictEqual(committed, before)
           const [staged, integrity, foreign] = yield* fixtureSql(
             config.dataDir,
             [
@@ -212,12 +251,12 @@ for (const { planned, needle } of paths)
             ],
             { readOnly: true }
           )
-          assert.strictEqual(staged![0]!.n, 3)
+          assert.strictEqual(staged![0]!.n, afterCommit ? 0 : 3)
           assert.strictEqual(integrity![0]!.integrity_check, "ok")
           assert.deepStrictEqual(foreign, [])
           yield* Effect.scoped(
             Effect.gen(function* () {
-              yield* client()
+              const api = yield* client()
               const [staged] = yield* fixtureSql(
                 config.dataDir,
                 [{ sql: "SELECT count(*) AS n FROM st_import_stage" }],
@@ -226,7 +265,14 @@ for (const { planned, needle } of paths)
                 }
               )
               assert.strictEqual(staged![0]!.n, 0)
-              assert.deepStrictEqual(yield* stImportGraph(config.dataDir, input.chatId), before)
+              assert.deepStrictEqual(yield* stImportGraph(config.dataDir, input.chatId), committed)
+              if (afterCommit) {
+                yield* api.GetShellLibrary()
+                const reader = yield* Reader
+                const cached = yield* reader.ShellLibrary({ userId: input.userId })
+                const rebuilt = yield* reader.ShellLibrary({ userId: input.userId, recompute: true })
+                assert.deepStrictEqual({ ...cached, fresh: [] }, { ...rebuilt, fresh: [] })
+              }
             }).pipe(Effect.provide(serverLayer(config)))
           )
         })
