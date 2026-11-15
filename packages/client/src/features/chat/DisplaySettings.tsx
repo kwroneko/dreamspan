@@ -27,6 +27,7 @@ import { ChatWidthSetting } from "./ChatWidth.tsx"
 import { HtmlFormattingSwitch, PanelDepthSelect } from "./htmlDisplay.tsx"
 import { MessageColorSettings } from "./MessageColors.tsx"
 import { MessageDetailSettings } from "./messageDetails.tsx"
+import { StateMarkerSettings } from "./StateRows.tsx"
 
 const NO_SCRIPTS: ReadonlyArray<RegexScript> = []
 
@@ -276,6 +277,7 @@ export function DisplaySettings() {
       </Field>
       <MessageColorSettings />
       <MessageDetailSettings />
+      <StateMarkerSettings />
       <Fieldset
         legend="Display transformations"
         about="Change only what you see: the text you edit, copy and send stays as written."

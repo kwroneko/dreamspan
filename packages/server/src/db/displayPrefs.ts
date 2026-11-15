@@ -67,7 +67,8 @@ export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
           ),
           messageToolbar: mergeChoices(stored.messageToolbar, prefs.messageToolbar),
           dismissedInfo: mergeChoices(stored.dismissedInfo, prefs.dismissedInfo),
-          messageDetails: mergeChoices(stored.messageDetails, prefs.messageDetails)
+          messageDetails: mergeChoices(stored.messageDetails, prefs.messageDetails),
+          stateMarkers: mergeChoices(stored.stateMarkers, prefs.stateMarkers)
         }
         yield* putUserSetting(sql, userId, KEY, merged)
         return yield* read(sql, userId)

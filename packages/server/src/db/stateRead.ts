@@ -24,7 +24,9 @@ const eventsOnPath = <A extends StateEventRow>(
   slotId: SlotId | null,
   fork: string | null,
   columns: string,
-  shown: ReadonlyArray<PathPiece> | null = null
+  shown: ReadonlyArray<PathPiece> | null = null,
+  /** Only these keys (the change markers' read); null: every key. */
+  keys: ReadonlyArray<string> | null = null
 ) => {
   const view = fork ?? sql`(SELECT current_fork_id FROM chats WHERE id = ${chatId})`
   return sql<A>`
@@ -34,6 +36,7 @@ const eventsOnPath = <A extends StateEventRow>(
     WHERE ${eventApplies(sql, view, "ev")}
       AND (ev.slot_id IS NULL OR NOT ${slotDeletedIn(sql, view, "s")})
       AND ${attachedApplies(sql, view, "s", "ev.version_id")}
+      AND ${keys === null ? sql`1` : sql`ev.key IN ${sql.in(keys)}`}
     ORDER BY ${sql.literal(shown === null ? eventOrder("ev") : eventOrder("ev", "ev.position"))}`
 }
 
@@ -108,6 +111,30 @@ export const awayEventsThrough = (sql: SqlClient.SqlClient, chatId: ChatId, slot
       )
     ),
     (rows) => rows.filter((row) => row.key === "away.set")
+  )
+
+/**
+ * The events of `keys` that apply on the fork's display path through `slotId`, in fold order,
+ * with where each was written: the timeline's change markers (`db/stateMarks.ts`). The path's
+ * segments and its events, as every state read; nothing per message.
+ */
+export const markEventsThrough = (
+  sql: SqlClient.SqlClient,
+  chatId: ChatId,
+  slotId: SlotId | null,
+  fork: string,
+  keys: ReadonlyArray<string>
+) =>
+  Effect.flatMap(displayIn(sql, chatId, slotId, fork), (shown) =>
+    eventsOnPath<ProvenancedEventRow>(
+      sql,
+      chatId,
+      slotId,
+      fork,
+      "ev.id, ev.origin, ev.slot_id, ev.version_id, ev.key, ev.scope, ev.value_json",
+      shown,
+      keys
+    )
   )
 
 /**

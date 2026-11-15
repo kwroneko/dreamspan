@@ -1,3 +1,5 @@
+**Built markers1 (2026-11-15):** §3.4's small timeline markers for state changes (who joined or left, mutes, notes, the chat's own model and preset, lorebooks, chat settings) are implemented and obsolete as an implementation proposal; see ARCHITECTURE §3.8 "Change markers in the timeline". The item stays Proposed; no Proposed item is promoted to Decided.
+
 **Built fixes1114 (2026-11-14):** §7.1's Move to an own-turn note now normalizes whitespace only at the cut; Undo restores original bytes. Workshop Changes retain the story title independently of branch naming, and summary status text explains pending work without extra requests. These fixes are obsolete as implementation proposals; see ARCHITECTURE's fixes1114 record. No Proposed item is promoted to Decided.
 
 **Built 2026-11-13 (ownturn1):** §7.1’s own-turn card notes, movable preset marker and export notice are implemented and obsolete as implementation proposals (ARCHITECTURE §15). The [P] mechanisms remain marked Proposed; Suggest a split stays later.
@@ -512,7 +514,7 @@ Design: [CHAT-MERGE.md](CHAT-MERGE.md).
   - presence
   - the "played by me" set
   - variables
-- **[P]** As a result, branching restores state automatically, edits after a branch point don't leak into other branches, and the timeline can show small markers for state changes. **Built isolation foundation** (ARCHITECTURE §3.8); universal timeline state markers remain unbuilt, to revisit with Phase 4 tool effects.
+- **[P]** As a result, branching restores state automatically, edits after a branch point don't leak into other branches, and the timeline can show small markers for state changes. **Built isolation foundation** (ARCHITECTURE §3.8); **Built markers** (markers1, 2026-11-15; ARCHITECTURE §3.8 "Change markers in the timeline"): quiet lines for the changes recorded with a message position; summary settings and card swaps, which have none, stay unmarked.
 - **[P]** State events produced by a rollout are **attached to the version that produced them**, so switching versions switches their effects too. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.8). General RP tool production of these events remains Phase 4 work.
 - **[P]** A deleted message's state events stop applying while it's in the recycle bin, and restoring the message brings them back (built, ARCHITECTURE.md §3.8; found 2026-10-11: before, they kept applying from the bin).
 - **[P]** **Overtaken**: History edits are always this chat only (§10.3, owner); shared-note text has explicit global sharing (§4.1), and new forks use the per-note choice above. No blanket apply-to-all-forks option is built. Earlier wording: “Default edit scope is "from here on, on this branch", with "apply to all branches" as an option.”

@@ -2112,6 +2112,19 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
     probe: (actor, owner) =>
       refused(actor.api.GetSplitChats({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
   },
+  // The timeline's change markers (contextsApi.ts).
+  GetStateMarks: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.GetStateMarks({
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId,
+          slotId: owner.chat.slotId,
+          keys: ["participant.join"]
+        }),
+        "NotFound"
+      )
+  },
   // Separate contexts' away rows and their Undo (contextsApi.ts).
   GetAwayMarks: {
     probe: (actor, owner) =>
@@ -4449,6 +4462,17 @@ const storage: Record<
         forkId: owner.chat.forkId,
         expectedForkIds: [owner.chat.forkId],
         title: "Foreign"
+      }),
+      "NotFound"
+    ),
+  StateMarks: (reader, actor, owner) =>
+    refused(
+      reader.StateMarks({
+        userId: actor.user.id,
+        chatId: owner.chat.chatId,
+        forkId: owner.chat.forkId,
+        slotId: owner.chat.slotId,
+        keys: ["participant.join"]
       }),
       "NotFound"
     ),
