@@ -26,6 +26,8 @@ export interface FakeProvider {
   readonly keys: ReadonlyArray<string>
   /** The chat completion requests received, parsed, in order. */
   readonly completions: ReadonlyArray<{ readonly messages: ReadonlyArray<{ role: string; content: string }> }>
+  /** Exact HTTP request bodies, before parsing. Synthetic requests only. */
+  readonly completionBytes: ReadonlyArray<string>
   readonly hold: () => void
   readonly release: () => void
   readonly stop: () => Promise<void>
@@ -56,6 +58,7 @@ export const startProvider = async (
   let listings = 0
   const endpointRequests: Array<string> = []
   const completions: Array<FakeProvider["completions"][number]> = []
+  const completionBytes: Array<string> = []
   let holding = false
   let holdingText = options.holdAfterText ?? false
   const held: Array<() => void> = []
@@ -107,6 +110,7 @@ export const startProvider = async (
       let body = ""
       request.on("data", (data: Buffer) => (body += data.toString()))
       request.on("end", () => {
+        completionBytes.push(body)
         completions.push(JSON.parse(body) as FakeProvider["completions"][number])
         if (holding) held.push(() => respond(response))
         else respond(response)
@@ -125,6 +129,7 @@ export const startProvider = async (
     endpointRequests,
     keys,
     completions,
+    completionBytes,
     hold: () => {
       holding = true
     },

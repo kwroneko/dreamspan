@@ -102,6 +102,8 @@ interface RetryPolicy {
 const defaultRetryPolicy: RetryPolicy = { maxRetries: 3, baseDelayMs: 1_000, maxDelayMs: 60_000 }
 
 export interface StreamRequest {
+  /** This submit authorizes one attempt and no auxiliary provider requests. */
+  readonly singleRequest?: boolean
   readonly userId: UserId
   readonly connectionId: ConnectionId
   readonly modelId: ModelId
@@ -1885,7 +1887,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             // A pinned route's own prices, when none are stored or they're stale: fetched alongside
             // the reply, off its path, so the close can price with them if they've arrived.
             const latest = { current: model }
-            if (prepared.kind.id === "openrouter")
+            if (!request.singleRequest && prepared.kind.id === "openrouter")
               yield* Effect.forkDetach(
                 ensureEndpoints(request.userId, model).pipe(
                   Effect.tap((fresh) =>
@@ -1924,6 +1926,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 return
               }
               const error = outcome.error
+              if (request.singleRequest) return yield* error
               // Once: a refusal of signed thinking is sent again without any (the provider's
               // check is stricter than ours), and a model that needs the thinking of the turn
               // being continued gets what was left out (thinkingBinding.ts).

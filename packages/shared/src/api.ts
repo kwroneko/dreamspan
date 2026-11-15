@@ -1,3 +1,4 @@
+import { DraftGenerationApi } from "./draftGenerationApi.ts"
 import { PluginApi } from "./plugins.ts"
 import { ExternalMediaApi } from "./externalMedia.ts"
 import { SavedMediaApi } from "./savedMedia.ts"
@@ -477,7 +478,10 @@ export const AuthenticatedMessageVersionApi = MessageVersionApi.middleware(Authe
 
 export class AuthenticatedPluginApi extends PluginApi.middleware(Authentication) {}
 
+export const AuthenticatedDraftGenerationApi = DraftGenerationApi.middleware(Authentication)
+
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
+  .merge(AuthenticatedDraftGenerationApi)
   .merge(AuthenticatedPluginApi)
   .merge(AuthenticatedOwnTurnNoteApi)
   .merge(AuthenticatedForkMergeApi)

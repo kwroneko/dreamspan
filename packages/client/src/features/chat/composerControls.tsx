@@ -24,6 +24,7 @@ export type Placement = "banner" | "queue" | "strip" | "speaker" | "tools" | "ac
 type Invocation = "button" | "keyboard"
 
 export interface ComposerControlContext {
+  readonly writing?: import("./draftWriter.ts").DraftWriter
   readonly draft: import("../../../../plugin-api/src/client.ts").DraftControl
   readonly compact?: boolean
   readonly recoverQueued: (text: string, images?: MessageImages) => void
@@ -64,6 +65,7 @@ export interface ComposerControlContext {
 }
 
 export interface ComposerControl {
+  readonly source?: string
   readonly id: string
   readonly order: number
   readonly placement: Placement | ((context: ComposerControlContext) => Placement)

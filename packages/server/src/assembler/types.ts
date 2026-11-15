@@ -621,6 +621,8 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
 
 /** The version being generated and where it is. */
 export interface Target {
+  /** Explicit composer destination; version and preview targets retain their existing shape. */
+  readonly draft?: import("@rp/shared/generationTarget.ts").DraftGenerationTarget
   /** Position-based numbering, including summarized/deleted gaps; absent on legacy snapshots and paths without insertions. */
   readonly displayPositions?: boolean
   readonly chatId: string
