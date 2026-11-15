@@ -297,6 +297,32 @@ export function MessageList({
   }, [virtualizer])
   useLayoutEffect(syncOffset)
 
+  // Contributions can grow below a partly visible earlier row whose text is already
+  // above the viewport. Keep the reading row fixed through a resize batch: querying
+  // it after each scroll correction can choose a different row before positions commit.
+  useLayoutEffect(() => {
+    const list = parent.current
+    if (list === null) return
+    let readingRow: HTMLElement | null = null
+    const remember = () => {
+      const anchor = readingAnchor(list)
+      readingRow = anchor === null ? null : list.querySelector(`.chat-row[data-index="${anchor.row}"]`)
+    }
+    remember()
+    const previous = virtualizer.shouldAdjustScrollPositionOnItemSizeChange
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
+      if (readingRow === null || !list.contains(readingRow)) remember()
+      return readingRow !== null && item.index < Number(readingRow.dataset.index)
+    }
+    // Scroll events follow the virtualizer's committed positions, including after
+    // a resize batch; a real scroll picks the new reading row in the same way.
+    list.addEventListener("scroll", remember, { passive: true })
+    return () => {
+      list.removeEventListener("scroll", remember)
+      virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previous
+    }
+  }, [virtualizer])
+
   // Changing the message spacing resizes every row, and the gaps between them. What's being
   // read keeps its place on screen: the first text in view is noted before anything changes,
   // and the list is put back around it once the rows are laid out again, and again over the
@@ -333,10 +359,11 @@ export function MessageList({
     // The rows shown have their new heights already, but the list still places them by the old
     // ones until its observer reports each. Told now, without its own scroll corrections (this
     // effect makes the one that counts), it has every row's new place before the first paint.
+    const previousAdjustment = virtualizer.shouldAdjustScrollPositionOnItemSizeChange
     virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false
     for (const element of list.querySelectorAll<HTMLElement>(".chat-row[data-index]"))
       virtualizer.resizeItem(Number(element.dataset.index), element.getBoundingClientRect().height)
-    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previousAdjustment
     virtualizer.getVirtualItems()
     const item = virtualizer.measurementsCache[row]
     if (item === undefined) return
@@ -361,7 +388,15 @@ export function MessageList({
       if (steady < 4 && performance.now() - started < 1000) frame = requestAnimationFrame(settle)
       else stop()
     }
+    // This commit still has the previous virtual positions in its DOM. resizeItem
+    // queued the measured positions for the next commit; correcting now would add
+    // that stale layout's drift to the new offset and can unmount the anchor.
+    let handoverCommit = true
     correctReading.current = () => {
+      if (handoverCommit) {
+        handoverCommit = false
+        return
+      }
       const drift = readingDrift(list, kept.anchor, row)
       if (drift !== null && Math.abs(drift) >= 0.5) moveBy(drift)
     }

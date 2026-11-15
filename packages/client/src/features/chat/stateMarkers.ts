@@ -285,7 +285,8 @@ const bindingChanges = (
   before: Readonly<Record<string, string | null>>,
   after: Readonly<Record<string, string | null>>,
   name: MarkContext["name"],
-  sameBinding: (scope: string) => boolean
+  sameBinding: (scope: string) => boolean,
+  includingRegenerated = false
 ): Array<StateChange> =>
   [...new Set([...Object.keys(before), ...Object.keys(after)])].flatMap((scope): Array<StateChange> => {
     const was = before[scope]
@@ -295,19 +296,21 @@ const bindingChanges = (
     if (was === null || now === null) return []
     const label = `${what}${forWhom(scope, name)}`
     const whose = scope === "" ? "replies in this chat" : `replies${forWhom(scope, name)}`
+    const text =
+      was === undefined
+        ? `${label} set for this chat: ${now}`
+        : now === undefined
+          ? `${label}: ${usual} again (was ${was})`
+          : was === now
+            ? `${label} changed: ${now}`
+            : `${label}: ${was} → ${now}`
     return [
       {
         id: `${what}:${scope}`,
-        text:
-          was === undefined
-            ? `${label} set for this chat: ${now}`
-            : now === undefined
-              ? `${label}: ${usual} again (was ${was})`
-              : was === now
-                ? `${label} changed: ${now}`
-                : `${label}: ${was} → ${now}`,
-        explanation:
-          now === undefined
+        text: includingRegenerated ? `${text} · new and regenerated replies` : text,
+        explanation: includingRegenerated
+          ? `From now on, new and regenerated ${whose} use ${now ?? usual}.`
+          : now === undefined
             ? `${NEXT}, ${whose} follow ${usual} again instead of one kept for this chat.`
             : `${NEXT}, ${whose} use ${now}, whatever ${usual} is.`
       }
@@ -319,7 +322,7 @@ const modelKind = folded({
   order: 40,
   label: "This chat's model changed",
   description:
-    "Under the message after which a model kept for this chat was set, changed or dropped. Each reply's own model shows in its header.",
+    "Where the model selected for new and regenerated replies changed. Each reply's own model shows in its header.",
   keys: ["model.binding", "model.unbind"],
   workshop: true,
   open: { panel: "model", label: "Model" },
@@ -340,7 +343,8 @@ const modelKind = folded({
       name,
       (scope) =>
         before.modelBindings[scope]?.connection === after.modelBindings[scope]?.connection &&
-        before.modelBindings[scope]?.model === after.modelBindings[scope]?.model
+        before.modelBindings[scope]?.model === after.modelBindings[scope]?.model,
+      true
     )
   }
 })

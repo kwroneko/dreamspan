@@ -242,12 +242,18 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
               pending.delete(0)
               pending.delete(1)
             }
-            const bad = axes.filter((i) => effective[i]! < inset - tolerance)
+            // Compact markers follow the list's 4 px vertical spacing. Keep their
+            // horizontal inset and every Comfortable control under the normal check.
+            const minimum = (axis: number) =>
+              axis >= 2 && p.matches("[data-state-markers]") && p.closest('[data-chat-density="compact"]')
+                ? Math.min(inset, 4)
+                : inset
+            const bad = axes.filter((i) => effective[i]! < minimum(i) - tolerance)
             if (bad.length)
               add(
                 "inset",
                 el,
-                `${bad.map((i) => `${["left", "right", "top", "bottom"][i]} ${effective[i]!.toFixed(2)}px`).join(", ")}; minimum ${inset}px`,
+                `${bad.map((i) => `${["left", "right", "top", "bottom"][i]} ${effective[i]!.toFixed(2)}px`).join(", ")}; minimum ${bad.map(minimum).join("/")}px`,
                 p
               )
             // Check the first bounded ancestor AND all scrollports (a nested padded

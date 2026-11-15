@@ -58,6 +58,23 @@ import { expectTextBox } from "./support/textbox.ts"
 // Opt-in: it imports a large synthetic library and still reports known findings, so the default
 // browser suite (`npm run test:browser`, the release gate's `e2e/`) leaves it out.
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
+test("Compact marker insets retain density and horizontal bounds", async ({ page }) => {
+  await page.setContent(`<style>
+    body { margin: 20px; }
+    [data-state-markers] { display: inline-flex; padding: 4px 8px; }
+    button { border: 0; padding: 0; width: 40px; height: 24px; }
+  </style><div data-chat-density="compact"><div data-state-markers="fixture"><button>Model</button></div></div>`)
+  expect((await layoutAudit(page)).filter((v) => v.kind === "inset")).toEqual([])
+  await page.locator("[data-chat-density]").evaluate((el) => el.setAttribute("data-chat-density", "comfortable"))
+  expect((await layoutAudit(page)).some((v) => v.kind === "inset")).toBe(true)
+  await page.locator("[data-chat-density]").evaluate((el) => el.setAttribute("data-chat-density", "compact"))
+  for (const padding of ["2px 8px", "4px 4px"]) {
+    await page.locator("[data-state-markers]").evaluate((el, value) => {
+      el.style.padding = value
+    }, padding)
+    expect((await layoutAudit(page)).some((v) => v.kind === "inset")).toBe(true)
+  }
+})
 if (process.env.LAYOUT_AUDIT_MARKERS_ONLY === "1") stateMarkerTests()
 if (process.env.LAYOUT_AUDIT_THINKING_ONLY === "1") hideThinkingTests()
 if (process.env.LAYOUT_AUDIT_PLUGIN_COPIES_ONLY === "1") {

@@ -15,7 +15,7 @@ import { Effect } from "effect"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { messageMenu } from "./support/message.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
-import { asUser } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({
@@ -24,7 +24,11 @@ const server = serverPerFile({
   FAKE_GENERATOR_TOKENS: "120",
   FAKE_GENERATOR_REASONING: "20"
 })
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let cookie: string
+test.beforeAll(async () => {
+  cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+})
+const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), cookie, use)
 
 const shoot = async (page: Page, name: string) => {
   const dir = process.env.SCREENSHOT_DIR
@@ -76,6 +80,7 @@ const seed = (title: string, count = COUNT) =>
         })
         if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
         parent = sent.entry.slotId as SlotId
+        yield* api.ChangeCast({ chatId: chat.id, slotId: parent, change: { _tag: "ReplySingle", on: i % 2 === 1 } })
       }
       return { chatId: chat.id as ChatId, forkId: chat.currentForkId!, mira, avani, tip: parent! }
     })
@@ -152,6 +157,66 @@ const open = async (page: Page, width: number, theme: "light" | "dark", url: str
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(url)
 }
+
+// Marker reads can finish after the spacing handover has already measured its rows.
+for (const width of [1440, 390] as const)
+  for (const theme of ["light", "dark"] as const)
+    test(`spacing keeps the reading place when markers arrive late (${width}px, ${theme})`, async ({ page }, info) => {
+      test.setTimeout(120_000)
+      await setDensity("comfortable")
+      const chat = await seed(`Late markers ${width} ${theme}`)
+      let release: (() => void) | undefined
+      await page.routeWebSocket(/\/rpc$/, (socket) => {
+        const upstream = socket.connectToServer()
+        upstream.onMessage((data) => socket.send(data))
+        socket.onMessage((data) => {
+          if (typeof data === "string" && (JSON.parse(data) as { tag?: string }).tag === "GetStateMarks") {
+            release = () => upstream.send(data)
+          } else upstream.send(data)
+        })
+      })
+      await open(page, width, theme, `${server().url}/chats/${chat.chatId}`)
+      await expect.poll(() => release !== undefined).toBe(true)
+      await expect(article(page, COUNT)).toBeInViewport()
+      // Take over from following before moving into the history. A synthetic scroll
+      // during initial end-positioning can otherwise be replaced by that end scroll.
+      await list(page).hover()
+      await page.mouse.wheel(0, -600)
+      await expect.poll(() => fromEnd(page)).toBeGreaterThan(100)
+      await list(page).evaluate((el) => {
+        el.scrollTop = Math.round(el.scrollHeight * 0.45) + 37
+      })
+      await page.waitForTimeout(500)
+      await choose(page, "compact", width !== 390)
+      await page.waitForTimeout(300)
+      // Leave only the preceding row's non-text tail at the fold. Its late marker
+      // must not push the next paragraph down; this is stricter than a mid-paragraph fold.
+      const target = await list(page).evaluate((el) => {
+        const top = el.getBoundingClientRect().top
+        const rows = [...el.querySelectorAll(".chat-row[data-index]")]
+        const next = rows.findIndex((row) => {
+          const block = row.querySelector(".markdown > *")
+          return block !== null && block.getBoundingClientRect().top > top + 50
+        })
+        const preceding = rows[next - 1]!
+        const last = [...preceding.querySelectorAll(".markdown > *")].at(-1)!
+        const text = rows[next]!.querySelector(".markdown > *")!.textContent!
+        el.scrollTop += last.getBoundingClientRect().bottom - top + 2
+        return text
+      })
+      await page.waitForTimeout(200)
+      await expect.poll(async () => (await reading(page))?.text).toBe(target)
+      expect(await fromEnd(page)).toBeGreaterThan(await list(page).evaluate((el) => el.clientHeight))
+      const before = (await reading(page))!
+      await watch(page, before.text!, before.top)
+      release!()
+      await expect(list(page).locator("[data-state-markers]").first()).toBeAttached()
+      await page.waitForTimeout(400)
+      const seen = await stopWatching(page)
+      note(info, "late marker reading place", `${width} ${theme}: worst frame ${seen.worst.toFixed(1)} px off`)
+      expect(seen.worst).toBeLessThan(2)
+      await expectLayout(page, info, `late markers compact ${width} ${theme}`)
+    })
 
 for (const width of [1440, 390] as const)
   for (const theme of ["light", "dark"] as const)

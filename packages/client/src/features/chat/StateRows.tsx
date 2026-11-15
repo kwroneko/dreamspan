@@ -99,7 +99,7 @@ function Marked({
       role="group"
       aria-label="What changed here"
       data-state-markers={entry.slotId}
-      className="flex w-full flex-col items-center gap-0.5 px-2 py-2 text-xs text-muted"
+      className="flex w-full flex-col items-center gap-0.5 px-2 py-2 text-xs text-muted compact:py-1"
     >
       {changes.length === 1 ? (
         <span className="flex max-w-full min-w-0 items-center justify-center gap-1">

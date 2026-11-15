@@ -57,6 +57,23 @@ it("anchors on the first block of text that reaches below the list's top edge", 
   expect(readingAnchor(list)).toEqual({ row: 1, rowOffset: -140, block: 1, offset: -20 })
 })
 
+it("keeps visible text when only a preceding row's marker remains at the top", () => {
+  const list = listOf([
+    { top: -200, height: 340, blocks: [[-190, 250]] },
+    { top: 146, height: 300, blocks: [[156, 180]] }
+  ])
+  // Row 0's text ends at 60; only its contribution/footer tail crosses the top at 100.
+  expect(readingAnchor(list)).toEqual({ row: 1, rowOffset: 46, block: 0, offset: 56 })
+})
+
+it("keeps an image-only row when the next text is outside the viewport", () => {
+  const list = listOf([
+    { top: 90, height: 620, blocks: [] },
+    { top: 716, height: 100, blocks: [[726, 80]] }
+  ])
+  expect(readingAnchor(list)).toEqual({ row: 0, rowOffset: -10, block: -1, offset: -10 })
+})
+
 it("anchors on the row itself when none of its text is in view", () => {
   const list = listOf([{ top: 90, height: 40, blocks: [] }])
   expect(readingAnchor(list)).toEqual({ row: 0, rowOffset: -10, block: -1, offset: -10 })

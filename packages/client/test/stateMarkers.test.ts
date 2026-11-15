@@ -158,21 +158,42 @@ describe("the timeline's change markers", () => {
     expect(texts(marks, "s2")).toEqual([
       "Wren joined",
       "Note on: Mood",
-      "Model set for this chat: Local · model-a",
+      "Model set for this chat: Local · model-a · new and regenerated replies",
       "Context: one shared → separate per character"
     ])
     expect(texts(marks, "s3")).toEqual([
-      "Model: Local · model-a → Local · model-b",
+      "Model: Local · model-a → Local · model-b · new and regenerated replies",
       "Prompt preset set for this chat: Terse",
       "Lorebook on: Harbour"
     ])
     expect(texts(marks, "s4")).toEqual([
       "Wren was removed",
       "Tobin unmuted",
-      "Model: your usual model again (was Local · model-b)",
+      "Model: your usual model again (was Local · model-b) · new and regenerated replies",
       "Card swap: off → on"
     ])
     expect(marks.get("s2")!.map((mark) => mark.open?.panel)).toEqual(["cast", "notes", "model", "chat"])
+  })
+
+  it("explains that model choices apply to new and regenerated replies, including scoped and cleared choices", () => {
+    const marks = marksOf(
+      data([
+        event("s1", "model.binding", { connection: "c1", model: "m1" }),
+        event("s2", "model.binding", { connection: "c1", model: "m2" }, "mira"),
+        event("s3", "model.unbind", {}, "mira")
+      ]),
+      kinds()
+    )
+    expect(marks.get("s1")![0]!.changes[0]!.explanation).toBe(
+      "From now on, new and regenerated replies in this chat use Local · model-a."
+    )
+    expect(marks.get("s2")![0]!.changes[0]!.explanation).toBe(
+      "From now on, new and regenerated replies for Mira use Local · model-b."
+    )
+    expect(marks.get("s3")![0]!.changes[0]!.explanation).toBe(
+      "From now on, new and regenerated replies for Mira use your usual model."
+    )
+    for (const slot of ["s1", "s2", "s3"]) expect(texts(marks, slot)[0]).toContain("new and regenerated replies")
   })
 
   it("shows the net change of a message: a change taken back there is no marker", () => {
@@ -201,7 +222,10 @@ describe("the timeline's change markers", () => {
       event("s1", "preset.binding", { ref: "p2" })
     ])
     const marks = marksOf({ ...input, names: { ...names, c2: "Local", p2: "Terse" } }, kinds())
-    expect(texts(marks, "s1")).toEqual(["Model changed: Local · model-a", "Prompt preset changed: Terse"])
+    expect(texts(marks, "s1")).toEqual([
+      "Model changed: Local · model-a · new and regenerated replies",
+      "Prompt preset changed: Terse"
+    ])
   })
 
   it("a persona switch is one change, not a join and a removal", () => {

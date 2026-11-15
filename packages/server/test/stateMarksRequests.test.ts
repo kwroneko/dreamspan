@@ -1,6 +1,6 @@
 // Causal wire evidence: positioned context changes affect N+1, not N's context.
-// Model routing retains DESIGN's explicit current-selection retry policy. The review
-// report records its conflict with the brief's strict historical-model marker boundary.
+// New and regenerated replies use the model selected now (DESIGN §3.1).
+// Regenerating an earlier reply retains its byte-identical causal context.
 // All transports are synthetic loopback recorders. Mute changes automatic speaker selection,
 // not the bytes for a speaker explicitly picked by the user.
 import { assert, it } from "@effect/vitest"
@@ -22,7 +22,7 @@ import { completionChunks, sse, startMockProvider } from "./support/mockProvider
 for (const kind of ["cast", "mute", "notes", "model", "preset", "lorebooks", "settings"] as const) {
   it.live(
     kind === "model"
-      ? "wire position of model: current-selection retry is an explicit routing exception"
+      ? "new and regenerated replies use the model selected now, with unchanged earlier context"
       : `wire position of ${kind}: after N, never in N's regeneration`,
     () => {
       const config = testConfig()

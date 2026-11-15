@@ -29,9 +29,16 @@ const blocksOf = (row: Element) => [...row.querySelectorAll(".markdown > *")]
  * that, the first row) that reaches below the list's top edge.
  */
 export const readingAnchor = (list: HTMLElement): ReadingAnchor | null => {
-  const top = list.getBoundingClientRect().top
+  const viewport = list.getBoundingClientRect()
+  const top = viewport.top
   const below = (element: Element) => element.getBoundingClientRect().bottom > top + 1
-  const row = [...list.querySelectorAll<HTMLElement>(".chat-row[data-index]")].find(below)
+  const rows = [...list.querySelectorAll<HTMLElement>(".chat-row[data-index]")].filter(below)
+  // A preceding row can reach the edge only through its marker/footer tail. Prefer
+  // the first text still being read, across rows, before falling back to a row box.
+  const row =
+    rows.find((candidate) =>
+      blocksOf(candidate).some((block) => below(block) && block.getBoundingClientRect().top < viewport.bottom)
+    ) ?? rows[0]
   if (row === undefined) return null
   const rowOffset = row.getBoundingClientRect().top - top
   const block = blocksOf(row).findIndex(below)

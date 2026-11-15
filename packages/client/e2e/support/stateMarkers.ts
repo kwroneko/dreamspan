@@ -17,6 +17,7 @@ import { loginCookie, withCookie } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 
 export function stateMarkerTests() {
+  const density = process.env.STATE_MARKER_DENSITY === "compact" ? "compact" : "comfortable"
   const server = serverPerFile(withAdmin)
   let cookie: string
   let provider: FakeProvider
@@ -72,7 +73,7 @@ export function stateMarkerTests() {
    * switched on, a model kept and separate contexts, together; a preset kept and a lorebook added.
    * Then a branch from the second line, and one change on each branch at that line.
    */
-  const story = () =>
+  const story = (mediaId?: string) =>
     admin((api) =>
       Effect.gen(function* () {
         const cards = yield* api.ListCards()
@@ -88,7 +89,8 @@ export function stateMarkerTests() {
             chatId,
             parentSlotId: slots.at(-1) ?? null,
             branch: false,
-            content: line(i),
+            content: mediaId && i === 3 ? "" : line(i),
+            ...(mediaId && i === 3 ? { images: [{ mediaId, altText: "Synthetic marker image" }] } : {}),
             reply: false
           })
           if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
@@ -130,10 +132,71 @@ export function stateMarkerTests() {
     await page.emulateMedia({ colorScheme: theme })
     await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await admin((api) => api.SetDisplayPrefs({ prefs: { chatDensity: density } }))
   }
 
   const marker = (page: Page, slot: SlotId) => page.locator(`[data-state-markers="${slot}"]`)
   const MESSAGES = '[data-testid="messages"]'
+
+  if (density === "compact")
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const)
+        test(`compact markers clear one-line, image, newest and hovered footers at ${width} ${theme}`, async ({
+          page
+        }, info) => {
+          await look(page, width, theme)
+          const png = await page.evaluate(() => {
+            const canvas = document.createElement("canvas")
+            canvas.width = 320
+            canvas.height = 120
+            const ctx = canvas.getContext("2d")!
+            ctx.fillStyle = "#32808a"
+            ctx.fillRect(0, 0, 320, 120)
+            return canvas.toDataURL("image/png").split(",")[1]!
+          })
+          const upload = await page.request.post(`${server().url}/chat/image`, {
+            headers: { "content-type": "application/octet-stream" },
+            data: Buffer.from(png, "base64")
+          })
+          expect(upload.ok()).toBe(true)
+          const { mediaId } = (await upload.json()) as { mediaId: string }
+          const { chatId, forkId, slots, mira } = await story(mediaId)
+          await admin((api) =>
+            api.ChangeCast({
+              chatId,
+              forkId,
+              slotId: slots[3]!,
+              change: { _tag: "Presence", entityId: mira, present: false }
+            })
+          )
+          await page.goto(`${server().url}/chats/${chatId}?fork=${forkId}`)
+          await expect(page.locator(MESSAGES)).toHaveAttribute("data-chat-density", "compact")
+          for (const [i, scene] of [
+            [0, "one-line"],
+            [2, "image"],
+            [3, "newest"],
+            [1, "expanded"]
+          ] as const) {
+            const row = page.locator(`article[data-slot="${slots[i]}"]`)
+            const mark = marker(page, slots[i]!)
+            if (scene === "expanded" || scene === "image")
+              await mark.getByRole("button", { name: /^\d+ changes/ }).click()
+            await mark.scrollIntoViewIfNeeded()
+            await row.hover({ position: { x: 100, y: (await row.boundingBox())!.height - 10 } })
+            const footer = row.locator(".message-footer")
+            if (width === 1440 || scene === "newest") await expect(footer).toHaveCSS("opacity", "1")
+            const footerBox = (await footer.boundingBox())!
+            const markerBox = (await mark.boundingBox())!
+            expect(markerBox.y).toBeGreaterThanOrEqual(footerBox.y + footerBox.height)
+            await expect(mark.getByRole("button", { name: /^Open / }).first()).toBeInViewport()
+            expect(await mark.evaluate((el) => getComputedStyle(el).paddingTop)).toBe("4px")
+            await expectLayout(page, info, `compact-marker-${scene}-${width}-${theme}`, {
+              scope: MESSAGES,
+              hovered: true
+            })
+            await shoot(page, `compact-marker-${scene}-${width}-${theme}`)
+          }
+        })
 
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const) {
@@ -171,6 +234,14 @@ export function stateMarkerTests() {
         await expect(marker(page, slots[2]!).getByRole("button", { name: /^2 changes/ })).toHaveText(
           /Prompt preset set for this chat: Terse · Lorebook on: Harbour lore/
         )
+        await several.getByText(/^Model set for this chat:/).hover()
+        await expect(
+          page
+            .getByText("From now on, new and regenerated replies in this chat use Local model · fake-large.", {
+              exact: true
+            })
+            .filter({ visible: true })
+        ).toBeVisible()
         await several.getByText("Note on: Mood", { exact: true }).hover()
         await expect(
           page
@@ -372,6 +443,26 @@ export function stateMarkerTests() {
         await page.waitForTimeout(250)
         expect(reads).toBe(settledReads)
         expect(reads).toBe(1)
+        // The measured virtual row includes its marker, and adjacent rows keep the density's gap.
+        const geometry = await list.evaluate((el) => {
+          const rows = [...el.querySelectorAll<HTMLElement>(".chat-row[data-index]")].sort(
+            (a, b) => Number(a.dataset.index) - Number(b.dataset.index)
+          )
+          return rows.map((row, i) => {
+            const box = row.getBoundingClientRect()
+            const mark = row.querySelector("[data-state-markers]")?.getBoundingClientRect()
+            const next = rows[i + 1]
+            return {
+              overflow: mark ? mark.bottom - box.bottom : 0,
+              gap: next ? next.getBoundingClientRect().top - box.bottom : null
+            }
+          })
+        })
+        expect(geometry.length).toBeGreaterThan(2)
+        for (const row of geometry) {
+          expect(row.overflow).toBeLessThanOrEqual(1)
+          if (row.gap !== null) expect(Math.abs(row.gap - (density === "compact" ? 4 : 6))).toBeLessThan(1)
+        }
         await expectLayout(page, info, `markers-dense-${width}-${theme}`, { scope: MESSAGES })
         await shoot(page, `markers-dense-${width}-${theme}`)
         console.log(
