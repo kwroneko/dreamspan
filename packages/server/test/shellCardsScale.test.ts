@@ -1,4 +1,4 @@
-// The left panel's card reads on a library of the synthetic scale dataset's size (437 cards,
+// The left panel's card reads on 6,000 synthetic cards with fork families of 2–50,
 // about 3.2 MB of card documents, some with large embedded lorebooks), or larger with
 // `SHELL_CARDS_BOOK_ENTRIES`: GetShellCards, ListCards, ListCardUsage and ListChatGroups, each
 // read after a write so no reader's memo answers it, the median of several. Opt-in
@@ -10,10 +10,24 @@ import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
-const CARDS = 437
+const CARDS = Number(process.env.SHELL_CARDS_COUNT ?? 6000)
 /** One card in eleven carries a lorebook of this many entries of about 560 characters. */
 const BOOK_ENTRIES = Number(process.env.SHELL_CARDS_BOOK_ENTRIES ?? 100)
 const READS = 15
+
+// Recorded fork lineage only: families of 2–50, alternating trees and deep chains.
+const lineage: Array<{ id: string; parent: string | null }> = []
+for (let start = 0, family = 0; start < CARDS; family++) {
+  const size = Math.min(2 + (family % 49), CARDS - start)
+  for (let member = 0; member < size; member++) {
+    const id = (i: number) => `e-${String(i).padStart(4, "0")}`
+    lineage.push({
+      id: id(start + member),
+      parent: member === 0 ? null : id(start + (family % 2 === 0 ? member - 1 : 0))
+    })
+  }
+  start += size
+}
 
 const config = testConfig({ dbReaders: 2 })
 
@@ -24,9 +38,9 @@ const build = (userId: string, now: number) => {
     `${name}(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM ${name} WHERE i < ${n - 1})`
   return fixtureSql(config.dataDir, [
     {
-      sql: `INSERT INTO entities (id, owner_user_id, kind, created_at) WITH RECURSIVE ${series("n", CARDS)}
-        SELECT printf('e-%04d', i), ?, 'card', ? + i FROM n`,
-      params: [userId, now - 1_000_000]
+      sql: `INSERT INTO entities (id, owner_user_id, kind, created_at, forked_from_entity_id)
+        SELECT value ->> 'id', ?, 'card', ? + key, value ->> 'parent' FROM json_each(?)`,
+      params: [userId, now - 1_000_000, JSON.stringify(lineage)]
     },
     {
       sql: `CREATE TEMP TABLE book AS WITH RECURSIVE ${series("k", BOOK_ENTRIES)}
@@ -77,10 +91,18 @@ const measure = () =>
         }
         return Math.round(median(ms) * 10) / 10
       })
+    const coldStart = performance.now()
     const cards = yield* api.GetShellCards()
+    const coldMs = performance.now() - coldStart
     assert.lengthOf(cards.cards, CARDS)
+    if (process.env.SHELL_CARDS_SCALE_OUT)
+      writeFileSync(`${process.env.SHELL_CARDS_SCALE_OUT}.cards.json`, JSON.stringify(cards.cards))
     const measured = JSON.stringify({
       cards: CARDS,
+      forked: lineage.filter((c) => c.parent !== null).length,
+      families: lineage.filter((c) => c.parent === null).length,
+      coldMs: Math.round(coldMs * 10) / 10,
+      // Flat and grouped grids share this read; grouping is entirely in the client.
       bookEntries: BOOK_ENTRIES,
       documentMB: +(bytes / 1e6).toFixed(1),
       readsEach: READS,
@@ -102,8 +124,8 @@ const measure = () =>
 
 if (process.env.SHELL_CARDS_SCALE === "1") {
   layer(serverLayer(config), { excludeTestServices: true, timeout: "10 minutes" })("shell cards at scale", (it) => {
-    it.effect("437 cards with lorebooks", measure, 10 * 60_000)
+    it.effect("thousands of cards with fork trees, chains and lorebooks", measure, 10 * 60_000)
   })
 } else {
-  plain.skip("the left panel's card reads on 437 cards (set SHELL_CARDS_SCALE=1)", () => {})
+  plain.skip("the left panel's card reads on fork families (set SHELL_CARDS_SCALE=1)", () => {})
 }

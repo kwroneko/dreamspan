@@ -1,3 +1,4 @@
+import { splitGroups } from "./splitChats.ts"
 import { putUserSetting } from "./settings.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -68,6 +69,21 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
         }
         const [chat] = yield* sql<{ id: string; cover_media_id: string | null }>`SELECT id, cover_media_id FROM chats
           WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (chat) {
+          // A physical chat may survive in the bin because a split group still uses its
+          // history. That does not make its deleted original group editable.
+          const forks = yield* sql<{
+            id: string
+            chat_id: string
+            parent_fork_id: string | null
+            deleted_at: number | null
+            split_chat: number
+          }>`
+            SELECT id, chat_id, parent_fork_id, deleted_at, split_chat FROM forks WHERE chat_id = ${chatId}`
+          const groups = splitGroups(forks, new Set(forks.filter((f) => f.split_chat === 1).map((f) => f.id)))
+          if (!forks.some((f) => f.deleted_at === null && groups.get(f.id) === chatId))
+            return yield* new NotFound({ entity: "chat", id: chatId })
+        }
         let physical = chatId as string
         let previous = chat?.cover_media_id ?? null
         if (chat) yield* sql`UPDATE chats SET cover_media_id = ${mediaId} WHERE id = ${chatId}`

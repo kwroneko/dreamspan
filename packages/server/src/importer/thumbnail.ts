@@ -14,6 +14,17 @@ sharp.cache(false)
 
 const MAX_INPUT_PIXELS = 40_000_000
 
+/** A signature alone cannot distinguish a picture from a truncated or corrupt file. */
+export const validateImage = (bytes: Uint8Array): Promise<boolean> =>
+  sharp(bytes, { animated: true, limitInputPixels: MAX_INPUT_PIXELS, failOn: "warning" })
+    .raw()
+    .timeout({ seconds: 20 })
+    .toBuffer()
+    .then(
+      () => true,
+      () => false
+    )
+
 const exists = (path: string) =>
   stat(path).then(
     () => true,

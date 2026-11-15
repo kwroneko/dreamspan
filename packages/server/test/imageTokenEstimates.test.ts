@@ -6,20 +6,12 @@ import { Effect, Stream } from "effect"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { eventually, generateReply, finished } from "./support/generation.ts"
-import { png } from "./formats/support.ts"
+import { sizedPng } from "./formats/support.ts"
 import { anthropicSse, completionChunks, json, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { AssemblyModules } from "../src/assembler/modules.ts"
 import type * as ImageTokenPlugin from "./support/imageTokenPlugin.ts"
-
-/** A PNG whose header says it is `width`×`height`; only the header is read. */
-const sized = (width: number, height: number) => {
-  const bytes = Buffer.from(png())
-  bytes.writeUInt32BE(width, 16)
-  bytes.writeUInt32BE(height, 20)
-  return bytes
-}
 
 const upload = (bytes: Uint8Array) =>
   Effect.gen(function* () {
@@ -61,7 +53,7 @@ describe("image token estimates", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()
-      const image = yield* upload(sized(1024, 1024))
+      const image = yield* upload(sizedPng(1024, 1024))
       const mock = yield* mockProvider((_r, res) => sse(res, completionChunks(["A map."], {})))
       const generated = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
@@ -85,7 +77,7 @@ describe("image token estimates", () => {
       assert.deepStrictEqual(next.imageTokens, { count: 1, tokens: 765, unknown: 0, bases: ["formula"] })
       assert.notProperty(next, "uncounted")
       const draft = yield* api.OpenComposer({ chatId: generated.chat.id, forkId: null })
-      const attached = yield* upload(sized(512, 512))
+      const attached = yield* upload(sizedPng(512, 512))
       yield* api.SetComposerImage({
         chatId: generated.chat.id,
         draftId: draft.id,
@@ -136,7 +128,7 @@ describe("image token estimates", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()
-      const image = yield* upload(sized(672, 672))
+      const image = yield* upload(sizedPng(672, 672))
       const mock = yield* mockProvider((_r, res) =>
         sse(
           res,
@@ -224,7 +216,7 @@ describe("image token estimates", () => {
       })
       const chat = yield* api.CreateChat({ title: "Synthetic draft" })
       const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
-      const image = yield* upload(sized(1000, 1000))
+      const image = yield* upload(sizedPng(1000, 1000))
       const events: ChatEvent[] = []
       yield* api.SubscribeChat({ chatId: chat.id }).pipe(
         Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
@@ -276,7 +268,7 @@ describe("image token estimates", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()
-      const image = yield* upload(sized(1000, 1000))
+      const image = yield* upload(sizedPng(1000, 1000))
       // The chat is watched from before the send. When Generate comes more than 2 s after it (a
       // busy machine; REPLY_EXPECTED_MS in chat/CacheWarmth.ts), the hold on the next request's
       // estimate lapses and the estimate asks for a count, which could land before the reply's

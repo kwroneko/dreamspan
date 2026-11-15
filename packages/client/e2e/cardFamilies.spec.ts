@@ -1,3 +1,4 @@
+import { seedCardArchive } from "./support/cardArchive.ts"
 // Group forks (audit item 015): a card and its forks as one tile on the Characters page and in
 // the left panel's grid, expanding to its members; off until chosen. Synthetic cards only.
 import { expect, type Locator, test } from "@playwright/test"
@@ -32,7 +33,7 @@ for (const width of [1440, 390])
               first: { _tag: "Send", content: "A synthetic festival evening.", speakerEntityId: null }
             })
             yield* api.SetCardFavourite({ entityId: winter.entityId, favourite: true })
-            return { mira: mira.entityId, tomas: tomas.entityId }
+            return { mira: mira.entityId, tomas: tomas.entityId, winter: winter.entityId }
           })
         )
         await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
@@ -78,12 +79,31 @@ for (const width of [1440, 390])
         await shot(main, "home-grouped", "main")
 
         // Expanded: its members follow it; the open family is in the URL and survives a reload.
-        await miraToggle.click()
+        await miraToggle.focus()
+        await page.keyboard.press("Enter")
         await expect(miraToggle).toHaveAttribute("aria-expanded", "true")
         await expect(main.locator(`[data-family="${seed.mira}"]`)).toHaveCount(3)
         await expect(tiles(main)).toHaveCount(5)
         await expect(page).toHaveURL(new RegExp(`family=${seed.mira}`))
         await shot(main, "home-expanded", "main")
+        // Collapsing and Back must restore the open family, independently of other tabs.
+        await miraToggle.focus()
+        await page.keyboard.press("Space")
+        await expect(tiles(main)).toHaveCount(3)
+        await page.goBack()
+        await expect(main.locator(`[data-family="${seed.mira}"]`)).toHaveCount(3)
+        const second = await page.context().newPage()
+        try {
+          await second.goto(page.url())
+          await expect(second.getByRole("main").locator(`[data-family="${seed.mira}"]`)).toHaveCount(3)
+          await second
+            .getByRole("main")
+            .getByRole("button", { name: "Mira Lantern: 3 cards in this family", exact: true })
+            .click()
+          await expect(main.locator(`[data-family="${seed.mira}"]`)).toHaveCount(3)
+        } finally {
+          await second.close()
+        }
         await page.reload()
         await expect(main.locator(`[data-family="${seed.mira}"]`)).toHaveCount(3)
         await expect(group(main)).toHaveAttribute("aria-pressed", "true")
@@ -93,6 +113,10 @@ for (const width of [1440, 390])
           main.getByRole("button", { name: "Remove Mira Lantern from favourites", exact: true })
         ).toHaveCount(1)
         await miraHead.getByRole("link", { name: "Open Mira Lantern", exact: true }).click({ button: "right" })
+        await expect(page.getByRole("menu", { name: "Actions for Mira Lantern", exact: true })).toBeVisible()
+        await page.keyboard.press("Escape")
+        const member = main.locator(`[data-family="${seed.mira}"][data-family-head="false"]`).first()
+        await member.getByRole("link", { name: "Open Mira Lantern", exact: true }).click({ button: "right" })
         await expect(page.getByRole("menu", { name: "Actions for Mira Lantern", exact: true })).toBeVisible()
         await page.keyboard.press("Escape")
 
@@ -110,6 +134,28 @@ for (const width of [1440, 390])
         await expect(tiles(main)).toHaveCount(1)
         await expect(main.locator("[data-family-toggle]")).toHaveCount(0)
         await show("All").click()
+        // Name sorts where the family stands, while the member used last still represents it.
+        const sort = main.getByRole("group", { name: "Sort by", exact: true })
+        await sort.getByRole("button", { name: "Name", exact: true }).click()
+        await expect(miraHead).toContainText("1 chat")
+        await sort.getByRole("button", { name: "Recent", exact: true }).click()
+        // Archive filters each member, including a middle ancestor; the lineage stays intact.
+        const winterTile = main
+          .locator(`[data-family="${seed.mira}"][data-family-head="false"]`)
+          .filter({ has: page.locator(`a[href*="${seed.winter}"]`) })
+        await winterTile.hover()
+        await winterTile.getByRole("button", { name: "Archive Mira Lantern", exact: true }).click({ timeout: 10000 })
+        await expect(
+          main.getByRole("button", { name: "Mira Lantern: 2 cards in this family", exact: true })
+        ).toBeVisible()
+        await expect(main.locator(`[data-family="${seed.mira}"]`)).toHaveCount(2)
+        await show("Archived").click()
+        await expect(tiles(main)).toHaveCount(1)
+        await expect(main.locator("[data-family-toggle]")).toHaveCount(0)
+        await expect(tiles(main)).toHaveAttribute("href", new RegExp(seed.winter))
+        await main.getByRole("button", { name: "Unarchive Mira Lantern", exact: true }).click({ timeout: 10000 })
+        await show("All").click()
+        await expect(miraToggle).toBeVisible()
         await miraToggle.click()
         await expect(tiles(main)).toHaveCount(3)
         await expect(page).not.toHaveURL(/family=/)
@@ -129,11 +175,41 @@ for (const width of [1440, 390])
         await expect(list.locator(`[data-family="${seed.tomas}"]`)).toHaveCount(2)
         await expect(page).toHaveURL(new RegExp(`sideFamily=${seed.tomas}`))
         await shot(list, "side-expanded", "[data-shell-list]")
+        const sideToggle = list.getByRole("button", { name: "Tomas Reed: 2 cards in this family", exact: true })
+        await sideToggle.focus()
+        await page.keyboard.press("Space")
+        await expect(tiles(list)).toHaveCount(3)
+        await page.goBack()
+        await expect(list.locator(`[data-family="${seed.tomas}"]`)).toHaveCount(2)
         // Back to every card on its own, here and on the page.
         await side.click()
         await expect(tiles(list)).toHaveCount(6)
         await expect(list.locator("[data-family-toggle]")).toHaveCount(0)
         await shot(list, "side-flat", "[data-shell-list]")
+        for (const chatDensity of ["comfortable", "compact"] as const) {
+          await asUser(server, ADMIN.handle, ADMIN.password, (api) => api.SetDisplayPrefs({ prefs: { chatDensity } }))
+          const first = tiles(list).first()
+          await first.focus()
+          const bounds = await first.boundingBox()
+          const viewport = await list.boundingBox()
+          expect(bounds!.y - viewport!.y).toBeGreaterThanOrEqual(4)
+          await expectLayout(page, info, `side-flat-focus-${chatDensity}-${width}-${theme}`, {
+            scope: "[data-shell-list]"
+          })
+          await first.hover()
+          await expectLayout(page, info, `side-flat-hover-${chatDensity}-${width}-${theme}`, {
+            scope: "[data-shell-list]",
+            hovered: true
+          })
+          const last = tiles(list).last()
+          await last.focus()
+          const end = (await last.boundingBox())!
+          const scrollport = (await list.boundingBox())!
+          expect(scrollport.y + scrollport.height - end.y - end.height).toBeGreaterThanOrEqual(4)
+          await expectLayout(page, info, `side-flat-last-focus-${chatDensity}-${width}-${theme}`, {
+            scope: "[data-shell-list]"
+          })
+        }
         await hideAppNavigation(page)
         if (width === 1440) await expect(tiles(main)).toHaveCount(6)
       } finally {
@@ -141,3 +217,74 @@ for (const width of [1440, 390])
       }
     })
   }
+
+// This case also runs unchanged on master, to distinguish the inherited short-grid inset
+// from a family regression. It uses no grouping controls or fork-family API fields.
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`${width} ${theme}: short flat grid keeps first-row focus inside its scroller`, async ({ page }, info) => {
+      const server = await startServer(withAdmin)
+      try {
+        await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+          Effect.gen(function* () {
+            for (let n = 0; n < 3; n++) yield* api.CreateCard({ label: `Synthetic ${n}`, name: `Synthetic ${n}` })
+          })
+        )
+        await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+        await page.goto(`${server.url}/?side=characters`)
+        await showAppNavigation(page)
+        const list = page.locator("[data-shell-list]").filter({ visible: true })
+        const first = list.getByRole("link", { name: /^Open Synthetic / }).first()
+        await expect(first).toBeVisible()
+        await first.focus()
+        expect(await list.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
+        await list.screenshot({ path: info.outputPath(`short-flat-${width}-${theme}.png`) })
+        const box = await first.boundingBox()
+        const viewport = await list.boundingBox()
+        expect(box!.y - viewport!.y, "space for the first focus ring and tile shadow").toBeGreaterThanOrEqual(4)
+        await expectLayout(page, info, `short-flat-${width}-${theme}`, { scope: "[data-shell-list]" })
+      } finally {
+        await server.stop()
+      }
+    })
+
+for (const width of [1440, 390])
+  test(`${width}: bulk archive reviews every member of a collapsed family`, async ({ page }) => {
+    const server = await startServer(withAdmin)
+    try {
+      await seedCardArchive(server, true)
+      await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto(server.url)
+      const main = page.getByRole("main")
+      await main.getByRole("button", { name: "Group forks", exact: true }).click()
+      await expect(main.getByRole("button", { name: "Pilot 008: 3 cards in this family", exact: true })).toBeVisible()
+      await expect(main.getByRole("link", { name: "Open Pilot 009", exact: true })).toHaveCount(0)
+      await expect(main.getByRole("link", { name: "Open Pilot 012", exact: true })).toHaveCount(0)
+      await main
+        .getByRole("group", { name: "Show", exact: true })
+        .getByRole("button", { name: "Archived", exact: true })
+        .click()
+      await main.getByRole("button", { name: "Archive unused cards…", exact: true }).click()
+      const dialog = page.getByRole("dialog", { name: "Archive unused cards", exact: true })
+      // Grouping never collapses the explicit selection list of a bulk action.
+      for (const n of ["008", "009", "012"])
+        await expect(dialog.getByRole("checkbox", { name: `Pilot ${n}`, exact: true })).toBeChecked()
+      await dialog.getByRole("checkbox", { name: "Pilot 009", exact: true }).uncheck()
+      await dialog.getByRole("checkbox", { name: "Pilot 012", exact: true }).uncheck()
+      await dialog.getByRole("button", { name: /^Archive [0-9,]+ cards$/ }).click()
+      await expect(dialog).toHaveCount(0)
+      const archived = await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+        Effect.map(api.ListLibrary({ kind: "card", archived: true }), (cards) =>
+          cards.map((card) => card.entityId as string)
+        )
+      )
+      expect(archived).toContain("archive-e-008")
+      expect(archived).not.toContain("archive-e-009")
+      expect(archived).not.toContain("archive-e-012")
+    } finally {
+      await server.stop()
+    }
+  })

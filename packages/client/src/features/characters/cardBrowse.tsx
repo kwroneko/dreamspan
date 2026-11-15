@@ -1,3 +1,4 @@
+import { useCardGrouping } from "./cardGrouping.tsx"
 // What lists characters, in one set of parts: the filter (All, With chats, Never used,
 // Favourites, Personas, Groups, each with its count), Include personas, the sort with its direction, the date a date sort
 // orders by, the favourite star and the grid of tiles. The home grid and the left panel's
@@ -295,7 +296,10 @@ export function GroupFamiliesToggle({ browse }: { browse: CardBrowse }) {
 }
 
 /** Whether a place's list groups families now: the account's choice, and no search (a search lists each card it finds). */
-export const useGroupedFamilies = (search: string) => useViewPrefs().prefs.cardFamilies && search.trim() === ""
+export const useGroupedFamilies = (search: string) => {
+  const part = useCardGrouping()
+  return useViewPrefs().prefs.cardFamilies && part !== undefined && search.trim() === ""
+}
 
 const SORT_LABELS: Record<CardSort, { label: string; hint: string }> = {
   recent: { label: "Recent", hint: "By the latest message in any of its chats; characters never used come last" },

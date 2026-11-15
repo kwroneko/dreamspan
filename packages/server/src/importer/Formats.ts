@@ -46,6 +46,7 @@ export class FormatWorkerFailed extends Schema.TaggedError<FormatWorkerFailed>()
 export class Formats extends Context.Service<
   Formats,
   {
+    readonly validateImage: (bytes: Uint8Array) => Effect.Effect<boolean, FormatWorkerFailed>
     readonly listExports: Effect.Effect<ReadonlyArray<ExportFormatInfo>, FormatWorkerFailed>
     /** Each text's tokens in a local encoding, on the interactive lane with thumbnails (tokenizer.ts). */
     readonly countTokens: (
@@ -214,6 +215,7 @@ export const layer = (options: FormatsOptions) =>
           const client = yield* ReaderPool.client(FormatOps)
           const lane = yield* ThumbnailLane
           return Formats.of({
+            validateImage: (bytes) => workerFailures(client.ValidateImage({ bytes: new Uint8Array(bytes) })),
             listExports: workerFailures(client.ListExportFormats()),
             previewStSettings: (text, surface) => workerFailures(client.PreviewStSettings({ text, surface })),
             thumbnail: lane.thumbnail,

@@ -48,3 +48,26 @@ test("the open family is in the URL and left out when none is", () => {
   expect(readHomeSearch({ family: 5 }).family).toBeNull()
   expect(writeHomeSearch(readHomeSearch({})).family).toBeUndefined()
 })
+
+test("the grouping part can be replaced or disabled without changing stored preferences", async () => {
+  const { cardGrouping } = await import("../src/features/characters/cardGrouping.tsx")
+  const cards = [card("a", "root"), card("b", "root")]
+  const control = () => null
+  const original = cardGrouping.register({ id: "forks", group: groupFamilies, control })
+  try {
+    expect(cardGrouping.get("forks")!.group(cards, null)).toHaveLength(1)
+    const replacement = cardGrouping.register({
+      id: "forks",
+      group: (cards) => cards.map((card) => ({ card })),
+      control
+    })
+    expect(cardGrouping.get("forks")!.group(cards, null)).toHaveLength(2)
+    const restore = cardGrouping.disable("forks")
+    expect(cardGrouping.get("forks")).toBeUndefined()
+    restore()
+    replacement()
+    expect(cardGrouping.get("forks")!.group(cards, null)).toHaveLength(1)
+  } finally {
+    original()
+  }
+})

@@ -1,3 +1,4 @@
+import { useCardGrouping } from "./cardGrouping.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useAtomValue } from "@effect/atom-react"
@@ -26,7 +27,7 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { PICTURE_TOGGLE, Tooltip } from "../../ui/Tooltip.tsx"
 import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
 import type { CardSort } from "./cardRecency.ts"
-import { type FamilyPlace, groupFamilies } from "./cardFamilies.ts"
+import { type FamilyPlace } from "./cardFamilies.ts"
 import { Icon } from "../../ui/Icon.tsx"
 
 /** A fork row with its cast's cards, which the wire names once in `people`. */
@@ -350,7 +351,8 @@ export function CharacterGrid({
   className: string
   children?: ReactNode
 }) {
-  const tiles = families ? groupFamilies(cards, families.expanded) : cards.map((card) => ({ card }))
+  const grouping = useCardGrouping()
+  const tiles = families && grouping ? grouping.group(cards, families.expanded) : cards.map((card) => ({ card }))
   return (
     <div aria-label="Characters" className={className}>
       {tiles.map(({ card: c, ...tile }) => (

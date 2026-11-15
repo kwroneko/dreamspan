@@ -929,6 +929,12 @@ export const layer = Layer.unwrap(
               if (!INLINE_IMAGES.has(image.mime)) {
                 return jsonError(415, "an image must be a PNG, JPEG, GIF or WebP image")
               }
+              if (!(yield* formats.validateImage(body))) {
+                return jsonError(
+                  415,
+                  "The image couldn’t be read. Choose a complete PNG, JPEG, GIF or WebP up to 40 million pixels."
+                )
+              }
               const sha256 = createHash("sha256").update(body).digest("hex")
               const change = yield* holding(
                 [sha256],

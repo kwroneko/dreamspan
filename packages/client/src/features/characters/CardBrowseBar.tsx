@@ -1,15 +1,10 @@
+import { CardGroupingControl } from "./cardGrouping.tsx"
 // The characters' filter and sort in one compact row, for a narrow place: the left panel's
 // grid (with Groups and Include personas), Add characters (with Include personas).
 // The home page lays the same parts out with CardGridControls. A card source shown (the
 // left panel's) takes over the sort, and Filters ends the row.
 import { type SourceBrowse, SourceFiltersButton, SourceSortControl } from "../cardSources/browse.tsx"
-import {
-  type CardBrowse,
-  CardFilterControl,
-  CardSortControl,
-  GroupFamiliesToggle,
-  IncludePersonas
-} from "./cardBrowse.tsx"
+import { type CardBrowse, CardFilterControl, CardSortControl, IncludePersonas } from "./cardBrowse.tsx"
 import { browsable, type ShellLibrary, useGroupCount } from "./shellData.tsx"
 
 type SourceProps = {
@@ -103,7 +98,7 @@ export function CardBrowseBar({
         <>
           <CardSortControl compact sort={browse.sort} reversed={browse.reversed} onChange={onChange} />
           {includePersonas && <IncludePersonas browse={browse} onChange={onChange} />}
-          {families && <GroupFamiliesToggle browse={browse} />}
+          {families && <CardGroupingControl browse={browse} />}
         </>
       )}
     </div>

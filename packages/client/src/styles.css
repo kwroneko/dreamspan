@@ -879,8 +879,8 @@ main:has(> [data-fill]) {
   position: relative;
   z-index: 1;
 }
-/* A chat's own picture fills the box of the slots its characters' faces take (ShellBrowser's
- * ForkRow), whatever size the row gives them. */
+/* A chat's picture fills one portrait slot; empty companion slots preserve row wrapping
+ * and height without stretching the picture across the cast's reserved box. */
 [data-portrait-slot] [data-portrait] {
   width: 100% !important;
   height: 100% !important;

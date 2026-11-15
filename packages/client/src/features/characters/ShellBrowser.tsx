@@ -518,21 +518,18 @@ export function ForkRow({
                     className="relative flex w-fit shrink-0 gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   >
                     {fork.chat.picture ? (
-                      // The chat's own picture stands for it, over the box its characters' faces take:
-                      // the same slots, empty, so the row is laid out as it is with the faces, and
-                      // setting or removing a picture moves nothing.
+                      // Keep the same reserved slots at every container breakpoint. Only the
+                      // first holds the picture, so its portrait cutout keeps its shape.
                       <>
-                        {fork.cast.slice(0, 2).map((c, i) => (
-                          <span key={c.entityId} data-portrait-slot className="h-12 w-8 shrink-0">
+                        {Array.from({ length: Math.max(1, Math.min(2, fork.cast.length)) }, (_, i) => (
+                          <span key={i} data-portrait-slot className="h-12 w-8 shrink-0">
                             {i === 0 && (
-                              <span className="absolute inset-0 z-2 flex overflow-hidden rounded-sm">
-                                <Avatar
-                                  id={fork.chat.id}
-                                  name={fork.chatName}
-                                  mediaId={fork.chat.picture ?? null}
-                                  size="fill"
-                                />
-                              </span>
+                              <Avatar
+                                id={fork.chat.id}
+                                name={fork.chatName}
+                                mediaId={fork.chat.picture ?? null}
+                                size="md"
+                              />
                             )}
                           </span>
                         ))}
@@ -540,6 +537,7 @@ export function ForkRow({
                       </>
                     ) : (
                       <>
+                        {fork.cast.length === 0 && <span data-portrait-slot className="h-12 w-8 shrink-0" />}
                         {fork.cast.slice(0, 2).map((c) => (
                           <Avatar
                             key={c.entityId}
@@ -1108,7 +1106,7 @@ function Browser({ data }: { data: ShellLibrary }) {
       <div
         ref={listRef}
         data-shell-list
-        className={`@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable] ${grid && !source ? "-mt-2 pt-2" : ""}`}
+        className={`@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable] ${grid && !source ? "-mt-2 pt-2 scroll-py-2" : ""}`}
       >
         {grid && source ? (
           // The source's cards only: never mixed with the user's (spec/CARD-SOURCES.md §3.2).

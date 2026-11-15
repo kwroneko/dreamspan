@@ -228,6 +228,8 @@ export type StParserSource = typeof StParserSource.Type
 const parser = Schema.NullOr(StParserSource)
 
 export class FormatOps extends RpcGroup.make(
+  /** Decode uploaded image pixels before storing them; runs in the bounded format pool. */
+  Rpc.make("ValidateImage", { payload: { bytes: Transferable.Uint8Array }, success: Schema.Boolean }),
   /** Each text's tokens in a local encoding (tokenizer.ts), on the interactive lane. */
   Rpc.make("CountTokens", {
     payload: { encoding: Schema.Literals(LOCAL_ENCODINGS), texts: Schema.Array(Schema.String) },

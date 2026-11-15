@@ -1294,7 +1294,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
            AND NOT EXISTS (SELECT 1 FROM slots p WHERE p.id = slots.parent_slot_id AND p.bin_item_id = slots.bin_item_id)`
       )
       yield* run(
-        `UPDATE forks SET purged_at = ?, name = NULL, tip_slot_id = NULL, bin_item_id = NULL, row_version = row_version + 1
+        `UPDATE forks SET purged_at = ?, name = NULL, tip_slot_id = NULL, cover_media_id = NULL, bin_item_id = NULL, row_version = row_version + 1
          WHERE bin_item_id IN (${items("'branch', 'threads'")})`,
         [now]
       )

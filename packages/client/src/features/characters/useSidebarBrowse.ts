@@ -46,7 +46,7 @@ export function useSidebarBrowse() {
       to: ".",
       search: (prev: Record<string, unknown>) => ({ ...prev, ...write(changeHomeBrowse(read(prev), change)) }),
       state: (prev) => ({ ...prev, sidebarBrowse: true }),
-      replace: options?.replace ?? true,
+      replace: options?.replace ?? change.family === undefined,
       resetScroll: false
     })
   }

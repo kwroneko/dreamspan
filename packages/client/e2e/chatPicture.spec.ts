@@ -113,6 +113,9 @@ for (const width of [1440, 390])
               .evaluate((img: HTMLImageElement) => img.naturalWidth)
           )
           .toBeGreaterThan(0)
+        // A chosen picture keeps a portrait's shape inside the reserved two-face box.
+        const portrait = await row(seed.pictured).locator("[data-row-portraits] [data-portrait]").boundingBox()
+        expect(portrait!.width / portrait!.height).toBeCloseTo(2 / 3, 2)
         const pictured = (await row(seed.pictured).boundingBox())!.height
         await expectLayout(page, info, `chats-list-picture-${width}-${theme}`, { scope: "[data-shell-list]" })
         await list.screenshot({ path: info.outputPath(`chats-list-picture-${width}-${theme}.png`) })
@@ -137,3 +140,98 @@ for (const width of [1440, 390])
       }
     })
   }
+
+test("pictures reserve the same row at every panel breakpoint, even before loading and without a cast", async ({
+  page
+}) => {
+  const server = await startServer(withAdmin)
+  try {
+    const chats = await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const cards = []
+        for (const name of ["Mira", "Tomas", "Wren"])
+          cards.push((yield* api.CreateCard({ label: name, name })).entityId)
+        const chats = []
+        for (const size of [0, 1, 2, 3]) {
+          if (size === 0) {
+            const empty = yield* api.CreateChat({ title: "Without characters" })
+            yield* api.SendMessage({
+              chatId: empty.id,
+              parentSlotId: null,
+              branch: false,
+              content: "Synthetic row size fixture."
+            })
+            chats.push(empty.id)
+            continue
+          }
+          const started = yield* api.StartChat({
+            cards: cards.slice(0, size),
+            persona: null,
+            greeting: null,
+            first: { _tag: "Send", content: "Synthetic row size fixture.", speakerEntityId: null }
+          })
+          chats.push(started.chat.id)
+        }
+        return chats
+      })
+    )
+    await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)
+    await page.setViewportSize({ width: 1440, height: 1100 })
+    const upload = await page.request.post(`${server.url}/chat/image`, {
+      headers: { "content-type": "application/octet-stream" },
+      data: portraitPng()
+    })
+    expect(upload.status()).toBe(200)
+    const { mediaId } = (await upload.json()) as { mediaId: string }
+    let release!: () => void
+    const loaded = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route("**/library/media?*", async (route) => {
+      await loaded
+      await route.continue()
+    })
+    await page.goto(`${server.url}/?side=chats`)
+    const sidebar = page.getByRole("complementary", { name: "Sidebar", exact: true })
+    const grip = page.getByRole("separator", { name: "Resize sidebar", exact: true })
+    const row = (id: string) =>
+      sidebar.locator("[data-fork-row]").filter({ has: page.locator(`[data-chat-id="${id}"]`) })
+    for (const width of [240, 250, 260, 280, 300, 320, 400, 640]) {
+      const current = Number(await grip.getAttribute("aria-valuenow"))
+      const box = (await grip.boundingBox())!
+      await page.mouse.move(box.x + box.width / 2, box.y + 100)
+      await page.mouse.down()
+      await page.mouse.move(box.x + box.width / 2 + width - current, box.y + 100, { steps: 3 })
+      await page.mouse.up()
+      await expect(grip).toHaveAttribute("aria-valuenow", String(width))
+      const before = await Promise.all(chats.map(async (id) => (await row(id).boundingBox())!.height))
+      await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+        Effect.forEach(chats, (chatId) => api.SetChatPicture({ chatId, mediaId }))
+      )
+      for (const [i, id] of chats.entries()) {
+        await expect(row(id).locator("[data-row-portraits] img")).toHaveCount(1)
+        expect((await row(id).boundingBox())!.height, `cast ${i}, panel ${width}, before thumbnail`).toBe(before[i])
+      }
+      release()
+      for (const [i, id] of chats.entries()) {
+        await expect
+          .poll(() =>
+            row(id)
+              .locator("[data-row-portraits] img")
+              .evaluate((img: HTMLImageElement) => img.naturalWidth)
+          )
+          .toBeGreaterThan(0)
+        const portrait = (await row(id).locator("[data-row-portraits] [data-portrait]").boundingBox())!
+        expect(portrait.width / portrait.height).toBeCloseTo(2 / 3, 2)
+        expect((await row(id).boundingBox())!.height, `cast ${i}, panel ${width}, after thumbnail`).toBe(before[i])
+      }
+      await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+        Effect.forEach(chats, (chatId) => api.SetChatPicture({ chatId, mediaId: null }))
+      )
+      await expect(sidebar.locator("[data-row-portraits] img")).toHaveCount(0)
+      for (const [i, id] of chats.entries()) expect((await row(id).boundingBox())!.height).toBe(before[i])
+    }
+  } finally {
+    await server.stop()
+  }
+})

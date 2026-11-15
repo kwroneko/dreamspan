@@ -29,6 +29,20 @@ export const png = (...extra: Array<Uint8Array>) =>
     chunk("IEND")
   ])
 
+/** A decodable grey PNG of the requested dimensions, including its real pixel rows. */
+export const sizedPng = (width: number, height: number) => {
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
+  header[8] = 8
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(Buffer.alloc((width + 1) * height))),
+    chunk("IEND")
+  ])
+}
+
 export const run = <A>(effect: Effect.Effect<A, FormatError>): A => Effect.runSync(effect)
 
 /** The `FormatError` code an effect fails with. */

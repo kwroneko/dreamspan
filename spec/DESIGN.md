@@ -1,4 +1,4 @@
-**Built families1 (2026-11-15):** §2.1's per-chat picture and §4's grouping of a card's forks into one entry are implemented as options; see ARCHITECTURE §12 (BASELINE CHANGED, fresh deploy). Both items remain [P]: grouping is off by default, and the default and one-tile versus count are the owner's to decide.
+**Built families1; reviewed review-families1 (2026-11-15):** §2.1's per-chat picture and §4's grouping of a card's forks into one entry are implemented as options; see ARCHITECTURE §12 (BASELINE CHANGED, fresh deploy). Both items remain [P]: grouping is off by default, and the default and one-tile versus count are the owner's to decide.
 
 **Built markers1 (2026-11-15):** §3.4's small timeline markers for state changes (who joined or left, mutes, notes, the chat's own model and preset, lorebooks, chat settings) are implemented and obsolete as an implementation proposal; see ARCHITECTURE §3.8 "Change markers in the timeline". The item stays Proposed; no Proposed item is promoted to Decided.
 
