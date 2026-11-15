@@ -122,14 +122,20 @@ for (const setting of ["FAKE_CARD_SOURCE", "FAKE_SAVED_MEDIA"] as const) {
   it(`refuses ${setting} plainly when development files are absent`, async () => {
     const fixture = tempDir("production-imports")
     const root = resolve(import.meta.dirname, "../../..")
-    cpSync(join(root, "packages/server/src"), join(fixture, "src"), {
+    // Keep the shipped workspace layout: built-in editable tools import the sibling
+    // plugin API. Omitting that runtime dependency fails before either guarded loader.
+    const server = join(fixture, "packages/server")
+    cpSync(join(root, "packages/server/src"), join(server, "src"), {
       recursive: true,
       filter: (source) => source !== join(root, "packages/server/src/dev")
+    })
+    cpSync(join(root, "packages/plugin-api/src"), join(fixture, "packages/plugin-api/src"), {
+      recursive: true
     })
     writeFileSync(join(fixture, "package.json"), JSON.stringify({ type: "module" }))
     symlinkSync(join(root, "node_modules"), join(fixture, "node_modules"))
     const child = spawn(process.execPath, ["--no-wasm-code-gc", "src/main.ts"], {
-      cwd: fixture,
+      cwd: server,
       env: {
         ...process.env,
         FAKE_CARD_SOURCE: "off",
@@ -156,7 +162,7 @@ for (const setting of ["FAKE_CARD_SOURCE", "FAKE_SAVED_MEDIA"] as const) {
       expect(output).not.toContain("ERR_MODULE_NOT_FOUND")
       expect(output).not.toMatch(/file:\/\/|^\s*at\s/m)
       expect(output).not.toContain("synthetic-secret-/private/fixture")
-      expect(output).not.toContain(join(fixture, "src/dev"))
+      expect(output).not.toContain(join(server, "src/dev"))
       expect(output).not.toContain("Listening on")
     } finally {
       clearTimeout(timer)
