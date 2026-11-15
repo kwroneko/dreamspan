@@ -133,6 +133,12 @@ const displayFields = {
   panelDepth: Schema.NullOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))),
   enterSends: Schema.Literals(["automatic", "always", "never"]),
   chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
+  /**
+   * "Message spacing": how much room messages take in a chat. `compact` tightens the gaps,
+   * the text's line and paragraph spacing and the name row, and shows a message's version
+   * controls only with the message pointed at, focused or tapped (ChatDensity.tsx).
+   */
+  chatDensity: Schema.Literals(["comfortable", "compact"]),
   /** How preset lists sort (the composer's picker, the Prompt preset tab's, the library's). */
   presetSort: PresetSort,
   /** How model lists sort (the composer's picker and the Model tab's). */
@@ -186,6 +192,7 @@ export const DisplayPrefsChange = Schema.Struct({
   panelDepth: Schema.optionalKey(displayFields.panelDepth),
   enterSends: Schema.optionalKey(displayFields.enterSends),
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
+  chatDensity: Schema.optionalKey(displayFields.chatDensity),
   presetSort: Schema.optionalKey(displayFields.presetSort),
   modelSort: Schema.optionalKey(displayFields.modelSort),
   modelPins: Schema.optionalKey(displayFields.modelPins),
@@ -221,6 +228,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   panelDepth: null,
   enterSends: "automatic",
   chatWidth: CHAT_WIDTH.default,
+  chatDensity: "comfortable",
   presetSort: "name",
   modelSort: "name",
   modelPins: {},

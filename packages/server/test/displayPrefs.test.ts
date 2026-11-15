@@ -115,6 +115,24 @@ it.live("the chat width persists per account, within its range, without resettin
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )
 
+it.live("message spacing is comfortable until chosen, persists per account and keeps other choices", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const bob = yield* client({ "Remote-User": "bob" })
+    assert.strictEqual((yield* alice.GetDisplayPrefs({})).chatDensity, "comfortable")
+    yield* alice.SetDisplayPrefs({ prefs: { chatWidth: 1760 } })
+    assert.strictEqual((yield* alice.SetDisplayPrefs({ prefs: { chatDensity: "compact" } })).chatDensity, "compact")
+    const prefs = yield* (yield* client({ "Remote-User": "alice" })).GetDisplayPrefs({})
+    assert.strictEqual(prefs.chatDensity, "compact")
+    assert.strictEqual(prefs.chatWidth, 1760)
+    assert.strictEqual((yield* bob.GetDisplayPrefs({})).chatDensity, "comfortable")
+    // Another choice written later leaves it.
+    assert.strictEqual((yield* alice.SetDisplayPrefs({ prefs: { coverageRail: true } })).chatDensity, "compact")
+    const decode = Schema.decodeUnknownOption(DisplayPrefsChange)
+    for (const value of ["cosy", "", 1, null]) assert.strictEqual(decode({ chatDensity: value })._tag, "None")
+  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)
+
 it.live("message toolbar choices merge by action id per account, across clients, and stay bounded", () =>
   Effect.gen(function* () {
     const alice = yield* client({ "Remote-User": "alice" })

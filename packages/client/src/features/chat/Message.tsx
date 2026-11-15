@@ -173,7 +173,7 @@ function VersionBody({
   const generating = version.status === "generating"
   const text = live ?? version.content
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 compact:gap-1">
       <ReasoningPanels
         version={version}
         session={session}
@@ -501,7 +501,7 @@ function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: O
 function Branches({ entry, onBranch }: { entry: PathEntry; onBranch: (entry: PathEntry, index: number) => void }) {
   return (
     <div
-      className="flex shrink-0 items-center rounded-md border border-border"
+      className="flex shrink-0 items-center rounded-md border border-border compact:sm:pointer-fine:[&_button]:size-5.5"
       role="group"
       aria-label={`Branches: ${entry.branchIndex + 1} of ${entry.branchCount}`}
       data-layout-audit-ignore="inset: Joined branch controls share a single outer border"
@@ -933,7 +933,7 @@ export const Message = memo(function Message({
       data-summarized={context?.kind === "summarized" || undefined}
       data-out-of-context={context?.kind === "dropped" || undefined}
       data-hidden={hidden || undefined}
-      className={`group flex touch-pan-y gap-3 rounded-lg border px-3 py-2.5 max-sm:gap-2.5 max-sm:px-2.5 ${
+      className={`group flex touch-pan-y gap-3 rounded-lg border px-3 py-2.5 max-sm:gap-2.5 max-sm:px-2.5 compact:relative compact:py-2 ${
         context?.kind === "dropped" ? "text-muted border-dashed " : ""
       }${context?.kind === "summarized" ? "border-l-4 border-l-accent/50 " : ""}${
         context?.kind === "dropped"
@@ -975,9 +975,9 @@ export const Message = memo(function Message({
           <MessageDetails details={details.portrait} {...detailProps} />
         </div>
       </div>
-      <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
+      <div className={`flex min-w-0 flex-1 flex-col gap-1 compact:gap-0.5 ${hidden ? "opacity-60" : ""}`}>
         {/* A chat in a narrow column (the workshop in a story's panel, `@container/chat`) wraps as a phone's does. */}
-        <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1 @max-[30rem]/chat:flex-wrap @max-[30rem]/chat:gap-y-1">
+        <header className="flex min-h-8 min-w-0 items-center compact:min-h-6 gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1 @max-[30rem]/chat:flex-wrap @max-[30rem]/chat:gap-y-1">
           {choosing ? (
             <span
               data-choosing-speaker
@@ -1017,7 +1017,8 @@ export const Message = memo(function Message({
             <MessageActions
               context={actionContext}
               // In a narrow column it keeps room for More actions, on a line of its own if need be.
-              className={`hidden justify-end transition-opacity duration-100 sm:flex @max-[30rem]/chat:min-w-8 ${
+              // Compact, with a mouse: the buttons are as tall as the slimmer name row (24 px).
+              className={`hidden justify-end transition-opacity duration-100 sm:flex @max-[30rem]/chat:min-w-8 compact:sm:pointer-fine:[&_a]:size-6 compact:sm:pointer-fine:[&_button]:size-6 ${
                 revealed
                   ? "opacity-100"
                   : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100"
@@ -1085,8 +1086,19 @@ export const Message = memo(function Message({
             </Tooltip>
           </div>
         )}
-        {/* Version controls keep their room even before a second version exists. */}
-        <div ref={footer} className="flex flex-col gap-1">
+        {/*
+          Version controls keep their room even before a second version exists. Compact spacing
+          (styles.css `.message-footer`) takes that room back: the controls lie over the message's
+          corner while it's pointed at or holds focus, and on a phone come with its actions after a
+          tap. `data-keep` leaves them in place where they're in use or would be missed.
+        */}
+        <div
+          ref={footer}
+          className="message-footer flex flex-col gap-1"
+          data-keep={latest || generating || revealed || editing !== null || savedAs !== null || undefined}
+          data-layout-overlay="With compact spacing, a message's version controls lie over its corner while it's pointed at"
+          data-layout-audit-ignore="inset: With compact spacing the version controls fill their own small backing over the message's corner"
+        >
           {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
           <footer className="flex min-h-8 items-center">
             {revealed && !editing ? (

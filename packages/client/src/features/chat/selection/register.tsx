@@ -38,7 +38,8 @@ function MessageTick({ entry, session }: { entry: PathEntry; session: ChatSessio
       label="Select this message"
       hint={why ?? "Selects this message to delete with the others. Shift-click selects every message up to it."}
       onToggle={(checked, shift) => selectionOf(session).toggle(entry, checked, shift)}
-      className="-mt-0.5"
+      // Compact rows have less room above the portrait: the tick keeps the row's own inset.
+      className="-mt-0.5 compact:mt-0"
     />
   )
 }

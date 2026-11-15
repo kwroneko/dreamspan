@@ -45,6 +45,7 @@ import { useSession } from "../../session.ts"
 import { CastContext, castView } from "./cast.ts"
 import { ChatSidePanel, type PanelTab, rememberPanel, usePanel } from "./ChatPanels.tsx"
 import { ChatHeader } from "./ChatHeader.tsx"
+import { densityMetrics, readingAnchor, type ReadingAnchor, readingDrift, readingInset } from "./readingPlace.ts"
 import { castCharacters, chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
@@ -127,6 +128,10 @@ export function MessageList({
   const [follow] = useState({ stuck: true })
   const { entries } = view
   const { prefs } = useViewPrefs()
+  // The spacing shown follows the account's choice one commit later, once what's being read
+  // is noted (below), so the rows, their gap and their estimated heights change together.
+  const [spacing, setSpacing] = useState(prefs.chatDensity)
+  const metrics = densityMetrics(spacing)
   const summarySlots = useSyncExternalStore(
     timelineSummaries.subscribe,
     timelineSummaries.snapshot,
@@ -210,7 +215,10 @@ export function MessageList({
   /** The row an entry is shown at. */
   const rowOf = (entry: number) =>
     rows.findIndex((row) => positionOf(entries[entry]!) >= row.from && positionOf(entries[entry]!) <= row.to)
-  const estimateSize = useCallback((row: number) => rows[row]!.estimate, [rows])
+  const estimateSize = useCallback(
+    (row: number) => Math.round(rows[row]!.estimate * metrics.estimate),
+    [rows, metrics.estimate]
+  )
   const getItemKey = useCallback((row: number) => rows[row]!.key, [rows])
   const offsetChanged = useRef<((offset: number, isScrolling: boolean) => void) | null>(null)
   const observeOffset = useCallback(
@@ -239,7 +247,7 @@ export function MessageList({
       const entry = entries.findIndex((e) => e.slotId === target)
       const index = entry >= 0 ? rowOf(entry) : rows.findIndex((row) => row.key === target || row.lastSlotId === target)
       let offset = 16
-      for (let i = 0; i < (index < 0 ? rows.length : index); i++) offset += rows[i]!.estimate + 6
+      for (let i = 0; i < (index < 0 ? rows.length : index); i++) offset += estimateSize(i) + metrics.gap
       return offset
     },
     overscan: 2,
@@ -247,7 +255,7 @@ export function MessageList({
     followOnAppend: view.follow,
     paddingStart: 16,
     paddingEnd: 16,
-    gap: 6,
+    gap: metrics.gap,
     // TanStack Virtual follows a row growing at the very end itself; once the user lets go,
     // it mustn't (below).
     scrollEndThreshold: follow.stuck ? 1 : -1
@@ -273,6 +281,74 @@ export function MessageList({
       offsetChanged.current?.(list.scrollTop, false)
   }, [virtualizer])
   useLayoutEffect(syncOffset)
+
+  // Changing the message spacing resizes every row, and the gaps between them. What's being
+  // read keeps its place on screen: the first text in view is noted before anything changes,
+  // and the list is put back around it once the rows are laid out again, and again over the
+  // next frames as they're measured. At the end of the chat the list stays at the end.
+  const reading = useRef<{ key: string; anchor: ReadingAnchor } | "end" | null>(null)
+  useLayoutEffect(() => {
+    if (prefs.chatDensity === spacing) return
+    const list = parent.current
+    const anchor = list === null || (follow.stuck && view.follow) ? null : readingAnchor(list)
+    const row = anchor === null ? undefined : rows[anchor.row]
+    reading.current = anchor !== null && row !== undefined ? { key: row.key, anchor } : list === null ? null : "end"
+    // Heights measured at the other spacing are wrong for rows that aren't shown: those go back
+    // to estimates, so each is measured afresh, and the list corrected for it, when it's reached.
+    const shown = new Set(virtualizer.getVirtualItems().map((item) => item.key))
+    for (const key of [...virtualizer.itemSizeCache.keys()]) if (!shown.has(key)) virtualizer.itemSizeCache.delete(key)
+    setSpacing(prefs.chatDensity)
+  }, [prefs.chatDensity, spacing, follow, view.follow, rows, virtualizer])
+  useLayoutEffect(() => {
+    const list = parent.current
+    const kept = reading.current
+    reading.current = null
+    if (list === null || kept === null) return
+    if (kept === "end") {
+      virtualizer.scrollToEnd()
+      return
+    }
+    const row = rows.findIndex((candidate) => candidate.key === kept.key)
+    if (row < 0) return
+    const moveBy = (drift: number) => {
+      virtualizer.scrollToOffset(Math.max(0, list.scrollTop + drift))
+      syncOffset()
+    }
+    // The rows shown have their new heights already, but the list still places them by the old
+    // ones until its observer reports each. Told now, without its own scroll corrections (this
+    // effect makes the one that counts), it has every row's new place before the first paint.
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false
+    for (const element of list.querySelectorAll<HTMLElement>(".chat-row[data-index]"))
+      virtualizer.resizeItem(Number(element.dataset.index), element.getBoundingClientRect().height)
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined
+    virtualizer.getVirtualItems()
+    const item = virtualizer.measurementsCache[row]
+    if (item === undefined) return
+    // Where the text read sits inside its row doesn't depend on where the row is placed.
+    virtualizer.scrollToOffset(Math.max(0, item.start + readingInset(list, kept.anchor, row)))
+    syncOffset()
+    let frame = 0
+    let steady = 0
+    const started = performance.now()
+    const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
+    const stop = () => {
+      cancelAnimationFrame(frame)
+      for (const event of inputs) list.removeEventListener(event, stop)
+    }
+    const settle = () => {
+      const drift = readingDrift(list, kept.anchor, row)
+      if (drift !== null && Math.abs(drift) >= 1) {
+        steady = 0
+        moveBy(drift)
+      } else steady++
+      if (steady < 4 && performance.now() - started < 1000) frame = requestAnimationFrame(settle)
+      else stop()
+    }
+    for (const event of inputs) list.addEventListener(event, stop, { passive: true })
+    frame = requestAnimationFrame(settle)
+    return stop
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per spacing change, with the rows of that render
+  }, [spacing])
 
   // A new window opens at the asked-for message, or at the bottom.
   // With summaries in the chat, a link waits for the layer: placed among the originals first,
@@ -578,6 +654,7 @@ export function MessageList({
       <div
         ref={parent}
         data-testid={embedded ? "side-chat-messages" : "messages"}
+        data-chat-density={spacing}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
         <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>
