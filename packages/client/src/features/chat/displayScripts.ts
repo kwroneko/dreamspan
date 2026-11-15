@@ -9,6 +9,7 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import type { Doc, RefId } from "@rp/shared/library.ts"
 import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import { makeRegistry } from "../../registry.ts"
+import { globalDisplayScripts, presetDisplayScripts, characterDisplayScripts } from "./displayListParts.ts"
 
 const NONE: ReadonlyArray<RegexScript> = []
 
@@ -47,16 +48,19 @@ export interface DisplayListContext {
 export interface DisplayScriptList {
   readonly id: string
   readonly order: number
+  readonly source?: string
+  readonly replacement?: string
   readonly scripts: (context: DisplayListContext) => ReadonlyArray<RegexScript>
+  readonly asyncScripts?: (context: DisplayListContext) => Promise<ReadonlyArray<RegexScript>>
 }
 
 export const displayScriptLists = makeRegistry<DisplayScriptList>()
 
 /** ST 1.19's three lists, in its order. */
 export const builtinDisplayScriptLists: ReadonlyArray<DisplayScriptList> = [
-  { id: "display-regex.global", order: 10, scripts: (context) => context.global },
-  { id: "display-regex.preset", order: 20, scripts: (context) => context.preset },
-  { id: "display-regex.character", order: 30, scripts: (context) => context.character }
+  globalDisplayScripts,
+  presetDisplayScripts,
+  characterDisplayScripts
 ]
 
 const contentKeys = new WeakMap<ReadonlyArray<RegexScript>, string>()
@@ -161,4 +165,15 @@ export class CardScripts {
       for (const listener of this.listeners) listener()
     })
   }
+}
+
+/** Only enabled copies take the asynchronous worker path; originals stay synchronous. */
+export const displayScriptsAsync = async (
+  lists: ReadonlyArray<DisplayScriptList>,
+  context: DisplayListContext
+): Promise<ReadonlyArray<RegexScript>> => {
+  const result: RegexScript[] = []
+  for (const list of [...lists].sort((a, b) => a.order - b.order))
+    result.push(...(await (list.asyncScripts?.(context) ?? list.scripts(context))))
+  return result.length ? result : NONE
 }

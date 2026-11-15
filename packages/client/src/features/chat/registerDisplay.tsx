@@ -11,6 +11,7 @@ import { MessageColorPreferences } from "./MessageColors.tsx"
 import { MessageToolbarPreferences } from "./MessageToolbarPreferences.tsx"
 const StMarkdown = lazy(() => import("../../ui/StMarkdown.tsx").then((module) => ({ default: module.StMarkdown })))
 import { displayTransforms, macroDisplay } from "./displayPipeline.ts"
+import { macroDisplayPart, regexDisplayPart } from "./displayParts.ts"
 import { regexDisplay } from "./displayWorker.ts"
 import { builtinDisplayScriptLists, displayScriptLists } from "./displayScripts.ts"
 import { chatPanels } from "./panels.tsx"
@@ -56,8 +57,8 @@ export const registerDisplay = () => [
   appTools.register({ id: "display.chat-width", order: 0, component: ChatWidthPreference }),
   // Which message actions show as buttons, from the account (messageActions.tsx).
   appTools.register({ id: "display.message-toolbar", order: 0, component: MessageToolbarPreferences }),
-  displayTransforms.register({ id: "display.macros", order: 10, transform: macroDisplay }),
-  displayTransforms.register({ id: "display.regex", order: 20, transform: regexDisplay }),
+  displayTransforms.register({ ...macroDisplayPart, transform: macroDisplay }),
+  displayTransforms.register({ ...regexDisplayPart, transform: regexDisplay }),
   ...builtinDisplayScriptLists.map((list) => displayScriptLists.register(list)),
   chatSurfaceProviders.register({ id: "display.context", order: 15, component: DisplayProvider }),
   chatSurfaceProviders.register({ id: "display.external-media", order: 17, component: ExternalMediaProvider }),

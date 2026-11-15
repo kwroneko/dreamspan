@@ -8,7 +8,7 @@ import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import type { GlobalRegex } from "@rp/shared/regexScripts.ts"
-import { createContext, useContext, useMemo, useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useMemo, useEffect, useState, useSyncExternalStore, type ReactNode } from "react"
 import { AppClient } from "../../rpc.ts"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Field, Fieldset } from "../../ui/Field.tsx"
@@ -19,6 +19,11 @@ import { onLibraryChange } from "../../libraryChanges.ts"
 import { globalRegexAtom } from "../regex/data.ts"
 import { useRefreshOnContext } from "../pickers/defaults.ts"
 import { useCaller } from "../editor/caller.ts"
+import { displayTransforms } from "./displayPipeline.ts"
+import { timelineTransforms } from "./timelineContributions.tsx"
+import { displayScriptLists } from "./displayScripts.ts"
+import { Tooltip } from "../../ui/Tooltip.tsx"
+import { builtinReplacement } from "@rp/shared/builtinParts.ts"
 import { approvedScripts, CardScripts } from "./displayScripts.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
@@ -296,6 +301,7 @@ export function DisplaySettings() {
         >
           Use display regex scripts
         </Switch>
+        <ReplacedDisplayRules />
         <HtmlFormattingSwitch />
         <ExternalMediaDefault />
         <PanelDepthSelect />
@@ -306,5 +312,41 @@ export function DisplaySettings() {
         )}
       </Fieldset>
     </div>
+  )
+}
+
+function ReplacedDisplayRules() {
+  const transforms = useSyncExternalStore(displayTransforms.subscribe, displayTransforms.snapshot)
+  const lists = useSyncExternalStore(displayScriptLists.subscribe, displayScriptLists.snapshot)
+  const timeline = useSyncExternalStore(timelineTransforms.subscribe, timelineTransforms.snapshot)
+  // The names consent and the copy picker use for the same parts (@rp/shared/builtinParts.ts).
+  const replaced = (
+    [
+      ["displayTransforms", transforms.entries],
+      ["displayScriptLists", lists.entries],
+      ["timelineTransforms", timeline.entries]
+    ] as const
+  ).flatMap(([registry, entries]) =>
+    entries
+      .filter((rule) => rule.replacement)
+      .map((rule) => ({
+        key: `${registry}:${rule.id}`,
+        name: builtinReplacement(`${registry}:${rule.id}`)?.label ?? rule.id,
+        by: rule.replacement
+      }))
+  )
+  if (!replaced.length) return null
+  return (
+    <ul aria-label="Replaced display rules" className="flex min-w-0 flex-col gap-1 text-sm text-muted">
+      {replaced.map((rule) => (
+        <li key={rule.key} className="[overflow-wrap:anywhere]">
+          <Tooltip label="This browser copy changes only how the chat looks. Turn it off in Plugins to restore the original.">
+            <span tabIndex={0}>
+              {rule.name} · Replaced by {rule.by}
+            </span>
+          </Tooltip>
+        </li>
+      ))}
+    </ul>
   )
 }

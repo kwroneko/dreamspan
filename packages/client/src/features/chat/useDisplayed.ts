@@ -13,6 +13,7 @@ import {
   displayRegexApplies,
   displayScriptLists,
   displayScripts,
+  displayScriptsAsync,
   messageCharacter,
   sameScripts
 } from "./displayScripts.ts"
@@ -55,7 +56,12 @@ export function useDisplayed(
 } {
   const { version, session, parentSlotId, depth } = at
   const viewer = useViewPrefs()
-  const needsContext = version.macroMode === "template" || viewer.prefs.outputMacros || viewer.prefs.displayRegex
+  const stages = useSyncExternalStore(displayTransforms.subscribe, displayTransforms.snapshot)
+  const needsContext =
+    stages.entries.some((stage) => stage.needsContext) ||
+    version.macroMode === "template" ||
+    viewer.prefs.outputMacros ||
+    viewer.prefs.displayRegex
   const cast = useCast()
   const read = useCallback(
     () => (needsContext ? session.castAfter(parentSlotId) : undefined),
@@ -80,18 +86,35 @@ export function useDisplayed(
   )
   const character = useSyncExternalStore(display.cards?.subscribe ?? noSubscription, readCharacterScripts)
   const lists = useSyncExternalStore(displayScriptLists.subscribe, displayScriptLists.snapshot)
-  const scripts = useMemo(
-    () =>
-      displayScripts(lists.entries, {
-        global: display.global,
-        preset: display.preset,
-        character,
-        characterId,
-        placement
-      }),
-    [lists, display.global, display.preset, character, characterId, placement]
+  const scriptContext = useMemo(
+    () => ({
+      global: display.global,
+      preset: display.preset,
+      character,
+      characterId,
+      placement
+    }),
+    [display.global, display.preset, character, characterId, placement]
   )
-  const stages = useSyncExternalStore(displayTransforms.subscribe, displayTransforms.snapshot)
+  const [scriptResult, setScriptResult] = useState<{
+    lists: typeof lists
+    context: typeof scriptContext
+    scripts: ReadonlyArray<RegexScript>
+  } | null>(null)
+  const asyncLists = lists.entries.some((list) => list.asyncScripts)
+  useEffect(() => {
+    if (!asyncLists) return
+    let live = true
+    void displayScriptsAsync(lists.entries, scriptContext).then((scripts) => {
+      if (live) setScriptResult({ lists, context: scriptContext, scripts })
+    })
+    return () => {
+      live = false
+    }
+  }, [asyncLists, lists, scriptContext])
+  const listPending = asyncLists && (scriptResult?.lists !== lists || scriptResult.context !== scriptContext)
+  const originalScripts = useMemo(() => displayScripts(lists.entries, scriptContext), [lists, scriptContext])
+  const scripts = asyncLists && !listPending ? scriptResult!.scripts : originalScripts
   const input = useMemo(
     (): DisplayInput => ({
       text,
@@ -101,9 +124,10 @@ export function useDisplayed(
       prefs: viewer.prefs,
       scripts,
       placement,
+      streaming,
       depth: display.leafDepth === null ? null : Math.max(0, display.leafDepth - depth)
     }),
-    [text, version, here, fields, viewer.prefs, scripts, display.leafDepth, depth, placement]
+    [text, version, here, fields, viewer.prefs, scripts, display.leafDepth, depth, placement, streaming]
   )
   const [result, setResult] = useState<{
     input: DisplayInput
@@ -127,11 +151,15 @@ export function useDisplayed(
   useEffect(() => {
     if (!streaming) {
       let active = true
-      void applyDisplayTransforms(input, stages.entries).then((value) => {
+      // Aborting tells a worker rule to drop work nobody reads: a screen of messages that
+      // re-renders must not fill a copy's queue with answers to text already replaced.
+      const abandoned = new AbortController()
+      void applyDisplayTransforms(input, stages.entries, abandoned.signal).then((value) => {
         if (active) setResult({ input, stages, ...value })
       })
       return () => {
         active = false
+        abandoned.abort()
       }
     }
     // Streaming: what arrives during a run is taken by the next one.
@@ -148,6 +176,15 @@ export function useDisplayed(
     }
     next()
   }, [input, stages, streaming])
+  if (listPending)
+    return streaming
+      ? { text: null, issues: [], current: false }
+      : {
+          text: displayText(text, version.macroMode, input.names, input.card, version.frozenMacros ?? {}),
+          issues: [],
+          pending: true,
+          current: false
+        }
   if (result?.input === input && result.stages === stages) return { ...result, current: true }
   // Until the transforms answer: what they last said of this version (a reply that just
   // finished keeps its streamed display rather than flashing its text without the scripts).

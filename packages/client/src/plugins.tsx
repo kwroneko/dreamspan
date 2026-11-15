@@ -14,6 +14,12 @@ import type {
   BannerEntry,
   NoticeChannelEntry
 } from "../../plugin-api/src/client.ts"
+import { startDisplayPlugin, isDisplayPlugin, DisplaySuperseded, type DisplayBridge } from "./displayPlugin.ts"
+import { displayInput, displayResult, displayListInput, displayListResult, timelineResult } from "./displayAdapter.ts"
+import { displayTransforms } from "./features/chat/displayPipeline.ts"
+import { timelineTransforms, timelineInput, timelineRows } from "./features/chat/timelineContributions.tsx"
+import { displayScriptLists } from "./features/chat/displayScripts.ts"
+import type { DisplayTransformV1, DisplayScriptListV1, TimelineTransformV1 } from "../../plugin-api/src/display.ts"
 import { composerControls } from "./features/chat/composerControls.tsx"
 import { chatPanels } from "./features/chat/panels.tsx"
 import { appBanners } from "./features/shell.tsx"
@@ -63,7 +69,7 @@ const withoutPlugins = (url: string) => {
 }
 
 /** Revocable, typed adapters own every mutation, including partial and late activation. */
-export const clientPluginHost = (p: ClientPlugin) => {
+export const clientPluginHost = (p: ClientPlugin, display?: DisplayBridge) => {
   const key = keyOf(p)
   let live = true
   const lifetimeListeners = new Set<() => void>()
@@ -82,7 +88,7 @@ export const clientPluginHost = (p: ClientPlugin) => {
       return enabled ? <Bounded {...props} /> : null
     }
   }
-  const disposers: Array<() => void> = []
+  const disposers: Array<() => void> = display ? [display.close] : []
   const own = (dispose: () => void) => {
     if (!live) {
       dispose()
@@ -116,6 +122,16 @@ export const clientPluginHost = (p: ClientPlugin) => {
           document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.focus({ preventScroll: true })
       })
   }
+  // A worker stopped while idle (it posted without being asked) has no call to fail: the
+  // copy is reported and turned off here, exactly as a failed call does.
+  display?.onFault?.(() => {
+    if (!live) return
+    report(p, "display", "display")
+    queueMicrotask(() => {
+      close()
+      if (active.get(key)?.plugin === p) active.delete(key)
+    })
+  })
   const reserved = (name: string, id: string) =>
     (name === "appBanners" && (id === "plugins.host" || id.startsWith("plugins.host."))) ||
     (name === "routes" && (id === "settings.plugins" || id.startsWith("settings.plugins.")))
@@ -138,9 +154,10 @@ export const clientPluginHost = (p: ClientPlugin) => {
           throw new Error("This built-in still needs a copy adapter")
         const converted = convert(entry, () => {
           if (live) {
-            report(p, p.manifest.replaces.includes(claim) ? "event" : id, name)
+            const displayRule = ["displayTransforms", "displayScriptLists", "timelineTransforms"].includes(name)
+            report(p, displayRule ? "display" : p.manifest.replaces.includes(claim) ? "event" : id, name)
             // A broken replacement must reveal the original, including render failures.
-            if (p.manifest.replaces.includes(claim))
+            if (displayRule || p.manifest.replaces.includes(claim))
               queueMicrotask(() => {
                 close()
                 if (active.get(key)?.plugin === p) active.delete(key)
@@ -172,6 +189,133 @@ export const clientPluginHost = (p: ClientPlugin) => {
   const registries: { -readonly [K in keyof ClientHost["registries"]]: ClientHost["registries"][K] } = {}
   for (const surface of p.manifest.surfaces.filter((s) => s.startsWith("client:"))) {
     switch (surface) {
+      case "client:timelineTransforms":
+        if (!display) throw new Error("Display rules start in a browser worker")
+        registries.timelineTransforms = adapter<TimelineTransformV1, Parameters<typeof timelineTransforms.register>[0]>(
+          "timelineTransforms",
+          timelineTransforms,
+          (entry, fail) => {
+            if (entry.api !== 1 || !Number.isFinite(entry.order)) throw new Error("Invalid timeline rule")
+            const original = timelineTransforms.get(entry.id)
+            const fallback = (
+              rows: Parameters<NonNullable<typeof original>["transform"]>[0],
+              context: Parameters<NonNullable<typeof original>["transform"]>[1]
+            ) => original?.transform(rows, context) ?? rows
+            return {
+              id: entry.id,
+              order: entry.order,
+              ...(p.manifest.replaces.includes(`timelineTransforms:${entry.id}`)
+                ? { replacement: p.manifest.name }
+                : {}),
+              transform: fallback,
+              asyncTransform: async (rows, context, signal) => {
+                try {
+                  if (!live) throw new Error("Plugin is off")
+                  const result = await display.call(
+                    "timelineTransforms",
+                    entry.id,
+                    timelineInput(rows, context),
+                    signal
+                  )
+                  return timelineRows(timelineResult(result), rows, context)
+                } catch (error) {
+                  // The timeline moved on before this was sent: nobody reads this answer.
+                  if (error instanceof DisplaySuperseded) return rows
+                  fail()
+                  close()
+                  return fallback(rows, context)
+                }
+              }
+            }
+          }
+        )
+        break
+      case "client:displayTransforms":
+        if (!display) throw new Error("Display rules start in a browser worker")
+        registries.displayTransforms = adapter<DisplayTransformV1, Parameters<typeof displayTransforms.register>[0]>(
+          "displayTransforms",
+          displayTransforms,
+          (entry, fail) => {
+            if (entry.api !== 1 || !Number.isFinite(entry.order)) throw new Error("Invalid display rule")
+            const original = displayTransforms.get(entry.id)
+            return {
+              id: entry.id,
+              order: entry.order,
+              ...(p.manifest.replaces.includes(`displayTransforms:${entry.id}`)
+                ? { replacement: p.manifest.name }
+                : {}),
+              needsContext: true,
+              transform: async (input, signal) => {
+                const fallback = () => (original ? original.transform(input) : { text: input.text, issues: [] })
+                try {
+                  if (!live) throw new Error("Plugin is off")
+                  return displayResult(await display.call("displayTransforms", entry.id, displayInput(input), signal))
+                } catch (error) {
+                  // The message changed or left the screen before this was sent.
+                  // Nobody reads this answer, so the original is not run for it either.
+                  if (error instanceof DisplaySuperseded) return { text: input.text, issues: [] }
+                  fail()
+                  close()
+                  return fallback()
+                }
+              }
+            }
+          }
+        )
+        break
+      case "client:displayScriptLists":
+        if (!display) throw new Error("Display rules start in a browser worker")
+        registries.displayScriptLists = adapter<DisplayScriptListV1, Parameters<typeof displayScriptLists.register>[0]>(
+          "displayScriptLists",
+          displayScriptLists,
+          (entry, fail) => {
+            if (entry.api !== 1 || !Number.isFinite(entry.order)) throw new Error("Invalid display rule")
+            const original = displayScriptLists.get(entry.id)
+            // Every message on screen asks with the same lists. One worker call answers them
+            // all: the newest answers are kept by the identity of what was asked.
+            const answers: Array<{
+              readonly input: Parameters<NonNullable<typeof original>["scripts"]>[0]
+              readonly scripts: Promise<ReturnType<typeof displayListResult>>
+            }> = []
+            return {
+              id: entry.id,
+              order: entry.order,
+              ...(p.manifest.replaces.includes(`displayScriptLists:${entry.id}`)
+                ? { replacement: p.manifest.name }
+                : {}),
+              scripts: (input) => original?.scripts(input) ?? [],
+              asyncScripts: async (input) => {
+                try {
+                  if (!live) throw new Error("Plugin is off")
+                  let known = answers.find(
+                    (answer) =>
+                      answer.input.global === input.global &&
+                      answer.input.preset === input.preset &&
+                      answer.input.character === input.character &&
+                      answer.input.characterId === input.characterId &&
+                      answer.input.placement === input.placement
+                  )
+                  if (!known) {
+                    known = {
+                      input,
+                      scripts: display
+                        .call("displayScriptLists", entry.id, displayListInput(input))
+                        .then(displayListResult)
+                    }
+                    answers.unshift(known)
+                    answers.length = Math.min(answers.length, 32)
+                  }
+                  return await known.scripts
+                } catch {
+                  fail()
+                  close()
+                  return original?.scripts(input) ?? []
+                }
+              }
+            }
+          }
+        )
+        break
       case "client:noticeChannels":
         registries.noticeChannels = adapter<NoticeChannelEntry, Parameters<typeof noticeChannels.register>[0]>(
           "noticeChannels",
@@ -295,7 +439,16 @@ export const loadClientPlugin = async (
   p: ClientPlugin,
   load: (url: string) => Promise<{ activate: Activate }> = (url) => import(/* @vite-ignore */ url)
 ) => {
-  const scope = clientPluginHost(p)
+  let display: ReturnType<typeof startDisplayPlugin> | undefined
+  let scope: ReturnType<typeof clientPluginHost>
+  try {
+    display = isDisplayPlugin(p) ? startDisplayPlugin(p, clientPluginUrl(p)) : undefined
+    scope = clientPluginHost(p, display?.bridge)
+  } catch {
+    display?.bridge.close()
+    report(p, "load")
+    return
+  }
   const current = { plugin: p, close: scope.close }
   // Attribute errors during import/activation as well as after startup. A failed
   // pending activation must never publish itself again when its Promise settles.
@@ -303,8 +456,35 @@ export const loadClientPlugin = async (
   try {
     await deadline(
       (async () => {
-        const module = await load(clientPluginUrl(p))
-        await module.activate(scope.host)
+        if (display) {
+          for (const entry of await display.ready) {
+            if (entry.registry === "displayTransforms")
+              scope.host.registries.displayTransforms!.register({
+                ...entry,
+                transform: () => {
+                  throw new Error("Worker only")
+                }
+              })
+            else if (entry.registry === "displayScriptLists")
+              scope.host.registries.displayScriptLists!.register({
+                ...entry,
+                scripts: () => {
+                  throw new Error("Worker only")
+                }
+              })
+            else if (entry.registry === "timelineTransforms")
+              scope.host.registries.timelineTransforms!.register({
+                ...entry,
+                transform: () => {
+                  throw new Error("Worker only")
+                }
+              })
+            else throw new Error("Unsupported display registry")
+          }
+        } else {
+          const module = await load(clientPluginUrl(p))
+          await module.activate(scope.host)
+        }
       })()
     )
   } catch {
@@ -401,9 +581,11 @@ function FailureDetails({ part }: { readonly part: string }) {
       <p className="text-sm">
         {part === "load"
           ? "This plugin couldn't start and is off in this tab."
-          : part === "event"
-            ? "An action failed. This plugin is off in this tab."
-            : "One part couldn't be shown. The rest of the app is available."}{" "}
+          : part === "display"
+            ? "A display rule failed. This plugin is off in this tab."
+            : part === "event"
+              ? "An action failed. This plugin is off in this tab."
+              : "One part couldn't be shown. The rest of the app is available."}{" "}
         Ask a workshop to fix it.
       </p>
       <Button
@@ -447,7 +629,7 @@ function PluginBanners() {
         <div key={error.key} data-plugin-error={error.part} className="flex flex-wrap items-center gap-2">
           <span>
             {error.name}
-            {error.part === "load" || error.part === "event"
+            {error.part === "load" || error.part === "event" || error.part === "display"
               ? " failed and is off here."
               : " had a problem. One part is hidden."}
           </span>

@@ -31,15 +31,21 @@ export const pluginRoutes = Layer.unwrap(
         const plugins = yield* host.clients(session.value.user)
         return HttpServerResponse.jsonUnsafe(plugins, { headers })
       }
-      if (path === "/plugin-host.mjs") {
+      if (path === "/plugin-host.mjs" || path === "/plugin-display.mjs") {
         const body = yield* Effect.tryPromise(async () => {
-          const manifest = JSON.parse(await readFile(join(config.clientDist, ".vite/manifest.json"), "utf8")) as Record<
-            string,
-            { file: string }
-          >
-          const file = manifest["src/pluginHost.ts"]?.file
+          const manifest = JSON.parse(
+            await readFile(
+              join(
+                config.clientDist,
+                path === "/plugin-display.mjs" ? ".vite/display-manifest.json" : ".vite/manifest.json"
+              ),
+              "utf8"
+            )
+          ) as Record<string, { file: string }>
+          const display = path === "/plugin-display.mjs"
+          const file = manifest[display ? "src/pluginDisplay.ts" : "src/pluginHost.ts"]?.file
           if (!file || !/^assets\/[a-zA-Z0-9_-]+\.js$/.test(file)) throw new Error("Missing host")
-          return `export * from "/${file}"; export { default } from "/${file}";`
+          return `export * from "/${file}";${display ? "" : ` export { default } from "/${file}";`}`
         }).pipe(Effect.option)
         return Option.isSome(body)
           ? HttpServerResponse.text(body.value, { headers, contentType: "text/javascript" })
@@ -56,6 +62,7 @@ export const pluginRoutes = Layer.unwrap(
     }).pipe(Effect.catchCause(() => Effect.succeed(missing())))
     return Layer.mergeAll(
       HttpRouter.add("GET", "/plugin-host.mjs", handler),
+      HttpRouter.add("GET", "/plugin-display.mjs", handler),
       HttpRouter.add("GET", "/plugins/*", handler)
     )
   })

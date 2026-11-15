@@ -4,7 +4,10 @@ export const CLIENT_PLUGIN_SURFACES: ReadonlyArray<string> = [
   "chatPanels",
   "routes",
   "appBanners",
-  "noticeChannels"
+  "noticeChannels",
+  "displayTransforms",
+  "displayScriptLists",
+  "timelineTransforms"
 ]
 export interface ClientPlugin {
   readonly scope: "instance" | "user"

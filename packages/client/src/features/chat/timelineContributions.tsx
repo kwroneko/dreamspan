@@ -1,5 +1,5 @@
 import { tokenizerText } from "../editor/tokenCounts.ts"
-import { useSyncExternalStore, type ReactNode } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { lcmCursor, positionOf } from "./position.ts"
 import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmState } from "@rp/shared/lcm.ts"
@@ -9,6 +9,9 @@ import { ChangeContextSize, contextOrigin, reserveOrigin, targetOrigin, withOrig
 import { Alert } from "../../ui/Surface.tsx"
 import { MergedChatRow } from "./MergedChatRow.tsx"
 import { timelineBoundaries, timelineSummaries } from "./presentation.tsx"
+import type { TimelineTransformV1, TimelineInputV1, TimelineRowV1 } from "../../../../plugin-api/src/display.ts"
+import { mergeTimeline, historyTimeline, lcmTimeline } from "./timelineParts.ts"
+import { Markdown } from "../../ui/Markdown.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 interface RenderContext {
@@ -25,6 +28,7 @@ export interface TimelineRow {
   readonly to: number
   readonly lastSlotId?: SlotId
   readonly entry?: PathEntry
+  readonly body?: TimelineRowV1["body"]
   readonly render: (context: RenderContext) => ReactNode
 }
 export interface TimelineContext {
@@ -34,11 +38,20 @@ export interface TimelineContext {
   readonly divider: number
   readonly historyDivider: number
 }
-export const timelineTransforms = makeRegistry<{
+export interface TimelineTransform {
   readonly id: string
   readonly order: number
+  readonly source?: string
+  readonly replacement?: string
+  readonly asyncTransform?: (
+    rows: ReadonlyArray<TimelineRow>,
+    context: TimelineContext,
+    /** Aborts once the timeline moved on: a call not yet sent to the worker is dropped. */
+    abandoned?: AbortSignal
+  ) => Promise<ReadonlyArray<TimelineRow>>
   readonly transform: (rows: ReadonlyArray<TimelineRow>, context: TimelineContext) => ReadonlyArray<TimelineRow>
-}>()
+}
+export const timelineTransforms = makeRegistry<TimelineTransform>()
 export const useTimelineTransforms = () =>
   useSyncExternalStore(timelineTransforms.subscribe, timelineTransforms.snapshot, timelineTransforms.snapshot)
 
@@ -69,46 +82,131 @@ export const messageRows = (entries: ReadonlyArray<PathEntry>): ReadonlyArray<Ti
     render: ({ renderMessage }) => renderMessage(entry)
   }))
 
-// Earlier transforms may insert rows, clone entries or project a range of messages.
-// Resolve a message boundary against the current rows' depth ranges, never its old index.
-const boundaryRow = (rows: ReadonlyArray<TimelineRow>, entries: ReadonlyArray<PathEntry>, index: number) => {
-  const depth = entries[index] && positionOf(entries[index])
-  if (depth === undefined) return rows.length
-  const at = rows.findIndex((row) => row.from <= row.to && row.to >= depth)
-  return at < 0 ? rows.length : at
+/** Additional data and host-rendered bodies supplied by another registered feature. */
+export const timelineDataSources = makeRegistry<{
+  readonly id: string
+  readonly source?: string
+  readonly threads: (view: ChatView) => TimelineInputV1["threads"]
+}>()
+export const timelineInput = (rows: ReadonlyArray<TimelineRow>, context: TimelineContext): TimelineInputV1 => {
+  if (rows.length > 2000 || context.view.entries.length > 2000) throw new Error("Display copy window is too large")
+  return {
+    rows: rows.map((row) => ({
+      key: row.key,
+      estimate: row.estimate,
+      from: row.from,
+      to: row.to,
+      ...(row.lastSlotId === undefined ? {} : { lastSlotId: row.lastSlotId }),
+      ...(row.entry
+        ? {
+            entry: {
+              slotId: row.entry.slotId,
+              depth: row.entry.depth,
+              position: row.entry.position,
+              version: row.entry.version ? { origin: row.entry.version.origin } : null
+            }
+          }
+        : {}),
+      ...(row.body ? { body: row.body } : {})
+    })),
+    entries: context.view.entries.map((entry) => ({
+      slotId: entry.slotId,
+      depth: entry.depth,
+      position: entry.position
+    })),
+    hasBudget: !!context.view.history?.budget,
+    assemblyError: !!context.view.history?.assemblyError,
+    historyDivider: context.historyDivider,
+    divider: context.divider,
+    summaries: context.summaries,
+    lcm: context.lcm
+      ? {
+          cursor: lcmCursor(context.lcm),
+          layer: context.lcm.layer.map((s) => ({ id: s.id, from: s.from, to: s.to, lastSlotId: s.lastSlotId }))
+        }
+      : null,
+    threads: timelineDataSources.list().flatMap((source) => source.threads(context.view))
+  }
 }
 
-export const registerTimelineTransforms = () => [
-  // A merged chat's entry is one row of its own (spec/CHAT-MERGE.md §7), registered so a plugin can replace it.
-  timelineTransforms.register({
-    id: "timeline.merges",
-    order: 5,
-    transform: (rows) =>
-      rows.some((row) => row.entry?.version?.origin === "merge")
-        ? rows.map((row) =>
-            row.entry?.version?.origin === "merge"
-              ? {
-                  ...row,
-                  estimate: 64,
-                  render: ({ session }) => <MergedChatRow entry={row.entry!} session={session} />
-                }
-              : row
-          )
-        : rows
-  }),
-  timelineTransforms.register({
-    id: "timeline.history-budget",
-    order: 10,
-    transform: (rows, { view, historyDivider }) => {
-      const budget = view.history?.budget
-      // A refusal above the composer explains the budget instead: nothing is sent at all.
-      if (historyDivider < 0 || !budget || view.history?.assemblyError) return rows
-      const result = [...rows]
-      result.splice(boundaryRow(result, view.entries, historyDivider), 0, {
-        key: "history-boundary",
-        estimate: 64,
-        from: Infinity,
-        to: -1,
+/** Presentation remains a feature registry, independent of the data-only worker seam. */
+export const timelineBodies = makeRegistry<{
+  readonly id: string
+  readonly source?: string
+  readonly row: (
+    body: NonNullable<TimelineRowV1["body"]>,
+    context: TimelineContext,
+    fields: Omit<TimelineRow, "render">
+  ) => TimelineRow
+}>()
+
+/** Reattach only host-owned renderers to data, never a plugin function or DOM node. */
+export const timelineRows = (
+  data: ReadonlyArray<TimelineRowV1>,
+  rows: ReadonlyArray<TimelineRow>,
+  context: TimelineContext,
+  trusted = false
+): ReadonlyArray<TimelineRow> => {
+  if (data === rows) return rows
+  const originals = trusted ? undefined : new Map(rows.map((row) => [row.key, row]))
+  const entries = trusted ? undefined : new Map(context.view.entries.map((entry) => [entry.slotId as string, entry]))
+  return data.map((row): TimelineRow => {
+    if (trusted && typeof (row as TimelineRow).render === "function" && row.body?.kind !== "merge")
+      return row as TimelineRow
+    const original = originals?.get(row.key)
+    const entry = row.entry && (entries?.get(row.entry.slotId) ?? (trusted ? (row as TimelineRow).entry : undefined))
+    if (!trusted && row.entry && !entry) throw new Error("Unknown message row")
+    if (
+      !trusted &&
+      row.lastSlotId !== undefined &&
+      !entries?.has(row.lastSlotId) &&
+      !context.lcm?.layer.some((summary) => summary.lastSlotId === row.lastSlotId)
+    )
+      throw new Error("Unknown row anchor")
+    const fields = {
+      key: row.key,
+      estimate: row.estimate,
+      from: row.from,
+      to: row.to,
+      ...(row.lastSlotId === undefined ? {} : { lastSlotId: row.lastSlotId as SlotId }),
+      ...(entry ? { entry } : {}),
+      ...(row.body ? { body: row.body } : {})
+    }
+    if (!row.body) {
+      if (!original) throw new Error("Unknown timeline row")
+      // A retained row keeps the message, range and anchor it was made with: a copy chooses
+      // which rows show, their order and their estimated height, never what a row is about
+      // (scrolling to a message and its links follow these fields).
+      return trusted ? { ...original, ...fields } : { ...original, estimate: row.estimate }
+    }
+    const { body } = row
+
+    if (body.kind === "text" && typeof body.text === "string")
+      return { ...fields, render: () => <Markdown text={body.text!} streaming={false} /> }
+    const renderer = timelineBodies.get(body.kind)
+    if (!renderer) throw new Error("Unsupported timeline body")
+    return renderer.row(body, context, fields)
+  })
+}
+
+const builtinTimelineBodies: ReadonlyArray<Parameters<typeof timelineBodies.register>[0]> = [
+  {
+    id: "merge",
+    source: import.meta.url,
+    row: (body, context, fields) => {
+      const merged = context.view.entries.find((e) => e.slotId === body.ref && e.version?.origin === "merge")
+      if (!merged) throw new Error("Unknown merge")
+      return { ...fields, render: ({ session }) => <MergedChatRow entry={merged} session={session} /> }
+    }
+  },
+  {
+    id: "history",
+    source: import.meta.url,
+    row: (_body, context, fields) => {
+      const budget = context.view.history?.budget
+      if (!budget || context.view.history?.assemblyError) throw new Error("Unknown history budget")
+      return {
+        ...fields,
         render: () => (
           <Alert
             tone={budget.origins?.context === "assumed" ? "warning" : "neutral"}
@@ -128,67 +226,117 @@ export const registerTimelineTransforms = () => [
             )}
           </Alert>
         )
-      })
-      return result
+      }
     }
-  }),
-  timelineTransforms.register({
-    id: "timeline.lcm",
-    order: 20,
-    transform: (rows, { view, lcm, summaries, divider, historyDivider }) => {
-      const entries = view.entries
-      const original = [...rows]
-      if (divider >= 0 && lcm) {
-        let at = boundaryRow(original, entries, divider)
-        if (divider === historyDivider && original[at - 1]?.key === "history-boundary") at--
-        original.splice(at, 0, {
-          key: "lcm-boundary",
-          estimate: 44,
-          from: lcmCursor(lcm) + 1,
-          to: -1,
-          render: ({ onOpenSummaries }) => (
-            <SlotOutlet slot={timelineBoundaries} props={{ lcm, onOpen: () => onOpenSummaries(null) }} />
-          )
-        })
+  },
+  {
+    id: "lcm-boundary",
+    source: import.meta.url,
+    row: (_body, context, fields) => {
+      const lcm = context.lcm
+      if (!lcm) throw new Error("Unknown summary boundary")
+      return {
+        ...fields,
+        render: ({ onOpenSummaries }) => (
+          <SlotOutlet slot={timelineBoundaries} props={{ lcm, onOpen: () => onOpenSummaries(null) }} />
+        )
       }
-      const layer = summaries
-        ? (lcm?.layer ?? []).filter((s) => s.from <= (entries.at(-1) ? positionOf(entries.at(-1)!) : -1) + 1)
-        : []
-      const result: TimelineRow[] = []
-      let next = 0
-      const append = () => {
-        const summary = layer[next++]!
-        result.push({
-          key: summary.id,
-          estimate: 64,
-          from: summary.from - 1,
-          to: summary.to - 1,
-          lastSlotId: summary.lastSlotId,
-          render: ({ session, anchor, renderMessage, onOpenSummaries }) => (
-            <SlotOutlet
-              slot={timelineSummaries}
-              props={{
-                session,
-                summary,
-                renderMessage,
-                onOpen: onOpenSummaries,
-                target:
-                  entries.find(
-                    (entry) =>
-                      entry.slotId === anchor && positionOf(entry) >= summary.from - 1 && positionOf(entry) < summary.to
-                  ) ?? null
-              }}
-            />
-          )
-        })
-      }
-      for (const row of original) {
-        while (next < layer.length && layer[next]!.from - 1 <= row.from) append()
-        if (!row.entry || !layer.some((s) => positionOf(row.entry!) >= s.from - 1 && positionOf(row.entry!) < s.to))
-          result.push(row)
-      }
-      while (next < layer.length) append()
-      return result
     }
-  })
+  },
+  {
+    id: "summary",
+    source: import.meta.url,
+    row: (body, context, fields) => {
+      const summary = context.lcm?.layer.find((s) => s.id === body.ref)
+      if (!summary) throw new Error("Unknown summary")
+      return {
+        ...fields,
+        render: ({ session, anchor, renderMessage, onOpenSummaries }) => (
+          <SlotOutlet
+            slot={timelineSummaries}
+            props={{
+              session,
+              summary,
+              renderMessage,
+              onOpen: onOpenSummaries,
+              target:
+                context.view.entries.find(
+                  (entry) =>
+                    entry.slotId === anchor && positionOf(entry) >= summary.from - 1 && positionOf(entry) < summary.to
+                ) ?? null
+            }}
+          />
+        )
+      }
+    }
+  }
 ]
+
+export const timelinePart = (
+  part: Omit<TimelineTransformV1, "transform"> & {
+    readonly transform: (input: TimelineInputV1) => ReadonlyArray<TimelineRowV1>
+  }
+): TimelineTransform => ({
+  id: part.id,
+  order: part.order,
+  ...(part.source ? { source: part.source } : {}),
+  transform: (rows, context) => {
+    // Originals already own their data/renderers. Avoid walking a long chat merely
+    // to project it; only the worker boundary needs detached field projections.
+    const input = {
+      ...timelineInput([], { ...context, view: { ...context.view, entries: [] } }),
+      rows,
+      entries: context.view.entries,
+      lcm: context.lcm ? { cursor: lcmCursor(context.lcm), layer: context.lcm.layer } : null
+    }
+    return timelineRows(part.transform(input), rows, context, true)
+  }
+})
+export const registerTimelineTransforms = () => [
+  ...builtinTimelineBodies.map((body) => timelineBodies.register(body)),
+  ...[mergeTimeline, historyTimeline, lcmTimeline].map((part) => timelineTransforms.register(timelinePart(part)))
+]
+
+/** The unchanged synchronous path remains the only path without copies. */
+export function useTransformedRows(
+  entries: ReadonlyArray<PathEntry>,
+  transforms: ReadonlyArray<TimelineTransform>,
+  context: TimelineContext,
+  inputs: number
+) {
+  const initial = useMemo(() => messageRows(entries), [entries])
+  const ordered = useMemo(() => [...transforms].sort((a, b) => a.order - b.order), [transforms])
+  const original = useMemo(
+    () => ordered.reduce((rows, entry) => entry.transform(rows, context), initial),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- inputs represents registered external data
+    [ordered, initial, context, inputs]
+  )
+  const [answer, setAnswer] = useState<{
+    initial: typeof initial
+    ordered: typeof ordered
+    context: typeof context
+    inputs: number
+    rows: typeof original
+  } | null>(null)
+  useEffect(() => {
+    if (!ordered.some((entry) => entry.asyncTransform)) return
+    // Newest input wins: the timeline changes on every reply, and each change abandons the
+    // run before it, so a copy's queue holds one timeline at most.
+    const abandoned = new AbortController()
+    void (async () => {
+      let rows = initial
+      for (const entry of ordered) {
+        if (abandoned.signal.aborted) return
+        rows = await (entry.asyncTransform?.(rows, context, abandoned.signal) ?? entry.transform(rows, context))
+      }
+      if (!abandoned.signal.aborted) setAnswer({ initial, ordered, context, inputs, rows })
+    })()
+    return () => abandoned.abort()
+  }, [initial, ordered, context, inputs])
+  return answer?.initial === initial &&
+    answer.ordered === ordered &&
+    answer.context === context &&
+    answer.inputs === inputs
+    ? answer.rows
+    : original
+}

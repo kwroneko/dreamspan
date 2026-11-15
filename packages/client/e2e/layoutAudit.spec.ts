@@ -1,3 +1,4 @@
+import { pluginDisplayCopyTests } from "./support/pluginDisplayCopies.ts"
 import { hideThinkingTests } from "./support/hideThinking.ts"
 import { pluginCopyApprovalTests } from "./support/pluginCopyApproval.ts"
 import { pluginCopyTests, copiedPresenceTests } from "./support/pluginCopies.ts"
@@ -59,6 +60,7 @@ import { expectTextBox } from "./support/textbox.ts"
 test.skip(!process.env["LAYOUT_AUDIT"], "the layout audit runs only with LAYOUT_AUDIT=1")
 if (process.env.LAYOUT_AUDIT_THINKING_ONLY === "1") hideThinkingTests()
 if (process.env.LAYOUT_AUDIT_PLUGIN_COPIES_ONLY === "1") {
+  pluginDisplayCopyTests({ layoutOnly: true })
   pluginCopyTests()
   copiedPresenceTests()
   pluginCopyApprovalTests()

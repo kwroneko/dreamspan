@@ -4,6 +4,8 @@
 
 # Workshop, setup tools and plugins (Phase 6)
 
+**Built browser display-rule copies (adapters2, 2026-11-14; obsolete as an implementation proposal):** text transforms, approved script lists and timeline row policies now have typed browser-only v1 contracts, finite source copies and worker deadlines. This is the display subset of PLUGINS §§3–5/8 and WORKSHOP §§5.3/5.7; ARCHITECTURE §17 records the boundary and restoration behavior. Remaining action/composer adapters and other registries retain their previous status. Proposed details remain Proposed.
+
 **Built live-test fixes (fixes1114, 2026-11-14; obsolete as implementation proposals):** the coordinator's enabled-version ruling below is implemented, with immutable approved-build runtime checks, name/version step headings, cross-tab reload notices, pending-summary copy/range-bounded summary instructions and story-title Changes rows. See ARCHITECTURE §17 and the fixes1114 implementation record. Existing Proposed/Open choices retain their markings.
 
 

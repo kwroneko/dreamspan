@@ -64,3 +64,18 @@ it("asks again when an earlier enabled version adds access, but not when it remo
   expect(pluginAccessGrows(manifest, { ...manifest, surfaces: [...manifest.surfaces, "server:storage"] })).toBe(true)
   expect(pluginAccessGrows(null, manifest)).toBe(true)
 })
+
+it("a display copy's consent names the part, the browser and that the model's input stays as written", () => {
+  for (const [surface, part, words] of [
+    ["client:displayTransforms", "displayTransforms:display.regex", "Replaces Display regex."],
+    ["client:displayScriptLists", "displayScriptLists:display-regex.character", "Replaces Character display scripts."],
+    ["client:timelineTransforms", "timelineTransforms:timeline.lcm", "Replaces Summary rows and divider."]
+  ] as const) {
+    const text = pluginConsent({ ...manifest, surfaces: [surface], replaces: [part] }, "user")
+    expect(text[0]).toBe("Runs only in your browser. It can do anything you can do in the app.")
+    expect(text).toContain(words)
+    expect(text.join(" ")).toContain("odel requests stay as written.")
+    expect(text).not.toContain("Changes what the model sees.")
+    expect(text).not.toContain("Can send data to other sites.")
+  }
+})
