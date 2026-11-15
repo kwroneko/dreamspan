@@ -38,6 +38,11 @@ import { remoteOf } from "@rp/shared/cardSources.ts"
 import { NotFound, ServerError } from "@rp/shared/errors.ts"
 import { CardSources } from "../sources/CardSources.ts"
 
+/** How long a branch list waits for the shared shell snapshot before it lists the rows stored so far. */
+const PARTIAL_AFTER = "300 millis"
+/** How often a branch list that is filling in is read again while the first pass goes on. */
+const PROGRESS_EVERY = "1 second"
+
 /** A cast change as the state event it records (DATA-MODEL §5.3), chat-wide. */
 const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): StateEventData => {
   switch (change._tag) {
@@ -279,16 +284,14 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   const decoded = new WeakMap<object, ReturnType<typeof snapshotState>>()
-  const shellState = (id: UserId) =>
-    reader.ShellMaterialize({ userId: id }).pipe(
-      Effect.map((snapshot) => {
-        const known = decoded.get(snapshot)
-        if (known) return known
-        const state = snapshotState(snapshot)
-        decoded.set(snapshot, state)
-        return state
-      })
-    )
+  const decode = (snapshot: Parameters<typeof snapshotState>[0]) => {
+    const known = decoded.get(snapshot)
+    if (known) return known
+    const state = snapshotState(snapshot)
+    decoded.set(snapshot, state)
+    return state
+  }
+  const shellState = (id: UserId) => reader.ShellMaterialize({ userId: id }).pipe(Effect.map(decode))
   const libraries = new WeakMap<object, ReturnType<typeof libraryView>>()
   const readLibrary = (id: UserId) =>
     shellState(id).pipe(
@@ -304,6 +307,25 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
   const readCards = (id: UserId) => shellState(id).pipe(Effect.map(({ state }) => cardsView(state)))
   const readForks = (id: UserId, view: ShellForksView) =>
     shellState(id).pipe(Effect.map(({ state, labels }) => forksView(state, view, labels)))
+  /**
+   * The branch lists don't wait for a cold library's first pass (seconds to minutes at scale):
+   * the shared snapshot if it is ready within `PARTIAL_AFTER`, else one from the stored summaries
+   * alone, its other rows `pending` (`loading` says how many are ready). The pass goes on meanwhile.
+   */
+  const readForksNow = (id: UserId, view: ShellForksView) =>
+    reader.ShellMaterialize({ userId: id }).pipe(
+      Effect.timeoutOption(PARTIAL_AFTER),
+      Effect.flatMap(
+        Option.match({
+          onSome: (snapshot) => Effect.succeed(snapshot),
+          onNone: () => reader.ShellMaterializePartial({ userId: id })
+        })
+      ),
+      Effect.map((snapshot) => {
+        const { state, labels } = decode(snapshot)
+        return forksView(state, view, labels)
+      })
+    )
 
   /** Store a shared snapshot once, asynchronously, in parts so other writes go between them. */
   const storing = new WeakSet<ReadonlyArray<ChatSummaries>>()
@@ -329,7 +351,12 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
   // Subscribe before the first read. A one-place signal coalesces bursts without
   // dropping a change that arrives during a read; no streamed token triggers this.
   const shellGates = new Map<UserId, Semaphore.Semaphore>()
-  const watchShell = <A, E>(read: (id: UserId, live: boolean) => Effect.Effect<A, E>) =>
+  // `filling`: the answer has rows the first pass hasn't read yet. It is read again once the
+  // pass is done or `PROGRESS_EVERY` from now, whichever is first, so the rows fill in as it goes.
+  const watchShell = <A, E>(
+    read: (id: UserId, live: boolean) => Effect.Effect<A, E>,
+    filling?: (answer: A) => boolean
+  ) =>
     Stream.unwrap(
       Effect.gen(function* () {
         const id = yield* userId
@@ -337,16 +364,22 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         const gate = shellGates.get(id) ?? Semaphore.makeUnsafe(1)
         shellGates.set(id, gate)
         const signals = yield* Queue.dropping<void>(1)
+        const streamScope = yield* Effect.scope
         yield* Effect.addFinalizer(() => Queue.shutdown(signals))
         yield* hub.listen(() => {
           Queue.offerUnsafe(signals, undefined)
         })
+        const again = Effect.raceFirst(
+          Effect.ignore(reader.ShellMaterialize({ userId: id })),
+          Effect.sleep(PROGRESS_EVERY)
+        ).pipe(Effect.andThen(Effect.sync(() => Queue.offerUnsafe(signals, undefined))), Effect.forkIn(streamScope))
         return Stream.concat(Stream.succeed(undefined), Stream.fromQueue(signals)).pipe(
           Stream.mapEffect(() => {
             const reading = read(id, !initial).pipe(
-              Effect.tap(() =>
-                Effect.sync(() => {
+              Effect.tap((answer) =>
+                Effect.suspend(() => {
                   initial = false
+                  return filling?.(answer) === true ? Effect.asVoid(again) : Effect.void
                 })
               )
             )
@@ -557,17 +590,19 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     },
     WatchShellForks: (view) => {
       let previous: ShellForks | undefined
-      return watchShell((id, live) =>
-        (live
-          ? reader
-              .ShellForksLive({ userId: id, view })
-              .pipe(Effect.flatMap((answer) => (answer === null ? readForks(id, view) : Effect.succeed(answer))))
-          : readForks(id, view)
-        ).pipe(
-          Effect.tap(({ fresh }) => storeFresh(id, fresh)),
-          Effect.map(({ fresh: _, ...forks }) => new ShellForks(forks, { disableChecks: true })),
-          internal("WatchShellForks")
-        )
+      return watchShell(
+        (id, live) =>
+          (live
+            ? reader
+                .ShellForksLive({ userId: id, view })
+                .pipe(Effect.flatMap((answer) => (answer === null ? readForksNow(id, view) : Effect.succeed(answer))))
+            : readForksNow(id, view)
+          ).pipe(
+            Effect.tap(({ fresh }) => storeFresh(id, fresh)),
+            Effect.map(({ fresh: _, ...forks }) => new ShellForks(forks, { disableChecks: true })),
+            internal("WatchShellForks")
+          ),
+        (forks) => forks.loading !== undefined
       ).pipe(
         Stream.map((next) => {
           const update = shellForksUpdate(previous, next)

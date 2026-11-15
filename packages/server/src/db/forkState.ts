@@ -84,6 +84,15 @@ export const selectedInSql = (fork: string, s: string) =>
     ${s}.selected_version_id)`
 
 /**
+ * SQL from `FROM` on: the chat's versions being written now. Through the partial index of
+ * generating versions: with covering slot/version indexes, the planner otherwise walks every
+ * version of the chat (360 ms for 170,000 versions).
+ */
+export const generatingIn = (sql: SqlClient.SqlClient, chatId: string) =>
+  sql`versions v INDEXED BY versions_generating CROSS JOIN slots s ON s.id = v.slot_id
+    WHERE v.status = 'generating' AND s.chat_id = ${chatId}`
+
+/**
  * SQL: the message's own version that version row `v` is or stands in for. A fork's own
  * version is a copy standing in for one (schema/forkVersions.ts); swipes are the message's.
  */

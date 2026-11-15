@@ -141,7 +141,11 @@ const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection):
       (view.chat === null || f.chat.id === view.chat) &&
       (chats === null || chats.has(f.chat.id)) &&
       (needle === "" ||
-        [f.name, f.chatName, ...f.cast.flatMap((c) => [c.label, c.name])].some((n) => n.toLowerCase().includes(needle)))
+        // A fork not read yet (`pending`) has no cast: its own name and its chat's, when known.
+        (f.pending === true
+          ? [f.named ? f.name : "", f.chatName]
+          : [f.name, f.chatName, ...f.cast.flatMap((c) => [c.label, c.name])]
+        ).some((n) => n !== "" && n.toLowerCase().includes(needle)))
   )
   // A chat's branches by their last message, newest first (owner, 2026-11-01).
   const byLast = (list: ReadonlyArray<Fork>) =>
@@ -255,8 +259,17 @@ export const forksView = (state: ShellState, view: ShellForksView, availableLabe
   for (const row of scoped)
     for (const filter of CHAT_FILTERS)
       if (inChatFilter(state.chatIndex.get(row.chat.id)!, filter, state.pinnedChats)) filterCounts[filter]++
+  // While the first pass hasn't read every fork: how far it is in what the view lists, its
+  // chat's forks for a chat's branches, else its chats (by the rows that stand for them). A
+  // character's scope counts its chats' rows, since a fork not read yet has no cast to match.
+  const listed =
+    view.chat !== null
+      ? state.forks.filter((f) => f.chat.id === view.chat)
+      : perChat(state.forks.filter((f) => chatIds === null || chatIds.has(f.chat.id)))
+  const waiting = listed.reduce((n, f) => n + (f.pending === true ? 1 : 0), 0)
   return {
     filterCounts,
+    ...(waiting > 0 ? { loading: { ready: listed.length - waiting, total: listed.length } } : {}),
     sections: sections.map((section) => ({ ...section, rows: section.rows.map(labelled) })),
     people: [
       ...new Map(

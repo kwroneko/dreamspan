@@ -200,7 +200,13 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
       slot: SlotId,
       category: Schema.Literals(["just", "with", "was"])
     })
-  )
+  ),
+  /**
+   * Its walk isn't done yet (a cold library's first pass): only what the fork's own row says is
+   * known (its name, pin, chat, when it was made, and `endAt` from its tip, which orders it).
+   * Its preview, length, cast, split and threads are empty until it is.
+   */
+  pending: Schema.optionalKey(Schema.Literal(true))
 }) {}
 export class ShellLibrary extends Schema.Class<ShellLibrary>("ShellLibrary")({
   cards: Schema.Array(ShellCard),
@@ -276,7 +282,13 @@ export class ShellForks extends Schema.Class<ShellForks>("ShellForks")({
   /** In the view's order: each section's first `limit` rows, and how many it has. */
   sections: Schema.Array(Schema.Struct({ id: ShellSection, rows: Schema.Array(ShellFork), total: Schema.Int })),
   /** Every card the rows' casts name, once. */
-  people: Schema.Array(CastCard)
+  people: Schema.Array(CastCard),
+  /**
+   * While some forks in the view's scope are `pending`: how many of its forks are walked. The
+   * sections' rows, totals and order are those of every fork in scope, pending ones included,
+   * but a search matches pending forks by name only.
+   */
+  loading: Schema.optionalKey(Schema.Struct({ ready: Schema.Int, total: Schema.Int }))
 }) {}
 
 /** Initial snapshots and subsequent changed rows; order also carries removals and page boundaries. */

@@ -10,7 +10,7 @@ import type { LibrarySteps } from "./editorWrites.ts"
 import type { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import type { WriteOps } from "./ops.ts"
 import { agentHistorySnapshot, checkWorkshopAccess, rewriteFork, type WorkshopCall } from "./agentHistoryShared.ts"
-import { selectedIn, nextSeq } from "./forkState.ts"
+import { generatingIn, selectedIn, nextSeq } from "./forkState.ts"
 import { transaction } from "./tx.ts"
 import { nextReceiptTime } from "./operationReceipts.ts"
 import { workshopLimits } from "../workshopLimits.ts"
@@ -103,8 +103,7 @@ export const makeAgentHistoryWriteHandlers = (
           return yield* reject(
             `One rewrite can change at most ${workshopLimits.rewriteItems} texts or bindings. Narrow this rewrite.`
           )
-        const [running] =
-          yield* sql`SELECT 1 FROM versions v JOIN slots s ON s.id=v.slot_id WHERE s.chat_id=${input.chatId} AND v.status='generating' LIMIT 1`
+        const [running] = yield* sql`SELECT 1 FROM ${generatingIn(sql, input.chatId)} LIMIT 1`
         if (running) return yield* reject("That chat is writing a reply; try again when it's done.")
         const snapshot = yield* agentHistorySnapshot(sql, input.userId, input.chatId, input.forkId)
         if (snapshot.stamp !== input.expected)

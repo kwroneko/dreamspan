@@ -90,7 +90,12 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       CROSS JOIN fork_overrides o ON o.chat_id = j.value AND o.kind = 'insert' LIMIT 1`
       return inserted.length === 0
     })
-  const shellState = (userId: string, recompute: boolean | undefined, chatId?: string) =>
+  /**
+   * `partial`: walk nothing. A fork without a valid stored summary gets a pending row (`pending`),
+   * ordered by the time of its tip's shown message, so a cold library lists every fork while the
+   * parts (`ShellSummarizeStale`) fill them in.
+   */
+  const shellState = (userId: string, recompute: boolean | undefined, chatId?: string, partial = false) =>
     Effect.gen(function* () {
       const modules = yield* ActiveStateModules
       // The stamps first, which also opens the transaction's snapshot: the version read next is its own.
@@ -260,8 +265,34 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       // Each fork's summary is valid or not on its own (db/summaryValidity.ts): only the
       // stale ones are walked, and their walks need their full rows.
       const stale = records.flatMap((r) => (stored.has(r.id) ? [] : [r.id]))
+      const pending = new Set(partial ? stale : [])
+      if (partial && stale.length > 0)
+        // Where its row will sort: its tip's shown message, as the walk ends it unless an
+        // override hides that message (then the walk moves it; rare). Nothing else is guessed.
+        for (const row of yield* sql<{ id: string; chat_id: string; end_at: number | null }>`
+            SELECT f.id, f.chat_id,
+              CASE WHEN s.deleted_at IS NULL AND v.deleted_at IS NULL
+                THEN CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END END AS end_at
+            FROM json_each(${JSON.stringify(stale)}) j CROSS JOIN forks f ON f.id = j.value
+            LEFT JOIN slots s ON s.id = f.tip_slot_id
+            LEFT JOIN versions v ON v.slot_id = s.id AND v.id = ${sql.literal(shownInSql("f.id", "s"))}`)
+          stored.set(row.id, {
+            forkId: row.id,
+            chatId: row.chat_id,
+            preview: "",
+            messages: 0,
+            leaf: null,
+            endAt: row.end_at,
+            split: null,
+            cast: [],
+            added: [],
+            joined: [],
+            departed: [],
+            activity: [],
+            threads: []
+          })
       const staleRecords =
-        stale.length === 0
+        stale.length === 0 || partial
           ? []
           : yield* sql<ForkRow>`SELECT f.* FROM json_each(${JSON.stringify(stale)}) j
                 CROSS JOIN forks f ON f.id = j.value WHERE f.deleted_at IS NULL`
@@ -308,11 +339,18 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       for (const [id, current] of groupCurrent) {
         const root = byFork.get(id)
         const cast = stored.get(current.id)!.cast.flatMap((card) => byCard.get(card) ?? [])
-        const original = chatName(importState(current.title).title, cast).name
+        const title = importState(current.title).title
+        // A name made from the cast of a fork not read yet isn't known: none ("") rather than a wrong one.
+        const unknown =
+          pending.has(current.id) && chatName(title, []).name !== chatName(title, [{ name: "\u0001" }]).name
+        const original = unknown ? "" : chatName(title, cast).name
         titles.set(
           id,
           markers.has(id)
-            ? (root?.name ?? `${original} — ${new Date(root!.created_at).toLocaleString("en-GB", { timeZone: "UTC" })}`)
+            ? (root?.name ??
+                (unknown
+                  ? ""
+                  : `${original} — ${new Date(root!.created_at).toLocaleString("en-GB", { timeZone: "UTC" })}`))
             : original
         )
         if (markers.has(id) && root?.pinned_at !== null) pinnedChats.add(id)
@@ -373,7 +411,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           joined: s.joined as Array<EntityId>,
           departed: s.departed as Array<EntityId>,
           activity: s.activity as Array<Activity>,
-          ...(threads.length > 0 ? { threads } : {})
+          ...(threads.length > 0 ? { threads } : {}),
+          ...(pending.has(record.id) ? { pending: true as const } : {})
         }
       })
       for (const f of forks) {
@@ -528,7 +567,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               }))
       }
       // With what it walked: a caller that didn't store it gets it again (storing moves the version).
-      if (chatId === undefined && recompute !== true) memo = { userId, version, modules, state }
+      if (chatId === undefined && recompute !== true && pending.size === 0) memo = { userId, version, modules, state }
       return state
     })
   // Only bounded metadata in the foreground; complex groups/titles use the
@@ -614,6 +653,33 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       }
       return null
     })
+  /**
+   * The chat's split-chat links from its shell state. `partial`: from the stored summaries alone
+   * (`shellState`'s pending rows), and null where they'd be wrong: a chat with split chats (their
+   * links carry the split's place, from a summary) or one whose name needs a fork's cast not read yet.
+   */
+  const splitChats = (userId: string, chatId: ChatId, forkId: ForkId | null, partial: boolean) =>
+    Effect.gen(function* () {
+      const [chat] = yield* sql<{ current_fork_id: string | null }>`SELECT current_fork_id FROM chats
+          WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+      if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+      const state = yield* shellState(userId, false, chatId, partial)
+      const shown = state.forks.find((f) => f.sourceChatId === chatId && f.forkId === (forkId ?? chat.current_fork_id))
+      if (!shown) return yield* new NotFound({ entity: "branch", id: forkId ?? chatId })
+      const group = state.links.get(shown.chat.id)!
+      if (partial && (state.splitChatIds.size > 0 || group.title === "")) return null
+      const parentId = state.parents.get(group.id)
+      return {
+        group,
+        parent: parentId ? (state.links.get(parentId) ?? null) : null,
+        children: [...state.parents].flatMap(([child, parent]) =>
+          parent === group.id ? [state.links.get(child)!] : []
+        ),
+        forkIds: state.forks.filter((f) => f.chat.id === group.id).map((f) => f.forkId as ForkId),
+        hasSplits: state.splitChatIds.has(chatId),
+        canSplit: shown.forkId !== group.rootForkId
+      }
+    })
   const shellEpoch = makeShellEpoch(sql)
   // The trees read for the last part, kept for the next while the owner's stamp stays put, with
   // each chat's stamp when its tree was read. A write since reaches only some forks (their
@@ -626,6 +692,31 @@ export const makeShellReadHandlers = Effect.gen(function* () {
     readonly stamps: Map<string, number>
     readonly resolver: PathResolver
   } | null = null
+  const materialize = (userId: string, partial: boolean) =>
+    Effect.gen(function* () {
+      const state = yield* shellState(userId, false, undefined, partial)
+      const labels = yield* threadLabels(
+        sql,
+        state.forks.flatMap((f) =>
+          f.threads === undefined
+            ? []
+            : [
+                {
+                  forkId: f.forkId,
+                  chatId: f.sourceChatId ?? f.chat.id,
+                  place: f.threads[0]!
+                }
+              ]
+        )
+      )
+      return {
+        ...cardsView(state),
+        forks: state.forks.map(wire),
+        people: [...state.people.values()],
+        pinnedChats: [...state.pinnedChats],
+        labels: [...labels].map(([forkId, thread]) => ({ forkId, thread }))
+      }
+    })
   const handlers = {
     ShellEpoch: ({ userId }) => shellEpoch(userId).pipe(query("ShellEpoch")),
     ShellSummarizeStale: ({ userId, chatId }) =>
@@ -634,9 +725,18 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         const userStamp = yield* summaryStamps(sql, userId)
         const only = chatId ?? ""
         // As `shellState` walks them: a chat an import is still writing isn't.
-        const stale = (yield* sql<ForkRow & { shell_stamp: number; title: string; fork_stamp: number }>`
-          SELECT f.*, c.shell_stamp, c.title,
-            coalesce((SELECT stamp FROM fork_shell_stamps WHERE fork_id = f.id), 0) AS fork_stamp
+        type Stale = ForkRow & {
+          shell_stamp: number
+          fork_stamp: number
+          current_fork_id: string | null
+          tip_at: number | null
+        }
+        const stale = (yield* sql<Stale & { title: string }>`
+          SELECT f.*, c.shell_stamp, c.title, c.current_fork_id,
+            coalesce((SELECT stamp FROM fork_shell_stamps WHERE fork_id = f.id), 0) AS fork_stamp,
+            (SELECT CASE WHEN v.origin IN ('edited', 'changeset') THEN ts.created_at ELSE v.created_at END
+              FROM slots ts JOIN versions v ON v.slot_id = ts.id AND v.id = ${sql.literal(shownInSql("f.id", "ts"))}
+              WHERE ts.id = f.tip_slot_id) AS tip_at
           FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
           LEFT JOIN fork_summaries s ON s.fork_id = f.id
           WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL
@@ -646,9 +746,34 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         // Parts are for chats with many stale forks, which share a tree. One or two (a chat after a
         // write, or a small chat) are left to the read that wants them, which reads only their paths,
         // once: a reply streaming into the chat would make every part's walk of them wasted.
-        const byStaleChat = new Map<string, Array<ForkRow & { shell_stamp: number; fork_stamp: number }>>()
-        for (const row of stale) byStaleChat.set(row.chat_id, [...(byStaleChat.get(row.chat_id) ?? []), row])
-        for (const [id, forks] of byStaleChat) if (forks.length <= 2) byStaleChat.delete(id)
+        const grouped = new Map<string, Array<Stale>>()
+        for (const row of stale) grouped.set(row.chat_id, [...(grouped.get(row.chat_id) ?? []), row])
+        for (const [id, forks] of grouped) if (forks.length <= 2) grouped.delete(id)
+        // What the panel shows first goes first (the branch rows fill in as parts are stored): the
+        // most recently used chat, and in each chat its current fork, then the forks nearest it in
+        // the branch list's order (by last message, as `shellState` orders pending rows), outwards.
+        const recency = (forks: ReadonlyArray<Stale>) =>
+          Math.max(...forks.map((f) => Math.max(f.created_at, f.last_chatted_at ?? 0)))
+        const byStaleChat = new Map(
+          [...grouped]
+            .sort(([, a], [, b]) => recency(b) - recency(a))
+            .map(([id, forks]) => {
+              const listed = [...forks].sort(
+                (a, b) => (b.tip_at ?? b.created_at) - (a.tip_at ?? a.created_at) || b.created_at - a.created_at
+              )
+              const at = Math.max(
+                0,
+                listed.findIndex((f) => f.id === f.current_fork_id)
+              )
+              return [
+                id,
+                listed
+                  .map((fork, i) => ({ fork, d: Math.abs(i - at), i }))
+                  .sort((a, b) => a.d - b.d || a.i - b.i)
+                  .map(({ fork }) => fork)
+              ] as const
+            })
+        )
         const total = [...byStaleChat.values()].reduce((n, forks) => n + forks.length, 0)
         if (total === 0) {
           parts = null
@@ -671,13 +796,34 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           if (!current.stamps.has(id)) current.stamps.set(id, forks[0]!.shell_stamp)
         const started = Date.now()
         const done: Array<ForkSummary> = []
-        // The forks of a chat share its tree through the resolver, a batch at a time.
+        // Each chat's current fork first, alone and by its path, before any tree is read: on a cold
+        // chat of thousands of messages the tree takes seconds, and the chat's row and the branch it
+        // opens on needn't wait for them. The most recently used chats first.
         for (const all of byStaleChat.values()) {
           if (done.length > 0 && Date.now() - started >= PART_MS) break
-          const forks = all.filter((fork) => kept(current, fork))
-          for (let at = 0; at < forks.length && (done.length === 0 || Date.now() - started < PART_MS); at += PART_FORKS)
-            done.push(...(yield* computeForkSummaries(sql, forks.slice(at, at + PART_FORKS), false, current.resolver)))
+          const first = all[0]
+          if (
+            first !== undefined &&
+            first.id === first.current_fork_id &&
+            kept(current, first) &&
+            !current.resolver.holds(first.chat_id)
+          )
+            done.push(...(yield* computeForkSummaries(sql, [first], true)))
         }
+        // Then the forks of a chat share its tree through the resolver, a batch at a time.
+        if (done.length === 0)
+          for (const all of byStaleChat.values()) {
+            if (done.length > 0 && Date.now() - started >= PART_MS) break
+            const forks = all.filter((fork) => kept(current, fork))
+            for (
+              let at = 0;
+              at < forks.length && (done.length === 0 || Date.now() - started < PART_MS);
+              at += PART_FORKS
+            )
+              done.push(
+                ...(yield* computeForkSummaries(sql, forks.slice(at, at + PART_FORKS), false, current.resolver))
+              )
+          }
         // Nothing to keep the trees for once the last part is done.
         if (done.length === total) parts = null
         const byChat = new Map<string, Array<ForkSummary>>()
@@ -692,31 +838,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           remaining: total - done.length
         }
       }).pipe(query("ShellSummarizeStale")),
-    ShellMaterialize: ({ userId }) =>
-      Effect.gen(function* () {
-        const state = yield* shellState(userId, false)
-        const labels = yield* threadLabels(
-          sql,
-          state.forks.flatMap((f) =>
-            f.threads === undefined
-              ? []
-              : [
-                  {
-                    forkId: f.forkId,
-                    chatId: f.sourceChatId ?? f.chat.id,
-                    place: f.threads[0]!
-                  }
-                ]
-          )
-        )
-        return {
-          ...cardsView(state),
-          forks: state.forks.map(wire),
-          people: [...state.people.values()],
-          pinnedChats: [...state.pinnedChats],
-          labels: [...labels].map(([forkId, thread]) => ({ forkId, thread }))
-        }
-      }).pipe(query("ShellMaterialize")),
+    ShellMaterialize: ({ userId }) => materialize(userId, false).pipe(query("ShellMaterialize")),
+    ShellMaterializePartial: ({ userId }) => materialize(userId, true).pipe(query("ShellMaterializePartial")),
     ShellLibrary: ({ userId, recompute }) =>
       Effect.map(shellState(userId, recompute), libraryView).pipe(query("ShellLibrary")),
     ShellCards: ({ userId }) => Effect.map(shellState(userId, false), cardsView).pipe(query("ShellCards")),
@@ -726,27 +849,14 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const fast = yield* splitMetadata(userId, chatId, forkId)
         if (fast !== null) return fast
-        const [chat] = yield* sql<{ current_fork_id: string | null }>`SELECT current_fork_id FROM chats
-          WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
-        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
-        const state = yield* shellState(userId, false, chatId)
-        const shown = state.forks.find(
-          (f) => f.sourceChatId === chatId && f.forkId === (forkId ?? chat.current_fork_id)
-        )
-        if (!shown) return yield* new NotFound({ entity: "branch", id: forkId ?? chatId })
-        const group = state.links.get(shown.chat.id)!
-        const parentId = state.parents.get(group.id)
-        return {
-          group,
-          parent: parentId ? (state.links.get(parentId) ?? null) : null,
-          children: [...state.parents].flatMap(([child, parent]) =>
-            parent === group.id ? [state.links.get(child)!] : []
-          ),
-          forkIds: state.forks.filter((f) => f.chat.id === group.id).map((f) => f.forkId as ForkId),
-          hasSplits: state.splitChatIds.has(chatId),
-          canSplit: shown.forkId !== group.rootForkId
-        }
+        return (yield* splitChats(userId, chatId, forkId, false))!
       }).pipe(query("GetSplitChats")),
+    GetSplitChatsPartial: ({ userId, chatId, forkId }) =>
+      Effect.gen(function* () {
+        const fast = yield* splitMetadata(userId, chatId, forkId)
+        if (fast !== null) return fast
+        return yield* splitChats(userId, chatId, forkId, true)
+      }).pipe(query("GetSplitChatsPartial")),
     ShellForks: ({ userId, view }) =>
       Effect.gen(function* () {
         const state = yield* shellState(userId, false)

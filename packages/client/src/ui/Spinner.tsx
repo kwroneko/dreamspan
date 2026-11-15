@@ -16,6 +16,40 @@ export function Spinner({ className = "" }: { className?: string }) {
   )
 }
 
+/**
+ * A quiet bar where a line of text will be once it's read. Give it the line's own box (a
+ * `min-h-*` wrapper or the line's height) so nothing moves when the text replaces it.
+ */
+export function PlaceholderBar({ className = "" }: { className?: string }) {
+  return <span aria-hidden="true" className={`block h-2.5 rounded-sm bg-border ${className}`} />
+}
+
+/**
+ * A list that is still filling in: "Loading branches… 120 of 600", announced politely. Shown
+ * only while `ready < total`, on a line of its own that the caller keeps in place.
+ */
+export function LoadingProgress({
+  noun,
+  ready,
+  total,
+  className = ""
+}: {
+  noun: string
+  ready: number
+  total: number
+  className?: string
+}) {
+  if (ready >= total) return null
+  return (
+    <span role="status" className={`flex min-w-0 items-center gap-1 text-xs text-muted ${className}`}>
+      <Spinner className="size-3" />
+      <span className="truncate tabular-nums">
+        Loading {noun}… {ready.toLocaleString()} of {total.toLocaleString()}
+      </span>
+    </span>
+  )
+}
+
 /** Loads the page again: what retries a code chunk that never arrived. */
 export const reloadPage = () => window.location.reload()
 

@@ -17,7 +17,7 @@ db.exec(`CREATE TABLE chats(id TEXT PRIMARY KEY,deleted_at INTEGER);
   CREATE INDEX fork_overrides_chat ON fork_overrides(chat_id);
   CREATE TABLE fork_labels(fork_id TEXT PRIMARY KEY,point BLOB);
   CREATE TABLE fork_steps(kind TEXT,target_id TEXT,label BLOB,override_id TEXT,PRIMARY KEY(kind,target_id,label)) WITHOUT ROWID;`)
-for (const name of ["slots_chat_depth", "slots_shell_chain", "versions_shell"])
+for (const name of ["slots_chat_depth", "slots_shell_chain", "versions_shell", "versions_shell_meta"])
   db.exec(baseline.find((ddl) => ddl.startsWith(`CREATE INDEX ${name} `))!)
 db.exec(`BEGIN; INSERT INTO chats VALUES('chat',NULL);
   INSERT INTO forks VALUES('current','chat','s999',NULL),('frozen','chat','s999',NULL);

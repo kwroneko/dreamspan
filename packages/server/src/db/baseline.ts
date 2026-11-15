@@ -697,8 +697,7 @@ export const baseline: ReadonlyArray<string> = [
     fork_id TEXT,
     -- Creation provenance, distinct from the fork owning a replacement copy. Fork deletion
     -- retains tombstones; chat deletion removes both versions and forks in one transaction.
-    authoring_fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
-    UNIQUE (slot_id, ordinal)
+    authoring_fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED
   ) STRICT`,
   `CREATE TABLE version_texts (
     version_seq INTEGER PRIMARY KEY REFERENCES versions(seq) ON DELETE CASCADE,
@@ -795,9 +794,19 @@ export const baseline: ReadonlyArray<string> = [
   // Startup's InterruptGenerations finds the few generating versions without scanning every
   // message: 8.5 s at 500,000 messages before (fux1).
   `CREATE INDEX versions_generating ON versions(id) WHERE status = 'generating'`,
-  // Cover selected shell metadata and every retained swipe's identity together.
-  // The shell joins by slot and version so both reads stay on these index pages.
-  `CREATE INDEX versions_shell ON versions(slot_id, id, purged_at, status, speaker_entity_id, origin, created_at, seq, content_length, ordinal)`,
+  // Every retained swipe's identity, by slot: participation reads all of a slot's swipes from
+  // these pages. It is the slot's only version index: a second slot-keyed one (a UNIQUE
+  // constraint's) doubled the pages a bulk rewrite dirties, one new swipe in each of thousands of
+  // slots (perfshell3), so the trigger below keeps ordinals unique by probing this one
+  // (versions_identity_fixed keeps slot and ordinal from changing after insert).
+  `CREATE INDEX versions_shell ON versions(slot_id, ordinal, id, purged_at)`,
+  // The shown version's shell metadata, by id (the shell joins on slot and id): a new version's
+  // id sorts after the old ones, so a bulk rewrite appends to these pages instead of dirtying one
+  // per slot.
+  `CREATE INDEX versions_shell_meta ON versions(id, slot_id, purged_at, status, speaker_entity_id, origin, created_at, content_length)`,
+  `CREATE TRIGGER versions_slot_ordinal_unique BEFORE INSERT ON versions
+    WHEN EXISTS (SELECT 1 FROM versions WHERE slot_id = NEW.slot_id AND ordinal = NEW.ordinal)
+    BEGIN SELECT RAISE(ABORT, 'UNIQUE constraint failed: versions.slot_id, versions.ordinal'); END`,
   // Human authors are sparse among model swipes; include the predicate columns too
   // so SQLite can answer from the index without opening version records.
   `CREATE INDEX versions_slot_human_authors ON versions(slot_id, writer, speaker_entity_id, origin, created_at, purged_at, ordinal)

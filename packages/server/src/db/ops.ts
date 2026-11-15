@@ -3593,6 +3593,15 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.NullOr(SplitChats),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * `GetSplitChats` from the stored summaries alone, walking nothing: for a chat with no split
+   * chats, whose name doesn't need the cast of a fork not read yet. Null when it would.
+   */
+  Rpc.make("GetSplitChatsPartial", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
+    success: Schema.NullOr(SplitChats),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("ThreadsOfFast", {
     payload: { userId: UserId, chatId: ChatId, forkId: ForkId },
     success: Schema.NullOr(Schema.Array(ThreadSet)),
@@ -3641,6 +3650,15 @@ export class ReadOps extends RpcGroup.make(
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   Rpc.make("ShellEpoch", { payload: { userId: UserId }, success: Schema.String, error: StorageError }),
   Rpc.make("ShellMaterialize", {
+    payload: { userId: UserId },
+    success: ShellSnapshotRead,
+    error: StorageError
+  }),
+  /**
+   * `ShellMaterialize` from the stored summaries alone, while the first pass hasn't stored them
+   * all: a fork without a valid one is a `pending` row. Walks nothing, so it is an ordinary read.
+   */
+  Rpc.make("ShellMaterializePartial", {
     payload: { userId: UserId },
     success: ShellSnapshotRead,
     error: StorageError

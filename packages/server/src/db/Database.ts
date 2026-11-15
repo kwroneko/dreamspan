@@ -44,6 +44,8 @@ interface DatabaseOptions {
   readonly bundleDir?: string
   /** Recycle bin capacities; defaults when omitted. */
   readonly binLimits?: BinLimits
+  /** A wait before each part of the shell's passes but the library pass's first (`storeStaleParts`); none when omitted. Tests only. */
+  readonly shellPassPauseMs?: number
 }
 
 class WorkerBundleMissing extends Schema.TaggedError<WorkerBundleMissing>()("WorkerBundleMissing", {
@@ -242,12 +244,17 @@ const STALLED_PARTS = 2
 export const storeStaleParts = <C, E1, E2>(
   gate: Semaphore.Semaphore,
   summarize: () => Effect.Effect<{ readonly chats: ReadonlyArray<C>; readonly remaining: number }, E1>,
-  store: (chats: ReadonlyArray<C>) => Effect.Effect<unknown, E2>
+  store: (chats: ReadonlyArray<C>) => Effect.Effect<unknown, E2>,
+  /** A wait between parts (SHELL_PASS_PAUSE_MS), none by default: what shows a pass half done. */
+  pauseMs = 0
 ) =>
   Effect.gen(function* () {
     let left = Infinity
     let stalled = 0
+    let first = true
     while (true) {
+      if (!first && pauseMs > 0) yield* Effect.sleep(pauseMs)
+      first = false
       const part = yield* gate.withPermits(1)(
         Effect.gen(function* () {
           const part = yield* summarize()
@@ -324,9 +331,15 @@ export const layer = (options: DatabaseOptions) => {
                 writer.StoreForkSummaries({ userId, chats })
               // What the materialization still computed itself is stored under the same gate
               // before anyone sees it, so a branch read waiting for the gate never computes it again.
+              const layerScope = yield* Effect.scope
               const shared = yield* makeShellMaterialization((userId: UserId) =>
                 Effect.andThen(
-                  storeStaleParts(gateOf(userId), () => raw.ShellSummarizeStale({ userId }), store(userId)),
+                  storeStaleParts(
+                    gateOf(userId),
+                    () => raw.ShellSummarizeStale({ userId }),
+                    store(userId),
+                    options.shellPassPauseMs
+                  ),
                   gateOf(userId).withPermits(1)(
                     Effect.flatMap(raw.ShellMaterialize({ userId }), (snapshot) =>
                       snapshot.fresh.length === 0
@@ -349,8 +362,45 @@ export const layer = (options: DatabaseOptions) => {
               )
               // A chat's branch reads first store its stale summaries, so what they compute is
               // kept for the next read and the shell instead of computed again by each of them.
+              // A chat's parts wait SHELL_PASS_PAUSE_MS before their first one too: only the
+              // library pass's first part doesn't, so a pass held half done stays so for every reader.
+              const pauseMs = options.shellPassPauseMs ?? 0
+              const held = <A, E, R>(part: Effect.Effect<A, E, R>) =>
+                pauseMs > 0 ? Effect.andThen(Effect.sleep(pauseMs), part) : part
               const storeChat = (userId: UserId, chatId: ChatId) =>
-                storeStaleParts(gateOf(userId), () => raw.ShellSummarizeStale({ userId, chatId }), store(userId))
+                held(
+                  storeStaleParts(
+                    gateOf(userId),
+                    () => raw.ShellSummarizeStale({ userId, chatId }),
+                    store(userId),
+                    pauseMs
+                  )
+                )
+              // One part of a chat, stored.
+              const chatPart = (userId: UserId, chatId: ChatId) =>
+                held(
+                  gateOf(userId)
+                    .withPermits(1)(
+                      Effect.flatMap(raw.ShellSummarizeStale({ userId, chatId }), (part) =>
+                        part.chats.length > 0 ? store(userId)(part.chats) : Effect.void
+                      )
+                    )
+                    .pipe(Effect.ignore)
+                )
+              // The open chat's stale forks, its parts between the library's (one at a time per user):
+              // its branch list fills in first. Once per chat at a time; outlives the read that asked.
+              const reading = new Set<string>()
+              const ahead = (userId: UserId, chatId: ChatId) =>
+                Effect.suspend(() => {
+                  const key = JSON.stringify([userId, chatId])
+                  if (reading.has(key)) return Effect.void
+                  reading.add(key)
+                  return storeChat(userId, chatId).pipe(
+                    Effect.ensuring(Effect.sync(() => reading.delete(key))),
+                    Effect.forkIn(layerScope),
+                    Effect.asVoid
+                  )
+                })
               return Reader.of({
                 ...raw,
                 ListForks: ((payload, options) =>
@@ -360,14 +410,29 @@ export const layer = (options: DatabaseOptions) => {
                         storeChat(payload.userId, payload.chatId),
                         raw.ListForks<false>(payload)
                       )) as typeof raw.ListForks,
-                GetSplitChats: ((payload, options) =>
-                  options !== undefined
-                    ? raw.GetSplitChats(payload, options)
-                    : Effect.flatMap(raw.GetSplitChatsFast<false>(payload), (answer) =>
-                        answer === null
-                          ? Effect.andThen(storeChat(payload.userId, payload.chatId), raw.GetSplitChats<false>(payload))
-                          : Effect.succeed(answer)
-                      )) as typeof raw.GetSplitChats,
+                // From what is stored when that is enough (a chat whose forks aren't all read yet
+                // still opens its branch list), while the chat's forks are read ahead of the rest.
+                // Else one part of the chat first (its current fork, alone, when that isn't read),
+                // and only then, if still needed, all of it.
+                GetSplitChats: ((payload, options) => {
+                  if (options !== undefined) return raw.GetSplitChats(payload, options)
+                  const partial = raw.GetSplitChatsPartial<false>(payload)
+                  return Effect.flatMap(partial, (answer) =>
+                    answer !== null
+                      ? Effect.as(ahead(payload.userId, payload.chatId), answer)
+                      : Effect.andThen(
+                          chatPart(payload.userId, payload.chatId),
+                          Effect.flatMap(partial, (again) =>
+                            again !== null
+                              ? Effect.as(ahead(payload.userId, payload.chatId), again)
+                              : Effect.andThen(
+                                  storeChat(payload.userId, payload.chatId),
+                                  raw.GetSplitChats<false>(payload)
+                                )
+                          )
+                        )
+                  )
+                }) as typeof raw.GetSplitChats,
                 ThreadsOf: ((payload, options) =>
                   options !== undefined
                     ? raw.ThreadsOf(payload, options)

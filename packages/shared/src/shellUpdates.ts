@@ -41,6 +41,7 @@ export const shellForksUpdate = (previous: ShellForks | undefined, next: ShellFo
   return {
     filterCounts: next.filterCounts,
     people: next.people,
+    ...(next.loading ? { loading: next.loading } : {}),
     sections: next.sections.map((section) => ({
       ...section,
       rows: changed(before, section.rows, (row) => row.forkId),
@@ -59,6 +60,7 @@ export const applyShellForks = (previous: ShellForks | undefined, update: ShellF
   return {
     filterCounts: update.filterCounts,
     people: update.people,
+    ...(update.loading ? { loading: update.loading } : {}),
     sections: update.sections.map((section) => ({
       id: section.id,
       total: section.total,

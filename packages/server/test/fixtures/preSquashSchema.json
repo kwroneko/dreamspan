@@ -1066,7 +1066,13 @@
       "type": "index",
       "name": "versions_shell",
       "tbl_name": "versions",
-      "sql": "CREATE INDEX versions_shell ON versions(slot_id, id, purged_at, status, speaker_entity_id, origin, created_at, seq, content_length, ordinal)"
+      "sql": "CREATE INDEX versions_shell ON versions(slot_id, ordinal, id, purged_at)"
+    },
+    {
+      "type": "index",
+      "name": "versions_shell_meta",
+      "tbl_name": "versions",
+      "sql": "CREATE INDEX versions_shell_meta ON versions(id, slot_id, purged_at, status, speaker_entity_id, origin, created_at, content_length)"
     },
     {
       "type": "index",
@@ -1618,7 +1624,7 @@
       "type": "table",
       "name": "versions",
       "tbl_name": "versions",
-      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY REFERENCES version_texts(version_seq) DEFERRABLE INITIALLY DEFERRED, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content_length INTEGER NOT NULL DEFAULT 0 CHECK (content_length >= 0), macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), origin TEXT NOT NULL, source_version_id TEXT REFERENCES versions(id), -- How a reply's speaker was chosen (SpeakerPick): {\"by\":\"auto\"} while the decision model -- is to choose, then its pick, or {\"by\":\"order\"} when Auto's pick stood. speaker_pick_json TEXT CHECK (speaker_pick_json IS NULL OR json_valid(speaker_pick_json)), rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT, fork_id TEXT, -- Creation provenance, distinct from the fork owning a replacement copy. Fork deletion -- retains tombstones; chat deletion removes both versions and forks in one transaction. authoring_fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED, UNIQUE (slot_id, ordinal) ) STRICT"
+      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY REFERENCES version_texts(version_seq) DEFERRABLE INITIALLY DEFERRED, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content_length INTEGER NOT NULL DEFAULT 0 CHECK (content_length >= 0), macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), origin TEXT NOT NULL, source_version_id TEXT REFERENCES versions(id), -- How a reply's speaker was chosen (SpeakerPick): {\"by\":\"auto\"} while the decision model -- is to choose, then its pick, or {\"by\":\"order\"} when Auto's pick stood. speaker_pick_json TEXT CHECK (speaker_pick_json IS NULL OR json_valid(speaker_pick_json)), rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT, fork_id TEXT, -- Creation provenance, distinct from the fork owning a replacement copy. Fork deletion -- retains tombstones; chat deletion removes both versions and forks in one transaction. authoring_fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED ) STRICT"
     },
     {
       "type": "table",
@@ -3701,6 +3707,12 @@
       "name": "versions_rollout_id_same_chat_update",
       "tbl_name": "versions",
       "sql": "CREATE TRIGGER versions_rollout_id_same_chat_update BEFORE UPDATE OF rollout_id, slot_id ON versions WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id) BEGIN SELECT RAISE(ABORT, 'versions.rollout_id must be in the same chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "versions_slot_ordinal_unique",
+      "tbl_name": "versions",
+      "sql": "CREATE TRIGGER versions_slot_ordinal_unique BEFORE INSERT ON versions WHEN EXISTS (SELECT 1 FROM versions WHERE slot_id = NEW.slot_id AND ordinal = NEW.ordinal) BEGIN SELECT RAISE(ABORT, 'UNIQUE constraint failed: versions.slot_id, versions.ordinal'); END"
     },
     {
       "type": "trigger",

@@ -31,6 +31,7 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   formatWorkers: 1,
   thumbnailWorkers: 1,
   dbAllowNetworkFs: false,
+  shellPassPauseMs: 0,
   // The run's own bundles unless TEST_DB_WORKERS=source (bundles.ts); tests of the source
   // entry points ask for source.
   dbWorkers: testWorkerMode,

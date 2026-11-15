@@ -581,7 +581,8 @@ const DatabaseLive = Layer.unwrap(
       dataDir: config.dataDir,
       readers: config.dbReaders,
       allowNetworkFs: config.dbAllowNetworkFs,
-      workers: config.dbWorkers
+      workers: config.dbWorkers,
+      shellPassPauseMs: config.shellPassPauseMs
     })
   )
 )

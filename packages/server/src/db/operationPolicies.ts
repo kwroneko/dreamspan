@@ -1,5 +1,6 @@
 import { historyFork } from "./historyShared.ts"
 import { onForkPath } from "./forks.ts"
+import { generatingIn } from "./forkState.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
 // Worker-only undo policies for operation exposures. No non-database work in a transaction.
 import { Effect } from "effect"
@@ -370,8 +371,7 @@ export const operationPolicies = makeRegistry<OperationPolicy>([
       Effect.forEach(input.applications, (application) =>
         Effect.gen(function* () {
           const chat = yield* snapshotChat(sql, userId, application.chatId)
-          const running =
-            yield* sql`SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id WHERE s.chat_id = ${chat.id} AND v.status = 'generating'`
+          const running = yield* sql`SELECT 1 FROM ${generatingIn(sql, chat.id)}`
           if (running.length) return yield* refuseOperation("That chat is writing a reply. Try again when it finishes.")
           const records = yield* sql<{
             id: string
