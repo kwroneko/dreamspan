@@ -1197,6 +1197,19 @@ test.describe("synthetic library and every app surface", () => {
                   })
                 parent = sent.entry!.slotId
               }
+              // A note on there, with a long title and text, for "Notes to bring".
+              const note = yield* api.CreateChatNote({
+                chatId: made.id,
+                forkId: made.currentForkId!,
+                title: "Harbor rules for every crew that docks after dark, written long to test wrapping",
+                content:
+                  "No boat leaves after the second bell, and every crane stays locked until the harbor master signs the night ledger in person."
+              })
+              yield* api.ChangeCast({
+                chatId: made.id,
+                slotId: parent,
+                change: { _tag: "Note", entityId: note.entityId, active: true }
+              })
               return made
             })
           )
@@ -1212,11 +1225,13 @@ test.describe("synthetic library and every app surface", () => {
             .getByRole("button", { name: source.title, exact: true })
             .click()
           await expect(dialog.getByTestId("merge-relation")).toBeVisible()
+          await dialog.getByRole("checkbox", { name: /^Harbor rules/ }).click()
+          await dialog.getByRole("radio", { name: /^Each character keeps its own chat's past/ }).click()
           await dialog.getByText("What the model reads", { exact: true }).click()
           await audit("chatmerge-dialog", '[role="dialog"]')
           await dialog.getByRole("button", { name: "Merge", exact: true }).click()
           await expect(dialog).toHaveCount(0)
-          const row = page.locator("article[data-merge]").last()
+          const row = page.getByRole("article", { name: `Merged chat “${source.title}”`, exact: true })
           await row.getByRole("button", { name: /^Merged “/ }).click()
           await expect(row.getByRole("list", { name: /^Messages of / })).toBeVisible()
           await audit("chatmerge-timeline", "article[data-merge]")

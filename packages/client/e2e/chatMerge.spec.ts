@@ -155,6 +155,124 @@ for (const [width, theme] of [
     await shoot(page, `settings-${width}-${theme}`)
   })
 
+for (const [width, theme] of [
+  [1440, "light"],
+  [1440, "dark"],
+  [390, "light"],
+  [390, "dark"]
+] as const)
+  test(`merging another chat with each character keeping its own past (${width} ${theme})`, async ({ page }) => {
+    const suffix = `own-${width}-${theme}`
+    const { home } = await seed(suffix)
+    await open(page, `/chats/${home.chatId}`, width, theme)
+    await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Merge another chat…", exact: true }).click()
+    await pickSource(page, `Docks ${suffix}`)
+    const choice = dialog(page).getByRole("radiogroup", { name: "How the characters see it" })
+    await expect(choice.getByRole("radio", { name: /^Everyone reads both chats/ })).toBeChecked()
+    await choice.getByRole("radio", { name: /^Each character keeps its own chat's past/ }).click()
+    await expect(choice.getByRole("radio", { name: /^Each character keeps its own chat's past/ })).toBeChecked()
+    await expect(choice).toContainText("Everyone reads what follows the merge. A narrator reads both.")
+    await dialog(page).getByText("What the model reads", { exact: true }).click()
+    const reader = dialog(page).getByRole("combobox", { name: "For" })
+    const section = dialog(page).getByTestId("merge-section")
+    await reader.click()
+    await page.getByRole("option", { name: /^Kai/ }).click()
+    await expect(section).toContainText("Kai: Kai climbs the crane at dusk.")
+    await expect(section).toContainText("[Of this chat before the merge, only what Kai was there for]")
+    await reader.click()
+    await page.getByRole("option", { name: /^Mira/ }).click()
+    await expect(section).toContainText(`[Nothing of “Docks ${suffix}”: Mira wasn't there.]`)
+    await expect(section).not.toContainText("Kai climbs the crane")
+    await shoot(page, `own-past-dialog-${width}-${theme}`)
+    await dialog(page).getByRole("button", { name: "Merge", exact: true }).click()
+    await expect(dialog(page)).toHaveCount(0)
+    const row = page.locator("article[data-merge]").last()
+    await expect(row).toBeVisible()
+    // One user click must survive the merge's pending state/metadata updates.
+    await row.getByRole("button", { name: /^Merged “/ }).click()
+    await expect(row.getByRole("list", { name: /^Messages of / })).toBeVisible()
+    await expect(row.getByRole("button", { name: /^Merged “/ })).toHaveAttribute("aria-expanded", "true")
+    const stored = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.ReadPath({ chatId: home.chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 50 })
+    )
+    expect(stored.entries.at(-1)?.version.origin).toBe("merge")
+  })
+
+for (const [width, theme] of [
+  [1440, "light"],
+  [1440, "dark"],
+  [390, "light"],
+  [390, "dark"]
+] as const)
+  test(`merging another chat brings only the notes ticked (${width} ${theme})`, async ({ page }) => {
+    const suffix = `notes-${width}-${theme}`
+    const { home, away } = await seed(suffix)
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        for (const [title, content] of [
+          ["Harbor curfew", "No boats leave after the second bell."],
+          ["Gull omens", '<img src=x onerror="globalThis.mergeNoteInjected=true"> Three gulls mean a storm.']
+        ] as const) {
+          const note = yield* api.CreateChatNote({ chatId: away.chatId, forkId: away.forkId, title, content })
+          yield* api.ChangeCast({
+            chatId: away.chatId,
+            slotId: away.slots.at(-1)!,
+            change: { _tag: "Note", entityId: note.entityId, active: true }
+          })
+        }
+      })
+    )
+    await open(page, `/chats/${home.chatId}`, width, theme)
+    await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+    await page.getByRole("menuitem", { name: "Merge another chat…", exact: true }).click()
+    await pickSource(page, `Docks ${suffix}`)
+    const notes = dialog(page).getByRole("region", { name: "Notes to bring" })
+    await expect(notes).toContainText(`Notes on in “Docks ${suffix}”.`)
+    const curfew = notes.getByRole("checkbox", { name: "Harbor curfew" })
+    const omens = notes.getByRole("checkbox", { name: "Gull omens" })
+    await expect(curfew).not.toBeChecked()
+    await expect(omens).not.toBeChecked()
+    await expect(notes).toContainText("Every reply reads it, this chat's characters' too.")
+    await expect(notes).toContainText('<img src=x onerror="globalThis.mergeNoteInjected=true">')
+    await expect(notes.locator("img, script")).toHaveCount(0)
+    expect(
+      await page.evaluate(() => (window as unknown as { mergeNoteInjected?: boolean }).mergeNoteInjected)
+    ).toBeUndefined()
+    await expect(notes).toContainText("“No boats leave after the second bell.”")
+    // Its hint is the tooltip on hover and focus, and the box's description.
+    await expect(curfew).toHaveAccessibleDescription(
+      /^Copies this note into this chat\. The other chat keeps its own\./
+    )
+    await curfew.click()
+    await expect(curfew).toBeChecked()
+    await dialog(page)
+      .getByRole("radio", { name: /^Each character keeps its own chat's past/ })
+      .click()
+    await page.reload()
+    await expect(dialog(page)).toBeVisible()
+    await expect(curfew).toBeChecked()
+    await expect(omens).not.toBeChecked()
+    await expect(dialog(page).getByRole("radio", { name: /^Each character keeps its own chat's past/ })).toBeChecked()
+    await shoot(page, `notes-dialog-${width}-${theme}`)
+    await dialog(page).getByRole("button", { name: "Merge", exact: true }).click()
+    await expect(dialog(page)).toHaveCount(0)
+    await expect(page.getByRole("article", { name: `Merged chat “Docks ${suffix}”`, exact: true })).toBeVisible()
+    const listed = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const here = yield* api.ListChatNotes({ chatId: home.chatId, forkId: home.forkId, slotId: null })
+        const there = yield* api.ListChatNotes({ chatId: away.chatId, forkId: away.forkId, slotId: null })
+        return {
+          here: here.map((n) => String(n.doc["title"])),
+          there: there.map((n) => String(n.doc["title"]))
+        }
+      })
+    )
+    expect(listed.here).toContain("Harbor curfew")
+    expect(listed.here).not.toContain("Gull omens")
+    expect(listed.there).toEqual(expect.arrayContaining(["Harbor curfew", "Gull omens"]))
+  })
+
 test("a message's Merge a chat here… merges after that message", async ({ page }) => {
   const { home } = await seed("here")
   await open(page, `/chats/${home.chatId}`, 1440, "light")

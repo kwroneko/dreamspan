@@ -909,6 +909,9 @@ export function SummaryPanel({
               title={`Summary of earlier steps ${n + 1}`}
               hint="Opens these summary notes. Original steps remain available in the request inspector."
             >
+              <p className="text-xs text-muted">
+                {summary.model ? `Written with ${summary.model}` : "Model not recorded"}
+              </p>
               <p className="whitespace-pre-wrap break-words text-sm">{summary.content}</p>
             </Disclosure>
           ))}

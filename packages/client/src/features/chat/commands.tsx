@@ -9,6 +9,8 @@ import { type ComponentType, Fragment, useEffect, useState, useSyncExternalStore
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
 import type { useNavigate } from "@tanstack/react-router"
+import { usePlaceParam } from "../../usePlaceParam.ts"
+import { useChatPlaceKey } from "./chatPlace.ts"
 import { makeRegistry } from "../../registry.ts"
 import type { IconName } from "../../ui/Icon.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
@@ -56,6 +58,8 @@ interface ChatCommand {
   readonly run?: (context: ChatCommandContext) => void
   /** What the menu opens instead of running it. */
   readonly dialog?: ComponentType<ChatCommandDialogProps>
+  /** Restore this dialog from the tab URL. */
+  readonly dialogInUrl?: boolean
 }
 
 /** A command's keys as written in its label: "Ctrl+H", "Alt+Enter", "ArrowUp". */
@@ -87,9 +91,11 @@ export const availableCommands = (
 export function ChatCommandMenu({ context }: { context: ChatCommandContext }) {
   const snapshot = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot, chatCommands.snapshot)
   const panels = useChatPanels()
-  const [dialog, setDialog] = useState<ChatCommand | null>(null)
+  const [localDialog, setDialog] = useState<ChatCommand | null>(null)
+  const [place, setPlace] = usePlaceParam(useChatPlaceKey("chatAction"), "")
   const commands = availableCommands(context, snapshot, panels).filter(inMenu)
   if (commands.length === 0) return null
+  const dialog = commands.find((entry) => entry.dialogInUrl && entry.id === place) ?? localDialog
   const Open = dialog?.dialog
   return (
     <>
@@ -110,14 +116,24 @@ export function ChatCommandMenu({ context }: { context: ChatCommandContext }) {
               icon={entry.icon}
               tone={entry.tone ?? "default"}
               description={entry.description}
-              onClick={() => (entry.dialog ? setDialog(entry) : entry.run?.(context))}
+              onClick={() =>
+                entry.dialog ? (entry.dialogInUrl ? setPlace(entry.id) : setDialog(entry)) : entry.run?.(context)
+              }
             >
               {entry.label}
             </MenuItem>
           </Fragment>
         ))}
       </Menu>
-      {Open && <Open context={context} onClose={() => setDialog(null)} />}
+      {Open && (
+        <Open
+          context={context}
+          onClose={() => {
+            setDialog(null)
+            if (dialog?.dialogInUrl) setPlace("")
+          }}
+        />
+      )}
     </>
   )
 }

@@ -385,9 +385,15 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     const expectedLayer = (history: ReadonlyArray<Node>) => {
       const onPath = new Set(history.map((n) => n.id)),
         selected: Array<Artifact> = []
+      // A request never reuses a stale summary over a message this fork deleted, through its
+      // condensation lineage too (review-msgactions1, "Deleted inputs in requests").
+      const deletedInput = (s: Artifact): boolean =>
+        s.inputs.some((i) => i.versionId !== null && nodes.get(i.slotId)?.deleted === true) ||
+        s.children.some((c) => deletedInput(artifacts.get(c.summaryId)!))
       const available = (s: Artifact) =>
         !superseded.has(s.id) &&
         !(s.revisions.get(revisionOf(s)) === "" && !fresh(s)) &&
+        !(!fresh(s) && deletedInput(s)) &&
         onPath.has(s.last) &&
         ![...jobs.values()].some(
           (j) => j.batchId === s.batchId && s.batchId !== null && ["pending", "processing"].includes(j.status)
