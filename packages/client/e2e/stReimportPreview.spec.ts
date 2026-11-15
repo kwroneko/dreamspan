@@ -5,7 +5,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
-import { expect, test } from "@playwright/test"
+import { expect, type Page, test } from "@playwright/test"
 import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
@@ -62,6 +62,18 @@ const write = (root: string, files: Record<string, Uint8Array>) => {
     mkdirSync(dirname(join(root, USER, path)), { recursive: true })
     writeFileSync(join(root, USER, path), bytes)
   }
+}
+
+// A picked upload opens its new report before sendUpload finishes. The previous report can
+// still say Imported (or its refusal list can disappear) before any new messages are committed.
+const importPicked = async (page: Page) => {
+  const before = new URL(page.url()).searchParams.get("job")
+  await page.getByRole("button", { name: "Import", exact: true }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.get("job")).not.toBe(before)
+  const importId = new URL(page.url()).searchParams.get("job")!
+  await expect
+    .poll(() => admin((api) => Effect.map(api.GetStImport({ importId }), (detail) => detail.job.status)))
+    .toBe("complete")
 }
 
 for (const width of [1440, 390])
@@ -264,7 +276,7 @@ for (const width of [1440, 390])
       })
       await page.getByLabel("Choose the folder").setInputFiles(join(other, "ST"))
       await expect(preview.getByText("Importing adds 4 messages and 0 swipes to them.")).toBeVisible()
-      await page.getByRole("button", { name: "Import", exact: true }).click()
+      await importPicked(page)
       await expect(page.getByRole("list", { name: "Imported" })).toContainText("Chats")
       const after = await admin((api) =>
         Effect.map(
@@ -303,7 +315,7 @@ for (const width of [1440, 390])
       await expect(page.getByLabel("Choose the folder")).toBeVisible()
       await page.getByLabel("Choose the folder").setInputFiles(join(other, "ST"))
       await expect(preview.getByText("Importing adds 2 messages and 0 swipes to them.")).toBeVisible()
-      await page.getByRole("button", { name: "Import", exact: true }).click()
+      await importPicked(page)
       await expect(refused).toHaveCount(0)
       const final = await admin((api) =>
         Effect.map(

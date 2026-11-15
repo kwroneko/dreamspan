@@ -3862,3 +3862,8 @@ browser fixtures accept `STACK_DENSITY=compact` for the same width/theme and lay
 the default remains Comfortable. Both use semantic tokens and existing registered controls.
 No baseline object or operation contract changes in stack3; assembler version 81 is above both
 merged sides (stack2 80, master 75). No Proposed/Open decision status changes.
+
+The picked-folder re-import browser fixture waits for the newly selected import job to complete
+before asserting its exact committed message count. A prior Imported report or a cleared refusal
+list can appear before the asynchronous upload publishes; reusing a fixture session exposes this
+ordering independently of login latency. The count/refusal assertions and deadlines stay intact.
