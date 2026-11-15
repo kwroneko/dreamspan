@@ -199,9 +199,14 @@ test("a branch's URL follows the messages sent on it", async ({ page }) => {
   await repliesDone(page, 1)
   await messageMenu(page.getByRole("article", { name: "Your message" }), "Branch from here")
   await expect(replies(page)).toHaveCount(0)
-  await expect(page).toHaveURL(/fork=/)
-  const branch = new URL(page.url()).searchParams.get("fork")
+  const chatId = new URL(page.url()).pathname.split("/").at(-1)! as Chat["id"]
+  const branch = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.GetChat({ chatId }).pipe(Effect.map((chat) => chat.currentForkId))
+  )
   expect(branch).not.toBeNull()
+  // The old branch already had fork= in its URL, and the rows clear before navigation.
+  // Wait for the new, server-recorded fork rather than capturing the outgoing URL.
+  await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBe(branch)
   await send(page, "Second, on the branch")
   await repliesDone(page, 1)
   await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBe(branch)

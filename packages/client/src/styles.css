@@ -230,6 +230,76 @@ main:has(> [data-fill]) {
   contain: layout paint style;
 }
 
+/*
+ * Compact message spacing (features/chat/ChatDensity.tsx): the message list carries
+ * `data-chat-density`, and `compact:` styles what's inside it. Comfortable is every rule
+ * without the variant, unchanged.
+ */
+@custom-variant compact (&:where([data-chat-density="compact"] *));
+
+[data-chat-density="compact"] .chat-row .markdown {
+  line-height: 1.45;
+}
+[data-chat-density="compact"] .chat-row .markdown > * + *,
+[data-chat-density="compact"] .chat-row .markdown li > * + * {
+  margin-top: 0.5em;
+}
+/*
+ * A message's footer (its version controls) takes no room of its own in a compact list. On a
+ * phone it shows after a tap on the message, with the message's actions. With a pointer it lies
+ * over the message's lower corner while the message is pointed at, holds focus or has a menu
+ * open. `data-keep` (Message.tsx) leaves it in place: the newest message, a reply being written,
+ * a message being edited. A touch screen wider than a phone keeps it too: nothing hovers there.
+ */
+@media (width < 40rem) {
+  [data-chat-density="compact"] .message-footer:not([data-keep]) {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  [data-chat-density="compact"] article:focus-within > * > .message-footer:not([data-keep]) {
+    position: static;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (pointer: coarse) {
+  [data-chat-density="compact"] .message-footer footer {
+    flex-wrap: wrap;
+  }
+  [data-chat-density="compact"] .message-footer :is(button, a) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+@media (width >= 40rem) and (hover: hover) {
+  /* The footer itself has no flow box. Keep its lower corner clear even when the body
+     fills the portrait height: text, links, images and thinking panels must stay readable.
+     This clearance is constant on hover/focus, so revealing controls never moves rows. */
+  [data-chat-density="compact"] .message-content:has(> .message-footer:not([data-keep])) {
+    padding-bottom: 2.25rem;
+  }
+  [data-chat-density="compact"] .message-footer:not([data-keep]) {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.5rem;
+    z-index: 1;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    background: var(--surface);
+    box-shadow: 0 1px 2px var(--overlay);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 100ms;
+  }
+  [data-chat-density="compact"] article:hover > * > .message-footer,
+  [data-chat-density="compact"] article:focus-within > * > .message-footer,
+  [data-chat-density="compact"] article:has([data-popup-open]) > * > .message-footer {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 /* Message text (ui/Markdown.tsx). */
 .markdown {
   color: var(--color-message-main);

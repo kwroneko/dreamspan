@@ -57,7 +57,7 @@ import {
   MergeRequest
 } from "@rp/shared/mergeApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
-import { AwayMark } from "@rp/shared/contextsApi.ts"
+import { AwayMark, StateMarks } from "@rp/shared/contextsApi.ts"
 import { StartedThreads, ThreadName, ThreadSet, ThreadStarts, ThreadsRefused } from "@rp/shared/threads.ts"
 import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
@@ -4444,6 +4444,21 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("AwayMarks", {
     payload: { userId: UserId, chatId: ChatId, forkId: ForkId, slotId: Schema.NullOr(SlotId) },
     success: Schema.Array(AwayMark),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The state events of the named keys on a fork's display path through `slotId`, in fold order,
+   * with the names of what they name (`db/stateMarks.ts`): the timeline's change markers.
+   */
+  Rpc.make("StateMarks", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      slotId: Schema.NullOr(SlotId),
+      keys: Schema.Array(Schema.String)
+    },
+    success: StateMarks,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The context views installed (`contextViews`), as This chat's Context setting offers them. */

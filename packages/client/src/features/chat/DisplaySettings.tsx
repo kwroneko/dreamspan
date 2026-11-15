@@ -23,10 +23,12 @@ import { approvedScripts, CardScripts } from "./displayScripts.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 
+import { ChatDensitySetting } from "./ChatDensity.tsx"
 import { ChatWidthSetting } from "./ChatWidth.tsx"
 import { HtmlFormattingSwitch, PanelDepthSelect } from "./htmlDisplay.tsx"
 import { MessageColorSettings } from "./MessageColors.tsx"
 import { MessageDetailSettings } from "./messageDetails.tsx"
+import { StateMarkerSettings } from "./StateRows.tsx"
 
 const NO_SCRIPTS: ReadonlyArray<RegexScript> = []
 
@@ -242,6 +244,7 @@ export function DisplaySettings() {
   return (
     <div className="flex flex-col gap-6">
       <ChatWidthSetting />
+      <ChatDensitySetting />
       <Fieldset legend="Enter sends" about="Ctrl/Cmd+Enter always sends; Shift+Enter adds a line.">
         <RadioGroup
           value={viewer.prefs.enterSends}
@@ -276,6 +279,7 @@ export function DisplaySettings() {
       </Field>
       <MessageColorSettings />
       <MessageDetailSettings />
+      <StateMarkerSettings />
       <Fieldset
         legend="Display transformations"
         about="Change only what you see: the text you edit, copy and send stays as written."

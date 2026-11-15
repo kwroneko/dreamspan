@@ -21,7 +21,56 @@ export const AwayMark = Schema.Struct({
 })
 export type AwayMark = typeof AwayMark.Type
 
+/**
+ * A recorded state change on a branch's path, as the timeline's change markers read it
+ * (client `features/chat/stateMarkers.ts`): the event as stored, where it was written
+ * (`slotId` null: before the first message) and what wrote it.
+ */
+export const StateMarkEvent = Schema.Struct({
+  eventId: Schema.String,
+  slotId: Schema.NullOr(SlotId),
+  /** Set while the event belongs to one version of its message: it applies while that one is shown. */
+  versionId: Schema.NullOr(Schema.String),
+  origin: Schema.String,
+  scope: Schema.NullOr(Schema.String),
+  key: Schema.String,
+  value: Schema.Unknown
+})
+export type StateMarkEvent = typeof StateMarkEvent.Type
+
+/** A note an event names: whose it is and how it stands without a switch. */
+const StateMarkNote = Schema.Struct({
+  card: Schema.NullOr(Schema.String),
+  onByDefault: Schema.Boolean,
+  /** Notes moved out of one card field switch together. */
+  group: Schema.NullOr(Schema.String)
+})
+
+export const StateMarks = Schema.Struct({
+  /** In fold order: before the first message, then each message of the path, as shown. */
+  events: Schema.Array(StateMarkEvent),
+  /** The names of the cards, notes, presets, lorebooks, models and connections the events name, by id. */
+  names: Schema.Record(Schema.String, Schema.String),
+  notes: Schema.Record(Schema.String, StateMarkNote)
+})
+export type StateMarks = typeof StateMarks.Type
+
+/** Bounded request size, with room for the union of installed marker kinds' keys. */
+const MAX_STATE_MARK_KEYS = 4096
+const StateMarkKeys = Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(
+  Schema.isMaxLength(MAX_STATE_MARK_KEYS)
+)
+
 export class ChatContextsApi extends RpcGroup.make(
+  /**
+   * The state events of the named keys on the fork's path through `slotId` (the leaf shown),
+   * with the names of what they name: one read a branch, for every change marker on screen.
+   */
+  Rpc.make("GetStateMarks", {
+    payload: { chatId: ChatId, forkId: ForkId, slotId: Schema.NullOr(SlotId), keys: StateMarkKeys },
+    success: StateMarks,
+    error: Schema.Union([NotFound, ServerError])
+  }),
   /** The away marks on the fork's path through `slotId` (the leaf shown), in order. */
   Rpc.make("GetAwayMarks", {
     payload: { chatId: ChatId, forkId: ForkId, slotId: Schema.NullOr(SlotId) },

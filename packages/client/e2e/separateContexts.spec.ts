@@ -835,11 +835,12 @@ for (const width of [1440, 390])
       const other = await context.newPage()
       await other.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       const reads = { marks: 0, cast: 0, path: 0, next: 0, summaries: 0 }
-      other.on("websocket", (socket) =>
+      let cacheReady = false
+      other.on("websocket", (socket) => {
         socket.on("framesent", ({ payload }) => {
           const wire = typeof payload === "string" ? payload : payload.toString()
           for (const [key, methods] of Object.entries({
-            marks: ["GetAwayMarks"],
+            marks: ["GetAwayMarks", "GetStateMarks"],
             cast: ["GetCast", "GetCasts"],
             path: ["ReadPath"],
             next: ["GetNextContext"],
@@ -848,7 +849,11 @@ for (const width of [1440, 390])
             if (methods.some((method) => wire.includes(`"${method}"`))) reads[key as keyof typeof reads]++
           }
         })
-      )
+        socket.on("framereceived", ({ payload }) => {
+          const wire = typeof payload === "string" ? payload : payload.toString()
+          if (/"_tag"\s*:\s*"Cache"/.test(wire)) cacheReady = true
+        })
+      })
       try {
         await page.goto(`${server().url}/chats/${chatId}?fork=${forkId}`)
         await other.goto(`${server().url}/chats/${chatId}?fork=${peer.fork.id}`)
@@ -858,6 +863,7 @@ for (const width of [1440, 390])
         await expect(left(other).getByRole("button", { name: "Undo", exact: true })).toBeVisible()
         // Let opening estimates and shell subscriptions settle before counting invalidations.
         await expect.poll(() => reads.marks).toBeGreaterThan(0)
+        await expect.poll(() => cacheReady).toBe(true)
         await other.waitForTimeout(800)
         const beforeReads = { ...reads }
         const unchangedRow = await left(other).elementHandle()
