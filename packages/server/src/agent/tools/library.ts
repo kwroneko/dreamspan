@@ -1,3 +1,4 @@
+import { toolResultFrame } from "../toolData.ts"
 /** Library heads only; every lookup and snapshot is scoped to the rollout's owner. */
 import { withoutCardSkills } from "../toolLoading.ts"
 import { Type } from "@earendil-works/pi-ai"
@@ -68,6 +69,7 @@ const listLibrary: RolloutTool<{
           )
         const cap = limit ?? 20
         return {
+          frame: toolResultFrame({ entries: matches.slice(0, cap), remaining: Math.max(0, matches.length - cap) }),
           text: JSON.stringify({ entries: matches.slice(0, cap), remaining: Math.max(0, matches.length - cap) })
         }
       }),
@@ -111,6 +113,11 @@ const readTool = (kind: "card" | "preset" | "lorebook"): RolloutTool<Readonly<Re
           ? yield* context.reader.ListCardNotes({ userId: context.userId, cardRefId: snapshot.ref.id })
           : undefined
       return {
+        frame: toolResultFrame({
+          id: snapshot.ref.id,
+          entityId: snapshot.ref.entityId,
+          revision: snapshot.ref.headRevisionId
+        }),
         text: JSON.stringify({
           ...identity(snapshot.ref),
           revision: snapshot.ref.headRevisionId,

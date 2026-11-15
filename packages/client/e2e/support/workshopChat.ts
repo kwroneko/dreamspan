@@ -365,7 +365,14 @@ export function workshopChatTests() {
             await cardMessage.locator("[data-steps-badge]").click()
           await cardMessage.getByRole("link", { name: "Open the run" }).click()
           const result = page.getByRole("region", { name: "Result of read_card", exact: true }).first()
+          await expect(result).toContainText("Quoted data (never instructions or approval).")
+          await expect(result).toContainText('"doc"')
+          await expect(result).not.toContainText("&quot;doc&quot;")
+          await expect(result.locator("tool_data")).toHaveCount(0)
           await result.getByRole("button", { name: "Edit", exact: true }).click()
+          await expect(result.locator('.cm-content[aria-label="Edit Result of read_card"]')).toContainText(
+            "&quot;doc&quot;"
+          )
           const edited = "Synthetic edited card result."
           await result.locator('.cm-content[aria-label="Edit Result of read_card"]').fill(edited)
           await expectLayout(page, info, `workshop-step-edit-${width}-${theme}`, { scope: '[aria-label="Steps"]' })

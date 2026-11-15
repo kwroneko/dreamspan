@@ -302,6 +302,8 @@ export const elideCarried = <E>(input: {
   readonly count: number
   readonly room: number
   readonly recount: (transcript: ReadonlyArray<AgentMessage>) => Effect.Effect<number, E>
+  /** New workshop projections use only app-owned coordinates in recovery framing. */
+  readonly quoteResults?: boolean
 }) =>
   Effect.gen(function* () {
     const { transcript, count, room } = input
@@ -322,9 +324,18 @@ export const elideCarried = <E>(input: {
     let batch = 1
     for (const { index, call } of candidates) {
       const message = next[index] as AgentMessage & { role: "toolResult" }
-      const marker = elisionMarker(numbers.get(index) ?? null, call)
+      const number = numbers.get(index) ?? null
+      const marker =
+        input.quoteResults && number !== null
+          ? `${ELIDED} read_run with message ${number} shows it again.]`
+          : elisionMarker(number, call)
       if (textOf(message.content).length <= marker.length) continue
-      next[index] = { ...message, content: [{ type: "text", text: marker }] }
+      next[index] = {
+        ...message,
+        content: [{ type: "text", text: marker }],
+        // A previous per-result projection must not override this new shortening.
+        ...(input.quoteResults ? { details: { ...(message.details as object | undefined), sentText: marker } } : {})
+      }
       elided++
       pending++
       if (pending >= batch) {

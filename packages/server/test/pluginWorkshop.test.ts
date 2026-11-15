@@ -1,3 +1,5 @@
+import { unquoteToolData } from "./support/toolData.ts"
+import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 // The dice safety loop against the real agent, workers and host; synthetic source and scripted loopback only.
 import { expect } from "vitest"
 import { assert, it } from "@effect/vitest"
@@ -52,7 +54,7 @@ const chunk = (name: string, args: unknown, id: string) => [
 const commitFrom = (messages: Body["messages"]) => {
   for (const m of messages.slice().reverse())
     if (m.role === "tool") {
-      const match = m.content?.match(/"commit":"([a-f0-9]{40})"/)
+      const match = unquoteToolData(m.content ?? "").match(/"commit":"([a-f0-9]{40})"/)
       if (match) return match[1]!
     }
   return "0".repeat(40)
@@ -257,7 +259,7 @@ for (const mode of ["every", "dispatcher", "stale", "declined", "resume", "histo
         assert.include(results, "Run plugin_check successfully")
         assert.include(results, "TS2339")
         assert.notInclude(results, config.dataDir)
-        assert.include(results, "Untrusted plugin/reference data")
+        assert.include(results, TOOL_DATA_NOTICE)
         if (mode === "dispatcher") {
           const definitions = JSON.stringify(requests[0]!.tools)
           assert.isTrue(requests.every((b) => JSON.stringify(b.tools) === definitions))
@@ -272,8 +274,8 @@ for (const mode of ["every", "dispatcher", "stale", "declined", "resume", "histo
         if (mode === "historical") {
           const creation = requests
             .flatMap((b) => b.messages)
-            .find((m) => m.role === "tool" && m.content?.startsWith('{"plugin":"dice-roller"'))
-          historicalTarget = JSON.parse(creation!.content!).commit as string
+            .find((m) => m.role === "tool" && unquoteToolData(m.content ?? "").startsWith('{"plugin":"dice-roller"'))
+          historicalTarget = JSON.parse(unquoteToolData(creation!.content!)).commit as string
           assert.notStrictEqual(historicalTarget, approval.plugin!.commit)
           const current = yield* api.GetChat({ chatId: chat.id })
           const sentOld = yield* posted(
@@ -614,7 +616,7 @@ it.live(
       const args = { plugin: target.id, message: "Original commit" }
       const committed = yield* run("plugin_commit", args, "commit-gap")
       assert.isNotTrue(committed.isError)
-      const version = JSON.parse(committed.text).commit as string
+      const version = JSON.parse(unquoteToolData(committed.text)).commit as string
       yield* fixtureSql(config.dataDir, [
         {
           sql: "DELETE FROM rollout_receipts WHERE rollout_id = ? AND tool_call_id = ?",

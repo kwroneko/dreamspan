@@ -339,12 +339,7 @@ export const declaredHandles = (
               )
             }
           }
-          if (
-            name === "rolloutTools" &&
-            (["list_notes", "switch_note"].includes(entry.id) ||
-              entry.id === "set_presence" ||
-              ["search_chat", "read_messages", "expand_summary", "search_summaries"].includes(entry.id))
-          ) {
+          if (name === "rolloutTools") {
             const tool = copied as { execute: (...args: unknown[]) => Effect.Effect<unknown, unknown> }
             const execute = tool.execute
             copied = {
@@ -356,10 +351,11 @@ export const declaredHandles = (
                     output === null ||
                     !("text" in output) ||
                     typeof output.text !== "string" ||
-                    Object.keys(output).some((k) => k !== "text" && k !== "isError")
+                    Object.keys(output).some((k) => k !== "text" && k !== "isError") ||
+                    ("isError" in output && typeof output.isError !== "boolean")
                   ) {
                     fail()
-                    throw new Error("Story tools cannot supply receipts or effects")
+                    throw new Error("Plugin tools can return only text and an error flag")
                   }
                   return output
                 })
