@@ -48,6 +48,7 @@ export class StateModules extends Context.Service<
   {
     readonly register: (source: ModuleSource) => Effect.Effect<void, StateKeyRegistrationError, Scope.Scope>
     readonly list: () => ReadonlyArray<ModuleSource>
+    readonly revision?: () => number
     readonly onFailure: (id: string, handler: () => void) => Effect.Effect<void, never, Scope.Scope>
     readonly reportFailure: (cause: Cause.Cause<unknown>) => void
   }
@@ -56,6 +57,7 @@ export class StateModules extends Context.Service<
     // Preserve the entire registration stack, including overrides of the same module id.
     // This matches the server even when an override changes which keys it installs.
     const active: Array<{ readonly source: ModuleSource }> = []
+    let revision = 0
     const failures = new Map<string, () => void>()
     return StateModules.of({
       onFailure: (id, handler) =>
@@ -83,15 +85,18 @@ export class StateModules extends Context.Service<
             Effect.sync(() => {
               const registration = { source }
               active.push(registration)
+              revision++
               return registration
             }),
             (registration) =>
               Effect.sync(() => {
                 active.splice(active.indexOf(registration), 1)
+                revision++
               })
           )
         }),
-      list: () => active.map(({ source }) => source)
+      list: () => active.map(({ source }) => source),
+      revision: () => revision
     })
   })
 }

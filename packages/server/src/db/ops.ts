@@ -1699,6 +1699,7 @@ export class WriteOpsChat extends RpcGroup.make(
   /** What a request's images cost together, for models without a formula; keeps the newest 20. */
   Rpc.make("RecordImageTokenSample", {
     payload: {
+      autoToken: Schema.optionalKey(Schema.NullOr(Schema.String)),
       userId: UserId,
       connectionId: ConnectionId,
       modelKey: Schema.String,
@@ -2528,7 +2529,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
        * An Auto turn (db/autoGuard.ts): admitted in this transaction only while its run is
        * unbroken and `token` is the one its last turn handed back; null starts a run.
        */
-      auto: Schema.optionalKey(Schema.Struct({ token: Schema.NullOr(Schema.String) }))
+      auto: Schema.optionalKey(Schema.Struct({ token: Schema.NullOr(Schema.String) })),
+      autoConfiguration: Schema.optionalKey(Schema.String)
     },
     success: Schema.Union([
       /** `queue`: the chat's queue, when the post queued the rest of a round behind it. `auto`: the run's next token. */
@@ -3173,6 +3175,12 @@ export class WriteOpsLibrary extends RpcGroup.make(
     payload: { userId: UserId, noteRefId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
     success: LibraryRef,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  /** Writer-local Auto authorization, immediately before dispatch, including later tool rounds. */
+  Rpc.make("AuthorizeAutoRequest", {
+    payload: { userId: UserId, token: Schema.String, configuration: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([AutoRefused, StorageError])
   }),
   // --- Generation (ARCHITECTURE.md §15).
   /**

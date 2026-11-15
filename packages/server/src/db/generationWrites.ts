@@ -29,7 +29,7 @@ import type { WriteOps } from "./ops.ts"
 import { LcmSettingsInvalid } from "@rp/shared/lcm.ts"
 import { orderProblem } from "./lcmEnableWrites.ts"
 import { transaction } from "./tx.ts"
-import { refuseBrokenTurn } from "./autoGuard.ts"
+import { authorizeAutoRequest, refuseBrokenTurn } from "./autoGuard.ts"
 
 export const makeGenerationWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -97,6 +97,9 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
     ...(yield* makeSavedMediaWriteHandlers),
     ...(yield* makeSourcePrefsWriteHandlers),
     ...(yield* makeTokenCountingWriteHandlers),
+    AuthorizeAutoRequest: ({ userId, token, configuration }) =>
+      authorizeAutoRequest(sql, userId, token, configuration).pipe(transaction(sql, "AuthorizeAutoRequest")),
+
     StartRollout: ({
       userId,
       chatId,

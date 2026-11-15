@@ -128,7 +128,7 @@ const handlers = WriteOps.toLayer(
       )
     )
     // Each says who is writing, for the Auto runs its writes reach (db/autoGuard.ts).
-    return attributed(yield* SqlClient.SqlClient, served)
+    return attributed(served)
   })
 )
 

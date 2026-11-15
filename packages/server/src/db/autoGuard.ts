@@ -27,6 +27,9 @@ const SLOT = "slot"
 const VERSION = "version"
 const CHAT = "chat"
 const CONFIG = "config"
+const LIBRARY = "library"
+const SUMMARY = "summary"
+const CALIBRATION = "calibration"
 
 const liveIn = (chat: string) =>
   `EXISTS (SELECT 1 FROM auto_guards ag_ WHERE ag_.broken IS NULL AND ag_.chat_id = ${chat})`
@@ -36,8 +39,8 @@ const touch = (kind: string, chat: string, ref = "NULL", when = "1") =>
   `INSERT INTO auto_touches (kind, chat_id, ref) SELECT '${kind}', ${chat}, ${ref} WHERE (${when}) AND ${liveIn(chat)};`
 
 /** Notes a change of the configuration, when `when` holds and any run is live. */
-const config = (when = "1") =>
-  `INSERT INTO auto_touches (kind) SELECT '${CONFIG}' WHERE (${when})
+const config = (when = "1", kind = CONFIG) =>
+  `INSERT INTO auto_touches (kind) SELECT '${kind}' WHERE (${when})
     AND EXISTS (SELECT 1 FROM auto_guards ag_ WHERE ag_.broken IS NULL);`
 
 const differs = (...columns: ReadonlyArray<string>) => columns.map((c) => `NEW.${c} IS NOT OLD.${c}`).join(" OR ")
@@ -51,9 +54,11 @@ const SLOT_COLUMNS = [
   "parent_slot_id",
   "depth",
   "selected_version_id",
+  "context_excluded",
   "deleted_at",
   "purged_at",
-  "inserted"
+  "inserted",
+  "created_at"
 ]
 const VERSION_COLUMNS = [
   "slot_id",
@@ -63,7 +68,13 @@ const VERSION_COLUMNS = [
   "source_version_id",
   "deleted_at",
   "purged_at",
-  "fork_id"
+  "fork_id",
+  "ordinal",
+  "writer",
+  "origin",
+  "hidden",
+  "created_at",
+  "rollout_id"
 ]
 const TEXT_COLUMNS = [
   "content",
@@ -72,10 +83,14 @@ const TEXT_COLUMNS = [
   "reply_sections",
   "frozen_macros",
   "cast_json",
-  "presence_json"
+  "presence_json",
+  "direction"
 ]
 const FORK_COLUMNS = ["parent_fork_id", "base_slot_id", "tip_slot_id", "deleted_at", "purged_at"]
 const CONNECTION_COLUMNS = [
+  "name",
+  "credential_id",
+  "headers_origin",
   "provider",
   "provider_settings_json",
   "kind",
@@ -104,6 +119,10 @@ const trigger = (name: string, event: string, table: string, body: string, when?
   `CREATE TEMP TRIGGER IF NOT EXISTS auto_touch_${name} AFTER ${event} ON main.${table}
     ${when === undefined ? "" : `WHEN ${when}`} BEGIN ${body} END`
 
+const overrideTouch = (row: "NEW" | "OLD") =>
+  `${touch(FORK, `${row}.chat_id`, `${row}.fork_id`, `${row}.kind NOT IN ('summary_revision', 'summary_choice', 'summary_superseded')`)}
+   ${touch(SUMMARY, `${row}.chat_id`, `${row}.fork_id`, `${row}.kind IN ('summary_revision', 'summary_choice', 'summary_superseded')`)}`
+
 const statements: ReadonlyArray<string> = [
   `CREATE TEMP TABLE IF NOT EXISTS auto_guards (
     id TEXT PRIMARY KEY,
@@ -112,6 +131,7 @@ const statements: ReadonlyArray<string> = [
     fork_id TEXT NOT NULL,
     -- What its last turn handed back: the next turn must present exactly this.
     token TEXT NOT NULL,
+    configuration TEXT NOT NULL DEFAULT '',
     turn INTEGER NOT NULL,
     -- The reply its last turn wrote: writes that name it, or a rollout of it, are the run's own.
     slot_id TEXT NOT NULL,
@@ -123,7 +143,9 @@ const statements: ReadonlyArray<string> = [
     cause TEXT,
     at INTEGER NOT NULL
   )`,
+  `CREATE INDEX IF NOT EXISTS temp.auto_guards_expiry ON auto_guards(at)`,
   `CREATE INDEX IF NOT EXISTS temp.auto_guards_version ON auto_guards(version_id)`,
+  `CREATE INDEX IF NOT EXISTS temp.auto_guards_live ON auto_guards(chat_id) WHERE broken IS NULL`,
   `CREATE TEMP TABLE IF NOT EXISTS auto_touches (kind TEXT NOT NULL, chat_id TEXT, ref TEXT)`,
   // A new message is on no branch's path until a tip moves; an inserted one sits below its anchor.
   trigger("slot_insert", "INSERT", "slots", touch(SLOT, "NEW.chat_id", "NEW.parent_slot_id"), "NEW.inserted = 1"),
@@ -135,7 +157,14 @@ const statements: ReadonlyArray<string> = [
     differs(...SLOT_COLUMNS)
   ),
   trigger("slot_delete", "DELETE", "slots", touch(CHAT, "OLD.chat_id")),
-  // A new version changes nothing until a branch selects it or shows it in another's place.
+  // Even an unselected alternative changes lastSwipeId and the macro message projection.
+  trigger(
+    "version_insert",
+    "INSERT",
+    "versions",
+    `${touch(SLOT, slotChat("NEW.slot_id"), "NEW.slot_id", "NEW.fork_id IS NULL")}
+     ${touch(FORK, slotChat("NEW.slot_id"), "NEW.fork_id", "NEW.fork_id IS NOT NULL")}`
+  ),
   trigger(
     "version",
     `UPDATE OF ${VERSION_COLUMNS.join(", ")}`,
@@ -144,34 +173,28 @@ const statements: ReadonlyArray<string> = [
      ${touch(SLOT, slotChat("OLD.slot_id"), "OLD.slot_id", "OLD.slot_id IS NOT NEW.slot_id")}`,
     differs(...VERSION_COLUMNS)
   ),
-  trigger("version_delete", "DELETE", "versions", touch(SLOT, slotChat("OLD.slot_id"), "OLD.slot_id")),
+  trigger(
+    "version_delete",
+    "DELETE",
+    "versions",
+    `${touch(SLOT, slotChat("OLD.slot_id"), "OLD.slot_id", "OLD.fork_id IS NULL")}
+     ${touch(FORK, slotChat("OLD.slot_id"), "OLD.fork_id", "OLD.fork_id IS NOT NULL")}`
+  ),
   `CREATE TEMP TRIGGER IF NOT EXISTS auto_touch_text AFTER UPDATE OF ${TEXT_COLUMNS.join(", ")} ON main.version_texts
     WHEN ${differs(...TEXT_COLUMNS)} BEGIN
       INSERT INTO auto_touches (kind, chat_id, ref)
         SELECT '${VERSION}', s.chat_id, v.id FROM versions v JOIN slots s ON s.id = v.slot_id
         WHERE v.seq = NEW.version_seq AND ${liveIn("s.chat_id")};
     END`,
-  trigger(
-    "override_insert",
-    "INSERT",
-    "fork_overrides",
-    touch(FORK, "NEW.chat_id", "NEW.fork_id"),
-    `NEW.kind NOT IN ${UNSENT_OVERRIDES}`
-  ),
+  trigger("override_insert", "INSERT", "fork_overrides", overrideTouch("NEW"), `NEW.kind NOT IN ${UNSENT_OVERRIDES}`),
   trigger(
     "override_update",
     "UPDATE",
     "fork_overrides",
-    `${touch(FORK, "OLD.chat_id", "OLD.fork_id")} ${touch(FORK, "NEW.chat_id", "NEW.fork_id")}`,
+    `${overrideTouch("OLD")} ${overrideTouch("NEW")}`,
     `OLD.kind NOT IN ${UNSENT_OVERRIDES} OR NEW.kind NOT IN ${UNSENT_OVERRIDES}`
   ),
-  trigger(
-    "override_delete",
-    "DELETE",
-    "fork_overrides",
-    touch(FORK, "OLD.chat_id", "OLD.fork_id"),
-    `OLD.kind NOT IN ${UNSENT_OVERRIDES}`
-  ),
+  trigger("override_delete", "DELETE", "fork_overrides", overrideTouch("OLD"), `OLD.kind NOT IN ${UNSENT_OVERRIDES}`),
   // An event a branch wrote is its own (and its later branches'); a shared one, or one changed
   // or removed in place, can be read anywhere in the chat.
   trigger(
@@ -206,7 +229,7 @@ const statements: ReadonlyArray<string> = [
       trigger(`split_${name}`, event, "thread_splits", touch(CHAT, `${row}.chat_id`)),
       trigger(`member_${name}`, event, "thread_members", touch(CHAT, splitChat(`${row}.split_id`))),
       trigger(`setting_${name}`, event, "settings", config(), `${row}.scope IN ${SENT_SCOPES}`),
-      trigger(`draft_${name}`, event, "drafts", config(), `${row}.target_kind IN ${SENT_DRAFTS}`)
+      trigger(`draft_${name}`, event, "drafts", config("1", LIBRARY), `${row}.target_kind IN ${SENT_DRAFTS}`)
     ]
   }),
   // A summary's text or choice changed outside a summary job.
@@ -214,14 +237,14 @@ const statements: ReadonlyArray<string> = [
     "summary",
     "UPDATE OF selected_revision_id",
     "summaries",
-    touch(CHAT, "NEW.chat_id"),
+    touch(SUMMARY, "NEW.chat_id"),
     differs("selected_revision_id")
   ),
   trigger(
     "summary_text",
     "UPDATE OF content",
     "summary_revisions",
-    touch(CHAT, summaryChat("NEW.summary_id")),
+    touch(SUMMARY, summaryChat("NEW.summary_id")),
     differs("content")
   ),
   trigger(
@@ -235,10 +258,84 @@ const statements: ReadonlyArray<string> = [
   trigger("model", `UPDATE OF ${MODEL_COLUMNS.join(", ")}`, "models", config(), differs(...MODEL_COLUMNS)),
   trigger("model_delete", "DELETE", "models", config()),
   // A new entry can be read at once: a chat's note names its chat itself (editorWrites.ts).
-  trigger("ref_insert", "INSERT", "entity_refs", config()),
-  trigger("ref", "UPDATE OF head_revision_id", "entity_refs", config(), differs("head_revision_id")),
-  trigger("ref_delete", "DELETE", "entity_refs", config()),
-  trigger("revision", "UPDATE OF doc_json", "entity_revisions", config(), differs("doc_json"))
+  trigger("ref_insert", "INSERT", "entity_refs", config("1", LIBRARY)),
+  trigger("ref", "UPDATE OF head_revision_id", "entity_refs", config("1", LIBRARY), differs("head_revision_id")),
+  trigger("ref_delete", "DELETE", "entity_refs", config("1", LIBRARY)),
+  ...(["INSERT", "UPDATE", "DELETE"] as const).flatMap((event) => {
+    const row = event === "DELETE" ? "OLD" : "NEW"
+    const name = event.toLowerCase()
+    const version = `(SELECT slot_id FROM versions WHERE id = ${row}.version_id)`
+    return [
+      trigger(`image_count_${name}`, event, "image_token_counts", config()),
+      trigger(`image_sample_${name}`, event, "image_token_samples", config("1", CALIBRATION)),
+      trigger(`plugin_${name}`, event, "plugin_data", config()),
+      trigger(`credential_${name}`, event, "credentials", config()),
+      trigger(
+        `attachment_${name}`,
+        event,
+        "version_attachments",
+        touch(VERSION, slotChat(version), `${row}.version_id`)
+      ),
+      trigger(`history_${name}`, event, "version_history", touch(VERSION, slotChat(version), `${row}.version_id`)),
+      trigger(
+        `merge_${name}`,
+        event,
+        "chat_merge_messages",
+        touch(
+          SLOT,
+          `(SELECT chat_id FROM chat_merges WHERE id = ${row}.merge_id)`,
+          `(SELECT slot_id FROM chat_merges WHERE id = ${row}.merge_id)`
+        )
+      ),
+      trigger(`merge_join_${name}`, event, "chat_merges", touch(SLOT, `${row}.chat_id`, `${row}.slot_id`)),
+      trigger(`summary_${name}`, event, "summaries", touch(SUMMARY, `${row}.chat_id`)),
+      trigger(`summary_revision_${name}`, event, "summary_revisions", touch(SUMMARY, summaryChat(`${row}.summary_id`))),
+      trigger(`summary_input_${name}`, event, "summary_inputs", touch(SUMMARY, summaryChat(`${row}.summary_id`))),
+      trigger(`summary_parent_${name}`, event, "summary_parents", touch(SUMMARY, summaryChat(`${row}.summary_id`))),
+      trigger(`summary_choice_${name}`, event, "lcm_summary_choices", touch(SUMMARY, summaryChat(`${row}.summary_id`))),
+      trigger(
+        `activation_${name}`,
+        event,
+        "lore_activations",
+        touch(
+          SLOT,
+          `(SELECT chat_id FROM rollouts WHERE id = ${row}.rollout_id)`,
+          `(SELECT slot_id FROM rollouts WHERE id = ${row}.rollout_id)`
+        )
+      ),
+      trigger(`library_merge_${name}`, event, "library_merges", config("1", LIBRARY)),
+      trigger(`media_${name}`, event, "media_assets", config())
+    ]
+  }),
+  trigger(
+    "user_sent",
+    "UPDATE OF role, display_name, disabled_at",
+    "users",
+    config(),
+    differs("role", "display_name", "disabled_at")
+  ),
+  trigger(
+    "entity_sent",
+    "UPDATE OF kind, archived_at, deleted_at, purged_at",
+    "entities",
+    config("1", LIBRARY),
+    differs("kind", "archived_at", "deleted_at", "purged_at")
+  ),
+  trigger(
+    "ref_sent",
+    "UPDATE OF label, source_path",
+    "entity_refs",
+    config("1", LIBRARY),
+    differs("label", "source_path")
+  ),
+  trigger(
+    "chat_sent",
+    "UPDATE OF title, kind, deleted_at",
+    "chats",
+    touch(CHAT, "NEW.id"),
+    differs("title", "kind", "deleted_at")
+  ),
+  trigger("revision", "UPDATE OF doc_json", "entity_revisions", config("1", LIBRARY), differs("doc_json"))
 ]
 
 /** Whether this thread's connection keeps runs: only the writer's does. */
@@ -249,11 +346,14 @@ interface Actor {
   readonly operation: string
   readonly rolloutId: string | undefined
   readonly versionId: string | undefined
+  readonly autoToken: string | undefined
+  readonly status: string | undefined
   /** A summary job's write: the summaries the user turned on, never a change from outside. */
   readonly maintenance: boolean
 }
 
 let actor: Actor | null = null
+let sweepAfter = 0
 
 const named = (input: unknown, key: string) => {
   const value = typeof input === "object" && input !== null ? (input as Record<string, unknown>)[key] : undefined
@@ -272,26 +372,54 @@ interface GuardRow {
   readonly user_id: string
   readonly chat_id: string
   readonly fork_id: string
+  readonly configuration: string
   readonly token: string
   readonly slot_id: string
   readonly version_id: string
   readonly wide: number
   readonly broken: string | null
+  readonly at: number
 }
 
 /** Whether `by`'s write belongs to the run's own turn: it names its reply, or a rollout of it. */
 const own = (sql: SqlClient.SqlClient, guard: GuardRow, by: Actor) =>
   Effect.gen(function* () {
-    if (by.versionId === guard.version_id) return true
-    if (by.rolloutId === undefined) return false
+    if (by.operation === "FinishGeneration" && by.status !== "complete") return false
+    const versionWrites = new Set([
+      "StartRollout",
+      "SaveGeneration",
+      "FinishRollout",
+      "FinishGeneration",
+      "PickSpeaker",
+      "SettleSpeaker",
+      "ApplyDecisionEffect",
+      "PostRolloutMessage"
+    ])
+    const rolloutWrites = new Set([
+      "StartRollout",
+      "FinishRollout",
+      "ApplyRolloutEffect",
+      "DeclareRolloutPresence",
+      "PostRolloutMessage",
+      "PickSpeaker",
+      "ApplyDecisionEffect"
+    ])
+    if (by.operation === "RecordImageTokenSample" && by.autoToken === guard.token) return true
+    // claimAutoTurn alone grants the admitting operation its placeholder, not other RPCs.
+    if (by.operation === "SendOrQueue" && by.versionId === guard.version_id) return true
+    if (versionWrites.has(by.operation) && by.versionId === guard.version_id) return true
+    const rolloutId = rolloutWrites.has(by.operation) ? by.rolloutId : undefined
+    const versionId = versionWrites.has(by.operation) ? by.versionId : undefined
+    if (rolloutId === undefined && versionId === undefined) return false
     // The reply's rollout, one it started (a tool's, a subagent's), or a decision asked for it.
     const [row] = yield* sql<{ one: number }>`
       WITH RECURSIVE up(id, parent, kind, slot) AS (
-        SELECT id, parent_rollout_id, kind, slot_id FROM rollouts WHERE id = ${by.rolloutId}
+        SELECT id, parent_rollout_id, kind, slot_id FROM rollouts WHERE id = coalesce(${rolloutId ?? null}, (SELECT rollout_id FROM versions WHERE id = ${versionId ?? null}))
         UNION ALL SELECT r.id, r.parent_rollout_id, r.kind, r.slot_id FROM up JOIN rollouts r ON r.id = up.parent
       )
       SELECT 1 AS one FROM up WHERE up.id = (SELECT rollout_id FROM versions WHERE id = ${guard.version_id})
-        OR (up.kind = 'decision' AND up.slot = ${guard.slot_id}) LIMIT 1`
+        OR (up.kind = 'decision' AND up.slot = ${guard.slot_id}
+          AND (SELECT fork_id FROM rollouts WHERE id = up.id) IS ${guard.fork_id}) LIMIT 1`
     return row !== undefined
   })
 
@@ -299,8 +427,8 @@ const own = (sql: SqlClient.SqlClient, guard: GuardRow, by: Actor) =>
 const reached = (sql: SqlClient.SqlClient, guard: GuardRow) =>
   Effect.gen(function* () {
     const [direct] = yield* sql<{ config: number; chat: number }>`SELECT
-      EXISTS (SELECT 1 FROM auto_touches WHERE kind = ${CONFIG}) AS config,
-      EXISTS (SELECT 1 FROM auto_touches WHERE chat_id = ${guard.chat_id} AND (${guard.wide} = 1 OR kind = ${CHAT}
+      EXISTS (SELECT 1 FROM auto_touches WHERE kind IN (${CONFIG}, ${LIBRARY}, ${CALIBRATION})) AS config,
+      EXISTS (SELECT 1 FROM auto_touches WHERE chat_id = ${guard.chat_id} AND (${guard.wide} = 1 OR kind IN (${CHAT}, ${SUMMARY})
         OR (kind = ${FORK} AND ref = ${guard.fork_id}))) AS chat`
     if (direct!.config === 1) return "settings" as const
     if (direct!.chat === 1) return "changed" as const
@@ -334,13 +462,24 @@ const reached = (sql: SqlClient.SqlClient, guard: GuardRow) =>
 export const settleAutoRuns = (sql: SqlClient.SqlClient, operation: string, foreign = false) =>
   Effect.gen(function* () {
     if (!tracking) return
+    const now = Date.now()
+    if (now >= sweepAfter) {
+      yield* sql`DELETE FROM auto_guards WHERE at < ${now - KEPT_MS}`
+      sweepAfter = now + 60_000
+    }
     const [noted] = yield* sql<{ n: number }>`SELECT EXISTS (SELECT 1 FROM auto_touches) AS n`
     if (!noted || noted.n === 0) return
     const by = foreign ? null : actor
-    if (by?.maintenance !== true) {
+    if (by?.maintenance === true) yield* sql`DELETE FROM auto_touches WHERE kind = ${SUMMARY}`
+    {
       const guards = yield* sql<GuardRow>`SELECT * FROM auto_guards WHERE broken IS NULL`
       for (const guard of guards) {
-        if (by !== null && (yield* own(sql, guard, by))) continue
+        // An own reply can write notes, but cannot authorize settings/key/plugin changes in
+        // the same transaction. These always end the run.
+        const [configuration] = yield* sql<{
+          n: number
+        }>`SELECT EXISTS (SELECT 1 FROM auto_touches WHERE kind = ${CONFIG}) AS n`
+        if (configuration!.n === 0 && by !== null && (yield* own(sql, guard, by))) continue
         const reason = yield* reached(sql, guard)
         if (reason === null) continue
         yield* sql`UPDATE auto_guards SET broken = ${reason}, cause = ${by?.operation ?? operation} WHERE id = ${guard.id}`
@@ -351,30 +490,35 @@ export const settleAutoRuns = (sql: SqlClient.SqlClient, operation: string, fore
   })
 
 /**
- * Write handlers that say who is writing: before each runs, what an unnamed write left noted is
- * settled as nobody's own, and the operation and the reply or rollout its input names are kept
- * for its transaction's settlement. The writer serves one operation at a time.
+ * Capture the operation for its transaction's settlement, then clear it even on failure.
+ * All supported writes settle inside their synchronous transaction; no probe or mutation
+ * runs outside that transaction. The writer serves one operation at a time.
  */
-export const attributed = <H extends object>(sql: SqlClient.SqlClient, handlers: H): H =>
+export const attributed = <H extends object>(handlers: H): H =>
   Object.fromEntries(
     Object.entries(handlers).map(([operation, handler]) => [
       operation,
       (input: unknown, ...rest: ReadonlyArray<unknown>) =>
-        Effect.andThen(
-          settleAutoRuns(sql, "unnamed", true).pipe(Effect.catch(() => Effect.void)),
-          Effect.suspend(() => {
-            actor = {
-              operation,
-              rolloutId: named(input, "rolloutId"),
-              versionId: named(input, "versionId"),
-              maintenance: named(input, "jobId") !== undefined
-            }
-            return (handler as (input: unknown, ...rest: ReadonlyArray<unknown>) => Effect.Effect<unknown, unknown>)(
-              input,
-              ...rest
+        Effect.suspend(() => {
+          actor = {
+            operation,
+            rolloutId: named(input, "rolloutId"),
+            versionId: named(input, "versionId"),
+            autoToken: named(input, "autoToken"),
+            status: named(input, "status"),
+            maintenance: operation === "CompleteSummary" && named(input, "jobId") !== undefined
+          }
+          return (handler as (input: unknown, ...rest: ReadonlyArray<unknown>) => Effect.Effect<unknown, unknown>)(
+            input,
+            ...rest
+          ).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                actor = null
+              })
             )
-          })
-        )
+          )
+        })
     ])
   ) as H
 
@@ -388,14 +532,16 @@ const refused = (reason: "changed" | "settings" | "replayed" | "expired") => new
 export const checkAutoTurn = (
   sql: SqlClient.SqlClient,
   at: { readonly userId: string; readonly chatId: string; readonly forkId: string },
-  token: string
+  token: string,
+  configuration = ""
 ) =>
   Effect.gen(function* () {
     if (!tracking) return yield* refused("expired")
     const [guard] = yield* sql<GuardRow>`SELECT * FROM auto_guards WHERE id = ${token.split(".")[0] ?? ""}`
-    if (!guard) return yield* refused("expired")
+    if (!guard || guard.at < Date.now() - KEPT_MS) return yield* refused("expired")
     if (guard.token !== token) return yield* refused("replayed")
     if (guard.broken !== null) return yield* refused(guard.broken === "settings" ? "settings" : "changed")
+    if (guard.configuration !== configuration) return yield* refused("settings")
     if (guard.user_id !== at.userId || guard.chat_id !== at.chatId || guard.fork_id !== at.forkId)
       return yield* refused("changed")
     return guard.id
@@ -413,7 +559,8 @@ export const claimAutoTurn = (
   sql: SqlClient.SqlClient,
   at: { readonly userId: string; readonly chatId: string; readonly forkId: string },
   run: string | null,
-  reply: { readonly slotId: string; readonly versionId: string }
+  reply: { readonly slotId: string; readonly versionId: string },
+  configuration = ""
 ) =>
   Effect.gen(function* () {
     if (!tracking) return yield* refused("expired")
@@ -423,9 +570,9 @@ export const claimAutoTurn = (
     if (run === null) {
       yield* sql`DELETE FROM auto_guards WHERE at < ${now - KEPT_MS}
         OR (user_id = ${at.userId} AND chat_id = ${at.chatId} AND fork_id = ${at.forkId})`
-      yield* sql`INSERT INTO auto_guards (id, user_id, chat_id, fork_id, token, turn, slot_id, version_id, wide, at)
+      yield* sql`INSERT INTO auto_guards (id, user_id, chat_id, fork_id, token, turn, slot_id, version_id, wide, at, configuration)
         SELECT ${id}, ${at.userId}, ${at.chatId}, ${at.forkId}, ${token}, 1, ${reply.slotId}, ${reply.versionId},
-          EXISTS (SELECT 1 FROM thread_splits WHERE chat_id = ${at.chatId}), ${now}`
+          EXISTS (SELECT 1 FROM thread_splits WHERE chat_id = ${at.chatId}), ${now}, ${configuration}`
     } else {
       yield* sql`UPDATE auto_guards SET token = ${token}, turn = turn + 1, slot_id = ${reply.slotId},
         version_id = ${reply.versionId}, at = ${now} WHERE id = ${id}`
@@ -453,6 +600,16 @@ export const brokenTurnAt = (sql: SqlClient.SqlClient, slotId: string) =>
     if (!tracking) return false
     const [guard] = yield* sql<{ one: number }>`
       SELECT 1 AS one FROM auto_guards g JOIN versions v ON v.id = g.version_id
-      WHERE g.slot_id = ${slotId} AND g.broken IS NOT NULL AND v.status = 'generating' AND v.rollout_id IS NULL`
+      WHERE g.slot_id = ${slotId} AND g.broken IS NOT NULL`
     return guard !== undefined
+  })
+
+/** Final dispatch boundary: explicit token survives a writer restart as a refusal, never an
+ * unguarded request. Checked after all live reads and cache/concurrency waits, for every round. */
+export const authorizeAutoRequest = (sql: SqlClient.SqlClient, userId: string, token: string, configuration: string) =>
+  Effect.gen(function* () {
+    if (!tracking) return yield* refused("expired")
+    const [guard] = yield* sql<GuardRow>`SELECT * FROM auto_guards WHERE id = ${token.split(".")[0] ?? ""}`
+    if (!guard) return yield* refused("expired")
+    yield* checkAutoTurn(sql, { userId, chatId: guard.chat_id, forkId: guard.fork_id }, token, configuration)
   })

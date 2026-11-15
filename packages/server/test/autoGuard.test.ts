@@ -5,7 +5,9 @@
 import { assert, it } from "@effect/vitest"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Effect, type Layer, type Scope } from "effect"
+import { Effect, Layer, type Scope } from "effect"
+import * as ProviderBuiltins from "../src/providers/builtins.ts"
+import { ProviderRegistry } from "../src/providers/registry.ts"
 import { Writer } from "../src/db/Database.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
@@ -37,7 +39,7 @@ const scene = Effect.gen(function* () {
   const ask = (token: string | null, from: Api = api) =>
     from.Generate({
       chatId: made.chat.id,
-      forkId: made.chat.currentForkId,
+      forkId: made.chat.currentForkId!,
       parentSlotId: tip,
       branch: false,
       speakerEntityId: speakers[turns % 2]!,
@@ -76,10 +78,10 @@ const scene = Effect.gen(function* () {
         Effect.catchDefect((defect) => Effect.die(new Error(`${label}: ${String(defect)}`)))
       )
     })
-  return { api, made, requests, turn, refused, ended, tip: () => tip }
+  return { api, made, requests, turn, refused, ended, ask, tip: () => tip }
 })
 
-const server = () => serverLayer(testConfig())
+const server = () => Layer.merge(serverLayer(testConfig()), ProviderBuiltins.layer)
 
 const live = <E>(name: string, body: Effect.Effect<void, E, Layer.Success<ReturnType<typeof server>> | Scope.Scope>) =>
   it.live(name, () => body.pipe(Effect.scoped, Effect.provide(server())), 120_000)
@@ -235,7 +237,7 @@ live(
       "chat model",
       api.ChangeCast({
         chatId: made.chat.id,
-        forkId: made.chat.currentForkId,
+        forkId: made.chat.currentForkId!,
         slotId: null,
         change: { _tag: "Model", connection: made.connection.id, model: made.model.id }
       })
@@ -265,7 +267,7 @@ live(
     const { api, made, turn, requests } = yield* scene
     const sibling = (yield* api.CreateFork({
       chatId: made.chat.id,
-      fromForkId: made.chat.currentForkId,
+      fromForkId: made.chat.currentForkId!,
       atSlotId: made.sent.slotId
     })).fork
     const first = yield* turn(null)
@@ -311,7 +313,7 @@ live(
     const admitted = yield* writer.SendOrQueue({
       userId,
       chatId: made.chat.id,
-      forkId: made.chat.currentForkId,
+      forkId: made.chat.currentForkId!,
       parentSlotId: tip(),
       branch: false,
       kind: "generate",
@@ -337,7 +339,7 @@ live(
         versionId: admitted.result.version.id,
         rolloutId: "018f0000-0000-7000-8000-00000000aaaa",
         leafSlotId: tip(),
-        forkId: made.chat.currentForkId,
+        forkId: made.chat.currentForkId!,
         connectionId: made.connection.id,
         modelId: made.model.id,
         snapshot: "{}",
@@ -359,10 +361,225 @@ live(
     const before = requests().length
     // ▶ Reply now carries no token and asks for none.
     const sent = yield* posted(
-      api.Generate({ chatId: made.chat.id, forkId: made.chat.currentForkId, parentSlotId: tip(), branch: false })
+      api.Generate({ chatId: made.chat.id, forkId: made.chat.currentForkId!, parentSlotId: tip(), branch: false })
     )
     yield* eventually(() => finished(made.events, sent.entry.version.id) !== undefined)
     assert.strictEqual(requests().length, before + 1)
     assert.isUndefined(sent.auto)
+  })
+)
+
+live(
+  "hiding thinking on the run's own last reply from another tab ends the run",
+  Effect.gen(function* () {
+    const { api, made, turn, refused, tip } = yield* scene
+    const token = yield* turn(null)
+    const versions = yield* api.ListVersions({ slotId: tip(), forkId: made.chat.currentForkId })
+    const last = versions.at(-1)!
+    yield* api.SetThinkingHidden({
+      versionId: last.id,
+      forkId: made.chat.currentForkId!,
+      part: "reasoning",
+      hidden: true
+    })
+    yield* refused(token, "changed")
+  })
+)
+
+live(
+  "a change after StartRollout and before transport dispatch sends nothing",
+  Effect.gen(function* () {
+    const { api, made, turn, ask, requests } = yield* scene
+    const registry = yield* ProviderRegistry
+    const original = registry.kinds.get("openai-chat")!
+    let armed = false
+    yield* registry.kinds.register({
+      ...original,
+      transport: (fetch) => async (input, init) => {
+        if (armed) {
+          armed = false
+          await Effect.runPromise(api.SetMessageHidden({ slotId: made.sent.slotId, hidden: true }))
+        }
+        return fetch(input, init)
+      }
+    })
+    const token = yield* turn(null)
+    armed = true
+    const before = requests().length
+    const sent = yield* posted(ask(token))
+    yield* eventually(() => finished(made.events, sent.entry.version.id) !== undefined)
+    assert.strictEqual(requests().length, before)
+    assert.strictEqual(finished(made.events, sent.entry.version.id)!.status, "failed")
+  })
+)
+
+live(
+  "UndoHistoryEdit ends an Auto run",
+  Effect.gen(function* () {
+    const { api, made, turn, refused } = yield* scene
+    const applied = yield* api.ApplyHistoryEdits({
+      title: "Synthetic rename",
+      applications: [
+        {
+          chatId: made.chat.id,
+          forkId: made.chat.currentForkId!,
+          edits: [
+            {
+              kind: "version_replace",
+              targetId: made.sent.version.id,
+              beforeId: made.sent.version.id,
+              before: made.sent.version.content,
+              after: "The synthetic road is dry."
+            }
+          ]
+        }
+      ]
+    })
+    const token = yield* turn(null)
+    yield* api.UndoHistoryEdit({
+      chatId: made.chat.id,
+      forkId: made.chat.currentForkId!,
+      changesetId: applied.changesetIds[0]!
+    })
+    yield* refused(token, "changed")
+  })
+)
+
+live(
+  "merging a sibling into the run's branch ends it",
+  Effect.gen(function* () {
+    const { api, made, turn, refused } = yield* scene
+    const sibling = (yield* api.CreateFork({
+      chatId: made.chat.id,
+      fromForkId: made.chat.currentForkId!,
+      atSlotId: made.sent.slotId
+    })).fork
+    yield* posted(
+      api.SendMessage({
+        chatId: made.chat.id,
+        forkId: sibling.id,
+        parentSlotId: made.sent.slotId,
+        branch: false,
+        content: "A synthetic detour."
+      })
+    )
+    const token = yield* turn(null)
+    const request = {
+      chatId: made.chat.id,
+      forkId: made.chat.currentForkId!,
+      at: null,
+      source: { chatId: made.chat.id, forkId: sibling.id },
+      includeLeftOut: false
+    }
+    const preview = yield* api.PreviewChatMerge(request)
+    yield* api.MergeChat({ ...request, title: preview.sourceTitle, framing: null, digest: preview.digest })
+    yield* refused(token, "changed")
+  })
+)
+
+live(
+  "a message queued by another tab ends the run before it drains",
+  Effect.gen(function* () {
+    const { api, made, tip, refused } = yield* scene
+    const writer = yield* Writer
+    const userId = (yield* api.Whoami()).id as UserId
+    const admitted = yield* writer.SendOrQueue({
+      userId,
+      chatId: made.chat.id,
+      forkId: made.chat.currentForkId!,
+      parentSlotId: tip(),
+      branch: false,
+      kind: "generate",
+      content: "",
+      speakerEntityId: made.mira.entityId as EntityId,
+      replySpeakerEntityId: null,
+      direction: null,
+      commitDraft: null,
+      immediate: true,
+      auto: { token: null }
+    })
+    if (admitted._tag !== "Posted") return assert.fail("expected an admitted reply")
+    const queued = yield* api.SendMessage({
+      chatId: made.chat.id,
+      forkId: made.chat.currentForkId!,
+      parentSlotId: admitted.result.slotId,
+      branch: false,
+      content: "A queued external message."
+    })
+    assert.strictEqual(queued._tag, "Queued")
+    yield* refused(admitted.auto!.token, "changed")
+  })
+)
+
+it.live(
+  "a real writer restart loses its TEMP authorization and refuses the old token",
+  () =>
+    Effect.gen(function* () {
+      const config = testConfig()
+      const previous = yield* Effect.gen(function* () {
+        const f = yield* scene
+        const token = yield* f.turn(null)
+        return { token, chatId: f.made.chat.id, forkId: f.made.chat.currentForkId!, parentSlotId: f.tip() }
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+      yield* Effect.gen(function* () {
+        const api = yield* client()
+        const error = yield* Effect.flip(
+          api.Generate({
+            chatId: previous.chatId,
+            forkId: previous.forkId,
+            parentSlotId: previous.parentSlotId,
+            branch: false,
+            immediate: true,
+            auto: { token: previous.token }
+          })
+        )
+        assert.strictEqual(error._tag, "AutoRefused")
+        assert.strictEqual((error as { reason?: string }).reason, "expired")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    }),
+  120_000
+)
+
+live(
+  "registry parts changed before plugin pins commit cannot bill another Auto turn",
+  Effect.gen(function* () {
+    const { made, turn, ask, requests } = yield* scene
+    const token = yield* turn(null)
+    const registry = yield* ProviderRegistry
+    const before = requests().length
+    // Host.enable activates parts before its GetPluginPins/SetPluginPins awaits; suspend
+    // restores parts before those awaits. No database write has happened in this window.
+    yield* registry.transforms.register({
+      id: "synthetic.activation-window",
+      appliesTo: () => true,
+      transform: (payload) => ({ ...payload, temperature: 0.17 })
+    })
+    const result = yield* ask(token).pipe(Effect.catch((error) => Effect.succeed(error)))
+    if (result._tag === "Posted") {
+      yield* eventually(() => finished(made.events, result.entry.version.id) !== undefined)
+      assert.strictEqual(requests().length, before, "a changed request registry must not bill")
+      assert.strictEqual(finished(made.events, result.entry.version.id)!.status, "failed")
+    } else {
+      assert.strictEqual(result._tag, "AutoRefused")
+      assert.strictEqual((result as { reason?: string }).reason, "settings")
+    }
+  })
+)
+
+live(
+  "restoring a request registry does not revive an old Auto authorization",
+  Effect.gen(function* () {
+    const { turn, refused } = yield* scene
+    const token = yield* turn(null)
+    const registry = yield* ProviderRegistry
+    yield* Effect.scoped(
+      registry.transforms.register({
+        id: "synthetic.temporary",
+        appliesTo: () => true,
+        transform: (payload) => ({ ...payload, temperature: 0.19 })
+      })
+    )
+    yield* refused(token, "settings")
+    yield* refused(token, "settings")
   })
 )

@@ -473,7 +473,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       autoPick,
       storyAt,
       immediate,
-      auto
+      auto,
+      autoConfiguration
     }: SendInput) =>
       Effect.gen(function* () {
         yield* graph.ownedChat(userId, chatId)
@@ -482,7 +483,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         // An Auto turn is admitted here, in the transaction that writes its reply: nothing can
         // change between this check and the reply's placeholder (db/autoGuard.ts).
         const autoAt = { userId, chatId, forkId: fork.id }
-        const run = auto == null || auto.token === null ? null : yield* checkAutoTurn(sql, autoAt, auto.token)
+        const run =
+          auto == null || auto.token === null
+            ? null
+            : yield* checkAutoTurn(sql, autoAt, auto.token, autoConfiguration ?? "")
         // A turn added at the fork's tip is a new user action: the round already there, waiting
         // or stopped, ends (DESIGN §2.3). A branch elsewhere leaves it be.
         const endedRound =
@@ -589,7 +593,13 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             ? {}
             : {
                 auto: {
-                  token: yield* claimAutoTurn(sql, autoAt, run, { slotId: result.slotId, versionId: result.version.id })
+                  token: yield* claimAutoTurn(
+                    sql,
+                    autoAt,
+                    run,
+                    { slotId: result.slotId, versionId: result.version.id },
+                    autoConfiguration ?? ""
+                  )
                 }
               }
         // A reply posted now: the rest of its round waits for it.

@@ -1,3 +1,4 @@
+import { autoConfigurationStamp } from "../chat/autoConfiguration.ts"
 import { OperationCall } from "../agent/operations.ts"
 import { regenerateSeveral } from "./agent.ts"
 // Chat RPC handlers (@rp/shared/chatApi.ts). Every handler acts as the authenticated user;
@@ -197,7 +198,9 @@ export const makeChatHandlers = Effect.gen(function* () {
         userId: user,
         ...send,
         ...(immediate || outputLimit !== undefined || auto !== undefined ? { immediate: true } : {}),
-        ...(auto === undefined || params.kind !== "generate" ? {} : { auto }),
+        ...(auto === undefined || params.kind !== "generate"
+          ? {}
+          : { auto, autoConfiguration: autoConfigurationStamp() }),
         content: written.content,
         ...(written.rewrite ? { rewrite: written.rewrite } : {}),
         ...(round === undefined || round.length === 0 ? {} : { round }),
@@ -241,6 +244,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           slotId: result.slotId,
           versionId: result.version.id,
           ...(outputLimit === undefined ? {} : { outputBudget: { remaining: outputLimit } }),
+          ...(outcome.auto ? { autoGuard: outcome.auto.token } : {}),
           ...(proof?.model ? { model: proof.model } : {}),
           ...(operation ? { replyOnly: true } : {}),
           ...(storyAt === undefined ? {} : { storyAt }),

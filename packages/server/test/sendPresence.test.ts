@@ -18,10 +18,14 @@ import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 import { runStory } from "./support/threadStory.ts"
 
-type Sent = { readonly message: string; readonly present?: ReadonlyArray<string> }
+type Sent = {
+  readonly message: string
+  readonly present?: ReadonlyArray<string>
+  readonly tool?: { readonly name: string; readonly args: Record<string, unknown> }
+}
 type Mode = "off" | "optional" | "required"
 
-const sendCall = (args: Sent, id: string) => [
+const sendCall = (args: unknown, id: string, name = "send_message") => [
   {
     id: "cmpl-t",
     object: "chat.completion.chunk",
@@ -31,9 +35,7 @@ const sendCall = (args: Sent, id: string) => [
         index: 0,
         delta: {
           role: "assistant",
-          tool_calls: [
-            { index: 0, id, type: "function", function: { name: "send_message", arguments: JSON.stringify(args) } }
-          ]
+          tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }]
         },
         finish_reason: null
       }
@@ -60,7 +62,7 @@ const scriptedSends = (queue: Array<Sent>) => {
   return (request: Recorded, res: import("node:http").ServerResponse) => {
     const next = request.body?.tools ? queue.shift() : undefined
     if (next) {
-      const chunks = sendCall(next, `call_${++calls}`)
+      const chunks = sendCall(next.tool?.args ?? next, `call_${++calls}`, next.tool?.name)
       const limit = Number(request.body?.["max_tokens"] ?? request.body?.["max_completion_tokens"] ?? 5)
       const usage = chunks.at(-1)!.usage!
       usage.completion_tokens = Math.min(5, limit)
@@ -164,6 +166,25 @@ const scene = (
         tip = entry.slotId
         return finished(made.events, entry.version.id)!
       })
+    const autoTurn = (token: string | null, speaker: string, send: Sent) =>
+      Effect.gen(function* () {
+        queue.push(send)
+        const result = yield* posted(
+          api.Generate({
+            chatId,
+            forkId,
+            parentSlotId: tip,
+            branch: false,
+            speakerEntityId: ids[speaker]!,
+            immediate: true,
+            auto: { token }
+          })
+        )
+        yield* eventually(() => finished(made.events, result.entry.version.id) !== undefined)
+        tip = result.entry.slotId
+        assert.strictEqual(finished(made.events, result.entry.version.id)!.status, "complete")
+        return result.auto!.token
+      })
     /** A swipe of the reply at `slotId`, sent as `send` says. */
     const swipe = (slotId: SlotId, expectedRowVersion: number, send: Sent) =>
       Effect.gen(function* () {
@@ -198,6 +219,7 @@ const scene = (
     }
     const marks = () => api.GetAwayMarks({ chatId, forkId, slotId: tip })
     return {
+      autoTurn,
       api,
       reader,
       writer,
@@ -567,3 +589,27 @@ describe("send_message says who is present", () => {
     })()
   )
 })
+
+it.live(
+  "Auto survives its own send_message presence effects across replies",
+  () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* scene(config.dataDir, "required", [
+        { message: "The scene begins.", present: ["Mira", "Wren", "Ash"] }
+      ])
+      yield* f.api.ChangeCast({
+        chatId: f.chatId,
+        forkId: f.forkId,
+        slotId: null,
+        change: { _tag: "AgentTools", tools: ["set_presence"] }
+      })
+      f.enqueue({ message: "", tool: { name: "set_presence", args: { character: "Ash", present: false } } })
+      const before = f.bodies().length
+      const first = yield* f.autoTurn(null, "Wren", { message: "Wren waits.", present: ["Mira", "Wren", "Ash"] })
+      assert.isAtLeast(f.bodies().length, before + 2, "the own presence write must be followed by another tool round")
+      yield* f.autoTurn(first, "Mira", { message: "Mira answers.", present: ["Mira", "Wren", "Ash"] })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  },
+  120_000
+)

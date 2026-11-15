@@ -1,3 +1,5 @@
+import { autoConfigurationStamp } from "../chat/autoConfiguration.ts"
+import { AutoRequestGuard } from "../chat/Generator.ts"
 import { summaryResponse } from "./summaryResponse.ts"
 import { Formats } from "../importer/Formats.ts"
 import { payloadText } from "./textPayload.ts"
@@ -577,6 +579,16 @@ export const layer = (options: ProvidersOptions = {}) =>
       const formats = yield* Effect.serviceOption(Formats)
       const reader = yield* Reader
       const writer = yield* Writer
+      const autoChanged = () =>
+        providerError("unusable", "Not sent: auto replies ended because the chat, settings or server changed.")
+      const authorizeAuto = (userId: UserId, token: string | null) =>
+        Effect.gen(function* () {
+          if (token === null) return null
+          const configuration = autoConfigurationStamp()
+          yield* writer.AuthorizeAutoRequest({ userId, token, configuration }).pipe(Effect.mapError(autoChanged))
+          if (configuration !== autoConfigurationStamp()) return yield* autoChanged()
+          return configuration
+        })
       const secrets = yield* Secrets
       const network = yield* Network
       const registry = yield* ProviderRegistry
@@ -1272,6 +1284,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             if (sample)
               yield* writer
                 .RecordImageTokenSample({
+                  autoToken: yield* AutoRequestGuard,
                   userId: request.userId,
                   connectionId: prepared.connection.id,
                   modelKey: model.key,
@@ -1424,6 +1437,8 @@ export const layer = (options: ProvidersOptions = {}) =>
           })
 
         const use = Effect.gen(function* () {
+          const auto =
+            attribution.purpose === "generation" || attribution.purpose === "decision" ? yield* AutoRequestGuard : null
           const transcript = yield* Effect.try({
             try: () =>
               normalizeContext(
@@ -1511,6 +1526,14 @@ export const layer = (options: ProvidersOptions = {}) =>
                     }
                   }
                 }
+                // All live reads and cache waits are over. A later tool round has the same
+                // authorization; a changed run cannot send new bytes.
+                const configuration = await Effect.runPromise(authorizeAuto(request.userId, auto), { signal }).catch(
+                  (error: unknown) => {
+                    state.refused = "Not sent: auto replies ended because the chat, settings or server changed."
+                    throw error
+                  }
+                )
                 // Queued before any HTTP is sent, so it commits ahead of the rollout's later
                 // writes, but not awaited: the request needn't wait on the writer.
                 recording = recordSent?.()
@@ -1518,6 +1541,10 @@ export const layer = (options: ProvidersOptions = {}) =>
                 heardAt = Date.now()
                 // SDK-created affinity headers are now available, before any HTTP is sent.
                 // Preserve refused redirects instead of retrying the SDK's generic network error.
+                if (configuration !== null && configuration !== autoConfigurationStamp()) {
+                  state.refused = autoChanged().message
+                  throw new Error(state.refused)
+                }
                 const response = await routed(input, init).catch((error: unknown) => {
                   if (error instanceof RedirectRefused) state.refused = error.message
                   throw error
@@ -1561,6 +1588,10 @@ export const layer = (options: ProvidersOptions = {}) =>
               const observers = registry.observers.list().filter((o) => o.appliesTo(target))
               const breakpoints = options.cacheRetention === "none" ? [] : (options.breakpoints ?? [])
               const overrides = options.payload
+              await Effect.runPromise(authorizeAuto(request.userId, auto), { signal }).catch((error: unknown) => {
+                state.refused = "Not sent: auto replies ended because the chat, settings or server changed."
+                throw error
+              })
               const events = prepared.kind.streams.streamSimple(piModel, transcript, {
                 // A keyless local server still needs a value; pi's direct calls require one. A
                 // kind with its own transport authorizes the request itself from the stored key,
@@ -1603,6 +1634,15 @@ export const layer = (options: ProvidersOptions = {}) =>
                 },
                 // The caller's fields, then the registered transforms, in registration order.
                 onPayload: async (payload: unknown) => {
+                  // Adapters without injected fetch must still authorize their dispatch.
+                  let configuration: string | null = null
+                  if (!prepared.kind.acceptsFetch)
+                    configuration = await Effect.runPromise(authorizeAuto(request.userId, auto)).catch(
+                      (error: unknown) => {
+                        state.refused = "Not sent: auto replies ended because the chat, settings or server changed."
+                        throw error
+                      }
+                    )
                   const sources = request.inspection
                     ? wireContext(request.inspection.request, {
                         ...request.inspection.model,
@@ -1750,6 +1790,10 @@ export const layer = (options: ProvidersOptions = {}) =>
                       recording = recordSent()
                       recordSent = undefined
                     }
+                  }
+                  if (configuration !== null && configuration !== autoConfigurationStamp()) {
+                    state.refused = autoChanged().message
+                    throw new Error(state.refused)
                   }
                   return final
                 }
@@ -2008,6 +2052,7 @@ export const layer = (options: ProvidersOptions = {}) =>
 
       const decide: ProvidersShape["decide"] = (request) =>
         Effect.gen(function* () {
+          const auto = yield* AutoRequestGuard
           const prepared = yield* prepare(request.userId, request.connectionId)
           const wire = prepared.kind.decide
           if (!wire)
@@ -2024,6 +2069,7 @@ export const layer = (options: ProvidersOptions = {}) =>
           const body = { model: model.key, state: request.state, questions: request.questions }
           const requestId = uuidv7() as LlmRequestId
           const target = { kind: prepared.kind.id, api: prepared.api, model: model.key }
+          yield* authorizeAuto(request.userId, auto)
           const allowed = yield* fromStorage(
             writer.OpenLlmRequest({
               userId: request.userId,
@@ -2102,7 +2148,12 @@ export const layer = (options: ProvidersOptions = {}) =>
                 baseUrl: prepared.baseUrl,
                 apiKey: prepared.apiKey,
                 headers: prepared.headers,
-                fetch: fetchFor(prepared, () => {}),
+                fetch: async (input, init) => {
+                  const configuration = await Effect.runPromise(authorizeAuto(request.userId, auto), { signal })
+                  if (configuration !== null && configuration !== autoConfigurationStamp())
+                    throw new Error(autoChanged().message)
+                  return fetchFor(prepared, () => {})(input, init)
+                },
                 body,
                 signal
               }),
