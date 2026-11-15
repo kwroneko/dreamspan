@@ -15,6 +15,8 @@ export const makeChatContextsHandlers = Effect.gen(function* () {
   const hub = yield* ChatHub
   const userId = Effect.map(CurrentUser, (user) => user.id)
   return {
+    GetStateMarks: (payload: { chatId: ChatId; forkId: ForkId; slotId: SlotId | null; keys: ReadonlyArray<string> }) =>
+      Effect.flatMap(userId, (id) => reader.StateMarks({ userId: id, ...payload })).pipe(internal("GetStateMarks")),
     GetAwayMarks: (payload: { chatId: ChatId; forkId: ForkId; slotId: SlotId | null }) =>
       Effect.flatMap(userId, (id) => reader.AwayMarks({ userId: id, ...payload })).pipe(internal("GetAwayMarks")),
     UndoAwayMark: (payload: { chatId: ChatId; forkId: ForkId; eventId: string }) =>

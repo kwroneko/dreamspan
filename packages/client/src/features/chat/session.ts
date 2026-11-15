@@ -470,6 +470,10 @@ export class ChatSession {
   private readonly positionCasts = new Map<string, Cast | "loading">()
   /** Bumped when position state changes, including a switch away and back to the same fork. */
   private positionGeneration = 0
+  /** Invalidated positional state; filling the cast/card caches does not change this. */
+  get positionRevision() {
+    return this.positionGeneration
+  }
   private readonly positionListeners = new Set<() => void>()
 
   readonly subscribePositions = (listener: () => void) => {

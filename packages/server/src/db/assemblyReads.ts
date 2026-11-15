@@ -54,6 +54,7 @@ import { makeCardOriginReadHandlers } from "./cardOrigins.ts"
 import { makeTokenCountingReadHandlers } from "./tokenCounting.ts"
 import { makeDecisionReadHandlers } from "./decisions.ts"
 import { makeAwayMarkReadHandlers } from "./awayMarks.ts"
+import { makeStateMarkReadHandlers } from "./stateMarks.ts"
 import type { ReadOps } from "./ops.ts"
 import { usedEntries } from "./usedEntries.ts"
 import { query } from "./tx.ts"
@@ -165,6 +166,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
     ...(yield* makeTokenCountingReadHandlers),
     ...(yield* makeDecisionReadHandlers),
     ...(yield* makeAwayMarkReadHandlers),
+    ...(yield* makeStateMarkReadHandlers),
     RoleProjections: () => assembler.projectionOptions,
     MergeLayouts: () => assembler.mergeLayoutOptions,
     ContextViews: () => assembler.contextViewOptions,

@@ -2,6 +2,8 @@ import { PresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { ChatExternalMedia } from "./externalMedia.tsx"
 import { SplitChatDivider } from "./SplitChatDivider.tsx"
 import { AwayRows } from "./AwayRows.tsx"
+import { StateRows } from "./StateRows.tsx"
+import { registerStateMarkerKinds } from "./stateMarkers.ts"
 import { ContextViewSection } from "./ContextViewSection.tsx"
 import { messageStream, runInspectorSections } from "./presentation.tsx"
 import { MacroBindings } from "./MacroBindings.tsx"
@@ -113,6 +115,9 @@ export const registerPresentation = () => [
   messageStream.register({ id: "chat.split-divider", order: 30, component: SplitChatDivider }),
   // Where a character left the scene or came back, with Undo for the scene check's (CU3).
   messageStream.register({ id: "chat.away-rows", order: 20, component: AwayRows }),
+  // Where who's in the chat, a note, the chat's model or preset, or a setting changed (stateMarkers.ts).
+  messageStream.register({ id: "chat.state-markers", source: import.meta.url, order: 25, component: StateRows }),
+  ...registerStateMarkerKinds(),
   // In the request inspector: whose view a separate context was written from, and what it left out (CU5).
   runInspectorSections.register({ id: "inspector.context-view", order: 5, component: ContextViewSection }),
   ...registerTimelineTransforms(),

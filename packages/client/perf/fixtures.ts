@@ -26,6 +26,8 @@ import { startServer, withClient } from "./support.ts"
 
 /** Bump when what's generated changes, so a stale cache isn't used. */
 const VERSION = 4
+/** A bounded full-length scroll review; the normal harness remains 100,000 messages. */
+const longCount = process.env.PERF_LONG_MESSAGES === "6000" ? 6000 : 100_000
 const DB = "rp-harness.db"
 
 export interface Fixture {
@@ -186,7 +188,7 @@ const build = async (dir: string): Promise<Fixture> => {
   const db = new DatabaseSync(join(dir, DB))
   db.exec("PRAGMA synchronous = OFF")
   db.exec("BEGIN")
-  const { slots: longSlots } = fill(db, long.id, 100_000, 1)
+  const { slots: longSlots } = fill(db, long.id, longCount, 1)
   fill(db, a.id, 300, 2)
   fill(db, b.id, 300, 3)
   // These chats stand for imported ones, where LCM is off (DESIGN §8.1). With it on, the first
@@ -206,7 +208,7 @@ const build = async (dir: string): Promise<Fixture> => {
   db.exec("PRAGMA wal_checkpoint(TRUNCATE)")
   db.close()
   return {
-    long: { chatId: long.id, deep: longSlots[30_000]! as SlotId },
+    long: { chatId: long.id, deep: longSlots[Math.min(30_000, longCount - 1)]! as SlotId },
     summarized: {
       chatId: summarized.id,
       boundary: voyage.slots[18_000]! as SlotId,
@@ -222,7 +224,7 @@ const build = async (dir: string): Promise<Fixture> => {
 /** A fresh data directory holding the fixtures, built once per fixture version. The caller removes it. */
 export const prepare = async (): Promise<{ dataDir: string; fixture: Fixture }> => {
   // Outside the run's own temp directory (globalSetup.ts), so it outlives the run.
-  const cache = join(process.env.RP_PERF_CACHE_ROOT ?? tmpdir(), `rp-perf-fixture-v${VERSION}`)
+  const cache = join(process.env.RP_PERF_CACHE_ROOT ?? tmpdir(), `rp-perf-fixture-v${VERSION}-${longCount}`)
   if (!existsSync(join(cache, "fixture.json"))) {
     const building = mkdtempSync(join(tmpdir(), "rp-perf-build-"))
     try {

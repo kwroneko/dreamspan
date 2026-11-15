@@ -48,6 +48,37 @@ const fixture = (dataDir: string) =>
   })
 
 describe("operation tools", () => {
+  it.live("notifies the recorded story fork after single and grouped Undo", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const f = yield* fixture(config.dataDir)
+      const story = yield* f.api.CreateChat({ title: "Undo notifications" })
+      const events: ChatEvent[] = []
+      yield* f.api.SubscribeChat({ chatId: story.id }).pipe(
+        Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+        Effect.forkScoped
+      )
+      yield* eventually(() => events.some((e) => e._tag === "Hello"))
+      const changed = () => events.some((e) => e._tag === "State" && e.forkId === story.currentForkId)
+      const run = (call: string) =>
+        f.run("change_chat", { chat: story.id, change: { _tag: "AgentEnabled", on: true } }, call)
+      assert.isUndefined((yield* run("single")).isError)
+      const effect = (yield* f.api.ListRolloutEffects({ chatId: f.chat.id })).find((e) => e.toolCallId === "single")!
+      events.length = 0
+      yield* f.api.UndoRolloutEffect(effect)
+      yield* eventually(changed)
+      assert.isFalse(
+        (yield* f.api.GetCast({ chatId: story.id, forkId: story.currentForkId, slotId: null })).agentEnabled
+      )
+      assert.isUndefined((yield* run("grouped")).isError)
+      events.length = 0
+      yield* f.api.UndoRolloutEffects({ chatId: f.chat.id, rolloutId: f.rolloutId })
+      yield* eventually(changed)
+      assert.isFalse(
+        (yield* f.api.GetCast({ chatId: story.id, forkId: story.currentForkId, slotId: null })).agentEnabled
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
   it.live("moves and edits own-turn card notes with receipted whole-effect Undo", () => {
     const config = testConfig()
     return Effect.gen(function* () {

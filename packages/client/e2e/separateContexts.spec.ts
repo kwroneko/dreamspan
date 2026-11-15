@@ -861,7 +861,7 @@ for (const width of [1440, 390])
             )
               pending.add(String(message.id))
           for (const [key, methods] of Object.entries({
-            marks: ["GetAwayMarks"],
+            marks: ["GetAwayMarks", "GetStateMarks"],
             cast: ["GetCast", "GetCasts"],
             path: ["ReadPath"],
             next: ["GetNextContext"],

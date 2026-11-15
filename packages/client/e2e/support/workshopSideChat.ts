@@ -420,28 +420,32 @@ export function workshopSideChatChangesTests() {
         test(`branch and range, Undo and Undo all at ${width} ${theme}`, async ({ page }, info) => {
           test.setTimeout(120_000)
           // No provider request is needed for the story fixture.
-          const { story, workshop, original, sibling } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-            Effect.gen(function* () {
-              const story = yield* api.CreateChat({ title: "Changes story" })
-              const first = yield* api.SendMessage({
-                chatId: story.id,
-                parentSlotId: null,
-                branch: false,
-                content: "ALPHA opening."
+          const { story, workshop, original, sibling, storySlot } = await asUser(
+            server(),
+            ADMIN.handle,
+            ADMIN.password,
+            (api) =>
+              Effect.gen(function* () {
+                const story = yield* api.CreateChat({ title: "Changes story" })
+                const first = yield* api.SendMessage({
+                  chatId: story.id,
+                  parentSlotId: null,
+                  branch: false,
+                  content: "ALPHA opening."
+                })
+                if (first._tag !== "Posted") return yield* Effect.die("unexpected queue")
+                const original = (yield* api.GetChat({ chatId: story.id })).currentForkId!
+                const second = yield* api.SendMessage({
+                  chatId: story.id,
+                  parentSlotId: null,
+                  branch: true,
+                  content: "BRAVO opening."
+                })
+                if (second._tag !== "Posted") return yield* Effect.die("unexpected queue")
+                const sibling = (yield* api.GetChat({ chatId: story.id })).currentForkId!
+                const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+                return { story, workshop, original, sibling, storySlot: first.entry.slotId }
               })
-              if (first._tag !== "Posted") return yield* Effect.die("unexpected queue")
-              const original = (yield* api.GetChat({ chatId: story.id })).currentForkId!
-              const second = yield* api.SendMessage({
-                chatId: story.id,
-                parentSlotId: null,
-                branch: true,
-                content: "BRAVO opening."
-              })
-              if (second._tag !== "Posted") return yield* Effect.die("unexpected queue")
-              const sibling = (yield* api.GetChat({ chatId: story.id })).currentForkId!
-              const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
-              return { story, workshop, original, sibling }
-            })
           )
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
           await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
@@ -464,6 +468,8 @@ export function workshopSideChatChangesTests() {
           )
           await expect(rewrite).toContainText("Changes story · Branch “Harbor path” · messages 1–1")
 
+          const stateMarker = page.locator(`[data-state-markers="${storySlot}"]`)
+          await expect(stateMarker).toContainText("Tools: off → on")
           await expect(changes).not.toContainText(original)
           await expectLayout(page, info, `side-changes-${width}-${theme}`, { scope: "[data-side-chat]" })
           if (shots) {
@@ -476,6 +482,7 @@ export function workshopSideChatChangesTests() {
             .locator('[data-effect-kind="chat.change"]')
             .getByRole("button", { name: "Undo", exact: true })
             .click()
+          await expect(stateMarker).toHaveCount(0)
           await expect(changes.locator('[data-effect-kind="chat.change"]')).toContainText("Undone")
           await changes.getByRole("button", { name: "Undo all of this reply", exact: true }).click()
           await expect(changes.locator('[data-effect-kind="changeset.apply"]')).toContainText("Undone")

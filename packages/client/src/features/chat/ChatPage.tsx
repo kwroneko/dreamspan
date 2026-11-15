@@ -45,6 +45,8 @@ import { useSession } from "../../session.ts"
 import { CastContext, castView } from "./cast.ts"
 import { ChatSidePanel, type PanelTab, rememberPanel, usePanel } from "./ChatPanels.tsx"
 import { ChatHeader } from "./ChatHeader.tsx"
+import { densityMetrics, readingAnchor, type ReadingAnchor, readingDrift, readingInset } from "./readingPlace.ts"
+import { ChatDensityContext } from "./ChatDensity.tsx"
 import { castCharacters, chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
@@ -127,6 +129,10 @@ export function MessageList({
   const [follow] = useState({ stuck: true })
   const { entries } = view
   const { prefs } = useViewPrefs()
+  // The spacing shown follows the account's choice one commit later, once what's being read
+  // is noted (below), so the rows, their gap and their estimated heights change together.
+  const [spacing, setSpacing] = useState(prefs.chatDensity)
+  const metrics = densityMetrics(spacing)
   const summarySlots = useSyncExternalStore(
     timelineSummaries.subscribe,
     timelineSummaries.snapshot,
@@ -171,6 +177,20 @@ export function MessageList({
           : null
   /** The message whose actions show after a tap, on a narrow screen. */
   const [revealed, setRevealed] = useState<SlotId | null>(null)
+  useEffect(() => {
+    if (spacing !== "compact" || revealed === null) return
+    const dismiss = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return
+      const message = event.target.closest("article[data-slot]")
+      // Portalled menus and pickers still belong to the revealed message.
+      if (message?.getAttribute("data-slot") === revealed || event.target.closest("[data-layout-overlay]")) return
+      setRevealed(null)
+    }
+    // Dismiss after the tapped control handles its click. Shrinking the previous row on
+    // pointerdown could move that control away before pointerup and swallow the action.
+    document.addEventListener("click", dismiss)
+    return () => document.removeEventListener("click", dismiss)
+  }, [spacing, revealed])
   let historyDivider = -1
   if (budget && entries.length > 0) {
     const start = history.historyStart
@@ -204,7 +224,10 @@ export function MessageList({
   /** The row an entry is shown at. */
   const rowOf = (entry: number) =>
     rows.findIndex((row) => positionOf(entries[entry]!) >= row.from && positionOf(entries[entry]!) <= row.to)
-  const estimateSize = useCallback((row: number) => rows[row]!.estimate, [rows])
+  const estimateSize = useCallback(
+    (row: number) => Math.round(rows[row]!.estimate * metrics.estimate),
+    [rows, metrics.estimate]
+  )
   const getItemKey = useCallback((row: number) => rows[row]!.key, [rows])
   const offsetChanged = useRef<((offset: number, isScrolling: boolean) => void) | null>(null)
   const observeOffset = useCallback(
@@ -233,7 +256,7 @@ export function MessageList({
       const entry = entries.findIndex((e) => e.slotId === target)
       const index = entry >= 0 ? rowOf(entry) : rows.findIndex((row) => row.key === target || row.lastSlotId === target)
       let offset = 16
-      for (let i = 0; i < (index < 0 ? rows.length : index); i++) offset += rows[i]!.estimate + 6
+      for (let i = 0; i < (index < 0 ? rows.length : index); i++) offset += estimateSize(i) + metrics.gap
       return offset
     },
     overscan: 2,
@@ -241,7 +264,7 @@ export function MessageList({
     followOnAppend: view.follow,
     paddingStart: 16,
     paddingEnd: 16,
-    gap: 6,
+    gap: metrics.gap,
     // TanStack Virtual follows a row growing at the very end itself; once the user lets go,
     // it mustn't (below).
     scrollEndThreshold: follow.stuck ? 1 : -1
@@ -267,6 +290,118 @@ export function MessageList({
       offsetChanged.current?.(list.scrollTop, false)
   }, [virtualizer])
   useLayoutEffect(syncOffset)
+
+  // Contributions can grow below a partly visible earlier row whose text is already
+  // above the viewport. Keep the reading row fixed through a resize batch: querying
+  // it after each scroll correction can choose a different row before positions commit.
+  useLayoutEffect(() => {
+    const list = parent.current
+    if (list === null) return
+    let readingRow: HTMLElement | null = null
+    const remember = () => {
+      const anchor = readingAnchor(list)
+      readingRow = anchor === null ? null : list.querySelector(`.chat-row[data-index="${anchor.row}"]`)
+    }
+    remember()
+    const previous = virtualizer.shouldAdjustScrollPositionOnItemSizeChange
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
+      if (readingRow === null || !list.contains(readingRow)) remember()
+      return readingRow !== null && item.index < Number(readingRow.dataset.index)
+    }
+    // Scroll events follow the virtualizer's committed positions, including after
+    // a resize batch; a real scroll picks the new reading row in the same way.
+    list.addEventListener("scroll", remember, { passive: true })
+    return () => {
+      list.removeEventListener("scroll", remember)
+      virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previous
+    }
+  }, [virtualizer])
+
+  // Changing the message spacing resizes every row, and the gaps between them. What's being
+  // read keeps its place on screen: the first text in view is noted before anything changes,
+  // and the list is put back around it once the rows are laid out again, and again over the
+  // next frames as they're measured. At the end of the chat the list stays at the end.
+  const reading = useRef<{ key: string; anchor: ReadingAnchor } | "end" | null>(null)
+  const correctReading = useRef<(() => void) | null>(null)
+  useLayoutEffect(() => {
+    if (prefs.chatDensity === spacing) return
+    const list = parent.current
+    const anchor = list === null || (follow.stuck && view.follow) ? null : readingAnchor(list)
+    const row = anchor === null ? undefined : rows[anchor.row]
+    reading.current = anchor !== null && row !== undefined ? { key: row.key, anchor } : list === null ? null : "end"
+    // Heights measured at the other spacing are wrong for rows that aren't shown: those go back
+    // to estimates, so each is measured afresh, and the list corrected for it, when it's reached.
+    setSpacing(prefs.chatDensity)
+  }, [prefs.chatDensity, spacing, follow, view.follow, rows, virtualizer])
+  useLayoutEffect(() => {
+    const list = parent.current
+    const kept = reading.current
+    reading.current = null
+    if (list === null || kept === null) return
+    // Use the public reset so both the size cache and its memoized measurements invalidate.
+    virtualizer.measure()
+    if (kept === "end") {
+      virtualizer.scrollToEnd()
+      return
+    }
+    const row = rows.findIndex((candidate) => candidate.key === kept.key)
+    if (row < 0) return
+    const moveBy = (drift: number) => {
+      virtualizer.scrollToOffset(Math.max(0, list.scrollTop + drift))
+      syncOffset()
+    }
+    // The rows shown have their new heights already, but the list still places them by the old
+    // ones until its observer reports each. Told now, without its own scroll corrections (this
+    // effect makes the one that counts), it has every row's new place before the first paint.
+    const previousAdjustment = virtualizer.shouldAdjustScrollPositionOnItemSizeChange
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false
+    for (const element of list.querySelectorAll<HTMLElement>(".chat-row[data-index]"))
+      virtualizer.resizeItem(Number(element.dataset.index), element.getBoundingClientRect().height)
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previousAdjustment
+    virtualizer.getVirtualItems()
+    const item = virtualizer.measurementsCache[row]
+    if (item === undefined) return
+    // Where the text read sits inside its row doesn't depend on where the row is placed.
+    virtualizer.scrollToOffset(Math.max(0, item.start + readingInset(list, kept.anchor, row)))
+    syncOffset()
+    let frame = 0
+    let steady = 0
+    const started = performance.now()
+    const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
+    const stop = () => {
+      correctReading.current = null
+      cancelAnimationFrame(frame)
+      for (const event of inputs) list.removeEventListener(event, stop)
+    }
+    const settle = () => {
+      const drift = readingDrift(list, kept.anchor, row)
+      if (drift !== null && Math.abs(drift) >= 1) {
+        steady = 0
+        moveBy(drift)
+      } else steady++
+      if (steady < 4 && performance.now() - started < 1000) frame = requestAnimationFrame(settle)
+      else stop()
+    }
+    // This commit still has the previous virtual positions in its DOM. resizeItem
+    // queued the measured positions for the next commit; correcting now would add
+    // that stale layout's drift to the new offset and can unmount the anchor.
+    let handoverCommit = true
+    correctReading.current = () => {
+      if (handoverCommit) {
+        handoverCommit = false
+        return
+      }
+      const drift = readingDrift(list, kept.anchor, row)
+      if (drift !== null && Math.abs(drift) >= 0.5) moveBy(drift)
+    }
+    for (const event of inputs) list.addEventListener(event, stop, { passive: true })
+    frame = requestAnimationFrame(settle)
+    return stop
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per spacing change, with the rows of that render
+  }, [spacing])
+  // resizeItem schedules a commit with new row positions. Correct after that commit, before
+  // paint; waiting only for rAF allows its old DOM positions to show for one frame.
+  useLayoutEffect(() => correctReading.current?.())
 
   // A new window opens at the asked-for message, or at the bottom.
   // With summaries in the chat, a link waits for the layer: placed among the originals first,
@@ -335,18 +470,27 @@ export function MessageList({
     if (list !== null && view.highlight !== null) return flashWhenShown(list, view.highlight)
   }, [view.highlight])
 
-  // Expansions load asynchronously, possibly through several summary levels. Position
-  // the linked article each time a new one mounts, after the virtualizer measures its row:
+  // Row contributions and summary expansions load asynchronously. Position the linked
+  // article each time a new one mounts, after the virtualizer measures its row:
   // the uncovered original can render first, before the selected layer replaces it.
   // Until the user takes over, the list mustn't hold at the end either: a collapsed
   // summary can fit the viewport, and holding there would follow its expansion down.
   const revealing = useRef(false)
   useEffect(() => {
     const list = parent.current
-    if (!summaries || anchor === null || list === null) return
+    if (anchor === null || list === null) return
     revealing.current = true
     let frame = 0
     let shown: Element | null = null
+    // Keep the linked message in place while asynchronous row contributions arrive.
+    // The default anchors only rows entirely above the viewport; a marker added below
+    // a partly visible earlier message would otherwise push the link down. Stop using
+    // this requested-message anchor as soon as the user takes over, like reveal below.
+    const previousAdjustment = virtualizer.shouldAdjustScrollPositionOnItemSizeChange
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
+      const row = shown?.closest<HTMLElement>("[data-index]")
+      return row !== undefined && row !== null && item.index < Number(row.dataset.index)
+    }
     const reveal = () => {
       const article = list.querySelector(`article[data-slot="${CSS.escape(anchor)}"]`)
       if (!article || article === shown) return
@@ -365,13 +509,23 @@ export function MessageList({
         })
       })
     }
-    const stop = () => {
+    const stop = (event?: Event) => {
+      const sendingAtEnd =
+        event?.target instanceof Node &&
+        !list.contains(event.target) &&
+        virtualizer.options.followOnAppend &&
+        virtualizer.isAtEnd(END_PX)
       revealing.current = false
+      cancelAnimationFrame(frame)
+      virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previousAdjustment
+      if (sendingAtEnd) hold(true)
       observer.disconnect()
-      for (const event of inputs) list.removeEventListener(event, stop)
+      for (const event of inputs) inputSurface.removeEventListener(event, stop)
     }
     const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
-    for (const event of inputs) list.addEventListener(event, stop, { passive: true })
+    // Writing/sending in the composer takes over too; it is a sibling of the list.
+    const inputSurface = list.parentElement ?? list
+    for (const event of inputs) inputSurface.addEventListener(event, stop, { passive: true })
     const observer = new MutationObserver(reveal)
     observer.observe(list, { childList: true, subtree: true })
     reveal()
@@ -379,7 +533,7 @@ export function MessageList({
       stop()
       cancelAnimationFrame(frame)
     }
-  }, [anchor, summaries, view.opened, virtualizer])
+  }, [anchor, summaries, view.opened, virtualizer, hold])
 
   // An end scroll remains pending by row index while the virtualizer measures it.
   // Appending or inserting the summary divider can move the last message to another
@@ -424,6 +578,9 @@ export function MessageList({
     // Capture runs before the virtualizer's own listener, whose render may follow at once.
     const onScroll = () => {
       if (!atEnd()) hold(false)
+      // Capture reaching the end before the virtualizer measures its newly mounted rows.
+      // Their corrected estimates can grow the list beyond END_PX in that same commit.
+      else if (spacing === "compact" && !revealing.current && performance.now() - intent.current > 300) hold(true)
     }
     list.addEventListener("wheel", onWheel, { passive: true })
     list.addEventListener("touchmove", letGo, { passive: true })
@@ -440,7 +597,7 @@ export function MessageList({
       list.removeEventListener("pointerdown", onPointerDown)
       list.removeEventListener("scroll", onScroll, { capture: true })
     }
-  }, [hold])
+  }, [hold, spacing])
   useEffect(() => {
     const list = parent.current
     if (list === null || entries.length === 0 || !view.follow) return
@@ -568,41 +725,44 @@ export function MessageList({
   )
 
   return (
-    <TooltipProvider>
-      <div
-        ref={parent}
-        data-testid={embedded ? "side-chat-messages" : "messages"}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
-      >
-        <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>
-          {showRail && (
-            <SlotOutlet
-              slot={timelineRails}
-              props={{ entries, rows: railRows, lcm, position, onOpen: onOpenSummaries }}
-            />
-          )}
-          {items.map((item) => {
-            const row = rows[item.index]!
-            return (
-              <div
-                key={item.key}
-                data-index={item.index}
-                ref={virtualizer.measureElement}
-                className="chat-row absolute left-0 w-full"
-                // Placed by `top`, not a transform: a transformed row would keep a reply's sticky
-                // Stop (Message.tsx) from holding to the bottom of the view.
-                style={{
-                  top: item.start,
-                  ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
-                }}
-              >
-                {row.render({ session, anchor, renderMessage, onOpenSummaries })}
-              </div>
-            )
-          })}
+    <ChatDensityContext value={spacing}>
+      <TooltipProvider>
+        <div
+          ref={parent}
+          data-testid={embedded ? "side-chat-messages" : "messages"}
+          data-chat-density={spacing}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+        >
+          <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>
+            {showRail && (
+              <SlotOutlet
+                slot={timelineRails}
+                props={{ entries, rows: railRows, lcm, position, onOpen: onOpenSummaries }}
+              />
+            )}
+            {items.map((item) => {
+              const row = rows[item.index]!
+              return (
+                <div
+                  key={item.key}
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  className="chat-row absolute left-0 w-full"
+                  // Placed by `top`, not a transform: a transformed row would keep a reply's sticky
+                  // Stop (Message.tsx) from holding to the bottom of the view.
+                  style={{
+                    top: item.start,
+                    ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
+                  }}
+                >
+                  {row.render({ session, anchor, renderMessage, onOpenSummaries })}
+                </div>
+              )
+            })}
+          </div>
         </div>
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </ChatDensityContext>
   )
 }
 

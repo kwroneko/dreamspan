@@ -129,6 +129,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   GetShellForks: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetShellLibrary: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetSplitChats: "Not in W6's first exposures; use the bounded workshop read tools.",
+  GetStateMarks: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetStImport: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetStImportReport: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetStImportPlan: "Not in W6's first exposures; use the bounded workshop read tools.",

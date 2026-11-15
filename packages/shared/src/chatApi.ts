@@ -133,6 +133,12 @@ const displayFields = {
   panelDepth: Schema.NullOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))),
   enterSends: Schema.Literals(["automatic", "always", "never"]),
   chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
+  /**
+   * "Message spacing": how much room messages take in a chat. `compact` tightens the gaps,
+   * the text's line and paragraph spacing and the name row, and shows a message's version
+   * controls only with the message pointed at, focused or tapped (ChatDensity.tsx).
+   */
+  chatDensity: Schema.Literals(["comfortable", "compact"]),
   /** How preset lists sort (the composer's picker, the Prompt preset tab's, the library's). */
   presetSort: PresetSort,
   /** How model lists sort (the composer's picker and the Model tab's). */
@@ -166,7 +172,12 @@ const displayFields = {
    * the detail's id (messageDetails.tsx): false hides one. An id no detail has is kept and ignored.
    */
   dismissedInfo: choicesById,
-  messageDetails: choicesById
+  messageDetails: choicesById,
+  /**
+   * Which kinds of change show as markers in the chat (who joined, notes switched, the model
+   * changed), by the kind's id (stateMarkers.ts): false hides one. Merged by id, as the details are.
+   */
+  stateMarkers: choicesById
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
@@ -186,6 +197,7 @@ export const DisplayPrefsChange = Schema.Struct({
   panelDepth: Schema.optionalKey(displayFields.panelDepth),
   enterSends: Schema.optionalKey(displayFields.enterSends),
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
+  chatDensity: Schema.optionalKey(displayFields.chatDensity),
   presetSort: Schema.optionalKey(displayFields.presetSort),
   modelSort: Schema.optionalKey(displayFields.modelSort),
   modelPins: Schema.optionalKey(displayFields.modelPins),
@@ -202,7 +214,8 @@ export const DisplayPrefsChange = Schema.Struct({
   messageToolbar: Schema.optionalKey(displayFields.messageToolbar),
   /** Merged by id with what's stored, as the message toolbar's are. */
   dismissedInfo: Schema.optionalKey(displayFields.dismissedInfo),
-  messageDetails: Schema.optionalKey(displayFields.messageDetails)
+  messageDetails: Schema.optionalKey(displayFields.messageDetails),
+  stateMarkers: Schema.optionalKey(displayFields.stateMarkers)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
@@ -221,6 +234,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   panelDepth: null,
   enterSends: "automatic",
   chatWidth: CHAT_WIDTH.default,
+  chatDensity: "comfortable",
   presetSort: "name",
   modelSort: "name",
   modelPins: {},
@@ -235,7 +249,8 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   singlePortrait: false,
   messageToolbar: {},
   dismissedInfo: {},
-  messageDetails: {}
+  messageDetails: {},
+  stateMarkers: {}
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
 
