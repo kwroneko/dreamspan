@@ -7,18 +7,9 @@ import { composerChoice } from "./speaker.ts"
 import { composerControls, type ComposerControlContext } from "./composerControls.tsx"
 import type { DraftWriter } from "./draftWriter.ts"
 
-function WriteControl({ writing, ready, busy, prefsReady, guidance, session, report }: ComposerControlContext) {
+function WriteControl({ writing, ready, busy, prefsReady, guidance, session }: ComposerControlContext) {
   if (!writing) return null
-  const start = async () => {
-    if (guidance) {
-      const changed = await composerChoice(session).change({ guidance: false })
-      if (!changed.ok) {
-        report(changed)
-        return
-      }
-    }
-    await writing.start()
-  }
+  const start = () => writing.start(guidance ? () => composerChoice(session).change({ guidance: false }) : undefined)
   return <WriteButton writing={writing} disabled={!ready || busy || !prefsReady} start={start} />
 }
 function WriteButton({

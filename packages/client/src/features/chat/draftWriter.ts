@@ -1,6 +1,6 @@
 import { Effect, Stream } from "effect"
 import type { DraftGenerationTarget } from "@rp/shared/generationTarget.ts"
-import type { ChatSession } from "./session.ts"
+import type { ChatSession, Outcome } from "./session.ts"
 import type { ComposerDraft } from "./composerDraft.ts"
 
 interface DraftWritingState {
@@ -70,7 +70,7 @@ export class DraftWriter {
         undo: this.undoText?.draftId === this.draft.snapshot().draftId
       })
   }
-  readonly start = async () => {
+  readonly start = async (prepare?: () => Promise<Outcome<unknown>>) => {
     if (this.active || !this.draft.snapshot().ready) return
     const view = this.session.snapshot()
     const opened = this.draft.snapshot()
@@ -90,6 +90,9 @@ export class DraftWriter {
     this.active = active
     this.update({ running: true, rolloutId: null, error: null, undo: false })
     const changed = () => {
+      // Cancellation settles asynchronously; an old subscription can still be present
+      // after a new writer starts. It must never stop that newer request.
+      if (this.active !== active) return
       const current = this.session.snapshot()
       const draft = this.draft.snapshot()
       if (
@@ -103,8 +106,15 @@ export class DraftWriter {
     }
     const stopView = this.session.subscribe(changed)
     const stopDraft = this.draft.subscribe(changed)
+    // Claim the origin before changing composer mode: that save can complete after
+    // navigation or Stop, and must never authorize a request in the new destination.
+    const prepared = prepare ? await prepare() : null
+    if (prepared !== null && !prepared.ok && this.active === active) {
+      this.update({ error: prepared.error.message })
+      this.stop()
+    }
     // Save the starting text before any generated append. All chunks use the same draft queue.
-    await this.draft.flush()
+    if (this.active === active) await this.draft.flush()
     if (this.active !== active) {
       stopView()
       stopDraft()

@@ -1,11 +1,13 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Fiber, Stream } from "effect"
+import { createHash } from "node:crypto"
 import { draftGenerationParts } from "../src/chat/draftGeneration.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import type { Generation } from "../src/assembler/types.ts"
 import { chatCompletionsFields } from "../src/assembler/wire.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
-import { generateReply, eventually } from "./support/generation.ts"
+import { generateReply, eventually, finished } from "./support/generation.ts"
+import { CacheSimulator, cacheClasses } from "./support/cacheSimulator.ts"
 import { completionChunks, json, sse, startMockProvider } from "./support/mockProvider.ts"
 import type { DraftGenerationTarget } from "@rp/shared/generationTarget.ts"
 
@@ -109,6 +111,19 @@ it.live(
         "NotFound"
       )
       assert.strictEqual(
+        (yield* reader.LastDraftRollout({ userId: other.id, chatId: chat.id, forkId: target.forkId }).pipe(Effect.flip))
+          ._tag,
+        "NotFound"
+      )
+      assert.strictEqual(
+        (yield* reader.RunContext({ userId, versionId: rolloutId as never }).pipe(Effect.flip))._tag,
+        "NotFound"
+      )
+      assert.strictEqual(
+        (yield* reader.DraftRunContext({ userId, rolloutId: stored.entry.version.id }).pipe(Effect.flip))._tag,
+        "NotFound"
+      )
+      assert.strictEqual(
         (yield* reader.AssembleDraftTurn({ userId, target, now: 1_000, timeZone: "UTC" }).pipe(Effect.flip))._tag,
         "StaleWrite"
       )
@@ -164,6 +179,7 @@ it.live("a retryable provider error makes exactly one attempt and remains inspec
 
 it.live("cancelling the draft stream closes its rollout and retains the delivered text", () =>
   Effect.gen(function* () {
+    let providerClosed = false
     const mock = yield* Effect.acquireRelease(
       Effect.promise(() => startMockProvider((_req, res) => sse(res, completionChunks(["Ready."], {})))),
       (m) => Effect.promise(() => m.close())
@@ -180,6 +196,9 @@ it.live("cancelling the draft stream closes its rollout and retains the delivere
       draftId: draft.id
     }
     mock.setHandler((_req, res) => {
+      res.once("close", () => {
+        providerClosed = true
+      })
       res.writeHead(200, { "content-type": "text/event-stream" })
       for (const chunk of completionChunks(["Keep this."], {}).slice(0, 1))
         res.write(`data: ${JSON.stringify(chunk)}\n\n`)
@@ -195,6 +214,7 @@ it.live("cancelling the draft stream closes its rollout and retains the delivere
     )
     yield* eventually(() => chunks.some((c) => c.text.includes("Keep this.")))
     yield* Fiber.interrupt(fiber)
+    yield* eventually(() => providerClosed)
     assert.strictEqual(chunks.map((c) => c.text).join(""), "Keep this.")
     let status = "running"
     while (status === "running") {
@@ -248,6 +268,13 @@ it.live("an earlier branch and parallel thread use only their own causal history
         { name: "Harbor", cast: [f.characters[0]!.entityId as never], writesAs: null }
       ]
     })
+    yield* api.SendMessage({
+      chatId: chat.id,
+      forkId: threads.forkIds[0]!,
+      parentSlotId: entry.slotId,
+      branch: false,
+      content: "Market-only sibling secret."
+    })
     mock.setHandler((_req, res) =>
       sse(res, completionChunks(["I take the harbor path."], { prompt_tokens: 100, completion_tokens: 8 }))
     )
@@ -259,6 +286,7 @@ it.live("an earlier branch and parallel thread use only their own causal history
     const body = JSON.stringify(mock.requests().at(-1)!.body)
     assert.include(body, "The road flooded.")
     assert.notInclude(body, "A later unseen reply.")
+    assert.notInclude(body, "Market-only sibling secret.")
     assert.include(body, "Tobin")
     assert.strictEqual(chunks.map((c) => c.text).join(""), "I take the harbor path.")
     assert.strictEqual(
@@ -282,4 +310,162 @@ it.effect("the draft policy is registered with source and scoped replacement res
     )
     assert.strictEqual(draftGenerationParts.get("draft"), original)
   })
+)
+
+it.live("drafting preserves the following reply's exact bytes and fake-provider cached tokens", () =>
+  Effect.gen(function* () {
+    // The fake provider counts one serialized byte as a synthetic token. Its cache
+    // keys are cumulative message prefixes, so a changed prefix cannot claim a hit.
+    const cache = new CacheSimulator({ ...cacheClasses[4]!, minTokens: 1, granularity: 1 })
+    const reads: number[] = []
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() =>
+        startMockProvider((request, res) => {
+          const messages = request.body!.messages as unknown[]
+          const blocks = messages.map((message, i) => ({
+            digest: createHash("sha256")
+              .update(JSON.stringify(messages.slice(0, i + 1)))
+              .digest("hex"),
+            tokens: Buffer.byteLength(JSON.stringify(message))
+          }))
+          const usage = cache.request(blocks, [], reads.length)
+          reads.push(usage.read)
+          sse(
+            res,
+            completionChunks(["A stable reply."], {
+              prompt_tokens: usage.input,
+              prompt_tokens_details: { cached_tokens: usage.read },
+              completion_tokens: 4
+            })
+          )
+        })
+      ),
+      (m) => Effect.promise(() => m.close())
+    )
+    const api = yield* client()
+    const f = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: {},
+      greeting: "Synthetic stable prefix. ".repeat(120)
+    })
+    const path = () => api.ReadPath({ chatId: f.chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+    const regenerate = () =>
+      Effect.gen(function* () {
+        const entry = (yield* path()).entries.at(-1)!
+        const result = yield* api.Regenerate({ slotId: entry.slotId, expectedRowVersion: entry.rowVersion })
+        yield* eventually(() => finished(f.events, result.version.id) !== undefined)
+        return result.version.id
+      })
+    yield* regenerate()
+    const control = mock.requests().at(-1)!.raw
+    const controlRead = reads.at(-1)!
+    assert.isAbove(controlRead, 1024)
+    const chat = yield* api.GetChat({ chatId: f.chat.id })
+    const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: chat.currentForkId })
+    yield* api
+      .WriteForMe({
+        target: {
+          kind: "draft",
+          chatId: chat.id,
+          forkId: chat.currentForkId!,
+          leafSlotId: chat.activeLeafSlotId,
+          draftId: draft.id
+        }
+      })
+      .pipe(Stream.runDrain)
+    const versionId = yield* regenerate()
+    assert.strictEqual(mock.requests().at(-1)!.raw, control)
+    assert.isAtLeast(reads.at(-1)!, controlRead)
+    const run = yield* api.GetRunContext({ versionId })
+    assert.strictEqual(run.requests[0]!.counts.cacheRead, reads.at(-1))
+    console.log(
+      "draft cache proof",
+      JSON.stringify({ controlRead, afterDraftRead: reads.at(-1), bytes: Buffer.byteLength(control!) })
+    )
+  }).pipe(Effect.provide(serverLayer(testConfig())))
+)
+
+it.live(
+  "tools on still sends one plain request, filters hidden history and pattern thinking, and executes no tool",
+  () =>
+    Effect.gen(function* () {
+      const reply = "<img src=x onerror=alert(1)>"
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((_request, res) =>
+            sse(res, [
+              ...completionChunks(["<pl", "an7>Captured secret.</plan7>", reply], {}),
+              {
+                id: "cmpl-1",
+                object: "chat.completion.chunk",
+                model: "served-model",
+                choices: [
+                  {
+                    index: 0,
+                    delta: {
+                      reasoning_content: "Provider secret.",
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: "unoffered",
+                          type: "function",
+                          function: { name: "set_presence", arguments: "{}" }
+                        }
+                      ]
+                    },
+                    finish_reason: "tool_calls"
+                  }
+                ]
+              }
+            ])
+          )
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const f = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: [{ key: "context.per_speaker", value: "separate" }],
+        presetFields: {
+          reply_sections: {
+            enabled: true,
+            pairs: [{ open: "<plan[0-9]+>", close: "</plan[0-9]+>", regex: true }],
+            send_back: 1
+          }
+        }
+      })
+      yield* api.SetMessageHidden({ slotId: f.sent.slotId, hidden: true })
+      yield* api.SetThinkingHidden({ versionId: f.version.id, part: "reasoning", hidden: true })
+      yield* api.SetThinkingHidden({ versionId: f.version.id, part: "sections", hidden: true })
+      yield* api.ChangeCast({ chatId: f.chat.id, slotId: f.version.slotId, change: { _tag: "AgentEnabled", on: true } })
+      const chat = yield* api.GetChat({ chatId: f.chat.id })
+      const cast = yield* api.GetCast({ chatId: chat.id, slotId: null, forkId: chat.currentForkId })
+      const before = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: chat.currentForkId })
+      const count = mock.requests().length
+      const chunks = yield* api
+        .WriteForMe({
+          target: {
+            kind: "draft",
+            chatId: chat.id,
+            forkId: chat.currentForkId!,
+            leafSlotId: chat.activeLeafSlotId,
+            draftId: draft.id
+          }
+        })
+        .pipe(Stream.runCollect)
+      assert.strictEqual(chunks.map((c) => c.text).join(""), reply)
+      assert.strictEqual(mock.requests().length, count + 1)
+      const body = mock.requests().at(-1)!.body!
+      assert.notProperty(body, "tools")
+      for (const hidden of ["The road flooded.", "Captured secret.", "Provider secret."])
+        assert.notInclude(mock.requests().at(-1)!.raw!, hidden)
+      assert.deepStrictEqual(yield* api.GetChat({ chatId: chat.id }), chat)
+      assert.deepStrictEqual(yield* api.GetCast({ chatId: chat.id, slotId: null, forkId: chat.currentForkId }), cast)
+      assert.deepStrictEqual(
+        yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }),
+        before
+      )
+    }).pipe(Effect.provide(serverLayer(testConfig())))
 )

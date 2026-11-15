@@ -249,7 +249,6 @@ export function Composer({
   // page while this chat was being made comes along (composerCarry.ts).
   const [workspace] = useState(() => composerWorkspace(session, userId))
   const { draft, writing, setBusy, setError, syncFork } = workspace
-  const writingState = useSyncExternalStore(writing.subscribe, writing.snapshot)
   const composerShown = useTabShown(!phone)
   useEffect(() => {
     if (!composerShown) writing.stop()
@@ -771,7 +770,7 @@ export function Composer({
           data-testid="composer"
           data-has-attachments={attachmentInput?.count ? true : undefined}
           value={text}
-          readOnly={editing === null && (!textReady || writingState.running)}
+          readOnly={editing === null && !textReady}
           aria-busy={editing === null && !textReady}
           aria-describedby={`${composerId}-hint`}
           placeholder={
