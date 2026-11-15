@@ -12,7 +12,7 @@ import type { WriteOps } from "./ops.ts"
 import { agentHistorySnapshot, checkWorkshopAccess, rewriteFork, type WorkshopCall } from "./agentHistoryShared.ts"
 import { selectedIn, nextSeq } from "./forkState.ts"
 import { transaction } from "./tx.ts"
-import { nextReceiptTime } from "./operationReceipts.ts"
+import { nextReceiptTime, pendingOperationResult, unwrapOperationResult } from "./operationReceipts.ts"
 import { workshopLimits } from "../workshopLimits.ts"
 
 const reject = (message: string) => new HistoryRejected({ message })
@@ -62,7 +62,10 @@ export const makeAgentHistoryWriteHandlers = (
         const [receipt] = yield* sql<{
           result_json: string
         }>`SELECT result_json FROM rollout_receipts WHERE rollout_id=${input.rolloutId} AND tool_call_id=${input.toolCallId}`
-        if (receipt) return JSON.parse(receipt.result_json) as string
+        if (receipt) {
+          const stored: unknown = JSON.parse(receipt.result_json)
+          return typeof stored === "string" ? stored : JSON.stringify(unwrapOperationResult(stored))
+        }
         yield* checkWorkshopAccess(sql, input, "chats.rewrite")
         const position = yield* checkStoryWrite(sql, input.userId, input.rolloutId, input.chatId, input.storyAt)
         let range: { first: number; last: number } | undefined
@@ -201,19 +204,20 @@ export const makeAgentHistoryWriteHandlers = (
         yield* sql`UPDATE changeset_groups SET origin='agent' WHERE id=${applied.groupId}`
         for (const id of applied.changesetIds)
           yield* sql`UPDATE changesets SET origin='agent',rollout_id=${editRollout} WHERE id=${id}`
-        const result = JSON.stringify({
+        const resultValue = {
           chat: snapshot.name,
           chatId: input.chatId,
           changesetId: applied.changesetIds[0],
           messages: edits.filter((e) => e.kind === "version_replace").length,
           summaries: edits.filter((e) => e.kind === "summary_revision").length,
           instructions: edits.filter((e) => e.kind === "state_event").length
-        })
+        }
+        const result = JSON.stringify(resultValue)
         const seq = yield* nextSeq(sql, input.chatId)
         const [after] = yield* sql<{ state_seq: number }>`SELECT state_seq FROM chats WHERE id=${input.chatId}`
         // The run's receipt clock, as every other reply effect: bulk Undo follows call order.
         const receiptAt = yield* nextReceiptTime(sql, input.rolloutId)
-        yield* sql`INSERT INTO rollout_receipts(rollout_id,tool_call_id,result_json,created_at) VALUES (${input.rolloutId},${input.toolCallId},${JSON.stringify(result)},${receiptAt})`
+        yield* sql`INSERT INTO rollout_receipts(rollout_id,tool_call_id,result_json,created_at) VALUES (${input.rolloutId},${input.toolCallId},${JSON.stringify(pendingOperationResult("ApplyAgentChangeset", resultValue))},${receiptAt})`
         const effectTitle = position
           ? `${input.title} · ${position.label} · messages ${range!.first}–${range!.last}`
           : input.title

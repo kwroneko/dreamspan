@@ -793,7 +793,7 @@ describe("side chat", () => {
       yield* alice.DeleteChat({ chatId: story.chat.id })
       const gone = mock.requests().length
       yield* turn(alice, workshop, "Is it still there?", undefined, lastShown)
-      assert.include(results(mock.requests()[gone + 1]!.body as Body)[0], "isn't available any more")
+      assert.include(results(mock.requests()[gone + 1]!.body as Body)[0], "isn&apos;t available any more")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

@@ -603,7 +603,7 @@ describe("side chat request", () => {
 
       // Sent without a position (the workshop in its own tab): the story isn't read.
       yield* turn(api, workshop, "From its own tab.", null)
-      assert.include(lastRead(), "wasn't sent from beside the story")
+      assert.include(lastRead(), "wasn&apos;t sent from beside the story")
       assert.notInclude(lastRead(), "Late again")
       // A position in another chat is refused.
       const elsewhere = yield* api.CreateChat({ title: "Elsewhere" })

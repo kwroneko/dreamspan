@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+import { escapeToolData, toolDataPage, TOOL_RESULT_CHARS } from "../toolData.ts"
 // The way back to a run's tool results (spec/WORKSHOP-CONTEXT.md §3.2), reference-harness's
 // read_session_transcript as a delta: a message's own steps, read from the run that wrote it.
 // Causal: only messages on the path before the one being generated, each cut at its own post.
@@ -159,27 +161,70 @@ const readRun: RolloutTool<{
           ? run.steps
           : run.steps.map((s) => (readsStory(s.tool) ? { ...s, args: {}, result: STORY_WITHHELD } : s))
         const words = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean)
+        // `call` is already a string in the frozen definition. Continuation cursors use it
+        // without changing any tool declaration in an existing chat's provider prefix.
+        const cursor = steps.some((s) => s.id === call)
+          ? undefined
+          : call?.match(/^page:v1:(\d+):(\d+):([a-f0-9]{24})$/)
+        const payload = (s: (typeof steps)[number]) => `${JSON.stringify(s.args)}\n${s.result ?? "(no result)"}`
+        const fingerprint = (s: (typeof steps)[number]) =>
+          createHash("sha256")
+            .update(JSON.stringify([s.n, s.id, s.tool, payload(s)]))
+            .digest("hex")
+            .slice(0, 24)
         const chosen = steps.filter(
           (s) =>
             s.n >= from_step &&
-            (call === undefined || s.id === call) &&
-            words.every((w) => `${JSON.stringify(s.args)}\n${s.result ?? ""}`.toLowerCase().includes(w))
+            (cursor ? s.n === Number(cursor[1]) : call === undefined || s.id === call) &&
+            words.every((w) => payload(s).toLowerCase().includes(w))
         )
         if (chosen.length === 0)
           return { text: `No step of message ${message} matches (it has ${steps.length}).`, isError: true }
+        const first = chosen[0]!
+        if (
+          cursor &&
+          (fingerprint(first) !== cursor[3] ||
+            !Number.isSafeInteger(Number(cursor[2])) ||
+            Number(cursor[2]) >= payload(first).length)
+        )
+          return {
+            text: "That result page is unavailable. Read the step again without its page cursor.",
+            isError: true
+          }
+        // Identities, counts, offsets and recovery directions are app-owned framing. A
+        // response can hold several complete steps, then a page within one large step.
+        const limit = Math.min(TOOL_RESULT_CHARS, max_tokens * 4)
         const shown: Array<string> = []
         let used = 0
-        for (const s of chosen) {
-          const part = `<step n="${s.n}" call="${s.id}" tool="${s.tool}"${s.status === "error" ? ' failed="true"' : ""}>\n${JSON.stringify(s.args)}\n<result>\n${s.result ?? "(no result)"}\n</result>\n</step>`
-          if (shown.length > 0 && used + tokensOf(part) > max_tokens) break
-          shown.push(part)
-          used += tokensOf(part)
+        for (const step of chosen) {
+          const stamp = fingerprint(step)
+          const content = payload(step)
+          const offset = cursor ? Number(cursor[2]) : 0
+          const frame = `<step n="${step.n}" call="${escapeToolData(step.id.slice(0, 24))}" tool="${escapeToolData(step.tool.slice(0, 24))}"${step.status === "error" ? ' failed="true"' : ""} identity_prefixes="${step.id.length > 24 || step.tool.length > 24}" offset="${offset}" total_characters="${content.length}" />`
+          const next = chosen.find((s) => s.n > step.n)?.n ?? (cursor ? steps.find((s) => s.n > step.n)?.n : undefined)
+          const following =
+            next === undefined ? "" : `\n[More steps: read_run with message ${message} and from_step=${next}.]`
+          const page = toolDataPage(content, {
+            offset,
+            limit: limit - used - following.length,
+            frame,
+            notice: shown.length === 0,
+            more: (end) =>
+              `[Result continues: read_run with message ${message} and call "page:v1:${step.n}:${end}:${stamp}"; keep query and from_step unchanged.]`
+          })
+          if (!page.text) {
+            shown.push(`[More steps: read_run with message ${message} and from_step=${step.n}.]`)
+            break
+          }
+          shown.push(page.text)
+          used += page.text.length + 1
+          if (page.end < content.length) {
+            if (following) shown.push(following.trimStart())
+            break
+          }
+          if (cursor && following) shown.push(following.trimStart())
         }
-        const left = chosen.length - shown.length
-        const next = chosen[shown.length]?.n
-        return {
-          text: `${shown.join("\n")}${left > 0 ? `\n[${left} more steps: read_run with from_step=${next}.]` : ""}`
-        }
+        return { text: shown.join("\n"), dataOnly: true as const }
       })
     )
 }

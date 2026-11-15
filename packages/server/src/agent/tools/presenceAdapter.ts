@@ -1,3 +1,4 @@
+import { savedToolResult } from "../toolData.ts"
 // Credential-free adapter shared by the built-in and its editable replacements.
 import type { EntityId } from "@rp/shared/chat.ts"
 import { foldState } from "@rp/shared/state.ts"
@@ -53,7 +54,7 @@ export const presenceContext = (context: ToolContext, enabled: () => boolean = (
           rolloutId: context.rolloutId,
           toolCallId: context.toolCallId,
           events: [{ key: "away.set", value: { entity: id as EntityId, away: !present } }],
-          result
+          result: savedToolResult(context, result)
         })
         return saved.result
       })

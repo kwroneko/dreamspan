@@ -1,3 +1,4 @@
+import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 // A workshop run on Anthropic's API with deferred tools (spec/TOOL-LOADING.md): an unloaded tool is
 // refused, tool_search loads it, and every request declares the same tools with the same bytes.
 import { assert, it } from "@effect/vitest"
@@ -131,7 +132,8 @@ it.live("loads a deferred tool mid-run without changing the declared tools", () 
       load.content!.filter((c) => c.type === "tool_reference").map((c) => c.tool_name),
       ["read_card"]
     )
-    // Loaded: it ran.
+    // Loaded: it ran with the same data-only boundary as other transports.
+    assert.include(JSON.stringify(lastResult(bodies[3]!)), TOOL_DATA_NOTICE)
     assert.notInclude(JSON.stringify(lastResult(bodies[3]!)), "isn't loaded yet")
     // The transcript keeps what was loaded, so a resume or step edit loads it at the same point.
     const transcript = yield* api.GetRunTranscript({ versionId: version.id })
