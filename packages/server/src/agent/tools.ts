@@ -44,6 +44,8 @@ export interface ToolContext {
   readonly cache: Map<string, unknown>
   /** A one-call approval, checked again in the change's transaction. */
   readonly approvalDigest?: string
+  /** New workshop results only; receipt producers use this before saving their final text. */
+  readonly formatResult?: (text: string, frame?: string) => string
   readonly onChanged?: (chatId: ChatId) => void
   /**
    * A side chat's request: where its story tools read the story (spec/WORKSHOP.md §4), as the
@@ -67,6 +69,12 @@ export interface ToolContext {
 
 /** What a tool returns to the model: text, or a failure the model can correct. */
 export interface ToolOutput {
+  /** App-owned assertion from a result builder, never inferred from returned text. */
+  readonly dataOnly?: true
+  /** Mechanical metadata prepared by a structured result builder. */
+  readonly frame?: string
+  /** Already committed bytes: do not reformat on replay. */
+  readonly replayed?: true
   /** Display metadata only, kept in the transcript but never sent to a model. */
   readonly presentation?: NonNullable<ApprovalPrompt["presentation"]>
   /** Non-atomic tools may record their already-applied changes with their result. */

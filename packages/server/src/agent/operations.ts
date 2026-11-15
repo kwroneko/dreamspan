@@ -1,3 +1,4 @@
+import { toolResultFrame } from "./toolData.ts"
 import type { RolloutEffectRecord } from "@rp/shared/workshopApi.ts"
 import { WriteOps } from "../db/ops.ts"
 import { operationExclusions, commandExclusions } from "./exposures/exclusions.ts"
@@ -205,7 +206,7 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
               rolloutId: ctx.rolloutId,
               toolCallId: ctx.toolCallId
             })
-            if (prior) return prior.isError ? prior : { text: prior.text }
+            if (prior) return { ...prior, replayed: true as const }
           }
           // Check even when called directly, or after a stopped run is resumed.
           const fresh = yield* validate(ctx, args)
@@ -225,10 +226,23 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
           })
           const output: ToolOutput = entry.after
             ? yield* entry.after(result, args, ctx)
-            : { text: budgetResult(entry.render?.(result, args) ?? JSON.stringify(result) ?? "Done.") }
+            : { text: entry.render?.(result, args) ?? JSON.stringify(result) ?? "Done." }
+          let frame: string | undefined
+          if (!entry.after) {
+            try {
+              frame = toolResultFrame(JSON.parse(output.text))
+            } catch {
+              /* Plain app prose. */
+            }
+          }
+          // Result handlers (including plugin adapters) return data, never assertions
+          // that formatting/replay already happened or app-owned recovery framing.
+          const { dataOnly: _dataOnly, replayed: _replayed, frame: _frame, ...outputData } = output
           const final: ToolOutput = {
-            ...output,
-            text: budgetResult(output.text),
+            ...outputData,
+            text: ctx.formatResult ? ctx.formatResult(output.text, frame) : budgetResult(output.text),
+            ...(ctx.formatResult ? { dataOnly: true as const } : {}),
+            ...(frame ? { frame } : {}),
             ...(entry.effects ? { effects: entry.effects(result, args) } : {})
           }
           if (entry.effect !== "read")

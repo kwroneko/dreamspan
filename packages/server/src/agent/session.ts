@@ -1,3 +1,4 @@
+import { toolData, toolDataPage, TOOL_RESULT_CHARS } from "./toolData.ts"
 import { outsideEffect, UNCERTAIN_EFFECT } from "./effects.ts"
 // The agent reply strategy (spec/AGENTIC.md §3): a pi-agent-core loop over the frozen request.
 // The assembler built the context once; each provider request is that prefix plus the
@@ -5,7 +6,13 @@ import { outsideEffect, UNCERTAIN_EFFECT } from "./effects.ts"
 // proxy, transforms and inspector capture apply. The loop's output is the same chunk stream a
 // plain reply yields, so reply parsers, live rewrites and the version's persistence treat both
 // alike (DESIGN §7.2: one commit pipeline). The transcript is flushed as each turn ends.
-import { Agent, type AgentMessage, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core"
+import {
+  Agent,
+  type AgentMessage,
+  type AgentTool,
+  type AgentToolResult,
+  type StreamFn
+} from "@earendil-works/pi-agent-core"
 import {
   createAssistantMessageEventStream,
   type Api,
@@ -526,8 +533,39 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         return events
       }
 
+      const workshopData = execution.chatKinds.get(run.kind ?? "")?.allowsOutside === true
       const cache = new Map<string, unknown>()
+      const deliveredContent = new WeakSet<object>()
+      // The engine itself produces unknown-tool, schema and thrown-execution errors,
+      // bypassing both the registered executor and its before/after hooks. Quote these
+      // at completion, before the engine constructs its durable result message.
+      const quoteRuntimeFailure = (result: AgentToolResult<unknown>, isError: boolean, call: string) => {
+        if (!workshopData || !isError || deliveredContent.has(result.content)) return
+        const text = result.content.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("")
+        // Fixed refusals with syntax-constrained identifiers contain no retrieved prose.
+        if (text === BAD_ARGS || /^Tool [a-zA-Z0-9_-]{1,150} not found$/.test(text)) return
+        const full = toolData(text)
+        const step =
+          stepsOf(agent.state.messages, frozen, false)
+            .filter((s) => s.kind === "tool")
+            .findLastIndex((s) => s.id === call) + 1
+        const recovery = `[Result shortened. read_run with message 0 and from_step=${Math.max(1, step)} recovers it; follow its page cursors for the rest.]`
+        const sent =
+          full.length > TOOL_RESULT_CHARS ? toolDataPage(full, { more: () => recovery }).text || recovery : full
+        result.content = [{ type: "text", text: full }]
+        if (sent !== full) result.details = { ...(result.details as object | null), sentText: sent }
+        deliveredContent.add(result.content)
+      }
       const context = (toolCallId: string) => ({
+        ...(workshopData
+          ? {
+              formatResult: (text: string, frame?: string) => {
+                const formatted = toolData(text, frame)
+                cache.set(`tool-data:${toolCallId}`, formatted)
+                return formatted
+              }
+            }
+          : {}),
         cache,
         ...(run.onChanged ? { onChanged: run.onChanged } : {}),
         userId: request.userId,
@@ -672,7 +710,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               ? run.reader
                   .RolloutToolReceipt({ userId: request.userId, rolloutId, toolCallId })
                   .pipe(
-                    Effect.flatMap((receipt) => (receipt !== null ? Effect.succeed<ToolOutput>(receipt) : permitted))
+                    Effect.flatMap((receipt) =>
+                      receipt !== null ? Effect.succeed<ToolOutput>({ ...receipt, replayed: true }) : permitted
+                    )
                   )
               : permitted
           // A stop interrupts the tool; its result says so, and a resume runs the call again.
@@ -685,7 +725,18 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               details: signal?.aborted ? INTERRUPTED : null,
               isError: true
             }
-          const result = exit.value
+          const raw = exit.value
+          // Skills are the intentionally approved instruction channel; loading returns app-owned
+          // frozen definitions. Every other fresh workshop result crosses the same data boundary.
+          const quote =
+            workshopData &&
+            !(["tool_search", "load_skill"].includes(tool.id) && !raw.isError && !raw.dataOnly) &&
+            !raw.replayed &&
+            ![BAD_ARGS, missingTool(tool.id)].includes(raw.text)
+          const result =
+            quote && !raw.dataOnly && cache.get(`tool-data:${toolCallId}`) !== raw.text
+              ? { ...raw, text: toolData(raw.text, raw.frame), dataOnly: true as const }
+              : raw
           if (tool.effect !== "read" && run.allowsOutside === true) {
             await runPromise(
               writer.RecordRolloutEffects({
@@ -699,9 +750,18 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             )
           }
           if (tool.effect === "chat_state" && !result.isError) run.onState?.()
-          const fullText = budgetResult(result.text)
-          let sentText = fullText
-          if (execution.chatKinds.get(run.kind ?? "")?.summaryTranscript) {
+          // Keep the complete original in the transcript. Only its model projection is bounded.
+          const fullText = workshopData ? result.text : budgetResult(result.text)
+          const stepNumber =
+            stepsOf(agent.state.messages, frozen, false)
+              .filter((step) => step.kind === "tool")
+              .findLastIndex((step) => step.id === toolCallId) + 1
+          const recovery = `[Result shortened. read_run with message 0 and from_step=${Math.max(1, stepNumber)} recovers it; follow its page cursors for the rest.]`
+          let sentText =
+            quote && fullText.length > TOOL_RESULT_CHARS
+              ? toolDataPage(fullText, { frame: raw.frame, more: () => recovery }).text || recovery
+              : fullText
+          if (execution.chatKinds.get(run.kind ?? "")?.summaryTranscript && !raw.replayed) {
             const turn = agent.state.messages.findLastIndex((m) => m.role === "assistant")
             if (turn !== resultTurn) {
               resultTurn = turn
@@ -709,22 +769,30 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             }
             const quota = Math.max(128, Math.floor(room / 4))
             const remaining = Math.max(0, quota - resultTokens)
-            if ((await textTokens(fullText)) > remaining) {
-              let marker = `\n[Result shortened for this turn. read_run with message 0 and call "${toolCallId}" recovers it.]`
+            if ((await textTokens(sentText)) > remaining) {
+              let marker = `\n${recovery}`
               if ((await textTokens(marker)) > remaining) marker = ""
+              const page = (limit: number) =>
+                quote
+                  ? toolDataPage(fullText, { limit, frame: raw.frame, more: () => recovery }).text
+                  : fullText.slice(0, limit) + marker
               let lo = 0,
-                hi = fullText.length
+                hi = Math.min(TOOL_RESULT_CHARS, sentText.length)
               while (lo < hi) {
                 const mid = Math.ceil((lo + hi) / 2)
-                if ((await textTokens(fullText.slice(0, mid) + marker)) <= remaining) lo = mid
+                if ((await textTokens(page(mid))) <= remaining) lo = mid
                 else hi = mid - 1
               }
-              sentText = fullText.slice(0, lo) + marker
+              // Always retain the recovery direction, even when the payload quota is spent.
+              // This small app-owned framing cost may exceed the aggregate payload quota.
+              sentText = page(lo) || recovery
             }
             resultTokens += await textTokens(sentText)
           }
+          const content = [{ type: "text" as const, text: fullText }]
+          deliveredContent.add(content)
           return {
-            content: [{ type: "text", text: fullText }],
+            content,
             // What a loading call loaded is part of the transcript: replay derives the loaded set from it.
             details:
               sentText !== fullText || result.loaded?.length || result.presentation
@@ -996,6 +1064,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         }
       }
       agent.subscribe((event) => {
+        if (event.type === "tool_execution_end") quoteRuntimeFailure(event.result, event.isError, event.toolCallId)
         if (event.type === "turn_end" || event.type === "agent_end")
           void flush().then(() => showSteps(event.type === "agent_end"))
         if (event.type === "message_end" || event.type === "tool_execution_end" || event.type === "turn_end")
@@ -1062,7 +1131,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           const refusal = dispatchRefusal(call)
           const result = receipt
             ? {
-                content: [{ type: "text" as const, text: budgetResult(receipt.text) }],
+                content: [{ type: "text" as const, text: workshopData ? receipt.text : budgetResult(receipt.text) }],
                 details: null,
                 isError: receipt.isError
               }
@@ -1083,6 +1152,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     details: null,
                     isError: true
                   }
+          if (!receipt) quoteRuntimeFailure(result, result.isError === true, call.id)
           agent.state.messages = [
             ...agent.state.messages,
             {

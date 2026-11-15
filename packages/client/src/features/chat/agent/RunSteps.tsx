@@ -13,6 +13,7 @@
 import type { CutSpan, OfferedTool, StepEdit, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
 import type { ForkId, VersionId } from "@rp/shared/chat.ts"
 import type { InspectorUsage, RunContext } from "@rp/shared/inspectorApi.ts"
+import { displayToolData } from "@rp/shared/toolData.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
@@ -200,7 +201,12 @@ function StepBox({ target, editing, id }: { target: StepTarget; editing: StepEdi
   const original = editableText(target)
   const title = titleOf(target)
   const note = noteOf(target)
-  const shown = target.kind === "part" && target.part.type === "toolCall" ? json(target.part.args) : original
+  const shown =
+    target.kind === "result"
+      ? displayToolData(original)
+      : target.part.type === "toolCall"
+        ? json(target.part.args)
+        : original
   if (editing === null || step === undefined || editing.running)
     return (
       <Box title={title} {...(note ? { note } : {})}>

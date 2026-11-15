@@ -1,3 +1,4 @@
+import { savedToolResult } from "../toolData.ts"
 import { listNotes as listNotesPart, switchNote as switchNotePart } from "./notesPart.ts"
 // The note tools (spec/AGENTIC.md §4.5): what notes the chat has at the position; switching one
 // on or off, writing a new one and editing one, each from the next message on, attached to the
@@ -195,7 +196,7 @@ export const notesContextV1 = (
           rolloutId: context.rolloutId,
           toolCallId: context.toolCallId,
           events: [{ key: on ? "note.activate" : "note.deactivate", value: { note: entity as EntityId } }],
-          result
+          result: savedToolResult(context, result)
         })
         return saved.result
       })
@@ -292,7 +293,7 @@ export const writeNote: RolloutTool<{
           toolCallId: context.toolCallId,
           events: [],
           notes: [{ create: doc }],
-          result: `Wrote “${title}”: it's on from the next message on.`
+          result: savedToolResult(context, `Wrote “${title}”: it's on from the next message on.`)
         })
         return { text: result }
       })
@@ -352,7 +353,7 @@ export const editNote: RolloutTool<{
           notes: [
             { revise: { note: target.entity, parent: target.revision, doc: { ...target.doc, content: next.text } } }
           ],
-          result: `Changed “${target.title}” from the next message on.`
+          result: savedToolResult(context, `Changed “${target.title}” from the next message on.`)
         })
         return { text: result }
       })

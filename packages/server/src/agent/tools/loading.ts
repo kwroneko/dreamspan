@@ -56,20 +56,26 @@ export const toolSearch: RolloutTool<{ readonly query: string; readonly max_resu
         : searchTools(pending(context), trimmed, max_results ?? MAX_RESULTS)
       const { added, already } = load(context, requested)
       const unknown = selecting ? requested.filter((n) => !context.offer!.tools.some((t) => t.name === n)) : []
+      const warnings: Array<string> = []
       const parts = [
         ...(added.length ? [loadedText(added)] : []),
-        ...(already.length ? [`Already available: ${already.join(", ")}.`] : []),
-        ...(unknown.length ? [`Not available in this chat: ${unknown.join(", ")}.`] : [])
+        ...(already.length ? [`Already available: ${already.join(", ")}.`] : [])
       ]
-      if (parts.length === 0) {
+      if (unknown.length) warnings.push(`Not available in this chat: ${unknown.join(", ")}.`)
+      if (parts.length === 0 && warnings.length === 0) {
         const left = pending(context).map((t) => t.name)
-        parts.push(
+        warnings.push(
           left.length
             ? `No tool matched "${trimmed}". Not loaded yet: ${left.join(", ")}. Try other words, or load_skill.`
             : "Every tool is already loaded."
         )
       }
-      return { text: parts.join("\n\n"), ...(added.length ? { loaded: added.map((t) => t.name) } : {}) }
+      if (warnings.length) parts.push(context.formatResult?.(warnings.join("\n\n")) ?? warnings.join("\n\n"))
+      return {
+        text: parts.join("\n\n"),
+        ...(warnings.length && context.formatResult ? { dataOnly: true as const } : {}),
+        ...(added.length ? { loaded: added.map((t) => t.name) } : {})
+      }
     })
 }
 
