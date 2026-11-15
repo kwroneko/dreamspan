@@ -341,18 +341,27 @@ export function MessageList({
     if (list !== null && view.highlight !== null) return flashWhenShown(list, view.highlight)
   }, [view.highlight])
 
-  // Expansions load asynchronously, possibly through several summary levels. Position
-  // the linked article each time a new one mounts, after the virtualizer measures its row:
+  // Row contributions and summary expansions load asynchronously. Position the linked
+  // article each time a new one mounts, after the virtualizer measures its row:
   // the uncovered original can render first, before the selected layer replaces it.
   // Until the user takes over, the list mustn't hold at the end either: a collapsed
   // summary can fit the viewport, and holding there would follow its expansion down.
   const revealing = useRef(false)
   useEffect(() => {
     const list = parent.current
-    if (!summaries || anchor === null || list === null) return
+    if (anchor === null || list === null) return
     revealing.current = true
     let frame = 0
     let shown: Element | null = null
+    // Keep the linked message in place while asynchronous row contributions arrive.
+    // The default anchors only rows entirely above the viewport; a marker added below
+    // a partly visible earlier message would otherwise push the link down. Stop using
+    // this requested-message anchor as soon as the user takes over, like reveal below.
+    const previousAdjustment = virtualizer.shouldAdjustScrollPositionOnItemSizeChange
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
+      const row = shown?.closest<HTMLElement>("[data-index]")
+      return row !== undefined && row !== null && item.index < Number(row.dataset.index)
+    }
     const reveal = () => {
       const article = list.querySelector(`article[data-slot="${CSS.escape(anchor)}"]`)
       if (!article || article === shown) return
@@ -371,13 +380,23 @@ export function MessageList({
         })
       })
     }
-    const stop = () => {
+    const stop = (event?: Event) => {
+      const sendingAtEnd =
+        event?.target instanceof Node &&
+        !list.contains(event.target) &&
+        virtualizer.options.followOnAppend &&
+        virtualizer.isAtEnd(END_PX)
       revealing.current = false
+      cancelAnimationFrame(frame)
+      virtualizer.shouldAdjustScrollPositionOnItemSizeChange = previousAdjustment
+      if (sendingAtEnd) hold(true)
       observer.disconnect()
-      for (const event of inputs) list.removeEventListener(event, stop)
+      for (const event of inputs) inputSurface.removeEventListener(event, stop)
     }
     const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
-    for (const event of inputs) list.addEventListener(event, stop, { passive: true })
+    // Writing/sending in the composer takes over too; it is a sibling of the list.
+    const inputSurface = list.parentElement ?? list
+    for (const event of inputs) inputSurface.addEventListener(event, stop, { passive: true })
     const observer = new MutationObserver(reveal)
     observer.observe(list, { childList: true, subtree: true })
     reveal()
@@ -385,7 +404,7 @@ export function MessageList({
       stop()
       cancelAnimationFrame(frame)
     }
-  }, [anchor, summaries, view.opened, virtualizer])
+  }, [anchor, summaries, view.opened, virtualizer, hold])
 
   // An end scroll remains pending by row index while the virtualizer measures it.
   // Appending or inserting the summary divider can move the last message to another

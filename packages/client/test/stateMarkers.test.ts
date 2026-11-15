@@ -5,8 +5,10 @@ import {
   marksOf,
   registerStateMarkerKinds,
   stateMarkerKinds,
+  stateMarksOf,
   type StateMarkerKind
 } from "../src/features/chat/stateMarkers.ts"
+import type { ChatSession } from "../src/features/chat/session.ts"
 
 let seq = 0
 const event = (slot: string | null, key: string, value: unknown, scope: string | null = null): StateMarkEvent => ({
@@ -17,6 +19,77 @@ const event = (slot: string | null, key: string, value: unknown, scope: string |
   scope,
   key,
   value
+})
+
+it("does not reread the whole branch when scrolling loads positional cast metadata", async () => {
+  let positions = () => {}
+  let changed = () => {}
+  let revision = 0
+  let pathRevision = 0
+  let reads = 0
+  const session = {
+    id: "chat",
+    get positionRevision() {
+      return revision
+    },
+    snapshot: () => ({ forkId: "fork", leafSlotId: "s1", loading: false, pathRevision }),
+    subscribe: (listener: () => void) => {
+      changed = listener
+      return () => {}
+    },
+    subscribePositions: (listener: () => void) => {
+      positions = listener
+      return () => {}
+    },
+    call: async () => {
+      reads++
+      return { ok: true, value: data(start) }
+    }
+  } as unknown as ChatSession
+  const undo = registerStateMarkerKinds()
+  const store = stateMarksOf(session)
+  const stop = store.subscribe(() => {})
+  await Promise.resolve()
+  for (let i = 0; i < 20; i++) {
+    positions()
+    changed()
+  }
+  await Promise.resolve()
+  expect(reads).toBe(1)
+  revision++
+  positions()
+  await Promise.resolve()
+  expect(reads).toBe(2)
+  pathRevision++
+  changed()
+  await Promise.resolve()
+  expect(reads).toBe(3)
+  stop()
+  for (const end of undo) end()
+})
+
+it("hides the previous branch's markers while the next branch is loading", async () => {
+  let forkId = "one"
+  const session = {
+    id: "chat",
+    positionRevision: 0,
+    snapshot: () => ({ forkId, leafSlotId: "s1", loading: false, pathRevision: 0 }),
+    subscribe: () => () => {},
+    subscribePositions: () => () => {},
+    call: async () => ({
+      ok: true,
+      value: data([...start, event("s1", "presence.set", { entity: "tobin", present: false })])
+    })
+  } as unknown as ChatSession
+  const undo = registerStateMarkerKinds()
+  const store = stateMarksOf(session)
+  const stop = store.subscribe(() => {})
+  await Promise.resolve()
+  expect(store.at("s1" as SlotId)).toHaveLength(1)
+  forkId = "two"
+  expect(store.at("s1" as SlotId)).toHaveLength(0)
+  stop()
+  for (const end of undo) end()
 })
 const names = {
   mira: "Mira",
@@ -120,6 +193,17 @@ describe("the timeline's change markers", () => {
     expect(marks.size).toBe(0)
   })
 
+  it("marks different bindings even when their names match", () => {
+    const input = data([
+      event(null, "model.binding", { connection: "c1", model: "m1" }),
+      event(null, "preset.binding", { ref: "p1" }),
+      event("s1", "model.binding", { connection: "c2", model: "m1" }),
+      event("s1", "preset.binding", { ref: "p2" })
+    ])
+    const marks = marksOf({ ...input, names: { ...names, c2: "Local", p2: "Terse" } }, kinds())
+    expect(texts(marks, "s1")).toEqual(["Model changed: Local · model-a", "Prompt preset changed: Terse"])
+  })
+
   it("a persona switch is one change, not a join and a removal", () => {
     const marks = marksOf(
       data([
@@ -131,6 +215,24 @@ describe("the timeline's change markers", () => {
       kinds()
     )
     expect(texts(marks, "s1")).toEqual(["You play Bryn (was Ash)"])
+  })
+
+  it("marks clearing the played character", () => {
+    const marks = marksOf(data([...start, event("s1", "played_by_me.set", { entities: [] })]), kinds())
+    expect(texts(marks, "s1")).toEqual(["You no longer play Ash"])
+  })
+
+  it("shows a newly joined character's mute without claiming they can reply", () => {
+    const marks = marksOf(
+      data([
+        ...start,
+        event("s1", "participant.join", { entity: "wren" }),
+        event("s1", "presence.set", { entity: "wren", present: false })
+      ]),
+      kinds()
+    )
+    expect(texts(marks, "s1")).toEqual(["Wren joined", "Wren muted"])
+    expect(marks.get("s1")![0]!.changes[0]!.explanation).not.toContain("can reply")
   })
 
   it("notes follow their defaults and their moved groups", () => {

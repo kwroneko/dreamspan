@@ -137,6 +137,13 @@ const castKind = folded({
     const persona = after.playedByMe.at(-1) ?? null
     const was = before.playedByMe.at(-1) ?? null
     const switched = persona !== was
+    if (switched && persona === null && name(was) !== null) {
+      changes.push({
+        id: "persona",
+        text: `You no longer play ${name(was)}`,
+        explanation: `${NEXT}, what you write has no character card of yours.`
+      })
+    }
     if (switched && name(persona) !== null) {
       const from = name(was)
       changes.push({
@@ -150,7 +157,7 @@ const castKind = folded({
       changes.push({
         id: `join:${id}`,
         text: `${name(id)} joined`,
-        explanation: `${NEXT}, ${name(id)} is in the chat: ${name(id)}'s card is sent to the model and ${name(id)} can reply.`
+        explanation: `${NEXT}, ${name(id)} is in the chat: ${name(id)}'s card is sent to the model.`
       })
     }
     for (const id of before.participants) {
@@ -186,9 +193,8 @@ const muteKind = folded({
   changes: (before, after, { name }) =>
     [...new Set([...before.absent, ...after.absent])].flatMap((id): Array<StateChange> => {
       const muted = after.absent.includes(id)
-      // Joining or leaving says it already.
-      if (muted === before.absent.includes(id) || !before.participants.includes(id) || !after.participants.includes(id))
-        return []
+      // A departing character no longer needs a mute marker. A newly joined, muted one does.
+      if (muted === before.absent.includes(id) || !after.participants.includes(id)) return []
       if (name(id) === null) return []
       return [
         {
@@ -278,12 +284,13 @@ const bindingChanges = (
   usual: string,
   before: Readonly<Record<string, string | null>>,
   after: Readonly<Record<string, string | null>>,
-  name: MarkContext["name"]
+  name: MarkContext["name"],
+  sameBinding: (scope: string) => boolean
 ): Array<StateChange> =>
   [...new Set([...Object.keys(before), ...Object.keys(after)])].flatMap((scope): Array<StateChange> => {
     const was = before[scope]
     const now = after[scope]
-    if (was === now) return []
+    if (sameBinding(scope)) return []
     // Something named was deleted for good: nothing true can be said.
     if (was === null || now === null) return []
     const label = `${what}${forWhom(scope, name)}`
@@ -296,7 +303,9 @@ const bindingChanges = (
             ? `${label} set for this chat: ${now}`
             : now === undefined
               ? `${label}: ${usual} again (was ${was})`
-              : `${label}: ${was} → ${now}`,
+              : was === now
+                ? `${label} changed: ${now}`
+                : `${label}: ${was} → ${now}`,
         explanation:
           now === undefined
             ? `${NEXT}, ${whose} follow ${usual} again instead of one kept for this chat.`
@@ -323,7 +332,16 @@ const modelKind = folded({
           return [scope, model === null ? null : connection === null ? model : `${connection} · ${model}`]
         })
       )
-    return bindingChanges("Model", "your usual model", named(before.modelBindings), named(after.modelBindings), name)
+    return bindingChanges(
+      "Model",
+      "your usual model",
+      named(before.modelBindings),
+      named(after.modelBindings),
+      name,
+      (scope) =>
+        before.modelBindings[scope]?.connection === after.modelBindings[scope]?.connection &&
+        before.modelBindings[scope]?.model === after.modelBindings[scope]?.model
+    )
   }
 })
 
@@ -364,7 +382,11 @@ const presetKind = folded({
         "your usual preset",
         named(before.presetBindings),
         named(after.presetBindings),
-        name
+        name,
+        (scope) =>
+          before.presetBindings[scope]?.ref === after.presetBindings[scope]?.ref &&
+          before.presetBindings[scope]?.revision === after.presetBindings[scope]?.revision &&
+          scope in before.presetBindings === scope in after.presetBindings
       ),
       ...overlays
     ]
@@ -539,7 +561,6 @@ const EMPTY: ReadonlyArray<StateMark> = []
 class StateMarksStore {
   private marks: ReadonlyMap<string, ReadonlyArray<StateMark>> = new Map()
   private key: Key | null = null
-  private generation = 0
   private readonly listeners = new Set<() => void>()
   private unsubscribe: Array<() => void> = []
   /** The rows the user opened, by message: kept while its row is scrolled away, so heights hold. */
@@ -553,14 +574,9 @@ class StateMarksStore {
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener)
     if (this.listeners.size === 1) {
-      // State may have changed while no timeline was listening, without moving its leaf.
-      this.generation++
       this.unsubscribe = [
         this.session.subscribe(() => this.check()),
-        this.session.subscribePositions(() => {
-          this.generation++
-          this.check()
-        }),
+        this.session.subscribePositions(() => this.check()),
         stateMarkerKinds.subscribe(() => this.check())
       ]
       this.check()
@@ -571,13 +587,21 @@ class StateMarksStore {
     }
   }
 
-  readonly at = (slotId: SlotId) => this.marks.get(slotId) ?? EMPTY
+  readonly at = (slotId: SlotId) =>
+    this.key?.forkId === this.session.snapshot().forkId ? (this.marks.get(slotId) ?? EMPTY) : EMPTY
 
   private check() {
     const view = this.session.snapshot()
     if (view.forkId === null || view.loading) return
     const kinds = stateMarkerKinds.snapshot().entries
-    const key: Key = { forkId: view.forkId, leaf: view.leafSlotId, generation: this.generation, kinds }
+    // Positional readers also notify when cached cast/card text arrives while scrolling.
+    // Only invalidation or a changed path affects marks, not those cache fills.
+    const key: Key = {
+      forkId: view.forkId,
+      leaf: view.leafSlotId,
+      generation: this.session.positionRevision + view.pathRevision,
+      kinds
+    }
     if (
       this.key &&
       this.key.forkId === key.forkId &&
@@ -586,7 +610,9 @@ class StateMarksStore {
       this.key.kinds === kinds
     )
       return
+    const switched = this.key?.forkId !== key.forkId
     this.key = key
+    if (switched) this.publish(new Map())
     void this.read(key, kinds)
   }
 

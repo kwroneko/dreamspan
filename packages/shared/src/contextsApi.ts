@@ -55,8 +55,8 @@ export const StateMarks = Schema.Struct({
 })
 export type StateMarks = typeof StateMarks.Type
 
-/** The most state keys one read names. */
-const MAX_STATE_MARK_KEYS = 64
+/** Bounded request size, with room for the union of installed marker kinds' keys. */
+const MAX_STATE_MARK_KEYS = 4096
 const StateMarkKeys = Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(
   Schema.isMaxLength(MAX_STATE_MARK_KEYS)
 )

@@ -8,7 +8,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
-import { client, posted, serverLayer, testConfig } from "./support/config.ts"
+import { client, post, posted, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
@@ -73,6 +73,61 @@ const shape = (marks: { readonly events: ReadonlyArray<{ slotId: string | null; 
   marks.events.map(({ slotId, key, value }) => ({ slotId, key, value }))
 
 describe("the timeline's change markers' read", () => {
+  it.live("keeps built-in markers when registered kinds request more than 64 keys", () =>
+    Effect.gen(function* () {
+      const { api, chatId, forkId, second, mira } = yield* twoMessages
+      const marks = yield* api.GetStateMarks({
+        chatId,
+        forkId,
+        slotId: second,
+        keys: ["participant.join", ...Array.from({ length: 64 }, (_, i) => `fixture/key-${i}`)]
+      })
+      assert.isTrue(marks.events.some((e) => e.key === "participant.join"))
+      assert.strictEqual(marks.names[mira], "Mira")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+  it.live("returns every note in a switched moved group, including its unswitched partner", () =>
+    Effect.gen(function* () {
+      const { api, chatId, forkId, second } = yield* twoMessages
+      const made = (yield* (yield* Writer).CreateEntity({
+        userId: (yield* api.Whoami()).id,
+        kind: "card",
+        label: "Pair",
+        subtitle: "",
+        doc: { ...cardDoc("Pair"), description: "Blue. Secret." },
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })).ref
+      yield* api.MoveToOwnTurnNote({
+        cardRefId: made.id,
+        expectedRevisionId: made.headRevisionId,
+        field: "description",
+        text: "Blue. Secret.",
+        at: 6,
+        length: 7
+      })
+      const notes = yield* api.ListCardNotes({ cardRefId: made.id })
+      assert.lengthOf(notes, 2)
+      yield* api.ChangeCast({ chatId, forkId, slotId: second, change: { _tag: "Join", entityId: made.entityId } })
+      yield* api.ChangeCast({
+        chatId,
+        forkId,
+        slotId: second,
+        change: { _tag: "Note", entityId: notes[0]!.ref.entityId, active: false }
+      })
+      const marks = yield* api.GetStateMarks({
+        chatId,
+        forkId,
+        slotId: second,
+        keys: ["note.activate", "note.deactivate"]
+      })
+      assert.sameMembers(
+        Object.keys(marks.notes),
+        notes.map((n) => n.ref.entityId)
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
   it.live("lists the named keys' events where they were written, with the names of what they name", () =>
     Effect.gen(function* () {
       const { api, mira, tobin, wren, chatId, forkId, first, second } = yield* twoMessages
@@ -142,6 +197,102 @@ describe("the timeline's change markers' read", () => {
           { slotId: first, key: "presence.set", value: { entity: mira, present: false } }
         ]
       )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("deleting and restoring a carrier removes and restores both its marker and its effective state", () =>
+    Effect.gen(function* () {
+      const { api, tobin, chatId, forkId, first, second } = yield* twoMessages
+      yield* api.ChangeCast({
+        chatId,
+        forkId,
+        slotId: first,
+        change: { _tag: "Presence", entityId: tobin, present: false }
+      })
+      const read = () => api.GetStateMarks({ chatId, forkId, slotId: second, keys: KEYS })
+      assert.isTrue((yield* api.GetCast({ chatId, forkId, slotId: second })).absent.includes(tobin))
+      const before = shape(yield* read())
+      const item = yield* api.DeleteMessage({ slotId: first, forkId })
+      assert.isFalse((yield* read()).events.some((e) => e.slotId === first))
+      assert.isFalse((yield* api.GetCast({ chatId, forkId, slotId: second })).absent.includes(tobin))
+      yield* api.RestoreBinItem({ itemId: item.id })
+      assert.deepStrictEqual(shape(yield* read()), before)
+      assert.isTrue((yield* api.GetCast({ chatId, forkId, slotId: second })).absent.includes(tobin))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live(
+    "version-attached effects follow the selected swipe; manual changes survive edits and multi-delete Undo",
+    () =>
+      Effect.gen(function* () {
+        const { api, tobin, chatId, forkId, first, second } = yield* twoMessages
+        const writer = yield* Writer
+        const userId = (yield* api.Whoami()).id
+        const read = () => api.GetStateMarks({ chatId, forkId, slotId: second, keys: KEYS })
+        const page = yield* api.ReadPath({ chatId, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+        const original = page.entries.find((e) => e.slotId === first)!
+        yield* writer.AddStateEvent({
+          userId,
+          chatId,
+          forkId,
+          slotId: first,
+          versionId: original.version.id,
+          scope: null,
+          data: { key: "presence.set", value: { entity: tobin, present: false } }
+        })
+        assert.isTrue((yield* read()).events.some((e) => e.versionId === original.version.id))
+        const alternate = yield* api.WriteVersion({
+          slotId: first,
+          forkId,
+          content: "A synthetic alternative.",
+          expectedRowVersion: original.rowVersion
+        })
+        assert.isFalse((yield* read()).events.some((e) => e.versionId === original.version.id))
+        yield* api.SelectVersion({
+          slotId: first,
+          forkId,
+          versionId: original.version.id,
+          expectedVersionId: alternate.version.id
+        })
+        assert.isTrue((yield* read()).events.some((e) => e.versionId === original.version.id))
+        yield* api.ChangeCast({
+          chatId,
+          forkId,
+          slotId: first,
+          change: { _tag: "ContextPerSpeaker", view: "separate" }
+        })
+        const before = shape(yield* read())
+        const items = yield* api.DeleteMessages({ forkId, slotIds: [first] })
+        assert.isFalse((yield* read()).events.some((e) => e.slotId === first))
+        yield* api.RestoreBinItems({ itemIds: items.map((item) => item.id) })
+        assert.deepStrictEqual(shape(yield* read()), before)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("reading and hiding markers leaves exports and indexed search text unchanged", () =>
+    Effect.gen(function* () {
+      const { api, tobin, chatId, forkId, first, second } = yield* twoMessages
+      yield* api.ChangeCast({
+        chatId,
+        forkId,
+        slotId: first,
+        change: { _tag: "Presence", entityId: tobin, present: false }
+      })
+      const exported = () =>
+        Effect.gen(function* () {
+          const response = yield* post("/library/chat-export", { chatId, forkId, scope: "branch", format: "jsonl" })
+          assert.strictEqual(response.status, 200)
+          return yield* Effect.promise(() => response.text())
+        })
+      const before = yield* exported()
+      const search = yield* api.SearchMessages({ text: "cup", cursor: null })
+      yield* api.GetStateMarks({ chatId, forkId, slotId: second, keys: KEYS })
+      yield* api.SetDisplayPrefs({ prefs: { stateMarkers: { "state.mute": false } } })
+      assert.strictEqual(yield* exported(), before)
+      assert.deepStrictEqual(yield* api.SearchMessages({ text: "cup", cursor: null }), search)
+      assert.isFalse(JSON.stringify(search).includes("muted"))
+      assert.lengthOf((yield* api.SearchMessages({ text: "muted", cursor: null })).hits, 0)
+      assert.notInclude(before, "muted")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 

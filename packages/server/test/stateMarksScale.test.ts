@@ -120,6 +120,7 @@ it.live(
       })
       const pagesBefore = yield* pages
       // The changes a long chat gathers: settings flipped, a note switched, along the whole path.
+      const addedEvents = new Set<string>()
       for (let i = 0; i < CHANGES; i++) {
         const slotId = fixture.main[Math.floor((i * fixture.main.length) / CHANGES)]!.id as SlotId
         const data =
@@ -133,7 +134,7 @@ it.live(
                     key: i % 8 === 3 ? "note.activate" : "note.deactivate",
                     value: { note: note.ref.entityId }
                   } as const)
-        yield* writer.AddStateEvent({
+        const added = yield* writer.AddStateEvent({
           userId,
           chatId,
           forkId,
@@ -142,20 +143,25 @@ it.live(
           scope: null,
           data: data as never
         })
+        addedEvents.add(added.id)
       }
       const timed = <A, E, R>(label: string, action: Effect.Effect<A, E, R>) =>
         Effect.gen(function* () {
           const samples: Array<number> = []
+          const coldStart = performance.now()
           let answer = yield* action
+          const coldMs = performance.now() - coldStart
           for (let i = 0; i < 7; i++) {
             const start = performance.now()
             answer = yield* action
             samples.push(performance.now() - start)
           }
           const ms = median(samples)
-          console.log("STATEMARKS_MEDIAN", label, ms.toFixed(1))
+          console.log("STATEMARKS_TIMING", label, JSON.stringify({ coldMs, medianMs: ms, samples }))
           return { answer, ms }
         })
+      // Measure marks before AwayMarks has warmed the same event query.
+      const marks = yield* timed("state-marks", reader.StateMarks({ userId, chatId, forkId, slotId: tip, keys: KEYS }))
       const window = yield* timed(
         "timeline-window",
         api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
@@ -173,12 +179,15 @@ it.live(
       )
       assert.deepStrictEqual(yield* pages, pagesBefore)
       const away = yield* timed("away-marks", reader.AwayMarks({ userId, chatId, forkId, slotId: tip }))
-      const marks = yield* timed("state-marks", reader.StateMarks({ userId, chatId, forkId, slotId: tip, keys: KEYS }))
-      const placed = marks.answer.events.filter((event) => event.slotId !== null)
+      // The fixture already activates its note once. Count the 400 newly written events by
+      // identity rather than mistaking that pre-existing activation for one of these changes.
+      const placed = marks.answer.events.filter((event) => addedEvents.has(event.eventId))
       // A change recorded at a message the fixture deleted doesn't apply, as in every state read,
       // so a few of the changes (those that landed on a deleted message) are not placed.
-      assert.isAtMost(placed.length, CHANGES)
-      assert.isAtLeast(placed.length, CHANGES - 8)
+      const deletedCarriers = Array.from({ length: CHANGES }, (_, i) => Math.floor((i * MESSAGES) / CHANGES)).filter(
+        (depth) => depth % 101 === 10
+      ).length
+      assert.lengthOf(placed, CHANGES - deletedCarriers)
       assert.strictEqual(marks.answer.names[note.ref.entityId], "Journey")
       console.log(
         "STATEMARKS_RESULT",

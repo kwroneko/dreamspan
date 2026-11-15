@@ -1,9 +1,9 @@
 import { PluginHost } from "../plugins/Host.ts"
 import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
 import { CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { type CapabilityMode, GrantRefused, type WorkshopApi } from "@rp/shared/workshopApi.ts"
+import { type CapabilityMode, GrantRefused, type RolloutEffect, type WorkshopApi } from "@rp/shared/workshopApi.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
@@ -13,12 +13,45 @@ import { capabilityView } from "../agent/capabilities.ts"
 import { cancelCapability, deliverAnswer } from "../agent/approvals.ts"
 import { CARD_SKILLS } from "../agent/tools/loading.ts"
 import { matchPatterns } from "../agent/toolLoading.ts"
+import { ChatHub } from "../chat/ChatHub.ts"
 
 export const makeWorkshopHandlers = Effect.gen(function* () {
   const writer = yield* Writer
   const reader = yield* Reader
   const execution = yield* ExecutionRegistry
   const plugins = yield* PluginHost
+  const hub = yield* ChatHub
+  // Undo runs the recorded worker operation, bypassing the original UI handler's
+  // notifications. Publish only after that transaction commits, on its recorded fork.
+  const notifyUndo = (effects: ReadonlyArray<RolloutEffect>) => {
+    const targets = new Map<string, { chatId: ChatId; forkId?: ForkId; state: boolean; history: boolean }>()
+    for (const effect of effects) {
+      if (effect.undoneAt === null || effect.targetKind !== "chat") continue
+      const recipe = effect.undo
+      const operation = recipe?.operation
+      const state = operation === "AddStateEvent" || operation === "AddStateEvents"
+      const history = typeof recipe?.changesetId === "string" || (effect.kind === "chat.change" && !state)
+      if (!state && !history) continue
+      const input = recipe?.input as { forkId?: unknown } | undefined
+      const prior = recipe?.prior as { chat?: { current_fork_id?: unknown } } | undefined
+      const fork = input?.forkId ?? recipe?.forkId ?? prior?.chat?.current_fork_id
+      const forkId = typeof fork === "string" ? (fork as ForkId) : undefined
+      const chatId = effect.targetId as ChatId
+      const key = JSON.stringify([chatId, forkId])
+      const target = targets.get(key) ?? { chatId, ...(forkId ? { forkId } : {}), state: false, history: false }
+      target.state ||= state
+      target.history ||= history
+      targets.set(key, target)
+    }
+    for (const { chatId, forkId, state, history } of targets.values()) {
+      const scope = forkId ? { forkId } : {}
+      if (state) hub.publish(chatId, { _tag: "State", ...scope })
+      if (history) {
+        hub.publish(chatId, { _tag: "Reload", ...scope })
+        hub.publish(chatId, { _tag: "Lcm", ...scope })
+      }
+    }
+  }
   const undo = (
     actor: import("@rp/shared/domain.ts").User,
     input: { rolloutId: string; toolCallId: string; seq: number }
@@ -38,7 +71,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
             )
           )
         })
-      })
+      }),
+      Effect.tap((effect) => Effect.sync(() => notifyUndo([effect])))
     )
   /** The capabilities of the tools this chat's kind offers, as they stand in it. */
   const capabilitiesOf = (userId: UserId, chatId: ChatId) =>
@@ -144,8 +178,11 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
             rolloutId: input.rolloutId
           })
           const rows = all.filter((e) => e.rolloutId === input.rolloutId && e.undoneAt === null)
-          if (!rows.some((e) => e.kind.startsWith("plugin.")))
-            return yield* writer.UndoRolloutEffects({ ...input, userId: user.id })
+          if (!rows.some((e) => e.kind.startsWith("plugin."))) {
+            const result = yield* writer.UndoRolloutEffects({ ...input, userId: user.id })
+            notifyUndo(result.undone)
+            return result
+          }
           const undone: Array<(typeof rows)[number]> = []
           for (const [at, row] of rows.entries()) {
             const result = yield* undo(user, row).pipe(Effect.exit)
