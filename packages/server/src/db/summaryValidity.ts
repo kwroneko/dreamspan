@@ -223,18 +223,20 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
         -- A shared old slot can have hundreds of thousands of descendants. Reach its
         -- forks by chain intervals, never by enumerating that message history. Deduplicate
         -- swipes pinned together before joining them to the forks' segments.
+        -- Touches must drive the identity probes. With the planning covering index,
+        -- an unconstrained join can instead scan every version on every write batch.
         touched(chat_id, chain_id, depth, author, at, slot_id, version_id) AS MATERIALIZED (
           SELECT DISTINCT s.chat_id, s.chain_id, s.depth, NULL, NULL, s.id, NULL
-          FROM shell_touches t CROSS JOIN kept k ON k.chat_id = t.chat_id
+          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id
             CROSS JOIN slots s ON s.id = t.ref WHERE t.kind = ${SLOT}
           UNION SELECT s.chat_id, s.chain_id, s.depth, v.speaker_entity_id,
             CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END, s.id, NULL
-          FROM shell_touches t CROSS JOIN kept k ON k.chat_id = t.chat_id CROSS JOIN versions v ON v.id = t.ref
+          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id CROSS JOIN versions v ON v.id = t.ref
             CROSS JOIN slots s ON s.id = v.slot_id
           WHERE t.kind = ${VERSION} AND v.writer = 'human' AND v.speaker_entity_id IS NOT NULL
             AND v.purged_at IS NULL AND s.inserted = 0
           UNION SELECT s.chat_id, s.chain_id, s.depth, NULL, NULL, s.id, v.id
-          FROM shell_touches t CROSS JOIN kept k ON k.chat_id = t.chat_id CROSS JOIN versions v ON v.id = t.ref
+          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id CROSS JOIN versions v ON v.id = t.ref
             CROSS JOIN slots s ON s.id = v.slot_id WHERE t.kind = ${TEXT}),
         segments(fork_id, chat_id, chain_id, lo, hi) AS (
           SELECT f.id, f.chat_id, s.chain_id, h.depth, s.depth FROM kept k
