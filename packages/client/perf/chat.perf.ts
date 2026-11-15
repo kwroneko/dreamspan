@@ -15,11 +15,16 @@ import { type PerfServer, startServer, withClient } from "./support.ts"
 let server: PerfServer
 let fixture: Fixture
 let dataDir: string
+const density = process.env.PERF_DENSITY === "compact" ? "compact" : "comfortable"
+/** PERF_SCROLL_PAGES stops the full scroll after that many pages of older history (60 messages each). */
+const scrollPages = Number(process.env.PERF_SCROLL_PAGES) || Number.POSITIVE_INFINITY
 test.beforeAll(async () => {
   const prepared = await prepare()
   fixture = prepared.fixture
   dataDir = prepared.dataDir
   server = await startServer(dataDir)
+  // PERF_DENSITY=compact runs every scenario at the account's compact message spacing.
+  if (density === "compact") await withClient(server, (api) => api.SetDisplayPrefs({ prefs: { chatDensity: density } }))
 })
 
 test.afterAll(async () => {
@@ -273,7 +278,7 @@ test("scroll the full length of 100,000 messages", async ({ page }) => {
   const started = Date.now()
   let pages = 0
   const heapSamples: Array<number> = []
-  while ((await windowState(page)).older) {
+  while (pages < scrollPages && (await windowState(page)).older) {
     const before = await scrollToTop(page)
     // The next older page lands above: this message must stay where it is.
     const error = await prepended(page, before.slot, before.top)
@@ -287,6 +292,7 @@ test("scroll the full length of 100,000 messages", async ({ page }) => {
   const measured = await since(page, from)
   const heapEnd = await heapMb(cdp)
   record("scroll", {
+    density,
     pages,
     seconds: round((Date.now() - started) / 1000),
     anchorErrorMaxPx: round(Math.max(0, ...errors)),

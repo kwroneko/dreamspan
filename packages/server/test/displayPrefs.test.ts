@@ -2,6 +2,8 @@ import { assert, it } from "@effect/vitest"
 import { CHAT_WIDTH, DEFAULT_DISPLAY_PREFS, DisplayPrefsChange } from "@rp/shared/chatApi.ts"
 import { Effect, Schema } from "effect"
 import { client, testConfig, withServer } from "./support/config.ts"
+import { generateReply, eventually, finished } from "./support/generation.ts"
+import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 
 it.live("model pins, recent choices and sort persist per account and merge independent devices", () =>
@@ -115,6 +117,24 @@ it.live("the chat width persists per account, within its range, without resettin
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )
 
+it.live("message spacing is comfortable until chosen, persists per account and keeps other choices", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const bob = yield* client({ "Remote-User": "bob" })
+    assert.strictEqual((yield* alice.GetDisplayPrefs({})).chatDensity, "comfortable")
+    yield* alice.SetDisplayPrefs({ prefs: { chatWidth: 1760 } })
+    assert.strictEqual((yield* alice.SetDisplayPrefs({ prefs: { chatDensity: "compact" } })).chatDensity, "compact")
+    const prefs = yield* (yield* client({ "Remote-User": "alice" })).GetDisplayPrefs({})
+    assert.strictEqual(prefs.chatDensity, "compact")
+    assert.strictEqual(prefs.chatWidth, 1760)
+    assert.strictEqual((yield* bob.GetDisplayPrefs({})).chatDensity, "comfortable")
+    // Another choice written later leaves it.
+    assert.strictEqual((yield* alice.SetDisplayPrefs({ prefs: { coverageRail: true } })).chatDensity, "compact")
+    const decode = Schema.decodeUnknownOption(DisplayPrefsChange)
+    for (const value of ["cosy", "", 1, null]) assert.strictEqual(decode({ chatDensity: value })._tag, "None")
+  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)
+
 it.live("message toolbar choices merge by action id per account, across clients, and stay bounded", () =>
   Effect.gen(function* () {
     const alice = yield* client({ "Remote-User": "alice" })
@@ -185,4 +205,38 @@ it.live("explanation dismissals merge by box id and stay within the account", ()
     })
     assert.deepStrictEqual((yield* bob.GetDisplayPrefs({})).dismissedInfo, {})
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)
+
+it.live("message spacing leaves the complete model request byte-identical", () =>
+  Effect.gen(function* () {
+    const mock = yield* Effect.acquireRelease(
+      Effect.promise(() => startMockProvider((_request, res) => sse(res, completionChunks(["Noted."], {})))),
+      (m) => Effect.promise(() => m.close())
+    )
+    const api = yield* client()
+    const { chat, version, events } = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+      model: {},
+      greeting: "Synthetic harbor greeting.",
+      content: "The tide rose."
+    })
+    const before = mock
+      .requests()
+      .filter((r) => r.path.endsWith("/chat/completions"))
+      .at(-1)!.raw
+    assert.isString(before)
+    yield* api.SetDisplayPrefs({ prefs: { chatDensity: "compact" } })
+    const row = (yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 }))
+      .entries[0]!
+    assert.strictEqual(row.version.id, version.id)
+    const again = yield* api.Regenerate({ slotId: row.slotId, expectedRowVersion: row.rowVersion })
+    yield* eventually(() => finished(events, again.version.id) !== undefined)
+    assert.strictEqual(
+      mock
+        .requests()
+        .filter((r) => r.path.endsWith("/chat/completions"))
+        .at(-1)!.raw,
+      before
+    )
+  }).pipe(Effect.scoped, withServer(testConfig()))
 )
