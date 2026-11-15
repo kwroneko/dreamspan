@@ -142,6 +142,16 @@ it.live(
           samples.push({ operation, ms: median(times) })
           return result as A
         })
+      const decisionState = yield* time(
+        "decision StateEventsAt: 300 branches / 3,000 messages",
+        h.reader.StateEventsAt({
+          userId: h.userId,
+          chatId,
+          forkId: main,
+          slotId: slotAt(2_999)
+        })
+      )
+      assert.isAbove(decisionState.length, 0)
       const placeholder = (speaker: EntityId) =>
         h.writer.AppendMessage({
           userId: h.userId,

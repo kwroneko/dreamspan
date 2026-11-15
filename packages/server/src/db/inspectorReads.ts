@@ -327,6 +327,19 @@ const speakerPickOf = (json: string | null) => {
   return pick?.by === "decision" ? { speakerPick: { name: pick.name, confidence: pick.confidence } } : {}
 }
 
+/** Decision points the chat had turned off when the reply was written, as its snapshot froze them. */
+const decisionsOffOf = (snapshot: unknown) => {
+  const off = (snapshot as { readonly decisionsOff?: unknown }).decisionsOff
+  if (!Array.isArray(off)) return {}
+  const points = off.flatMap(
+    (point: { readonly id?: unknown; readonly label?: unknown; readonly instead?: unknown }) =>
+      typeof point?.id === "string" && typeof point.label === "string" && typeof point.instead === "string"
+        ? [{ id: point.id, label: point.label, instead: point.instead }]
+        : []
+  )
+  return points.length ? { decisionsOff: points } : {}
+}
+
 export const makeInspectorReadHandlers = Effect.gen(function* () {
   const assembler = yield* WorkerAssembler
   const sql = yield* SqlClient.SqlClient
@@ -421,6 +434,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         capture: display ? "captured" : "unavailable",
         tokenizer: textCounts.tokenizer,
         ...speakerPickOf(row.speaker_pick_json),
+        ...decisionsOffOf(snapshot),
         ...(separateContext ? { separateContext } : {}),
         messages: display
           ? contextMessages(wire!, images, textCounts.counts, (source) => {

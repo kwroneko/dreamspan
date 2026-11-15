@@ -22,7 +22,13 @@ import { executionRegistry } from "../execution.ts"
 import { OUT_OF_TIME } from "@rp/shared/regexScripts.ts"
 import type { LiveRewrite } from "./liveRewrites.ts"
 import { Notices } from "./Notices.ts"
-import { GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
+import {
+  AutoRequestGuard,
+  GenerationFailed,
+  type GenerationRequest,
+  Generator,
+  type GeneratorShape
+} from "./Generator.ts"
 
 /** How often a generating version's text so far is saved. */
 const SAVE_EVERY_MS = 2000
@@ -583,7 +589,8 @@ export class Generations extends Context.Service<
                 )
               })
             ),
-            Effect.onExit((exit) => finish(entry, exit))
+            Effect.onExit((exit) => finish(entry, exit)),
+            Effect.provideService(AutoRequestGuard, entry.request.autoGuard ?? null)
           )
 
       /** Saves the text so far now and then, so a crash keeps most of it. */

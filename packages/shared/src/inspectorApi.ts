@@ -312,6 +312,13 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
   tokenizer: Schema.optionalKey(TokenizerInfo),
   /** The decision model chose who wrote this reply (DESIGN §2.3): by the name it was asked about, how sure. */
   speakerPick: Schema.optionalKey(Schema.Struct({ name: Schema.String, confidence: Schema.Number })),
+  /**
+   * Decision points a connection has on that this chat turned off when the reply was written
+   * (`decision.points`): nothing was asked, and `instead` says what decided. Absent: none.
+   */
+  decisionsOff: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String, instead: Schema.String }))
+  ),
   /** Absent: one shared context, or a reply from before separate contexts. */
   separateContext: Schema.optionalKey(SeparateContext),
   ...ContextDisplay.fields,

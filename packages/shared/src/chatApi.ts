@@ -20,7 +20,7 @@ import {
   Version,
   VersionId
 } from "./chat.ts"
-import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
+import { AutoRefused, LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { ComposerImageIds, ComposerChoice, TextTooLong } from "./composerApi.ts"
 import {
   ObservedDeletion,
@@ -443,7 +443,13 @@ const Sent = { draft: Schema.NullOr(Draft), recovered: Schema.Int }
  * written (DESIGN §2.2), with every entry now waiting in the chat.
  */
 export const SendResult = Schema.Union([
-  Schema.TaggedStruct("Posted", { entry: PathEntry, chat: Chat, ...Sent }),
+  Schema.TaggedStruct("Posted", {
+    entry: PathEntry,
+    chat: Chat,
+    /** An Auto turn's: the token its run's next turn must present. */
+    auto: Schema.optionalKey(Schema.Struct({ token: Schema.String })),
+    ...Sent
+  }),
   Schema.TaggedStruct("Queued", { queued: QueuedMessage, queue: Schema.Array(QueuedMessage), ...Sent })
 ])
 export type SendResult = typeof SendResult.Type
@@ -610,12 +616,22 @@ export class ChatApi extends RpcGroup.make(
        * next", when the user turned it on, may choose another for each (DESIGN §2.3).
        */
       autoPick: Schema.optionalKey(Schema.Boolean),
+      /** Hard output-token ceiling for this reply, shared by its tool rounds. */
+      outputLimit: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 2147483647 }))),
+      /** Auto must never enter the server's send queue. */
+      immediate: Schema.optionalKey(Schema.Boolean),
+      /**
+       * An Auto turn (ARCHITECTURE §15, Auto replies). `token` null: the run's first, the user's
+       * Start. Otherwise the token the run's last turn handed back: the turn starts only if
+       * nothing changed since that the run didn't cause (AutoRefused otherwise, nothing sent).
+       */
+      auto: Schema.optionalKey(Schema.Struct({ token: Schema.NullOr(Schema.String) })),
       composer: ComposerCommit,
       /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
       storyAt: StoryAtField
     },
     success: SendResult,
-    error: Schema.Union([NotFound, LeafMoved, GenerationUnavailable, ServerError])
+    error: Schema.Union([NotFound, LeafMoved, AutoRefused, GenerationUnavailable, ServerError])
   }),
   /**
    * The fork's round (DESIGN §2.3). `continue`: a stopped round goes on, its next reply starting

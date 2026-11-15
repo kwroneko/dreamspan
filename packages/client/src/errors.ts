@@ -6,6 +6,7 @@ import { BinChanged, CannotDeleteLastFork } from "@rp/shared/bin.ts"
 import { InvalidNetworkSettings, Unauthorized } from "@rp/shared/api.ts"
 import {
   AccountRejected,
+  AutoRefused,
   Forbidden,
   LeafMoved,
   ModelKeyTaken,
@@ -91,6 +92,16 @@ const describeError = (error: unknown): AppError => {
     return make("ModelKeyTaken", `This connection already has a model called “${error.key}”.`)
   }
   // Chats
+  if (error instanceof AutoRefused)
+    return make(
+      "AutoRefused",
+      error.reason === "settings"
+        ? "A setting, preset, model or library entry changed, so nothing more was sent."
+        : error.reason === "expired"
+          ? "The server restarted, so nothing more was sent."
+          : "This chat changed, so nothing more was sent.",
+      error.reason
+    )
   if (error instanceof LeafMoved)
     return make("LeafMoved", "A newer message arrived meanwhile. The chat is up to date now: try again.")
   if (error instanceof GenerationUnavailable) return make("GenerationUnavailable", sentence(error.message))

@@ -38,6 +38,7 @@ import { type ChatRow, rewriteColumns, toVersion, toChat } from "./rows.ts"
 import { separateThreads } from "./threads.ts"
 import type { StoredRewrite } from "@rp/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
+import { checkAutoTurn, claimAutoTurn } from "./autoGuard.ts"
 
 const userMessage = (
   content: string,
@@ -470,12 +471,22 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       rewrite,
       round,
       autoPick,
-      storyAt
+      storyAt,
+      immediate,
+      auto,
+      autoConfiguration
     }: SendInput) =>
       Effect.gen(function* () {
         yield* graph.ownedChat(userId, chatId)
         let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
         const draftForkId = fork.id
+        // An Auto turn is admitted here, in the transaction that writes its reply: nothing can
+        // change between this check and the reply's placeholder (db/autoGuard.ts).
+        const autoAt = { userId, chatId, forkId: fork.id }
+        const run =
+          auto == null || auto.token === null
+            ? null
+            : yield* checkAutoTurn(sql, autoAt, auto.token, autoConfiguration ?? "")
         // A turn added at the fork's tip is a new user action: the round already there, waiting
         // or stopped, ends (DESIGN §2.3). A branch elsewhere leaves it be.
         const endedRound =
@@ -501,6 +512,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           // A deleted anchor can remain the tip to retain its gap. Nothing waits on its
           // hidden generation: afterReply withdraws entries whose reply was deleted.
           if (parent.status === "generating" && !parent.deleted) {
+            if (immediate) return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
             const at = Date.now()
             // A branch queued onto a reply still being written waits in a fork of its own.
             if (branch && parentSlotId !== fork.tip_slot_id) {
@@ -576,6 +588,20 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               : reply(speakerEntityId, direction, autoPick === true),
           commitDraft
         })
+        const next =
+          auto == null || kind !== "generate"
+            ? {}
+            : {
+                auto: {
+                  token: yield* claimAutoTurn(
+                    sql,
+                    autoAt,
+                    run,
+                    { slotId: result.slotId, versionId: result.version.id },
+                    autoConfiguration ?? ""
+                  )
+                }
+              }
         // A reply posted now: the rest of its round waits for it.
         if (kind === "generate" && (round ?? []).length > 0) {
           const [next] = yield* sql<{ n: number }>`
@@ -590,14 +616,19 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             autoPick === true,
             result.slotId
           )
-          return { _tag: "Posted" as const, result, queue: yield* chatQueue(sql, chatId) }
+          return { _tag: "Posted" as const, result, ...next, queue: yield* chatQueue(sql, chatId) }
         }
         return {
           _tag: "Posted" as const,
           result,
+          ...next,
           ...(endedRound.length > 0 ? { queue: yield* chatQueue(sql, chatId) } : {})
         }
       })
+
+    /** `sendOrQueue` for a send that is never an Auto turn, which only one can be refused as. */
+    const sendPlain = (input: SendInput) =>
+      sendOrQueue(input).pipe(Effect.catchTag("AutoRefused", (refused) => Effect.die(refused)))
 
     const handlers = {
       ...(yield* makeShellWriteHandlers),
@@ -658,7 +689,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             const target = targets[index]!
             const fork = forks[index]!
             const first = index === 0
-            const sent = yield* sendOrQueue({
+            const sent = yield* sendPlain({
               userId,
               chatId,
               forkId: fork.id as ForkId,
@@ -691,7 +722,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             let reply: { slotId: SlotId; versionId: VersionId } | null = null
             if (target.reply) {
               // The reply the client would ask for after an immediate send, as Generate does.
-              const asked = yield* sendOrQueue({
+              const asked = yield* sendPlain({
                 userId,
                 chatId,
                 forkId: result.forkId,

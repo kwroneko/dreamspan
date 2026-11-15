@@ -215,6 +215,37 @@ export const sendMessageDefinition = {
   effect: "read"
 } satisfies FrozenTool
 
+/** What `present` tells the model: the argument's whole contract, since nothing else explains it. */
+const PRESENT_DESCRIPTION =
+  "The names of the characters who are in the scene for this message, yours included. Leave out anyone who isn't there: they don't hear this message, and aren't picked to reply until they're back."
+
+/**
+ * The send tool of a chat whose replies say who is present (`agent.send_presence`; DESIGN §3.5
+ * [D]: "by a required `send_message` argument"). The names aren't listed in the schema, so the
+ * definition is the same for every cast and stays cached.
+ */
+export const sendMessageWithPresence = (mode: "optional" | "required"): FrozenTool => {
+  const present = Type.Array(Type.String(), { description: PRESENT_DESCRIPTION })
+  return {
+    ...sendMessageDefinition,
+    description: `${sendMessageDefinition.description} Say who is in the scene in \`present\`.`,
+    parameters: Type.Object({
+      message: Type.String({ description: "The message, exactly as it should appear." }),
+      present: mode === "required" ? present : Type.Optional(present)
+    })
+  }
+}
+
+/** Whether a frozen send tool takes `present`, and whether it must: read from what was offered. */
+export const sendPresenceOf = (definition: Pick<FrozenTool, "parameters">): "optional" | "required" | null => {
+  const schema = definition.parameters as {
+    readonly properties?: Readonly<Record<string, unknown>>
+    readonly required?: ReadonlyArray<string>
+  } | null
+  if (!schema?.properties || !("present" in schema.properties)) return null
+  return schema.required?.includes("present") ? "required" : "optional"
+}
+
 /** Several-message contracts share the tool shape, with instructions matching their loop. */
 export const severalMessageDefinition: FrozenTool = {
   ...sendMessageDefinition,

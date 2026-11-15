@@ -33,12 +33,14 @@ import {
   type FrozenTool,
   frozenTool,
   sendMessageDefinition,
+  sendPresenceOf,
   severalMessageDefinition,
   type RolloutTool,
   type ToolOutput,
   toolWriter
 } from "./tools.ts"
 import { forTarget, rolloutRequest } from "./wire.ts"
+import { declarePresence } from "./tools/sendPresence.ts"
 import {
   BAD_ARGS,
   CALL_TOOL,
@@ -113,19 +115,48 @@ const INTERRUPTED = { interrupted: true } as const
  */
 const PARTIAL_SAVE_MS = 2000
 
-/** The contract's tool (DESIGN §7.2): the message, ending the turn; one a turn. */
-const sendMessageTool = (onSend: (message: string) => boolean): AgentTool => ({
-  ...sendMessageDefinition,
-  executionMode: "sequential",
-  execute: async (_id, params) => {
-    const sent = onSend((params as { message: string }).message)
-    return {
-      content: [{ type: "text", text: sent ? "Sent." : "Only one message a turn: the first one was sent." }],
-      details: null,
-      ...(sent ? { terminate: true } : { isError: true })
+/**
+ * The contract's tool (DESIGN §7.2): the message, ending the turn; one a turn. Where the chat
+ * has the tool say who is present (`definition` takes `present`), `declare` records it with the
+ * message before the message is taken; its refusal (a name nobody in the chat has) goes back to
+ * the model, which sends again.
+ */
+const sendMessageTool = (
+  definition: FrozenTool,
+  send: { readonly sent: () => boolean; readonly take: (message: string) => boolean },
+  declare?: (toolCallId: string, present: ReadonlyArray<string>) => Promise<string | null>
+): AgentTool => {
+  const presence = sendPresenceOf(definition)
+  const refuse = (text: string) => ({ content: [{ type: "text" as const, text }], details: null, isError: true })
+  return {
+    name: definition.name,
+    label: definition.label,
+    description: definition.description,
+    parameters: definition.parameters as AgentTool["parameters"],
+    executionMode: "sequential",
+    execute: async (id, params) => {
+      const { message, present } = params as { message: string; present?: unknown }
+      if (send.sent()) return refuse("Only one message a turn: the first one was sent.")
+      if (presence !== null && declare) {
+        const names = Array.isArray(present) && present.every((name) => typeof name === "string") ? present : null
+        if (present !== undefined && names === null) return refuse(PRESENT_NEEDED)
+        if (names === null && presence === "required") return refuse(PRESENT_NEEDED)
+        if (names !== null) {
+          const refusal = await declare(id, names)
+          if (refusal !== null) return refuse(refusal)
+        }
+      }
+      const sent = send.take(message)
+      return sent
+        ? { content: [{ type: "text", text: "Sent." }], details: null, terminate: true }
+        : refuse("Only one message a turn: the first one was sent.")
     }
   }
-})
+}
+
+/** A send that had to say who is present and didn't, or said it as something other than names. */
+const PRESENT_NEEDED =
+  "Say who is in the scene: send the message again with `present`, the names of the characters there for it."
 
 const emptyAssistant = (model: Model<Api>): AssistantMessage => ({
   role: "assistant",
@@ -230,7 +261,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               return { content: [{ type: "text", text: "Sent." }], details: { versionId: next.postedVersionId } }
             }
           }
-        : sendMessageTool(send)
+        : sendMessageTool(
+            // What the snapshot froze, so a resume offers and reads the same tool.
+            run.offered?.find((t) => t.name === SEND_MESSAGE) ?? sendMessageDefinition,
+            { sent: () => sent !== undefined, take: send },
+            (id, present) =>
+              runPromise(declarePresence(context(id), present)).catch(() => "Who is present could not be saved.")
+          )
       // A resume offers the definitions its snapshot froze, exactly as they were sent.
       const frozen = (run.offered ?? tools.map(frozenTool)).filter(
         (t) => t.name !== SEND_MESSAGE && t.name !== CALL_TOOL
@@ -355,6 +392,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               inspection: { request: generation.request, model, display: generation.inspection },
               options: {
                 ...(prefix.cacheRetention ? { cacheRetention: prefix.cacheRetention } : {}),
+                ...(request.outputBudget ? { outputBudget: request.outputBudget } : {}),
                 ...(prefix.temperature !== undefined ? { temperature: prefix.temperature } : {}),
                 ...(prefix.maxTokens !== undefined ? { maxTokens: prefix.maxTokens } : {}),
                 ...(prefix.reasoning ? { reasoning: prefix.reasoning } : {}),

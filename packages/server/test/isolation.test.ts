@@ -5012,6 +5012,16 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  DeclareRolloutPresence: (_reader, actor, owner, writer) =>
+    refused(
+      writer.DeclareRolloutPresence({
+        userId: actor.user.id,
+        rolloutId: owner.chat.rolloutId,
+        toolCallId: "call_1",
+        present: []
+      }),
+      "NotFound"
+    ),
   PostRolloutMessage: (_reader, actor, owner, writer) =>
     refused(
       writer.PostRolloutMessage({

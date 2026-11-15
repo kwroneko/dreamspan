@@ -42,6 +42,8 @@ const chunk = (body: Record<string, unknown>) =>
 export const startProvider = async (
   options: {
     holdAfterText?: boolean
+    /** Honour output ceilings in billing-bound tests. */
+    respectOutputLimit?: boolean
     /** Streamed instead of REPLY. */ reply?: string
     models?: ReadonlyArray<{
       id: string
@@ -62,7 +64,10 @@ export const startProvider = async (
   let holding = false
   let holdingText = options.holdAfterText ?? false
   const held: Array<() => void> = []
-  const respond = (response: ServerResponse) => {
+  const respond = (response: ServerResponse, body?: Record<string, unknown>) => {
+    const output = options.respectOutputLimit
+      ? Math.min(6, Number(body?.["max_completion_tokens"] ?? body?.["max_tokens"] ?? 6))
+      : 6
     response.writeHead(200, { "content-type": "text/event-stream" })
     response.write(
       chunk({ choices: [{ index: 0, delta: { role: "assistant", content: reply }, finish_reason: null }] })
@@ -73,7 +78,7 @@ export const startProvider = async (
       response.write(
         chunk({
           choices: [],
-          usage: { prompt_tokens: 120, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 100 } }
+          usage: { prompt_tokens: 120, completion_tokens: output, prompt_tokens_details: { cached_tokens: 100 } }
         })
       )
       response.end("data: [DONE]\n\n")
@@ -111,9 +116,10 @@ export const startProvider = async (
       request.on("data", (data: Buffer) => (body += data.toString()))
       request.on("end", () => {
         completionBytes.push(body)
-        completions.push(JSON.parse(body) as FakeProvider["completions"][number])
-        if (holding) held.push(() => respond(response))
-        else respond(response)
+        const parsed = JSON.parse(body) as Record<string, unknown>
+        completions.push(parsed as unknown as FakeProvider["completions"][number])
+        if (holding) held.push(() => respond(response, parsed))
+        else respond(response, parsed)
       })
       return
     }

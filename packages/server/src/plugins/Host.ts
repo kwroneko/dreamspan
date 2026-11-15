@@ -1,3 +1,7 @@
+import { configurationRevision, trackAutoConfiguration } from "../chat/autoConfiguration.ts"
+import { stateKeys } from "@rp/shared/state.ts"
+import { settingsRegistry } from "../db/settings.ts"
+import { storageKinds } from "../db/storageKinds.ts"
 // Full-trust server plugins, scoped registrations and worker bridges. Consent is never inferred.
 import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect"
 import { randomUUID } from "node:crypto"
@@ -135,6 +139,19 @@ export class PluginHost extends Context.Service<
         costFormulas: providers.costs,
         decisionPoints: decisions.points
       }
+      // Registration and restoration happen before pin writes. Revisions change in the
+      // same synchronous step as the part, so that interval cannot authorize an Auto send.
+      const requestRegistries = [
+        ...Object.values(registryMap),
+        ...Object.values(execution),
+        ...Object.values(providers),
+        assemblies,
+        states,
+        stateKeys,
+        settingsRegistry,
+        storageKinds
+      ]
+      yield* trackAutoConfiguration(() => requestRegistries.map(configurationRevision))
       const notify = (userId: UserId, id: string, message: string) =>
         notices.publish(userId, { _tag: "PluginsChanged", id, message })
       const close = (owner: string, id: string) =>

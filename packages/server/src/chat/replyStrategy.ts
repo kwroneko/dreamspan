@@ -37,7 +37,7 @@ export const runPlainReply = ({
   purpose,
   target
 }: {
-  readonly request: Pick<GenerationRequest, "userId" | "chatId" | "onWaitingCache">
+  readonly request: Pick<GenerationRequest, "userId" | "chatId" | "onWaitingCache" | "outputBudget">
   readonly target: GenerationTarget
   readonly generation: Generation
   readonly rolloutId: string
@@ -62,6 +62,7 @@ export const runPlainReply = ({
           inspection: { request: generation.request, model, display: generation.inspection },
           options: {
             ...(model.settings?.cacheRetention ? { cacheRetention: model.settings.cacheRetention } : {}),
+            ...(request.outputBudget ? { outputBudget: request.outputBudget } : {}),
             ...(output.replyTool ? { replyTool: output.replyTool } : {}),
             ...(wire.temperature !== undefined ? { temperature: wire.temperature } : {}),
             ...(wire.maxTokens !== undefined ? { maxTokens: wire.maxTokens } : {}),

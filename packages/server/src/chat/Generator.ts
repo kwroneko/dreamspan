@@ -8,6 +8,11 @@ import type { ReplySections } from "@rp/shared/replySections.ts"
 import type { RolloutStep } from "@rp/shared/agent.ts"
 import { Context, Layer, Option, Schema, type Stream } from "effect"
 
+/** Transient authorization inherited by decision calls and tool rounds of this reply. */
+export const AutoRequestGuard = Context.Reference<string | null>("rp/chat/AutoRequestGuard", {
+  defaultValue: () => null
+})
+
 /** A position in a chat to generate at: a new version of `slotId`, on the path through it. */
 export interface GenerationRequest {
   readonly userId: UserId
@@ -22,6 +27,8 @@ export interface GenerationRequest {
   /** "Retry with…": generates with this model instead of the chat's. */
   readonly model?: { readonly connection: ConnectionId; readonly model: ModelId }
   /** An approved workshop send permits this reply only, without auxiliary provider workflows. */
+  readonly autoGuard?: string
+  readonly outputBudget?: { remaining: number }
   readonly replyOnly?: boolean
   /**
    * A side chat's request (spec/WORKSHOP.md §4): where its story tools read the story, as the

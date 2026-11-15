@@ -1,3 +1,4 @@
+import { autoConfigurationStamp } from "../chat/autoConfiguration.ts"
 import { OperationCall } from "../agent/operations.ts"
 import { regenerateSeveral } from "./agent.ts"
 // Chat RPC handlers (@rp/shared/chatApi.ts). Every handler acts as the authenticated user;
@@ -171,12 +172,16 @@ export const makeChatHandlers = Effect.gen(function* () {
       /** The reply's speaker and the round's are Auto's picks, which the decision model may change. */
       readonly autoPick?: boolean | undefined
       readonly composer: { readonly draftId: string; readonly session: number } | undefined
+      readonly outputLimit?: number | undefined
+      readonly immediate?: boolean | undefined
+      /** An Auto turn and the token it presents (null: the run's first), db/autoGuard.ts. */
+      readonly auto?: { readonly token: string | null } | undefined
       /** A side chat's story position, for its reply now or when the queue posts it. */
       readonly storyAt?: StoryAt | undefined
     }
   ) =>
     Effect.gen(function* () {
-      const { composer, round, autoPick, storyAt, ...send } = params
+      const { composer, round, autoPick, storyAt, outputLimit, immediate, auto, ...send } = params
       // What the user sends goes through the scripts first, as ST's sendMessageAsUser.
       const written =
         params.kind === "message"
@@ -192,6 +197,10 @@ export const makeChatHandlers = Effect.gen(function* () {
       const outcome = yield* writer.SendOrQueue({
         userId: user,
         ...send,
+        ...(immediate || outputLimit !== undefined || auto !== undefined ? { immediate: true } : {}),
+        ...(auto === undefined || params.kind !== "generate"
+          ? {}
+          : { auto, autoConfiguration: autoConfigurationStamp() }),
         content: written.content,
         ...(written.rewrite ? { rewrite: written.rewrite } : {}),
         ...(round === undefined || round.length === 0 ? {} : { round }),
@@ -234,6 +243,8 @@ export const makeChatHandlers = Effect.gen(function* () {
           chatId: params.chatId,
           slotId: result.slotId,
           versionId: result.version.id,
+          ...(outputLimit === undefined ? {} : { outputBudget: { remaining: outputLimit } }),
+          ...(outcome.auto ? { autoGuard: outcome.auto.token } : {}),
           ...(proof?.model ? { model: proof.model } : {}),
           ...(operation ? { replyOnly: true } : {}),
           ...(storyAt === undefined ? {} : { storyAt }),
@@ -245,7 +256,14 @@ export const makeChatHandlers = Effect.gen(function* () {
       hub.publish(params.chatId, { _tag: "Chat", chat: result.chat })
       // The rest of the round waits behind the reply just posted.
       if (outcome.queue !== undefined) hub.publish(params.chatId, { _tag: "Queue", queue: outcome.queue })
-      return { _tag: "Posted" as const, entry, chat: result.chat, draft: result.draft, recovered: result.recovered }
+      return {
+        _tag: "Posted" as const,
+        entry,
+        chat: result.chat,
+        draft: result.draft,
+        recovered: result.recovered,
+        ...(outcome.auto === undefined ? {} : { auto: outcome.auto })
+      }
     })
 
   /** An edit's text through the scripts that run on edits, at the version it edits. */
@@ -354,7 +372,11 @@ export const makeChatHandlers = Effect.gen(function* () {
           composer,
           storyAt
         })
-      ).pipe(internal("SendMessage")),
+      ).pipe(
+        // Only an Auto turn can be refused as one, and a message is never one.
+        Effect.catchTag("AutoRefused", (refused) => Effect.die(refused)),
+        internal("SendMessage")
+      ),
 
     // Once the version is written, its generation starts even if the caller has gone:
     // otherwise it would stay `generating` with nothing behind it.
@@ -368,7 +390,10 @@ export const makeChatHandlers = Effect.gen(function* () {
       round,
       autoPick,
       composer,
-      storyAt
+      storyAt,
+      outputLimit,
+      immediate,
+      auto
     }) =>
       Effect.gen(function* () {
         yield* needGenerator
@@ -386,7 +411,10 @@ export const makeChatHandlers = Effect.gen(function* () {
           round,
           autoPick,
           composer,
-          storyAt
+          storyAt,
+          outputLimit,
+          immediate,
+          auto
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
 

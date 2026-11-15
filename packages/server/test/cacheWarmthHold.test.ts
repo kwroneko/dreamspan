@@ -110,3 +110,20 @@ it.live("a posted message holds for the reply it expects, until the reply holds 
     assert.isBelow(Date.now() - started, 4000)
   }).pipe(Effect.scoped, Effect.provide(layer))
 })
+
+it.live("an account configuration change is announced while its estimate is held", () => {
+  const { state, layer } = fixture()
+  return Effect.gen(function* () {
+    const { hub, warmth } = yield* open(state)
+    const events: string[] = []
+    yield* hub.listen((_chat, event) => {
+      if (event) events.push(event._tag)
+    })
+    const release = warmth.hold(chatId)
+    yield* warmth.refreshUser(user, true)
+    assert.include(events, "State", "the running tab can stop before any new estimate")
+    assert.strictEqual(state.calls, 1, "announcing a setting sends no estimate or provider request")
+    release()
+    yield* eventually(() => state.calls === 2)
+  }).pipe(Effect.scoped, Effect.provide(layer))
+})

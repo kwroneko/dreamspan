@@ -37,6 +37,8 @@ const context = {
 
 const harness = (options: {
   readonly on?: boolean
+  /** The chat turned the point off (`decision.points`). */
+  readonly offInChat?: boolean
   readonly answer: Effect.Effect<unknown, ReturnType<typeof providerError>>
   readonly timeoutMs?: number
   readonly resolve?: typeof point.resolve
@@ -52,7 +54,11 @@ const harness = (options: {
           model: "model_1" as ModelId,
           points: { probe: { on: options.on ?? true, threshold: 0.8 } }
         }
-      ])
+      ]),
+    StateEventsAt: () =>
+      Effect.succeed(
+        options.offInChat ? [{ scope: null, data: { key: "decision.points", value: { off: ["probe"] } } }] : []
+      )
   } as never)
   const writer = Layer.succeed(Writer, {
     StartDecisionRollout: ({ rolloutId }: { rolloutId: string }) => Effect.sync(() => void started.push(rolloutId)),
@@ -127,6 +133,15 @@ describe("decision engine", () => {
     Effect.gen(function* () {
       const h = harness({ on: false, answer: Effect.succeed({ q: { noul: 0.99 } }) })
       assert.deepStrictEqual(yield* h.run(), { value: "fallback", source: "heuristic", reason: "off" })
+      assert.strictEqual(h.sent(), 0)
+      assert.deepStrictEqual(h.started, [])
+    })
+  )
+
+  it.effect("a point the chat turned off returns the fallback without a request or a rollout", () =>
+    Effect.gen(function* () {
+      const h = harness({ offInChat: true, answer: Effect.succeed({ q: { noul: 0.99 } }) })
+      assert.deepStrictEqual(yield* h.run(), { value: "fallback", source: "heuristic", reason: "off_in_chat" })
       assert.strictEqual(h.sent(), 0)
       assert.deepStrictEqual(h.started, [])
     })

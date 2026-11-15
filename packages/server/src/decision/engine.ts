@@ -10,7 +10,7 @@ import type { ChatId, ForkId, SlotId, Version, VersionId } from "@rp/shared/chat
 import { type DecisionAnswers, type DecisionQuestion, parseAnswers } from "@rp/shared/decisions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import type { FoldableEvent } from "@rp/shared/state.ts"
+import { type ChatState, type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { Cause, Context, Effect, Exit, Layer, Option } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
@@ -66,6 +66,16 @@ export interface DecisionPoint<I, V> {
   /** User-facing, for the connection's Decisions settings. */
   readonly label: string
   readonly description: string
+  /**
+   * User-facing, one sentence: what decides in its place when a chat turns the point off (the
+   * chat's Decisions setting and the inspector say it). Absent: nothing is said.
+   */
+  readonly instead?: string
+  /**
+   * Whether the point would have been asked about a reply written from this state, for the
+   * inspector's note of a point the chat turned off; absent: every reply.
+   */
+  readonly appliesTo?: (turn: SkippedTurn) => boolean
   /** How sure the model must be, 0.5..1, unless the user sets it. */
   readonly defaultThreshold: number
   /** Its own call deadline, for a point a reply waits on (the engine's otherwise). */
@@ -84,6 +94,24 @@ export interface DecisionPoint<I, V> {
   readonly beforeReply?: (reply: StartingReply, services: DecisionServices) => Effect.Effect<boolean, unknown>
 }
 
+/** A reply being written, as a point says whether it would have been asked about it. */
+interface SkippedTurn {
+  /** The chat's state at the reply's parent. */
+  readonly state: ChatState
+  /** Lorebook entries were waiting for the decision model's answer. */
+  readonly loreAsked: boolean
+}
+
+/** A point a connection has on that the chat turned off (`decision.points`), as the inspector says it. */
+interface SkippedPoint {
+  readonly id: string
+  readonly label: string
+  readonly instead: string
+}
+
+/** What a point without its own `instead` is said to do when a chat turns it off. */
+const INSTEAD_DEFAULT = "The app decided as it does without a decision model."
+
 /** A point with its input and verdict types erased, as the registry holds it. */
 export type AnyDecisionPoint = DecisionPoint<never, unknown>
 
@@ -92,7 +120,7 @@ type DecisionSource = "model" | "heuristic"
 interface DecisionOutcome<V> {
   readonly value: V
   readonly source: DecisionSource
-  /** Why the fallback decided: `off`, `nothing_to_ask`, `timeout`, `error`, `malformed`, `low_confidence`, `unavailable`. */
+  /** Why the fallback decided: `off`, `off_in_chat`, `nothing_to_ask`, `timeout`, `error`, `malformed`, `low_confidence`, `unavailable`. */
   readonly reason?: string
   /** The decision's rollout, when a request was sent. */
   readonly rolloutId?: string
@@ -110,6 +138,12 @@ export interface DecisionEngineShape {
    * only logged (the reply goes on as it was), a stop stops it. True when one changed the message.
    */
   readonly beforeReply: (reply: StartingReply) => Effect.Effect<boolean>
+  /**
+   * The points a connection of the user's has on that the chat's state turns off
+   * (`decision.points`) and that would have been asked about this reply. Reads the settings
+   * only when the chat turns any off, so a chat that doesn't costs nothing. Never fails.
+   */
+  readonly skippedIn: (userId: UserId, turn: SkippedTurn) => Effect.Effect<ReadonlyArray<SkippedPoint>>
 }
 
 export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngineShape>()(
@@ -164,6 +198,17 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
             const entry = yield* answering(context.userId, pointId)
             // Off for every connection: nothing is built, nothing is sent.
             if (!entry) return fallback("off")
+            // Off in this chat at the message decided for (`decision.points`): the same. Read
+            // only once a connection has the point on, so nothing changes for anyone else.
+            const off = foldState(
+              yield* reader.StateEventsAt({
+                userId: context.userId,
+                chatId: context.chatId,
+                slotId: context.slotId,
+                forkId: context.forkId
+              })
+            ).decisionsOff
+            if (off?.includes(pointId)) return fallback("off_in_chat")
             const questions = point.questions(input)
             if (Object.keys(questions).length === 0) return fallback("nothing_to_ask")
             const threshold = entry.points[pointId]?.threshold ?? point.defaultThreshold
@@ -295,7 +340,10 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
 
         const beforeReply: DecisionEngineShape["beforeReply"] = (reply) =>
           Effect.forEach(
-            points.list().filter((point) => point.beforeReply),
+            // A point the chat turned off does none of its work; `evaluate` refuses it besides.
+            points
+              .list()
+              .filter((point) => point.beforeReply && !foldState(reply.events).decisionsOff?.includes(point.id)),
             (point) =>
               point.beforeReply!(reply, { reader, writer, evaluate }).pipe(
                 Effect.catchCause((cause) =>
@@ -308,7 +356,28 @@ export class DecisionEngine extends Context.Service<DecisionEngine, DecisionEngi
               )
           ).pipe(Effect.map((changed) => changed.some(Boolean)))
 
-        return DecisionEngine.of({ points, evaluate, afterReply, beforeReply })
+        const skippedIn: DecisionEngineShape["skippedIn"] = (userId, turn) => {
+          const off = turn.state.decisionsOff ?? []
+          if (off.length === 0) return Effect.succeed([])
+          return reader.GetDecisionSettings({ userId }).pipe(
+            Effect.map((settings) =>
+              points
+                .list()
+                .filter(
+                  (point) =>
+                    off.includes(point.id) &&
+                    settings.some((entry) => entry.model !== null && entry.points[point.id]?.on === true) &&
+                    (point.appliesTo?.(turn) ?? true)
+                )
+                .map((point) => ({ id: point.id, label: point.label, instead: point.instead ?? INSTEAD_DEFAULT }))
+            ),
+            Effect.catchCause((cause) =>
+              Effect.logWarning("reading the decisions a chat turned off failed", cause).pipe(Effect.as([]))
+            )
+          )
+        }
+
+        return DecisionEngine.of({ points, evaluate, afterReply, beforeReply, skippedIn })
       })
     )
 

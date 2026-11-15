@@ -150,6 +150,8 @@ export const DecisionPointInfo = Schema.Struct({
   label: Schema.String,
   /** User-facing: what the point decides, and what happens without a model. */
   description: Schema.String,
+  /** User-facing: what decides in its place when a chat turns it off; absent when the point says nothing. */
+  instead: Schema.optionalKey(Schema.String),
   defaultThreshold: Schema.Number
 })
 export type DecisionPointInfo = typeof DecisionPointInfo.Type

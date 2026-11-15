@@ -39,6 +39,7 @@ import { makeWriteHandlers } from "./writes.ts"
 import { makeStImportWriteHandlers } from "./stImportWrites.ts"
 import { makeStImportJobWriteHandlers } from "./stImportJobWrites.ts"
 import { trackSummaryTouches } from "./summaryValidity.ts"
+import { attributed, trackAutoRuns } from "./autoGuard.ts"
 
 const {
   dbPath,
@@ -55,6 +56,7 @@ const handlers = WriteOps.toLayer(
     // After the migrations, which make the tables it watches.
     yield* installStorageKindValidation
     yield* trackSummaryTouches(yield* SqlClient.SqlClient)
+    yield* trackAutoRuns(yield* SqlClient.SqlClient)
     // One bin (and draft store) for every handler group.
     const bin = makeBin(
       yield* SqlClient.SqlClient,
@@ -73,7 +75,7 @@ const handlers = WriteOps.toLayer(
     // --- ST data folder import (ARCHITECTURE.md §13)
     const prefix = makeStImportPrefix()
     const stImport = yield* makeStImportWriteHandlers(prefix)
-    return WriteOps.of(
+    const served = WriteOps.of(
       providerDefinitionHandlers(
         stateModuleHandlers(
           stImportPrefixHandlers(
@@ -125,6 +127,8 @@ const handlers = WriteOps.toLayer(
         )
       )
     )
+    // Each says who is writing, for the Auto runs its writes reach (db/autoGuard.ts).
+    return attributed(served)
   })
 )
 

@@ -70,7 +70,7 @@ export const makeProviderHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) =>
         writer
           .SetConnectionCredential({ userId: id, connectionId, credentialId })
-          .pipe(Effect.tap(() => warmth.refreshUser(id)))
+          .pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SetConnectionCredential"))),
     ListCredentials: () =>
       Effect.flatMap(userId, (id) => reader.ListCredentials({ userId: id })).pipe(
@@ -84,37 +84,41 @@ export const makeProviderHandlers = Effect.gen(function* () {
       ),
     ReplaceCredentialKey: ({ credentialId, apiKey, urls }) =>
       Effect.flatMap(userId, (id) =>
-        providers.replaceCredentialKey(id, credentialId, apiKey, urls).pipe(Effect.tap(() => warmth.refreshUser(id)))
+        providers
+          .replaceCredentialKey(id, credentialId, apiKey, urls)
+          .pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ),
     AllowCredentialHost: ({ credentialId, apiKey, url }) =>
       Effect.flatMap(userId, (id) => providers.allowCredentialOrigin({ userId: id, credentialId, apiKey, url })),
     DeleteCredential: ({ credentialId }) =>
       Effect.flatMap(userId, (id) =>
-        writer.DeleteCredential({ userId: id, credentialId }).pipe(Effect.tap(() => warmth.refreshUser(id)))
+        writer.DeleteCredential({ userId: id, credentialId }).pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("DeleteCredential"))),
     UpdateConnection: ({ connectionId, settings, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         writer
           .UpdateConnection({ userId: id, connectionId, settings, expectedRowVersion })
-          .pipe(Effect.tap(() => warmth.refreshUser(id)))
+          .pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("UpdateConnection"))),
     SetConnectionKey: ({ connectionId, apiKey, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
-        providers.setKey(id, connectionId, apiKey, expectedRowVersion).pipe(Effect.tap(() => warmth.refreshUser(id)))
+        providers
+          .setKey(id, connectionId, apiKey, expectedRowVersion)
+          .pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ),
     SetConnectionHeaders: ({ connectionId, headers, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         providers
           .setHeaders(id, connectionId, headers, expectedRowVersion)
-          .pipe(Effect.tap(() => warmth.refreshUser(id)))
+          .pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ),
     SetConnectionProxy: ({ connectionId, mode, url }) =>
       Effect.flatMap(userId, (id) =>
-        providers.setProxy(id, connectionId, mode, url).pipe(Effect.tap(() => warmth.refreshUser(id)))
+        providers.setProxy(id, connectionId, mode, url).pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ),
     DeleteConnection: ({ connectionId }) =>
       Effect.flatMap(userId, (id) =>
-        writer.DeleteConnection({ userId: id, connectionId }).pipe(Effect.tap(() => warmth.refreshUser(id)))
+        writer.DeleteConnection({ userId: id, connectionId }).pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("DeleteConnection"))),
     TestConnection: ({ connectionId }) =>
       Effect.flatMap(userId, (id) => providers.testConnection(id, connectionId)).pipe(
@@ -122,7 +126,7 @@ export const makeProviderHandlers = Effect.gen(function* () {
       ),
     RefreshModels: ({ connectionId }) =>
       Effect.flatMap(userId, (id) =>
-        providers.refreshModels(id, connectionId).pipe(Effect.tap(() => warmth.refreshUser(id)))
+        providers.refreshModels(id, connectionId).pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ).pipe(Effect.map((result) => new ModelRefresh(result))),
     ListModels: ({ connectionId, includeHidden }) =>
       Effect.flatMap(userId, (id) => reader.ListModels({ userId: id, connectionId, includeHidden })).pipe(
@@ -136,19 +140,19 @@ export const makeProviderHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) =>
         providers.catalogUpstream(id, connectionId, key).pipe(
           Effect.flatMap((upstream) => writer.AddUserModel({ userId: id, connectionId, key, overrides, upstream })),
-          Effect.tap(() => warmth.refreshUser(id))
+          Effect.tap(() => warmth.refreshUser(id, true))
         )
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("AddUserModel"))),
     SaveLearnedContext: ({ modelId, context }) =>
       Effect.flatMap(userId, (id) =>
         writer
           .SetLearnedContext({ userId: id, modelId, context, at: Date.now() })
-          .pipe(Effect.tap(() => warmth.refreshUser(id)))
+          .pipe(Effect.tap(() => warmth.refreshUser(id, true)))
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SaveLearnedContext"))),
     EditModel: ({ modelId, overrides, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         writer.EditModel({ userId: id, modelId, overrides, expectedRowVersion }).pipe(
-          Effect.tap(() => warmth.refreshUser(id)),
+          Effect.tap(() => warmth.refreshUser(id, true)),
           // A pin saved: its provider's prices are fetched now, off the save's path.
           Effect.tap((model) => Effect.forkDetach(providers.ensureEndpoints(id, model)))
         )

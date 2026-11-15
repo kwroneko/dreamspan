@@ -38,6 +38,7 @@ import {
   type FrozenTool,
   frozenTool,
   sendMessageDefinition,
+  sendMessageWithPresence,
   severalMessageDefinition,
   prepareToolSnapshots,
   toolWriter
@@ -320,6 +321,12 @@ export const layer = Layer.effect(
           const plan = plainTurn
             ? { ...planned.plan, strategy: "reply", tools: [], contract: "final_text" as const }
             : planned.plan
+          if (plan.sendPresence && plan.contract !== "final_text" && (state.contextPerSpeaker ?? "shared") === "shared")
+            return yield* new GenerationFailed({
+              class: "context_view",
+              message:
+                "Replies that say who's in the scene need Separate contexts. Choose Separate contexts, or set Who's in the scene to Replies don't say."
+            })
           const agentic = plan.strategy !== "reply"
           const candidates = plan.tools.flatMap((id) => {
             const tool = toolForKind(execution, chat.kind, id)
@@ -414,6 +421,12 @@ export const layer = Layer.effect(
             if (outcome.source === "model" && outcome.value.length > 0)
               assembled = yield* assembleWith({ stamp: assembled.loreDecision.stamp, lore: outcome.value })
           }
+          // Points a connection has on that this chat turned off (`decision.points`): nothing was
+          // asked; the snapshot says which, so the inspector can say what decided instead.
+          const decisionsOff =
+            !request.replyOnly && Option.isSome(decisions) && state.decisionsOff?.length
+              ? yield* decisions.value.skippedIn(userId, { state, loreAsked: assembled.loreDecision !== undefined })
+              : []
           let generation = JSON.parse(assembled.generation) as Generation
           let snapshot = JSON.parse(assembled.snapshot) as ContinuousSnapshot
           if (request.storyAt)
@@ -439,7 +452,13 @@ export const layer = Layer.effect(
           const contractTools =
             plan.contract === "final_text"
               ? []
-              : [plan.contract === "several" ? severalMessageDefinition : sendMessageDefinition]
+              : [
+                  plan.contract === "several"
+                    ? severalMessageDefinition
+                    : plan.sendPresence
+                      ? sendMessageWithPresence(plan.sendPresence)
+                      : sendMessageDefinition
+                ]
           const frozenTools: ReadonlyArray<FrozenTool> = [
             ...frozenOffer(offer.tools, offer.deferred, frozenTool),
             ...contractTools,
@@ -636,7 +655,7 @@ export const layer = Layer.effect(
               modelId: model.modelId as ModelId,
               // An agent turn's tools and contract are frozen with its context (spec/AGENTIC.md §3.3).
               snapshot: agentic
-                ? `${JSON.stringify({ ...snapshot, ...(request.storyAt ? { storyAt: request.storyAt } : {}), ...(continuity ? { continuity } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
+                ? `${JSON.stringify({ ...snapshot, ...(request.storyAt ? { storyAt: request.storyAt } : {}), ...(continuity ? { continuity } : {}), ...(decisionsOff.length ? { decisionsOff } : {}) }).slice(0, -1)},"agent":${JSON.stringify(
                     {
                       mode: planned.mode,
                       contract: plan.contract,
@@ -646,7 +665,9 @@ export const layer = Layer.effect(
                       ...(cardSkills.length ? { cardSkills } : {})
                     }
                   )}}`
-                : assembled.snapshot,
+                : decisionsOff.length
+                  ? `${assembled.snapshot.slice(0, -1)},"decisionsOff":${JSON.stringify(decisionsOff)}}`
+                  : assembled.snapshot,
               ...(continuity?.parent ? { parentRolloutId: continuity.parent.rolloutId } : {}),
               ...(seed ? { transcript: JSON.stringify(seed) } : {}),
               ...(agentic ? { mode: planned.mode } : {}),
@@ -658,6 +679,18 @@ export const layer = Layer.effect(
           ).pipe(
             Effect.catchTag("NotFound", () =>
               Effect.fail(new GenerationFailed({ class: "not_found", message: "The model or the message is gone." }))
+            ),
+            // An Auto turn whose chat changed before its request was made (db/autoGuard.ts).
+            Effect.catchTag("AutoRefused", (refused) =>
+              Effect.fail(
+                new GenerationFailed({
+                  class: "auto_refused",
+                  message:
+                    refused.reason === "settings"
+                      ? "Not sent: your settings changed after auto replies started this reply."
+                      : "Not sent: this chat changed after auto replies started this reply."
+                })
+              )
             ),
             Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("StartRollout"))
           )

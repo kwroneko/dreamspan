@@ -21,7 +21,7 @@ import type {
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { type Reuse, ReuseLine, reuseByMessage } from "../editor/promptLines.tsx"
-import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from "react"
+import { createContext, Fragment, type ReactNode, useContext, useMemo, useRef, useState } from "react"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -707,6 +707,14 @@ function Inspector({ run }: { run: RunContext }) {
               </dd>
             </>
           )}
+          {run.decisionsOff?.map((point) => (
+            <Fragment key={point.id}>
+              <dt className="text-muted">{point.label}</dt>
+              <dd data-decision-off={point.id}>
+                Off in this chat, so the decision model wasn't asked. {point.instead}
+              </dd>
+            </Fragment>
+          ))}
           <dt className="text-muted">Generation</dt>
           <dd>
             {run.type}, {run.mode === "st" ? "the earlier fixed layout" : "the preset's layout"}; {run.status}

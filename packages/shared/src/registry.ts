@@ -12,6 +12,8 @@ interface Registration<A> {
 }
 
 export interface Registry<A extends { readonly id: string }> {
+  /** Monotonic mutation revision, including scope restoration (optional for custom registries). */
+  readonly revision?: () => number
   /**
    * Adds an entry, or overrides the entry with the same id. When the scope closes, the
    * registration is undone and whatever it overrode is back. To wrap an entry, `get` it
@@ -30,6 +32,7 @@ export const makeRegistry = <A extends { readonly id: string }>(initial: Readonl
   // Each id keeps a stack of registrations; the newest is in effect. A registration
   // removes itself, wherever it is in the stack, so scopes may close in any order.
   const stacks = new Map<string, Array<Registration<A>>>(initial.map((value) => [value.id, [{ value }]]))
+  let revision = 0
 
   const push = (id: string, value: A | typeof DISABLED) =>
     Effect.acquireRelease(
@@ -38,6 +41,7 @@ export const makeRegistry = <A extends { readonly id: string }>(initial: Readonl
         const stack = stacks.get(id) ?? []
         stack.push(registration)
         stacks.set(id, stack)
+        revision++
         return registration
       }),
       (registration) =>
@@ -45,7 +49,10 @@ export const makeRegistry = <A extends { readonly id: string }>(initial: Readonl
           const stack = stacks.get(id)
           if (!stack) return
           const index = stack.indexOf(registration)
-          if (index >= 0) stack.splice(index, 1)
+          if (index >= 0) {
+            stack.splice(index, 1)
+            revision++
+          }
         })
     ).pipe(Effect.asVoid)
 
@@ -55,6 +62,7 @@ export const makeRegistry = <A extends { readonly id: string }>(initial: Readonl
   }
 
   return {
+    revision: () => revision,
     register: (entry) => push(entry.id, entry),
     disable: (id) => push(id, DISABLED),
     get,

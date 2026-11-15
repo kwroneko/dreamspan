@@ -45,7 +45,7 @@ export class CacheWarmth extends Context.Service<
     readonly watch: (userId: UserId, chatId: ChatId) => Effect.Effect<void, never, Scope.Scope>
     /** Estimates the user's open chats again: a card, preset, model or default of theirs changed. */
     readonly refreshAll: Effect.Effect<void>
-    readonly refreshUser: (userId: UserId) => Effect.Effect<void>
+    readonly refreshUser: (userId: UserId, configurationChanged?: boolean) => Effect.Effect<void>
     /**
      * Holds the chat's estimates while a reply is prepared and written: changes wait, and one
      * estimate follows the last release. Returns the release; calling it again does nothing.
@@ -180,9 +180,14 @@ export class CacheWarmth extends Context.Service<
         refreshAll: Effect.sync(() => {
           for (const chatId of watched.keys()) schedule(chatId)
         }),
-        refreshUser: (userId) =>
+        refreshUser: (userId, configurationChanged = false) =>
           Effect.sync(() => {
-            for (const [chatId, entry] of watched) if (entry.userId === userId) schedule(chatId)
+            for (const [chatId, entry] of watched) {
+              if (entry.userId !== userId) continue
+              // Global choices must be announced even while estimates are held by a reply.
+              if (configurationChanged) hub.publish(chatId, { _tag: "State" })
+              schedule(chatId)
+            }
           }),
         hold: (chatId) => {
           holds.set(chatId, (holds.get(chatId) ?? 0) + 1)

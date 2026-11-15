@@ -145,7 +145,7 @@ import {
   SetComposerImageFields,
   ComposerChoice
 } from "@rp/shared/composerApi.ts"
-import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
+import { AccountRejected, AutoRefused, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import { StImportJob } from "@rp/shared/stImportApi.ts"
 import {
   CardFamily,
@@ -1700,6 +1700,7 @@ export class WriteOpsChat extends RpcGroup.make(
   /** What a request's images cost together, for models without a formula; keeps the newest 20. */
   Rpc.make("RecordImageTokenSample", {
     payload: {
+      autoToken: Schema.optionalKey(Schema.NullOr(Schema.String)),
       userId: UserId,
       connectionId: ConnectionId,
       modelKey: Schema.String,
@@ -2502,6 +2503,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
       /** The fork it's sent in, as AppendMessage takes it. */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       parentSlotId: Schema.NullOr(SlotId),
+      immediate: Schema.optionalKey(Schema.Boolean),
       branch: Schema.Boolean,
       kind: Schema.Literals(["message", "generate"]),
       content: Schema.String,
@@ -2523,11 +2525,21 @@ export class WriteOpsLibrary extends RpcGroup.make(
       /** The reply's speaker and the round's are Auto's picks: the decision model may change each (DESIGN §2.3). */
       autoPick: Schema.optionalKey(Schema.Boolean),
       /** A side chat's story position (spec/WORKSHOP.md §4): kept with a queued entry for its reply. */
-      storyAt: StoryAtField
+      storyAt: StoryAtField,
+      /**
+       * An Auto turn (db/autoGuard.ts): admitted in this transaction only while its run is
+       * unbroken and `token` is the one its last turn handed back; null starts a run.
+       */
+      auto: Schema.optionalKey(Schema.Struct({ token: Schema.NullOr(Schema.String) })),
+      autoConfiguration: Schema.optionalKey(Schema.String)
     },
     success: Schema.Union([
-      /** `queue`: the chat's queue, when the post queued the rest of a round behind it. */
-      Schema.TaggedStruct("Posted", { result: AppendResult, queue: Schema.optionalKey(Schema.Array(QueuedMessage)) }),
+      /** `queue`: the chat's queue, when the post queued the rest of a round behind it. `auto`: the run's next token. */
+      Schema.TaggedStruct("Posted", {
+        result: AppendResult,
+        queue: Schema.optionalKey(Schema.Array(QueuedMessage)),
+        auto: Schema.optionalKey(Schema.Struct({ token: Schema.String }))
+      }),
       Schema.TaggedStruct("Queued", {
         queued: QueuedMessage,
         queue: Schema.Array(QueuedMessage),
@@ -2536,7 +2548,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
         recovered: Schema.Int
       })
     ]),
-    error: Schema.Union([NotFound, LeafMoved, StorageError])
+    error: Schema.Union([NotFound, LeafMoved, AutoRefused, StorageError])
   }),
   Rpc.make("EditQueued", {
     payload: {
@@ -3165,6 +3177,12 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
+  /** Writer-local Auto authorization, immediately before dispatch, including later tool rounds. */
+  Rpc.make("AuthorizeAutoRequest", {
+    payload: { userId: UserId, token: Schema.String, configuration: Schema.String },
+    success: Schema.Void,
+    error: Schema.Union([AutoRefused, StorageError])
+  }),
   // --- Generation (ARCHITECTURE.md §15).
   /**
    * Opens a generation's rollout before its request is sent (DATA-MODEL §7.1): the row, its
@@ -3223,7 +3241,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
       )
     },
     success: Schema.Void,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, AutoRefused, StorageError])
   }),
   /**
    * The sanitized SDK payload projection, recorded before HTTP; only the rollout's owner may
@@ -3291,6 +3309,31 @@ export class WriteOpsLibrary extends RpcGroup.make(
       result: Schema.String
     },
     success: Schema.Struct({ result: Schema.String, replayed: Schema.Boolean }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Who is in the scene for the message a rollout is sending (`send_message`'s `present`; DESIGN
+   * §3.5 [D]), in one transaction, keyed by the tool call like every rollout effect: the
+   * generating version's own presence record (`presence_json`: who of its cast knows this
+   * message) and, attached to the version, an `away.set` for each character whose presence
+   * changes, so the next message starts from it and a swipe takes it back. `present` holds card
+   * ids, each of which must be in the cast the version recorded (NotFound otherwise). The
+   * speaker is always present; a narrator, and a card the user plays, are left as they are.
+   * A call already receipted writes nothing and answers `replayed`.
+   */
+  Rpc.make("DeclareRolloutPresence", {
+    payload: {
+      userId: UserId,
+      rolloutId: Schema.String,
+      toolCallId: Schema.String,
+      present: Schema.Array(EntityId).check(Schema.isMaxLength(500))
+    },
+    success: Schema.Struct({
+      /** The characters now away who weren't, and those back who were away. */
+      left: Schema.Array(EntityId),
+      back: Schema.Array(EntityId),
+      replayed: Schema.Boolean
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SaveRolloutTranscript", {
