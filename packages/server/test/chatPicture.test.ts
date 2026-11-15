@@ -274,6 +274,70 @@ describe("a chat's own picture", () => {
       assert.strictEqual((yield* api.GetSplitChats({ chatId: chat.id, forkId: branch.fork.id })).group.picture, split)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
+
+  it.live("a cold library's pending rows carry their own chat's picture and no other", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const reader = yield* Reader
+      const writer = yield* Writer
+      const userId = (yield* api.Whoami()).id as UserId
+      const own = yield* upload(png(textChunk("fixture", "cold original")))
+      const split = yield* upload(png(textChunk("fixture", "cold split")))
+      const chat = yield* api.CreateChat({ title: "Cold pictures" })
+      const root = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Shared opening" })
+      )
+      const branch = yield* api.CreateFork({
+        chatId: chat.id,
+        fromForkId: chat.currentForkId!,
+        atSlotId: root.entry.slotId,
+        name: "Harbor"
+      })
+      const kept = yield* api.CreateFork({
+        chatId: chat.id,
+        fromForkId: chat.currentForkId!,
+        atSlotId: root.entry.slotId,
+        name: "Quay"
+      })
+      yield* api.SetSplitChat({ forkId: branch.fork.id, split: true })
+      const groupId = branch.fork.id as unknown as ChatId
+      yield* api.SetChatPicture({ chatId: chat.id, mediaId: own })
+      yield* api.SetChatPicture({ chatId: groupId, mediaId: split })
+      const plain = yield* api.CreateChat({ title: "No picture" })
+      yield* posted(api.SendMessage({ chatId: plain.id, parentSlotId: null, branch: false, content: "Alone" }))
+      // Another account's chat, with nothing of ours.
+      const foreign = (yield* writer.EnsureUser({ handle: "bea", displayName: "Bea" })).id
+      yield* writer.CreateChat({
+        userId: foreign,
+        kind: "rp",
+        status: "active",
+        title: "Bea's",
+        participants: [],
+        greeting: null
+      })
+      // Cold, as a fresh import leaves it: nothing stored, so every row is pending.
+      yield* fixtureSql(config.dataDir, [{ sql: "DELETE FROM fork_summaries" }])
+      const partial = yield* reader.ShellMaterializePartial({ userId })
+      const byFork = new Map(partial.forks.map((f) => [String(f.forkId), f]))
+      assert.isTrue(
+        partial.forks.every((f) => f.pending === true),
+        "the probe reads pending rows"
+      )
+      assert.strictEqual(byFork.get(String(chat.currentForkId))!.chat.picture, own)
+      assert.strictEqual(byFork.get(String(kept.fork.id))!.chat.picture, own, "a branch shows its chat's picture")
+      assert.strictEqual(byFork.get(String(branch.fork.id))!.chat.picture, split, "a split chat shows its own")
+      assert.isUndefined(byFork.get(String(plain.currentForkId))!.chat.picture)
+      const theirs = yield* reader.ShellMaterializePartial({ userId: foreign })
+      assert.lengthOf(theirs.forks, 1)
+      assert.isUndefined(theirs.forks[0]!.chat.picture)
+      // Read in full, the same pictures.
+      const full = new Map(
+        (yield* reader.ShellLibrary({ userId, recompute: true })).forks.map((f) => [String(f.forkId), f.chat.picture])
+      )
+      for (const [forkId, row] of byFork) assert.strictEqual(row.chat.picture, full.get(forkId))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
 })
 
 describe("fork families in the shell's cards", () => {

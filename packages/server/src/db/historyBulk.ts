@@ -212,9 +212,11 @@ export const makeBulkHistory = Effect.fnUntraced(function* (sql: SqlClient.SqlCl
     const now = Date.now()
     // Insert the same metadata and payload as the view's INSTEAD OF trigger, in two
     // set statements. The reverse payload FK stays deferred until this transaction commits.
+    // The copy's length is known here, so the payload's length trigger finds nothing to
+    // correct and leaves the new rows (and their indexes) alone.
     yield* sql.unsafe(
-      `INSERT INTO versions (id,ordinal,origin,source_version_id,fork_id,authoring_fork_id,changeset_id,created_at,updated_at,${metadata.join(",")})
-      SELECT b.after_id,b.ordinal,'changeset',b.target,?,?,?,?, ?,${metadata.map((c) => `v.${c}`).join(",")}
+      `INSERT INTO versions (id,ordinal,origin,source_version_id,fork_id,authoring_fork_id,changeset_id,created_at,updated_at,content_length,${metadata.join(",")})
+      SELECT b.after_id,b.ordinal,'changeset',b.target,?,?,?,?, ?,length(b.content),${metadata.map((c) => `v.${c}`).join(",")}
       FROM history_bulk b CROSS JOIN versions v ON v.id=b.current_id WHERE b.copy=1 ORDER BY b.n`,
       [fork.id, fork.id, changesetId, now, now]
     )

@@ -200,9 +200,10 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
         CROSS JOIN versions v ON v.id = t.ref CROSS JOIN slots s ON s.id = v.slot_id
         WHERE t.kind = ${VERSION} AND v.purged_at IS NULL AND (
           EXISTS (SELECT 1 FROM version_participants p WHERE p.version_id = v.id AND NOT EXISTS (
-            SELECT 1 FROM versions other JOIN version_participants op ON op.version_id = other.id
-            WHERE other.slot_id = v.slot_id AND other.id NOT IN (
-              SELECT ref FROM shell_touches WHERE kind = ${VERSION}) AND other.purged_at IS NULL
+            SELECT 1 FROM versions other JOIN version_participants op ON op.version_seq = other.seq
+            WHERE other.slot_id = v.slot_id AND other.seq NOT IN (
+              SELECT tv.seq FROM shell_touches tt CROSS JOIN versions tv ON tv.id = tt.ref
+              WHERE tt.kind = ${VERSION}) AND other.purged_at IS NULL
               AND op.entity_id = p.entity_id))
           OR (s.inserted = 1 AND v.writer = 'human' AND v.speaker_entity_id IS NOT NULL))`
       // Decide once per moved chat. Inlining this scans all touches again for every

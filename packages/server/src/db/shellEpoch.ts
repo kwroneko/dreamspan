@@ -17,10 +17,12 @@ export const makeShellEpoch = (sql: SqlClient.SqlClient) => {
       const known = epochs.get(userId)
       if (known !== undefined) return known
       const stamps = yield* sql`SELECT stamp FROM shell_user_stamps WHERE user_id = ${userId}`
-      const chats = yield* sql`SELECT id, kind, title, current_fork_id, created_at, added_at, shell_stamp
+      // Pictures too (a chat's own, a split chat's on its first fork): rows show them.
+      const chats =
+        yield* sql`SELECT id, kind, title, current_fork_id, created_at, added_at, shell_stamp, cover_media_id
     FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL ORDER BY id`
       const forks = yield* sql`SELECT f.id, f.chat_id, f.parent_fork_id, f.base_slot_id, f.tip_slot_id,
-      f.name, f.pinned_at, f.last_chatted_at, f.created_at, f.deleted_at, f.purged_at, f.split_chat
+      f.name, f.pinned_at, f.last_chatted_at, f.created_at, f.deleted_at, f.purged_at, f.split_chat, f.cover_media_id
     FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
     WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL ORDER BY f.id`
       const cards = yield* sql`SELECT e.id, e.archived_at, e.created_at, r.created_at AS added_at,

@@ -9,9 +9,10 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
+import { portraitPng } from "./support/portrait.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -233,3 +234,109 @@ test("a chat deleted mid-pass disappears from both tabs", async ({ page, context
   }
   await second.close()
 })
+
+/**
+ * Small cold chats beside `coldChat`'s: one branch each, so the pass walks them only after its
+ * parts (held by SHELL_PASS_PAUSE_MS), and their chat rows stay pending meanwhile. Two have a
+ * picture of their own; one or three characters each.
+ */
+const coldChats = async (page: Page, title: string) => {
+  const big = await coldChat(title)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const upload = async (variant: number) => {
+    const response = await page.request.post(`${server().url}/chat/image`, {
+      headers: { "content-type": "application/octet-stream" },
+      data: portraitPng([], variant)
+    })
+    expect(response.status()).toBe(200)
+    return ((await response.json()) as { mediaId: string }).mediaId
+  }
+  const pictures = [await upload(3), await upload(4)]
+  const small = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const cards: Array<EntityId> = []
+      for (const name of ["Mira Lantern", "Tomas Reed", "Ada Quill"])
+        cards.push((yield* api.CreateCard({ label: name, name })).entityId)
+      const start = (members: typeof cards, content: string) =>
+        api.StartChat({
+          cards: [...members],
+          persona: null,
+          greeting: 0,
+          first: { _tag: "Send", content, speakerEntityId: null }
+        })
+      const one = (yield* start(cards.slice(0, 1), "A synthetic walk along the quay.")).chat.id
+      const three = (yield* start(cards, "A synthetic evening at the lighthouse.")).chat.id
+      const pictureOne = (yield* start(cards.slice(1, 2), "A synthetic morning at the market.")).chat.id
+      const pictureThree = (yield* start(cards, "A synthetic night on the pier.")).chat.id
+      yield* api.SetChatPicture({ chatId: pictureOne, mediaId: pictures[0]! })
+      yield* api.SetChatPicture({ chatId: pictureThree, mediaId: pictures[1]! })
+      return { one, three, pictureOne, pictureThree }
+    })
+  )
+  await server().pause()
+  await Effect.runPromise(
+    fixtureSql(server().dataDir, [
+      {
+        sql: "DELETE FROM fork_summaries WHERE chat_id IN (?, ?, ?, ?, ?)",
+        params: [big.chat.id, small.one, small.three, small.pictureOne, small.pictureThree]
+      }
+    ])
+  )
+  await server().restart()
+  return { big, small }
+}
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a cold library's chat rows keep their boxes as they fill in, pictured or not: ${width} ${theme}`, async ({
+      page
+    }, info) => {
+      test.setTimeout(240_000)
+      const { big, small } = await coldChats(page, `Harbor chats ${width} ${theme}`)
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${big.chat.id}`)
+      await expect(page.getByRole("main").getByText("Main line goes on.")).toBeVisible()
+      if (width === 390) await page.getByRole("button", { name: "Chats and menu", exact: true }).click()
+      const panel =
+        width === 390
+          ? page.locator(".fixed.inset-0")
+          : page.getByRole("complementary", { name: "Sidebar", exact: true })
+      const list = panel.locator("[data-shell-list]")
+      const row = (chatId: string) =>
+        list.locator("[data-fork-row]").filter({ has: page.locator(`[data-chat-id="${chatId}"]`) })
+      for (const chatId of Object.values(small)) await expect(row(chatId)).toHaveAttribute("data-fork-pending", "true")
+      // A pending chat's own picture shows at once, in its first box; nothing shows another's.
+      for (const chatId of [small.pictureOne, small.pictureThree]) {
+        await expect(row(chatId).locator("[data-row-portraits] img")).toHaveCount(1)
+        await expect
+          .poll(() =>
+            row(chatId)
+              .locator("[data-row-portraits] img")
+              .evaluate((img: HTMLImageElement) => img.naturalWidth)
+          )
+          .toBeGreaterThan(0)
+      }
+      for (const chatId of [small.one, small.three])
+        await expect(row(chatId).locator("[data-row-portraits] img")).toHaveCount(0)
+      const shownPicture = (chatId: string) =>
+        row(chatId)
+          .locator("[data-row-portraits] img")
+          .evaluate((img: HTMLImageElement) => new URL(img.src).searchParams.get("id"))
+      const pictured = [await shownPicture(small.pictureOne), await shownPicture(small.pictureThree)]
+      expect(new Set(pictured).size).toBe(2)
+      const rows = list.locator("[data-fork-row]")
+      await expectLayout(page, info, `chat rows mid-pass ${width} ${theme}`)
+      await shots(page, `chats-mid-pass-${width}-${theme}`)
+      const before = await boxes(rows)
+      await expect(list.locator("[data-fork-pending]")).toHaveCount(0, { timeout: PAUSE_MS * 4 })
+      // Filled in: faces where there is no picture, the same picture where there is, and no row moved.
+      await expect(row(small.three).locator("[data-row-portraits] [data-portrait]")).toHaveCount(2)
+      await expect(row(small.three).locator("[data-portrait-overflow]")).toContainText("+1")
+      await expect(row(small.one).locator("[data-row-portraits] [data-portrait]")).toHaveCount(1)
+      expect([await shownPicture(small.pictureOne), await shownPicture(small.pictureThree)]).toEqual(pictured)
+      expect(await boxes(rows)).toEqual(before)
+      await expectLayout(page, info, `chat rows complete ${width} ${theme}`)
+      await shots(page, `chats-complete-${width}-${theme}`)
+    })

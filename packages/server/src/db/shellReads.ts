@@ -673,7 +673,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         current_fork_id: string | null
         title: string
         created_at: number
-      }>`SELECT current_fork_id, title, created_at FROM chats
+        cover_media_id: string | null
+      }>`SELECT current_fork_id, title, created_at, cover_media_id FROM chats
           WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
       if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
       const [ownedFork] = yield* sql`SELECT 1 FROM forks WHERE chat_id = ${chatId}
@@ -734,6 +735,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                 forkId: current.id as ForkId,
                 rootForkId: chatId as unknown as ForkId,
                 title: chatName(title.title, []).name,
+                // Unsplit, so the chat's own picture (shellState's `pictureOf`).
+                ...(chat.cover_media_id === null ? {} : { picture: chat.cover_media_id }),
                 slotId: null,
                 split: null
               },

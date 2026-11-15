@@ -745,7 +745,9 @@ export const baseline: ReadonlyArray<string> = [
     WHEN EXISTS (SELECT 1 FROM versions WHERE seq = OLD.version_seq)
     BEGIN SELECT RAISE(ABORT, 'delete the version to delete its payload'); END`,
   // Counts and emptiness checks stay on metadata, using SQLite's character-count semantics.
-  `CREATE TRIGGER version_texts_length_insert AFTER INSERT ON version_texts BEGIN
+  // A bulk copy states its length up front; the trigger corrects only a missing or wrong one.
+  `CREATE TRIGGER version_texts_length_insert AFTER INSERT ON version_texts
+    WHEN (SELECT content_length FROM versions WHERE seq = NEW.version_seq) IS NOT length(NEW.content) BEGIN
     UPDATE versions SET content_length = length(NEW.content) WHERE seq = NEW.version_seq;
   END`,
   `CREATE TRIGGER version_texts_length_update AFTER UPDATE OF content ON version_texts
@@ -807,12 +809,15 @@ export const baseline: ReadonlyArray<string> = [
   // Startup's InterruptGenerations finds the few generating versions without scanning every
   // message: 8.5 s at 500,000 messages before (fux1).
   `CREATE INDEX versions_generating ON versions(id) WHERE status = 'generating'`,
-  // Every retained swipe's identity, by slot: participation reads all of a slot's swipes from
-  // these pages. It is the slot's only version index: a second slot-keyed one (a UNIQUE
-  // constraint's) doubled the pages a bulk rewrite dirties, one new swipe in each of thousands of
-  // slots (perfshell3), so the trigger below keeps ordinals unique by probing this one
-  // (versions_identity_fixed keeps slot and ordinal from changing after insert).
-  `CREATE INDEX versions_shell ON versions(slot_id, ordinal, id, purged_at)`,
+  // Every retained swipe by slot, with its seq (the rowid every index entry carries):
+  // participation reads all of a slot's swipes from these pages and finds their casts by seq
+  // (version_participants_seq). It is the slot's only version index, and a narrow one: a bulk
+  // rewrite adds one swipe to each of thousands of slots, dirtying about a leaf page per slot of
+  // every slot-keyed index, more the wider its entries (a second index for a UNIQUE constraint
+  // doubled them, perfshell3; the 36-character id here cost a fifth of the commit's pages,
+  // stack4). The trigger below keeps ordinals unique by probing it (versions_identity_fixed
+  // keeps slot and ordinal from changing after insert).
+  `CREATE INDEX versions_shell ON versions(slot_id, ordinal, purged_at)`,
   // The shown version's shell metadata, by id (the shell joins on slot and id): a new version's
   // id sorts after the old ones, so a bulk rewrite appends to these pages instead of dirtying one
   // per slot.
@@ -826,39 +831,43 @@ export const baseline: ReadonlyArray<string> = [
     WHERE writer = 'human' AND speaker_entity_id IS NOT NULL AND purged_at IS NULL`,
   // An indexed projection of each version's cast and author; no join event establishes
   // historical participation. Copies carry cast_json with their other version fields.
+  // version_seq is the version's seq (set only by these triggers; a version's seq never
+  // changes), so a slot's swipes reach their casts from versions_shell without the id.
   `CREATE TABLE version_participants (
     version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
     entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    version_seq INTEGER NOT NULL,
     PRIMARY KEY (entity_id, version_id)
   ) STRICT, WITHOUT ROWID`,
   `CREATE INDEX version_participants_version ON version_participants(version_id, entity_id)`,
+  `CREATE INDEX version_participants_seq ON version_participants(version_seq, entity_id)`,
   `CREATE TRIGGER version_participants_insert AFTER INSERT ON versions BEGIN
-    INSERT OR IGNORE INTO version_participants(version_id, entity_id)
-      SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL;
+    INSERT OR IGNORE INTO version_participants(version_id, entity_id, version_seq)
+      SELECT NEW.id, NEW.speaker_entity_id, NEW.seq WHERE NEW.speaker_entity_id IS NOT NULL;
   END`,
   `CREATE TRIGGER version_participants_speaker AFTER UPDATE OF speaker_entity_id ON versions
     WHEN NEW.speaker_entity_id IS NOT OLD.speaker_entity_id BEGIN
     DELETE FROM version_participants WHERE version_id = NEW.id;
-    INSERT OR IGNORE INTO version_participants(version_id, entity_id)
-      SELECT NEW.id, c.value FROM version_texts t, json_each(t.cast_json) c WHERE t.version_seq = NEW.seq
+    INSERT OR IGNORE INTO version_participants(version_id, entity_id, version_seq)
+      SELECT NEW.id, c.value, NEW.seq FROM version_texts t, json_each(t.cast_json) c WHERE t.version_seq = NEW.seq
         AND NOT EXISTS (SELECT 1 FROM json_each(t.presence_json, '$.away') a WHERE a.value = c.value)
-      UNION SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL;
+      UNION SELECT NEW.id, NEW.speaker_entity_id, NEW.seq WHERE NEW.speaker_entity_id IS NOT NULL;
   END`,
   `CREATE TRIGGER version_participants_cast_insert AFTER INSERT ON version_texts
     BEGIN
     DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq);
-    INSERT OR IGNORE INTO version_participants(version_id, entity_id)
-      SELECT v.id, j.value FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq
+    INSERT OR IGNORE INTO version_participants(version_id, entity_id, version_seq)
+      SELECT v.id, j.value, v.seq FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq
         AND NOT EXISTS (SELECT 1 FROM json_each(NEW.presence_json, '$.away') a WHERE a.value = j.value)
-      UNION SELECT id, speaker_entity_id FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL;
+      UNION SELECT id, speaker_entity_id, seq FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL;
   END`,
   `CREATE TRIGGER version_participants_cast AFTER UPDATE OF cast_json, presence_json ON version_texts
     WHEN NEW.cast_json IS NOT OLD.cast_json OR NEW.presence_json IS NOT OLD.presence_json BEGIN
     DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq);
-    INSERT OR IGNORE INTO version_participants(version_id, entity_id)
-      SELECT v.id, j.value FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq
+    INSERT OR IGNORE INTO version_participants(version_id, entity_id, version_seq)
+      SELECT v.id, j.value, v.seq FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq
         AND NOT EXISTS (SELECT 1 FROM json_each(NEW.presence_json, '$.away') a WHERE a.value = j.value)
-      UNION SELECT id, speaker_entity_id FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL;
+      UNION SELECT id, speaker_entity_id, seq FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL;
   END`,
   `CREATE VIEW card_chat_membership AS
     SELECT DISTINCT p.entity_id, s.chat_id FROM version_participants p

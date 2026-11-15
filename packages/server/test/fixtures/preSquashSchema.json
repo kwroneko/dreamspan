@@ -1016,6 +1016,12 @@
     },
     {
       "type": "index",
+      "name": "version_participants_seq",
+      "tbl_name": "version_participants",
+      "sql": "CREATE INDEX version_participants_seq ON version_participants(version_seq, entity_id)"
+    },
+    {
+      "type": "index",
       "name": "version_participants_version",
       "tbl_name": "version_participants",
       "sql": "CREATE INDEX version_participants_version ON version_participants(version_id, entity_id)"
@@ -1072,7 +1078,7 @@
       "type": "index",
       "name": "versions_shell",
       "tbl_name": "versions",
-      "sql": "CREATE INDEX versions_shell ON versions(slot_id, ordinal, id, purged_at)"
+      "sql": "CREATE INDEX versions_shell ON versions(slot_id, ordinal, purged_at)"
     },
     {
       "type": "index",
@@ -1624,7 +1630,7 @@
       "type": "table",
       "name": "version_participants",
       "tbl_name": "version_participants",
-      "sql": "CREATE TABLE version_participants ( version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE, PRIMARY KEY (entity_id, version_id) ) STRICT, WITHOUT ROWID"
+      "sql": "CREATE TABLE version_participants ( version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE, entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE, version_seq INTEGER NOT NULL, PRIMARY KEY (entity_id, version_id) ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "table",
@@ -3520,25 +3526,25 @@
       "type": "trigger",
       "name": "version_participants_cast",
       "tbl_name": "version_texts",
-      "sql": "CREATE TRIGGER version_participants_cast AFTER UPDATE OF cast_json, presence_json ON version_texts WHEN NEW.cast_json IS NOT OLD.cast_json OR NEW.presence_json IS NOT OLD.presence_json BEGIN DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq); INSERT OR IGNORE INTO version_participants(version_id, entity_id) SELECT v.id, j.value FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq AND NOT EXISTS (SELECT 1 FROM json_each(NEW.presence_json, '$.away') a WHERE a.value = j.value) UNION SELECT id, speaker_entity_id FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL; END"
+      "sql": "CREATE TRIGGER version_participants_cast AFTER UPDATE OF cast_json, presence_json ON version_texts WHEN NEW.cast_json IS NOT OLD.cast_json OR NEW.presence_json IS NOT OLD.presence_json BEGIN DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq); INSERT OR IGNORE INTO version_participants(version_id, entity_id, version_seq) SELECT v.id, j.value, v.seq FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq AND NOT EXISTS (SELECT 1 FROM json_each(NEW.presence_json, '$.away') a WHERE a.value = j.value) UNION SELECT id, speaker_entity_id, seq FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL; END"
     },
     {
       "type": "trigger",
       "name": "version_participants_cast_insert",
       "tbl_name": "version_texts",
-      "sql": "CREATE TRIGGER version_participants_cast_insert AFTER INSERT ON version_texts BEGIN DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq); INSERT OR IGNORE INTO version_participants(version_id, entity_id) SELECT v.id, j.value FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq AND NOT EXISTS (SELECT 1 FROM json_each(NEW.presence_json, '$.away') a WHERE a.value = j.value) UNION SELECT id, speaker_entity_id FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL; END"
+      "sql": "CREATE TRIGGER version_participants_cast_insert AFTER INSERT ON version_texts BEGIN DELETE FROM version_participants WHERE version_id = (SELECT id FROM versions WHERE seq = NEW.version_seq); INSERT OR IGNORE INTO version_participants(version_id, entity_id, version_seq) SELECT v.id, j.value, v.seq FROM versions v, json_each(NEW.cast_json) j WHERE v.seq = NEW.version_seq AND NOT EXISTS (SELECT 1 FROM json_each(NEW.presence_json, '$.away') a WHERE a.value = j.value) UNION SELECT id, speaker_entity_id, seq FROM versions WHERE seq = NEW.version_seq AND speaker_entity_id IS NOT NULL; END"
     },
     {
       "type": "trigger",
       "name": "version_participants_insert",
       "tbl_name": "versions",
-      "sql": "CREATE TRIGGER version_participants_insert AFTER INSERT ON versions BEGIN INSERT OR IGNORE INTO version_participants(version_id, entity_id) SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL; END"
+      "sql": "CREATE TRIGGER version_participants_insert AFTER INSERT ON versions BEGIN INSERT OR IGNORE INTO version_participants(version_id, entity_id, version_seq) SELECT NEW.id, NEW.speaker_entity_id, NEW.seq WHERE NEW.speaker_entity_id IS NOT NULL; END"
     },
     {
       "type": "trigger",
       "name": "version_participants_speaker",
       "tbl_name": "versions",
-      "sql": "CREATE TRIGGER version_participants_speaker AFTER UPDATE OF speaker_entity_id ON versions WHEN NEW.speaker_entity_id IS NOT OLD.speaker_entity_id BEGIN DELETE FROM version_participants WHERE version_id = NEW.id; INSERT OR IGNORE INTO version_participants(version_id, entity_id) SELECT NEW.id, c.value FROM version_texts t, json_each(t.cast_json) c WHERE t.version_seq = NEW.seq AND NOT EXISTS (SELECT 1 FROM json_each(t.presence_json, '$.away') a WHERE a.value = c.value) UNION SELECT NEW.id, NEW.speaker_entity_id WHERE NEW.speaker_entity_id IS NOT NULL; END"
+      "sql": "CREATE TRIGGER version_participants_speaker AFTER UPDATE OF speaker_entity_id ON versions WHEN NEW.speaker_entity_id IS NOT OLD.speaker_entity_id BEGIN DELETE FROM version_participants WHERE version_id = NEW.id; INSERT OR IGNORE INTO version_participants(version_id, entity_id, version_seq) SELECT NEW.id, c.value, NEW.seq FROM version_texts t, json_each(t.cast_json) c WHERE t.version_seq = NEW.seq AND NOT EXISTS (SELECT 1 FROM json_each(t.presence_json, '$.away') a WHERE a.value = c.value) UNION SELECT NEW.id, NEW.speaker_entity_id, NEW.seq WHERE NEW.speaker_entity_id IS NOT NULL; END"
     },
     {
       "type": "trigger",
@@ -3574,7 +3580,7 @@
       "type": "trigger",
       "name": "version_texts_length_insert",
       "tbl_name": "version_texts",
-      "sql": "CREATE TRIGGER version_texts_length_insert AFTER INSERT ON version_texts BEGIN UPDATE versions SET content_length = length(NEW.content) WHERE seq = NEW.version_seq; END"
+      "sql": "CREATE TRIGGER version_texts_length_insert AFTER INSERT ON version_texts WHEN (SELECT content_length FROM versions WHERE seq = NEW.version_seq) IS NOT length(NEW.content) BEGIN UPDATE versions SET content_length = length(NEW.content) WHERE seq = NEW.version_seq; END"
     },
     {
       "type": "trigger",

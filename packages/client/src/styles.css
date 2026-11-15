@@ -875,7 +875,8 @@ main:has(> [data-fill]) {
     display: none;
   }
 }
-[data-row-portraits] > [data-portrait] {
+[data-row-portraits] > [data-portrait],
+[data-row-portraits] > [data-portrait-slot] {
   position: relative;
   z-index: 1;
 }

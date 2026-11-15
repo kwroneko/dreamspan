@@ -461,6 +461,58 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
   )
 }
 
+/**
+ * A chat row's portraits while it is pending, and after, until it unmounts: two portrait boxes
+ * and the count tile's sliver, whatever the cast turns out to be, so reading it moves nothing.
+ * The chat's own picture is known at once and fills the first box; read faces fill both; a box
+ * left over stays empty. Pending boxes without a picture are quiet bars.
+ */
+function ReservedPortraits({ fork, pending }: { fork: ShellFork; pending: boolean }) {
+  const picture = fork.chat.picture
+  const faces = picture ? [] : fork.cast.slice(0, 2)
+  const remaining = fork.cast.length - 2
+  const count = !picture && remaining > 0
+  const names = `Characters: ${fork.cast.map((c) => c.name).join(", ")}`
+  return (
+    <Tooltip label={names} enabled={!pending}>
+      <span
+        tabIndex={pending ? undefined : 0}
+        aria-hidden={pending || undefined}
+        aria-label={pending ? undefined : names}
+        data-row-portraits
+        data-reserved-portraits
+        data-layout-audit-ignore="overlap: The count tile sits partly behind the last fully visible portrait; gap: Portraits have a positive gap while the count tile intentionally overlaps the last portrait"
+        className="relative flex w-fit shrink-0 gap-0.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        {[0, 1].map((i) => {
+          const face = faces[i]
+          return (
+            <span key={i} data-portrait-slot className="h-12 w-8 shrink-0">
+              {i === 0 && picture ? (
+                <Avatar id={fork.chat.id} name={fork.chatName} mediaId={picture} size="md" />
+              ) : face ? (
+                <Avatar
+                  id={face.entityId}
+                  name={face.name}
+                  mediaId={face.avatarMediaId}
+                  crop={face.avatarCrop}
+                  size="md"
+                />
+              ) : pending && !picture ? (
+                <span className="block h-full w-full rounded-sm bg-border" />
+              ) : null}
+            </span>
+          )
+        })}
+        <PortraitOverflow
+          remaining={count ? remaining : 1}
+          className={`fork-row-overflow${count ? "" : " invisible"}`}
+        />
+      </span>
+    </Tooltip>
+  )
+}
+
 export function ForkRow({
   fork,
   scopeChat = false,
@@ -493,6 +545,11 @@ export function ForkRow({
   const [menu, setMenu] = useState(false)
   const kindLook = useChatKindLook(fork.chat.kind)
   const kindBadge = kindLook?.badge
+  // A row that was pending keeps the boxes it reserved (two portraits and the count's sliver)
+  // until it unmounts: its cast is unknown until the pass reaches it, and arriving must move
+  // neither the row nor its text. A picture is known at once and shows in the first box.
+  const [reservePortraits, setReservePortraits] = useState(fork.pending === true)
+  if (fork.pending === true && !reservePortraits) setReservePortraits(true)
   if (branchOnly) return <BranchListRow fork={fork} here={here} open={open} />
   const label = fork.thread ? `Thread: ${shellThreadLabel(fork.thread)}` : shellBranchLabel(fork)
   // Not read yet (a cold library's first pass): its chat's name when that doesn't come from
@@ -546,11 +603,8 @@ export function ForkRow({
               data-fork-id={fork.forkId}
               className="fork-row-open flex min-w-0 flex-1 items-center self-stretch gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
-              {!branchOnly && pending && (
-                // A portrait's box (Avatar's md), so the text doesn't move when the cast is read.
-                <span aria-hidden="true" data-row-portraits className="block h-12 w-8 shrink-0 rounded-sm bg-border" />
-              )}
-              {!branchOnly && !pending && (
+              {!branchOnly && reservePortraits && <ReservedPortraits fork={fork} pending={pending} />}
+              {!branchOnly && !reservePortraits && (
                 <Tooltip label={`Characters: ${fork.cast.map((c) => c.name).join(", ")}`}>
                   <span
                     tabIndex={0}

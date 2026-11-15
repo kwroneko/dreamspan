@@ -62,10 +62,13 @@ export const presenceBefore = Effect.fnUntraced(function* (
 /** The stored form of a presence record: NULL when nobody was away and none narrated. */
 export const presenceJson = (presence: VersionPresence | null) => (presence === null ? null : JSON.stringify(presence))
 
-/** Every retained swipe at a position is evidence, selected or not. Copies retain its cast. */
+/**
+ * Every retained swipe at a position is evidence, selected or not. Copies retain its cast.
+ * Joined by seq: `versions_shell` holds a slot's swipes without their ids.
+ */
 export const slotParticipantsSql = (slot: string) => `(SELECT json_group_array(entity_id) FROM (
   SELECT p.entity_id
-  FROM versions pv JOIN version_participants p ON p.version_id = pv.id
+  FROM versions pv JOIN version_participants p ON p.version_seq = pv.seq
     JOIN entities pe ON pe.id = p.entity_id AND pe.purged_at IS NULL
   WHERE pv.slot_id = ${slot}.id AND pv.purged_at IS NULL
   GROUP BY p.entity_id ORDER BY min(pv.ordinal), p.entity_id))`

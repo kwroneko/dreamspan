@@ -152,9 +152,12 @@ layer(serverLayer(config), { excludeTestServices: true })("batched ST message in
               return Object.fromEntries(Object.entries(value).map(([key, val]) => [key, normalize(val)]))
             return value
           }
+          // Sequence offsets differ too: a participant row's version seq becomes its version's place.
+          const place = new Map(result[3]!.map((row, index) => [row.seq, index]))
           result[3]!.forEach((row, index) => {
             row.seq = index
           })
+          for (const row of result[4]!) row.version_seq = place.get(row.version_seq) ?? "unknown version"
           return normalize(result)
         })
       const positional = yield* run(true)
@@ -260,6 +263,9 @@ it.live(
         assert.lengthOf(rows[13]!, family.files.length)
         assert.isTrue(rows[13]!.every((row) => row.valid === 1))
         const library = yield* api.GetShellLibrary()
+        // A participant row's version seq becomes its version's place, as the versions' seqs do below.
+        const place = new Map(rows[6]!.map((row, index) => [row.seq, index]))
+        for (const row of rows[10]!) row.version_seq = place.get(row.version_seq) ?? "unknown version"
         // All physical storage and derived search/participation rows, plus the shell's
         // summaries. Only independent IDs, sequence offsets and wall clocks differ.
         const ids = new Map<string, string>([
