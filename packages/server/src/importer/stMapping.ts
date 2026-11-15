@@ -9,6 +9,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { createHash } from "node:crypto"
 import type { StImportNote } from "../db/ops.ts"
+import { stStateHash } from "../db/stImportProgress.ts"
 import { DEFAULT_SUMMARY_SETTINGS, stRole } from "../formats/stData.ts"
 import type { StAuthorNote } from "../formats/stChat.ts"
 import type { StChatHeader, StGroup, StSettings, StSpeaker } from "./ops.ts"
@@ -473,7 +474,8 @@ export const chatStateChange = (
     played: mapped.played,
     vars: Object.fromEntries(mapped.vars.map(([name, value]) => [name, hash(JSON.stringify(value))])),
     authorNote: authorNote && hash(JSON.stringify(authorNote)),
-    summary: summary && hash(JSON.stringify(summary.note))
+    // As the confirmed re-import takes it again once the note names its slots (stImportProgress.ts).
+    summary: summary && stStateHash(summary.note)
   }
   const events: Array<StateEventData> = []
   for (const entity of mapped.participants) {

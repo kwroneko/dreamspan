@@ -37,6 +37,7 @@ import { Formats } from "./Formats.ts"
 import { MediaHolds } from "./MediaHolds.ts"
 import { StImportJobs } from "./StImportJobs.ts"
 import { StImports } from "./StImports.ts"
+import { StImportPlans } from "./StImportPlans.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
 import { StFileResult } from "@rp/shared/stImportApi.ts"
@@ -715,6 +716,7 @@ export const layer = Layer.unwrap(
     // of a chat file, through the same limits as a library upload.
     const stImports = yield* StImports
     const stImportJobs = yield* StImportJobs
+    const stImportPlans = yield* StImportPlans
     const stImportFile = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
       const user = yield* CurrentUser
@@ -793,6 +795,64 @@ export const layer = Layer.unwrap(
       }),
       Effect.catch((error) =>
         Effect.logError("an ST import failed", error).pipe(Effect.as(jsonError(500, "the import failed")))
+      )
+    )
+
+    // --- The re-import preview's files from a browser (StImportPlans): a chat file part the
+    // preview asked for, through the same body reader, limits, permits and one transfer per
+    // user as an import's. Nothing is stored.
+    const stImportPlanFile = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      if (request.headers["content-type"] !== "application/octet-stream") {
+        return jsonError(415, "expected application/octet-stream")
+      }
+      const query = new URL(request.url, "http://upload").searchParams
+      const planId = query.get("plan") ?? ""
+      const path = query.get("path") ?? ""
+      const file = classifyStPath(path)
+      if (file === null || (file.kind !== "chat" && file.kind !== "group_chat"))
+        return jsonError(400, "that isn't a chat file the import reads")
+      const part = Number(query.get("part") ?? "0")
+      if (!Number.isSafeInteger(part) || part < 0 || part > 100_000)
+        return jsonError(400, "part must be a part's number")
+      if (Number(request.headers["content-length"]) > ST_CHAT_PART_BYTES)
+        return jsonError(413, `at most ${formatByteSize(ST_CHAT_PART_BYTES)}`)
+      // Before the body is read: another user's preview, or none, reads nothing.
+      if (!stImportPlans.exists(user, planId)) return jsonError(404, "there's no such check")
+      const message = NodeHttpServerRequest.toIncomingMessage(request)
+      const limits = {
+        maxBytes: ST_CHAT_PART_BYTES,
+        idleMs: BODY_IDLE_MS,
+        deadline: Date.now() + BODY_DEADLINE_MS,
+        minBytesPerSecond: BODY_MIN_BYTES_PER_SECOND,
+        rateWindowMs: BODY_RATE_WINDOW_MS
+      }
+      return yield* oneAtATime(
+        user.id,
+        Effect.gen(function* () {
+          yield* firstBytes(message, limits)
+          const taken = yield* withPermitWithin(
+            uploads,
+            limits.deadline - Date.now(),
+            Effect.gen(function* () {
+              const body = yield* readBody(message, limits)
+              const outcome = yield* stImportPlans.file(user, planId, path, body, part, query.get("last") !== "0")
+              return yield* HttpServerResponse.json({ outcome })
+            })
+          )
+          return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))
+        }).pipe(
+          Effect.catchTag("BodyRefused", ({ reason }) => {
+            const [status, text] = BODY_REFUSALS[reason]
+            return Effect.succeed(jsonError(status, text).pipe(HttpServerResponse.setHeader("connection", "close")))
+          })
+        )
+      )
+    }).pipe(
+      Effect.catchTags({ NotFound: () => Effect.succeed(jsonError(404, "there's no such check")) }),
+      Effect.catch((error) =>
+        Effect.logError("an ST re-import check failed", error).pipe(Effect.as(jsonError(500, "the check failed")))
       )
     )
 
@@ -1142,6 +1202,7 @@ export const layer = Layer.unwrap(
       HttpRouter.add("GET", "/library/download-status", authenticated(accounts, downloadStatus)),
       HttpRouter.add("POST", "/library/download-stop", authenticated(accounts, stopDownload)),
       HttpRouter.add("POST", "/st-import/file", authenticated(accounts, stImportFile)),
+      HttpRouter.add("POST", "/st-import/plan-file", authenticated(accounts, stImportPlanFile)),
       Layer.effectDiscard(Effect.forkScoped(Effect.repeat(sweep, Schedule.spaced("1 hour"))))
     )
   })

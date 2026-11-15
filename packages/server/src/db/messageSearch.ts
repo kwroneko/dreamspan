@@ -8,7 +8,7 @@
 // after `SCAN` matches, whichever comes first, with a cursor to go on from, so a query no
 // version of the user's matches still answers in bounded time. Every statement is separate, so
 // a superseded query interrupted by its caller stops at the next one (readerPool.ts).
-import { importState } from "@rp/shared/stImportApi.ts"
+import { importState, unfinishedTitle } from "@rp/shared/stImportApi.ts"
 import { chatName } from "@rp/shared/chatName.ts"
 import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -25,7 +25,7 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { onDisplayPath, type PathPiece, pathPieces, positionOf } from "./displayPath.ts"
 import { forkRecency } from "./forks.ts"
-import { chatForkSummaries } from "./forkSummaries.ts"
+import { chatForkSummaries, computeForkSummaries, FORK_SUMMARY_FORMAT, summaryStamps } from "./forkSummaries.ts"
 import { shownIn, shownVersionDeletedIn, slotDeletedIn } from "./forkState.ts"
 import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
@@ -115,23 +115,32 @@ const searchMessages = (
 /** The chat's name and live forks, read once per search. */
 const chatForks = (sql: SqlClient.SqlClient, userId: UserId, chatId: string) =>
   Effect.gen(function* () {
-    const [chat] = yield* sql<{ title: string; current_fork_id: string | null }>`
-      SELECT title, current_fork_id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+    const [chat] = yield* sql<{ title: string; current_fork_id: string | null; shell_stamp: number }>`
+      SELECT title, current_fork_id, shell_stamp FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
     if (!chat) return null
     const forks = yield* sql<ForkRow & { tip_depth: number | null }>`
       SELECT f.*, t.depth AS tip_depth FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id
       WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL
       ORDER BY f.id = ${chat.current_fork_id} DESC, ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
     // The cast as the current branch's list row has it, for a chat named after its characters.
-    const cast = yield* sql<{ label: string }>`
-      SELECT r.label FROM fork_summaries s CROSS JOIN json_each(s.cast_json) j
-        JOIN entity_refs r ON r.entity_id = j.value
-      WHERE s.fork_id = ${chat.current_fork_id} ORDER BY j.key`
+    const userStamp = yield* summaryStamps(sql, userId)
+    const [stored] = yield* sql<{ cast_json: string }>`SELECT cast_json FROM fork_summaries
+      WHERE fork_id = ${chat.current_fork_id} AND stamp = ${chat.shell_stamp}
+        AND user_stamp = ${userStamp} AND format = ${FORK_SUMMARY_FORMAT}`
+    const current = forks.find((fork) => fork.id === chat.current_fork_id)
+    const castIds =
+      stored !== undefined
+        ? stored.cast_json
+        : JSON.stringify(current === undefined ? [] : (yield* computeForkSummaries(sql, [current]))[0]!.cast)
+    const cast = yield* sql<{ label: string }>`SELECT r.label FROM json_each(${castIds}) j
+      JOIN entity_refs r ON r.entity_id = j.value ORDER BY j.key`
+    const imported = importState(chat.title)
+    const name = chatName(
+      imported.title,
+      cast.map((c) => ({ name: c.label }))
+    ).name
     return {
-      name: chatName(
-        importState(chat.title).title,
-        cast.map((c) => ({ name: c.label }))
-      ).name,
+      name: imported.unfinished ? unfinishedTitle(name) : name,
       currentForkId: chat.current_fork_id,
       forks,
       pieces: new Map(),

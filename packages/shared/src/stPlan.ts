@@ -52,6 +52,29 @@ export const orderStBranches = <P extends StPlanned<unknown>>(
   return send.map((entry) => (isChat(entry) ? ordered[next++]!.entry : entry))
 }
 
+/**
+ * The order an import sends a folder's files in, and its re-import preview reads them in:
+ * each once; then the branches that came back deferred (their parent wasn't in yet), again,
+ * until a round takes none of them; then those on their own (`orphan`). The caller answers
+ * each step with whether that file came back deferred (`next(true)`).
+ */
+export function* stSendRounds<E>(
+  entries: ReadonlyArray<E>
+): Generator<{ readonly entry: E; readonly orphan: boolean }, void, boolean | undefined> {
+  let deferred: Array<E> = []
+  for (const entry of entries) if (yield { entry, orphan: false }) deferred.push(entry)
+  while (deferred.length > 0) {
+    const waiting = deferred
+    deferred = []
+    for (const entry of waiting) if (yield { entry, orphan: false }) deferred.push(entry)
+    if (deferred.length === waiting.length) {
+      const orphans = deferred
+      deferred = []
+      for (const entry of orphans) if (yield { entry, orphan: true }) deferred.push(entry)
+    }
+  }
+}
+
 /** How much of a chat's start is read for the parent it names. */
 export const ST_HEAD_BYTES = 64 * 1024
 

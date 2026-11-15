@@ -23,7 +23,9 @@ export const stChatLimits = {
   maxVariableBytes: MiB,
   /** Messages per write: each batch is one transaction in the writer. */
   maxBatchMessages: 100,
-  maxBatchBytes: MiB,
+  // Swipe-heavy files hit the byte bound first. Keep a new-chat batch below the
+  // concurrent writer's latency budget without halving short-message batches.
+  maxBatchBytes: MiB / 2,
   /**
    * Speakers per part. Each is mapped to a card on the main thread and checked in the
    * writer, so a file naming a new speaker on every line can't make that cost grow; a

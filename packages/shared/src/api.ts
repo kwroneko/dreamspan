@@ -25,7 +25,7 @@ import { DecisionApi } from "./decisionApi.ts"
 import { ThinkingApi } from "./thinkingApi.ts"
 import { ProviderListApi } from "./providerApi.ts"
 import { ChatSetupApi, ShellUpdatesApi } from "./chatSetupApi.ts"
-import { StImportApi } from "./stImportApi.ts"
+import { StImportApi, StImportPlanApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
 import { ComposerApi } from "./composerApi.ts"
 import { NoticeApi } from "./noticeApi.ts"
@@ -476,6 +476,9 @@ export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Aut
 
 export const AuthenticatedMessageVersionApi = MessageVersionApi.middleware(Authentication)
 
+/** The ST re-import preview (stImportApi.ts). */
+export class AuthenticatedStImportPlanApi extends StImportPlanApi.middleware(Authentication) {}
+
 export class AuthenticatedPluginApi extends PluginApi.middleware(Authentication) {}
 
 export const AuthenticatedDraftGenerationApi = DraftGenerationApi.middleware(Authentication)
@@ -506,7 +509,8 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedShellUpdatesApi)
   .merge(AuthenticatedProviderListApi)
   .merge(AuthenticatedTextSearchApi)
-  .merge(AuthenticatedDraftPreviewApi) {}
+  .merge(AuthenticatedDraftPreviewApi)
+  .merge(AuthenticatedStImportPlanApi) {}
 
 /**
  * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method

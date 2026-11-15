@@ -34,6 +34,23 @@ describe("ST dates", () => {
 })
 
 describe("ST chat parts", () => {
+  it("splits swipe-heavy writes at half a MiB while retaining every version in order", () => {
+    const input = Array.from({ length: 80 }, (_, i) => ({
+      name: "Synthetic",
+      mes: `Message ${i}`,
+      is_user: i % 2 === 1,
+      swipes: Array.from({ length: 20 }, (_, v) => `${i}:${v} ` + "x".repeat(500)),
+      swipe_id: 0
+    }))
+    const { part, report } = read(lines({ chat_metadata: {} }, ...input))
+    expect(report.issues).toEqual([])
+    expect(part.batches.length).toBeGreaterThan(1)
+    for (const batch of part.batches) expect(batch.messagesJson.length).toBeLessThan(512 * 1024 + 2)
+    expect(messages(part.batches).map((message) => message.versions.map((version) => version.content))).toEqual(
+      input.map((message) => [...message.swipes, message.mes])
+    )
+  })
+
   it("reads the header, swipes, reasoning, hidden messages, speakers and summaries", () => {
     const { part, report } = read(
       lines(

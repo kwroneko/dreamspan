@@ -83,6 +83,8 @@ export const bundleEntry = (dir: string, name: string) =>
  * A pending chat's first-request preview is one: a card with a huge greeting takes minutes to build.
  */
 const BACKGROUND_READS: ReadonlySet<string> = new Set([
+  "StImportPlanBatch",
+  "StImportChatSummaries",
   "ShellLibrary",
   "ShellCards",
   "ShellForks",

@@ -99,6 +99,9 @@ const PRESERVES_PREFIX = new Set([
   "StImportStartChat",
   "StImportMessages",
   "StImportFinishChat",
+  // Holds a confirmed re-import's batches; the chat isn't touched until StImportCommitChat,
+  // which isn't here: it writes without the trie.
+  "StImportStage",
   "StImportJobUpdate",
   "StImportJobReport",
   "StImportJobSeen"

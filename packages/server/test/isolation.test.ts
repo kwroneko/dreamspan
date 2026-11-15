@@ -2810,6 +2810,35 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   StartStPathImport: {
     adminOnly: (actor) => refused(actor.api.StartStPathImport({ path: "/", prefix: "" }), "Forbidden")
   },
+  StartStImportPlan: {
+    // A picked folder's preview reads only the caller's chats; one named by its path reads files.
+    adminOnly: (actor) => refused(actor.api.StartStImportPlan({ folder: { root: "/", prefix: "" } }), "Forbidden")
+  },
+  GetStImportPlan: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { plan } = yield* owner.api.StartStImportPlan({ files: [] })
+        yield* refused(actor.api.GetStImportPlan({ planId: plan.planId }), "NotFound")
+      })
+  },
+  GetStImportPlanMessages: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { plan } = yield* owner.api.StartStImportPlan({ files: [] })
+        yield* refused(
+          actor.api.GetStImportPlanMessages({ planId: plan.planId, path: "chats/A/A.jsonl", offset: 0 }),
+          "NotFound"
+        )
+      })
+  },
+  CancelStImportPlan: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { plan } = yield* owner.api.StartStImportPlan({ files: [] })
+        yield* refused(actor.api.CancelStImportPlan({ planId: plan.planId }), "NotFound")
+        assert.strictEqual((yield* owner.api.GetStImportPlan({ planId: plan.planId })).planId, plan.planId)
+      })
+  },
   LinkStImportChat: {
     adminOnly: (actor, owner) =>
       Effect.gen(function* () {
@@ -4657,6 +4686,112 @@ const storage: Record<
         }),
         "NotFound"
       )
+    }),
+  StImportStage: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(
+        writer.StImportStage({
+          userId: actor.user.id,
+          lease: importId,
+          path: "chats/A/B.jsonl",
+          seq: 0,
+          batchJson: null
+        }),
+        "ImportLeaseLost"
+      )
+    }),
+  StImportCommitChat: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const commit = (lease: string) =>
+        writer.StImportCommitChat({
+          userId: actor.user.id,
+          lease,
+          path: "chats/A/B.jsonl",
+          chatId: owner.chat.chatId,
+          stamp: "",
+          claim: { recordId: owner.importRecordId },
+          start: null,
+          batches: 0,
+          advanceLeaf: false,
+          strict: false,
+          matching: true,
+          finish: {
+            isNew: false,
+            branch: false,
+            prevEnd: null,
+            resumeAt: null,
+            hiddenRun: 0,
+            events: [],
+            notes: [],
+            previousNotes: {},
+            removedNotes: [],
+            lastMessageAt: null,
+            sha256: "",
+            stateJson: "null",
+            prevStateJson: "null",
+            fork: null,
+            stCurrent: true
+          },
+          slotsAt: [],
+          expect: null
+        })
+      const theirs = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(commit(theirs.importId), "ImportLeaseLost")
+      // Another account's chat has no stamp the actor can hold.
+      const mine = yield* actor.api.StartStImport({ unsupported: [] })
+      yield* refused(commit(mine.importId), "StImportPlanChanged")
+    }),
+  StImportChatSummaries: (reader, actor, owner) =>
+    Effect.map(reader.StImportChatSummaries({ userId: actor.user.id, chatId: owner.chat.chatId }), (value) =>
+      assert.isNull(value)
+    ),
+  StImportPlanBatch: (reader, actor, owner) =>
+    refused(
+      reader.StImportPlanBatch({
+        userId: actor.user.id,
+        recordId: owner.importRecordId,
+        branch: false,
+        parent: null,
+        carry: null,
+        matching: true,
+        strict: false,
+        messagesJson: "[]",
+        firstIndex: 0,
+        detailLimit: 0,
+        digest: "",
+        overlayJson: null,
+        virtualPrefix: "virtual:foreign:",
+        track: false,
+        plan: true
+      }),
+      "NotFound"
+    ),
+  StImportCommitBatch: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const theirs = yield* owner.api.StartStImport({ unsupported: [] })
+      const mine = yield* actor.api.StartStImport({ unsupported: [] })
+      const path = "chats/Synthetic/Batch.jsonl"
+      const batchJson = JSON.stringify({ messagesJson: "[]", speakers: {} })
+      yield* writer.StImportStage({ userId: owner.user.id, lease: theirs.importId, path, seq: 0, batchJson })
+      const commit = (lease: string, chatId = owner.chat.chatId) =>
+        writer.StImportCommitBatch({
+          userId: actor.user.id,
+          lease,
+          path,
+          seq: 0,
+          chatId,
+          recordId: owner.importRecordId,
+          advanceLeaf: true,
+          parentSlotId: null,
+          castJson: "[]"
+        })
+      yield* refused(commit(theirs.importId), "ImportLeaseLost")
+      yield* writer.StImportStage({ userId: actor.user.id, lease: mine.importId, path, seq: 0, batchJson })
+      yield* refused(commit(mine.importId), "NotFound")
+      yield* refused(commit(mine.importId, actor.chat.chatId), "NotFound")
+      yield* writer.StImportStage({ userId: owner.user.id, lease: theirs.importId, path, seq: 0, batchJson: null })
+      yield* writer.StImportStage({ userId: actor.user.id, lease: mine.importId, path, seq: 0, batchJson: null })
     }),
   StImportSummarySettings: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {

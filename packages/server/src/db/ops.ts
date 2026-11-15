@@ -147,6 +147,7 @@ import {
 } from "@rp/shared/composerApi.ts"
 import { AccountRejected, AutoRefused, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import { StImportJob } from "@rp/shared/stImportApi.ts"
+import { StImportPlanChanged, StPlanCounts, StPlanMessage } from "@rp/shared/stReimportPlan.ts"
 import {
   CardFamily,
   Doc,
@@ -2694,6 +2695,10 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
   }),
+  /**
+   * Makes `importId` the user's current run, and drops what the user's earlier runs held for a
+   * confirmed re-import (`StImportStage`).
+   */
   Rpc.make("StImportBegin", {
     payload: { userId: UserId, importId: Schema.String },
     success: Schema.Void,
@@ -2774,6 +2779,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Int,
     error: StorageError
   }),
+  /** A chat file's record and, unless `chatId` names the chat it goes into, its chat. */
   Rpc.make("StImportStartChat", {
     payload: {
       groupId: Schema.optionalKey(Schema.String),
@@ -2785,9 +2791,42 @@ export class WriteOpsLibrary extends RpcGroup.make(
       createdAt: Schema.Number,
       chatId: Schema.NullOr(ChatId),
       /** The import run that may write it. */
-      lease: Schema.String
+      lease: Schema.String,
+      /** A confirmed import's: refused (`ImportLeaseLost`) if the file has a record already. */
+      once: Schema.optionalKey(Schema.Boolean)
     },
     success: Schema.Struct({ chatId: ChatId, recordId: Schema.String }),
+    error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
+  }),
+  /**
+   * One staged batch (`StImportStage`, by `seq`) of a confirmed import's new chat, written as
+   * `StImportMessages` writes a batch that matches nothing, and no longer held. `castJson`: the
+   * cast the file's finish pins, written with the versions (`StImportFinishChat.castWritten`).
+   * A new chat goes in over several of these, so no one transaction holds the writer for long.
+   */
+  Rpc.make("StImportCommitBatch", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      recordId: Schema.String,
+      lease: Schema.String,
+      path: Schema.String,
+      seq: Schema.Int,
+      advanceLeaf: Schema.Boolean,
+      parentSlotId: Schema.NullOr(SlotId),
+      castJson: Schema.String,
+      groupArrival: Schema.optionalKey(StArrival),
+      groupId: Schema.optionalKey(Schema.String)
+    },
+    success: Schema.Struct({
+      slotIds: Schema.Array(SlotId),
+      matching: Schema.Boolean,
+      added: Schema.Int,
+      updated: Schema.Int,
+      differing: Schema.Int,
+      /** Versions written with the cast. */
+      versions: Schema.Int
+    }),
     error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
   }),
   /**
@@ -2866,10 +2905,18 @@ export class WriteOpsLibrary extends RpcGroup.make(
        * ST opens the file's card or group on it (`chat`, `chat_id`): the chat opens on its fork
        * here, unless the user has chatted or branched in the chat since it was imported.
        */
-      stCurrent: Schema.optionalKey(Schema.Boolean)
+      stCurrent: Schema.optionalKey(Schema.Boolean),
+      /**
+       * A confirmed import's new chat (`StImportCommitBatch`): how many versions were written
+       * with the cast already, the only ones of the chat. Its shell summaries are computed
+       * after, in a reader (`StImportChatSummaries`).
+       */
+      castWritten: Schema.optionalKey(Schema.Int)
     },
     success: Schema.Struct({
-      notes: Schema.Record(Schema.String, EntityId)
+      notes: Schema.Record(Schema.String, EntityId),
+      /** With `castWritten`: the chat's stamp after this write (stImportPlanStamp.ts). */
+      stamp: Schema.optionalKey(Schema.String)
     }),
     error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
   }),
@@ -2890,6 +2937,101 @@ export class WriteOpsLibrary extends RpcGroup.make(
     /** The record as it is now, which an earlier view of it may be behind. */
     success: StChatRecord,
     error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
+  }),
+  /**
+   * Holds one parsed batch of a chat file a confirmed re-import is reading (ARCHITECTURE.md §13
+   * "Re-import preview"), in order, until `StImportCommitChat` writes the file or it's refused.
+   * Batch 0 replaces what the run held for the file; a null batch drops it.
+   */
+  Rpc.make("StImportStage", {
+    payload: {
+      userId: UserId,
+      lease: Schema.String,
+      path: Schema.String,
+      seq: Schema.Int,
+      /** `StImportMessages`' batch fields, as JSON (`StStagedBatch`). */
+      batchJson: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Void,
+    error: Schema.Union([ImportLeaseLost, StorageError])
+  }),
+  /**
+   * A confirmed re-import's write of one chat file, whole, in one transaction: refused
+   * (`StImportPlanChanged`), with nothing written, unless the chat's stamp is still `stamp`
+   * (`stImportPlanStamp.ts`) and, given `expect`, its batches place as the check showed.
+   * Then the record is claimed (`claim`) or made (`start`, a new branch of the chat), the
+   * staged batches go in as `StImportMessages` puts them, and the finish as
+   * `StImportFinishChat` does. Slots the finish names as `stIndexSlot`s are the file's.
+   */
+  Rpc.make("StImportCommitChat", {
+    payload: {
+      userId: UserId,
+      lease: Schema.String,
+      path: Schema.String,
+      chatId: Schema.NullOr(ChatId),
+      stamp: Schema.NullOr(Schema.String),
+      claim: Schema.NullOr(
+        Schema.Struct({ recordId: Schema.String, parentRecordId: Schema.optionalKey(Schema.String) })
+      ),
+      start: Schema.NullOr(
+        Schema.Struct({
+          parentRecordId: Schema.optionalKey(Schema.String),
+          title: Schema.String,
+          createdAt: Schema.Number,
+          groupId: Schema.optionalKey(Schema.String),
+          arrival: Schema.optionalKey(StArrival)
+        })
+      ),
+      batches: Schema.Int,
+      advanceLeaf: Schema.Boolean,
+      strict: Schema.Boolean,
+      matching: Schema.Boolean,
+      groupArrival: Schema.optionalKey(StArrival),
+      groupId: Schema.optionalKey(Schema.String),
+      finish: Schema.Struct({
+        isNew: Schema.Boolean,
+        branch: Schema.Boolean,
+        prevEnd: Schema.NullOr(SlotId),
+        resumeAt: Schema.NullOr(SlotId),
+        hiddenRun: Schema.Int,
+        events: Schema.Array(StateEventData),
+        notes: Schema.Array(StImportNote),
+        previousNotes: Schema.Record(Schema.String, EntityId),
+        removedNotes: Schema.Array(StImportNote.fields.kind),
+        lastMessageAt: Schema.NullOr(Schema.Number),
+        sha256: Schema.String,
+        /** The state mapped; its summary's hash is taken again once the note names its slots. */
+        stateJson: Schema.String,
+        prevStateJson: Schema.String,
+        fork: Schema.NullOr(Schema.Struct({ parentRecordId: Schema.String })),
+        stCurrent: Schema.Boolean
+      }),
+      /** The file's messages whose slots come back (`slots`). */
+      slotsAt: Schema.Array(Schema.Int),
+      expect: Schema.NullOr(Schema.Struct({ counts: StPlanCounts, digest: Schema.String, keepsTip: Schema.Boolean }))
+    },
+    success: Schema.Struct({
+      chatId: ChatId,
+      recordId: Schema.String,
+      /** The chat's stamp after this write. */
+      stamp: Schema.String,
+      progress: Schema.Struct({
+        firstAdded: Schema.NullOr(SlotId),
+        afterEnd: Schema.NullOr(SlotId),
+        atEnd: Schema.Boolean,
+        firstSlot: Schema.NullOr(SlotId),
+        throughSlot: Schema.NullOr(SlotId),
+        written: Schema.Int,
+        cursor: Schema.NullOr(SlotId),
+        matching: Schema.Boolean,
+        added: Schema.Int,
+        updated: Schema.Int,
+        differing: Schema.Int
+      }),
+      slots: Schema.Record(Schema.String, SlotId),
+      notes: Schema.Record(Schema.String, EntityId)
+    }),
+    error: Schema.Union([NotFound, ImportLeaseLost, StImportPlanChanged, StorageError])
   }),
   /** Un-hides the hidden messages on the path from the chat's first message to `throughSlotId`. */
   Rpc.make("StImportUnhide", {
@@ -4365,6 +4507,96 @@ export class ReadOps extends RpcGroup.make(
         })
       )
     }),
+    error: StorageError
+  }),
+  /**
+   * The re-import preview's dry run of one batch of a chat file (stImportPlanReads.ts): the
+   * writer's matcher (`placeStMessages`) with writes that only count. `recordId` is the file's
+   * own record, read as `StImportClaim` would leave it; with `branch`, it's the parent file's
+   * record, and the file is matched as a new branch of that file's fork would be. `parent` is
+   * where the batch goes on from (the last matched slot), `carry` what earlier batches left in
+   * the record. Nothing is written.
+   */
+  Rpc.make("StImportPlanBatch", {
+    payload: {
+      userId: UserId,
+      recordId: Schema.String,
+      branch: Schema.Boolean,
+      parent: Schema.NullOr(Schema.Struct({ id: Schema.String, depth: Schema.Int })),
+      matching: Schema.Boolean,
+      strict: Schema.Boolean,
+      carry: Schema.NullOr(
+        Schema.Struct({
+          keepTip: Schema.Boolean,
+          branchDeleted: Schema.Boolean,
+          last: Schema.NullOr(Schema.String)
+        })
+      ),
+      messagesJson: Schema.String,
+      /** The batch's first message's position in the file. */
+      firstIndex: Schema.Int,
+      /** At most this many changed messages come back in detail. */
+      detailLimit: Schema.Int,
+      /**
+       * What the preview's earlier files would have written to the chat, as JSON
+       * (`PlaceOverlay`, stImportPlace.ts), when other files of the folder go into it too.
+       */
+      overlayJson: Schema.NullOr(Schema.String),
+      /** Ids for the slots and versions the batch would add, unique in the preview. */
+      virtualPrefix: Schema.String,
+      /** Return what the batch would write (`written`), for the chat's later files. */
+      track: Schema.Boolean,
+      /** Keep only arrival metadata when the entire batch is an unchanged certified prefix. */
+      compact: Schema.optionalKey(Schema.Boolean),
+      /**
+       * A confirmed import's plan of the batch (`planJson`, `StBatchPlan` in stImportPlanOps.ts):
+       * every write with the ids it takes, for the writer to apply without matching.
+       */
+      plan: Schema.optionalKey(Schema.Boolean),
+      /** The file's digest so far (stImportPlanCount.ts), "" before its first batch. */
+      digest: Schema.String
+    },
+    success: Schema.Struct({
+      chatId: ChatId,
+      chatTitle: Schema.String,
+      /** Where the next batch goes on from; `virtual` once the rest is new. */
+      cursor: Schema.NullOr(Schema.Struct({ id: Schema.String, depth: Schema.Int, virtual: Schema.Boolean })),
+      matching: Schema.Boolean,
+      /** Stored slots before the first change; reusable only under the same whole-chat stamp. */
+      unchangedSlots: Schema.optionalKey(Schema.Array(SlotId)),
+      compactJson: Schema.optionalKey(Schema.String),
+      counts: StPlanCounts,
+      carry: Schema.Struct({
+        keepTip: Schema.Boolean,
+        branchDeleted: Schema.Boolean,
+        last: Schema.NullOr(Schema.String)
+      }),
+      messages: Schema.Array(StPlanMessage),
+      /** Changed messages in the batch, including those past `detailLimit`. */
+      changed: Schema.Int,
+      /** With `track`: what the batch would write, as a `PlaceOverlay` in JSON. */
+      written: Schema.NullOr(Schema.String),
+      /** The file's digest with this batch's messages. */
+      digest: Schema.String,
+      /** With `plan`: the batch's plan; absent for a batch the writer must match itself. */
+      planJson: Schema.optionalKey(Schema.String)
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The shell's summaries of chat `chatId`'s live forks that are stale at its stamps now
+   * (`refreshChatSummaries` in forkSummaries.ts, computed here instead of in the writer), for
+   * `StoreForkSummaries`; null when none is.
+   */
+  Rpc.make("StImportChatSummaries", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.NullOr(ChatSummariesAt),
+    error: StorageError
+  }),
+  /** Each of the user's chats' stamps, by chat: what a re-import preview reads (stImportPlanStamp.ts). */
+  Rpc.make("StImportPlanStamp", {
+    payload: { userId: UserId },
+    success: Schema.Record(Schema.String, Schema.String),
     error: StorageError
   }),
   /** The user's chat an ST import made with the latest message, not in the bin; null for none. */
