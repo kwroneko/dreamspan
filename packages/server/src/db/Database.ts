@@ -84,6 +84,7 @@ export const bundleEntry = (dir: string, name: string) =>
  */
 const BACKGROUND_READS: ReadonlySet<string> = new Set([
   "StImportPlanBatch",
+  "StImportChatSummaries",
   "ShellLibrary",
   "ShellCards",
   "ShellForks",

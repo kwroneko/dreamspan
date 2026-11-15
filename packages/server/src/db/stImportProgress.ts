@@ -6,6 +6,7 @@ import { createHash } from "node:crypto"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { StImportNote } from "./ops.ts"
+import type { StBatchPlan } from "./stImportPlanOps.ts"
 
 /** The hash a chat file's mapped state keeps of a value (stMapping.ts `chatStateChange`). */
 export const stStateHash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex")
@@ -50,6 +51,8 @@ export interface StStagedBatch {
   readonly cached?: ReadonlyArray<SlotId>
   readonly speakers: Readonly<Record<string, EntityId | null>>
   readonly arrivalRefs?: Readonly<Record<string, RefId>>
+  /** The reader's plan of the batch (`StBatchPlan`, stImportPlanOps.ts), when it has one. */
+  readonly plan?: StBatchPlan
 }
 
 /** The part of a chat file's progress its writes move. */

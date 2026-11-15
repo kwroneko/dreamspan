@@ -415,6 +415,78 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
     })
   )
 
+  /** A new 40-message chat checked, then a confirmed run of that check started. */
+  const freshRun = (title: string) =>
+    Effect.gen(function* () {
+      const { api, importId } = yield* imported(`${title} base`)
+      yield* api.CancelStImport({ importId })
+      const path = `chats/Alice/${title}.jsonl`
+      const bytes = lines(40)
+      const plan = yield* check(api, new Map([[path, bytes]]))
+      assert.strictEqual(plan.status, "done")
+      const run = yield* api.StartStImport({ unsupported: [], plan: { planId: plan.planId, skip: [] } })
+      yield* sendStFile(run.importId, "characters/Alice.png", CARD)
+      return { api, path, bytes, importId: run.importId }
+    })
+
+  it.effect("writes a confirmed new chat batch by batch, then finishes it", () =>
+    Effect.gen(function* () {
+      const { api, path, bytes, importId } = yield* freshRun("Bounded")
+      // Small parts: many staged batches, each written in a transaction of its own.
+      assert.strictEqual((yield* sendStFile(importId, path, bytes, {}, 400)).outcome, "added")
+      yield* api.FinishStImport({ importId, notSent: [] })
+      const chat = (yield* api.ListChats({ limit: 200, before: null })).find((c) => c.title === "Bounded")!
+      const rows = yield* entries(api, chat.id)
+      assert.deepStrictEqual(
+        rows.map((row) => row.version.content),
+        Array.from({ length: 40 }, (_, i) => `m${i}`)
+      )
+      assert.lengthOf(yield* api.ListVersions({ slotId: rows[2]!.slotId }), 2)
+      assert.strictEqual(yield* staged, 0)
+    })
+  )
+
+  it.effect("leaves a new chat that failed part way unfinished, for the next import to finish", () =>
+    Effect.gen(function* () {
+      const { api, path, bytes, importId } = yield* freshRun("Part way")
+      // A write failing at message 30, after earlier batches went in.
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: "CREATE TRIGGER part_way_probe BEFORE INSERT ON version_texts WHEN NEW.content = 'm30' BEGIN SELECT RAISE(ABORT, 'probe'); END"
+        }
+      ])
+      const failed = yield* Effect.exit(
+        sendStFile(importId, path, bytes, {}, 400).pipe(
+          Effect.ensuring(
+            fixtureSql(config.dataDir, [{ sql: "DROP TRIGGER IF EXISTS part_way_probe" }]).pipe(Effect.ignore)
+          )
+        )
+      )
+      assert.isTrue(Exit.isFailure(failed))
+      yield* api.CancelStImport({ importId }).pipe(Effect.ignore)
+      const listed = yield* api.ListChats({ limit: 200, before: null })
+      // Shown as unfinished, with the batches written before the failure.
+      const chat = listed.find((c) => c.title === "Part way (import unfinished)")
+      assert.isDefined(chat, JSON.stringify(listed.map((c) => c.title)))
+      if (chat === undefined) return
+      const partial = (yield* entries(api, chat.id)).length
+      assert.isAbove(partial, 0)
+      assert.isBelow(partial, 30)
+      assert.strictEqual(yield* staged, 0)
+      const again = yield* api.StartStImport({ unsupported: [] })
+      yield* sendStFile(again.importId, "characters/Alice.png", CARD)
+      yield* sendStFile(again.importId, path, bytes)
+      yield* api.FinishStImport({ importId: again.importId, notSent: [] })
+      assert.isTrue(
+        (yield* api.GetStImportReport({ importId: again.importId })).issues.some(
+          (i) => i.code === "st.unfinished" && i.path === path
+        )
+      )
+      assert.lengthOf(yield* entries(api, chat.id), 40)
+      assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).title, "Part way")
+    })
+  )
+
   it.effect(
     "reaps an abandoned upload and its staged rows without another import or restart",
     () =>

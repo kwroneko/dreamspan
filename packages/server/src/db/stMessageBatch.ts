@@ -7,15 +7,22 @@ import type { SqlClient } from "effect/sql"
 import type { StMessage } from "../formats/stChat.ts"
 import { recordedColumns } from "./rows.ts"
 
+/**
+ * The rows of `messages` as a new path, each under the one before. `slotIds`: ids the plan
+ * already gave their slots (stImportPlanReads.ts); new ones otherwise. `castJson`: the cast the
+ * file's finish pins on its imported versions, written with them instead of updated after.
+ */
 export const prepareStMessageBatch = (
   messages: ReadonlyArray<StMessage>,
-  speakers: Readonly<Record<string, EntityId | null>>
+  speakers: Readonly<Record<string, EntityId | null>>,
+  slotIds?: ReadonlyArray<string>,
+  castJson: string | null = null
 ) => {
   const versions: Array<Record<string, unknown>> = []
   const slots: Array<Record<string, unknown>> = []
-  const slotIds: Array<SlotId> = []
+  const ids: Array<SlotId> = []
   for (const [depth, message] of messages.entries()) {
-    const slotId = uuidv7() as SlotId
+    const slotId = (slotIds?.[depth] ?? uuidv7()) as SlotId
     const chosen = message.selected < message.versions.length ? message.selected : 0
     let selected = ""
     for (const [ordinal, version] of message.versions.entries()) {
@@ -37,15 +44,21 @@ export const prepareStMessageBatch = (
     }
     slots.push({
       id: slotId,
-      parent: slotIds.at(-1) ?? null,
+      parent: ids.at(-1) ?? null,
       depth,
       selected,
       hidden: message.hidden ? 1 : 0,
       at: message.versions[chosen]!.at
     })
-    slotIds.push(slotId)
+    ids.push(slotId)
   }
-  return { slotIds, versionsJson: JSON.stringify(versions), slotsJson: JSON.stringify(slots) }
+  return {
+    slotIds: ids,
+    versions: versions.length,
+    castJson,
+    versionsJson: JSON.stringify(versions),
+    slotsJson: JSON.stringify(slots)
+  }
 }
 
 export const insertStMessageBatch = Effect.fnUntraced(function* (
@@ -55,11 +68,12 @@ export const insertStMessageBatch = Effect.fnUntraced(function* (
 ) {
   if (batch.slotIds.length === 0) return
   yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, speaker_entity_id, writer, content,
-    macro_mode, origin, authoring_fork_id, reasoning, reply_sections, recorded_model_json, recorded_generation_json, created_at, updated_at)
+    macro_mode, origin, authoring_fork_id, reasoning, reply_sections, recorded_model_json, recorded_generation_json,
+    cast_json, created_at, updated_at)
     SELECT value ->> '$.id', value ->> '$.slot_id', value ->> '$.ordinal', 'complete',
       value ->> '$.speaker_entity_id', value ->> '$.writer', value ->> '$.content', 'verbatim', 'imported', ${position.forkId},
       value ->> '$.reasoning', value ->> '$.reply_sections', value ->> '$.recorded_model_json',
-      value ->> '$.recorded_generation_json', value ->> '$.created_at', value ->> '$.updated_at'
+      value ->> '$.recorded_generation_json', ${batch.castJson}, value ->> '$.created_at', value ->> '$.updated_at'
     FROM json_each(${batch.versionsJson}) ORDER BY key`
   yield* sql`INSERT INTO slots (id, chat_id, fork_id, parent_slot_id, depth, selected_version_id, context_excluded, created_at)
     SELECT value ->> '$.id', ${position.chatId}, ${position.forkId},

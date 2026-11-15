@@ -20,8 +20,12 @@ import {
   type RecordPayload,
   StPlacedMessages
 } from "./stImportPlace.ts"
+import { uuidv7 } from "@rp/shared/id.ts"
+import { slotDeletedIn } from "./forkState.ts"
+import { computeForkSummaries, FORK_SUMMARY_FORMAT, summaryStamps } from "./forkSummaries.ts"
 import { planCounter } from "./stImportPlanCount.ts"
-import { stImportChatStamps } from "./stImportPlanStamp.ts"
+import type { StBatchPlan, StPlanOp } from "./stImportPlanOps.ts"
+import { stImportChatStamp, stImportChatStamps } from "./stImportPlanStamp.ts"
 import { query } from "./tx.ts"
 
 const VIRTUAL = "virtual:"
@@ -46,6 +50,15 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
     if (!current) return yield* new NotFound({ entity: "fork", id: payload.chatId })
     return current
   })
+
+  /** `end`, or the nearest slot above it live in fork `forkId` (`relocatedEnd`, stImportWrites.ts). */
+  const relocatedEnd = (forkId: string, end: string) =>
+    sql<{ id: string }>`WITH RECURSIVE up(id, parent, deleted, depth) AS (
+      SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, forkId, "s")}, s.depth FROM slots s WHERE s.id = ${end}
+      UNION ALL
+      SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, forkId, "s")}, s.depth
+      FROM slots s JOIN up ON s.id = up.parent WHERE up.deleted
+    ) SELECT id FROM up WHERE NOT deleted ORDER BY depth DESC LIMIT 1`.pipe(Effect.map(([row]) => row?.id ?? null))
 
   const handlers = {
     StImportPlanBatch: (input) =>
@@ -94,6 +107,55 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
         const versions: Array<{ slotId: string; version: OverlayVersion }> = []
         const selects: Array<{ slotId: string; versionId: string }> = []
         const writerOf = (message: { readonly user: boolean }) => (message.user ? "human" : "model")
+        // With `plan`, the writes are recorded with the ids the writer will give them. A resumed
+        // shared-selection copy (`forkPrior`) is the one write the plan doesn't take: the writer
+        // matches such a file itself.
+        const planning = input.plan === true && (payload.forkPrior ?? null) === null
+        const ops: Array<StPlanOp> = []
+        const tail: { from: number; parent: { id: string; depth: number } | null; ids: Array<string> } = {
+          from: -1,
+          parent: null,
+          ids: []
+        }
+        const indexOf = new Map(messages.map((message, index) => [message, index]))
+        const recording: PlaceWrites<never> = {
+          copy: () => Effect.die(new Error("a planned batch copies nothing")),
+          addVersion: (slotId, ordinal, version, message) =>
+            Effect.sync(() => {
+              const id = uuidv7()
+              ops.push({
+                k: "v",
+                slot: slotId,
+                id,
+                ordinal,
+                m: indexOf.get(message)!,
+                v: message.versions.indexOf(version)
+              })
+              return id
+            }),
+          select: (slotId, versionId, shown) =>
+            Effect.sync(() => {
+              const m = messages.findIndex((message) => message.versions.includes(shown))
+              ops.push({ k: "s", slot: slotId, version: versionId, m, v: messages[m]!.versions.indexOf(shown) })
+            }),
+          newSlot: (message, _chosen, under) =>
+            Effect.sync(() => {
+              if (tail.from < 0) {
+                tail.from = indexOf.get(message)!
+                tail.parent = under === null ? null : { id: under.id, depth: under.depth }
+              }
+              const id = uuidv7()
+              tail.ids.push(id)
+              return id
+            }),
+          bulk: (under) =>
+            Effect.sync(() => {
+              tail.from = 0
+              tail.parent = under === null ? null : { id: under.id, depth: under.depth }
+              for (const _ of messages) tail.ids.push(uuidv7())
+              return tail.ids
+            })
+        }
         const counting: PlaceWrites<never> = {
           copy: () => Effect.sync(virtual),
           addVersion: (slotId, ordinal, version, message) =>
@@ -149,7 +211,7 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
             strict: input.strict,
             overlay
           },
-          counting,
+          planning ? recording : counting,
           (event) => {
             counter.observe(event)
             if (
@@ -169,6 +231,36 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
           !input.branch && record.forkPrior == null && placed.branchDeleted === (payload.branchDeleted ?? false)
         const last = placed.slotIds.at(-1)
         const depth = (parent?.depth ?? -1) + messages.length
+        let planJson: string | undefined
+        if (planning) {
+          const fresh = new Set(tail.ids)
+          const stored = placed.slotIds.filter((id) => !fresh.has(id))
+          const uncast =
+            stored.length === 0
+              ? []
+              : (yield* sql<{ id: string }>`SELECT v.id FROM json_each(${JSON.stringify(stored)}) j
+                  CROSS JOIN version_records v ON v.slot_id = j.value
+                  WHERE v.origin = 'imported' AND v.cast_json IS NULL ORDER BY j.key, v.ordinal`).map((row) => row.id)
+          const tip = last === undefined ? null : fresh.has(last) ? last : yield* relocatedEnd(fork.id, last)
+          const plan: StBatchPlan = {
+            stamp: (yield* stImportChatStamp(sql, input.userId, chat.id)) ?? "",
+            ops,
+            tail: tail.from < 0 ? null : tail,
+            slotIds: placed.slotIds,
+            matching: placed.matching,
+            added: placed.added,
+            updated: placed.updated,
+            differing: placed.differing,
+            firstAdded: placed.firstAdded,
+            branchDeleted: placed.branchDeleted,
+            keepTip: placed.keepTip,
+            tip,
+            uncast,
+            counts: counter.counts,
+            digest: counter.digest()
+          }
+          planJson = JSON.stringify(plan)
+        }
         return {
           chatId: chat.id as ChatId,
           chatTitle: chat.title,
@@ -208,10 +300,25 @@ export const makeStImportPlanReadHandlers = Effect.gen(function* () {
           messages: counter.details,
           changed: counter.changed(),
           written: input.track ? JSON.stringify({ slots, versions, selects } satisfies PlaceOverlay) : null,
-          digest: counter.digest()
+          digest: counter.digest(),
+          ...(planJson === undefined ? {} : { planJson })
         }
       }).pipe(query("StImportPlanBatch")),
-    StImportPlanStamp: ({ userId }) => stImportChatStamps(sql, userId).pipe(query("StImportPlanStamp"))
+    StImportPlanStamp: ({ userId }) => stImportChatStamps(sql, userId).pipe(query("StImportPlanStamp")),
+    // What `refreshChatSummaries` would store at the end of the write, computed here.
+    StImportChatSummaries: ({ userId, chatId }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ shell_stamp: number }>`SELECT shell_stamp FROM chats
+          WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (chat === undefined) return null
+        const userStamp = yield* summaryStamps(sql, userId)
+        const records = yield* sql<ForkRow>`SELECT f.* FROM forks f LEFT JOIN fork_summaries s ON s.fork_id = f.id
+          WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL AND (s.fork_id IS NULL OR s.format <> ${FORK_SUMMARY_FORMAT}
+            OR s.stamp <> ${chat.shell_stamp} OR s.user_stamp <> ${userStamp})`
+        if (records.length === 0) return null
+        const forks = yield* computeForkSummaries(sql, records, records.length <= 2)
+        return { chatId, stamp: chat.shell_stamp, userStamp, forks: JSON.stringify(forks) }
+      }).pipe(query("StImportChatSummaries"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers
 })

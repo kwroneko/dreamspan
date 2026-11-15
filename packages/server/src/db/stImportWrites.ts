@@ -55,6 +55,7 @@ import {
   stStateHash
 } from "./stImportProgress.ts"
 import { newEvent, type PlaceEvent } from "./stImportPlace.ts"
+import { planTipRef, type StPlanTip, stepPlanTip } from "./stImportPlanOps.ts"
 import { StImportPlanChanged } from "@rp/shared/stReimportPlan.ts"
 import { DEFAULT_PERSONA, DEFAULT_PRESET, newChatLcmSettings, ownedPersona, ownedPreset } from "./generationSettings.ts"
 
@@ -596,8 +597,16 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       return { slotIds, matching, added, updated, differing, keepTip }
     })
 
-  /** A chat file's finish (`StImportFinishChat`), inside the caller's transaction. */
-  const finishChat = (input: Payload<"StImportFinishChat">) =>
+  /**
+   * A chat file's finish (`StImportFinishChat`), inside the caller's transaction. `planned`: a
+   * confirmed write's, whose plan named the versions the cast goes on (`cast`: those still
+   * without one, and how many more were written with it, each a shell stamp the update would
+   * have moved), and whose shell summaries are computed after it, in a reader.
+   */
+  const finishChat = (
+    input: Payload<"StImportFinishChat">,
+    planned: { readonly cast: ReadonlyArray<string>; readonly castWritten: number } | null = null
+  ) =>
     Effect.gen(function* () {
       const { userId, chatId } = input
       yield* ownedChat(userId, chatId)
@@ -695,12 +704,21 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       // ST records a file's cast separately from its versions. Pin that imported cast
       // once; a later re-import or a local cast change must not rewrite old participation.
       const importedCast = foldState(input.events.map((data) => ({ scope: null, data }))).participants
-      yield* sql`${pathSegments(sql, chatId, input.end, null)}
-        UPDATE version_records SET cast_json = ${JSON.stringify(importedCast)}
-        WHERE origin = 'imported' AND cast_json IS NULL AND slot_id IN (
-          SELECT s.id FROM segments g CROSS JOIN slots s
-          WHERE s.chat_id = ${chatId} AND s.chain_id = g.chain_id AND s.depth BETWEEN g.lo AND g.hi
-        )`
+      if (planned === null)
+        yield* sql`${pathSegments(sql, chatId, input.end, null)}
+          UPDATE version_records SET cast_json = ${JSON.stringify(importedCast)}
+          WHERE origin = 'imported' AND cast_json IS NULL AND slot_id IN (
+            SELECT s.id FROM segments g CROSS JOIN slots s
+            WHERE s.chat_id = ${chatId} AND s.chain_id = g.chain_id AND s.depth BETWEEN g.lo AND g.hi
+          )`
+      else {
+        if (planned.cast.length > 0)
+          yield* sql`UPDATE version_records SET cast_json = ${JSON.stringify(importedCast)}
+            WHERE id IN (SELECT value FROM json_each(${JSON.stringify(planned.cast)}))
+              AND origin = 'imported' AND cast_json IS NULL`
+        if (planned.castWritten > 0)
+          yield* sql`UPDATE chats SET shell_stamp = shell_stamp + ${planned.castWritten} WHERE id = ${chatId}`
+      }
       // Advance only this file's fork, preserving a continuation made locally.
       if (
         fileFork.deleted_at === null &&
@@ -735,7 +753,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         WHERE id = ${input.recordId}`
       yield* openOnStCurrent(userId, chatId, input.stCurrent === true ? fileFork.id : null)
       // The shell's summaries of the finished chat, last, at the stamps this write left.
-      yield* refreshChatSummaries(sql, userId, chatId)
+      if (planned === null) yield* refreshChatSummaries(sql, userId, chatId)
       return { notes }
     })
 
@@ -778,6 +796,219 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         merged: payload.merged ?? false,
         firstAdded: (payload.firstAdded ?? null) as SlotId | null
       }
+    })
+
+  /**
+   * A confirmed write of a file into a chat already here, as the reader planned it batch by
+   * batch (stImportPlanOps.ts). Everything that isn't confirming and writing happens before the
+   * transaction: the plan's matching, its counts against the check's, the rows with their ids,
+   * the record's and fork's progress. The transaction confirms the chat is as the plans read it
+   * (its stamp, which every plan carries) and that this run still holds the file, then applies
+   * the rows: a statement per kind of row, not per message.
+   */
+  const commitPlanned = (
+    input: Payload<"StImportCommitChat">,
+    decoded: ReadonlyArray<{ readonly batch: StStagedBatch; readonly messages: ReadonlyArray<StPlacedMessage> }>
+  ) =>
+    Effect.gen(function* () {
+      const { userId, lease, path, finish } = input
+      const changed = () => new StImportPlanChanged({ message: "Changed since the check. Not imported." })
+      const plans = decoded.map(({ batch }) => batch.plan!)
+      if (decoded.length !== input.batches || plans.some((plan) => plan.stamp !== input.stamp)) return yield* changed()
+      const progress = emptyWriteProgress(input.matching)
+      const slotIds: Array<SlotId> = []
+      const counts = emptyCounts()
+      for (const plan of plans) {
+        stepWriteProgress(progress, plan, finish.prevEnd, finish.hiddenRun, [])
+        slotIds.push(...plan.slotIds)
+        addCounts(counts, plan.counts)
+      }
+      const last = plans.at(-1)!
+      // Placed as the check showed, message by message, or not at all.
+      if (
+        input.expect !== null &&
+        (!sameCounts(counts, input.expect.counts) ||
+          last.digest !== input.expect.digest ||
+          last.keepTip !== input.expect.keepsTip)
+      )
+        return yield* changed()
+      const { position, applies, leaf } = stFinishAt({ ...finish, ...progress })
+      const events = applies ? finish.events : []
+      const castJson = JSON.stringify(foldState(events.map((data) => ({ scope: null, data }))).participants)
+      // The rows, with the ids the plan gave them.
+      const versionRows: Array<Record<string, unknown>> = []
+      const selects: Array<{ slot: string; version: string; content: string }> = []
+      const tails: Array<{
+        prepared: ReturnType<typeof prepareStMessageBatch>
+        under: { readonly id: string; readonly depth: number } | null
+      }> = []
+      const cast: Array<string> = []
+      let castWritten = 0
+      const named = new Set<EntityId>()
+      const cardArrivals = new Map<string, number>()
+      let firstAt: number | null = null
+      for (const [index, { batch, messages }] of decoded.entries()) {
+        const plan = plans[index]!
+        for (const op of plan.ops) {
+          const message = messages[op.m]!
+          const version = message.versions[op.v]!
+          if (op.k === "s") {
+            selects.push({ slot: op.slot, version: op.version, content: version.content })
+            continue
+          }
+          versionRows.push({
+            id: op.id,
+            slot_id: op.slot,
+            ordinal: op.ordinal,
+            speaker_entity_id: message.speaker === null ? null : (batch.speakers[message.speaker] ?? null),
+            writer: message.user ? "human" : "model",
+            content: version.content,
+            reasoning: version.reasoning,
+            reply_sections: version.sections ? JSON.stringify(version.sections) : null,
+            ...recordedColumns(version.generation),
+            created_at: version.at,
+            updated_at: version.at
+          })
+          cast.push(op.id)
+        }
+        cast.push(...plan.uncast)
+        if (plan.tail !== null) {
+          const prepared = prepareStMessageBatch(
+            messages.slice(plan.tail.from),
+            batch.speakers,
+            plan.tail.ids,
+            castJson
+          )
+          castWritten += prepared.versions
+          tails.push({ prepared, under: plan.tail.parent })
+        }
+        for (const id of Object.values(batch.speakers)) if (id !== null) named.add(id)
+        const arrived = arrivalsOf(messages, batch.arrivalRefs)
+        for (const [ref, at] of arrived.arrivals) cardArrivals.set(ref, Math.min(cardArrivals.get(ref) ?? Infinity, at))
+        if (arrived.firstAt !== null) firstAt = Math.min(firstAt ?? Infinity, arrived.firstAt)
+      }
+      const versionsJson = JSON.stringify(versionRows)
+      // The state, with the summary named by the slots its messages go to.
+      const state = JSON.parse(finish.stateJson) as Record<string, unknown> | null
+      const prevState = JSON.parse(finish.prevStateJson) as Record<string, unknown> | null
+      const notes: Array<StImportNote> = []
+      for (const note of finish.notes) {
+        if (note.kind !== "imported_summary") {
+          notes.push(note)
+          continue
+        }
+        const resolved = resolveStNote(note, slotIds)
+        const { modifiedAt: _dated, ...mapped } = resolved
+        const summary = stStateHash(mapped)
+        if (state !== null) state.summary = summary
+        if (summary !== prevState?.summary) notes.push(resolved)
+      }
+      const stateJson = applies ? JSON.stringify(state) : finish.prevStateJson
+      return yield* Effect.gen(function* () {
+        yield* stagingCurrent(userId, lease, path)
+        if ((yield* stImportChatStamp(sql, userId, input.chatId!)) !== input.stamp) return yield* changed()
+        const target =
+          input.claim !== null
+            ? yield* claim({ userId, lease, ...input.claim })
+            : input.start !== null
+              ? yield* startChat({ userId, lease, source: path, chatId: input.chatId, ...input.start }, true)
+              : yield* Effect.die(new Error("a commit names neither a record nor a start"))
+        const { chatId, recordId } = target
+        if (chatId !== input.chatId) return yield* changed()
+        const payload = yield* leased(userId, recordId, chatId, lease)
+        const fileFork = yield* recordFork(payload)
+        // Every speaker must be one of the user's live cards.
+        for (const entity of named) {
+          const [row] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM entities
+            WHERE id = ${entity} AND owner_user_id = ${userId} AND kind = 'card' AND deleted_at IS NULL`
+          if (row?.n !== 1) return yield* new NotFound({ entity: "entity", id: entity })
+        }
+        if (input.groupId !== undefined)
+          yield* sql`UPDATE chats SET st_group_id = ${input.groupId} WHERE id = ${chatId} AND owner_user_id = ${userId}`
+        if (input.groupArrival !== undefined) yield* recordChatArrival(sql, userId, chatId, input.groupArrival)
+        for (const [ref, at] of cardArrivals) yield* recordCardArrival(sql, userId, ref, { at, basis: 1 })
+        if (firstAt !== null) yield* recordChatArrival(sql, userId, chatId, { at: firstAt, basis: 1 })
+        if (versionRows.length > 0)
+          yield* sql`INSERT INTO version_records (id, slot_id, ordinal, status, speaker_entity_id, writer, content,
+            macro_mode, origin, authoring_fork_id, reasoning, reply_sections, recorded_model_json,
+            recorded_generation_json, created_at, updated_at)
+            SELECT value ->> '$.id', value ->> '$.slot_id', value ->> '$.ordinal', 'complete',
+              value ->> '$.speaker_entity_id', value ->> '$.writer', value ->> '$.content', 'verbatim', 'imported',
+              ${fileFork.id}, value ->> '$.reasoning', value ->> '$.reply_sections', value ->> '$.recorded_model_json',
+              value ->> '$.recorded_generation_json', value ->> '$.created_at', value ->> '$.updated_at'
+            FROM json_each(${versionsJson}) ORDER BY key`
+        for (const select of selects) {
+          yield* recordHistoryReduction(sql, select.slot, select.content, null, fileFork.id)
+          yield* writeSelect(sql, { id: fileFork.id, chatId }, select.slot, select.version, "import")
+        }
+        for (const { prepared, under } of tails)
+          yield* insertStMessageBatch(sql, prepared, {
+            chatId,
+            forkId: fileFork.id,
+            parentId: under?.id ?? null,
+            depth: under === null ? 0 : under.depth + 1
+          })
+        // The fork's tip and the record as the batches would have left them one by one.
+        const ref = planTipRef(payload)
+        const tip: StPlanTip = {
+          tip: fileFork.tip_slot_id,
+          moves: 0,
+          payload,
+          ref,
+          relocated: yield* relocatedEnd(fileFork, ref)
+        }
+        for (const plan of plans)
+          stepPlanTip(tip, plan, {
+            advanceLeaf: input.advanceLeaf,
+            forkId: fileFork.id,
+            forkLive: fileFork.deleted_at === null
+          })
+        if (tip.moves > 0) {
+          yield* sql`UPDATE forks SET tip_slot_id = ${tip.tip}, row_version = row_version + ${tip.moves}
+            WHERE id = ${fileFork.id}`
+          // Each move was a write of the fork, which moves the shell stamp.
+          if (tip.moves > 1)
+            yield* sql`UPDATE chats SET shell_stamp = shell_stamp + ${tip.moves - 1} WHERE id = ${chatId}`
+        }
+        yield* sql`UPDATE jobs SET updated_at = ${Date.now()}, payload_json = ${JSON.stringify(tip.payload)}
+          WHERE id = ${recordId}`
+        const finished = yield* finishChat(
+          {
+            userId,
+            chatId,
+            recordId,
+            lease,
+            position,
+            events,
+            notes: applies ? notes : [],
+            removedNotes: applies ? finish.removedNotes : [],
+            previousNotes: finish.previousNotes,
+            leaf,
+            end: progress.cursor,
+            lastMessageAt: finish.lastMessageAt,
+            sha256: finish.sha256,
+            stateJson,
+            fork: finish.fork,
+            stCurrent: finish.stCurrent
+          },
+          { cast, castWritten }
+        )
+        yield* sql`DELETE FROM st_import_stage WHERE import_id = ${lease} AND path = ${path}`
+        const stamp = yield* stImportChatStamp(sql, userId, chatId)
+        const slots: Record<string, SlotId> = {}
+        for (const index of input.slotsAt) {
+          const slot = slotIds[index]
+          if (slot !== undefined) slots[index] = slot
+        }
+        return {
+          chatId,
+          recordId,
+          stamp: stamp!,
+          progress: { ...progress },
+          slots,
+          notes: finished.notes
+        }
+      }).pipe(transaction(sql, "StImportCommitChat"))
     })
 
   const handlers = {
@@ -833,7 +1064,12 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       }).pipe(transaction(sql, "StImportBegin")),
 
     StImportStartChat: (input) =>
-      startChat(input).pipe(
+      Effect.gen(function* () {
+        // A confirmed import starts a new chat only while its run goes on: a Stop before then
+        // leaves nothing. Once started, the chat's batches go in whatever comes.
+        if (input.once === true) yield* stagingCurrent(input.userId, input.lease, input.source)
+        return yield* startChat(input, input.once === true)
+      }).pipe(
         transaction(sql, "StImportStartChat"),
         Effect.tap((target) =>
           Effect.sync(() => {
@@ -880,7 +1116,56 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         return { slotIds, matching, added, updated, differing }
       }),
 
-    StImportFinishChat: (input) => finishChat(input).pipe(transaction(sql, "StImportFinishChat")),
+    StImportFinishChat: ({ castWritten, ...input }) =>
+      Effect.gen(function* () {
+        if (castWritten === undefined) return yield* finishChat(input)
+        const finished = yield* finishChat(input, { cast: [], castWritten })
+        const payload = yield* record(input.userId, input.recordId)
+        yield* sql`DELETE FROM st_import_stage WHERE import_id = ${input.lease} AND path = ${payload.source}`
+        const stamp = yield* stImportChatStamp(sql, input.userId, input.chatId)
+        return { ...finished, stamp: stamp! }
+      }).pipe(transaction(sql, "StImportFinishChat")),
+
+    StImportCommitBatch: (input) =>
+      // Read and decoded before the transaction, which holds only database work.
+      Effect.gen(function* () {
+        const { userId, lease, path, seq, chatId, recordId } = input
+        const [row] = yield* sql<{ batch_json: string }>`SELECT batch_json FROM st_import_stage
+          WHERE owner_user_id = ${userId} AND import_id = ${lease} AND path = ${path} AND seq = ${seq}`.pipe(
+          Effect.mapError(toStorageError("StImportCommitBatch"))
+        )
+        if (row === undefined) return yield* new ImportLeaseLost({ recordId })
+        const batch = JSON.parse(row.batch_json) as StStagedBatch
+        const messages = yield* Schema.decodeEffect(StPlacedMessages)(batch.messagesJson).pipe(Effect.orDie)
+        const prepared = prepareStMessageBatch(messages, batch.speakers, undefined, input.castJson)
+        const written = yield* Effect.gen(function* () {
+          const placed = yield* placeBatch(
+            {
+              userId,
+              chatId,
+              recordId,
+              lease,
+              advanceLeaf: input.advanceLeaf,
+              strict: false,
+              parentSlotId: input.parentSlotId,
+              matching: false,
+              speakers: batch.speakers,
+              ...(batch.arrivalRefs === undefined ? {} : { arrivalRefs: batch.arrivalRefs }),
+              ...(input.groupArrival === undefined ? {} : { groupArrival: input.groupArrival }),
+              ...(input.groupId === undefined ? {} : { groupId: input.groupId })
+            },
+            messages,
+            [],
+            prepared,
+            () => {},
+            () => {}
+          )
+          yield* sql`DELETE FROM st_import_stage WHERE import_id = ${lease} AND path = ${path} AND seq = ${seq}`
+          return placed
+        }).pipe(transaction(sql, "StImportCommitBatch"))
+        const { slotIds, matching, added, updated, differing } = written
+        return { slotIds, matching, added, updated, differing, versions: prepared.versions }
+      }),
 
     StImportStage: ({ userId, lease, path, seq, batchJson }) =>
       Effect.gen(function* () {
@@ -905,20 +1190,20 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           WHERE owner_user_id = ${userId} AND import_id = ${lease} AND path = ${path} ORDER BY seq`.pipe(
           Effect.mapError(toStorageError("StImportCommitChat"))
         )
-        const batches: Array<{
-          batch: StStagedBatch
-          messages: ReadonlyArray<StPlacedMessage>
-          prepared: ReturnType<typeof prepareStMessageBatch>
-        }> = []
+        const decoded: Array<{ batch: StStagedBatch; messages: ReadonlyArray<StPlacedMessage> }> = []
         for (const row of staged) {
           const batch = JSON.parse(row.batch_json) as StStagedBatch
           const messages = yield* Schema.decodeEffect(StPlacedMessages)(batch.messagesJson).pipe(Effect.orDie)
-          batches.push({
-            batch,
-            messages,
-            prepared: prepareStMessageBatch(messages.slice(batch.cached?.length ?? 0), batch.speakers)
-          })
+          decoded.push({ batch, messages })
         }
+        // A file the reader planned whole goes in as its plan says.
+        if (input.chatId !== null && decoded.length > 0 && decoded.every(({ batch }) => batch.plan !== undefined))
+          return yield* commitPlanned(input, decoded)
+        const batches = decoded.map(({ batch, messages }) => ({
+          batch,
+          messages,
+          prepared: prepareStMessageBatch(messages.slice(batch.cached?.length ?? 0), batch.speakers)
+        }))
         return yield* Effect.gen(function* () {
           const changed = () => new StImportPlanChanged({ message: "Changed since the check. Not imported." })
           yield* stagingCurrent(userId, lease, path)

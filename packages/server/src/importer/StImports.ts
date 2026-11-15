@@ -47,6 +47,8 @@ import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from 
 import { Report } from "./stReport.ts"
 import { stChatTarget } from "./stChatTarget.ts"
 import { stepWriteProgress, stFinishAt, stIndexSlot, type StStagedBatch } from "../db/stImportProgress.ts"
+import type { StBatchPlan } from "../db/stImportPlanOps.ts"
+import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import { stBytesHash, type StPlanExpect, type StPlanExpectFile, stPartsHash } from "./stPlanExpect.ts"
 import { ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK } from "@rp/shared/stReimportPlan.ts"
 import {
@@ -65,6 +67,9 @@ import {
 } from "./stMapping.ts"
 
 const IDLE_MS = 60 * 60_000
+
+/** A confirmed import's new chat that stopped part way (`commitNewChat`). */
+const UNFINISHED_MESSAGE = "This chat stopped part way and shows as unfinished. Import it again to finish it."
 /**
  * What one import may hold about the folder in memory: cards' names and greetings, groups,
  * personas, and the summaries of the chat being read. Past it, files that would add more
@@ -218,9 +223,17 @@ interface ChatProgress {
   /** Its batches waiting in the writer for that transaction. */
   staged: number
   stagedChars: number
+  /**
+   * Where the reader's plan of the file's next batch goes on from (stImportPlanOps.ts): what the
+   * batches planned so far leave. Null once a batch can't be planned: the writer matches it.
+   */
   prepared: {
     parent: { id: string; depth: number } | null
     carry: Parameters<Reader["Service"]["StImportPlanBatch"]>[0]["carry"]
+    matching: boolean
+    digest: string
+    /** The file's messages planned so far. */
+    index: number
   } | null
   /** The record of the parent its header names, which claiming its own record takes. */
   claimParent: string | undefined
@@ -829,7 +842,8 @@ export class StImports extends Context.Service<
         createdAt: progress.header?.createdAt ?? progress.firstAt ?? progress.lastAt ?? Date.now()
       })
 
-      const startChat = (session: Session, user: User, progress: ChatProgress) =>
+      /** `once`: a confirmed import's, refused if the file has a record already. */
+      const startChat = (session: Session, user: User, progress: ChatProgress, once = false) =>
         Effect.gen(function* () {
           const target = yield* writer.StImportStartChat({
             userId: user.id,
@@ -837,7 +851,8 @@ export class StImports extends Context.Service<
             ...(progress.fork === null ? {} : { parentRecordId: progress.fork.parentRecordId }),
             ...startFields(progress),
             chatId: progress.into,
-            lease: session.id
+            lease: session.id,
+            ...(once ? { once } : {})
           })
           progress.target = target
           session.report.chat(progress.path, target.chatId)
@@ -888,36 +903,50 @@ export class StImports extends Context.Service<
         speakers: ReadonlyMap<string, EntityId | null>
       ) =>
         Effect.gen(function* () {
-          let fields = batchFields(session, batch, speakers)
-          // Matching that cannot write runs on a reader. The final transaction certifies
-          // every reused slot with the check's stamp; a concurrent change refuses the file.
-          if (progress.target !== null && progress.prepared !== null) {
+          let fields: StStagedBatch = batchFields(session, batch, speakers)
+          // Matching runs on a reader, which plans every write of the batch with its ids
+          // (stImportPlanOps.ts); the final transaction only applies the plans, once it has
+          // confirmed the chat is as they read it (the check's stamp, which each plan carries).
+          // A file into a chat already here: its own record, or its parent's for a new branch.
+          const recordId =
+            progress.target?.recordId ?? (progress.into === null ? undefined : progress.fork?.parentRecordId)
+          if (recordId !== undefined && progress.prepared !== null) {
             const prepared = progress.prepared
             const planned = yield* reader.StImportPlanBatch({
               userId: user.id,
-              recordId: progress.target.recordId,
-              branch: false,
+              recordId,
+              branch: progress.target === null,
               parent: prepared.parent,
               carry: prepared.carry,
-              matching: true,
+              matching: prepared.matching,
               strict: progress.branch,
               messagesJson: fields.messagesJson,
-              firstIndex: 0,
+              firstIndex: prepared.index,
               detailLimit: 0,
               overlayJson: null,
               virtualPrefix: "virtual:prepare:",
               track: false,
               compact: true,
-              digest: ""
+              plan: true,
+              digest: prepared.digest
             })
+            const plan = planned.planJson === undefined ? undefined : (JSON.parse(planned.planJson) as StBatchPlan)
             fields = {
               ...fields,
               cached: planned.unchangedSlots ?? [],
-              messagesJson: planned.compactJson ?? fields.messagesJson
+              messagesJson: planned.compactJson ?? fields.messagesJson,
+              ...(plan === undefined ? {} : { plan })
             }
+            // Without a plan the writer matches what's left itself.
             progress.prepared =
-              planned.matching && planned.cursor !== null && !planned.cursor.virtual
-                ? { parent: planned.cursor, carry: planned.carry }
+              plan !== undefined && planned.cursor !== null
+                ? {
+                    parent: { id: planned.cursor.id, depth: planned.cursor.depth },
+                    carry: planned.carry,
+                    matching: planned.matching,
+                    digest: planned.digest,
+                    index: prepared.index + plan.slotIds.length
+                  }
                 : null
           }
           const batchJson = JSON.stringify(fields)
@@ -974,6 +1003,10 @@ export class StImports extends Context.Service<
             }
           }
         })
+
+      /** The cast a file's finish pins on its imported versions (`StImportFinishChat`). */
+      const castOf = (events: ReadonlyArray<StateEventData>) =>
+        JSON.stringify(foldState(events.map((data) => ({ scope: null, data }))).participants)
 
       /** What the file's chat state becomes, from what the file says and the slots it went to. */
       const stateChangeOf = (session: Session, progress: ChatProgress) =>
@@ -1122,13 +1155,25 @@ export class StImports extends Context.Service<
         return progress.isNew ? "added" : applies || progress.updated > 0 ? "updated" : "unchanged"
       }
 
-      /** Writes the chat's state and makes it active, once its last part is in. */
-      const finishChat = (session: Session, user: User, progress: ChatProgress, target: Target) =>
+      /**
+       * Writes the chat's state and makes it active, once its last part is in. `castWritten`: a
+       * confirmed import's new chat, whose versions went in with the cast (`StImportCommitBatch`).
+       */
+      const finishChat = (
+        session: Session,
+        user: User,
+        progress: ChatProgress,
+        target: Target,
+        castWritten?: { readonly count: number; readonly castJson: string }
+      ) =>
         Effect.gen(function* () {
           const change = stateChangeOf(session, progress)
           const { position, applies, leaf } = stFinishAt(progress)
+          if (castWritten !== undefined && castOf(applies ? change.events : []) !== castWritten.castJson)
+            return yield* Effect.die(new Error("a new chat's cast changed while its messages went in"))
           finishIssues(session, progress, change, applies)
           const stored = yield* writer.StImportFinishChat({
+            ...(castWritten === undefined ? {} : { castWritten: castWritten.count }),
             lease: session.id,
             userId: user.id,
             chatId: target.chatId,
@@ -1146,6 +1191,8 @@ export class StImports extends Context.Service<
             fork: progress.fork,
             stCurrent: progress.stCurrent
           })
+          // A later file of the run into this chat is held to the chat as this one left it.
+          if (stored.stamp !== undefined) session.stamps.set(target.chatId, stored.stamp)
           return finished(session, progress, target, change, applies, stored.notes)
         })
 
@@ -1164,6 +1211,69 @@ export class StImports extends Context.Service<
           return result("skipped", "Changed since the check. Not imported.")
         })
 
+      /** The shell's summaries of a chat a write left stale: computed in a reader, then stored. */
+      const storeSummaries = (user: User, chatId: ChatId) =>
+        reader.StImportChatSummaries({ userId: user.id, chatId }).pipe(
+          Effect.flatMap((fresh) =>
+            fresh === null ? Effect.void : writer.StoreForkSummaries({ userId: user.id, chats: [fresh] })
+          ),
+          // A failure leaves them to the shell's next read.
+          Effect.catchCause((cause) => Effect.logWarning("storing an imported chat's summaries failed", cause))
+        )
+
+      /**
+       * A confirmed import's new chat, once its last part is in and matches the bytes the check
+       * read: all of it was held, so nothing was written yet. Its record and chat are claimed
+       * once, while the run goes on (a Stop before then writes nothing); then its batches go in a
+       * transaction each, as an import writes a new chat, so no one write holds the writer for
+       * long; then its finish. Once started it goes on to the end, Stop or not. One that stops
+       * part way (the run lost to a newer one, a card deleted meanwhile) stays marked unfinished,
+       * as the report says, for an import to finish.
+       */
+      const commitNewChat = (session: Session, user: User, progress: ChatProgress) =>
+        Effect.gen(function* () {
+          const castJson = castOf(stateChangeOf(session, progress).events)
+          const target = yield* startChat(session, user, progress, true)
+          const stopped = () =>
+            Effect.sync(() => {
+              session.report.issue(progress.path, "error", "st.chat_unfinished", UNFINISHED_MESSAGE)
+              return "failed" as const
+            })
+          return yield* Effect.gen(function* () {
+            let count = 0
+            for (let seq = 0; seq < progress.staged; seq++) {
+              const written = yield* writer.StImportCommitBatch({
+                userId: user.id,
+                chatId: target.chatId,
+                recordId: target.recordId,
+                lease: session.id,
+                path: progress.path,
+                seq,
+                advanceLeaf: progress.isNew,
+                parentSlotId: progress.cursor,
+                castJson,
+                ...groupFields(progress)
+              })
+              count += written.versions
+              stepWriteProgress(progress, written, progress.prevEnd, progress.hiddenRun, progress.summaries)
+              // The writes waiting meanwhile go first, so none waits for the whole chat.
+              yield* Effect.yieldNow
+            }
+            progress.staged = 0
+            if (progress.userTurns === 0) {
+              session.report.issue(
+                progress.path,
+                "info",
+                "st.no_user_turn",
+                "This chat has no message of yours; it was imported all the same."
+              )
+            }
+            const outcome = yield* finishChat(session, user, progress, target, { count, castJson })
+            yield* storeSummaries(user, target.chatId)
+            return outcome
+          }).pipe(Effect.catchTags({ ImportLeaseLost: stopped, NotFound: stopped }))
+        })
+
       /**
        * A confirmed re-import's file, once its last part is in and matches the bytes checked:
        * all of it in one transaction (`StImportCommitChat`), which writes nothing unless its
@@ -1173,6 +1283,7 @@ export class StImports extends Context.Service<
       const commitChat = (session: Session, user: User, progress: ChatProgress, exact: StPlanExpectFile | null) =>
         Effect.gen(function* () {
           const chatId = exact?.chatId ?? progress.into
+          if (progress.target === null && chatId === null) return yield* commitNewChat(session, user, progress)
           const stamp = chatId === null ? null : session.stamps.get(chatId)
           if (stamp === undefined) return null
           // The finish names the slots of the file's messages by their places in it; the
@@ -1226,6 +1337,7 @@ export class StImports extends Context.Service<
                 : { counts: exact.counts, digest: exact.digest, keepsTip: exact.keepsTip }
           })
           progress.staged = 0
+          yield* storeSummaries(user, committed.chatId)
           Object.assign(progress, committed.progress)
           for (const summary of progress.summaries) {
             const slot = committed.slots[summary.index]
@@ -1401,7 +1513,13 @@ export class StImports extends Context.Service<
           exact: null,
           staged: 0,
           stagedChars: 0,
-          prepared: { parent: null, carry: null },
+          prepared: {
+            parent: null,
+            carry: null,
+            matching: own !== undefined || into !== undefined,
+            digest: "",
+            index: 0
+          },
           claimParent: undefined
         }
       }
@@ -1558,6 +1676,7 @@ export class StImports extends Context.Service<
             yield* dropChat(session)
             if (outcome === null) return yield* refuse(session, user, path, file.kind, progress.staged > 0)
             report.count(file.kind, outcome)
+            if (outcome === "failed") return result("failed", UNFINISHED_MESSAGE)
             return result(outcome)
           }
           const target = progress.target ?? (yield* startChat(session, user, progress))
