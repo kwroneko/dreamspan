@@ -609,7 +609,31 @@ it.live(
       const before = f.bodies().length
       const first = yield* f.autoTurn(null, "Wren", { message: "Wren waits.", present: ["Mira", "Wren", "Ash"] })
       assert.isAtLeast(f.bodies().length, before + 2, "the own presence write must be followed by another tool round")
-      yield* f.autoTurn(first, "Mira", { message: "Mira answers.", present: ["Mira", "Wren", "Ash"] })
+      const second = yield* f.autoTurn(first, "Mira", { message: "Mira answers.", present: ["Mira", "Wren", "Ash"] })
+      const path = yield* f.api.ReadPath({
+        chatId: f.chatId,
+        forkId: f.forkId,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 20
+      })
+      const leaf = path.entries.at(-1)!.slotId
+      const marks = yield* f.api.GetStateMarks({
+        chatId: f.chatId,
+        forkId: f.forkId,
+        slotId: leaf,
+        keys: ["presence.set", "away.set"]
+      })
+      assert.isTrue(
+        marks.events.some(
+          (e) =>
+            e.key === "away.set" &&
+            e.versionId !== null &&
+            (e.value as { entity: string; present: boolean }).entity === f.ids["Ash"] &&
+            (e.value as { away: boolean }).away
+        )
+      )
+      assert.isNotEmpty(second)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   },
   120_000

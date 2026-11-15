@@ -15,6 +15,9 @@ let chatId = ""
 test.beforeAll(async () => {
   chatId = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
+      yield* api.SetDisplayPrefs({
+        prefs: { chatDensity: process.env.STACK_DENSITY === "compact" ? "compact" : "comfortable" }
+      })
       const chat = yield* api.CreateChat({ title: "Swipes" })
       const sent = yield* api.SendMessage({
         chatId: chat.id,

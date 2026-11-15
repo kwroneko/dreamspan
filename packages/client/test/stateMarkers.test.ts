@@ -128,6 +128,32 @@ const texts = (marks: ReturnType<typeof marksOf>, slot: string) =>
   (marks.get(slot) ?? []).flatMap((mark) => mark.changes.map((change) => change.text))
 
 describe("the timeline's change markers", () => {
+  it("marks branch decision switches and reply presence mode, including equal-size off-list changes", () => {
+    const marks = marksOf(
+      data([
+        ...start,
+        event("s1", "decision.points", { off: ["presence"] }),
+        event("s1", "agent.send_presence", { mode: "required" }),
+        event("s2", "decision.points", { off: ["lore"] }),
+        event("s3", "decision.points", { off: [] }),
+        event("s3", "agent.send_presence", { mode: "off" }),
+        event("s4", "decision.points", { off: ["next", "lore"] }),
+        event("s5", "decision.points", { off: ["lore", "next"] }),
+        event("s6", "decision.points", { off: [] }),
+        event("s6", "decision.points", { off: ["next", "lore"] })
+      ]),
+      kinds()
+    )
+    expect(texts(marks, "s1")).toEqual(["Who is present in replies: off → required", "Decisions changed for this chat"])
+    expect(texts(marks, "s2")).toEqual(["Decisions changed for this chat"])
+    expect(texts(marks, "s3")).toEqual(["Who is present in replies: required → off", "Decisions changed for this chat"])
+    expect(marks.get("s1")![0]!.open?.panel).toBe("chat")
+    expect(marks.get("s1")![0]!.changes[1]!.explanation).toContain("Nothing is sent")
+    expect(marks.get("s3")![0]!.changes[1]!.explanation).toContain("follows your decision connections again")
+    expect(marks.has("s5")).toBe(false)
+    expect(marks.has("s6")).toBe(false)
+  })
+
   it("marks nothing for where the chat started", () => {
     expect(marksOf(data(start), kinds()).size).toBe(0)
   })

@@ -199,6 +199,18 @@ describe("a chat's own decision switches", () => {
 
       const cast = yield* change(["presence", "presence", "not-a-point"])
       assert.deepStrictEqual(cast.decisionsOff, ["presence", "not-a-point"])
+      const marks = (forkId: typeof main) =>
+        api.GetStateMarks({
+          chatId: chat.id,
+          forkId: forkId!,
+          slotId: version.slotId,
+          keys: ["decision.points"]
+        })
+      assert.deepStrictEqual(
+        (yield* marks(main)).events.map((e) => [e.slotId, e.value]),
+        [[version.slotId, { off: ["presence", "not-a-point"] }]]
+      )
+      assert.isEmpty((yield* marks(fork.id)).events)
       yield* after(main)
       assert.strictEqual(decides(mock.requests()).length, 0)
       // Before the switch's message, on the same branch, the point still holds.
@@ -224,6 +236,7 @@ describe("a chat's own decision switches", () => {
       // Back on: an empty list leaves no trace in the state, and the point asks again.
       const cleared = yield* change([])
       assert.isUndefined(cleared.decisionsOff)
+      assert.deepStrictEqual((yield* marks(main)).events.at(-1)!.value, { off: [] })
       const reader = yield* Reader
       const state = foldState(
         yield* reader.StateEventsAt({ userId, chatId: chat.id, slotId: version.slotId, forkId: main })

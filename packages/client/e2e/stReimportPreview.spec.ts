@@ -10,15 +10,22 @@ import type { ChatId, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
-import { asUser } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let cookie: string
+const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), cookie, use)
 
 let base = ""
-test.beforeAll(() => {
+test.beforeAll(async () => {
   base = mkdtempSync(join(tmpdir(), "rp-st-plan-"))
+  cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+})
+test.beforeEach(async () => {
+  await admin((api) =>
+    api.SetDisplayPrefs({ prefs: { chatDensity: process.env.STACK_DENSITY === "compact" ? "compact" : "comfortable" } })
+  )
 })
 test.afterAll(() => {
   rmSync(base, { recursive: true, force: true })
@@ -138,6 +145,7 @@ for (const width of [1440, 390])
       await expect(sideRow.getByRole("button", { name: "Skip" })).toHaveAttribute("aria-pressed", "true")
       await expect(preview.getByText("Importing adds 2 messages and 1 swipe to them.")).toBeVisible()
 
+      await page.screenshot({ path: info.outputPath(`preview-${width}-${theme}.png`), animations: "disabled" })
       const shots = process.env.SCREENSHOT_DIR
       if (shots) {
         await preview.scrollIntoViewIfNeeded()

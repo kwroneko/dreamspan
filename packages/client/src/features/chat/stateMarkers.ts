@@ -481,6 +481,12 @@ const SETTINGS: ReadonlyArray<{
     explanation: `${NEXT}, replies are written with or without tools and their instructions.`
   },
   {
+    id: "send-presence",
+    label: "Who is present in replies",
+    value: (state) => word(state.sendPresence ?? "off"),
+    explanation: `${NEXT}, replies say who is in the scene either optionally, always, or not at all.`
+  },
+  {
     id: "roles",
     label: "Message roles",
     value: (state) => word(state.rolesProjection ?? "by_writer"),
@@ -528,6 +534,8 @@ const settingsKind = folded({
     "context.per_speaker",
     "cards.rotation",
     "agent.enabled",
+    "agent.send_presence",
+    "decision.points",
     "roles.projection",
     "merge.layout",
     "context.html_depth",
@@ -536,14 +544,29 @@ const settingsKind = folded({
     "reply.single"
   ],
   open: { panel: "chat", label: "This chat" },
-  changes: (before, after) =>
-    SETTINGS.flatMap((setting): Array<StateChange> => {
+  changes: (before, after) => [
+    ...SETTINGS.flatMap((setting): Array<StateChange> => {
       const was = setting.value(before)
       const now = setting.value(after)
       return was === now
         ? []
         : [{ id: setting.id, text: `${setting.label}: ${was} → ${now}`, explanation: setting.explanation }]
-    })
+    }),
+    // Compare the set, not its size or storage order: replacing one disabled decision with
+    // another changes requests too. Point ids (including plugin ids) aren't user-facing names.
+    ...(JSON.stringify([...(before.decisionsOff ?? [])].sort()) ===
+    JSON.stringify([...(after.decisionsOff ?? [])].sort())
+      ? []
+      : [
+          {
+            id: "decisions",
+            text: "Decisions changed for this chat",
+            explanation: after.decisionsOff?.length
+              ? `${NEXT}, ${after.decisionsOff.length} decision${after.decisionsOff.length === 1 ? " is" : "s are"} turned off here. Nothing is sent to a decision model for them; the app decides as it does without one.`
+              : `${NEXT}, this chat follows your decision connections again. Only decisions you enabled there can send anything.`
+          }
+        ])
+  ]
 })
 
 export const registerStateMarkerKinds = () =>

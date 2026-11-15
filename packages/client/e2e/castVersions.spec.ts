@@ -15,6 +15,9 @@ let chatId = ""
 test.beforeAll(async () => {
   chatId = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
+      yield* api.SetDisplayPrefs({
+        prefs: { chatDensity: process.env.STACK_DENSITY === "compact" ? "compact" : "comfortable" }
+      })
       const summer = yield* api.CreateCard({ label: "Mira", name: "Mira", version: "Summer coast" })
       const winter = yield* api.CreateCard({ label: "Mira", name: "Mira", version: "Winter keep" })
       const tobin = yield* api.CreateCard({ label: "Tobin", name: "Tobin" })

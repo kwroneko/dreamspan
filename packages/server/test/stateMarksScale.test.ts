@@ -46,7 +46,9 @@ const KEYS = [
   "context.html_depth",
   "lorebook.below_history",
   "reply.order",
-  "reply.single"
+  "reply.single",
+  "agent.send_presence",
+  "decision.points"
 ]
 const MESSAGES = 5000
 const BRANCHES = 200

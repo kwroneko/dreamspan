@@ -24,6 +24,9 @@ test.beforeEach(async () => {
   provider = await startProvider({ reply: "Synthetic draft.", holdAfterText: true })
   await admin((api) =>
     Effect.gen(function* () {
+      yield* api.SetDisplayPrefs({
+        prefs: { chatDensity: process.env.STACK_DENSITY === "compact" ? "compact" : "comfortable" }
+      })
       const connection = yield* api.CreateConnection({
         kind: "openai-chat",
         settings: {
@@ -111,18 +114,41 @@ for (const width of [1440, 390])
             }
           })
         )
+        await admin((api) =>
+          Effect.gen(function* () {
+            const path = yield* api.ReadPath({
+              chatId: chat.id,
+              leafSlotId: null,
+              range: { _tag: "Bottom" },
+              limit: 20
+            })
+            for (const change of [
+              { _tag: "DecisionPoints", off: ["lore"] },
+              { _tag: "SendPresence", mode: "required" }
+            ] as const)
+              yield* api.ChangeCast({ chatId: chat.id, slotId: path.entries.at(-1)!.slotId, change })
+          })
+        )
         await page.goto(`${server().url}/chats/${chat.id}`)
         const articles = page.locator("article[data-slot]")
         await expect(articles.last()).toContainText("DISPLAYONLY")
         await expect(page.getByRole("heading", { name: `Display ${width} ${theme}`, exact: true })).toBeVisible()
         await expect(page.getByText("import unfinished", { exact: true }).first()).toBeVisible()
         await expect(page.getByTestId("composer")).toHaveValue("")
+        const marks = page.locator("[data-state-markers]")
+        await expect(marks).toContainText("2 changes")
+        await marks.getByRole("button", { name: /2 changes/ }).click()
+        await expect(marks).toContainText("Decisions changed for this chat")
+        await expect(marks).toContainText("Who is present in replies: off → required")
+        await expect(marks).not.toContainText("DISPLAYONLY")
+        await page.screenshot({ path: info.outputPath(`markers-${width}-${theme}.png`), animations: "disabled" })
         await messageMenu(articles.last(), "Select messages")
         const selection = page.getByRole("region", { name: "Selected messages" })
         await expect(selection).toContainText("1 message selected")
         await expect(articles.last().getByRole("checkbox", { name: "Select this message", exact: true })).toBeChecked()
         await expect(selection).not.toContainText("DISPLAYONLY")
         await expectLayout(page, info, "copied rules with selection ticks")
+        await page.screenshot({ path: info.outputPath(`selection-${width}-${theme}.png`), animations: "disabled" })
         await selection.getByRole("button", { name: "Cancel", exact: true }).click()
         await expect(nextReply(page).getByRole("button", { name: "Auto…", exact: true })).toBeVisible()
         await nextReply(page).getByRole("button", { name: "Auto…", exact: true }).click()
@@ -134,13 +160,16 @@ for (const width of [1440, 390])
         await expect(strip.getByRole("button", { name: "Stop", exact: true })).toBeVisible()
         await expect(strip).not.toContainText("DISPLAYONLY")
         await expectLayout(page, info, "copied rules with active auto strip")
+        await page.screenshot({ path: info.outputPath(`auto-${width}-${theme}.png`), animations: "disabled" })
         await strip.getByRole("button", { name: "Stop", exact: true }).click()
         const count = provider.completionBytes.length
         await page.getByRole("button", { name: "Write for me", exact: true }).click()
         await expect(page.getByTestId("composer")).toHaveValue("Synthetic draft.")
         expect(provider.completionBytes).toHaveLength(count + 1)
         expect(provider.completionBytes.at(-1)).not.toContain("DISPLAYONLY")
+        expect(provider.completionBytes.at(-1)).not.toContain("Decisions changed for this chat")
         await expectLayout(page, info, "copied rules with streaming draft")
+        await page.screenshot({ path: info.outputPath(`draft-${width}-${theme}.png`), animations: "disabled" })
         await page.getByRole("button", { name: "Stop writing", exact: true }).click()
         await expect(page.getByTestId("composer")).toHaveValue("Synthetic draft.")
         expect((await admin((api) => api.GetChat({ chatId: chat.id }))).title).toContain("import unfinished")

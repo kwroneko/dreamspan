@@ -13,7 +13,7 @@ const CARD = card("Alice", "m0")
 const path = "chats/Alice/Seam.jsonl"
 const lines = (count: number, selected = 0) =>
   jsonl([
-    header({}),
+    header({ note_prompt: "Original imported note." }),
     ...Array.from({ length: count }, (_, i) =>
       message({
         name: i % 2 ? "Sam" : "Alice",
@@ -88,12 +88,44 @@ lcmTest(
         (rows) => rows[0]![0]!.lcm_stamp as number
       )
       const beforeSelection = yield* stamp
+      const markKeys = ["participant.join", "note.activate", "note.deactivate"]
+      const marks = () => h.api.GetStateMarks({ chatId, forkId, slotId: rows.at(-1)!.slotId, keys: markKeys })
+      const initialMarks = yield* marks()
+      assert.isTrue(initialMarks.events.some((e) => e.key === "note.activate" && e.origin === "import"))
+      const initialStage = h.writer.StImportStage
+      let stagedReads = 0
+      const stageHook = vi.spyOn(h.writer, "StImportStage").mockImplementation((input) =>
+        initialStage(input).pipe(
+          Effect.tap(() =>
+            Effect.gen(function* () {
+              if (input.batchJson === null) return
+              stagedReads++
+              assert.deepStrictEqual(
+                yield* marks().pipe(Effect.orDie),
+                initialMarks,
+                "unpublished staging must add no marker events"
+              )
+            })
+          )
+        )
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => stageHook.mockRestore()))
       yield* importStFolder(
         new Map([
           ["characters/Alice.png", CARD],
           [path, lines(60, 1)]
         ]),
         { checked: true, partBytes: 700 }
+      )
+      stageHook.mockRestore()
+      assert.isAbove(stagedReads, 0)
+      const publishedMarks = yield* marks()
+      // This re-import changes a selected message, not the imported cast/note state.
+      assert.deepStrictEqual(publishedMarks, initialMarks)
+      const effective = yield* h.reader.StateEventsAt({ userId: h.userId, chatId, forkId, slotId: rows.at(-1)!.slotId })
+      assert.deepStrictEqual(
+        publishedMarks.events.map((e) => ({ scope: e.scope, data: { key: e.key, value: e.value } })),
+        effective.filter((e) => markKeys.includes(e.data.key))
       )
       assert.strictEqual((yield* read).entries[2]!.version.content, "Changed summary input.")
       assert.isAbove(yield* stamp, beforeSelection, "a re-import changing a summarized selection moves the LCM stamp")
