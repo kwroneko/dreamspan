@@ -472,12 +472,12 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         yield* sql`UPDATE rollout_effects SET undone_at = ${at}, undo_result_json = ${JSON.stringify(undoResult)} WHERE rollout_id = ${row.rollout_id} AND tool_call_id = ${row.tool_call_id} AND seq = ${row.seq}`
         return toRolloutEffect({ ...row, undone_at: at, undo_result_json: JSON.stringify(undoResult) })
       })
-    const receipted = <E>(
+    const receipted = <R, E>(
       key: Key,
       capability: string,
       body: Effect.Effect<
         {
-          result: string
+          result: R
           effects: ReadonlyArray<
             Omit<RolloutEffect, "rolloutId" | "toolCallId" | "seq" | "undoResult" | "undoneAt" | "createdAt">
           >
@@ -490,7 +490,7 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
         const [receipt] = yield* sql<{
           result_json: string
         }>`SELECT result_json FROM rollout_receipts WHERE rollout_id = ${key.rolloutId} AND tool_call_id = ${key.toolCallId}`
-        if (receipt) return JSON.parse(receipt.result_json) as string
+        if (receipt) return JSON.parse(receipt.result_json) as R
         if (!["running", "created"].includes(rollout.status))
           return yield* new EffectUndoRefused({ message: "This workshop run is no longer running." })
         // Check the current permission in the same transaction as the change. An Off choice

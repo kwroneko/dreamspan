@@ -1,3 +1,4 @@
+import { TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 // Real loop, canonical persistence/consent/receipt/Undo and transport switches. Fake provider only.
 import { assert, it } from "@effect/vitest"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
@@ -142,6 +143,7 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
     assert.include(bodies[2]!.messages.at(-1)!.content, DISPATCH_DEFINITIONS)
     assert.include(bodies[3]!.messages.at(-1)!.content, "arguments don't fit")
     assert.include(bodies[4]!.messages.at(-1)!.content, "Tool list_library not found")
+    assert.include(bodies[5]!.messages.at(-1)!.content, TOOL_DATA_NOTICE)
     const raw = bodies
       .at(-1)!
       .messages.flatMap((m) => m.tool_calls ?? [])

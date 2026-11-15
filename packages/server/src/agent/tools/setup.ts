@@ -1,4 +1,5 @@
 import { editDocument, presetEditArguments, lorebookEditArguments } from "./documents.ts"
+import { toolResultFrame } from "../toolData.ts"
 import { boundedArguments } from "../operations.ts"
 import { documentDiff, documentChangeRows, executableNotice } from "../../db/agentDocuments.ts"
 import { ToolInputRefused } from "../tools.ts"
@@ -33,7 +34,12 @@ const receiptFirst = <A>(tool: RolloutTool<A>): RolloutTool<A> => ({
                 catch: () => ({
                   message: "Invalid tool arguments. Use only the listed fields and stay within their size limits."
                 })
-              }).pipe(Effect.flatMap((validated) => tool.execute(ctx, validated)))
+              }).pipe(
+                Effect.flatMap((validated) => tool.execute(ctx, validated)),
+                Effect.map((out) =>
+                  !ctx.formatResult || out.isError ? out : { ...out, frame: toolResultFrame(JSON.parse(out.text)) }
+                )
+              )
             : Effect.succeed(receipt.isError ? receipt : { text: receipt.text })
         )
       )

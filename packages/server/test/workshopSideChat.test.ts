@@ -229,10 +229,14 @@ describe("side chat", () => {
       const api = yield* client()
       const userId = (yield* api.Whoami()).id
       const story = yield* api.CreateChat({ title: '"<&'.repeat(200) })
-      const content = "<&\"'>".repeat(4000)
+      const content = "<&\"'>😀".repeat(4000)
       yield* posted(api.SendMessage({ chatId: story.id, parentSlotId: null, branch: false, content }))
       const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
       const context = yield* contextFor(userId, workshop, yield* shownNow(userId, story))
+      for (let max_tokens = 200; max_tokens < 230; max_tokens++) {
+        const first = yield* storyTool("read_story").execute(context, { max_tokens })
+        assert.notMatch(first.text, /&#xd[89a-f][0-9a-f]{2};/i, "never encode a half of a valid pair")
+      }
       const pages: Array<string> = []
       let offset = 0
       for (let page = 0; page < 30; page++) {
@@ -240,6 +244,7 @@ describe("side chat", () => {
         assert.isUndefined(output.isError)
         assert.isBelow(output.text.length, 16000)
         assert.strictEqual(output.text.match(/<\/story_excerpt>/g)?.length, 1)
+        assert.strictEqual(Buffer.from(output.text).toString(), output.text, "a page survives UTF-8 transport")
         pages.push(quoted(output.text))
         const next = /\[More: repeat with offset=(\d+)\.\]/.exec(output.text)
         if (!next) break
@@ -793,7 +798,7 @@ describe("side chat", () => {
       yield* alice.DeleteChat({ chatId: story.chat.id })
       const gone = mock.requests().length
       yield* turn(alice, workshop, "Is it still there?", undefined, lastShown)
-      assert.include(results(mock.requests()[gone + 1]!.body as Body)[0], "isn't available any more")
+      assert.include(results(mock.requests()[gone + 1]!.body as Body)[0], "isn&apos;t available any more")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

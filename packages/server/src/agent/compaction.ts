@@ -1,3 +1,5 @@
+import { escapeToolData } from "./toolData.ts"
+import { decodeToolData } from "@rp/shared/toolData.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { Message } from "@earendil-works/pi-ai"
 
@@ -35,6 +37,27 @@ const scrubLiteral = (text: string): string =>
 export const summarySafeText = (text: string): string => {
   const walk = (value: unknown, depth = 0): unknown => {
     if (typeof value === "string") {
+      // Decode only literal-data bodies, scrub at their JSON/string boundaries, then
+      // restore the same escaping. This never changes stored or replayed tool results.
+      if (value.includes("<tool_data>\n")) {
+        const parts: Array<string> = []
+        let copied = 0
+        for (const match of value.matchAll(/<tool_data>\n([\s\S]*?)(\n<\/tool_data>|$)/g)) {
+          // A source can itself contain fake quotes. Scrub the surrounding prose too.
+          parts.push(String(walk(value.slice(copied, match.index), depth + 1)))
+          const body = match[1]!,
+            close = match[2]!
+          if (!close) parts.push("<tool_data>\n[partial quoted data withheld; read_run recovers the original]")
+          else if (depth >= 32) parts.push("<tool_data>\n[redacted nested data]\n</tool_data>")
+          else {
+            const decoded = decodeToolData(body)
+            parts.push(`<tool_data>\n${escapeToolData(String(walk(decoded, depth + 1)))}\n</tool_data>`)
+          }
+          copied = match.index + match[0].length
+        }
+        parts.push(String(walk(value.slice(copied), depth + 1)))
+        return parts.join("")
+      }
       // read_run and story readers wrap JSON in prose/XML. Scrub each balanced JSON
       // fragment as data before re-encoding; regex cannot see escaped nested keys.
       let start = -1,

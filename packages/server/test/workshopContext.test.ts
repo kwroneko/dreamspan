@@ -1,3 +1,4 @@
+import { toolData } from "../src/agent/toolData.ts"
 // Workshop context sizing and long runs (spec/WORKSHOP-CONTEXT.md §1, §2, §3): the window and
 // the reply reserve come from the model, a carried run leaves older tool results out before it
 // is rebuilt, read_run shows them again, and the history tools never see later messages.
@@ -199,7 +200,7 @@ describe("workshop context", () => {
                         const marker = messages
                           .map((m) => text(m.content))
                           .join("\n")
-                          .match(/read_run with message (\d+) and call \\?"c1\\?"/)
+                          .match(/\[Result left out to save room\. read_run with message (\d+)/)
                         return marker ? [["read_run", { message: Number(marker[1]), call: "c1" }, "c4"] as const] : []
                       })()
                     : []
@@ -251,7 +252,7 @@ describe("workshop context", () => {
         const closing = mock.requests().at(-1)!.body!.messages as Array<Wire>
         const reread = closing.findLast((m) => m.role === "tool")!
         assert.strictEqual(reread.tool_call_id, "c4")
-        assert.include(text(reread.content), 'call="c1"')
+        assert.include(text(reread.content), "&quot;call&quot;:&quot;c1&quot;")
         assert.include(text(reread.content), "Marker Ledger one")
         // The next turn carries the shortened run as it was sent.
         const fourth = yield* turn(api, chat, events, "Turn four.")
@@ -332,12 +333,12 @@ describe("workshop context", () => {
       const own = results.slice(-4)
       assert.lengthOf(results, 5, JSON.stringify(results).slice(0, 3000))
       for (const result of results.filter((_, i) => i !== 1)) assert.notInclude(result, "Zephyr", result)
-      assert.strictEqual(own[0], "No earlier messages match “Zephyr”.")
+      assert.strictEqual(own[0], toolData("No earlier messages match “Zephyr”."))
       assert.include(own[1], "Message 4, local: Plan the second card.")
       assert.include(own[1], "Message 3, Assistant: Done.")
       assert.notInclude(own[1], "Message 5")
-      assert.include(own[2], "Message 7 isn't one of the earlier messages.")
-      assert.include(own[3], 'tool="read_card"')
+      assert.include(own[2], "Message 7 isn&apos;t one of the earlier messages.")
+      assert.include(own[3], "&quot;tool&quot;:&quot;read_card&quot;")
 
       // Attack the same boundary through a real swipe and an explicit fork, rather than
       // relying only on Generate's branch flag. Later runs stay readable to the user.
@@ -378,10 +379,10 @@ describe("workshop context", () => {
           .slice(-4)
           .map((m) => text(m.content))
         assert.lengthOf(outputs, 4)
-        assert.strictEqual(outputs[0], "No earlier messages match “Zephyr”.")
+        assert.strictEqual(outputs[0], toolData("No earlier messages match “Zephyr”."))
         assert.notInclude(outputs[1], "Zephyr")
-        assert.include(outputs[2], "Message 7 isn't one of the earlier messages.")
-        assert.include(outputs[3], 'tool="read_card"')
+        assert.include(outputs[2], "Message 7 isn&apos;t one of the earlier messages.")
+        assert.include(outputs[3], "&quot;tool&quot;:&quot;read_card&quot;")
       }
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })

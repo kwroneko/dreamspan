@@ -9,6 +9,7 @@ import { useAtom, useAtomValue } from "@effect/atom-react"
 import type { RolloutStep } from "@rp/shared/agent.ts"
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
 import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
+import { displayToolData } from "@rp/shared/toolData.ts"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useId, useState } from "react"
 import { Icon, type IconName } from "../../../ui/Icon.tsx"
@@ -132,7 +133,7 @@ function StepRow({
           id={id}
           className="ml-5 max-h-64 overflow-auto rounded-md border border-border bg-canvas px-2 py-1.5 font-mono text-xs whitespace-pre-wrap text-muted [overflow-wrap:anywhere]"
         >
-          {body}
+          {step.kind === "tool" ? displayToolData(body) : body}
         </pre>
       )}
       {step.kind === "tool" &&

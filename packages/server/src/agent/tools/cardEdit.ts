@@ -1,3 +1,4 @@
+import { savedToolResult } from "../toolData.ts"
 // edit_card (spec/AGENTIC.md §4.6, DESIGN §4.2 [D]): an agent's change to a character's card
 // field never edits the card. The passage leaves the field through a chat note replacing the
 // field in its place, so the top of the context changes once; the passage as it now is goes in a
@@ -138,7 +139,7 @@ export const editCard: RolloutTool<{
               )
             ],
             notes: [...inPlace.notes, ...tailNote],
-            result: `Changed ${member.name}'s ${label} from the next message on.`
+            result: savedToolResult(context, `Changed ${member.name}'s ${label} from the next message on.`)
           })
           return { text: result }
         }
@@ -156,7 +157,7 @@ export const editCard: RolloutTool<{
               notes: [
                 { revise: { note: tail.entity, parent: tail.revision, doc: { ...tail.doc, content: inTail.text } } }
               ],
-              result: `Changed ${member.name}'s ${label} from the next message on.`
+              result: savedToolResult(context, `Changed ${member.name}'s ${label} from the next message on.`)
             })
             return { text: result }
           }

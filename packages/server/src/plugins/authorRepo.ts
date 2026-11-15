@@ -120,7 +120,7 @@ export const authorRepo = async (
           .split("\n")
           .slice(from - 1, from - 1 + count)
           .map((t, n) => `${from + n}: ${t}`)
-      }).slice(0, 15000)
+      })
     }
   }
   if (request.action === "search") {
@@ -143,7 +143,7 @@ export const authorRepo = async (
         files: [...new Set([...Object.keys(before), ...Object.keys(current)])]
           .filter((p) => before[p] !== current[p])
           .map((p) => ({ path: p, before: before[p] ?? null, after: current[p] ?? null }))
-      }).slice(0, 15000)
+      })
     }
   }
   if (request.action === "checkpoint" && request.commit) {

@@ -1,3 +1,4 @@
+import { dataEnvelope, escapeToolData } from "../toolData.ts"
 import { line } from "./historyPart.ts"
 import {
   searchChat as searchChatPart,
@@ -784,13 +785,7 @@ export const storyContext = (context: ToolContext) =>
   })
 
 /** Encode both attributes and payload: story text cannot manufacture delimiters or roles. */
-const escapeStory = (text: string): string =>
-  text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;")
+const escapeStory = escapeToolData
 const quote = (value: string) => `"${escapeStory(value.length > 120 ? `${value.slice(0, 120)}…` : value)}"`
 const CLOSE = "</story_excerpt>"
 
@@ -803,13 +798,15 @@ export const STORY_NOTICE =
  * story's content to discuss, not instructions and not a conversation to continue.
  */
 const wrapStory = (place: StoryPlace, text: string) =>
-  [
-    `<story_excerpt story=${quote(place.title ?? "Untitled")} branch=${quote(place.branch ?? "unnamed")} up_to_message="${place.upTo}">`,
-    STORY_NOTICE,
-    "",
-    escapeStory(text),
+  dataEnvelope(
+    text,
+    [
+      `<story_excerpt story=${quote(place.title ?? "Untitled")} branch=${quote(place.branch ?? "unnamed")} up_to_message="${place.upTo}">`,
+      STORY_NOTICE,
+      ""
+    ].join("\n"),
     CLOSE
-  ].join("\n")
+  )
 
 /** A history tool over the story: the same reads, at the story's position. */
 const overStory = <A>(
@@ -887,7 +884,11 @@ const overStory = <A>(
         // The tool's own note, outside the quote: where the next page starts.
         const more = end < output.text.length ? `\n[More: repeat with offset=${end}.]` : ""
         // What the story says is quoted; a refusal ("no messages match") is the tool's own.
-        return { ...output, text: (output.isError ? page : wrapStory(story.place, page)) + more }
+        return {
+          ...output,
+          ...(!output.isError ? { dataOnly: true as const } : {}),
+          text: (output.isError ? page : wrapStory(story.place, page)) + more
+        }
       })
     )
 })

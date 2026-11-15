@@ -1,3 +1,4 @@
+import { unquoteToolData } from "../../server/test/support/toolData.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { pluginDocumentation } from "../../plugin-api/src/docs.ts"
@@ -49,11 +50,12 @@ test.describe("workshop plugin consent and dice", () => {
           arguments: (body) => ({
             plugin: pluginId,
             commit:
-              body.messages
-                .filter((m) => m.role === "tool")
-                .at(-1)
-                ?.content?.toString()
-                .match(/"commit":"([a-f0-9]{40})"/)?.[1] ?? "0".repeat(40)
+              unquoteToolData(
+                body.messages
+                  .filter((m) => m.role === "tool")
+                  .at(-1)
+                  ?.content?.toString() ?? ""
+              ).match(/"commit":"([a-f0-9]{40})"/)?.[1] ?? "0".repeat(40)
           })
         }
       ]

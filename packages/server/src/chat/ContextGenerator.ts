@@ -516,6 +516,7 @@ export const layer = Layer.effect(
               let needsRebuild = count > room * ELIDE_TRIGGER
               if (needsRebuild && !state.lcm?.enabled) {
                 const compacted = yield* elideCarried({
+                  quoteResults: profile?.allowsOutside === true,
                   reader,
                   request,
                   path,
