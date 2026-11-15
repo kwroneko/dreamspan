@@ -57,5 +57,10 @@ it.live("summary settlement starts from sparse touches even when a version index
       plan.join("\n")
     )
     assert.isTrue(plan.some((detail) => /^SEARCH v .*\(id=\?\)/.test(detail)))
+    // Children of touched forks are found from the touches, never by scanning every fork.
+    assert.isFalse(
+      plan.some((detail) => /^SCAN f(?:\s|$)/.test(detail)),
+      plan.join("\n")
+    )
   }).pipe(Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers })), Effect.scoped)
 })

@@ -267,18 +267,22 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
           UNION SELECT h.fork, s.id FROM shifted h JOIN slots s ON s.parent_slot_id = h.id),
         reached(id) AS (
           SELECT t.ref FROM shell_touches t WHERE t.kind IN (${SELF}, ${FORK})
-          UNION ALL SELECT f.id FROM shell_touches t JOIN forks f ON f.parent_fork_id = t.ref
+          -- Touches first, here and for the shifted slots below: the other order scanned every
+          -- fork, probing the touches for each (300 ms of a 5,000-message rename's settlement).
+          UNION ALL SELECT f.id FROM shell_touches t CROSS JOIN forks f ON f.parent_fork_id = t.ref
             WHERE t.kind = ${KIN} OR (t.kind = ${TIP} AND EXISTS (
               -- Moving to/from an inserted tip can change the display end.
               -- Normal structural tip moves use the shifted chain below.
               SELECT 1 FROM slots s WHERE s.id IN (t.from_slot, t.to_slot) AND s.inserted = 1))
-          UNION ALL SELECT f.id FROM shifted h JOIN forks f ON f.parent_fork_id = h.fork AND f.tip_slot_id = h.id
-          UNION ALL SELECT g.fork_id FROM segments g JOIN touched t ON t.chat_id = g.chat_id
-            AND t.chain_id = g.chain_id AND t.depth BETWEEN g.lo AND g.hi
-            JOIN slots affected ON affected.id = t.slot_id
+          UNION ALL SELECT f.id FROM shifted h CROSS JOIN forks f ON f.parent_fork_id = h.fork AND f.tip_slot_id = h.id
+          -- Once per segment, up to its first reaching touch: a bulk rewrite touches thousands
+          -- of slots each segment holds, and pairing them all costs touches × forks.
+          UNION ALL SELECT g.fork_id FROM segments g WHERE EXISTS (
+            SELECT 1 FROM touched t JOIN slots affected ON affected.id = t.slot_id
+            WHERE t.chat_id = g.chat_id AND t.chain_id = g.chain_id AND t.depth BETWEEN g.lo AND g.hi
             -- A newly human-authored alternative matters only when this fork
             -- doesn't already record that author's same or later turn.
-            WHERE (t.version_id IS NULL OR ${sql.literal(shownInSql("g.fork_id", "affected"))} = t.version_id)
+            AND (t.version_id IS NULL OR ${sql.literal(shownInSql("g.fork_id", "affected"))} = t.version_id)
               -- Only a summary valid before this write can say the author's turn is recorded.
               AND (t.author IS NULL OR NOT EXISTS (
               SELECT 1 FROM fork_summaries fs, json_each(fs.activity_json) a WHERE fs.fork_id = g.fork_id
@@ -286,7 +290,7 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
                 AND fs.user_stamp = coalesce((SELECT u.stamp FROM chats ch JOIN shell_user_stamps u
                   ON u.user_id = ch.owner_user_id WHERE ch.id = fs.chat_id), 0)
                 AND a.value ->> 'entityId' = t.author AND (a.value ->> 'at' > t.at
-                  OR (a.value ->> 'at' = t.at AND a.value ->> 'slot' = t.slot_id))))
+                  OR (a.value ->> 'at' = t.at AND a.value ->> 'slot' = t.slot_id)))))
           -- The writer's range from its point at that number: one range of fork_labels_point.
           UNION ALL SELECT x.fork_id FROM written w JOIN fork_labels wl ON wl.fork_id = w.ref
             JOIN fork_labels x ON x.chat_id = w.chat_id
