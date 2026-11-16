@@ -36,6 +36,8 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
         ])
       )
       assert.strictEqual(report.counts.regex?.added, 2)
+      const said = (r: typeof report, code: string) => r.issues.filter((i) => i.code === code).map((i) => i.message)
+      assert.lengthOf(said(report, "st.global_regex_kept"), 0)
       const stored = yield* api.GetGlobalRegex()
       assert.deepStrictEqual(
         stored.scripts.map((s) => [s.id, s.name, s.disabled, s.markdown_only, [...s.placement]]),
@@ -50,6 +52,11 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
       const again = yield* importStFolder(folder([script("g-3", "Other")]))
       assert.strictEqual(again.report.counts.regex?.added ?? 0, 0)
       assert.strictEqual(again.report.counts.regex?.skipped, 1)
+      // The report says they weren't taken, and why, as a warning the report keeps.
+      const kept = again.report.issues.filter((i) => i.code === "st.global_regex_kept")
+      assert.lengthOf(kept, 1)
+      assert.strictEqual(kept[0]!.level, "warning")
+      assert.match(kept[0]!.message, /^1 global regex script wasn't imported, because/)
       assert.deepStrictEqual(
         (yield* api.GetGlobalRegex()).scripts.map((s) => s.id),
         ["g-1", "g-2"]
@@ -76,6 +83,11 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
       const many = Array.from({ length: 105 }, (_, i) => script(`m-${i}`, `Script ${i}`))
       const { report } = yield* importStFolder(folder(many))
       assert.strictEqual(report.counts.regex?.added, 100)
+      // The rest are named in a warning the report keeps (a file's own warnings aren't kept).
+      const dropped = report.issues.filter((i) => i.code === "st_settings.regex_dropped")
+      assert.lengthOf(dropped, 1)
+      assert.strictEqual(dropped[0]!.level, "warning")
+      assert.include(dropped[0]!.message, "5 more were left out")
       assert.strictEqual((yield* api.GetGlobalRegex()).scripts.length, 100)
     })
   )

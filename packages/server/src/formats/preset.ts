@@ -870,13 +870,13 @@ export const readRegex = (
       ...(Object.keys(unsupported).length > 0 ? { unsupported } : {})
     })
   }
-  if (scripts.size > 0)
+  // Global scripts are reported by the import once it knows whether they went in (an account
+  // with scripts of its own keeps them).
+  if (scripts.size > 0 && owner !== "global")
     r.add(
       "info",
       "preset.regex_imported",
-      owner === "global"
-        ? `${scripts.size} global regex scripts were imported. As in ST, they run in every chat, except those switched off.`
-        : `${scripts.size} regex scripts were imported as data. As in ST, none runs until you allow this ${owner}'s scripts.`,
+      `${scripts.size} regex scripts were imported as data. As in ST, none runs until you allow this ${owner}'s scripts.`,
       base
     )
   return [...scripts.values()]
