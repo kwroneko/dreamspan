@@ -18,15 +18,7 @@ import { forkThrough, onForkPath } from "./forks.ts"
 import { displayEndOf } from "./displayPath.ts"
 import { placeAsShown as followParent } from "./forkOrder.ts"
 import { type PositionalCast, presenceAt, presenceJson } from "./participation.ts"
-import {
-  forkAt,
-  nextSeq,
-  insertFork,
-  originalSql,
-  replacedIn,
-  selectionIn,
-  writeSelect
-} from "./forkState.ts"
+import { forkAt, nextSeq, insertFork, originalSql, replacedIn, selectionIn, writeSelect } from "./forkState.ts"
 import {
   rewriteColumns,
   versionExtras,
