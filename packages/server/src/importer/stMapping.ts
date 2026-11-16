@@ -464,9 +464,9 @@ export const chatStateChange = (
   /** A new chat takes all of it; a chat merged into gets only what changed. */
   isNew: boolean,
   /**
-   * `previous` is the parent file's state at its own end (a branch's first import), which may
-   * not be what the branch inherits where it leaves the parent: who the user plays is then
-   * written whatever it says.
+   * A branch's first import: `previous` is the state in effect where it leaves its parent
+   * (StImports.ts `inheritedState`), or, for a parent recorded before that was kept, the
+   * parent's at its own end. Who the user plays is then written whatever it says.
    */
   inherited = false
 ) => {
@@ -518,6 +518,12 @@ export const chatStateChange = (
   // Then leave, as after a persona switch: played by the user, never a character.
   for (const entity of mapped.otherPersonas) {
     if (!personasBefore?.otherPersonas?.includes(entity))
+      events.push({ key: "participant.leave", value: { entity: entity as EntityId } })
+  }
+  // A persona selected before that this file neither selects nor has speak (a branch that
+  // leaves its parent before the parent's switch to it) leaves too: it's no one's character.
+  for (const entity of previous?.played ?? []) {
+    if (!mapped.participants.includes(entity) && !mapped.otherPersonas.includes(entity as EntityId))
       events.push({ key: "participant.leave", value: { entity: entity as EntityId } })
   }
   for (const entity of new Set([

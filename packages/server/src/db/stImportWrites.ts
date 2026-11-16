@@ -613,7 +613,10 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       yield* ownedChat(userId, chatId)
       const payload = yield* leased(userId, input.recordId, chatId, input.lease)
       const fileFork = yield* recordFork(payload)
-      if (input.position !== null) yield* ownedSlot(chatId, input.position)
+      const at = input.position === null ? null : yield* ownedSlot(chatId, input.position)
+      // Where the file's first import's state applies from, which a branch of it forking
+      // earlier doesn't inherit (StImports.ts `inheritedState`).
+      const stateAt = payload.stateAt ?? (payload.state === undefined ? (at?.depth ?? 0) : undefined)
       const target = input.leaf === null ? null : yield* ownedSlot(chatId, input.leaf)
       if (input.end !== null) yield* ownedSlot(chatId, input.end)
       // Include dormant positional choices too: a later restore or swipe must retain
@@ -741,6 +744,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         ...(input.fork === null ? {} : { parentRecordId: input.fork.parentRecordId }),
         sha256: input.sha256,
         state: input.stateJson,
+        ...(stateAt === undefined ? {} : { stateAt }),
         notes,
         end: input.end,
         firstAdded: null,
@@ -755,7 +759,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       yield* openOnStCurrent(userId, chatId, input.stCurrent === true ? fileFork.id : null)
       // The shell's summaries of the finished chat, last, at the stamps this write left.
       if (planned === null) yield* refreshChatSummaries(sql, userId, chatId)
-      return { notes }
+      return { notes, ...(stateAt === undefined ? {} : { stateAt }) }
     })
 
   /** Makes `lease` the run that may write a recorded file's chat (`StImportClaim`). */
@@ -795,7 +799,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         notes: (payload.notes ?? {}) as Record<string, EntityId>,
         end: (payload.end ?? null) as SlotId | null,
         merged: payload.merged ?? false,
-        firstAdded: (payload.firstAdded ?? null) as SlotId | null
+        firstAdded: (payload.firstAdded ?? null) as SlotId | null,
+        ...(parentId === undefined ? {} : { parentRecordId: parentId }),
+        ...(payload.stateAt === undefined ? {} : { stateAt: payload.stateAt })
       }
     })
 
@@ -1331,7 +1337,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             stamp: stamp!,
             progress: { ...progress },
             slots,
-            notes: finished.notes
+            notes: finished.notes,
+            ...(finished.stateAt === undefined ? {} : { stateAt: finished.stateAt })
           }
         }).pipe(transaction(sql, "StImportCommitChat"))
       }),

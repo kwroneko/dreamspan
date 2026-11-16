@@ -6,7 +6,8 @@
 // messages, one-to-one and group chats, branches of branches (scale: importedPersonasScale).
 import { assert, describe, it } from "@effect/vitest"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import { Writer } from "../src/db/Database.ts"
+import type { ChatId, EntityId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { Effect, Stream } from "effect"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished } from "./support/generation.ts"
@@ -82,6 +83,26 @@ describe("personas of an imported ST chat", () => {
             }
           })
 
+        const swipe = (chatId: ChatId, forkId: ForkId, entry: PathEntry) =>
+          Effect.gen(function* () {
+            const events: Array<ChatEvent> = []
+            yield* api.SubscribeChat({ chatId }).pipe(
+              Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+              Effect.forkScoped
+            )
+            yield* eventually(() => events.length > 0)
+            const before = mock.requests().length
+            const swiped = yield* api.Regenerate({ slotId: entry.slotId, forkId, expectedRowVersion: entry.rowVersion })
+            yield* eventually(() => finished(events, swiped.version.id) !== undefined, 60_000)
+            assert.strictEqual(finished(events, swiped.version.id)!.status, "complete")
+            const sent = mock.requests().slice(before)
+            assert.lengthOf(sent, 1, "one swipe, no round after it")
+            return {
+              reply: swiped,
+              messages: (sent[0]!.body!.messages as Array<Wire>).map((m) => ({ role: m.role, text: text(m.content) }))
+            }
+          })
+
         for (const main of [
           `chats/${KAREN}/${KAREN} - 2025-11-01@20h00m00s.jsonl`,
           "group chats/2025-11-02@21h00m00s.jsonl"
@@ -118,6 +139,36 @@ describe("personas of an imported ST chat", () => {
           const theirs = messages.filter((m) => m.text.includes(`${other.name} (main,`))
           assert.isAbove(theirs.length, 0)
           for (const m of theirs) assert.strictEqual(m.role, "user")
+          // A swipe of the reply is sent the same way (review-personacast1).
+          const swiped = yield* swipe(record.chatId, record.forkId, reply)
+          assert.notInclude([persona.name, other.name], names.get(swiped.reply.version.speakerEntityId!))
+          assert.notInclude(swiped.messages.map((m) => m.text).join("\n"), other.description)
+          // And with separate contexts, where each character reads what it knew.
+          if (main.startsWith("group chats/")) {
+            const user = yield* api.Whoami()
+            const tipNow = (yield* api.ReadPath({
+              chatId: record.chatId,
+              forkId: record.forkId,
+              leafSlotId: null,
+              range: { _tag: "Bottom" },
+              limit: 1
+            })).entries.at(-1)!.slotId
+            yield* (yield* Writer).AddStateEvent({
+              userId: user.id,
+              chatId: record.chatId,
+              forkId: record.forkId,
+              slotId: tipNow as SlotId,
+              versionId: null,
+              scope: null,
+              data: { key: "context.per_speaker", value: "separate" }
+            })
+            const separate = yield* generate(record.chatId, record.forkId)
+            assert.notInclude([persona.name, other.name], names.get(separate.reply.version.speakerEntityId!))
+            const sent = separate.messages.map((m) => m.text).join("\n")
+            assert.include(sent, persona.description)
+            assert.notInclude(sent, other.description)
+            assert.notInclude(sent, `Write ${other.name}'s next message`)
+          }
         }
 
         // Switching persona to any of them still works, from the persona control.

@@ -144,6 +144,8 @@ export const makeStImportReadHandlers = Effect.gen(function* () {
               end?: SlotId | null
               merged?: boolean
               firstAdded?: SlotId | null
+              parentRecordId?: string
+              stateAt?: number
             }
             return {
               forkId: payload.forkId ?? (String(payload.chatId) as ForkId),
@@ -156,7 +158,9 @@ export const makeStImportReadHandlers = Effect.gen(function* () {
               notes: payload.notes ?? {},
               end: payload.end ?? null,
               merged: payload.merged ?? false,
-              firstAdded: payload.firstAdded ?? null
+              firstAdded: payload.firstAdded ?? null,
+              ...(payload.parentRecordId === undefined ? {} : { parentRecordId: payload.parentRecordId }),
+              ...(payload.stateAt === undefined ? {} : { stateAt: payload.stateAt })
             }
           }),
           library: library.map((row) => ({
