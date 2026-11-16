@@ -17,6 +17,7 @@ import {
   onDisplayPath,
   pathPieces,
   placedInsertions,
+  placedMoves,
   positionOf,
   type SlotPlace
 } from "./displayPath.ts"
@@ -37,6 +38,7 @@ import { recordReduction } from "./historyChanges.ts"
 import { pathSegments } from "./pathSegments.ts"
 import type { ForkRow } from "./rows.ts"
 import { binItemForks } from "./binForks.ts"
+import { placeAsShown } from "./forkOrder.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { NotFound } from "./ops.ts"
 import { setSplitApplied } from "./threads.ts"
@@ -136,22 +138,21 @@ const chatRecordBytes = [
 ]
 
 /**
- * The slots whose gap still holds an inserted message fork `forkId` shows: each slot it places
- * and doesn't delete, and every anchor above it up to a structural one (a deleted inserted slot's
- * own gap stays shown, as a deleted message's replies do). Empty, after one lookup, when the fork
- * places nothing.
+ * The slots whose gap still holds a message fork `forkId` shows: each slot it places or moves and
+ * doesn't delete, and every anchor above it up to a structural one (a deleted inserted or moved
+ * slot's own gap stays shown, as a deleted message's replies do). A moved slot's anchor is the
+ * slot its move shows it after. Empty, after two lookups, when the fork places and moves nothing.
  */
 const liveGaps = (sql: SqlClient.SqlClient, chatId: string, forkId: string) =>
   Effect.gen(function* () {
     const placed = yield* placedInsertions(sql, chatId, forkId)
+    const moves = (yield* placedMoves(sql, chatId, forkId)).filter((m) => !m.out)
     const kept = new Set<string>()
-    if (placed.length === 0) return kept
-    const anchorOf = new Map(placed.map((x) => [x.id, x.anchorId]))
+    if (placed.length === 0 && moves.length === 0) return kept
+    const anchorOf = new Map<string, string | null>(placed.map((x) => [x.id, x.anchorId]))
+    for (const m of moves) anchorOf.set(m.id, m.anchorId)
     const live = yield* sql<{ id: string }>`
-      SELECT s.id FROM slots s WHERE ${sql.in(
-        "s.id",
-        placed.map((x) => x.id)
-      )} AND NOT ${slotDeletedIn(sql, forkId, "s")}`
+      SELECT s.id FROM slots s WHERE ${sql.in("s.id", [...anchorOf.keys()])} AND NOT ${slotDeletedIn(sql, forkId, "s")}`
     for (const { id } of live) {
       let anchor = anchorOf.get(id) ?? null
       while (anchor !== null && !kept.has(anchor)) {
@@ -1102,6 +1103,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
                 tipSlotId: tip,
                 at: Date.now()
               })
+              yield* placeAsShown(sql, chatId, fork, slot?.parent_slot_id ?? null, branch)
               recovered?.set(forkId, branch.id)
             }
           }

@@ -15,7 +15,8 @@ import type { CommitDraft } from "./drafts.ts"
 import { makeDraftCarry } from "./carryDrafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
 import { forkThrough, onForkPath } from "./forks.ts"
-import { displayEndOf, hiddenAtFork, pathPieces, slotPlace } from "./displayPath.ts"
+import { displayEndOf } from "./displayPath.ts"
+import { placeAsShown as followParent } from "./forkOrder.ts"
 import { type PositionalCast, presenceAt, presenceJson } from "./participation.ts"
 import {
   forkAt,
@@ -365,19 +366,9 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       )
     )
 
-  /**
-   * Fork `row`, just made from `from` at `baseSlotId`, places no inserted slot `from` doesn't
-   * show up to there: each gets a row of 0 (`hiddenAtFork`, spec/MESSAGE-INSERT.md §2.4).
-   * Costs the branch points and insertions of both paths; read even when `from` shows no
-   * insertion, since it may have one structurally while inheriting its row.
-   */
+  /** Fork `row`, just made from `from` at `baseSlotId`, shows what `from` shows up to there (forkOrder.ts). */
   const placeAsShown = (chatId: string, from: ForkRow, baseSlotId: string | null, row: ForkRow) =>
-    Effect.gen(function* () {
-      const shown = yield* pathPieces(sql, chatId, from.id, from.tip_slot_id)
-      const base = baseSlotId === null ? null : yield* slotPlace(sql, chatId, baseSlotId)
-      const own = yield* pathPieces(sql, chatId, row.id, row.tip_slot_id)
-      for (const slotId of hiddenAtFork(shown, base, own)) yield* writeInsert(sql, { id: row.id, chatId }, slotId, 0)
-    })
+    followParent(sql, chatId, from, baseSlotId, row)
 
   /**
    * A new fork of `from` at `atSlotId` (null: before the first message), which must be on

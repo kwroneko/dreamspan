@@ -1,4 +1,5 @@
 import { forkLabelSchema } from "./forkLabels.ts"
+import { mcpSchema } from "./mcpSchema.ts"
 
 // The schema, created whole. Nobody has run an earlier version of this software, so there
 // is no chain of migrations to replay: while that holds, a schema change edits this file and
@@ -2421,19 +2422,19 @@ export const baseline: ReadonlyArray<string> = [
   // itself; flag 1 shows it there, 0 at its own place; no bin item or changeset.
   `CREATE TRIGGER fork_overrides_move BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'move'
     AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL
-      OR NEW.slot_id IS NOT NEW.target_id OR NEW.value_id IS NEW.target_id
+      OR NEW.slot_id IS NOT NEW.target_id
       OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.target_id)
       OR NOT EXISTS (SELECT 1 FROM slots x WHERE x.id = NEW.target_id AND x.chat_id = NEW.chat_id)
       OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id
         AND a.chat_id = NEW.chat_id))
       OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL))
-    BEGIN ${raise("a move shows a slot of its chat after another of its slots, or at its own place")}; END`,
+    BEGIN ${raise("a move shows a slot of its chat after one of its slots, at its own place, or leaves it out")}; END`,
   `CREATE TRIGGER fork_overrides_move_update BEFORE UPDATE OF flag, value_id, bin_item_id, changeset_id ON fork_overrides
     WHEN NEW.kind = 'move' AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL
-      OR NEW.value_id IS NEW.target_id OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL)
+      OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL)
       OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id
         AND a.chat_id = NEW.chat_id)))
-    BEGIN ${raise("a move shows a slot of its chat after another of its slots, or at its own place")}; END`,
+    BEGIN ${raise("a move shows a slot of its chat after one of its slots, at its own place, or leaves it out")}; END`,
   `CREATE TRIGGER fork_overrides_delete_version_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'delete_version'
     AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM versions o JOIN slots s ON s.id = o.slot_id
       WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth))
@@ -2591,5 +2592,6 @@ export const baseline: ReadonlyArray<string> = [
   ...forkLabelSchema,
   ...threadSchema,
   ...shellSummaries,
-  ...lcmStamp
+  ...lcmStamp,
+  ...mcpSchema
 ]

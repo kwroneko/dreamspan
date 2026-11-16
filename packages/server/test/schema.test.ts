@@ -1483,9 +1483,9 @@ describe("inserted messages (spec/MESSAGE-INSERT.md §2.2)", () => {
         value,
         flag
       )
-    const message = /a move shows a slot of its chat after another of its slots/
+    const message = /a move shows a slot of its chat after one of its slots/
     expect(() => moveRow(b.slotId, a.slotId, null, 1)).toThrow(message) // slot_id is the moved slot
-    expect(() => moveRow(b.slotId, b.slotId, b.slotId, 1)).toThrow(message) // never after itself
+    expect(() => moveRow(b.slotId, b.slotId, b.slotId, 0)).toThrow(message) // left out is flag 1
     expect(() => moveRow(b.slotId, b.slotId, elsewhere.slotId, 1)).toThrow(message) // anchor in another chat
     expect(() => moveRow(b.slotId, b.slotId, a.slotId, null)).toThrow(message) // no flag
     expect(() => moveRow(b.slotId, b.slotId, a.slotId, 0)).toThrow(message) // own place names no anchor
@@ -1493,7 +1493,9 @@ describe("inserted messages (spec/MESSAGE-INSERT.md §2.2)", () => {
     moveRow(b.slotId, b.slotId, null, 1) // above the first message
     const [row] = all<{ id: string }>("SELECT id FROM fork_overrides WHERE kind = 'move' AND target_id = ?", b.slotId)
     run("UPDATE fork_overrides SET value_id = ?, seq = ? WHERE id = ?", a.slotId, ++n, row!.id)
-    expect(() => run("UPDATE fork_overrides SET value_id = ? WHERE id = ?", b.slotId, row!.id)).toThrow(message)
+    // Naming itself leaves the slot out of the fork (a fork made where its parent showed it later).
+    run("UPDATE fork_overrides SET value_id = ?, seq = ? WHERE id = ?", b.slotId, ++n, row!.id)
+    expect(() => run("UPDATE fork_overrides SET value_id = ? WHERE id = ?", elsewhere.slotId, row!.id)).toThrow(message)
     expect(() => run("UPDATE fork_overrides SET flag = 0 WHERE id = ?", row!.id)).toThrow(message)
     run("UPDATE fork_overrides SET flag = 0, value_id = NULL, seq = ? WHERE id = ?", ++n, row!.id)
   })

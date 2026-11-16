@@ -494,6 +494,78 @@
     },
     {
       "type": "index",
+      "name": "mcp_calls_call",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE INDEX mcp_calls_call ON mcp_calls(rollout_id, tool_call_id) WHERE rollout_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "mcp_calls_chat",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE INDEX mcp_calls_chat ON mcp_calls(chat_id) WHERE chat_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "mcp_calls_connection",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE INDEX mcp_calls_connection ON mcp_calls(connection_id, started_at DESC, id)"
+    },
+    {
+      "type": "index",
+      "name": "mcp_calls_live",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE INDEX mcp_calls_live ON mcp_calls(status) WHERE status = 'running'"
+    },
+    {
+      "type": "index",
+      "name": "mcp_calls_owner",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE INDEX mcp_calls_owner ON mcp_calls(owner_user_id, started_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "mcp_connection_shares_user",
+      "tbl_name": "mcp_connection_shares",
+      "sql": "CREATE INDEX mcp_connection_shares_user ON mcp_connection_shares(user_id)"
+    },
+    {
+      "type": "index",
+      "name": "mcp_connections_credential",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE INDEX mcp_connections_credential ON mcp_connections(credential_id) WHERE credential_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "mcp_connections_key",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE UNIQUE INDEX mcp_connections_key ON mcp_connections(owner_user_id, key) WHERE purged_at IS NULL"
+    },
+    {
+      "type": "index",
+      "name": "mcp_connections_owner",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE INDEX mcp_connections_owner ON mcp_connections(owner_user_id)"
+    },
+    {
+      "type": "index",
+      "name": "mcp_connections_shared",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE INDEX mcp_connections_shared ON mcp_connections(share_scope) WHERE share_scope <> 'private' AND deleted_at IS NULL"
+    },
+    {
+      "type": "index",
+      "name": "mcp_uses_offered_key",
+      "tbl_name": "mcp_uses",
+      "sql": "CREATE UNIQUE INDEX mcp_uses_offered_key ON mcp_uses(user_id, offered_key)"
+    },
+    {
+      "type": "index",
+      "name": "mcp_uses_user",
+      "tbl_name": "mcp_uses",
+      "sql": "CREATE INDEX mcp_uses_user ON mcp_uses(user_id)"
+    },
+    {
+      "type": "index",
       "name": "media_refs_owner",
       "tbl_name": "media_refs",
       "sql": "CREATE INDEX media_refs_owner ON media_refs(owner_user_id)"
@@ -1382,6 +1454,30 @@
     },
     {
       "type": "table",
+      "name": "mcp_calls",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE TABLE mcp_calls ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL REFERENCES mcp_connections(id), connection_revision INTEGER NOT NULL CHECK (connection_revision >= 0), method TEXT NOT NULL CHECK (method IN ('initialize', 'tools/list', 'tools/call', 'oauth')), tool TEXT CHECK (tool IS NULL OR length(tool) <= 128), purpose TEXT NOT NULL CHECK (purpose IN ('story', 'workshop', 'check')), chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL, tool_call_id TEXT, attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1), status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'error', 'failed', 'timeout', 'cancelled', 'interrupted')), started_at INTEGER NOT NULL, ended_at INTEGER, sent_bytes INTEGER CHECK (sent_bytes IS NULL OR sent_bytes >= 0), received_bytes INTEGER CHECK (received_bytes IS NULL OR received_bytes >= 0), error TEXT CHECK (error IS NULL OR length(error) <= 1000), CHECK ((status = 'running') = (ended_at IS NULL)), CHECK ((method = 'tools/call') = (tool IS NOT NULL)), CHECK (method = 'tools/call' OR (rollout_id IS NULL AND tool_call_id IS NULL)) ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "mcp_connection_shares",
+      "tbl_name": "mcp_connection_shares",
+      "sql": "CREATE TABLE mcp_connection_shares ( connection_id TEXT NOT NULL REFERENCES mcp_connections(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL, PRIMARY KEY (connection_id, user_id) ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "mcp_connections",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE TABLE mcp_connections ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100), -- The fixed part of the tools' names the model sees, mcp_<key>_<tool>. Never changes. key TEXT NOT NULL CHECK (length(key) BETWEEN 1 AND 24 AND key GLOB '[a-z]*' AND key NOT GLOB '*[^a-z0-9]*'), -- The user's own words for what it's for: the skill index line. about TEXT NOT NULL DEFAULT '' CHECK (length(about) <= 1000), transport TEXT NOT NULL CHECK (transport IN ('streamable-http', 'sse', 'stdio')), url TEXT CHECK (url IS NULL OR length(url) <= 2048), -- stdio: the argv array, no shell. command_json TEXT CHECK (command_json IS NULL OR (json_valid(command_json) AND json_type(command_json) = 'array')), env_enc BLOB, env_names_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(env_names_json) AND json_type(env_names_json) = 'array'), credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL, headers_enc BLOB, header_names_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(header_names_json) AND json_type(header_names_json) = 'array'), headers_origin TEXT, proxy_mode TEXT NOT NULL DEFAULT 'inherit' CHECK (proxy_mode IN ('inherit', 'direct', 'custom')), proxy_url_enc BLOB, timeout_s INTEGER NOT NULL DEFAULT 60 CHECK (timeout_s BETWEEN 5 AND 1800), loading TEXT NOT NULL DEFAULT 'auto' CHECK (loading IN ('auto', 'immediate', 'deferred')), use_instructions INTEGER NOT NULL DEFAULT 1 CHECK (use_instructions IN (0, 1)), share_scope TEXT NOT NULL DEFAULT 'private' CHECK (share_scope IN ('private', 'all', 'chosen')), -- The last listing (§4.1): server info and the tool catalog, with its revision. server_json TEXT CHECK (server_json IS NULL OR (json_valid(server_json) AND json_type(server_json) = 'object')), tools_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(tools_json) AND json_type(tools_json) = 'array'), catalog_revision INTEGER NOT NULL DEFAULT 0 CHECK (catalog_revision >= 0), listed_at INTEGER, check_error TEXT CHECK (check_error IS NULL OR length(check_error) <= 1000), row_version INTEGER NOT NULL DEFAULT 1 CHECK (row_version >= 1), -- Advances on any change to where or how calls are sent; open clients close on it. cache_revision INTEGER NOT NULL DEFAULT 0 CHECK (cache_revision >= 0), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, -- Purged connections stay as tombstones, so the call ledger still names them. purged_at INTEGER, CHECK (purged_at IS NOT NULL OR ((transport = 'stdio') = (command_json IS NOT NULL) AND (transport = 'stdio') = (url IS NULL))), CHECK (transport = 'stdio' OR (env_enc IS NULL AND env_names_json = '[]')), CHECK (transport <> 'stdio' OR (credential_id IS NULL AND headers_enc IS NULL AND proxy_mode = 'inherit')), CHECK ((proxy_mode = 'custom') = (proxy_url_enc IS NOT NULL)), CHECK (purged_at IS NULL OR (url IS NULL AND command_json IS NULL AND env_enc IS NULL AND credential_id IS NULL AND headers_enc IS NULL AND proxy_url_enc IS NULL)) ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "mcp_uses",
+      "tbl_name": "mcp_uses",
+      "sql": "CREATE TABLE mcp_uses ( connection_id TEXT NOT NULL REFERENCES mcp_connections(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, stories INTEGER NOT NULL DEFAULT 0 CHECK (stories IN (0, 1)), workshops INTEGER NOT NULL DEFAULT 0 CHECK (workshops IN (0, 1)), -- { \"<MCP tool name>\": { \"on\": bool } }: the allow list; annotations are never stored here. tools_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(tools_json) AND json_type(tools_json) = 'object'), reviewed_revision INTEGER NOT NULL DEFAULT 0 CHECK (reviewed_revision >= 0), offered_key TEXT NOT NULL CHECK (length(offered_key) BETWEEN 1 AND 26 AND offered_key NOT GLOB '*[^a-z0-9]*'), -- This user's own sign-in with the server (§2.4), bound to \"mcp:<connection>:<user>:oauth\". oauth_enc BLOB, oauth_origin TEXT, oauth_expires_at INTEGER, row_version INTEGER NOT NULL DEFAULT 1 CHECK (row_version >= 1), updated_at INTEGER NOT NULL, CHECK ((oauth_enc IS NULL) = (oauth_origin IS NULL)), CHECK (oauth_expires_at IS NULL OR oauth_enc IS NOT NULL), PRIMARY KEY (connection_id, user_id) ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
       "name": "media_assets",
       "tbl_name": "media_assets",
       "sql": "CREATE TABLE media_assets ( id TEXT PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE, mime TEXT NOT NULL, width INTEGER, height INTEGER, byte_size INTEGER NOT NULL, path TEXT NOT NULL, created_at INTEGER NOT NULL ) STRICT"
@@ -2050,13 +2146,13 @@
       "type": "trigger",
       "name": "fork_overrides_move",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TRIGGER fork_overrides_move BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'move' AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL OR NEW.slot_id IS NOT NEW.target_id OR NEW.value_id IS NEW.target_id OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.target_id) OR NOT EXISTS (SELECT 1 FROM slots x WHERE x.id = NEW.target_id AND x.chat_id = NEW.chat_id) OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id AND a.chat_id = NEW.chat_id)) OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL)) BEGIN SELECT RAISE(ABORT, 'a move shows a slot of its chat after another of its slots, or at its own place'); END"
+      "sql": "CREATE TRIGGER fork_overrides_move BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'move' AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL OR NEW.slot_id IS NOT NEW.target_id OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.target_id) OR NOT EXISTS (SELECT 1 FROM slots x WHERE x.id = NEW.target_id AND x.chat_id = NEW.chat_id) OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id AND a.chat_id = NEW.chat_id)) OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL)) BEGIN SELECT RAISE(ABORT, 'a move shows a slot of its chat after one of its slots, at its own place, or leaves it out'); END"
     },
     {
       "type": "trigger",
       "name": "fork_overrides_move_update",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TRIGGER fork_overrides_move_update BEFORE UPDATE OF flag, value_id, bin_item_id, changeset_id ON fork_overrides WHEN NEW.kind = 'move' AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL OR NEW.value_id IS NEW.target_id OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL) OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id AND a.chat_id = NEW.chat_id))) BEGIN SELECT RAISE(ABORT, 'a move shows a slot of its chat after another of its slots, or at its own place'); END"
+      "sql": "CREATE TRIGGER fork_overrides_move_update BEFORE UPDATE OF flag, value_id, bin_item_id, changeset_id ON fork_overrides WHEN NEW.kind = 'move' AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL) OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id AND a.chat_id = NEW.chat_id))) BEGIN SELECT RAISE(ABORT, 'a move shows a slot of its chat after one of its slots, at its own place, or leaves it out'); END"
     },
     {
       "type": "trigger",
@@ -2639,6 +2735,90 @@
       "name": "llm_requests_stagger_frozen",
       "tbl_name": "llm_requests",
       "sql": "CREATE TRIGGER llm_requests_stagger_frozen BEFORE UPDATE OF cache_stagger_json ON llm_requests WHEN OLD.status <> 'running' AND NEW.cache_stagger_json IS NOT OLD.cache_stagger_json BEGIN SELECT RAISE(ABORT, 'a closed request is a record'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_calls_chat_owner",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE TRIGGER mcp_calls_chat_owner BEFORE INSERT ON mcp_calls WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id) IS NOT NEW.owner_user_id BEGIN SELECT RAISE(ABORT, 'an MCP call is attributed only to its user''s chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_calls_closed_final",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE TRIGGER mcp_calls_closed_final BEFORE UPDATE OF status, ended_at, sent_bytes, received_bytes, error ON mcp_calls WHEN OLD.status <> 'running' BEGIN SELECT RAISE(ABORT, 'a closed MCP call is a record'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_calls_identity",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE TRIGGER mcp_calls_identity BEFORE UPDATE OF id, owner_user_id, connection_id, connection_revision, method, tool, purpose, rollout_id, tool_call_id, attempt, started_at ON mcp_calls WHEN NEW.id IS NOT OLD.id OR NEW.owner_user_id IS NOT OLD.owner_user_id OR NEW.connection_id IS NOT OLD.connection_id OR NEW.connection_revision IS NOT OLD.connection_revision OR NEW.method IS NOT OLD.method OR NEW.tool IS NOT OLD.tool OR NEW.purpose IS NOT OLD.purpose OR NEW.attempt IS NOT OLD.attempt OR NEW.started_at IS NOT OLD.started_at OR NEW.tool_call_id IS NOT OLD.tool_call_id OR (NEW.rollout_id IS NOT OLD.rollout_id AND NEW.rollout_id IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'a call''s identity never changes; its attribution can only be cleared'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_calls_owner",
+      "tbl_name": "mcp_calls",
+      "sql": "CREATE TRIGGER mcp_calls_owner BEFORE INSERT ON mcp_calls WHEN NOT EXISTS (SELECT 1 FROM mcp_uses u WHERE u.connection_id = NEW.connection_id AND u.user_id = NEW.owner_user_id) AND (SELECT owner_user_id FROM mcp_connections WHERE id = NEW.connection_id) IS NOT NEW.owner_user_id BEGIN SELECT RAISE(ABORT, 'an MCP call needs a connection its user may use'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_connection_shares_not_owner",
+      "tbl_name": "mcp_connection_shares",
+      "sql": "CREATE TRIGGER mcp_connection_shares_not_owner BEFORE INSERT ON mcp_connection_shares WHEN (SELECT owner_user_id FROM mcp_connections WHERE id = NEW.connection_id) = NEW.user_id BEGIN SELECT RAISE(ABORT, 'a connection is not shared with its owner'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_connections_credential_owner",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE TRIGGER mcp_connections_credential_owner BEFORE INSERT ON mcp_connections WHEN NEW.credential_id IS NOT NULL AND (SELECT owner_user_id FROM credentials WHERE id = NEW.credential_id) IS NOT NEW.owner_user_id BEGIN SELECT RAISE(ABORT, 'an MCP connection can only use its owner''s credentials'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_connections_credential_owner_update",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE TRIGGER mcp_connections_credential_owner_update BEFORE UPDATE OF credential_id ON mcp_connections WHEN NEW.credential_id IS NOT NULL AND (SELECT owner_user_id FROM credentials WHERE id = NEW.credential_id) IS NOT NEW.owner_user_id BEGIN SELECT RAISE(ABORT, 'an MCP connection can only use its owner''s credentials'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_connections_identity",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE TRIGGER mcp_connections_identity BEFORE UPDATE OF id, owner_user_id, key, created_at ON mcp_connections WHEN NEW.id IS NOT OLD.id OR NEW.owner_user_id IS NOT OLD.owner_user_id OR NEW.key IS NOT OLD.key OR NEW.created_at IS NOT OLD.created_at BEGIN SELECT RAISE(ABORT, 'an MCP connection never changes identity, owner or key'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_connections_share_admin",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE TRIGGER mcp_connections_share_admin BEFORE UPDATE OF share_scope ON mcp_connections WHEN NEW.share_scope <> 'private' AND (SELECT role FROM users WHERE id = NEW.owner_user_id) IS NOT 'admin' BEGIN SELECT RAISE(ABORT, 'only an admin can share an MCP connection'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_connections_share_admin_insert",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE TRIGGER mcp_connections_share_admin_insert BEFORE INSERT ON mcp_connections WHEN NEW.share_scope <> 'private' AND (SELECT role FROM users WHERE id = NEW.owner_user_id) IS NOT 'admin' BEGIN SELECT RAISE(ABORT, 'only an admin can share an MCP connection'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_connections_stdio_admin",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE TRIGGER mcp_connections_stdio_admin BEFORE INSERT ON mcp_connections WHEN NEW.transport = 'stdio' AND (SELECT role FROM users WHERE id = NEW.owner_user_id) IS NOT 'admin' BEGIN SELECT RAISE(ABORT, 'only an admin can add a local program'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_connections_stdio_admin_update",
+      "tbl_name": "mcp_connections",
+      "sql": "CREATE TRIGGER mcp_connections_stdio_admin_update BEFORE UPDATE OF transport, command_json, env_enc ON mcp_connections WHEN NEW.transport = 'stdio' AND NEW.purged_at IS NULL AND (SELECT role FROM users WHERE id = NEW.owner_user_id) IS NOT 'admin' BEGIN SELECT RAISE(ABORT, 'only an admin can add a local program'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_uses_access",
+      "tbl_name": "mcp_uses",
+      "sql": "CREATE TRIGGER mcp_uses_access BEFORE INSERT ON mcp_uses WHEN NOT EXISTS ( SELECT 1 FROM mcp_connections m WHERE m.id = NEW.connection_id AND m.purged_at IS NULL AND ( m.owner_user_id = NEW.user_id OR m.share_scope = 'all' OR (m.share_scope = 'chosen' AND EXISTS (SELECT 1 FROM mcp_connection_shares s WHERE s.connection_id = m.id AND s.user_id = NEW.user_id)))) BEGIN SELECT RAISE(ABORT, 'an MCP use needs a connection its user may use'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "mcp_uses_identity",
+      "tbl_name": "mcp_uses",
+      "sql": "CREATE TRIGGER mcp_uses_identity BEFORE UPDATE OF connection_id, user_id, offered_key ON mcp_uses WHEN NEW.connection_id IS NOT OLD.connection_id OR NEW.user_id IS NOT OLD.user_id OR NEW.offered_key IS NOT OLD.offered_key BEGIN SELECT RAISE(ABORT, 'an MCP use never changes identity or key'); END"
     },
     {
       "type": "trigger",

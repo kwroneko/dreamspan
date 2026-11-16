@@ -9,6 +9,7 @@ import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { effectRef } from "./rolloutEffects.ts"
 import { nextSeq, insertFork, eventApplies } from "./forkState.ts"
+import { placeAsShown } from "./forkOrder.ts"
 import type { ForkRow } from "./rows.ts"
 import type { StorageError, WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
@@ -82,6 +83,7 @@ export const makeRolloutWriteHandlers = (addSelectedVersion: AddSelectedVersion)
                 tipSlotId: source.slot_id,
                 at: Date.now()
               })
+              yield* placeAsShown(sql, current.chat_id, current, source.slot_id, branch)
               targetFork = branch.id as ForkId
               yield* sql`UPDATE chats SET current_fork_id = ${targetFork} WHERE id = ${current.chat_id}`
             }

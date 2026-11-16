@@ -1,6 +1,6 @@
 # MCP servers: tools from other programs, in stories and workshops
 
-**Status**: Proposed, 2026-11-16 (job `mcpspec`). Spec only; nothing here is built. Everything below is **[P]** unless it cites a **[D]**. The one Decided item is the owner's requirement, recorded in DESIGN §7.8:
+**Status**: Proposed, 2026-11-16 (job `mcpspec`). M0 (the baseline DDL of §12, without `mcp_calls.effect`) is built (job `finalwipe1`, ARCHITECTURE §3.7 "MCP storage"); nothing else here is. Everything below is **[P]** unless it cites a **[D]**. The one Decided item is the owner's requirement, recorded in DESIGN §7.8:
 
 - **[D]** (owner, 2026-11-16, relayed by the coordinator) MCP support is essential, for both agentic RP (story chats with tools, ARCHITECTURE §16 "Agent rollouts") and the workshop, and **each MCP connection can be enabled separately for each**.
 - **[D]** (owner, 2026-11-16, corrections to the first draft, relayed by the coordinator):

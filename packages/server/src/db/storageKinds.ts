@@ -25,13 +25,26 @@ export const storageKinds = makeRegistry<StorageKind>([
       "plugin.disable",
       "plugin.commit",
       "plugin.enable",
-      "reply.generate"
+      "reply.generate",
+      // A call to an MCP server in a workshop (spec/MCP.md §8.2): target kind `mcp_connection`.
+      "mcp.call"
     ]
   },
   { id: "changeset_groups.origin", values: ["user", "agent"] },
   {
     id: "bin_items.kind",
-    values: ["chat", "message", "branch", "version", "entity", "connection", "card_asset", "threads"]
+    values: [
+      "chat",
+      "message",
+      "branch",
+      "version",
+      "entity",
+      "connection",
+      "card_asset",
+      "threads",
+      // An MCP server connection (spec/MCP.md §12).
+      "mcp_connection"
+    ]
   },
   {
     id: "drafts.target_kind",

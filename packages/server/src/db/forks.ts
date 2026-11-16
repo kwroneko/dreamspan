@@ -130,8 +130,9 @@ export const onPath = (sql: SqlClient.SqlClient, chatId: string, tipSlotId: stri
 
 /**
  * Whether fork `fork` shows `slotId`: it's on its display path (displayPath.ts). Only an
- * inserted slot can be shown off the structural path, and a structural one is shown iff it's
- * on it, so for any other slot this is `onPath`, at its cost.
+ * inserted slot or one the fork moves (or leaves out) can differ from the structural path, and
+ * any other slot is shown iff it's on it, so for those this is `onPath`, at its cost, after one
+ * probe of `fork_steps` for the slot's move.
  */
 export const onForkPath = (
   sql: SqlClient.SqlClient,
@@ -142,12 +143,23 @@ export const onForkPath = (
   Effect.gen(function* () {
     const place = yield* slotPlace(sql, chatId, slotId)
     if (place === null) return false
-    if (!place.inserted) return yield* onPath(sql, chatId, fork.tip_slot_id, slotId)
+    if (!place.inserted) {
+      const [moved] = yield* sql<{ flag: number | null }>`
+        SELECT (SELECT o.flag FROM fork_overrides o
+          WHERE o.id = ${sql.literal(effectiveOverrideSql("move", "f.id", "x.id"))}) AS flag
+        FROM forks f CROSS JOIN slots x WHERE f.id = ${fork.id} AND x.id = ${slotId}`
+      if (moved?.flag !== 1) return yield* onPath(sql, chatId, fork.tip_slot_id, slotId)
+    }
     return onDisplayPath(yield* pathPieces(sql, chatId, fork.id, fork.tip_slot_id), place)
   })
 
-/** SQL: whether fork tip `t` (left-joined) can reach slot `x` on a display path: an inserted slot can sit below the tip. */
-const reaches = (t: string, x: string) => `(${x}.inserted = 1 OR ${t}.depth >= ${x}.depth)`
+/**
+ * SQL: whether fork tip `t` (left-joined) can reach slot `x` on a display path: an inserted slot
+ * can sit below the tip, and so can one some fork moved (a fork made above where its parent had it).
+ */
+const reaches = (t: string, x: string) =>
+  `(${x}.inserted = 1 OR ${t}.depth >= ${x}.depth
+    OR EXISTS (SELECT 1 FROM fork_steps mv WHERE mv.kind = 'move' AND mv.target_id = ${x}.id))`
 
 /**
  * The live fork whose path holds `slotId` that was current most recently, preferring

@@ -1,7 +1,8 @@
 // Moving messages up and down in one branch (owner, 2026-11-16), through the real writer: the
 // fork shows the new order, reads (GetPath) follow it, forks made before or beside it keep
-// theirs, forks made after inherit it, Undo restores it, and a random sequence of moves,
-// deletions and insertions matches an array oracle at a few hundred messages.
+// theirs, forks made after inherit it, Undo restores it, a fork made anywhere follows its
+// parent's order there, and a random sequence of moves, deletions, insertions, appends and
+// forks at any message matches an array oracle at a few hundred messages.
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, it } from "@effect/vitest"
 import { type ChatId, type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
@@ -83,6 +84,26 @@ const setup = (dataDir: string) =>
         }),
         (made) => made.slotId
       )
+    /** Sends below `parent`, which needn't be the tip: a fork is made there first (CreateFork). */
+    const branch = (forkId: ForkId, parent: SlotId, content: string) =>
+      Effect.map(
+        writer.AppendMessage({
+          userId,
+          chatId,
+          forkId,
+          parentSlotId: parent,
+          branch: true,
+          version: said(content, mira),
+          commitDraft: null
+        }),
+        (sent) => ({ slotId: sent.slotId, forkId: sent.forkId as ForkId })
+      )
+    const tip = (forkId: ForkId) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const [row] = yield* sql<{ tip: SlotId | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${forkId}`
+        return row!.tip
+      }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })))
     const remove = (forkId: ForkId, slotId: SlotId) =>
       writer.DeleteMessages({ userId, forkId, slotIds: [slotId] as never })
 
@@ -124,6 +145,8 @@ const setup = (dataDir: string) =>
       undo,
       fork,
       insert,
+      branch,
+      tip,
       remove,
       display,
       order,
@@ -215,7 +238,118 @@ describe("moving messages", () => {
   )
 
   it.live(
-    "matches an array oracle over random moves, deletions, insertions and forks at hundreds of messages",
+    "a branch made above a message its parent moved down follows the parent's order there",
+    () =>
+      run((dataDir) =>
+        Effect.gen(function* () {
+          const t = yield* setup(dataDir)
+          const a = yield* t.append(t.main, null, "a")
+          const b = yield* t.append(t.main, a, "b")
+          const c = yield* t.append(t.main, b, "c")
+          const d = yield* t.append(t.main, c, "d")
+          const e = yield* t.append(t.main, d, "e")
+          yield* t.move(t.main, b, "down")
+          yield* t.move(t.main, b, "down")
+          assert.deepStrictEqual(yield* t.order(t.main), [a, c, d, b, e])
+          // Above where b now is: b isn't there yet.
+          const above = yield* t.fork(t.main, c)
+          assert.deepStrictEqual(yield* t.order(above), [a, c])
+          const x = yield* t.append(above, c, "x")
+          assert.deepStrictEqual(yield* t.path(above), [a, c, x])
+          // At the moved message: what the parent showed above it comes along.
+          const at = yield* t.fork(t.main, b)
+          assert.deepStrictEqual(yield* t.order(at), [a, c, d, b])
+          const y = yield* t.append(at, b, "y")
+          assert.deepStrictEqual(yield* t.path(at), [a, c, d, b, y])
+          assert.deepStrictEqual(yield* t.order(yield* t.fork(t.main, a)), [a])
+          assert.deepStrictEqual(yield* t.order(yield* t.fork(t.main, null)), [])
+          // Sending below a message that isn't the tip makes the branch the same way.
+          const sent = yield* t.branch(t.main, d, "z")
+          assert.deepStrictEqual(yield* t.path(sent.forkId), [a, c, d, sent.slotId])
+          // A later move on either side never reaches the other.
+          yield* t.move(t.main, b, "up")
+          assert.deepStrictEqual(yield* t.order(t.main), [a, c, b, d, e])
+          assert.deepStrictEqual(yield* t.order(above), [a, c, x])
+          assert.deepStrictEqual(yield* t.order(at), [a, c, d, b, y])
+          yield* t.move(at, d, "up")
+          assert.deepStrictEqual(yield* t.order(at), [a, d, c, b, y])
+          assert.deepStrictEqual(yield* t.order(t.main), [a, c, b, d, e])
+          // A branch of a branch, at a message it shows off its own line.
+          const nested = yield* t.fork(at, c)
+          assert.deepStrictEqual(yield* t.path(nested), [a, d, c])
+          const w = yield* t.append(nested, c, "w")
+          assert.deepStrictEqual(yield* t.path(nested), [a, d, c, w])
+          assert.deepStrictEqual(yield* t.order(at), [a, d, c, b, y])
+        })
+      ),
+    60_000
+  )
+
+  it.live(
+    "a branch made below where its parent moved a message up keeps it, and one made above leaves it out",
+    () =>
+      run((dataDir) =>
+        Effect.gen(function* () {
+          const t = yield* setup(dataDir)
+          const a = yield* t.append(t.main, null, "a")
+          const b = yield* t.append(t.main, a, "b")
+          const c = yield* t.append(t.main, b, "c")
+          const d = yield* t.append(t.main, c, "d")
+          yield* t.move(t.main, d, "up")
+          yield* t.move(t.main, d, "up")
+          assert.deepStrictEqual(yield* t.order(t.main), [a, d, b, c])
+          const below = yield* t.fork(t.main, b)
+          assert.deepStrictEqual(yield* t.path(below), [a, d, b])
+          const z = yield* t.append(below, b, "z")
+          assert.deepStrictEqual(yield* t.path(below), [a, d, b, z])
+          // d is shown off the branch's own line: it can be moved, forked at and deleted there.
+          const moved = yield* t.move(below, d, "down")
+          assert.deepStrictEqual(yield* t.order(below), [a, b, d, z])
+          yield* t.undo(below, moved.undo)
+          assert.deepStrictEqual(yield* t.order(below), [a, d, b, z])
+          assert.deepStrictEqual(yield* t.order(yield* t.fork(below, d)), [a, d])
+          yield* t.remove(below, d)
+          assert.deepStrictEqual(yield* t.path(below), [a, b, z])
+          assert.deepStrictEqual(yield* t.path(t.main), [a, d, b, c])
+          assert.deepStrictEqual(yield* t.order(yield* t.fork(t.main, a)), [a])
+          // Moved to the top: a branch at it holds only it.
+          yield* t.move(t.main, d, "up")
+          assert.deepStrictEqual(yield* t.order(t.main), [d, a, b, c])
+          const top = yield* t.fork(t.main, d)
+          assert.deepStrictEqual(yield* t.order(top), [d])
+          const v = yield* t.append(top, d, "v")
+          assert.deepStrictEqual(yield* t.path(top), [d, v])
+          assert.deepStrictEqual(yield* t.order(yield* t.fork(t.main, null)), [])
+          assert.deepStrictEqual(yield* t.order(yield* t.fork(t.main, a)), [d, a])
+        })
+      ),
+    60_000
+  )
+
+  it.live(
+    "deleting the last message keeps what was moved after it in place",
+    () =>
+      run((dataDir) =>
+        Effect.gen(function* () {
+          const t = yield* setup(dataDir)
+          const a = yield* t.append(t.main, null, "a")
+          const b = yield* t.append(t.main, a, "b")
+          const c = yield* t.append(t.main, b, "c")
+          const d = yield* t.append(t.main, c, "d")
+          yield* t.move(t.main, b, "down")
+          yield* t.move(t.main, b, "down")
+          assert.deepStrictEqual(yield* t.order(t.main), [a, c, d, b])
+          yield* t.remove(t.main, d)
+          assert.deepStrictEqual(yield* t.path(t.main), [a, c, b])
+          const e = yield* t.append(t.main, yield* t.tip(t.main), "e")
+          assert.deepStrictEqual(yield* t.path(t.main), [a, c, b, e])
+        })
+      ),
+    60_000
+  )
+
+  it.live(
+    "matches an array oracle over random moves, deletions, insertions, appends and forks anywhere at hundreds of messages",
     () =>
       run((dataDir) =>
         Effect.gen(function* () {
@@ -246,35 +380,39 @@ describe("moving messages", () => {
             forks.set(made, { order: [...ids], deleted: new Set() })
             forkIds.push(made)
           }
-          for (let step = 0; step < 300; step++) {
+          for (let step = 0; step < 400; step++) {
             const forkId = forkIds[random(forkIds.length)]!
             const state = forks.get(forkId)!
             const visible = state.order.filter((id) => !state.deleted.has(id))
             const roll = random(20)
             last = `fork ${forkIds.indexOf(forkId)}: `
-            // A fork at the tip while the tip is shown last: it shows exactly what its parent shows.
-            if (
-              roll === 0 &&
-              forkIds.length < 6 &&
-              state.order.at(-1) === ids.at(-1) &&
-              !state.deleted.has(ids.at(-1)!)
-            ) {
-              const made = yield* t.fork(forkId, ids.at(-1)!)
-              forks.set(made, { order: [...state.order], deleted: new Set(state.deleted) })
+            if (roll <= 1 && forkIds.length < 12) {
+              // A fork at any message shown (rarely before the first): it shows exactly what its
+              // parent shows up to there.
+              const at = random(40) === 0 || visible.length === 0 ? null : visible[random(visible.length)]!
+              const made = yield* t.fork(forkId, at)
+              const order = at === null ? [] : state.order.slice(0, state.order.indexOf(at) + 1)
+              forks.set(made, { order, deleted: new Set(order.filter((id) => state.deleted.has(id))) })
               forkIds.push(made)
-              last += "fork"
-            } else if (roll === 1 && visible.length > 10) {
-              const victim = visible[random(visible.length)]!
+              last += `fork at ${label(at ?? undefined)}`
+            } else if (roll === 2 && visible.length > 10) {
+              const victim = random(4) === 0 ? visible.at(-1)! : visible[random(visible.length)]!
               yield* t.remove(forkId, victim)
               state.deleted.add(victim)
               last += `delete ${label(victim)}`
-            } else if (roll === 2) {
+            } else if (roll === 3 && visible.length > 0) {
               const anchor = visible[random(visible.length)]!
               const made = yield* t.insert(forkId, anchor, `x${step}`)
               names.set(made, `x${step}`)
               last += `insert x${step} below ${label(anchor)}`
               state.order.splice(state.order.indexOf(anchor) + 1, 0, made)
-            } else {
+            } else if (roll === 4) {
+              // Sent in the fork: below its tip, shown last.
+              const made = yield* t.append(forkId, yield* t.tip(forkId), `n${step}`)
+              names.set(made, `n${step}`)
+              last += `append n${step}`
+              state.order.push(made)
+            } else if (visible.length > 0) {
               const index = random(visible.length)
               const slot = visible[index]!
               const direction = random(2) === 0 ? "up" : "down"
@@ -286,7 +424,7 @@ describe("moving messages", () => {
                 continue
               }
               assert.isTrue(Exit.isSuccess(exit), `moved ${direction}`)
-              if ((roll === 3 || roll === 4) && Exit.isSuccess(exit)) {
+              if ((roll === 5 || roll === 6) && Exit.isSuccess(exit)) {
                 // Undone at once: the order is back as it was.
                 yield* t.undo(forkId, exit.value.undo)
                 last += " undone"
@@ -297,10 +435,12 @@ describe("moving messages", () => {
               }
             }
             log.push(last)
+            // What each fork shows (a deleted last message can leave its line, so deleted ones aren't compared).
             for (const [id, expected] of forks) {
-              const actual = yield* t.order(id)
-              const at = actual.findIndex((slot, i) => slot !== expected.order[i])
-              if (at >= 0 || actual.length !== expected.order.length)
+              const actual = (yield* t.display(id)).filter((slot) => !slot.deleted).map((slot) => slot.id)
+              const shown = expected.order.filter((slot) => !expected.deleted.has(slot))
+              const at = actual.findIndex((slot, i) => slot !== shown[i])
+              if (at >= 0 || actual.length !== shown.length)
                 assert.fail(
                   `moves ${(yield* t.moves(id)).map((m) => `${label(m.id)}>${label(m.anchorId ?? undefined)}@${m.seq}`).join(" ")}; ` +
                     `step ${step} (${log.slice(-4).join("; ")}), fork ${forkIds.indexOf(id)}, from ${at}: ` +
@@ -308,7 +448,7 @@ describe("moving messages", () => {
                       .slice(Math.max(0, at - 3), at + 4)
                       .map(label)
                       .join(" ")} instead of ` +
-                    `${expected.order
+                    `${shown
                       .slice(Math.max(0, at - 3), at + 4)
                       .map(label)
                       .join(" ")}`

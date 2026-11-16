@@ -14,9 +14,12 @@
 // it names (`value_id`, its anchor; null: above the first message), wherever that slot is
 // shown, instead of at M's own place. Several moved after one anchor go newest first by seq
 // (the chat's state seq, which only grows), each followed by the slots moved after it, so
-// "show M after A" always puts M directly after A. A move whose slot or anchor the fork
-// doesn't show (or a cycle of them) leaves the slot at its own place. A moved slot is a
-// `moved` piece; what was inserted below it stays where it was.
+// "show M after A" always puts M directly after A. A move applies wherever its anchor is
+// shown, even when M isn't on the fork's structural path (a fork made below where its parent
+// moved M up); one whose anchor the fork doesn't show (or a cycle of them) leaves the slot at its
+// own place, if it has one. A row naming M itself leaves M out of the fork (a fork made above
+// where its parent moved M down: forkOrder.ts). A moved slot is a `moved` piece; what was
+// inserted below it stays where it was.
 import type { SqlClient } from "effect/sql"
 import { Effect } from "effect"
 import { pathSegments } from "./pathSegments.ts"
@@ -68,6 +71,11 @@ export interface Moved {
   readonly anchorChainId: string | null
   readonly anchorDepth: number | null
   readonly seq: number
+  /**
+   * Left out: the fork doesn't show the slot at all (a row naming the slot as its own anchor).
+   * A fork made where its parent showed the slot further down writes it (`placeAsShown`).
+   */
+  readonly out: boolean
 }
 
 /** What a fork changes about its display path: its placed insertions and its moves. */
@@ -177,7 +185,8 @@ export const placedMoves = (sql: SqlClient.SqlClient, chatId: string, forkId: st
         anchorId: row.anchor_id,
         anchorChainId: row.anchor_chain_id,
         anchorDepth: row.anchor_depth,
-        seq: row.seq
+        seq: row.seq,
+        out: row.anchor_id === row.id
       }))
   )
 
@@ -201,39 +210,94 @@ export const rearranges = (sql: SqlClient.SqlClient, chatId: string, forkId: str
 const isSingle = (piece: PathPiece): piece is InsertedPiece | MovedPiece => piece.kind !== "run"
 
 /**
- * The pieces with the moves applied (the header): each move whose slot and anchor are shown
- * (an anchor that's moved itself must be applied too) takes its slot out of its own place and
- * shows it directly after its anchor, newest first among those after one anchor, each followed
- * by the slots moved after it.
+ * The pieces with the moves applied (the header). A move applies when its anchor is shown (null:
+ * the top; an anchor that's moved itself is shown where its own move puts it, else at its own
+ * place), whether or not the slot is on the structural path, so a fork made where its parent
+ * showed a slot moved up from below shows it too. An applied slot leaves its own place and shows
+ * directly after its anchor, newest first among those after one anchor, each followed by the
+ * slots moved after it. A move that doesn't apply leaves its slot at its own place, if any; a
+ * cycle of anchors applies none of its moves; a left-out slot (`out`) isn't shown at all. The
+ * cost is the moves and the pieces, not the path.
  */
 const applyMoves = (pieces: ReadonlyArray<PathPiece>, moves: ReadonlyArray<Moved>): ReadonlyArray<PathPiece> => {
   if (moves.length === 0) return pieces
-  const shown = new Map<string, Moved>()
-  for (const m of moves) if (onDisplayPath(pieces, m)) shown.set(m.id, m)
-  // Which apply: the anchor is null or shown, and a moved anchor applies itself; a cycle doesn't.
-  const applies = new Map<string, boolean>()
-  const resolve = (m: Moved, seen: Set<string>): boolean => {
-    const known = applies.get(m.id)
-    if (known !== undefined) return known
-    if (seen.has(m.id)) return false
-    seen.add(m.id)
-    let ok: boolean
-    if (m.anchorId === null) ok = true
+  const byId = new Map<string, Moved>()
+  for (const m of moves) byId.set(m.id, m)
+  // Which slots the pieces hold (before the moves): inserted ones by id, runs by chain and depth.
+  const singles = new Set<string>()
+  const runsOf = new Map<string, Array<RunPiece>>()
+  for (const piece of pieces)
+    if (piece.kind !== "run") singles.add(piece.slotId)
     else {
-      const anchor = shown.get(m.anchorId)
-      ok =
-        anchor !== undefined
-          ? resolve(anchor, seen)
-          : m.anchorChainId !== null &&
-            m.anchorDepth !== null &&
-            onDisplayPath(pieces, { id: m.anchorId, chainId: m.anchorChainId, depth: m.anchorDepth })
+      const list = runsOf.get(piece.chainId)
+      if (list === undefined) runsOf.set(piece.chainId, [piece])
+      else list.push(piece)
     }
-    applies.set(m.id, ok)
-    return ok
+  const held = (id: string, chainId: string | null, depth: number | null) =>
+    singles.has(id) ||
+    (chainId !== null &&
+      depth !== null &&
+      (runsOf.get(chainId)?.some((run) => depth >= run.lo && depth <= run.hi) ?? false))
+  // Anchor cycles (each move names one anchor): their moves never apply.
+  const cyclic = new Set<string>()
+  const state = new Map<string, 1 | 2>()
+  for (const start of moves) {
+    if (state.has(start.id)) continue
+    const walk: Array<string> = []
+    let at: Moved | undefined = start
+    while (at !== undefined && !state.has(at.id)) {
+      state.set(at.id, 1)
+      walk.push(at.id)
+      at = at.out || at.anchorId === null ? undefined : byId.get(at.anchorId)
+    }
+    if (at !== undefined && state.get(at.id) === 1) {
+      // The walk came back to itself: from `at` on, it's a cycle.
+      for (let i = walk.indexOf(at.id); i < walk.length; i++) cyclic.add(walk[i]!)
+    }
+    for (const id of walk) state.set(id, 2)
   }
-  const applied = [...shown.values()].filter((m) => resolve(m, new Set()))
-  if (applied.length === 0) return pieces
+  // Whether each move applies, iteratively along its anchors (which, outside cycles, end).
+  const applies = new Map<string, boolean>()
+  const shownAt = (id: string, chainId: string | null, depth: number | null): boolean | undefined => {
+    const m = byId.get(id)
+    if (m === undefined) return held(id, chainId, depth)
+    if (m.out) return false
+    const own = applies.get(m.id)
+    if (own === undefined) return undefined
+    return own || held(m.id, m.chainId, m.depth)
+  }
+  for (const start of moves) {
+    const stack: Array<Moved> = [start]
+    while (stack.length > 0) {
+      const m = stack.at(-1)!
+      if (applies.has(m.id)) {
+        stack.pop()
+        continue
+      }
+      if (m.out || cyclic.has(m.id)) {
+        applies.set(m.id, false)
+        stack.pop()
+        continue
+      }
+      if (m.anchorId === null) {
+        applies.set(m.id, true)
+        stack.pop()
+        continue
+      }
+      const anchor = shownAt(m.anchorId, m.anchorChainId, m.anchorDepth)
+      if (anchor === undefined) {
+        stack.push(byId.get(m.anchorId)!)
+        continue
+      }
+      applies.set(m.id, anchor)
+      stack.pop()
+    }
+  }
+  const applied = moves.filter((m) => applies.get(m.id) === true)
+  const outs = moves.filter((m) => m.out && held(m.id, m.chainId, m.depth))
+  if (applied.length === 0 && outs.length === 0) return pieces
   const movedIds = new Set(applied.map((m) => m.id))
+  const removedIds = new Set([...movedIds, ...outs.map((m) => m.id)])
   const children = new Map<string | null, Array<Moved>>()
   for (const m of applied) {
     const list = children.get(m.anchorId)
@@ -243,25 +307,30 @@ const applyMoves = (pieces: ReadonlyArray<PathPiece>, moves: ReadonlyArray<Moved
   for (const list of children.values()) list.sort((a, b) => b.seq - a.seq || (a.id < b.id ? 1 : -1))
   // Structural anchors in runs, by chain and depth: where a run is split to emit a gap.
   const runAnchors = new Map<string, string>()
-  for (const m of applied)
-    if (m.anchorId !== null && !movedIds.has(m.anchorId) && m.anchorChainId !== null && m.anchorDepth !== null)
-      runAnchors.set(`${m.anchorChainId}:${m.anchorDepth}`, m.anchorId)
-  // Moved slots taken out of runs, by chain and depth, with the slot before them there.
+  // Slots taken out of runs (moved or left out), by chain and depth.
   const removed = new Map<string, Moved>()
-  for (const m of applied) removed.set(`${m.chainId}:${m.depth}`, m)
-  // The depths where runs of each chain split, in order: the cost is the moves, not the path.
-  const special = new Map<string, Array<number>>()
+  // The depths where runs of each chain split: the cost is the moves, not the path.
+  const special = new Map<string, Set<number>>()
   const mark = (chainId: string, depth: number) => {
-    const list = special.get(chainId)
-    if (list === undefined) special.set(chainId, [depth])
-    else if (!list.includes(depth)) list.push(depth)
+    const set = special.get(chainId)
+    if (set === undefined) special.set(chainId, new Set([depth]))
+    else set.add(depth)
   }
-  for (const m of applied) {
+  for (const m of [...applied, ...outs]) {
+    removed.set(`${m.chainId}:${m.depth}`, m)
     mark(m.chainId, m.depth)
-    if (m.anchorId !== null && !movedIds.has(m.anchorId) && m.anchorChainId !== null && m.anchorDepth !== null)
-      mark(m.anchorChainId, m.anchorDepth)
   }
-  for (const list of special.values()) list.sort((a, b) => a - b)
+  for (const m of applied)
+    if (m.anchorId !== null && !removedIds.has(m.anchorId) && m.anchorChainId !== null && m.anchorDepth !== null) {
+      runAnchors.set(`${m.anchorChainId}:${m.anchorDepth}`, m.anchorId)
+      mark(m.anchorChainId, m.anchorDepth)
+    }
+  const sorted = new Map<string, Array<number>>()
+  for (const [chainId, set] of special)
+    sorted.set(
+      chainId,
+      [...set].sort((a, b) => a - b)
+    )
 
   const out: Array<PathPiece> = []
   let position = 0
@@ -291,14 +360,15 @@ const applyMoves = (pieces: ReadonlyArray<PathPiece>, moves: ReadonlyArray<Moved
   gap(null)
   for (const piece of pieces) {
     if (piece.kind !== "run") {
-      if (movedIds.has(piece.slotId)) continue
+      if (removedIds.has(piece.slotId)) continue
       out.push({ ...piece, start: position++ })
       gap(piece.slotId)
       continue
     }
     // Split the run at each removed slot and after each anchor in it.
     let lo = piece.lo
-    for (const depth of (special.get(piece.chainId) ?? []).filter((d) => d >= piece.lo && d <= piece.hi)) {
+    for (const depth of sorted.get(piece.chainId) ?? []) {
+      if (depth < piece.lo || depth > piece.hi) continue
       const key = `${piece.chainId}:${depth}`
       const cut = removed.get(key)
       if (cut !== undefined) {
@@ -654,3 +724,13 @@ export const displayEvents = (sql: SqlClient.SqlClient, chatId: string, pieces: 
     SELECT e.*, w.start + e.slot_depth - w.lo AS position FROM w CROSS JOIN state_events e
       ON e.chat_id = ${chatId} AND e.slot_chain_id = w.chain_id AND e.slot_depth BETWEEN w.lo AND w.hi
   )`
+
+/** Every slot the pieces hold, in order (deleted ones included): one range of `slots_chain` per run. */
+export const displayIds = (sql: SqlClient.SqlClient, pieces: ReadonlyArray<PathPiece>) =>
+  pieces.length === 0
+    ? Effect.succeed([] as ReadonlyArray<string>)
+    : Effect.map(
+        sql<{ id: string }>`${displaySlots(sql, pieces, 0, displayLength(pieces) - 1)}
+          SELECT id FROM display_slots ORDER BY position`,
+        (rows): ReadonlyArray<string> => rows.map((row) => row.id)
+      )
