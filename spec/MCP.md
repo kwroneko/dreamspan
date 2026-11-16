@@ -3,15 +3,19 @@
 **Status**: Proposed, 2026-11-16 (job `mcpspec`). Spec only; nothing here is built. Everything below is **[P]** unless it cites a **[D]**. The one Decided item is the owner's requirement, recorded in DESIGN §7.8:
 
 - **[D]** (owner, 2026-11-16, relayed by the coordinator) MCP support is essential, for both agentic RP (story chats with tools, ARCHITECTURE §16 "Agent rollouts") and the workshop, and **each MCP connection can be enabled separately for each**.
+- **[D]** (owner, 2026-11-16, corrections to the first draft, relayed by the coordinator):
+  1. No read-only restriction for stories and no gating by the server's annotations: annotations are self-declared hints and not trustworthy. **Enabling a connection for Stories or Workshops is the consent**: every allowed tool of an enabled connection is offered there. Per-tool allow lists stay. Annotations are shown only as information. An interrupted call is still never re-run silently.
+  2. Every connection can be turned on or off per chat as an override, in story chats and workshops alike, whatever the account default.
+  3. Build order: remote HTTP first, then sign-in (OAuth), local programs (stdio) last, keeping stdio admin-only behind the startup switch.
 
 Today the app has no MCP client, storage or UI. This spec designs it as deltas from reference-harness `latest` (`src/mcp/`, `src/tools/side-effects.ts`, `src/agent/dynamic-tools.ts`) and from what this app already builds: frozen tool offers, receipts, approvals and grants, effect classes, the data-only result boundary, dynamic tool loading, Resume, the run inspector and credentials.
 
 ## 0. Summary
 
 - **An MCP connection** is a stored server the user added in **Settings → MCP servers**: a remote server over Streamable HTTP (or the older HTTP+SSE), or, for admins only and only where the instance allows it, a local program (stdio). Its secrets use the existing encryption and host binding: a bearer key is an ordinary credential; header and program environment values are encrypted columns bound to the connection, as a provider connection's headers are, and sign-in tokens are encrypted on each user's own use of it.
-- **Enabling is per connection and per use.** Each connection has two account switches, **Stories** and **Workshops**, which are the default; a story chat overrides it in **This chat → Tools**, per branch, and a workshop overrides it in the capability chip, per workshop. Nothing is sent to a server unless that connection is enabled for that use where the request is made (§6).
+- **Enabling is per connection and per use.** Each connection has two account switches, **Stories** and **Workshops**, which are the default; every story chat and every workshop can turn each connection on or off for itself, whatever the default (This chat → Tools in a story, the capability chip in a workshop). Nothing is sent to a server unless that connection is enabled for that use where the request is made (§6).
 - **Tools appear to the model** as `mcp_<key>_<tool>`, from a catalog the app stored when it last listed the server's tools, never fetched while planning a reply. Connections with many tools are deferred behind `tool_search` and a `load_skill` entry per connection on the wires that carry deferred tools (TOOL-LOADING), so they cost nothing until used. Order and bytes are stable across turns.
-- **Effect classes come from the server's annotations**, overridable per tool: `readOnlyHint` makes a tool `read`; anything else is `outside`. Stories offer only `read` tools (open question 1). Workshops ask before every `outside` call unless the user allowed that connection there. A non-read call that may have started is never re-run silently.
+- **Enabling is the consent** ([D]): every allowed tool of a connection enabled for a use is offered there and runs without asking, in stories and workshops alike. The server's annotations (`readOnlyHint` and the rest) are self-declared hints, shown only as information and never used to offer, refuse or ask. Since the app can't know what a call does, every MCP call gets a receipt, and an interrupted one is never re-run silently: Resume asks first (§8).
 - **Results are data**: every result goes through the workshop's `tool_data` boundary in both kinds, is stored complete, and is shown to the model in pages.
 - **Every call is recorded** in a new `mcp_calls` ledger (opened before it is sent, closed after), shown in the run inspector beside the step and in the connection's "Recent calls".
 - **Resources, prompts, sampling and elicitation are later.** The client declares none of them.
@@ -28,11 +32,11 @@ Today the app has no MCP client, storage or UI. This spec designs it as deltas f
 | `tools/list` at connect, frozen for the process; a late connect adds tools for new sessions | A stored catalog per connection with a revision, listed only by Check, by a `tools/list_changed` notice from a connected server, or at the first connect of a process; a run freezes the definitions it offered (§4.1) | Cache-stable definitions, and planning never touches the network |
 | `mcp_<server>_<tool>`, label `MCP: server/tool` | The same shape, `mcp_<key>_<tool>`, with the key fixed at creation and names fitted to 64 characters (§4.2) | OpenAI-compatible name limits; renaming a connection doesn't change what the model sees |
 | Per-agent `mcp_servers` allowlist; session-type `tools` allowlist with globs | Per connection: two uses with account defaults, per-chat (branch) and per-workshop overrides, and a per-tool allow list (§5) | The owner's decision: each connection enabled separately for each use |
-| `mcpToolEffect`: `readOnlyHint` → `redo_safe`; idempotent and not destructive → `repeatable`; else `irreversible`; per-server `effects` override wins | `readOnlyHint` → `read`; everything else → `outside`; a per-tool override (Only reads / May change things) wins (§8.1). `idempotentHint`, `destructiveHint` and `openWorldHint` only shape the approval's wording | This app has no "repeatable" class: Resume never re-runs a non-read call silently (WORKSHOP §1.2), whatever the server promises |
+| `mcpToolEffect`: `readOnlyHint` → `redo_safe`; idempotent and not destructive → `repeatable`; else `irreversible`; per-server `effects` override wins | No class from annotations: every MCP tool has one registered class, `mcp` (§8.1), offered in both kinds once enabled; annotations are only displayed | [D] 2026-11-16: annotations are self-declared and not trustworthy; enabling is the consent |
 | `isError` results thrown as errors; text and image blocks passed through, other blocks as JSON; no size limit | Error results are tool errors the model sees; all content through the `tool_data` boundary; complete results stored, the model shown pages (§9) | Results are data, not instructions (ARCHITECTURE §16 "Workshop result boundaries") |
-| A dead Streamable HTTP session (404, "not initialized", message regex) reconnects and retries the call once, whatever the tool | The same reconnect, but the call is retried only when the HTTP status proves the server refused it unprocessed (404 or 400 on the session), and never on a message match for a non-read tool (§7.2) | A retried write must not happen twice |
+| A dead Streamable HTTP session (404, "not initialized", message regex) reconnects and retries the call once, whatever the tool | The same reconnect, but the call is retried only when the HTTP status proves the server refused it unprocessed (404 or 400 on the session), never on a message match (§7.2) | The app can't tell a read from a write, so a call must not happen twice |
 | The SDK's default 60 s request timeout; Stop aborts the signal | Per-connection timeout (default 60 s), progress resetting it, a 30-minute ceiling; Stop sends `notifications/cancelled` (§7.3) | Long tools (image generation) report progress |
-| No approvals, no record beyond logs | Workshop approvals and grants (built W4), receipts and `rollout_effects` rows, the `mcp_calls` ledger, the run inspector (§10) | DESIGN §7.7 [P], §11: tools with external effects need approval |
+| No approvals, no record beyond logs | No approval for a call (enabling is the consent, [D]); a receipt for every call, `rollout_effects` rows in workshops, a prompt only when Resume meets an interrupted call, the `mcp_calls` ledger, the run inspector (§8, §10) | A call that may have happened is never repeated without the user |
 | `DynamicToolRegistry` with `addedToolNames`; skills files with tool patterns | The built dynamic loading (TOOL-LOADING): each connection is a registered skill whose patterns are its tools; `tool_search` finds single tools (§4.4) | Already built and measured, cache-preserving |
 
 ## 2. Connections
@@ -78,7 +82,7 @@ The MCP authorization flow (2025-06-18 and 2025-11-25): protected-resource metad
 ## 3. Scope: per user, optionally shared by an admin
 
 - **Per user by default** (as provider connections, DESIGN §9 [D]). Every RPC is owner-scoped; another user's connection is `NotFound` (the isolation matrix gets every new RPC).
-- **Admin sharing** (M6), modelled on DESIGN §9's [D] "Later, and deliberately small" shared provider connections: an admin's connection can be shared with everyone or with chosen users (`share_scope`, `mcp_connection_shares`). Others see its name, what it's for, its tools and its status; never its address, program, headers, keys or environment. Each user has their own uses, allow list and per-chat choices for it (`mcp_uses`), their own Streamable HTTP session and their own stdio process, so one user's server-side state doesn't leak into another's session. Calls are recorded under the calling user. The admin can stop sharing at any time; chats that used it get "<name> isn't available to you any more" for later calls.
+- **Admin sharing** (M5), modelled on DESIGN §9's [D] "Later, and deliberately small" shared provider connections: an admin's connection can be shared with everyone or with chosen users (`share_scope`, `mcp_connection_shares`). Others see its name, what it's for, its tools and its status; never its address, program, headers, keys or environment. Each user has their own uses, allow list and per-chat choices for it (`mcp_uses`), their own Streamable HTTP session and their own stdio process, so one user's server-side state doesn't leak into another's session. Calls are recorded under the calling user. The admin can stop sharing at any time; chats that used it get "<name> isn't available to you any more" for later calls.
 - A shared stdio connection still runs as the app on the server for every user it's shared with; the share dialog says so.
 
 ## 4. How tools appear to the model
@@ -116,18 +120,18 @@ Built-in tools first, as today. Then MCP connections in creation order (`created
 | Level | Stories | Workshops | Stored |
 |---|---|---|---|
 | Account default | Settings → MCP servers → the connection: **Stories** switch | **Workshops** switch | `mcp_uses.stories`, `mcp_uses.workshops` |
-| Per chat | This chat → Tools → "From MCP servers": per connection on/off, with Reset back to the default | — | Branch-owned state key `agent.mcp { connection, on: boolean \| null }` (state events) |
-| Per workshop | — | The capability chip: a row per connection, Off / Ask first / Allowed, "Use the default" | `workshop_grants (chat, 'mcp', <connection id>, mode)` (the built `target` column) |
-| Per tool (both uses) | The connection's Tools list: on/off, and its class | | `mcp_uses.tools_json` |
+| Per chat ([D] override, whatever the default) | This chat → Tools → "From MCP servers": per connection on/off, with Reset back to the default | The capability chip: a row per connection, On / Off, "Use the default" | Story: branch-owned state key `agent.mcp { connection, on: boolean \| null }` (state events). Workshop: `workshop_grants (chat, 'mcp', <connection id>, 'allow' \| 'off')` (the built `target` column) |
+| Per tool (both uses) | The connection's Tools list: allowed or not | | `mcp_uses.tools_json` |
 
 - **Story chats.** A connection's tools are offered in a story reply when the chat's Tools switch is on (`agent.enabled`) and `agent.mcp` for it is on at the reply's parent, or absent and the account default is on. Like `agent.tools`, `agent.mcp` is branch-owned and read at the generating slot's parent, so a choice applies from the next reply on that branch, a swipe keeps the choice it was generated under, and other branches don't change (DESIGN §3, branches are independent). `null` drops the chat's choice from there on. `ChangeCast` gets `McpConnection { connection, on }`; the state key's `connection` is an id field checked by `db/stateRefs.ts` against connections the user can use.
-- **Workshops.** The workshop's grant for `mcp` with target = the connection id overrides the default, which is **Ask first** when the account's Workshops switch is on, else **Off**. Grants stay chat-wide, not per branch, as built (ARCHITECTURE §16 "Grants": a grant is the workshop's, not a branch's). `ListWorkshopCapabilities` expands the registered `mcp` capability into one row per connection the user can use; `SetWorkshopGrant { capability: "mcp", target }` takes the target. "Allow in this workshop" on an MCP approval writes that connection's grant only.
+- **Workshops.** The workshop's grant for `mcp` with target = the connection id (`allow` for On, `off` for Off) overrides the default, which is On when the account's Workshops switch is on, else Off. The capability's modes are `off` and `allow` only: there is no Ask first for MCP, since enabling is the consent ([D]). Grants stay chat-wide, not per branch, as built (ARCHITECTURE §16 "Grants": a grant is the workshop's, not a branch's). `ListWorkshopCapabilities` expands the registered `mcp` capability into one row per connection the user can use; `SetWorkshopGrant { capability: "mcp", target }` takes the target.
+- **The chat's choice wins either way** ([D] 2026-11-16): a connection whose account default is off can be turned on in one story chat or workshop, and one whose default is on can be turned off there.
 - **The agent never enables a connection**: `agent.mcp`, `mcp_uses` and grants are written only by the user's own RPCs, all listed in `agent/exposures/exclusions.ts` (the coverage test makes that certain).
 - A connection deleted, unshared, failing or turned off for the instance simply isn't offered; a frozen call to it gets "<name> isn't available here now." without sending anything.
 
-### 5.2 Tool allow list and class
+### 5.2 Tool allow list
 
-On the connection's page, each tool has a checkbox (allowed or not, in every use) and a class: **Only reads** or **May change things**, starting from the server's annotation and saying so ("The server says it only reads"), with "Use what the server says" once changed. Stories offer only allowed tools whose class is Only reads (§8.2). The allow list is the user's own on a shared connection.
+On the connection's page, each tool has a checkbox: allowed or not, in every use. Every allowed tool of an enabled connection is offered, in stories and workshops alike ([D]). The server's annotations show beside the tool as information only ("The server says it only reads", "…that it may delete or overwrite things") and change nothing. The allow list is the user's own on a shared connection.
 
 ## 6. Consent: what each enable sends
 
@@ -138,12 +142,12 @@ On the connection's page, each tool has a checkbox (allowed or not, in every use
 | Adds a server, or presses Check now | To the server: the app's name and version, then a request for its tool list. No chat, card or account data. A local program is started for it. |
 | Signs in | The browser goes to the server's sign-in page; the app sends the server its registration and the sign-in codes. No chat data. |
 | Turns **Stories** on (account) | Nothing at once. From then on, in every story chat with Tools on that hasn't turned this server off: when a reply's model calls one of its tools, the arguments the model wrote (which can quote the story, cards and notes) go to the server. Its tool descriptions go to the chat's model with each request. |
-| Turns **Workshops** on (account) | The same for workshops, where it asks first by default before any call that may change something. The arguments can include anything the assistant has read, such as your cards or chats. |
-| Turns it on in **This chat** | The same, for replies on this branch of this chat only. |
-| Sets it to **Ask first** or **Allowed** in a workshop | The same, for this workshop only; Allowed stops asking. |
-| Allows one approval | That one call's arguments, shown in full in the approval. |
+| Turns **Workshops** on (account) | The same for workshops that haven't turned it off. The arguments can include anything the assistant has read, such as your cards or chats. |
+| Turns it on in **This chat** | The same, for replies on this branch of this chat only, even with the account switch off. |
+| Turns it **On** in a workshop | The same, for this workshop only, even with the account switch off. |
+| Runs an interrupted call again (§8.3) | That one call's arguments, shown in full, sent again. |
 
-Every switch's hover says it in one or two lines (§13). The server's results go to the chat's model as part of the reply the user asked for, which the user's submit already covers. `test/providerSend.test.ts` gets an MCP twin, `test/mcpSend.test.ts`: with defaults, nothing reaches a fake server through opening, editing, switching, planning or sending, until a call by an enabled tool.
+No call asks first: the enable is the consent ([D]). Every switch's hover says what it sends in one or two lines (§13). The server's results go to the chat's model as part of the reply the user asked for, which the user's submit already covers. `test/providerSend.test.ts` gets an MCP twin, `test/mcpSend.test.ts`: with defaults, nothing reaches a fake server through opening, editing, switching, planning or sending, until a call by an enabled tool.
 
 ## 7. Calls
 
@@ -153,11 +157,11 @@ One client per (connection, user), created at the first call of a run that reach
 
 ### 7.2 Reconnecting without repeating a change
 
-On a dead session the client reconnects once (shared by concurrent callers, as reference-harness's `reconnect`). The call is sent again only when the failure proves the server didn't process it: an HTTP 404 on the session id, or a 400 saying the session isn't initialized, both received as the response to the call itself. A transport error after the request was sent, a timeout or any message-text match leaves the call failed: a `read` call returns the error for the model to retry, an `outside` call returns "The connection to <name> dropped. It may still have happened." Each attempt is its own `mcp_calls` row.
+On a dead session the client reconnects once (shared by concurrent callers, as reference-harness's `reconnect`). The call is sent again only when the failure proves the server didn't process it: an HTTP 404 on the session id, or a 400 saying the session isn't initialized, both received as the response to the call itself. A transport error after the request was sent, a timeout or any message-text match leaves the call failed, returning "The connection to <name> dropped. It may still have happened." for the model to decide whether to call again. Each attempt is its own `mcp_calls` row.
 
 ### 7.3 Timeouts and cancellation
 
-- **Timeout** per connection, 5 s to 30 min, default 60 s. Progress notifications reset it (`resetTimeoutOnProgress`), with 30 minutes in total (`maxTotalTimeout`). A timeout sends `notifications/cancelled` and returns "<name> didn't answer within 60 s." (plus "It may still have happened." for `outside`).
+- **Timeout** per connection, 5 s to 30 min, default 60 s. Progress notifications reset it (`resetTimeoutOnProgress`), with 30 minutes in total (`maxTotalTimeout`). A timeout sends `notifications/cancelled` and returns "<name> didn't answer within 60 s. It may still have happened."
 - **Stop** aborts the call's signal (the built per-run abort signal; tools run one at a time): the SDK sends `notifications/cancelled`, the result is the built interrupted result (`details: { interrupted: true }`), the `mcp_calls` row is `cancelled`.
 - **Progress** while running shows on the step's row ("Working… 40%" or the server's message), from the notifications, without a model request.
 
@@ -165,34 +169,30 @@ On a dead session the client reconnects once (shared by concurrent callers, as r
 
 Validated before anything is sent by the built `fitsTool` (bounded, non-coercing, full JSON Schema) against the frozen `parameters`; the dispatcher path canonicalizes `call_tool` first (built). A refused call sends nothing. Arguments go as `tools/call { name: <MCP name>, arguments }`.
 
-## 8. Effects, approvals and replay
+## 8. Effects, receipts and replay
 
-### 8.1 Classes
+### 8.1 One class, offered once enabled
 
-`read` when the tool's class is Only reads (the server's `readOnlyHint: true`, or the user's override); otherwise `outside` (DESIGN §7.3's external class, WORKSHOP §3.1's `outside`: it leaves the app and the app can't undo it). Unknown or missing annotations are `outside`, the safe direction reference-harness takes. `destructiveHint`, `idempotentHint` and `openWorldHint` add one line to the approval ("The server says this may delete or overwrite things.", "…that repeating it changes nothing more.", "…that it reaches beyond the server.").
+Every MCP tool has the registered effect class **`mcp`** (`rolloutEffectClasses`): a call to a server the user enabled for this use, whose effect the app can't know. Server annotations never choose it ([D]). The kind profiles admit `mcp` in both kinds, so the story profile's refusal of outside effects (`allowsOutside: false`, ARCHITECTURE §16 "Workshop chats, server") doesn't apply to it: stories get every allowed tool of an enabled connection, as workshops do. Its rules: no approval for a fresh call; a receipt for every call; never re-run silently after an interruption. The step shows the outside-effect icon.
 
-### 8.2 Stories
+### 8.2 Receipts and effects
 
-The `rp` kind profile refuses outside effects (ARCHITECTURE §16 "Workshop chats, server": `allowsOutside: false`), so a story reply is offered only `read` MCP tools, and the loop's existing check blocks any other. A read call needs no approval and no receipt: Resume re-runs a dangling read call (the built `rerun` policy), and a swipe is a new run that calls again. Open question 1 asks whether stories should get changing tools too.
+- Before sending, the app opens the call's `mcp_calls` row (`running`); after the result, one writer transaction writes the `rollout_receipts` row (complete result, `is_error`) and closes the `mcp_calls` row, in both kinds.
+- In a workshop the same transaction also writes a `rollout_effects` row of kind `mcp.call` (target kind `mcp_connection`, title "Called <tool> on <Name>", no undo recipe). The Changes panel lists it with "Can't be undone from the app" in place of Undo; the regenerate warning lists it among the changes that stand ("A new version won't undo it, and the assistant may call it again."); Undo all of this reply stops at it, as at any change that can't be undone. Story runs write receipts only: the existing `rollout_effects_owner` trigger keeps effect rows to workshop runs, and stories have no Changes panel.
 
-### 8.3 Workshops
+### 8.3 Resume and replay: never re-run a call silently
 
-- The registered capability `mcp` (label from the connection: "<Name>", explanation "Uses <Name>'s tools. Each call sends what the assistant writes in it to <host>.") with modes Off / Ask first / Allowed. **Ask first asks before each `outside` call; `read` calls run without asking**, since enabling the connection already consented to sending (§6). Its hover says so: "Asks before each call that might change something. Lookups run without asking."
-- The ask is the built W4 approval: `describe` shows the server, tool, the complete arguments as JSON (folded past 4,000 characters, as built), the annotation lines, and "This can't be undone from the app." The digest binds tool name, capability, target (the connection) and arguments. Allow / Allow in this workshop / Decline, as built.
-- **Receipts and effects.** Before sending an `outside` call, the app opens its `mcp_calls` row (`running`); after the result, one writer transaction writes the `rollout_receipts` row (complete result, `is_error`) and a `rollout_effects` row of kind `mcp.call` (target kind `mcp_connection`, title "Called <tool> on <Name>", no undo recipe), then closes the `mcp_calls` row. The Changes panel lists it with "Can't be undone from the app" in place of Undo; the regenerate warning lists it among changes that stand ("A new version won't undo it, and the assistant may call it again."). Undo all of this reply stops at it, as at any change that can't be undone.
-
-### 8.4 Resume and replay: never re-run a change silently
-
-- A call with a receipt answers from it, before validation (built).
-- A dangling `outside` call (no receipt) asks again with the built `uncertain: true` warning ("The app stopped while this was running. It may already have happened: check before allowing it again."), even where the connection is Allowed, and the approval adds what the ledger knows: "The app had sent it to <name> at 14:02 and got no answer." (an `mcp_calls` row left `running` or `interrupted`) or "It was never sent." (no row). Never sent and Allowed: it runs without asking.
-- A step edit giving new arguments makes a new call id (built), so it asks as a new call.
+- A call with a receipt answers from it, before validation (built), in both kinds.
+- A dangling call (no receipt: the app stopped or crashed, or the user pressed Stop, while it ran) is **never re-run silently**, in stories as in workshops. Resume holds it in its step with the built approval panel and its `uncertain: true` warning ("The app stopped while this was running. It may already have happened: check before running it again."), plus what the ledger knows: "The app had sent it to <name> at 14:02 and got no answer." (an `mcp_calls` row left `running`, `interrupted` or `cancelled`) or "It was never sent." (no row). **Run it again** sends it; **Don't run it** gives the model "This was interrupted and may already have happened; it wasn't run again." A call that was never sent runs without asking. This needs the approval wait in story runs: the shared executor's permit already renders through `stepActions` in any chat, and the story profile admits the wait for `mcp` calls only.
+- A step edit giving new arguments makes a new call id (built), so it is a fresh call and runs.
+- A swipe or regenerate is a new run whose model may call again, as with any tool; the old run's calls stay in its steps.
 - Startup marks `running` `mcp_calls` rows `interrupted` (`InterruptRunningMcpCalls`, as `InterruptRunningLlmRequests`).
 - Saved results are never re-fetched for display or replay; the stored bytes are what the model is sent again (built "Saved transcripts and receipts are never reformatted on replay").
 
-### 8.5 Causal order and branches
+### 8.4 Causal order and branches
 
 - A reply sees only what precedes it: an MCP tool is reached only by the model's own calls during that reply's run, and its results enter only that run's transcript (and, in a workshop, the carried transcript of later turns, built W5). The app never prefetches, never puts resources or results into the assembled context of another reply, and never reads ahead.
-- What a server does is outside the chat: a swipe or another branch doesn't undo it. The Stories hover and the approval say so ("Changes it makes outside the app aren't undone by a swipe or a branch."). The app's own records (receipts, effects, enablement) follow the existing branch rules: `agent.mcp` is per branch; workshop records stay on their originating run.
+- What a server does is outside the chat: a swipe or another branch doesn't undo it. The Stories hover and the interrupted-call prompt say so ("Changes it makes outside the app aren't undone by a swipe or a branch."). The app's own records (receipts, effects, enablement) follow the existing branch rules: `agent.mcp` is per branch; workshop records stay on their originating run.
 
 ## 9. Results
 
@@ -205,14 +205,14 @@ The `rp` kind profile refuses outside effects (ARCHITECTURE §16 "Workshop chats
 
 - **`mcp_calls`** (new table, §12) is the MCP twin of `llm_requests`: one row per request the app sends to a server, `initialize` and `tools/list` from Checks included. Opened `running` before sending, closed with status, end time, bytes sent and received and a scrubbed one-line error. Attribution (chat, rollout, tool call) is cleared, never moved, when the chat is deleted for good; the row outlives it, so the user can always see what was sent where. No arguments or result text are stored in it (those live in the transcript, deleted with the chat).
 - **Run inspector** (`RunSteps.tsx`). "Tools offered" groups MCP tools under their connection ("From GitHub, listed 16 Nov 14:02"), with deferred and loaded as built. Each MCP call's step box gets a header line "Sent to api.github.com (GitHub) at 14:02:11 · 1.2 s · 3 KB back" (or "Run as a local program") from its `mcp_calls` rows, every attempt listed; the arguments box is titled "Sent to the server"; the result box "What the server returned", with "What the model saw" when the projection differs (built `sentText`).
-- **Steps in the message.** The row's icon is the outside-effect icon for `outside` and the read icon for `read` (built `effectClass`), the label "<Tool> (<Connection>)".
+- **Steps in the message.** The row's icon is the outside-effect icon (§8.1), the label "<Tool> (<Connection>)".
 - **Recent calls** on the connection's page: newest first, 50 a page, from `ListMcpCalls { connectionId, before? }`: time, tool or "Check", chat (a link to the step in the run inspector), status and duration. Admins see their shared connections' calls without other users' chats (counts only).
 - **Activity** (the chat's panel) is unchanged: MCP calls belong to replies and are reached from their message.
 - **The usage ledger** (`llm_requests`) is unchanged: MCP calls aren't model requests. The tool definitions' token cost is part of each model request's counted input, as now.
 
 ## 11. Resources, prompts and the rest: later
 
-- **Resources** (later, M7 candidate): offered as two read tools per connection, `mcp_<key>_list_resources` and `…_read_resource`, through the same boundary, never added to the context by themselves. Subscriptions never.
+- **Resources** (later): offered as two tools per connection, `mcp_<key>_list_resources` and `…_read_resource`, through the same boundary, never added to the context by themselves. Subscriptions never.
 - **Prompts** (later): a server's prompts as composer snippets the user picks, filled in by the user, never by the model. This needs a composer surface and is UI work of its own.
 - **Elicitation** (later): a server asking the user a question mid-call would render in the step's row, as approvals do. Until then the client doesn't declare it.
 - **Sampling: never automatic.** A server asking the app's model to generate would send data to a provider the user didn't choose for that (DESIGN §11 [D]). If ever added, it is per connection, off by default, and each request asks.
@@ -222,12 +222,14 @@ The `rp` kind profile refuses outside effects (ARCHITECTURE §16 "Workshop chats
 
 **MCP needs new tables.** It can't live in existing storage without loss: connections need encrypted, row-bound secrets with origin binding, row versions, the bin and tombstones (as `connections` has, but MCP isn't a model provider: no kind, API, models or ledger rows); per-user uses of a shared connection need a (connection, user) key with cascading deletes; and the call ledger must outlive chats.
 
+**Re-checked after the owner's 2026-11-16 corrections.** Dropping annotation-based classes removed `mcp_calls.effect` and the class overrides in `mcp_uses.tools_json`; the per-chat override in both kinds and receipts in story runs fit the tables below as they are. Nothing else changed.
+
 **Fits existing storage (no DDL):**
 
 - A bearer key: `credentials` (host-bound, as provider keys).
 - Per-chat story enablement: state key `agent.mcp` in `state_events` (registered in `@rp/shared/state.ts`; its id field checked by `db/stateRefs.ts`).
-- Per-workshop enablement: `workshop_grants` with `capability = 'mcp'` and `target` = the connection id (the built, so far unused `target` column; at most 200 characters).
-- Approvals: `tool_approvals`. Receipts: `rollout_receipts`. Workshop effects: `rollout_effects` with kind `mcp.call` and target kind `mcp_connection` (registered values in `storageKinds`; the existing `rollout_effects_owner` trigger already admits a non-entity, non-chat target in a workshop rollout, and story runs write no effects).
+- Per-workshop enablement: `workshop_grants` with `capability = 'mcp'`, `target` = the connection id (the built, so far unused `target` column; at most 200 characters) and mode `allow` (On) or `off` (Off), both already in its CHECK.
+- The interrupted-call prompt, in both kinds: `tool_approvals` (no kind restriction in its DDL). Receipts for every MCP call, in both kinds: `rollout_receipts` (no kind restriction). Workshop effects: `rollout_effects` with kind `mcp.call` and target kind `mcp_connection` (registered values in `storageKinds`; the existing `rollout_effects_owner` trigger already admits a non-entity, non-chat target in a workshop rollout, and story runs write no effects).
 - Tool calls and results: `rollout_payloads.transcript_json`; frozen MCP definitions in `context_snapshot_json`.
 - The bin kind `mcp_connection`: a `storageKinds` value (`bin_items.kind` has no CHECK).
 - Instance switch `MCP_LOCAL_PROGRAMS`: environment, not stored.
@@ -327,14 +329,14 @@ CREATE TRIGGER mcp_connection_shares_not_owner BEFORE INSERT ON mcp_connection_s
   BEGIN SELECT RAISE(ABORT, 'a connection is not shared with its owner'); END;
 
 -- One user's uses of a connection they own or were given (§5): the account defaults for
--- stories and workshops, the tool allow list and class overrides, the catalog revision they
+-- stories and workshops, the tool allow list, the catalog revision they
 -- last saw (tools listed after it start off), and the key their tools are offered under.
 CREATE TABLE mcp_uses (
   connection_id TEXT NOT NULL REFERENCES mcp_connections(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   stories INTEGER NOT NULL DEFAULT 0 CHECK (stories IN (0, 1)),
   workshops INTEGER NOT NULL DEFAULT 0 CHECK (workshops IN (0, 1)),
-  -- { "<MCP tool name>": { "on": bool, "effect"?: "read" | "outside" } }
+  -- { "<MCP tool name>": { "on": bool } }: the allow list; annotations are never stored here.
   tools_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(tools_json) AND json_type(tools_json) = 'object'),
   reviewed_revision INTEGER NOT NULL DEFAULT 0 CHECK (reviewed_revision >= 0),
   offered_key TEXT NOT NULL CHECK (length(offered_key) BETWEEN 1 AND 26 AND offered_key NOT GLOB '*[^a-z0-9]*'),
@@ -371,7 +373,6 @@ CREATE TABLE mcp_calls (
   method TEXT NOT NULL CHECK (method IN ('initialize', 'tools/list', 'tools/call', 'oauth')),
   tool TEXT CHECK (tool IS NULL OR length(tool) <= 128),
   purpose TEXT NOT NULL CHECK (purpose IN ('story', 'workshop', 'check')),
-  effect TEXT CHECK (effect IS NULL OR effect IN ('read', 'outside')),
   chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
   rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL,
   tool_call_id TEXT,
@@ -398,10 +399,10 @@ CREATE TRIGGER mcp_calls_owner BEFORE INSERT ON mcp_calls
 CREATE TRIGGER mcp_calls_chat_owner BEFORE INSERT ON mcp_calls
   WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id) IS NOT NEW.owner_user_id
   BEGIN SELECT RAISE(ABORT, 'an MCP call is attributed only to its user''s chat'); END;
-CREATE TRIGGER mcp_calls_identity BEFORE UPDATE OF id, owner_user_id, connection_id, connection_revision, method, tool, purpose, effect, rollout_id, tool_call_id, attempt, started_at ON mcp_calls
+CREATE TRIGGER mcp_calls_identity BEFORE UPDATE OF id, owner_user_id, connection_id, connection_revision, method, tool, purpose, rollout_id, tool_call_id, attempt, started_at ON mcp_calls
   WHEN NEW.id IS NOT OLD.id OR NEW.owner_user_id IS NOT OLD.owner_user_id OR NEW.connection_id IS NOT OLD.connection_id
     OR NEW.connection_revision IS NOT OLD.connection_revision OR NEW.method IS NOT OLD.method OR NEW.tool IS NOT OLD.tool
-    OR NEW.purpose IS NOT OLD.purpose OR NEW.effect IS NOT OLD.effect OR NEW.attempt IS NOT OLD.attempt OR NEW.started_at IS NOT OLD.started_at
+    OR NEW.purpose IS NOT OLD.purpose OR NEW.attempt IS NOT OLD.attempt OR NEW.started_at IS NOT OLD.started_at
     OR NEW.tool_call_id IS NOT OLD.tool_call_id
     OR (NEW.rollout_id IS NOT OLD.rollout_id AND NEW.rollout_id IS NOT NULL)
   BEGIN SELECT RAISE(ABORT, 'a call''s identity never changes; its attribution can only be cleared'); END;
@@ -415,7 +416,7 @@ Notes for the implementer:
 - `ON DELETE SET NULL` clears `chat_id` and `rollout_id` (attribution cleared, never moved), as for `llm_requests`: the identity trigger allows `rollout_id` to become NULL and doesn't watch `chat_id`, and the closing trigger doesn't watch either. `tool_call_id` stays as an inert string once its rollout is gone. M0's schema test deletes a chat and a rollout under closed and running calls to prove it.
 - The `mcp_connections_identity` and `mcp_uses_identity` triggers keep the keys fixed; `mcp_uses.offered_key` is chosen in the inserting transaction (§4.2).
 - A user can't be deleted while they own connections or calls (no cascade on `owner_user_id`, as `connections` and `llm_requests`); account deletion follows whatever `connections` does.
-- Writer operations (`db/ops.ts`, one synchronous transaction each, no network inside): `CreateMcpConnection`, `UpdateMcpConnection` (`expectedRowVersion`), `SetMcpCredential`, `SetMcpHeaders`, `SetMcpEnv`, `SetMcpOAuth`, `ClearMcpOAuth`, `SetMcpProxy`, `SaveMcpCatalog { id, listing, expectedCacheRevision }`, `SetMcpShare`, `DeleteMcpConnection` (bin), `SetMcpUse`, `OpenMcpCall`, `CloseMcpCall`, `InterruptRunningMcpCalls`, `RecordMcpCallEffect` (receipt + effect + close, §8.3). Reader: `ListMcpConnections`, `GetMcpConnection` (secrets as names and hints only), `ResolveMcpConnection` (ciphertexts and origins, main thread's MCP client only), `McpOfferFor { userId, kind, chatId, slotId, forkId }`, `ListMcpCalls`, `McpCallsFor { rolloutId }`.
+- Writer operations (`db/ops.ts`, one synchronous transaction each, no network inside): `CreateMcpConnection`, `UpdateMcpConnection` (`expectedRowVersion`), `SetMcpCredential`, `SetMcpHeaders`, `SetMcpEnv`, `SetMcpOAuth`, `ClearMcpOAuth`, `SetMcpProxy`, `SaveMcpCatalog { id, listing, expectedCacheRevision }`, `SetMcpShare`, `DeleteMcpConnection` (bin), `SetMcpUse`, `OpenMcpCall`, `CloseMcpCall`, `InterruptRunningMcpCalls`, `RecordMcpCall` (receipt, the workshop effect, closing the call; §8.2). Reader: `ListMcpConnections`, `GetMcpConnection` (secrets as names and hints only), `ResolveMcpConnection` (ciphertexts and origins, main thread's MCP client only), `McpOfferFor { userId, kind, chatId, slotId, forkId }`, `ListMcpCalls`, `McpCallsFor { rolloutId }`.
 
 ## 13. UI, checked against the real UI
 
@@ -430,8 +431,8 @@ A new settings group **Tools** (order 15, between Models at 10 and Chatting at 2
   1. **Server**: Name; What it's for (hover "Shown to the model so it knows when to use these tools."); Transport (Streamable HTTP / SSE (older servers) / Local program, the last for admins, disabled with its reason elsewhere); Address, or Program and Arguments.
   2. **Sign-in** (remote only): None / Key / Headers / Sign in with the server. Key reuses the provider connection's key field and credential picker; Headers reuses its headers editor (names visible, values write-only).
   3. **Environment** (local program only): names visible, values write-only, as headers.
-  4. **Use it in**: switches **Stories** (hover "Lets story replies with tools call its lookups, unless a chat turns it off. Each call sends what the model writes in it to <host>.") and **Workshops** (hover "Lets workshops use its tools, asking before anything that might change something. Each call sends what the assistant writes in it to <host>.").
-  5. **Tools**: "Check now" with the last listing's time and status; one row per tool: checkbox with its title (hover: its description, cut to three lines, with "Show all"), a "New" badge, and a small Segmented **Only reads / May change things** (hover "Stories use only tools that only read. The server says: <annotation>."), with "Use what the server says" when changed. A tool that can't be used is listed disabled with the reason. A line under the heading: "Its allowed tools add about 3,400 tokens to each request (when sent from the start)."
+  4. **Use it in**: switches **Stories** (hover "Lets story replies with tools use its allowed tools, unless a chat turns it off. Each call sends what the model writes in it to <host>.") and **Workshops** (hover "Lets workshops use its allowed tools, unless a workshop turns it off. Each call sends what the assistant writes in it to <host>."). A chat or workshop can still turn it on with these off.
+  5. **Tools**: "Check now" with the last listing's time and status; one row per tool: checkbox with its title (hover: its description, cut to three lines, with "Show all"), a "New" badge, and the server's annotations as muted text ("The server says it only reads"; hover "What the server says about this tool. The app can't check it, so it changes nothing."). A tool that can't be used is listed disabled with the reason. A line under the heading: "Its allowed tools add about 3,400 tokens to each request (when sent from the start)."
   6. **Advanced** (collapsed, as connections' Advanced): Timeout, Send its tools (Automatically / From the start / When the model asks), Use the server's instructions, Proxy.
   7. **Sharing** (admins): Only me / Everyone / Chosen users (a user picker). Hover "Others can use its tools but never see its address, keys or program."
   8. **Recent calls** (§10).
@@ -439,15 +440,15 @@ A new settings group **Tools** (order 15, between Models at 10 and Chatting at 2
 
 ### 13.2 This chat → Tools (stories)
 
-`ToolsSection.tsx` (`settings.tools`, order 20), when Tools is on, gets a third fieldset after "Allowed tools": **From MCP servers** (about: "Tools from your MCP servers. A server's changes aren't undone by a swipe or a branch."). One `Checkbox` row per usable connection: "<Name>" with "6 lookups" under it, checked as the chat's choice or the account default, and a **Reset** button at the row's end only while the chat overrides it (the pattern of Model may change, DESIGN §7.3 [D] 2026-11-06), hover "Goes back to your account setting: on/off." Checkbox hover: "Click to let replies on this branch call <Name>'s lookups. Each call sends what the model writes in it to <host>." A connection with no read tools is shown disabled: "None of its tools only read; story replies use only tools that read." No connections: "No MCP servers. Add one in Settings → MCP servers." (a link). The workshop look already hides `settings.tools`, so workshops never show this.
+`ToolsSection.tsx` (`settings.tools`, order 20), when Tools is on, gets a third fieldset after "Allowed tools": **From MCP servers** (about: "Tools from your MCP servers. A server's changes aren't undone by a swipe or a branch."). One `Checkbox` row per usable connection: "<Name>" with "6 tools" under it, checked as the chat's choice or the account default, and a **Reset** button at the row's end only while the chat overrides it (the pattern of Model may change, DESIGN §7.3 [D] 2026-11-06), hover "Goes back to your account setting: on/off." Checkbox hover: "Click to let replies on this branch use <Name>'s tools. Each call sends what the model writes in it to <host>." (or "Click to stop replies on this branch using <Name>'s tools."). A connection with no allowed tools is shown disabled: "None of its tools are allowed. Choose them in Settings → MCP servers." No connections: "No MCP servers. Add one in Settings → MCP servers." (a link). The workshop look already hides `settings.tools`, so workshops never show this.
 
 ### 13.3 The workshop's capability chip
 
-`CapabilityChip` rows are server-driven, so MCP rows need no new component: `ListWorkshopCapabilities` returns one row per usable connection after the built-ins (order 100 onward, in creation order), label "<Name>", explanation "Uses <Name>'s tools. Each call sends what the assistant writes in it to <host>.", example "Ask first: asks before each call that might change something; lookups run without asking.", the Segmented Off / Ask first / Allowed and "Use the default", as built. The chip's counts include them.
+`CapabilityChip` rows are server-driven, so MCP rows need no new component: `ListWorkshopCapabilities` returns one row per usable connection after the built-ins (order 100 onward, in creation order), label "<Name>", explanation "Uses <Name>'s tools. Each call sends what the assistant writes in it to <host>.", a Segmented **Off / On** (hover "Off: the assistant can't use it here." / "On: the assistant may use its allowed tools here without asking."), and "Use the default", as built. A capability with these two modes renders through the existing `choicesOf`, with "On" as the label of `allow` for `mcp` rows. The chip's counts include them.
 
 ### 13.4 Steps, approvals, Changes, inspector
 
-Existing renderers: the step row (label "<Tool> (<Name>)", progress text), the `ApprovalPanel` with the server-built prompt (§8.3), `EffectRow` in Changes with "Can't be undone from the app" in place of Undo (hover "<Name> made this change; undo it there if you need to."), and the run inspector additions of §10. New layout appears only on the Settings pages and the Tools fieldset; both go through the layout audit at 1440/390, light and dark, before merge.
+Existing renderers: the step row (label "<Tool> (<Name>)", progress text), the `ApprovalPanel` for an interrupted call (§8.3), in story steps as in workshop steps, `EffectRow` in Changes with "Can't be undone from the app" in place of Undo (hover "<Name> made this change; undo it there if you need to."), and the run inspector additions of §10. New layout appears only on the Settings pages and the Tools fieldset; both go through the layout audit at 1440/390, light and dark, before merge.
 
 ## 14. Build plan
 
@@ -457,16 +458,15 @@ Each unit is one agent session, with tests, ARCHITECTURE text in the same commit
 |---|---|---|---|---|
 | M0 | **Baseline**: the four tables of §12, `storageKinds` values (`mcp_connection` bin kind, `mcp.call` effect kind, `mcp_connection` target kind), the recorded schema fixture. Lands with the wipe | — | `db/baseline.ts`, `db/storageKinds.ts` | Schema tests for every CHECK and trigger: stdio and sharing need an admin, key fixed, purge tombstone, credential owner, use access, call identity and closing, `SET NULL` attribution |
 | M1 | **Remote connections and Check**: the SDK pinned, the MCP client service over `Network.fetchFor`, Streamable HTTP and SSE, keys and headers with origin binding, Check, the catalog and names (§4.1–§4.2), `mcp_calls` for checks, Settings → MCP servers (§13.1 without Use, Sharing, Sign-in OAuth) | M0 | `server/src/mcp/*`, `db/mcpWrites.ts`, `db/mcpReads.ts`, `api/mcp.ts`, `@rp/shared/mcpApi.ts`, `features/mcp/*` | A fake MCP server (both transports) in-process; secrets never in responses, logs or errors; redirect and origin refusals; name fitting and collisions; isolation matrix; e2e and layout audit of the pages |
-| M2 | **Workshops**: `mcp_uses` Workshops switch and allow list, the `mcp` capability with targets, offers and frozen definitions, `tools/call` with timeouts, progress, Stop, reconnect rule, results through the boundary with pages, approvals, receipts and `mcp.call` effects, uncertain Resume with ledger facts, Changes and regenerate warning, inspector additions, `mcpSend.test.ts` | M1 | `agent/tools/mcp.ts`, `agent/capabilities.ts`, `agent/approvals.ts`, `features/workshop/*`, `RunSteps.tsx` | Scripted provider + fake server: ask, allow, allow here, decline; kill mid-call then Resume asks with "had sent"; never-sent call runs; receipt replay; nothing sent before an enabled call; cache-stable definitions across turns; e2e at 1440/390 both themes |
-| M3 | **Deferred loading**: per-connection skills, `tool_search` over MCP tools, "Send its tools", server instructions as skill text, counting | M2 | `agent/loadingPlan.ts`, `agent/skills.ts`, `agent/toolLoading.ts` | Native and dispatcher wires keep the prefix when an MCP skill loads; the index never contains server text |
-| M4 | **Stories**: `agent.mcp` state key and `ChangeCast` change, the Tools fieldset (§13.2), read-only offers, `read_result`, story steps | M2 | `@rp/shared/state.ts`, `agent/modes.ts`, `features/chat/agent/ToolsSection.tsx` | A swipe and another branch keep their own choice; outside tools never offered or run in a story; read Resume re-runs; e2e and layout audit of This chat |
-| M5 | **Local programs**: `MCP_LOCAL_PROGRAMS`, admin-only stdio, environment, per-user processes, PID-only stopping, stderr buffer | M1 | `server/src/mcp/stdio.ts` | Refused without the switch and for non-admins (RPC and trigger); clean environment; idle stop; a crash mid-call is `interrupted` |
-| M6 | **Sign-in and sharing**: OAuth (§2.4) with the callback route; admin sharing with per-user uses, sessions and processes | M2, M5 | `server/src/mcp/oauth.ts`, `api/mcp.ts`, `features/mcp/*` | A fake authorization server: PKCE, refresh, origin binding; shared connection hides its secrets from others; each user's own session |
-| Later | Resources as read tools, prompts as snippets, elicitation in the step row, changing tools in stories (open question 1) | | | |
+| M2 | **Workshops**: `mcp_uses` Workshops switch and allow list, the `mcp` effect class and capability with targets (Off/On), offers and frozen definitions, `tools/call` with timeouts, progress, Stop, reconnect rule, results through the boundary with pages, receipts and `mcp.call` effects, the interrupted-call prompt with ledger facts, Changes and regenerate warning, inspector additions, `mcpSend.test.ts` | M1 | `agent/tools/mcp.ts`, `agent/effects.ts`, `agent/capabilities.ts`, `agent/approvals.ts`, `features/workshop/*`, `RunSteps.tsx` | Scripted provider + fake server: an enabled tool runs without asking whatever its annotations; Off and On overriding either default; kill mid-call then Resume asks with "had sent"; Don't run it; a never-sent call runs; receipt replay; nothing sent before an enabled call; cache-stable definitions across turns; e2e at 1440/390 both themes |
+| M3 | **Stories**: `agent.mcp` state key and `ChangeCast` change, the story profile admitting `mcp`, the Tools fieldset (§13.2), every allowed tool offered, receipts, the interrupted-call prompt in story steps, `read_result` | M2 | `@rp/shared/state.ts`, `@rp/shared/chatKinds.ts`, `agent/modes.ts`, `features/chat/agent/ToolsSection.tsx` | A tool annotated as destructive is offered and runs; a swipe and another branch keep their own choice; on in one chat with the default off and the reverse; Resume of an interrupted call asks in a story; e2e and layout audit of This chat |
+| M4 | **Deferred loading**: per-connection skills, `tool_search` over MCP tools, "Send its tools", server instructions as skill text, counting | M2 | `agent/loadingPlan.ts`, `agent/skills.ts`, `agent/toolLoading.ts` | Native and dispatcher wires keep the prefix when an MCP skill loads; the index never contains server text |
+| M5 | **Sign-in and sharing**: OAuth (§2.4) with the callback route and per-user tokens; admin sharing with per-user uses and sessions | M2 | `server/src/mcp/oauth.ts`, `api/mcp.ts`, `features/mcp/*` | A fake authorization server: PKCE, refresh, origin binding; a shared connection hides its secrets and asks each user to sign in; each user's own session |
+| M6 | **Local programs**: `MCP_LOCAL_PROGRAMS`, admin-only stdio, environment, per-user processes (shared ones included), PID-only stopping, stderr buffer | M5 | `server/src/mcp/stdio.ts` | Refused without the switch and for non-admins (RPC and trigger); clean environment; idle stop; a crash mid-call is `interrupted` |
+| Later | Resources as tools, prompts as snippets, elicitation in the step row | | | |
 
-Order: M0 with the wipe; M1; then M2; M3, M4 and M5 in parallel; M6 last.
+Order ([D] 2026-11-16: remote first, then sign-in, local programs last): M0 with the wipe; M1; M2; M3 and M4 in parallel; M5; M6 last.
 
 ## 15. Open questions
 
-1. **Story replies and tools that change things.** Story chats today never offer a tool that changes anything outside the chat (DESIGN §7.3, built: the story profile refuses those effects), so this spec offers stories only an MCP server's lookups. Some servers you might want in a story change things, for example an image generator that makes a picture of the scene, or a dice server that keeps a log. Should story chats be able to use such tools? **Recommendation:** yes, but only for tools you mark "Allowed in stories" on the server's page, and each call asks first inside the reply's steps (with "Allow in this chat"), as a workshop does. This would be built after M4.
-2. **Which kind of server first after plain web servers?** Local programs (things started with `npx`, the most common kind of community server) need an admin and a switch when starting the app; signing in (OAuth) is what hosted services such as GitHub, Notion or Linear use. **Recommendation:** local programs first (M5 before M6), since you run your own instance and most servers are published that way, unless a hosted service you need signs in with OAuth.
+None at present. The owner's 2026-11-16 corrections settled the two questions of the first draft (changing tools in stories; the build order).
