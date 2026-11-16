@@ -506,7 +506,7 @@ export const makeWriteHandlers = (bin: Bin) =>
               targetKind: "version_edit",
               targetId: version.sourceVersionId,
               matchesField: (_kind, field) => field === EDIT_THINKING_FIELD,
-              content: version.rewrite?.rawReasoning ?? row.reasoning ?? "",
+              content: commitReasoningDraft.text,
               moveTo: row.id
             })
           return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId, version: toVersion(row) }
@@ -519,6 +519,7 @@ export const makeWriteHandlers = (bin: Bin) =>
         content,
         images,
         reasoning,
+        replySections,
         expectedRowVersion,
         commitDraft,
         commitReasoningDraft,
@@ -553,7 +554,7 @@ export const makeWriteHandlers = (bin: Bin) =>
             targetKind: "version_edit",
             targetId: versionId,
             matchesField: (_kind, field) => field === EDIT_THINKING_FIELD,
-            content: rewrite?.rawReasoning ?? (reasoning === undefined ? (row.reasoning ?? "") : (reasoning ?? ""))
+            content: commitReasoningDraft?.text ?? ""
           })
           // The images it had, as its history keeps them, when this amend changes them.
           const had = JSON.parse(row.images_json ?? "[]") as MessageImages
@@ -562,12 +563,23 @@ export const makeWriteHandlers = (bin: Bin) =>
           const before = images !== undefined && normal(images) !== normal(had) ? normal(had) : null
           // Its thinking, when this amend changes it: plain text, never a provider's signed block.
           const thinking = reasoning === undefined ? (row.reasoning ?? null) : reasoning || null
-          const thinkingChanged = thinking !== (row.reasoning ?? null)
+          const reasoningChanged = thinking !== (row.reasoning ?? null)
+          // Or its reply sections, the thinking of a version without reasoning.
+          const sections =
+            replySections === undefined
+              ? (row.reply_sections ?? null)
+              : replySections === null || replySections.sections.length === 0
+                ? null
+                : JSON.stringify(replySections)
+          const sectionsChanged = sections !== (row.reply_sections ?? null)
+          const thinkingChanged = reasoningChanged || sectionsChanged
           // What its history keeps of the thinking it had (JSON: a string, or null for none).
           const hadThinking = JSON.stringify(row.reasoning ?? null)
+          const hadSections = row.reply_sections ?? null
           const rewritten = rewriteColumns(rewrite)
           // Scripts' record of the thinking only changes with the thinking.
-          const rawReasoning = thinkingChanged ? rewritten.raw_reasoning : (row.raw_reasoning ?? null)
+          const rawReasoning = reasoningChanged ? rewritten.raw_reasoning : (row.raw_reasoning ?? null)
+          const rawSections = sectionsChanged ? rewritten.raw_sections : (row.raw_sections ?? null)
           if (content === row.content && before === null && !thinkingChanged) return toVersion(shown)
           if (before !== null) yield* checkImages(userId, images!)
           const attach = (target: string) =>
@@ -588,17 +600,17 @@ export const makeWriteHandlers = (bin: Bin) =>
             if (content !== row.content) {
               // The trigger keeps the earlier text and thinking in version_history.
               yield* sql`UPDATE version_records SET content = ${content}, reasoning = ${thinking},
-                raw_content = ${rewritten.raw_content}, raw_reasoning = ${rawReasoning},
-                raw_sections = ${rewritten.raw_sections}, rewrite_json = ${rewritten.rewrite_json}, updated_at = ${at}
+                reply_sections = ${sections}, raw_content = ${rewritten.raw_content}, raw_reasoning = ${rawReasoning},
+                raw_sections = ${rawSections}, rewrite_json = ${rewritten.rewrite_json}, updated_at = ${at}
                 WHERE id = ${versionId}`
             } else {
               yield* sql`UPDATE versions SET updated_at = ${at} WHERE id = ${versionId}`
               // Images or thinking alone: the entry the trigger would have written.
-              yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json)
-                VALUES (${versionId}, ${row.content}, ${at}, ${before ?? normal(had)}, ${hadThinking})`
+              yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json, sections_json)
+                VALUES (${versionId}, ${row.content}, ${at}, ${before ?? normal(had)}, ${hadThinking}, ${hadSections})`
               if (thinkingChanged)
                 yield* sql`UPDATE version_records SET reasoning = ${thinking}, raw_reasoning = ${rawReasoning},
-                  updated_at = ${at} WHERE id = ${versionId}`
+                  reply_sections = ${sections}, raw_sections = ${rawSections}, updated_at = ${at} WHERE id = ${versionId}`
               // The import matcher reads whether this history exists, even when text did
               // not change. Certify image- and thinking-only amends in its whole-chat snapshot too.
               yield* sql`UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = ${slot.chat_id}`
@@ -629,13 +641,13 @@ export const makeWriteHandlers = (bin: Bin) =>
              FROM version_records v WHERE v.id = ?`,
             [copy, content, original, fork.id, fork.id, at, at, versionId]
           )
-          yield* sql`UPDATE version_records SET reasoning = ${thinking}, raw_content = ${rewritten.raw_content},
-            raw_reasoning = ${rawReasoning}, raw_sections = ${rewritten.raw_sections},
+          yield* sql`UPDATE version_records SET reasoning = ${thinking}, reply_sections = ${sections},
+            raw_content = ${rewritten.raw_content}, raw_reasoning = ${rawReasoning}, raw_sections = ${rawSections},
             rewrite_json = ${rewritten.rewrite_json} WHERE id = ${copy}`
-          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json)
-            SELECT ${copy}, content, replaced_at, images_json, reasoning_json FROM version_history WHERE version_id = ${versionId} ORDER BY id`
-          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json)
-            VALUES (${copy}, ${row.content}, ${at}, ${normal(had)}, ${hadThinking})`
+          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json, sections_json)
+            SELECT ${copy}, content, replaced_at, images_json, reasoning_json, sections_json FROM version_history WHERE version_id = ${versionId} ORDER BY id`
+          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json, sections_json)
+            VALUES (${copy}, ${row.content}, ${at}, ${normal(had)}, ${hadThinking}, ${hadSections})`
           if (before !== null) yield* attach(copy)
           else
             yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)

@@ -5,10 +5,13 @@
 // does, and Save commits both together: a new version, or the user's own version changed in
 // place with the earlier thinking in its history. Saved thinking is plain text: the edited
 // version has no provider signature, so no request ever replays it as the model's own.
+// Without reasoning the field holds the reply's tagged thinking (its sections: an imported ST
+// chat's reasoning, or what the auto-parse took out of a reply), which stays tagged thinking.
 //
 // Both parts are registered (the field in `messageEditorThinking`, Add thinking among the
 // editor's tools), so a plugin can replace or remove either.
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
+import { editableThinking, thinkingInSections } from "@rp/shared/replySections.ts"
 import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import { AboutHint } from "../../ui/AboutHint.tsx"
@@ -61,7 +64,7 @@ const useThinkingEditor = ({ session, entry, draft, source }: EditThinkingProps)
   useEffect(() => {
     if (versionId === null || source === undefined || source.id !== versionId) return
     if (session.editor(thinkingKey(versionId)) === undefined)
-      session.openEditor({ _tag: "EditThinking", versionId: source.id }, source.reasoning ?? "", entry.slotId)
+      session.openEditor({ _tag: "EditThinking", versionId: source.id }, editableThinking(source), entry.slotId)
   }, [session, entry.slotId, versionId, source])
   return { key, editor }
 }
@@ -74,6 +77,9 @@ const useText = (editor: MessageDraft | undefined) =>
 
 const ABOUT =
   "The reasoning shown folded above the reply. What you write here is saved as plain text, without the provider's signature. Plain chats never send thinking to the model."
+/** The thinking is the reply's own tagged thinking (an imported chat's, or parsed from a reply). */
+const ABOUT_IN_REPLY =
+  "The thinking in the reply, shown folded above it. The model sees it again only if the preset sends thinking back for the last replies."
 
 function ThinkingField(props: EditThinkingProps) {
   const { source, draft } = props
@@ -87,14 +93,14 @@ function ThinkingField(props: EditThinkingProps) {
     <div className="flex flex-col gap-1" data-edit-thinking>
       <div className="flex items-center gap-1 text-sm text-muted">
         <span>Thinking</span>
-        <AboutHint heading="Thinking">{ABOUT}</AboutHint>
+        <AboutHint heading="Thinking">{thinkingInSections(source) ? ABOUT_IN_REPLY : ABOUT}</AboutHint>
       </div>
       <SlotOutlet
         slot={messageTextEditor}
         props={{
           label: "Thinking",
           value: view.text,
-          base: source.reasoning ?? "",
+          base: editableThinking(source),
           autoFocus: state.focus,
           quietMarkers: true,
           expand: false,

@@ -35,6 +35,7 @@ import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
 import { RefId } from "./library.ts"
 import { RawText } from "./regexScripts.ts"
+import { ReplySections } from "./replySections.ts"
 
 /** Earlier saved text of a human-written version, newest first. */
 export const VersionAmendment = Schema.Struct({
@@ -44,7 +45,9 @@ export const VersionAmendment = Schema.Struct({
   /** The complete image set it had before this amendment, including text-only amendments. */
   images: Schema.optionalKey(MessageImages),
   /** Its thinking before this amendment (null: none); absent where the amendment didn't record it. */
-  reasoning: Schema.optionalKey(Schema.NullOr(Schema.String))
+  reasoning: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** Its reply sections before this amendment (null: none); absent where it didn't record them. */
+  sections: Schema.optionalKey(Schema.NullOr(ReplySections))
 })
 
 /** The draft field an edit's thinking is typed into (`version_edit` drafts; the text's field is ""). */

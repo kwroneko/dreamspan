@@ -284,6 +284,10 @@ export class DraftTooLarge extends Schema.TaggedError<DraftTooLarge>()("DraftToo
  * (another tab typed on), it stays active, and nothing else is touched.
  */
 const CommitDraft = Schema.NullOr(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
+/** An edit's thinking draft, with the thinking as it was typed, which the draft must still hold. */
+const ThinkingDraftCommit = Schema.NullOr(
+  Schema.Struct({ draftId: Schema.String, session: Schema.Int, text: Schema.String })
+)
 
 export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   slotId: SlotId,
@@ -2080,7 +2084,7 @@ export class WriteOpsLibrary extends RpcGroup.make(
        */
       commitDraft: Schema.optionalKey(CommitDraft),
       /** An edit's thinking draft (`version_edit`, field `reasoning`, its source version), committed the same way. */
-      commitReasoningDraft: Schema.optionalKey(CommitDraft)
+      commitReasoningDraft: Schema.optionalKey(ThinkingDraftCommit)
     },
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])
@@ -2101,11 +2105,13 @@ export class WriteOpsLibrary extends RpcGroup.make(
       images: Schema.optionalKey(MessageImages),
       /** Its thinking from now on (null: none; absent: kept); the earlier one stays in its history. */
       reasoning: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      /** Its reply sections from now on (null: none; absent: kept), kept in its history the same way. */
+      replySections: Schema.optionalKey(Schema.NullOr(ReplySections)),
       expectedRowVersion: Schema.Int,
       /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
       commitDraft: Schema.optionalKey(CommitDraft),
       /** The edit's thinking draft (field `reasoning`), committed with it if it holds the thinking typed. */
-      commitReasoningDraft: Schema.optionalKey(CommitDraft),
+      commitReasoningDraft: Schema.optionalKey(ThinkingDraftCommit),
       /** What regex scripts did to `content` and the thinking (an edit's run-on-edit scripts), and the text typed. */
       rewrite: Schema.optionalKey(StoredRewrite)
     },

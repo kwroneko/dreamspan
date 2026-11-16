@@ -32,6 +32,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import type { MessageImages, EntityId } from "@rp/shared/chat.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { EDIT_THINKING_FIELD } from "@rp/shared/chatApi.ts"
+import { editableThinking, type ReplySections } from "@rp/shared/replySections.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { DraftTooLarge, NotFound, StaleWrite } from "./ops.ts"
@@ -299,10 +300,19 @@ export const makeDraftStore = (
               Effect.map(([row]) => row?.content ?? null)
             )
       case "version_edit":
-        // The edit's thinking field starts from the version's thinking ("" without one).
+        // The edit's thinking field starts from the version's thinking ("" without one): its
+        // reasoning, or its reply sections' text.
         return key.field === EDIT_THINKING_FIELD
-          ? sql<{ reasoning: string | null }>`SELECT reasoning FROM version_records WHERE id = ${key.targetId}`.pipe(
-              Effect.map(([row]) => (row ? (row.reasoning ?? "") : null))
+          ? sql<{ reasoning: string | null; reply_sections: string | null }>`
+              SELECT reasoning, reply_sections FROM version_records WHERE id = ${key.targetId}`.pipe(
+              Effect.map(([row]) =>
+                row
+                  ? editableThinking({
+                      reasoning: row.reasoning,
+                      replySections: row.reply_sections ? (JSON.parse(row.reply_sections) as ReplySections) : null
+                    })
+                  : null
+              )
             )
           : sql<{ content: string }>`SELECT content FROM version_records WHERE id = ${key.targetId}`.pipe(
               Effect.map(([row]) => row?.content ?? null)

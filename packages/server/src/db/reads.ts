@@ -25,6 +25,7 @@ import { shownSplits } from "./threads.ts"
 import { makeThreadReadHandlers } from "./threadReads.ts"
 import { Branch, type PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import type { ReplySections } from "@rp/shared/replySections.ts"
 import { MergePreview, type RefId, Revision, type RevisionId } from "@rp/shared/library.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
@@ -1040,13 +1041,20 @@ export const makeReadHandlers = Effect.gen(function* () {
           at: number
           images_json: string | null
           reasoning_json: string | null
+          sections_json: string | null
         }>`
-          SELECT id, content, replaced_at AS at, images_json, reasoning_json
+          SELECT id, content, replaced_at AS at, images_json, reasoning_json, sections_json
           FROM version_history WHERE version_id=${versionId} ORDER BY id DESC`
-        return rows.map(({ images_json, reasoning_json, ...row }) => ({
+        return rows.map(({ images_json, reasoning_json, sections_json, ...row }) => ({
           ...row,
           ...(images_json === null ? {} : { images: JSON.parse(images_json) as MessageImages }),
-          ...(reasoning_json === null ? {} : { reasoning: JSON.parse(reasoning_json) as string | null })
+          // A state that recorded its thinking recorded its sections with it (null: none).
+          ...(reasoning_json === null
+            ? {}
+            : {
+                reasoning: JSON.parse(reasoning_json) as string | null,
+                sections: sections_json === null ? null : (JSON.parse(sections_json) as ReplySections)
+              })
         }))
       }).pipe(query("VersionAmendments")),
 
