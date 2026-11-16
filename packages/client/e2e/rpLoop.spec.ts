@@ -236,24 +236,26 @@ for (const width of [1440, 390])
         .filter({ has: page.getByText("Muted", { exact: true }) })
         .first()
       const mutedName = (await mutedRow.getAttribute("aria-label"))!
+      // The synthetic import's standard version is part of every Next choice.
+      const mutedChoice = `${mutedName} · 1`
       await expect(mutedRow.getByRole("button", { name: `Unmute ${mutedName}`, exact: true })).toBeVisible()
       await shot("09-cast-tab-muted")
       // Never picked automatically: it's not offered to reply.
       if (width < 1024) await closePanel(page)
       await expect(nextChip(page)).toBeVisible()
-      await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedName))
+      await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedChoice))
       const whoReplies = choices(page, "Who replies next")
       await nextChip(page).click()
       await expect(whoReplies.getByRole("radio", { name: /^Auto: .+$/ })).toBeChecked()
-      await expect(whoReplies.getByRole("radio", { name: /^Auto: / })).not.toHaveAccessibleName(`Auto: ${mutedName}`)
+      await expect(whoReplies.getByRole("radio", { name: /^Auto: / })).not.toHaveAccessibleName(`Auto: ${mutedChoice}`)
       // It can still be picked for one reply, explicitly.
-      const muted = whoReplies.getByRole("radio", { name: mutedName, exact: true })
+      const muted = whoReplies.getByRole("radio", { name: mutedChoice, exact: true })
       await expect(muted).toHaveAttribute("aria-description", "Muted: replies only when picked")
       await muted.click()
-      await expect(nextChip(page)).toHaveAccessibleName(nextName(mutedName))
+      await expect(nextChip(page)).toHaveAccessibleName(nextName(mutedChoice))
       // Auto goes back to its own pick.
       await pickReply(page, null)
-      await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedName))
+      await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedChoice))
       // Writing as a member (the muted one, explicitly) doesn't change who {{user}} is.
       await page.getByRole("button", { name: /^Speaking as / }).click()
       await page.getByRole("group", { name: "Speak as" }).getByRole("option", { name: mutedName, exact: true }).click()
