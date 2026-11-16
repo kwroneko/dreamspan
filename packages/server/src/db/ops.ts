@@ -3279,7 +3279,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
       userId: UserId,
       cardRefId: RefId,
       title: Schema.String,
-      link: Schema.optionalKey(EntityId)
+      link: Schema.optionalKey(EntityId),
+      /** A workshop tool's call (`rollout:call`): the first revision is the assistant's. */
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
@@ -3293,7 +3295,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       title: Schema.String,
       link: Schema.optionalKey(EntityId),
       replaces: Schema.optionalKey(ReplaceTarget),
-      content: Schema.optionalKey(Schema.String)
+      content: Schema.optionalKey(Schema.String),
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, InvalidDocument, StorageError])
@@ -3308,7 +3311,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       title: Schema.String,
       content: Schema.String,
       fromNoteRefId: Schema.optionalKey(RefId),
-      chatNote: Schema.optionalKey(ChatNotePosition)
+      chatNote: Schema.optionalKey(ChatNotePosition),
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])

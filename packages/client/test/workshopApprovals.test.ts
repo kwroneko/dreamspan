@@ -10,7 +10,9 @@ import { statusText } from "../src/features/chat/agent/steps.ts"
 import { guardReply, replyGuards, type ReplyGuardRequest } from "../src/features/chat/replyGuards.ts"
 import { chatKindLooks } from "../src/features/chat/kindLooks.ts"
 import {
+  binnedTargets,
   groupByReply,
+  opensNow,
   openTarget,
   outstanding,
   undoAllOffered,
@@ -84,6 +86,25 @@ describe("a workshop change", () => {
     expect(outstanding([effect({}), undone, fixed]).map((e) => e.seq)).toEqual([0, 2])
     expect(undoHint(effect({ kind: "library.create" }))).toMatch(/bin/)
     expect(undoHint(effect({}))).toMatch(/as it was before/)
+  })
+
+  it("offers Open only while the item is out of the bin", () => {
+    const binned = effect({ kind: "library.delete" })
+    expect(undoHint(binned)).toBe("Takes it back out of the bin.")
+    // Put in the bin: nothing to open until that is undone.
+    expect([binned, effect({ kind: "library.delete", undoneAt: 5 })].map(opensNow)).toEqual([false, true])
+    // Made: there to open until its undo bins it. An edit's undo leaves the item where it is.
+    const made = effect({ kind: "library.create" })
+    expect([made, effect({ kind: "library.create", undoneAt: 5 })].map(opensNow)).toEqual([true, false])
+    expect([effect({}), effect({ undoneAt: 5 })].map(opensNow)).toEqual([true, true])
+  })
+
+  it("knows which items a later change of the assistant's left in the bin", () => {
+    const made = effect({ kind: "library.create", targetId: "note1" })
+    const binned = effect({ kind: "library.delete", targetId: "note1", seq: 1 })
+    expect([...binnedTargets([made, binned])]).toEqual(["note1"])
+    // Taken back out: it opens again.
+    expect([...binnedTargets([made, { ...binned, undoneAt: 5 }])]).toEqual([])
   })
 })
 

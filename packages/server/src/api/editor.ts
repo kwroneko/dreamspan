@@ -577,7 +577,10 @@ export const makeEditorHandlers = Effect.gen(function* () {
         const id = yield* userId
         const note = yield* reader.GetLibraryRef({ userId: id, refId: noteRefId })
         if (note.kind !== "note") return yield* new NotFound({ entity: "note", id: noteRefId })
-        return yield* writer.DeleteEntity({ userId: id, entityId: note.entityId }).pipe(changed(id))
+        const item = yield* writer.DeleteEntity({ userId: id, entityId: note.entityId })
+        // Notes that showed it send nothing now: open chats read their notes again.
+        yield* warmth.refreshUser(id, true)
+        return item
       }).pipe(settle("DeleteNote"))
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
   return remoteAware(handlers)

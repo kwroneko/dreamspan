@@ -16,6 +16,7 @@ export const storageKinds = makeRegistry<StorageKind>([
     values: [
       "library.create",
       "library.revise",
+      "library.delete",
       "chat.create",
       "chat.change",
       "setting.set",

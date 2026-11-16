@@ -49,11 +49,11 @@ export interface OperationExposure {
   readonly description: string
   readonly parameters?: Schema.Top
   readonly adapt?: (args: Record<string, unknown>, ctx: ToolContext) => Effect.Effect<unknown, unknown>
-  /** Optional server-built description of the prepared, owner-resolved payload. */
+  /** Optional server-built description of the prepared, owner-resolved payload; null keeps the generic one. */
   readonly describe?: (
     payload: Record<string, unknown>,
     ctx: ToolContext
-  ) => Effect.Effect<Pick<import("@rp/shared/agent.ts").ApprovalPrompt, "title" | "rows" | "changes">, unknown>
+  ) => Effect.Effect<Pick<import("@rp/shared/agent.ts").ApprovalPrompt, "title" | "rows" | "changes"> | null, unknown>
   readonly render?: (result: unknown, args: Record<string, unknown>) => string
   readonly effects?: (result: unknown, args: Record<string, unknown>) => ReadonlyArray<RolloutEffectRecord>
   readonly summarize?: (args: Record<string, unknown>) => string
@@ -165,7 +165,8 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
                 chats?: ReadonlyArray<{ id: string; title: string }>
               }
             | undefined
-          const rows = Object.entries(payload as object)
+          // An operation without a payload (a plain list) has nothing to show here.
+          const rows = Object.entries((payload ?? {}) as object)
             .filter(([label]) => !proof?.storyAt || !["chatId", "forkId", "slotId", "leaf"].includes(label))
             .map(([label, value]) => ({
               label,
@@ -193,9 +194,8 @@ export const makeOperationTools = (capabilities: CapabilityRegistries, runtime: 
             const model = yield* ctx.reader.GetModel({ userId: ctx.userId, modelId: proof.chat.model.model })
             rows.unshift({ label: "provider", value: `${connection.name} · ${model.key}` })
           }
-          return entry.describe
-            ? { ...(yield* entry.describe(payload as Record<string, unknown>, ctx)), ...position }
-            : { title: entry.explanation, rows, ...position }
+          const described = entry.describe ? yield* entry.describe(payload as Record<string, unknown>, ctx) : null
+          return described ? { ...described, ...position } : { title: entry.explanation, rows, ...position }
         }).pipe(Effect.mapError((error) => new ToolInputRefused(failure(error).text))),
       execute: (ctx, args) =>
         Effect.gen(function* () {
