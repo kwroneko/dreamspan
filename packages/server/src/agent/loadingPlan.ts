@@ -129,8 +129,9 @@ export const planToolLoading = (
       loadable
     )
     const load = execution.toolLoaders.get(LOAD_SKILL)
-    const loader = load && listed.length ? { ...load, description: loadSkillDescription(listed) } : undefined
-    if (!wire || !wire.supports(input.model)) {
+    const deferring = wire !== undefined && wire.supports(input.model)
+    const loader = load && listed.length ? { ...load, description: loadSkillDescription(listed, deferring) } : undefined
+    if (!deferring) {
       // Every tool from the start: nothing to load but the skills' instructions, so load_skill
       // alone comes after the tools, frozen with them. Its index is the one the loading modes send.
       if (!loader) return unsplit

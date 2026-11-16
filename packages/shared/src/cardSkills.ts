@@ -57,31 +57,49 @@ export const readCardSkill = (entry: unknown): CardSkillEntry | null => {
 
 /**
  * What the editor says about an entry the server would skip or shorten, in the user's words;
- * empty when it's used as written. `index` is its place in the list (from 0).
+ * empty when it's used as written. `index` is its place in the list (from 0). It follows
+ * `readCardSkill` step for step, so what it says is what the server does.
  */
 export const cardSkillProblems = (entry: unknown, index: number): ReadonlyArray<string> => {
   if (index >= CARD_SKILL_LIMITS.entries) return [`Only the first ${CARD_SKILL_LIMITS.entries} skills are used.`]
   if (!entry || typeof entry !== "object") return ["Not a skill: it's skipped."]
   const e = entry as Record<string, unknown>
-  if (typeof e.use === "string" && e.use.trim() !== "")
-    return CARD_SKILL_NAME.test(e.use) ? [] : ["Not an installed skill's name: it's skipped."]
+  const long = (value: unknown) => typeof value === "string" && value.length > CARD_SKILL_LIMITS.name
+  const shortened = `Only the first ${CARD_SKILL_LIMITS.name} characters of its name are used.`
+  const read = readCardSkill(entry)
+  if (read && "use" in read) return long(e.use) ? [shortened] : []
   const problems: Array<string> = []
-  const name = typeof e.name === "string" ? e.name : ""
-  if (!CARD_SKILL_NAME.test(name))
+  const name = text(e.name, CARD_SKILL_LIMITS.name)
+  if (name === undefined && text(e.use, CARD_SKILL_LIMITS.name) !== undefined)
+    return ["Not a skill's name: it's skipped."]
+  if (name === undefined || !CARD_SKILL_NAME.test(name))
     problems.push("Skipped until its name is 1–48 lower-case letters, digits, - or _, starting with a letter or digit.")
-  if (typeof e.description !== "string" || e.description.trim() === "")
+  else if (long(e.name)) problems.push(shortened)
+  if (text(e.description, CARD_SKILL_LIMITS.description) === undefined)
     problems.push("Skipped until it says what it's for.")
-  else if (e.description.length > CARD_SKILL_LIMITS.description)
+  else if ((e.description as string).length > CARD_SKILL_LIMITS.description)
     problems.push(`Only the first ${CARD_SKILL_LIMITS.description} characters of what it's for are used.`)
-  if (typeof e.instructions !== "string" || e.instructions.trim() === "")
+  if (text(e.instructions, CARD_SKILL_LIMITS.instructions) === undefined)
     problems.push("Skipped until it has instructions.")
-  else if (e.instructions.length > CARD_SKILL_LIMITS.instructions)
+  else if ((e.instructions as string).length > CARD_SKILL_LIMITS.instructions)
     problems.push(
       `Only the first ${CARD_SKILL_LIMITS.instructions.toLocaleString("en")} characters of its instructions are used.`
     )
   const tools = Array.isArray(e.tools) ? e.tools : []
-  if (tools.length > CARD_SKILL_LIMITS.tools) problems.push(`Only its first ${CARD_SKILL_LIMITS.tools} tools are used.`)
+  const named = tools.filter((t) => typeof t === "string" && t.length > 0 && t.length <= CARD_SKILL_LIMITS.tool)
+  if (named.length < tools.length)
+    problems.push(`Tool names over ${CARD_SKILL_LIMITS.tool} characters, and anything that isn't a name, are left out.`)
+  if (named.length > CARD_SKILL_LIMITS.tools) problems.push(`Only its first ${CARD_SKILL_LIMITS.tools} tools are used.`)
   return problems
+}
+
+/** Whether the server reads the entry as a reference to an installed skill (`{ "use": "id" }`). */
+export const isSkillReference = (entry: unknown): entry is { readonly use: string } => {
+  const read = readCardSkill(entry)
+  if (read) return "use" in read
+  if (!entry || typeof entry !== "object") return false
+  const e = entry as Record<string, unknown>
+  return text(e.use, CARD_SKILL_LIMITS.name) !== undefined && text(e.name, CARD_SKILL_LIMITS.name) === undefined
 }
 
 /** Names more than one of a card's own skills have: none of them is offered. */

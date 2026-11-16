@@ -42,13 +42,20 @@ const ownedRollout = (sql: Sql, userId: string, rolloutId: string) =>
     return row
   })
 
-export const writeGrant = (sql: Sql, userId: string, chatId: string, capability: string, mode: string | null) =>
+export const writeGrant = (
+  sql: Sql,
+  userId: string,
+  chatId: string,
+  capability: string,
+  mode: string | null,
+  target = ""
+) =>
   mode === null
-    ? sql`DELETE FROM workshop_grants WHERE chat_id = ${chatId} AND capability = ${capability} AND target = ''`
+    ? sql`DELETE FROM workshop_grants WHERE chat_id = ${chatId} AND capability = ${capability} AND target = ${target}`
     : sql`INSERT INTO workshop_grants ${sql.insert({
         chat_id: chatId,
         capability,
-        target: "",
+        target,
         owner_user_id: userId,
         mode,
         expires_at: null,
@@ -63,6 +70,9 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* ownedWorkshop(sql, userId, chatId)
         yield* writeGrant(sql, userId, chatId, capability, mode)
+        // Choosing a capability's standing anew also forgets what was allowed for exact content
+        // under it (a card skill "allowed in this workshop"): the chip is where that is undone.
+        yield* sql`DELETE FROM workshop_grants WHERE chat_id = ${chatId} AND capability = ${capability} AND target <> ''`
         if (mode === "off")
           yield* sql`UPDATE tool_approvals SET status = CASE WHEN status = 'allowed' THEN 'used' ELSE 'cancelled' END
             WHERE capability = ${capability} AND status IN ('pending', 'allowed')
@@ -98,7 +108,10 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
         }>`SELECT status, digest, capability, prompt_json
           FROM tool_approvals WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
         if (!row) return yield* new NotFound({ entity: "approval", id: toolCallId })
-        const expectedAt = JSON.parse(row.prompt_json).storyAt
+        const asked = JSON.parse(row.prompt_json) as { storyAt?: unknown; grantTarget?: unknown }
+        const expectedAt = asked.storyAt
+        // Server-written with the request: the client's answer can't name other content.
+        const target = typeof asked.grantTarget === "string" ? asked.grantTarget : ""
         if (answer !== "deny" && expectedAt && JSON.stringify(expectedAt) !== JSON.stringify(storyAt))
           return yield* new ApprovalRefused({
             message: "The story tab moved. Send the request again from its new position."
@@ -122,13 +135,17 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
           return yield* new ApprovalRefused({
             message: "This capability is turned off. Look again before allowing it."
           })
-        if (answer === "allow_chat" && workshopCapabilities.get(row.capability)?.modes?.includes("allow") === false)
+        if (
+          answer === "allow_chat" &&
+          target === "" &&
+          workshopCapabilities.get(row.capability)?.modes?.includes("allow") === false
+        )
           return yield* new ApprovalRefused({ message: "This capability must ask each time." })
         yield* sql`UPDATE tool_approvals SET status = ${answer === "deny" ? "denied" : "allowed"}, answer = ${answer},
           note = ${note}, answered_at = ${Date.now()} WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
         if (answer === "allow_chat") {
           yield* ownedWorkshop(sql, userId, chat_id)
-          yield* writeGrant(sql, userId, chat_id, row.capability, "allow")
+          yield* writeGrant(sql, userId, chat_id, row.capability, "allow", target)
         }
       }).pipe(transaction(sql, "AnswerToolApproval")),
     SettleToolApproval: ({ userId, rolloutId, toolCallId, status }) =>
@@ -178,13 +195,13 @@ const lineage = (sql: Sql, rolloutId: string) =>
 export const makeWorkshopGrantReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    WorkshopGrants: ({ userId, chatId, now }) =>
+    WorkshopGrants: ({ userId, chatId, now, target }) =>
       Effect.gen(function* () {
         const [chat] = yield* sql<{ id: string }>`SELECT id FROM chats
           WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
         return yield* sql<{ capability: string; mode: "off" | "ask" | "allow" }>`SELECT capability, mode
-          FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ''
+          FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND target = ${target ?? ""}
             AND (expires_at IS NULL OR expires_at > ${now}) ORDER BY capability`
       }).pipe(query("WorkshopGrants")),
     AuthorizePluginTool: ({ userId, rolloutId, toolCallId, capability, digest, requireApproval, rollback }) =>

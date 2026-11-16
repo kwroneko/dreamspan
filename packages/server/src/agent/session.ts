@@ -664,6 +664,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                   })(),
                   context: context(toolCallId),
                   args: params,
+                  ...(() => {
+                    const grantTarget = tool.approvalTarget?.(context(toolCallId), params as never)
+                    return grantTarget ? { grantTarget } : {}
+                  })(),
                   dangling,
                   ...(dispatch
                     ? {

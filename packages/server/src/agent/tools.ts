@@ -106,6 +106,12 @@ export interface RolloutTool<A = never> {
    * permit then decides as for a tool with that capability (`load_skill` for a card's own skill).
    */
   readonly capabilityFor?: (context: ToolContext, args: A) => string | undefined
+  /**
+   * What exactly this call would let in, as a digest, where "Allow in this workshop" must mean
+   * that content and nothing else (a card's own skill, as written now). The answer is then
+   * remembered for this digest only: changed content asks again. Absent: the capability's standing.
+   */
+  readonly approvalTarget?: (context: ToolContext, args: A) => string | undefined
   /** Argument used as the plain step title, frozen with setup-tool metadata. */
   readonly titleField?: string
   readonly effect: EffectClass

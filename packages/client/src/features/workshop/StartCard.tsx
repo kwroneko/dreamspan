@@ -5,7 +5,7 @@
 import { useAtomValue } from "@effect/atom-react"
 import type { RefId } from "@rp/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
-import type { ReactNode } from "react"
+import { type ReactNode, useEffect } from "react"
 import { SlotOutlet } from "../../slots.tsx"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
@@ -60,9 +60,9 @@ function StartChoices({
   setPersona
 }: {
   card: string
-  setCard: (id: string) => void
+  setCard: (id: string, replace?: boolean) => void
   persona: string
-  setPersona: (id: string) => void
+  setPersona: (id: string, replace?: boolean) => void
 }): ReactNode {
   const shell = useAtomValue(shellAtom)
   const defaults = useAtomValue(workshopDefaultsAtom)
@@ -72,6 +72,17 @@ function StartChoices({
   const byRef = new Map(data.map((c) => [c.card.refId as string, c]))
   const cardId = card || stored?.card || ""
   const personaId = persona === NONE ? "" : persona || stored?.persona || ""
+  // An id the library no longer has (a deleted card, a link from another account) isn't a choice:
+  // it's dropped from the URL, so the card shows and starts with what it says.
+  const loaded = AsyncResult.isSuccess(shell)
+  const staleCard = loaded && card !== "" && !byEntity.has(card)
+  const stalePersona = loaded && persona !== "" && persona !== NONE && byEntity.get(persona)?.persona !== true
+  useEffect(() => {
+    if (staleCard) setCard("", true)
+  }, [staleCard, setCard])
+  useEffect(() => {
+    if (stalePersona) setPersona("", true)
+  }, [stalePersona, setPersona])
   const cardName = byEntity.get(cardId)?.card.label ?? "Assistant"
   const personaName =
     persona === NONE

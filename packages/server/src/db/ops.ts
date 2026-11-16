@@ -5074,7 +5074,13 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** A workshop's grants (workshopGrants.ts): capability → mode, expired ones left out. */
   Rpc.make("WorkshopGrants", {
-    payload: { userId: UserId, chatId: ChatId, now: Schema.Number },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      now: Schema.Number,
+      /** Absent: the capabilities' own standing. Set: what was allowed for that exact content. */
+      target: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Array(Schema.Struct({ capability: Schema.String, mode: CapabilityMode })),
     error: Schema.Union([NotFound, StorageError])
   }),

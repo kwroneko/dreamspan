@@ -231,7 +231,8 @@ describe("workshop setup effects", () => {
           ["allow"],
           ...Array.from({ length: 7 }, () => ["off", "ask", "allow"] as const),
           ["off", "ask"],
-          ["off", "ask", "allow"]
+          // A card's skills always ask; allowing one covers that skill's exact words only.
+          ["off", "ask"]
         ]
       )
       const registry = yield* ExecutionRegistry

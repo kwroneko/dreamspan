@@ -7,7 +7,8 @@ import {
   CARD_SKILLS_NAMESPACE,
   cardSkillList,
   cardSkillProblems,
-  duplicateSkillNames
+  duplicateSkillNames,
+  isSkillReference
 } from "@rp/shared/cardSkills.ts"
 import { valueField } from "@rp/shared/editing.ts"
 import { useState } from "react"
@@ -49,8 +50,7 @@ const entryOf = (draft: Draft, before: Entry | null): Entry => ({
     .map((t) => t.trim())
     .filter((t) => t !== "")
 })
-const isReference = (entry: unknown): entry is { use: string } =>
-  !!entry && typeof entry === "object" && typeof (entry as { use?: unknown }).use === "string"
+const isReference = isSkillReference
 const labelOf = (entry: unknown) =>
   isReference(entry) ? entry.use : str((entry as Entry | null)?.name) || "Unnamed skill"
 
@@ -179,11 +179,11 @@ function SkillRow({
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="min-w-0 font-mono text-sm font-medium [overflow-wrap:anywhere]">{name}</span>
-              {reference && <Badge>installed</Badge>}
+              {reference && <Badge>reference</Badge>}
             </span>
             <span className="line-clamp-2 text-sm text-muted [overflow-wrap:anywhere]">
               {reference
-                ? "Uses the installed skill with this name."
+                ? "Offers the installed skill with this name, if there is one."
                 : str((entry as Entry | null)?.description) || "No description"}
             </span>
             {problems.map((p) => (
@@ -258,13 +258,21 @@ export function CardSkills({ store }: { store: EditorStore }) {
     next.splice(to, 0, item)
     write(next)
   }
-  const keys = list.map((entry, i) => `${isReference(entry) ? "use" : "own"}:${labelOf(entry)}:${i}`)
+  // A key that stays with its entry as it moves (its name, numbered among entries of that name),
+  // so the handle keeps the focus and the arrows can move an entry more than one place.
+  const seen = new Map<string, number>()
+  const keys = list.map((entry) => {
+    const name = `${isReference(entry) ? "use" : "own"}:${labelOf(entry)}`
+    const nth = seen.get(name) ?? 0
+    seen.set(name, nth + 1)
+    return `${name}:${nth}`
+  })
   const current = typeof editing === "number" ? ((list[editing] as Entry | undefined) ?? null) : null
   return (
     <Card>
       <CardHeader
         title="Skills"
-        about="Skills a workshop assistant speaking as this card can load. The assistant sees only their names; it asks you before loading one, and shows you its instructions first."
+        about="Skills a workshop assistant speaking as this card can load. The assistant sees only their names; it asks you before loading one, and shows you its instructions first. A skill is left out when an installed skill has its name, or when it lists tools and none of them is available in the workshop."
         actions={
           <Button hint="Writes a new skill for this card." onClick={() => setEditing("new")}>
             Add a skill

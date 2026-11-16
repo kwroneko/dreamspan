@@ -364,10 +364,16 @@ export const cardSkillsText = (skills: ReadonlyArray<Pick<Skill, "id" | "descrip
       ].join("\n")
 }
 
-/** `load_skill`'s definition carries the compact skill index, frozen with the run's tools. */
-export const loadSkillDescription = (skills: ReadonlyArray<Skill>) =>
+/**
+ * `load_skill`'s definition carries the compact skill index, frozen with the run's tools. With
+ * every tool sent from the start (`deferring` false) nothing waits for a load, so it says only
+ * what it then does: return the instructions.
+ */
+export const loadSkillDescription = (skills: ReadonlyArray<Skill>, deferring = true) =>
   [
-    "Loads a skill: returns its instructions and makes the tools it lists callable. Load a skill before working in its area; its tools aren't available until then.",
+    deferring
+      ? "Loads a skill: returns its instructions and makes the tools it lists callable. Load a skill before working in its area; its tools aren't available until then."
+      : "Returns a skill's instructions for using your tools. Load a skill before working in its area.",
     "Skills:",
     ...skills.map(indexLine)
   ].join("\n")

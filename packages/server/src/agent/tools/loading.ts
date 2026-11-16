@@ -5,9 +5,10 @@
 // run's frozen offer can be loaded (an Off capability's tools aren't in it). A delta from
 // reference-harness's `tools/tool-search.ts` and `tools/load-skill.ts`: skills are registered entries,
 // not files, and the result's `loaded` names are what the wire layer serializes as the load point.
+import { createHash } from "node:crypto"
 import { Type } from "@earendil-works/pi-ai"
 import { Effect } from "effect"
-import { LOAD_SKILL, loadedText, matchPatterns, searchTools, TOOL_SEARCH } from "../toolLoading.ts"
+import { LOAD_SKILL, loadedText, matchPatterns, searchTools, type Skill, TOOL_SEARCH } from "../toolLoading.ts"
 import type { RolloutTool, ToolContext, ToolOutput } from "../tools.ts"
 
 const MAX_RESULTS = 5
@@ -85,6 +86,30 @@ export const CARD_SKILLS = "skills.card"
 /** The offer freezes both registered and card skills; later registry edits cannot change it. */
 const availableSkills = (context: ToolContext) => context.offer?.cardSkills ?? []
 
+/**
+ * A card skill's exact content, as one digest: the card, the name and every word the approval
+ * shows. "Allow in this workshop" remembers this digest, never the capability, so a skill edited
+ * afterwards (by the user, a re-import, a tool or a plugin), a skill of the same name on another
+ * card, and any other skill ask again.
+ */
+export const cardSkillDigest = (skill: Skill) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify([
+        skill.source?.card ?? "",
+        skill.source?.name ?? "",
+        skill.id,
+        skill.description,
+        skill.instructions,
+        skill.tools
+      ])
+    )
+    .digest("hex")
+
+/** A card's words can't close the element they're returned in and write what follows it. */
+const skillBody = (skill: Skill) =>
+  skill.source ? skill.instructions.replace(/<(\/?)skill\b/gi, "<$1 skill") : skill.instructions
+
 export const makeLoadSkill = (): RolloutTool<{ readonly name: string }> => ({
   source: import.meta.url,
   id: LOAD_SKILL,
@@ -100,6 +125,10 @@ export const makeLoadSkill = (): RolloutTool<{ readonly name: string }> => ({
   summarize: ({ name }) => name,
   capabilityFor: (context, { name }) =>
     availableSkills(context).find((s) => s.id === name)?.source ? CARD_SKILLS : undefined,
+  approvalTarget: (context, { name }) => {
+    const skill = availableSkills(context).find((s) => s.id === name)
+    return skill?.source ? cardSkillDigest(skill) : undefined
+  },
   // What the user is shown before a card's skill is first used: its own words and what it loads.
   describe: (context, { name }) =>
     Effect.sync(() => {
@@ -137,7 +166,7 @@ export const makeLoadSkill = (): RolloutTool<{ readonly name: string }> => ({
       )
       const { added, already } = load(context, names)
       const parts = [
-        `<skill name="${skill.id}">\n${skill.instructions}\n</skill>`,
+        `<skill name="${skill.id}">\n${skillBody(skill)}\n</skill>`,
         ...(added.length ? [loadedText(added)] : []),
         ...(already.length ? [`Already available: ${already.join(", ")}.`] : []),
         ...(names.length === 0 ? ["This skill has instructions only; it adds no tools here."] : [])

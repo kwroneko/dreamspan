@@ -101,8 +101,11 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     id: "skills.card",
     order: 95,
     label: "Use skills from cards",
-    explanation: "Follows instructions written in the workshop's card. They only choose among the tools allowed here.",
-    example: "A card's “proofreading” skill tells the assistant how to check a card's spelling."
+    explanation:
+      "Follows instructions written in the workshop's card. It asks first and shows them; allowing one here covers that skill only, until it changes.",
+    example: "A card's “proofreading” skill tells the assistant how to check a card's spelling.",
+    // No standing Allowed: a card's words are shown before they're used, each skill as written.
+    modes: ["off", "ask"]
   }
 ])
 

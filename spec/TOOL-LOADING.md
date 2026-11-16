@@ -159,6 +159,8 @@ Built: §2–§6 server side, §7 (fields and the inspector's groups), the trans
 
 Built (wsb2, 2026-11-15; obsolete as a proposal, ARCHITECTURE §16 "Workshop skills in every mode"): `load_skill` in every mode, also with every tool sent from the start (it then returns instructions only; nothing is deferred), so the same skills and approvals apply whatever the connection's Tool loading; the card editor's Skills section (Extra tab) to list, add, edit, reorder and remove a card's own skills and its `{ "use" }` entries, saying why an entry would be skipped. It adds no way to type a new `{ "use" }` reference: the editor has no list of installed skills yet.
 
+Reviewed (review-wsb2, 2026-11-15; ARCHITECTURE §16 "Workshop skills review"): `skills.card` offers Off and Ask first only; "Allow in this workshop" on a card skill is remembered for that skill's exact content in that workshop, so §6's approval is asked again whenever the skill changes.
+
 Not yet: live verification of dispatcher loading outside §15's measured profiles. The fallback of §11.1(b) is built (§15), with untested providers remaining opt-in.
 
 ## 11. Open questions

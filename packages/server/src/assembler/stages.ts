@@ -1974,6 +1974,7 @@ const composeStage = sync("compose", (assembly) => {
   // run's load_skill offers, listed by the same function the loading plan freezes them with.
   // A card's own skills go by name only: their words reach the model once the user allows one.
   const skillsInput = assembly.request.summarizing ? undefined : assembly.request.agent?.skills
+  const filledMarkers: Array<string> = []
   if (skillsInput) {
     const played = new Set<string>(need(assembly, "state").playedByMe)
     const skills = offeredSkills(
@@ -1988,12 +1989,19 @@ const composeStage = sync("compose", (assembly) => {
       ["skillsIndex", "Skills", skillsIndexText(skills)],
       ["cardSkills", "Card skills", cardSkillsText(skills)]
     ] as const)
-      // Only where the preset has the marker and it's on: a preset without one sends nothing more.
-      if (text && !disabled(identifier) && collection.some((p) => p.identifier === identifier))
+      // Only where the preset has the marker (a marker, not a prompt of the user's that shares
+      // its identifier) and it's on: a preset without one sends nothing more.
+      if (
+        text &&
+        !disabled(identifier) &&
+        collection.some((p) => p.identifier === identifier && p.system_prompt === true)
+      ) {
         place(collection, identifier, "system", {
           text,
           piece: env.verbatim(`workshop:${identifier}`, { kind: "assembler", what }, text)
         })
+        filledMarkers.push(identifier)
+      }
   }
   if (overrides && speaker) {
     assembly.cardOverrides = []
@@ -2309,6 +2317,7 @@ const composeStage = sync("compose", (assembly) => {
       layer: [...layer, ...markers],
       stableExamples: assembly.lcm !== undefined || doc.pin_examples === true,
       beside,
+      filled: filledMarkers,
       collection,
       disabled,
       chat: injectInChat(

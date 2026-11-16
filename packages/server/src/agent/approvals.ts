@@ -84,6 +84,11 @@ export interface PermitInput {
   readonly tool: RolloutTool<never>
   readonly context: ToolContext
   readonly args: unknown
+  /**
+   * The exact content this call lets in (`RolloutTool.approvalTarget`). An earlier "Allow in this
+   * workshop" for the same digest allows it; the answer to this one is remembered for it alone.
+   */
+  readonly grantTarget?: string
   /** The call was made before a stop or a restart and had no result: it may have run. */
   readonly dangling: boolean
   /** The call starts or stops waiting, with what it will do. */
@@ -105,7 +110,16 @@ export interface PermitDeps {
  */
 export const makePermit =
   (deps: PermitDeps) =>
-  ({ tool, context, args, dangling, onWaiting, unavailableText, validate }: PermitInput): Effect.Effect<PermitResult> =>
+  ({
+    tool,
+    context,
+    args,
+    grantTarget,
+    dangling,
+    onWaiting,
+    unavailableText,
+    validate
+  }: PermitInput): Effect.Effect<PermitResult> =>
     Effect.gen(function* () {
       const { reader, writer, userId, rolloutId, registries } = deps
       if (tool.capability === undefined && IN_REPLY.has(tool.effect)) {
@@ -131,7 +145,8 @@ export const makePermit =
       if (mode === "off") return { run: false, text: unavailableText ?? offText(capabilityLabel) } as const
       const invalid = validate?.()
       if (invalid) return { run: false, text: invalid } as const
-      const digest = argsDigest({ tool: tool.id, capability, args })
+      // The content's digest is part of what an answer names: an answer can't move to other content.
+      const digest = argsDigest({ tool: tool.id, capability, args, ...(grantTarget ? { target: grantTarget } : {}) })
       const toolCallId = context.toolCallId
       let uncertain = false
       if (dangling && !IN_REPLY.has(tool.effect)) {
@@ -140,6 +155,16 @@ export const makePermit =
         uncertain = prior?.status !== "pending" && prior?.status !== "cancelled"
       } else if (mode === "allow") return { run: true } as const
       if (mode === "allow" && !uncertain) return { run: true } as const
+      // This exact content was allowed in this workshop before (and the capability isn't Off).
+      if (grantTarget && !uncertain) {
+        const remembered = yield* reader.WorkshopGrants({
+          userId: userId as never,
+          chatId: deps.chatId as never,
+          now: Date.now(),
+          target: grantTarget
+        })
+        if (remembered.some((g) => g.capability === capability && g.mode === "allow")) return { run: true } as const
+      }
 
       // A missing target cannot become a different target after the user approves.
       const described = tool.describe
@@ -168,6 +193,7 @@ export const makePermit =
         digest,
         capability,
         capabilityLabel,
+        ...(grantTarget ? { grantTarget } : {}),
         title: described?.title ?? `${capabilityLabel}: ${tool.id}`,
         rows: described?.rows ?? argumentRows(args),
         ...(described?.changes ? { changes: described.changes } : {}),
