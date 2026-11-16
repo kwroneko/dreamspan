@@ -1602,7 +1602,10 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
           true
         )
         expect(change.state.played).toEqual(selectedPersona ? [selectedPersona] : [])
-        expect(change.state.participants).toContain("oren")
+        // Oren is the user's too: joined for the messages and left, never a character.
+        expect(change.state.participants).not.toContain("oren")
+        expect(change.state.otherPersonas).toEqual(["oren"])
+        expect(change.events).toContainEqual({ key: "participant.leave", value: { entity: "oren" } })
         const snapshot = await assembled(
           chat({
             participants: [],

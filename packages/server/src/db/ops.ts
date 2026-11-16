@@ -527,7 +527,15 @@ const StChatRecord = Schema.Struct({
   /** The file went into another file's chat. */
   merged: Schema.Boolean,
   /** The first slot an unfinished import of the file added. */
-  firstAdded: Schema.NullOr(SlotId)
+  firstAdded: Schema.NullOr(SlotId),
+  /** The parent file's record, for a branch merged into its parent's chat. */
+  parentRecordId: Schema.optionalKey(Schema.String),
+  /**
+   * The depth of the slot from which the file's first import's state applies: 0 for the
+   * chat's start, else a branch's first message of its own. Absent on records finished
+   * before it was kept.
+   */
+  stateAt: Schema.optionalKey(Schema.Int)
 })
 
 /**
@@ -2924,7 +2932,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Struct({
       notes: Schema.Record(Schema.String, EntityId),
       /** With `castWritten`: the chat's stamp after this write (stImportPlanStamp.ts). */
-      stamp: Schema.optionalKey(Schema.String)
+      stamp: Schema.optionalKey(Schema.String),
+      /** The record's `stateAt` (`StChatRecord`), when it has one. */
+      stateAt: Schema.optionalKey(Schema.Int)
     }),
     error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
   }),
@@ -3037,7 +3047,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
         differing: Schema.Int
       }),
       slots: Schema.Record(Schema.String, SlotId),
-      notes: Schema.Record(Schema.String, EntityId)
+      notes: Schema.Record(Schema.String, EntityId),
+      /** The record's `stateAt` (`StChatRecord`), when it has one. */
+      stateAt: Schema.optionalKey(Schema.Int)
     }),
     error: Schema.Union([NotFound, ImportLeaseLost, StImportPlanChanged, StorageError])
   }),

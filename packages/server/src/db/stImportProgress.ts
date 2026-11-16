@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
+import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import type { StImportNote } from "./ops.ts"
 import type { StBatchPlan } from "./stImportPlanOps.ts"
 
@@ -42,6 +43,17 @@ export const resolveStNote = (note: StImportNote, slotIds: ReadonlyArray<SlotId>
         }
       })
 })
+
+/**
+ * The cast a chat file's imported versions pin (`cast_json`): who the finish's events leave in
+ * the chat, and the personas they join only to leave again (stMapping.ts `otherPersonas`), as
+ * those wrote some of the messages.
+ */
+export const stImportedCast = (events: ReadonlyArray<StateEventData>): ReadonlyArray<string> => {
+  const { participants } = foldState(events.map((data) => ({ scope: null, data })))
+  const left = events.flatMap((e) => (e.key === "participant.leave" ? [e.value.entity as string] : []))
+  return [...participants, ...new Set(left.filter((id) => !participants.includes(id)))]
+}
 
 /** One parsed batch a confirmed re-import holds until its file is written (`StImportStage`). */
 export interface StStagedBatch {

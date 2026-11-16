@@ -46,9 +46,15 @@ import { storeMedia } from "./mediaFiles.ts"
 import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from "./ops.ts"
 import { Report } from "./stReport.ts"
 import { stChatTarget } from "./stChatTarget.ts"
-import { stepWriteProgress, stFinishAt, stIndexSlot, type StStagedBatch } from "../db/stImportProgress.ts"
+import {
+  stepWriteProgress,
+  stFinishAt,
+  stImportedCast,
+  stIndexSlot,
+  type StStagedBatch
+} from "../db/stImportProgress.ts"
 import type { StBatchPlan } from "../db/stImportPlanOps.ts"
-import { foldState, type StateEventData } from "@rp/shared/state.ts"
+import type { StateEventData } from "@rp/shared/state.ts"
 import { stBytesHash, type StPlanExpect, type StPlanExpectFile, stPartsHash } from "./stPlanExpect.ts"
 import { ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK, ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
 import {
@@ -139,6 +145,10 @@ interface ChatRecord {
   readonly notes: Readonly<Record<string, EntityId>>
   readonly end: SlotId | null
   readonly firstAdded: SlotId | null
+  /** A branch's parent file's record. */
+  readonly parentRecordId?: string
+  /** The depth from which the file's first import's state applies (`StChatRecord.stateAt`). */
+  readonly stateAt?: number
 }
 
 /** Where a chat's messages go: its chat and record, once it has them. */
@@ -174,6 +184,11 @@ interface ChatProgress {
   /** ST opens the file's card or group on it (a card's `chat`, a group's `chat_id`): its last-opened chat. */
   readonly stCurrent: boolean
   readonly prevState: ChatState | null
+  /**
+   * `prevState` is the parent file's, as a branch's first import takes it: the parent's state at
+   * its own end, not necessarily what the branch inherits where it leaves the parent.
+   */
+  readonly prevFromParent: boolean
   readonly prevNotes: Readonly<Record<string, EntityId>>
   /** Where the file ended when last imported, and the first slot an unfinished run added. */
   readonly prevEnd: SlotId | null
@@ -182,6 +197,8 @@ interface ChatProgress {
   cursor: SlotId | null
   /** The first slot this run added, and the first past `prevEnd` on this run's path. */
   firstAdded: SlotId | null
+  /** The index in the file (its depth in the chat) of `firstAdded`, when this run wrote it. */
+  firstAddedAt: number | null
   afterEnd: SlotId | null
   atEnd: boolean
   firstSlot: SlotId | null
@@ -1008,7 +1025,9 @@ export class StImports extends Context.Service<
             ...batchFields(session, batch, speakers),
             ...groupFields(progress)
           })
+          const before = progress.written
           if (stepWriteProgress(progress, written, progress.prevEnd, progress.hiddenRun, progress.summaries)) {
+            progress.firstAddedAt = before + written.slotIds.length - written.added
             // As the record now says, for this run sending the chat again from its start.
             const cached = session.records.get(progress.path)
             if (cached !== undefined && !cached.complete) {
@@ -1018,8 +1037,39 @@ export class StImports extends Context.Service<
         })
 
       /** The cast a file's finish pins on its imported versions (`StImportFinishChat`). */
-      const castOf = (events: ReadonlyArray<StateEventData>) =>
-        JSON.stringify(foldState(events.map((data) => ({ scope: null, data }))).participants)
+      const castOf = (events: ReadonlyArray<StateEventData>) => JSON.stringify(stImportedCast(events))
+
+      /**
+       * What a branch's first import compares its state with: the state in effect where it
+       * leaves its parent, not the parent's at its own end. That's the parent file's when the
+       * branch leaves after the parent's own first message; one that leaves in the part the
+       * parent shares with its own parent (a branch of a branch) inherits that file's, and so
+       * on up. The walk stops at a record finished before `stateAt` was kept, whose state is
+       * taken as before. Its notes are those of every file on the way, the nearer ones winning,
+       * so a note the parent dropped is still the one to switch off. Otherwise the file's own.
+       */
+      const inheritedState = (session: Session, progress: ChatProgress) => {
+        const own = { state: progress.prevState, notes: progress.prevNotes }
+        const forkAt = progress.firstAddedAt
+        if (!progress.prevFromParent || progress.fork === null || forkAt === null) return own
+        const byId = new Map([...session.records.values()].map((record) => [record.recordId, record]))
+        let at = byId.get(progress.fork.parentRecordId)
+        if (at === undefined) return own
+        const chain: Array<ChatRecord> = [at]
+        while (at.stateAt !== undefined && at.stateAt >= forkAt && at.parentRecordId !== undefined) {
+          const up = byId.get(at.parentRecordId)
+          if (up === undefined) break
+          chain.push((at = up))
+        }
+        if (chain.length === 1) return own
+        return {
+          state: at.state,
+          notes: Object.assign({}, ...chain.toReversed().map((record) => record.notes), progress.prevNotes) as Record<
+            string,
+            EntityId
+          >
+        }
+      }
 
       /** What the file's chat state becomes, from what the file says and the slots it went to. */
       const stateChangeOf = (session: Session, progress: ChatProgress) =>
@@ -1034,8 +1084,9 @@ export class StImports extends Context.Service<
             messages: progress.index,
             run: { length: progress.hiddenRun, firstSlot: progress.firstSlot, throughSlot: progress.throughSlot }
           },
-          progress.prevState,
-          progress.isNew
+          inheritedState(session, progress).state,
+          progress.isNew,
+          progress.prevFromParent
         )
       type StateChange = ReturnType<typeof stateChangeOf>
 
@@ -1128,9 +1179,10 @@ export class StImports extends Context.Service<
         target: Target,
         change: StateChange,
         applies: boolean,
-        notes: Readonly<Record<string, EntityId>>
+        { notes, stateAt }: { readonly notes: Readonly<Record<string, EntityId>>; readonly stateAt?: number }
       ) => {
         const { report } = session
+        const parentRecordId = progress.fork?.parentRecordId ?? session.records.get(progress.path)?.parentRecordId
         session.records.set(progress.path, {
           ...target,
           complete: true,
@@ -1139,7 +1191,9 @@ export class StImports extends Context.Service<
           state: applies ? change.state : progress.prevState,
           notes,
           end: progress.cursor,
-          firstAdded: null
+          firstAdded: null,
+          ...(parentRecordId === undefined ? {} : { parentRecordId }),
+          ...(stateAt === undefined ? {} : { stateAt })
         })
         // Open tabs read the chat again: it changed under them.
         if (!progress.isNew) hub.publish(target.chatId, { _tag: "Reload" })
@@ -1195,7 +1249,7 @@ export class StImports extends Context.Service<
             events: applies ? change.events : [],
             notes: applies ? datedNotes(session, progress, change) : [],
             removedNotes: applies ? change.removedNotes : [],
-            previousNotes: progress.prevNotes,
+            previousNotes: inheritedState(session, progress).notes,
             leaf,
             end: progress.cursor,
             lastMessageAt: progress.lastMessageAt,
@@ -1206,7 +1260,7 @@ export class StImports extends Context.Service<
           })
           // A later file of the run into this chat is held to the chat as this one left it.
           if (stored.stamp !== undefined) session.stamps.set(target.chatId, stored.stamp)
-          return finished(session, progress, target, change, applies, stored.notes)
+          return finished(session, progress, target, change, applies, stored)
         })
 
       /**
@@ -1383,7 +1437,7 @@ export class StImports extends Context.Service<
           const stored = stateChangeOf(session, progress)
           const { applies } = stFinishAt(progress)
           finishIssues(session, progress, stored, applies)
-          return finished(session, progress, target, stored, applies, committed.notes)
+          return finished(session, progress, target, stored, applies, committed)
         })
 
       /** Reads a chat's first part: what it's linked to, and where its messages go. */
@@ -1504,12 +1558,14 @@ export class StImports extends Context.Service<
           fork: branch && parent !== undefined ? { parentRecordId: parent.recordId } : null,
           stCurrent,
           prevState: previous?.state ?? null,
+          prevFromParent: previous !== undefined && previous !== own,
           prevNotes: previous?.notes ?? {},
           prevEnd: own?.complete ? own.end : null,
           resumeAt: own !== undefined && !own.complete ? own.firstAdded : null,
           matching: own !== undefined || into !== undefined,
           cursor: null,
           firstAdded: null,
+          firstAddedAt: null,
           afterEnd: null,
           atEnd: false,
           firstSlot: null,

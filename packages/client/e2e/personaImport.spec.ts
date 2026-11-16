@@ -1,5 +1,6 @@
-// Synthetic ST personas: the last speaker is selected, earlier speakers stay in the
-// cast, and changing the persona leaves historical message authors intact.
+// Synthetic ST personas: the last speaker is selected, an earlier one is the user's too and
+// never one of the characters (no Speak now, no Next), and changing the persona leaves
+// historical message authors intact.
 import { join } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -70,11 +71,15 @@ for (const width of [1440, 390]) {
       const persona = page.getByRole("group", { name: "Your persona" })
       await expect(persona.getByRole("button", { name: "Playing as Bo. Change your persona" })).toBeVisible()
       const castList = page.getByRole("list", { name: "Characters in this chat" })
-      // The persona is apart from the characters, in its own row.
-      await expect(castList.getByRole("listitem")).toHaveCount(2)
+      // The persona is apart from the characters, in its own row; the earlier persona is
+      // neither a character nor offered to speak.
+      await expect(castList.getByRole("listitem")).toHaveCount(1)
       await expect(castList.getByRole("listitem", { name: "Bo", exact: true })).toHaveCount(0)
+      await expect(castList.getByRole("listitem", { name: "Ada", exact: true })).toHaveCount(0)
+      await expect(page.getByRole("button", { name: "Speak now: Ada" })).toHaveCount(0)
       await expect(persona).toContainText("Bo")
-      await expect(page.getByRole("heading", { level: 2, name: "2 characters", exact: true })).toBeVisible()
+      await expect(page.getByRole("heading", { level: 2, name: "1 character", exact: true })).toBeVisible()
+      if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "persona-import-cast")
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `personas-${width}-${scheme}.png`) })
@@ -86,6 +91,12 @@ for (const width of [1440, 390]) {
       ).toBe("Ada")
       // The phone's panel covers the messages; close it before checking the history.
       await closePanel(page)
+      // Bo, played until the switch, left with it: Next offers only the character.
+      const next = page.getByRole("button", { name: /^Next: / }).first()
+      if (await next.isVisible()) {
+        await expect(next).toHaveAccessibleName(/^Next: Bot\b/)
+        await expect(next).not.toHaveAccessibleName(/\b(Ada|Bo)\b/)
+      }
       await expect(ada.locator("header")).toContainText("Ada")
       await expect(bo.locator("header")).toContainText("Bo")
       // The same imported persona is used in the library, its own page, and its editor.
