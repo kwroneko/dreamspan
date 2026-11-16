@@ -142,6 +142,11 @@ export interface ChatState {
   readonly characterNotesOff?: ReadonlyArray<string>
   /** A group chat's reply order (`reply.order`); absent is the default, natural order. */
   readonly replyOrder?: string
+  /**
+   * Personas who spoke here but aren't selected: joined for their messages and then left, so
+   * the user plays them and the model never does. Absent when there are none.
+   */
+  readonly otherPersonas?: ReadonlyArray<string>
 }
 
 /** Where ST put an extension prompt (`extension_prompt_types`), as a note's placement. */
@@ -338,10 +343,14 @@ const membership = (
     if (ref !== undefined) lorebooks.push(ref)
     else if (!embedded.has(name)) missingWorlds.push(name)
   }
-  const allPersonas = [...new Set([...spoke, ...(selectedPersona === null ? [] : [selectedPersona])])]
   const played = selectedPersona === null ? [] : [selectedPersona]
+  // The user plays every persona who spoke (DESIGN §2.2), but only the selected one stays in
+  // the cast. The others join for their messages and then leave, as a persona switched away
+  // from in a chat leaves it (the Cast tab's persona control): none is ever a character.
+  const otherPersonas = [...spoke].filter((p) => !participants.includes(p) && !played.includes(p))
   return {
-    participants: [...participants, ...allPersonas.filter((p) => !participants.includes(p))],
+    participants: [...participants, ...played.filter((p) => !participants.includes(p))],
+    otherPersonas,
     absent,
     played,
     lorebooks,
@@ -453,8 +462,15 @@ export const chatStateChange = (
   },
   previous: ChatState | null,
   /** A new chat takes all of it; a chat merged into gets only what changed. */
-  isNew: boolean
+  isNew: boolean,
+  /**
+   * `previous` is the parent file's state at its own end (a branch's first import), which may
+   * not be what the branch inherits where it leaves the parent: who the user plays is then
+   * written whatever it says.
+   */
+  inherited = false
 ) => {
+  const personasBefore = inherited ? null : previous
   const mapped = membership(
     folder,
     file.link,
@@ -477,19 +493,32 @@ export const chatStateChange = (
     // As the confirmed re-import takes it again once the note names its slots (stImportProgress.ts).
     summary: summary && stStateHash(summary.note)
   }
+  if (mapped.otherPersonas.length > 0) state.otherPersonas = mapped.otherPersonas
   const events: Array<StateEventData> = []
   for (const entity of mapped.participants) {
-    if (!previous?.participants.includes(entity)) {
+    const persona = (mapped.played as ReadonlyArray<string>).includes(entity)
+    if (!(persona ? personasBefore : previous)?.participants.includes(entity)) {
       events.push({ key: "participant.join", value: { entity: entity as EntityId } })
     }
+  }
+  // The other personas join once, so their messages keep their names and faces, unless an
+  // earlier import of this chat already joined them.
+  for (const entity of mapped.otherPersonas) {
+    if (!personasBefore?.participants.includes(entity) && !personasBefore?.otherPersonas?.includes(entity))
+      events.push({ key: "participant.join", value: { entity: entity as EntityId } })
   }
   if (isNew) {
     for (const entity of mapped.absent) {
       events.push({ key: "presence.set", value: { entity: entity as EntityId, present: false } })
     }
   }
-  if (JSON.stringify(previous?.played ?? []) !== JSON.stringify(mapped.played)) {
+  if (inherited || JSON.stringify(previous?.played ?? []) !== JSON.stringify(mapped.played)) {
     events.push({ key: "played_by_me.set", value: { entities: mapped.played as Array<EntityId> } })
+  }
+  // Then leave, as after a persona switch: played by the user, never a character.
+  for (const entity of mapped.otherPersonas) {
+    if (!personasBefore?.otherPersonas?.includes(entity))
+      events.push({ key: "participant.leave", value: { entity: entity as EntityId } })
   }
   for (const entity of new Set([
     ...Object.keys(mapped.lorebookBindings),

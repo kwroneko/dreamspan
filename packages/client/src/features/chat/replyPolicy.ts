@@ -99,10 +99,15 @@ const natural = (
   return id === undefined ? null : { id, after, then }
 }
 
-/** Whether a turn is the user's: a card they play, or no one's written by a person. */
+/**
+ * Whether a turn is the user's: a card they play, or one written by a person as no one or as a
+ * card no longer in the chat (an earlier persona, an imported chat's other personas).
+ */
 const userTurn = (cast: Cast, entry: PathEntry) => {
   const id = entry.version.speakerEntityId
-  return id === null ? entry.version.writer === "human" : cast.playedByMe.includes(id)
+  return id === null || !cast.participants.includes(id)
+    ? entry.version.writer === "human"
+    : cast.playedByMe.includes(id)
 }
 
 /** The characters who spoke since the user's last turn on the path, latest last (none when the user is sending). */

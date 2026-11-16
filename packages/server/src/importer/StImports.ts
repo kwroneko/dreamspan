@@ -46,9 +46,15 @@ import { storeMedia } from "./mediaFiles.ts"
 import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from "./ops.ts"
 import { Report } from "./stReport.ts"
 import { stChatTarget } from "./stChatTarget.ts"
-import { stepWriteProgress, stFinishAt, stIndexSlot, type StStagedBatch } from "../db/stImportProgress.ts"
+import {
+  stepWriteProgress,
+  stFinishAt,
+  stImportedCast,
+  stIndexSlot,
+  type StStagedBatch
+} from "../db/stImportProgress.ts"
 import type { StBatchPlan } from "../db/stImportPlanOps.ts"
-import { foldState, type StateEventData } from "@rp/shared/state.ts"
+import type { StateEventData } from "@rp/shared/state.ts"
 import { stBytesHash, type StPlanExpect, type StPlanExpectFile, stPartsHash } from "./stPlanExpect.ts"
 import { ST_CHANGED_SINCE_CHECK as CHANGED_SINCE_CHECK, ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
 import {
@@ -174,6 +180,11 @@ interface ChatProgress {
   /** ST opens the file's card or group on it (a card's `chat`, a group's `chat_id`): its last-opened chat. */
   readonly stCurrent: boolean
   readonly prevState: ChatState | null
+  /**
+   * `prevState` is the parent file's, as a branch's first import takes it: the parent's state at
+   * its own end, not necessarily what the branch inherits where it leaves the parent.
+   */
+  readonly prevFromParent: boolean
   readonly prevNotes: Readonly<Record<string, EntityId>>
   /** Where the file ended when last imported, and the first slot an unfinished run added. */
   readonly prevEnd: SlotId | null
@@ -1018,8 +1029,7 @@ export class StImports extends Context.Service<
         })
 
       /** The cast a file's finish pins on its imported versions (`StImportFinishChat`). */
-      const castOf = (events: ReadonlyArray<StateEventData>) =>
-        JSON.stringify(foldState(events.map((data) => ({ scope: null, data }))).participants)
+      const castOf = (events: ReadonlyArray<StateEventData>) => JSON.stringify(stImportedCast(events))
 
       /** What the file's chat state becomes, from what the file says and the slots it went to. */
       const stateChangeOf = (session: Session, progress: ChatProgress) =>
@@ -1035,7 +1045,8 @@ export class StImports extends Context.Service<
             run: { length: progress.hiddenRun, firstSlot: progress.firstSlot, throughSlot: progress.throughSlot }
           },
           progress.prevState,
-          progress.isNew
+          progress.isNew,
+          progress.prevFromParent
         )
       type StateChange = ReturnType<typeof stateChangeOf>
 
@@ -1504,6 +1515,7 @@ export class StImports extends Context.Service<
           fork: branch && parent !== undefined ? { parentRecordId: parent.recordId } : null,
           stCurrent,
           prevState: previous?.state ?? null,
+          prevFromParent: previous !== undefined && previous !== own,
           prevNotes: previous?.notes ?? {},
           prevEnd: own?.complete ? own.end : null,
           resumeAt: own !== undefined && !own.complete ? own.firstAdded : null,

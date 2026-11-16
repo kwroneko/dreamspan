@@ -36,7 +36,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { validateDoc } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { unfinishedTitle } from "@rp/shared/stImportApi.ts"
-import { foldState, type StateEventData } from "@rp/shared/state.ts"
+import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { docHash, searchText } from "./documents.ts"
@@ -51,6 +51,7 @@ import {
   resolveStNote,
   stepWriteProgress,
   stFinishAt,
+  stImportedCast,
   type StStagedBatch,
   stStateHash
 } from "./stImportProgress.ts"
@@ -703,7 +704,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
       // ST records a file's cast separately from its versions. Pin that imported cast
       // once; a later re-import or a local cast change must not rewrite old participation.
-      const importedCast = foldState(input.events.map((data) => ({ scope: null, data }))).participants
+      const importedCast = stImportedCast(input.events)
       if (planned === null)
         yield* sql`${pathSegments(sql, chatId, input.end, null)}
           UPDATE version_records SET cast_json = ${JSON.stringify(importedCast)}
@@ -834,7 +835,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         return yield* changed()
       const { position, applies, leaf } = stFinishAt({ ...finish, ...progress })
       const events = applies ? finish.events : []
-      const castJson = JSON.stringify(foldState(events.map((data) => ({ scope: null, data }))).participants)
+      const castJson = JSON.stringify(stImportedCast(events))
       // The rows, with the ids the plan gave them.
       const versionRows: Array<Record<string, unknown>> = []
       const selects: Array<{ slot: string; version: string; content: string }> = []
