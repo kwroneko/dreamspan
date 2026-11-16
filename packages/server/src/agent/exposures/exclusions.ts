@@ -21,7 +21,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
 
   AddRemoteVersionAsCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   AddUserModel: "User-only security, consent, account, credential or network configuration.",
-  AdoptRemoteCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  AdoptRemoteCard:
+    "Exposed as the sources.adopt command (adopt_remote_card): a receipted workshop creation with Undo that always asks.",
   AllowCredentialHost: "User-only security, consent, account, credential or network configuration.",
   AmendVersion: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   AnswerToolApproval: "User-only security, consent, account, credential or network configuration.",
@@ -40,7 +41,6 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ChangeCardAsset: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ChangeLcmSettings: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ChangeMediaHosts: "User-only security, consent, account, credential or network configuration.",
-  CheckRemoteVersion: "Not in W6's first exposures; use the bounded workshop read tools.",
   ClearRecentRemote: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ClearSourceCache: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   ClearStImports: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
@@ -150,7 +150,6 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ListBin: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListBranches: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListCardNotes: "Not in W6's first exposures; use the bounded workshop read tools.",
-  ListCardSources: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListCardUsage: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListCards: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListChatCards: "Not in W6's first exposures; use the bounded workshop read tools.",
@@ -244,7 +243,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetCardAvatarCrop: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetCardParent: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetCardSourceAdminDisabled: "User-only security, consent, account, credential or network configuration.",
-  SetCardSourceEnabled: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  SetCardSourceEnabled:
+    "User-only: turning a card source on or off is the user's consent to contact it (spec/CARD-SOURCES.md §5.1).",
   SetCardSourceKey: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetCardSourceRating: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetComposerChoice: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
@@ -280,14 +280,17 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetVersionFlags: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetWorkshopGrant: "User-only security, consent, account, credential or network configuration.",
   ShowSectionsAsText: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
-  SourceCapabilities: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
-  SourceCard: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  SourceCapabilities:
+    "Exposed through the workshop's card-source tools (sources.* commands), which add the source and rating checks.",
+  SourceCard:
+    "Exposed through the workshop's card-source tools (sources.* commands), which add the source and rating checks.",
   SourceCardForChat: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SourceCreator:
     "Contacts a card source over the network (an outside effect, WORKSHOP §3.1); not in W6's first exposures.",
   SourceFamily:
-    "Contacts a card source over the network (an outside effect, WORKSHOP §3.1); not in W6's first exposures.",
-  SourceSearch: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+    "Exposed through the workshop's card-source tools (sources.* commands), which add the source and rating checks.",
+  SourceSearch:
+    "Exposed through the workshop's card-source tools (sources.* commands), which add the source and rating checks.",
   SourceSuggestions: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SourceTags: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   StImportPreview: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",

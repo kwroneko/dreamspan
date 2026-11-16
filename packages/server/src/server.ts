@@ -1,3 +1,4 @@
+import { installCardSourceCommands } from "./agent/cardSourceCommands.ts"
 import { pluginRoutes } from "./plugins/serve.ts"
 import { PluginHost } from "./plugins/Host.ts"
 import { makePluginHandlers } from "./api/plugins.ts"
@@ -235,6 +236,7 @@ const Handlers = Layer.effectDiscard(
     const execution = yield* ExecutionRegistry
     yield* installOperationRuntime(execution.operationRuntime, yield* Commands)
     yield* installLibraryImport(yield* Commands)
+    yield* installCardSourceCommands(yield* Commands)
   })
 ).pipe(
   Layer.provideMerge(

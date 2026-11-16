@@ -59,7 +59,14 @@ export const SourceCapabilities = Schema.Struct({
   filters: Schema.Array(SourceFilter),
   sorts: Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String, reversible: Schema.Boolean })),
   /** Which filter is the content rating, and the source's own anonymous default for it (§5.3). */
-  ratings: Schema.optionalKey(Schema.Struct({ filterId: Schema.String, default: Schema.NullOr(Schema.String) })),
+  ratings: Schema.optionalKey(
+    Schema.Struct({
+      filterId: Schema.String,
+      default: Schema.NullOr(Schema.String),
+      /** Its choice that leaves out every rated card ("Safe"): the narrowest an assistant may choose. */
+      safe: Schema.optionalKey(Schema.String)
+    })
+  ),
   paging: Schema.Literals(["cursor", "page"]),
   /** Labels for the numbers in a summary's `stats`, by key; the first is the main one. */
   stats: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String }))),

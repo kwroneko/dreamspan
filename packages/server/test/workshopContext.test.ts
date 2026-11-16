@@ -226,6 +226,8 @@ describe("workshop context", () => {
         // Every-tool mode intentionally includes every offered tool; Off removes these tools.
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "plugins.write", mode: "off" })
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "plugins.apply", mode: "off" })
+        // The card-source tools (cardextools1) use the internet: Off leaves their definitions out too.
+        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "network", mode: "off" })
         // Legacy elision remains available when the user explicitly turns LCM off.
         yield* api.ChangeLcmSettings({ chatId: chat.id, change: { enabled: false } })
         const events = yield* watch(api, chat)

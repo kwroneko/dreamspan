@@ -66,6 +66,8 @@ const IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
 /** A source's card as the writer's `AdoptRemoteCard` takes it. */
 type AdoptPayload = Parameters<Writer["Service"]["AdoptRemoteCard"]>[0]
 
+type AdoptResult = { readonly entityId: string; readonly refId: string; readonly existing: boolean }
+
 /** A source's card ready to add: its writer payload, and the media files it brings. */
 interface PreparedAdoption {
   readonly name: string
@@ -140,13 +142,18 @@ export interface CardSourcesShape {
    * has from there is answered instead, with `existing`. A standalone lorebook joins the
    * user's lorebooks the same way (§3.9).
    */
-  readonly adopt: (
+  readonly adopt: <E = never>(
     user: User,
     sourceId: string,
-    remoteId: string
+    remoteId: string,
+    /**
+     * The transaction that adds it, when not the writer's own `AdoptRemoteCard`: the workshop's
+     * receipted operation, with its Undo (`agent/cardSourceCommands.ts`).
+     */
+    write?: (payload: AdoptPayload) => Effect.Effect<AdoptResult, E>
   ) => Effect.Effect<
     { entityId: string; refId: string; name: string; existing: boolean },
-    SourceFailed | NotFound | ServerError
+    SourceFailed | NotFound | ServerError | E
   >
   /**
    * A remote card as a pending chat shows it (§4.2), under its placeholder id
@@ -559,34 +566,33 @@ const make = (options: CardSourcesOptions = {}) =>
      * writer tells it from a card by its document (`adoptedKind`); one the user has from there
      * already is answered instead, with `existing`.
      */
-    const adoptLorebook = (
+    const adoptLorebook = <E>(
       user: User,
       sourceId: string,
       remoteId: string,
-      { summary, fileName, parsed, locator }: CardFile
+      { summary, fileName, parsed, locator }: CardFile,
+      write: (payload: AdoptPayload) => Effect.Effect<AdoptResult, E>
     ) =>
       Effect.gen(function* () {
         const book = withSourceName(parsed.library!, summary.name, fileName.replace(/\.[^.]*$/, ""))
-        const added = yield* writer
-          .AdoptRemoteCard({
-            userId: user.id,
-            sourceId,
-            remoteId,
-            remoteVersion: summary.version.id,
-            ...(locator ? { locator } : {}),
-            file: {
-              label: book.label,
-              docJson: book.docJson,
-              docHash: book.docHash,
-              searchText: book.searchText,
-              schemaVersion: book.schemaVersion,
-              sourceName: fileName,
-              sourceHash: parsed.sha256,
-              media: [],
-              noteDocJson: null
-            }
-          })
-          .pipe(Effect.catch(storage("adding the lorebook")))
+        const added = yield* write({
+          userId: user.id,
+          sourceId,
+          remoteId,
+          remoteVersion: summary.version.id,
+          ...(locator ? { locator } : {}),
+          file: {
+            label: book.label,
+            docJson: book.docJson,
+            docHash: book.docHash,
+            searchText: book.searchText,
+            schemaVersion: book.schemaVersion,
+            sourceName: fileName,
+            sourceHash: parsed.sha256,
+            media: [],
+            noteDocJson: null
+          }
+        })
         return { entityId: added.entityId, refId: added.refId, name: summary.name, existing: added.existing }
       })
 
@@ -1060,15 +1066,25 @@ const make = (options: CardSourcesOptions = {}) =>
           )
           return result
         }),
-      adopt: (user, sourceId, remoteId) =>
+      adopt: <E = never>(
+        user: User,
+        sourceId: string,
+        remoteId: string,
+        write?: (payload: AdoptPayload) => Effect.Effect<AdoptResult, E>
+      ) =>
         Effect.gen(function* () {
           const file = yield* cardFile(user, sourceId, remoteId)
+          const writing = (what: string) =>
+            write ??
+            ((payload: AdoptPayload): Effect.Effect<AdoptResult, E | ServerError> =>
+              writer.AdoptRemoteCard(payload).pipe(Effect.catch(storage(what))))
           // A standalone lorebook joins the user's lorebooks (§3.9): opening one adds it.
-          if (file.parsed.library?.kind === "lorebook") return yield* adoptLorebook(user, sourceId, remoteId, file)
+          if (file.parsed.library?.kind === "lorebook")
+            return yield* adoptLorebook(user, sourceId, remoteId, file, writing("adding the lorebook"))
           const prepared = yield* preparedOf(user, sourceId, remoteId, file)
           const added = yield* service.storingAdoptions(
             [prepared],
-            writer.AdoptRemoteCard(prepared.payload).pipe(Effect.catch(storage("adding the card"))),
+            writing("adding the card")(prepared.payload),
             (result) => [!result.existing]
           )
           return { entityId: added.entityId, refId: added.refId, name: prepared.name, existing: added.existing }

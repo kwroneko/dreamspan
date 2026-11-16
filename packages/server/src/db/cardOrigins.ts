@@ -50,7 +50,7 @@ const remoteTarget = (sourceId: string, remoteId: string) => `${sourceId}:${remo
  * greeting, a card's the reverse (a card's own book is under `character_book`). A standalone
  * lorebook from a source (spec/CARD-SOURCES.md §3.9) is added as a lorebook.
  */
-const adoptedKind = (docJson: string): "card" | "lorebook" => {
+export const adoptedKind = (docJson: string): "card" | "lorebook" => {
   try {
     const doc: unknown = JSON.parse(docJson)
     return typeof doc === "object" &&

@@ -76,6 +76,12 @@ const handlers = Layer.unwrap(
     // --- ST data folder import (ARCHITECTURE.md §13)
     const prefix = makeStImportPrefix()
     const stImport = yield* makeStImportWriteHandlers(prefix)
+    const adoption = yield* makeAdoptWriteHandlers(
+      library.ImportFile,
+      chatSetup.StartChat,
+      library.CommitEditorDrafts,
+      bin.drafts
+    )
     const served = WriteOps.of(
       providerDefinitionHandlers(
         stateModuleHandlers(
@@ -101,7 +107,9 @@ const handlers = Layer.unwrap(
                   ...graph,
                   ...binOps,
                   ...generation,
-                  ...(yield* makeHistoryWriteHandlers)
+                  ...(yield* makeHistoryWriteHandlers),
+                  // A card added from a card source by the workshop (cardextools1).
+                  AdoptRemoteCard: adoption.AdoptRemoteCard
                 },
                 bin
               )),
@@ -115,12 +123,7 @@ const handlers = Layer.unwrap(
               ...(yield* makeLcmUiWriteHandlers),
               ...(yield* makeLcmEnableWriteHandlers(bin)),
               ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
-              ...(yield* makeAdoptWriteHandlers(
-                library.ImportFile,
-                chatSetup.StartChat,
-                library.CommitEditorDrafts,
-                bin.drafts
-              )),
+              ...adoption,
               ...(yield* makeDecisionWriteHandlers(bin))
             },
             prefix

@@ -32,6 +32,7 @@ import { makeRegistry } from "@rp/shared/registry.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import { toBinItem, type Bin } from "./bin.ts"
 import { NotFound, WriteOps } from "./ops.ts"
+import { adoptedKind } from "./cardOrigins.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
@@ -59,6 +60,7 @@ type OperationName =
   | "DeleteMessage"
   | "RestoreBinItem"
   | "SetPersona"
+  | "AdoptRemoteCard"
 type OperationRpc<K> = Extract<OpsOf<typeof WriteOps>, { readonly _tag: K }>
 type Operations = {
   [K in OperationName]: (
@@ -142,7 +144,9 @@ const creations: Readonly<Record<string, string>> = {
   CreateCardNote: "library.write",
   CreateSharedNote: "library.write",
   CreateChatNote: "chats.setup",
-  ImportFile: "library.write"
+  ImportFile: "library.write",
+  // Add to my cards from a card source (cardextools1): its Undo bins the added card.
+  AdoptRemoteCard: "library.write"
 }
 
 // A reverse-order undo restores content through new revisions. Only those known restores
@@ -703,6 +707,50 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                     : null
                   if (proof.chat && JSON.stringify(current!.proof) !== JSON.stringify(proof.chat))
                     return yield* refuseOperation("The saved chat changed while waiting. Read it again and ask again.")
+                }
+                if (creates && input.operation === "AdoptRemoteCard") {
+                  // The user's Add to my cards, with the same rule as a file the assistant imports:
+                  // nothing in it grants a permission, and scripts and HTML stay off.
+                  const file = value.file as Record<string, unknown>
+                  const kind = adoptedKind(String(file.docJson))
+                  const safe = yield* Effect.try({
+                    try: () => {
+                      const doc = JSON.parse(String(file.docJson)) as Doc
+                      const ours = (doc.extensions as { rp_harness?: { skills?: unknown } } | undefined)?.rp_harness
+                      if (ours?.skills !== undefined) return null
+                      return encodeLibraryDoc(
+                        safeAgentDocument(
+                          kind,
+                          {},
+                          withHtmlApprovals(
+                            {},
+                            {
+                              ...withoutGrantedAgentEdits(kind, {}, doc),
+                              ...(kind === "lorebook" ? {} : { regex_approved: false })
+                            }
+                          )
+                        )
+                      )
+                    },
+                    catch: () => refuseOperation("This card can't be added here. Add it from its page.")
+                  })
+                  if (safe === null)
+                    return yield* refuseOperation("This card carries its own skills. Add it from its page.")
+                  yield* checkDocument(JSON.parse(safe.json))
+                  const result = (yield* handler!({
+                    ...(payload as object),
+                    file: { ...file, docJson: safe.json, docHash: safe.hash, searchText: safe.searchText }
+                  })) as { entityId: string; refId: RefId; existing: boolean }
+                  // A card the user has from there already: nothing was added, so nothing to undo.
+                  if (result.existing) return { result: pendingOperationResult(input.operation, result), effects: [] }
+                  const first = yield* creation(result.refId)
+                  const effects = [first]
+                  for (const note of first.undo.notes) {
+                    const [ref] = yield* sql<{ id: RefId }>`SELECT id FROM entity_refs WHERE entity_id = ${note}
+                      ORDER BY id LIMIT 1`
+                    effects.push(yield* creation(ref!.id))
+                  }
+                  return { result: pendingOperationResult(input.operation, result), effects }
                 }
                 if (creates) {
                   if (input.operation === "ForkWithDrafts" && value.moveDrafts !== false)

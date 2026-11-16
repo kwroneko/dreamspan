@@ -9,6 +9,7 @@ import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext, ToolOutput } from "../src/agent/tools.ts"
 import { toolData } from "../src/agent/toolData.ts"
 import { paritySkills, paritySkillTools, parityTools } from "../src/agent/exposures/parity.ts"
+import { cardSourceExposures } from "../src/agent/exposures/cardSources.ts"
 import { builtinSkills } from "../src/agent/skills.ts"
 import { loadSkillDescription, orphansOf, skillsFor, toolSearchDescription } from "../src/agent/toolLoading.ts"
 import { client, serverLayer, testConfig, outcome } from "./support/config.ts"
@@ -583,9 +584,11 @@ it.effect("every new tool sits in a skill; the skill index only gains Notes", ()
       ),
       []
     )
-    const deferred = plan.tools.filter((id) => !immediate.has(id))
+    // The card-source tools (cardextools1) are a skill of their own, checked in workshopCardSources.test.ts.
+    const sourceTools = cardSourceExposures.map((e) => e.id)
+    const deferred = plan.tools.filter((id) => !immediate.has(id) && !sourceTools.includes(id))
     const before = deferred.filter((id) => !NEW_TOOLS.includes(id))
-    const registered = registry.skills.list()
+    const registered = registry.skills.list().filter((skill) => skill.id !== "card-sources")
     // With and without the new tools, against the skills as shipped and as registered.
     assert.strictEqual(
       toolSearchDescription(orphansOf(deferred, registered)),

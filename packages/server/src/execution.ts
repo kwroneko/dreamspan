@@ -2,6 +2,7 @@ import { historyRenameTool, historySearchTool, rewriteTools } from "./agent/tool
 import { makeOperationTools, type OperationRuntime } from "./agent/operations.ts"
 import { builtinOperationExposures } from "./agent/exposures/builtins.ts"
 import { paritySkills, paritySkillTools, parityTools } from "./agent/exposures/parity.ts"
+import { cardSourceExposures, cardSourcesSkill } from "./agent/exposures/cardSources.ts"
 import { rolloutEffectClasses } from "./agent/effects.ts"
 import { outsideEffect } from "./agent/effects.ts"
 import { capabilityDefaults, workshopCapabilities } from "./agent/capabilities.ts"
@@ -95,7 +96,7 @@ export class ExecutionRegistry extends Context.Service<
         { workshopCapabilities, capabilityDefaults },
         operationRuntime
       )
-      for (const entry of builtinOperationExposures) yield* operationTools.register(entry)
+      for (const entry of [...builtinOperationExposures, ...cardSourceExposures]) yield* operationTools.register(entry)
       yield* orchestrationModes.register({
         ...workshopMode,
         plan: (input) => {
@@ -161,6 +162,7 @@ export class ExecutionRegistry extends Context.Service<
       for (const skill of builtinSkills)
         yield* skills.register({ ...skill, tools: [...skill.tools, ...(paritySkillTools[skill.id] ?? [])] })
       for (const skill of paritySkills) yield* skills.register(skill)
+      yield* skills.register(cardSourcesSkill)
       const toolLoaders = makeRegistry<RolloutTool<never>>()
       yield* toolLoaders.register(toolSearch as RolloutTool<never>)
       yield* toolLoaders.register(makeLoadSkill() as RolloutTool<never>)

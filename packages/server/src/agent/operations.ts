@@ -44,6 +44,8 @@ export interface OperationExposure {
   readonly operation: { readonly rpc: string } | { readonly command: string }
   readonly capability: string
   readonly effect: "read" | "library" | "setup" | "outside"
+  /** Asks every time, even where the capability is Allowed (as plugin_enable does). */
+  readonly approval?: "always"
   readonly label: string
   readonly explanation: string
   readonly description: string

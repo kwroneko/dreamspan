@@ -482,7 +482,13 @@ export const capabilitiesOf = (raw: unknown): SourceCapabilities => {
       reversible: s.needs.length > 1
     })),
     ...(ratings.length
-      ? { ratings: { filterId: "nsfw", default: typeof nsfwDefault === "string" ? nsfwDefault : null } }
+      ? {
+          ratings: {
+            filterId: "nsfw",
+            default: typeof nsfwDefault === "string" ? nsfwDefault : null,
+            ...(ratings.includes("exclude") ? { safe: "exclude" } : {})
+          }
+        }
       : {}),
     paging: "cursor",
     stats: [{ id: "popularity", label: "popularity" }],
