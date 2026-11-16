@@ -261,6 +261,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SetImageExcluded: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetLcmBackfill: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetLcmEnabled: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  SetMessagesHidden: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetMessageHidden: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetThinkingHidden: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SetModelHidden: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",

@@ -1,5 +1,5 @@
 import { chatKinds } from "@rp/shared/chatKinds.ts"
-import { displayEndOf } from "./displayPath.ts"
+import { displayEndOf, pathPieces, positionOf } from "./displayPath.ts"
 import { presenceBefore } from "./participation.ts"
 import { canonicalJson } from "@rp/shared/editing.ts"
 import { previewForkNotes } from "./forkNotes.ts"
@@ -26,6 +26,7 @@ import {
   imageExcludedSql,
   imageTarget,
   insertFork,
+  slotDeletedIn,
   thinkingHiddenSql,
   thinkingTarget,
   versionAsShown,
@@ -183,6 +184,25 @@ export const makeWriteHandlers = (bin: Bin) =>
             const [slot] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM slots WHERE id = ${slotId}`
             return (yield* forkAt(sql, slot!.chat_id, slotId)) as ForkId | null
           })
+
+    /**
+     * Hides `slotId` from the model in `fork`, or shows it again: a `hide` row of the fork's own
+     * (spec/FORK-INDEPENDENCE-DELTA.md §2.4). Whether it wasn't so already.
+     */
+    const setSlotHidden = (fork: ForkRow, slotId: string, hidden: boolean) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{ effective: number }>`
+          SELECT ${contextExcludedIn(sql, fork.id, "s")} AS effective FROM slots s WHERE s.id = ${slotId}`
+        if ((row!.effective === 1) === hidden) return false
+        yield* writeOverride(
+          sql,
+          { id: fork.id, chatId: fork.chat_id },
+          { kind: "hide", targetId: slotId, slotId, valueId: null, flag: hidden ? 1 : 0 }
+        )
+        // A hide is a history reduction in the fork (stepped history, historyChanges.ts).
+        if (hidden) yield* recordReduction(sql, slotId, fork.id)
+        return true
+      })
 
     const forkOut = (forkId: string) =>
       sql<
@@ -355,18 +375,32 @@ export const makeWriteHandlers = (bin: Bin) =>
           const named = yield* forkOf(slotId, forkId)
           if (named === null) return yield* new NotFound({ entity: "fork", id: forkId ?? slotId })
           const fork = yield* ownedForkById(userId, named)
-          const [row] = yield* sql<{ effective: number }>`
-            SELECT ${contextExcludedIn(sql, fork.id, "s")} AS effective FROM slots s WHERE s.id = ${slotId}`
-          if ((row!.effective === 1) === hidden) return { changed: false }
-          yield* writeOverride(
-            sql,
-            { id: fork.id, chatId: fork.chat_id },
-            { kind: "hide", targetId: slotId, slotId, valueId: null, flag: hidden ? 1 : 0 }
-          )
-          // A hide is a history reduction in the fork (stepped history, historyChanges.ts).
-          if (hidden) yield* recordReduction(sql, slotId, fork.id)
-          return { changed: true }
+          return { changed: yield* setSlotHidden(fork, slotId, hidden) }
         }).pipe(transaction("SetSlotHidden")),
+
+      // Several at once (Select messages): each as SetSlotHidden, in this one transaction.
+      SetSlotsHidden: ({ userId, forkId, slotIds, hidden }) =>
+        Effect.gen(function* () {
+          const fork = yield* ownedForkById(userId, forkId)
+          const unique = [...new Set(slotIds)]
+          // Each must be shown in the fork, as DeleteMessages requires (db/bin.ts): one read of
+          // the path's pieces, then one query for all of them.
+          const pieces = yield* pathPieces(sql, fork.chat_id, fork.id, fork.tip_slot_id)
+          const rows = yield* sql<{ id: string; chain_id: string; depth: number }>`
+            SELECT s.id, s.chain_id, s.depth FROM json_each(${JSON.stringify(unique)}) asked
+              CROSS JOIN slots s ON s.id = asked.value
+            WHERE s.chat_id = ${fork.chat_id} AND NOT ${slotDeletedIn(sql, fork.id, "s")}`
+          const shown = new Set(
+            rows
+              .filter((row) => positionOf(pieces, { id: row.id, chainId: row.chain_id, depth: row.depth }) !== null)
+              .map((row) => row.id)
+          )
+          const missing = unique.find((id) => !shown.has(id))
+          if (missing !== undefined) return yield* new NotFound({ entity: "slot", id: missing })
+          const changed: Array<SlotId> = []
+          for (const slotId of unique) if (yield* setSlotHidden(fork, slotId, hidden)) changed.push(slotId)
+          return { chatId: fork.chat_id as ChatId, changed }
+        }).pipe(transaction("SetSlotsHidden")),
 
       AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data, forkId, displayEnd }) =>
         Effect.gen(function* () {

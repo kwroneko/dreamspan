@@ -1,6 +1,7 @@
 // A multi-delete at the owner's scale (job msgactions1): 3,000 messages, 300 branches sharing the
 // main fork's history, 20–50 swipes on most messages. Deleting 1,000 messages, at the branch's end
-// and in its shared middle, and their Undo, each one writer transaction. Synthetic data only.
+// and in its shared middle, and their Undo, then hiding and showing them (selecthide1), each one
+// writer transaction. Synthetic data only.
 // Run: env VITEST_MAX_WORKERS=1 npx vitest run --project server-slow \
 //   packages/server/test/messageSelectionScale.test.ts
 import { join } from "node:path"
@@ -121,6 +122,39 @@ it.live(
         // Bounded: one writer transaction each, well under the writer's patience on a busy host.
         assert.isBelow(deleted.ms, 30_000)
         assert.isBelow(restored.ms, 30_000)
+        // Hide from the model, then Show (job selecthide1): one writer transaction each. The fixture
+        // hid some messages already: those don't change, and stay hidden after the Show.
+        const range = new Set<string>(slotIds)
+        const hiddenInRange = () =>
+          Effect.gen(function* () {
+            const page = yield* reader.GetPath({
+              userId,
+              chatId,
+              forkId: main,
+              leafSlotId: slotIds.at(-1)!,
+              limit: RANGE
+            })
+            // One page: inserted messages can push the range's first few into the page before.
+            const seen = page.entries.filter((e) => range.has(e.slotId))
+            return { seen: seen.length, hidden: seen.filter((e) => e.contextExcluded).map((e) => e.slotId) }
+          })
+        const before = yield* hiddenInRange()
+        const hidden = yield* timed(
+          `SetSlotsHidden-${label}`,
+          writer.SetSlotsHidden({ userId, forkId: main, slotIds, hidden: true })
+        )
+        assert.isAtMost(hidden.answer.changed.length, RANGE - before.hidden.length)
+        assert.isAtLeast(hidden.answer.changed.length, before.seen - before.hidden.length)
+        const hiddenAfter = yield* hiddenInRange()
+        assert.strictEqual(hiddenAfter.hidden.length, hiddenAfter.seen)
+        const shownAgain = yield* timed(
+          `SetSlotsShown-${label}`,
+          writer.SetSlotsHidden({ userId, forkId: main, slotIds: hidden.answer.changed, hidden: false })
+        )
+        assert.strictEqual(shownAgain.answer.changed.length, hidden.answer.changed.length)
+        assert.deepStrictEqual(yield* hiddenInRange(), before)
+        assert.isBelow(hidden.ms, 30_000)
+        assert.isBelow(shownAgain.ms, 30_000)
       }
     }).pipe(Effect.provide(server.layer), Effect.scoped)
   },

@@ -1,7 +1,7 @@
 // Which messages are ticked, while the user picks several to delete together (job msgactions1).
 // One store per open chat, in the tab only: a selection is a moment's work, gone on reload, as a
 // confirmation is. Each row reads only its own tick (`ticked`), so ticking or a range of 500
-// re-renders the rows whose ticks change, never the message list.
+// re-renders the rows whose ticks change, never the message list. Hide and Show (selecthide1) use it too.
 import type { ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { MULTI_DELETE_LIMIT } from "@rp/shared/bin.ts"
 import type { ChatSession } from "../session.ts"
@@ -12,6 +12,8 @@ export interface Ticked {
   readonly slotId: SlotId
   readonly position: number
   readonly versions: number
+  /** Hidden from the model in this fork. */
+  readonly hidden: boolean
   readonly copies: ReadonlyArray<{ readonly slotId: SlotId; readonly forkId: ForkId }>
 }
 
@@ -46,6 +48,7 @@ const tickedOf = (entry: PathEntry): Ticked => ({
   slotId: entry.slotId,
   position: positionOf(entry),
   versions: entry.versionCount,
+  hidden: entry.contextExcluded,
   copies: entry.copies ?? []
 })
 
@@ -114,7 +117,7 @@ export class MessageSelection {
       else next.delete(entry.slotId)
     }
     if (next.size > MULTI_DELETE_LIMIT) {
-      notice = `At most ${MULTI_DELETE_LIMIT.toLocaleString()} messages can be deleted at once.`
+      notice = `At most ${MULTI_DELETE_LIMIT.toLocaleString()} messages can be selected at once.`
       return this.set({ notice, range: false })
     }
     this.set({ ticked: next, anchor: entry.slotId, range: false, notice })
@@ -146,9 +149,16 @@ export class MessageSelection {
 
   /** The ticked messages in the path's order, top down: the order they're deleted and restored in. */
   ordered(): ReadonlyArray<Ticked> {
-    return [...this.state.ticked.values()].sort((a, b) => a.position - b.position)
+    return orderedOf(this.state.ticked)
   }
 }
+
+/**
+ * `ticked` in the path's order, top down. Components call this with the snapshot's `ticked`, not
+ * `store.ordered()`: the React Compiler would keep the first answer for the (stable) store.
+ */
+export const orderedOf = (ticked: SelectionState["ticked"]): ReadonlyArray<Ticked> =>
+  [...ticked.values()].sort((a, b) => a.position - b.position)
 
 const stores = new WeakMap<ChatSession, MessageSelection>()
 
