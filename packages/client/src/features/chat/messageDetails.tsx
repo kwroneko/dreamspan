@@ -152,7 +152,7 @@ function ModelIcon({ entry }: MessageDetailProps) {
  * A header item that never moves the wrapping header (a phone's, a narrow column's) onto
  * another line: no width of its own, it grows into what its line leaves, up to its content.
  */
-export const headerGives =
+const headerGives =
   "max-sm:shrink max-sm:basis-0 max-sm:grow max-sm:max-w-max @max-[30rem]/chat:shrink @max-[30rem]/chat:basis-0 @max-[30rem]/chat:grow @max-[30rem]/chat:max-w-max"
 
 /**
