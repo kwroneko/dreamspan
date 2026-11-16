@@ -644,6 +644,67 @@ test("a panel that takes focus gets neither the typing nor the bridge, and a cli
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("Panel text")
 })
 
+// A press in a panel can reach the app before the pointer's arrival over it does (pointer moves
+// wait for the app's next frame; a busy host makes that late): the app then takes the focus
+// back at once, as from a frame the pointer isn't over, and the press's signed `rp:focus`
+// gives it back. The press's own focus inside the panel must come back with it: the field the
+// user pressed in gets the typing, from its first key.
+test("a press the app sees before the pointer's arrival keeps its field's focus", async ({ page }) => {
+  test.setTimeout(180_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const imported = await page.request.post(`${server().url}/library/import?name=late-hover.json`, {
+    data: Buffer.from(
+      JSON.stringify({
+        spec: "chara_card_v3",
+        spec_version: "3.0",
+        data: {
+          name: "Late hover card",
+          first_mes: panel("Late", '<input id="field">\n<script>document.body.dataset.ready = "yes"</script>')
+        }
+      })
+    ),
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(imported.status()).toBe(200)
+  const { ref } = ((await imported.json()) as { library: { ref: { id: RefId; entityId: EntityId } } }).library
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.SetHtmlApproval({ refId: ref.id, scripts: true, network: false })
+  )
+  const plain = await page.request.post(`${server().url}/library/import?name=Plain-preset-2.json`, {
+    data: Buffer.from(JSON.stringify({ openai_max_context: 8192 })),
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(plain.status()).toBe(200)
+  const { ref: preset } = ((await plain.json()) as { library: { ref: { id: RefId } } }).library
+  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.ChangeGenerationDefaults({ change: { preset: preset.id } })
+  )
+  const started = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.StartChat({
+      cards: [ref.entityId],
+      persona: null,
+      greeting: 0,
+      first: { _tag: "Send", content: "Evening.", speakerEntityId: null }
+    })
+  )
+  await page.goto(`${server().url}/chats/${started.chat.id}`)
+  const inside = page.frameLocator('iframe[title="Panel"]')
+  await expect(inside.locator("body")).toHaveAttribute("data-ready", "yes")
+  const composer = page.locator("textarea").last()
+  await composer.click()
+  await page.keyboard.type("Hello", { delay: 30 })
+  await page.waitForTimeout(700)
+  const field = (await inside.locator("#field").boundingBox())!
+  await page.mouse.move(field.x + field.width / 2, field.y + field.height / 2)
+  // The pointer's arrival hasn't reached the app yet: as far as it knows, it's over the composer.
+  await composer.dispatchEvent("pointerover")
+  await page.mouse.down()
+  await page.mouse.up()
+  await page.keyboard.type("Room 4", { delay: 60 })
+  await expect(inside.locator("#field")).toHaveValue("Room 4")
+  await expect(composer).toHaveValue("Hello")
+})
+
 // A message's own HTML can paint over the strip (a decoy with pointer-events: none passes the
 // click to the button under it). So the strip's button only asks; the confirmation, outside
 // the message, is what allows the scripts.

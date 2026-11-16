@@ -12,7 +12,8 @@ import { registerTimelineTransforms } from "./timelineContributions.tsx"
 import { NextImagesNote } from "./imageTokens.tsx"
 import { ReplyChoicesSetting } from "./ReplyChoicesSetting.tsx"
 import { ContextSetting } from "./ContextSetting.tsx"
-import { lazy, Suspense, type ComponentType } from "react"
+import { lazy, Suspense, type ComponentType, type ReactNode } from "react"
+import { Loading } from "../../ui/Spinner.tsx"
 import {
   accountSettingSections,
   chatComposer,
@@ -43,10 +44,11 @@ import { boundEditorSurroundings } from "../editor/workspaceViews.ts"
 import { PortraitColumn } from "./PortraitColumn.tsx"
 import { AssemblyRefusal } from "./AssemblyRefusal.tsx"
 import { LearnContextLimit } from "./LearnContextLimit.tsx"
-function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
+/** A part whose code loads on first use; `fallback` shows meanwhile (nothing by default). */
+function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>, fallback: ReactNode = null) {
   const Component = lazy(load)
   return (props: P) => (
-    <Suspense fallback={null}>
+    <Suspense fallback={fallback}>
       <Component {...props} />
     </Suspense>
   )
@@ -87,8 +89,11 @@ const OneReplySection = deferred<Parameters<typeof import("./ReplyOrder.tsx").On
 const Versions = deferred<Parameters<typeof import("./VersionControls.tsx").Versions>[0]>(() =>
   import("./VersionControls.tsx").then((m) => ({ default: m.Versions }))
 )
-const LcmFields = deferred<Parameters<typeof import("./LcmFields.tsx").LcmFields>[0]>(() =>
-  import("./LcmFields.tsx").then((m) => ({ default: m.LcmFields }))
+// The summary settings' fields: their section already shows the summary model above them, so
+// while their code loads it says so instead of looking complete.
+const LcmFields = deferred<Parameters<typeof import("./LcmFields.tsx").LcmFields>[0]>(
+  () => import("./LcmFields.tsx").then((m) => ({ default: m.LcmFields })),
+  <Loading />
 )
 const BranchControl = deferred<Parameters<typeof import("./BranchControl.tsx").BranchControl>[0]>(() =>
   import("./BranchControl.tsx").then((m) => ({ default: m.BranchControl }))

@@ -29,10 +29,12 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore
 } from "react"
+import { flushSync } from "react-dom"
 import { Button } from "../../ui/Button.tsx"
 import { ChatSkeleton, SkeletonMessages } from "./SkeletonMessages.tsx"
 import { Alert } from "../../ui/Surface.tsx"
@@ -248,8 +250,26 @@ export function MessageList({
     },
     []
   )
+  // While the list scrolls, TanStack Virtual measures newly mounted rows only in its resize
+  // observer, before the browser paints, but re-renders for a size that moves nothing above the
+  // screen in a later task: for one painted frame the rows on screen stood at their estimated
+  // places, a strip of empty list between messages where a row came out shorter than its
+  // estimate (masterfix1: readingDensity.perf.ts' blank frames, 32 px in Comfortable). Apply
+  // such a measurement before the paint: a microtask after the observer's callback is still
+  // before it, and outside React's own render and commit, so flushSync is allowed there.
+  const [, repaint] = useReducer((n: number) => n + 1, 0)
+  const repaintQueued = useRef(false)
+  const onVirtualChange = useCallback((_instance: Virtualizer<HTMLDivElement, Element>, sync: boolean) => {
+    if (sync || repaintQueued.current) return
+    repaintQueued.current = true
+    queueMicrotask(() => {
+      repaintQueued.current = false
+      flushSync(repaint)
+    })
+  }, [])
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
+    onChange: onVirtualChange,
     count: rowCount,
     getScrollElement: () => parent.current,
     estimateSize,
@@ -493,10 +513,21 @@ export function MessageList({
     // The default anchors only rows entirely above the viewport; a marker added below
     // a partly visible earlier message would otherwise push the link down. Stop using
     // this requested-message anchor as soon as the user takes over, like reveal below.
+    // It only holds while the linked message is on screen: once the list is somewhere else
+    // (a scroll with no input event, the link unmounted) the ordinary reading anchor
+    // applies, or rows growing between the screen and the link would move what's read, and
+    // older pages landing above it wouldn't be corrected at all (masterfix1).
     const previousAdjustment = virtualizer.shouldAdjustScrollPositionOnItemSizeChange
-    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) => {
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, delta, instance) => {
       const row = shown?.closest<HTMLElement>("[data-index]")
-      return row !== undefined && row !== null && item.index < Number(row.dataset.index)
+      if (row !== undefined && row !== null && list.contains(row)) {
+        const box = row.getBoundingClientRect()
+        const view = list.getBoundingClientRect()
+        if (box.bottom > view.top && box.top < view.bottom) return item.index < Number(row.dataset.index)
+      }
+      return previousAdjustment
+        ? previousAdjustment(item, delta, instance)
+        : item.start < (instance.scrollOffset ?? 0) + instance.scrollAdjustments
     }
     const reveal = () => {
       const article = list.querySelector(`article[data-slot="${CSS.escape(anchor)}"]`)
