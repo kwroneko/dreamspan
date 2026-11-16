@@ -2,7 +2,7 @@
 // handles. Staging is bookkeeping; publication is foreign story content.
 import { assert } from "@effect/vitest"
 import { vi } from "vitest"
-import { Deferred, Effect, Exit, Fiber, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber } from "effect"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest, PAIRS_8K } from "./support/lcmHarness.ts"

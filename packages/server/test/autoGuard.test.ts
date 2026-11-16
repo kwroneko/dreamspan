@@ -5,7 +5,7 @@
 import { assert, it } from "@effect/vitest"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Effect, Layer, Stream, type Scope } from "effect"
+import { Effect, Layer, type Scope } from "effect"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
 import { ProviderRegistry } from "../src/providers/registry.ts"
 import { Writer } from "../src/db/Database.ts"

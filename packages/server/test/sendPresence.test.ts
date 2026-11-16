@@ -9,7 +9,7 @@ import { NewVersion, type EntityId, type ForkId, type SlotId, type VersionId } f
 import type { UserId } from "@rp/shared/domain.ts"
 import { awayAt } from "@rp/shared/knowledge.ts"
 import { foldState, type StateEventData } from "@rp/shared/state.ts"
-import { Effect, Stream } from "effect"
+import { Effect } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"

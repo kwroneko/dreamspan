@@ -23,7 +23,7 @@ export const defaultReplyOutput: ReplyOutputStrategy = {
   create: ({ prefix }) => replyDecoder(prefix)
 }
 
-export const replyDecoder = (prefix: string | null): ReturnType<ReplyOutputStrategy["create"]> => {
+const replyDecoder = (prefix: string | null): ReturnType<ReplyOutputStrategy["create"]> => {
   let emitted = ""
   const decodeReply = Schema.decodeUnknownOption(Schema.Struct({ text: Schema.String }))
   const suffix = (args: unknown, final: boolean): Effect.Effect<string, GenerationFailed> => {

@@ -27,7 +27,7 @@ export const defaultReplyStrategy: ReplyStrategy = {
   run: (input) => runPlainReply({ ...input, target: { kind: "version", versionId: input.request.versionId } })
 }
 
-export const runPlainReply = ({
+const runPlainReply = ({
   request,
   generation,
   rolloutId,
