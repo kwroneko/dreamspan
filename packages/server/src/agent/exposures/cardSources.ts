@@ -185,7 +185,7 @@ export const cardField = (
 const quotedSize = (text: string) => escapeToolData(JSON.stringify(text)).length - 2
 
 /** Text from `offset`, as much as fits in `limit` quoted characters (at least one character). */
-export const pagedText = (text: string, offset: number, limit: number) => {
+const pagedText = (text: string, offset: number, limit: number) => {
   const start = Math.min(text.length, Math.max(0, offset))
   let low = Math.min(text.length, start + 1)
   let high = Math.min(text.length, start + limit)

@@ -24,7 +24,7 @@ import { withoutCardSkills } from "./toolLoading.ts"
 const refuse = (message: string) => new HistoryRejected({ message })
 
 /** A source's refusal in words the assistant can act on. */
-export const sourceRefusal = (error: SourceFailed, name = error.sourceId) =>
+const sourceRefusal = (error: SourceFailed, name = error.sourceId) =>
   refuse(
     error.reason === "disabled"
       ? `${name} is turned off. Only the user can turn it on, in Settings → Card sources.`
@@ -71,7 +71,7 @@ const chosenSource = (sources: ReadonlyArray<SourceInfo>, wanted: string | null)
 }
 
 /** The rating the user's searches use: the one they chose last, else the source's default (§5.3). */
-export const userRating = (caps: SourceCapabilities, info: Pick<SourceInfo, "rating">) =>
+const userRating = (caps: SourceCapabilities, info: Pick<SourceInfo, "rating">) =>
   caps.ratings ? (info.rating ?? caps.ratings.default) : null
 
 const labelOf = (caps: SourceCapabilities, filterId: string, value: string) => {

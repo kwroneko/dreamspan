@@ -92,7 +92,8 @@ const fixture = (dataDir: string) =>
     const ok = (name: string, args: unknown, id = name) =>
       Effect.map(run(name, args, id), (out) => {
         assert.isUndefined(out.isError, `${id}: ${out.text}`)
-        return JSON.parse(out.text) as Record<string, any>
+        // The tools' JSON, read field by field below.
+        return JSON.parse(out.text)
       })
     const refused = (name: string, args: unknown, id = name) =>
       Effect.map(run(name, args, id), (out) => {
