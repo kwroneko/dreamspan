@@ -79,8 +79,8 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     id: "network",
     order: 70,
     label: "Use the internet",
-    explanation: "Fetches pages from other sites, and searches and opens cards on the card sources you've turned on.",
-    example: "Opens a page you linked to read a character's description."
+    explanation: "Searches and opens cards on the card sources you've turned on.",
+    example: "Searches cardex for fantasy cards and opens one to read it."
   },
   {
     id: "plugins.write",

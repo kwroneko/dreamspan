@@ -58,7 +58,7 @@ import { makeSourceHttp } from "./guard.ts"
 import { withConditionalGets } from "./httpCache.ts"
 import { makeCoalescer, makeLimiter } from "./limiter.ts"
 
-const ADMIN_KEY = "sources.admin"
+export const ADMIN_KEY = "sources.admin"
 const IMAGE_PURPOSE = "card-source-image"
 /** Images a browser shows as images; anything else a source sends is refused. */
 const IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
@@ -131,7 +131,9 @@ export interface CardSourcesShape {
   readonly card: (
     user: User,
     sourceId: string,
-    remoteId: string
+    remoteId: string,
+    /** Whether to record it as recently viewed, once its listing is known (default: yes). */
+    record?: (summary: RemoteSummary) => boolean
   ) => Effect.Effect<
     { summary: RemoteSummary; docJson: string | null; problems: ReadonlyArray<string> },
     SourceFailed | NotFound | ServerError
@@ -961,7 +963,7 @@ const make = (options: CardSourcesOptions = {}) =>
             suggest(http, kind, prefix.trim(), page)
           )
         }),
-      card: (user, sourceId, remoteId) =>
+      card: (user, sourceId, remoteId, record) =>
         Effect.gen(function* () {
           const { summary, parsed, fetched, locator } = yield* cardFile(user, sourceId, remoteId)
           const card = parsed.library?.kind === "card" ? parsed.library : null
@@ -973,20 +975,24 @@ const make = (options: CardSourcesOptions = {}) =>
             parsed.sha256,
             locator
           )
-          yield* writer
-            .RecordRecentRemote({
-              userId: user.id,
-              entry: {
-                sourceId,
-                remoteId,
-                name: summary.name,
-                ...(summary.kind ? { kind: summary.kind } : {}),
-                ...(summary.creator ? { creator: summary.creator } : {}),
-                ...(shown!.thumb ? { thumb: shown!.thumb } : {}),
-                at: Date.now()
-              }
-            })
-            .pipe(Effect.tap(keep(user.id)), Effect.catch(storage("recording a recently viewed card")))
+          if (record?.(summary) !== false)
+            yield* writer
+              .RecordRecentRemote({
+                userId: user.id,
+                entry: {
+                  sourceId,
+                  remoteId,
+                  name: summary.name,
+                  ...(summary.kind ? { kind: summary.kind } : {}),
+                  ...(summary.creator ? { creator: summary.creator } : {}),
+                  ...(shown!.thumb ? { thumb: shown!.thumb } : {}),
+                  version: summary.version.id,
+                  ...(summary.version.updatedAt !== undefined ? { versionAt: summary.version.updatedAt } : {}),
+                  ...(summary.rating !== undefined ? { rating: summary.rating } : {}),
+                  at: Date.now()
+                }
+              })
+              .pipe(Effect.tap(keep(user.id)), Effect.catch(storage("recording a recently viewed card")))
           return {
             summary: shown!,
             docJson: card?.docJson ?? null,

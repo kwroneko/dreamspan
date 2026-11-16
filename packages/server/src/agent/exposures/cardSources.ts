@@ -14,6 +14,7 @@ import type {
   SourcePage
 } from "@rp/shared/cardSources.ts"
 import type { CardOrigin, SourceList } from "@rp/shared/cardSources.ts"
+import { SourceAdminSettings } from "@rp/shared/cardSources.ts"
 import type { OperationExposure } from "../operations.ts"
 import type { ToolContext } from "../tools.ts"
 import type { Skill } from "../toolLoading.ts"
@@ -22,7 +23,7 @@ import { escapeToolData } from "../toolData.ts"
 
 const optional = Schema.optionalKey
 const sourceArg = optional(
-  Schema.String.check(Schema.isMaxLength(100)).annotate({
+  Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,39}$/)).annotate({
     description: "The source's id from list_card_sources. Leave it out when only one is on."
   })
 )
@@ -31,15 +32,41 @@ const cardArg = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(50
 })
 const offsetArg = optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1_000_000 })))
 
-/** A source the user turned off is refused here, before anything is asked or sent. */
+/** The instance's card-source settings (`CardSources.ts` ADMIN_KEY): sources an admin turned off. */
+export const SOURCES_ADMIN_KEY = "sources.admin"
+const decodeAdmin = Schema.decodeUnknownOption(SourceAdminSettings)
+const offText = (sourceId: string) =>
+  `${sourceId} is turned off. Only the user can turn it on, in Settings → Card sources.`
+
+/** Whether the user (or an admin, for everyone) turned this source off. */
+const sourceOff = (ctx: ToolContext) =>
+  Effect.gen(function* () {
+    const prefs = yield* ctx.reader.GetSourcePrefs({ userId: ctx.userId })
+    const stored = decodeAdmin((yield* ctx.reader.GetAppSetting({ key: SOURCES_ADMIN_KEY })) ?? { disabled: {} })
+    const admin = stored._tag === "Some" ? stored.value.disabled : {}
+    return {
+      prefs,
+      off: (sourceId: string) => prefs.enabled[sourceId] === false || admin[sourceId] === true,
+      anyOff: Object.values(prefs.enabled).includes(false) || Object.values(admin).includes(true)
+    }
+  })
+
+/**
+ * A source that's off is refused here, before anything is asked or sent (§5.1). Without a source
+ * named, the command picks the only one on; that's left to it only while no source is off, so it
+ * can never land on one that is.
+ */
 const sourceOn = (ctx: ToolContext, sourceId: string | undefined) =>
   Effect.gen(function* () {
-    if (sourceId === undefined) return null
-    const prefs = yield* ctx.reader.GetSourcePrefs({ userId: ctx.userId })
-    if (prefs.enabled[sourceId] === false)
-      return yield* Effect.fail(
-        new Error(`${sourceId} is turned off. Only the user can turn it on, in Settings → Card sources.`)
-      )
+    const { off, anyOff } = yield* sourceOff(ctx)
+    if (sourceId === undefined) {
+      if (anyOff)
+        return yield* Effect.fail(
+          new Error("A card source is turned off here, so name the one to use by its id from list_card_sources.")
+        )
+      return null
+    }
+    if (off(sourceId)) return yield* Effect.fail(new Error(offText(sourceId)))
     return sourceId
   })
 
@@ -112,31 +139,69 @@ type CardDocLike = Readonly<Record<string, unknown>> & {
   readonly character_book?: { readonly entries?: ReadonlyArray<Record<string, unknown>> }
 }
 
-/** One field of an opened card, paged by characters (text) or by entries (greetings, lorebook). */
-export const cardField = (doc: CardDocLike, field: (typeof FIELDS)[number], offset: number) => {
+const entryHead = (entry: Record<string, unknown>, at: number) => ({
+  entry: at + 1,
+  ...(typeof entry.comment === "string" && entry.comment ? { comment: cut(entry.comment, 200) } : {}),
+  keys: (Array.isArray(entry.keys) ? (entry.keys as Array<unknown>) : []).slice(0, 20).map((k) => cut(String(k), 100)),
+  ...(entry.enabled === false ? { off: true } : {})
+})
+
+/** A list entry's opening; `whole: false` when `entry` reads the rest. */
+const opening = (text: string, limit: number) =>
+  text.length <= limit ? { length: text.length, text } : { length: text.length, text: cut(text, limit), whole: false }
+
+/**
+ * One field of an opened card. Text pages by characters; greetings and lorebook entries page by
+ * entry, each with its opening, and `entry` (from 1) reads one of them whole, paged by characters.
+ */
+export const cardField = (
+  doc: CardDocLike,
+  field: (typeof FIELDS)[number],
+  offset: number,
+  entry?: number
+): Record<string, unknown> => {
   if (field === "alternate_greetings" || field === "character_book") {
-    const rows: ReadonlyArray<Record<string, unknown>> =
-      field === "alternate_greetings"
-        ? (doc.alternate_greetings ?? []).map((text, at) => ({ greeting: at + 1, ...pagedText(text, 0, 2_000) }))
-        : (doc.character_book?.entries ?? []).map((entry, at) => ({
-            entry: at + 1,
-            ...(typeof entry.comment === "string" && entry.comment ? { comment: cut(entry.comment, 200) } : {}),
-            keys: (Array.isArray(entry.keys) ? (entry.keys as Array<unknown>) : []).slice(0, 20).map(String),
-            ...(entry.enabled === false ? { off: true } : {}),
-            ...pagedText(String(entry.content ?? ""), 0, 1_500)
-          }))
+    const list: ReadonlyArray<unknown> =
+      field === "alternate_greetings" ? (doc.alternate_greetings ?? []) : (doc.character_book?.entries ?? [])
+    const textOf = (item: unknown) =>
+      field === "alternate_greetings" ? String(item ?? "") : String((item as Record<string, unknown>).content ?? "")
+    const head = (item: unknown, at: number) =>
+      field === "alternate_greetings" ? { greeting: at + 1 } : entryHead(item as Record<string, unknown>, at)
+    if (entry !== undefined) {
+      const item = list[entry - 1]
+      if (item === undefined) return { field, count: list.length, problem: `There's no entry ${entry}.` }
+      return { field, count: list.length, ...head(item, entry - 1), ...pagedText(textOf(item), offset, FIELD_CHARS) }
+    }
+    const rows = list.map((item, at) => ({
+      ...head(item, at),
+      ...opening(textOf(item), field === "alternate_greetings" ? 2_000 : 1_500)
+    }))
     return { field, count: rows.length, offset, ...pageRows(rows, offset) }
   }
   return { field, ...pagedText(String(doc[field] ?? ""), offset, FIELD_CHARS) }
 }
 
-const pagedText = (text: string, offset: number, limit: number) => {
-  let end = Math.min(text.length, offset + limit)
+/** What a stretch of text costs once quoted: JSON-encoded, then escaped inside the data boundary. */
+const quotedSize = (text: string) => escapeToolData(JSON.stringify(text)).length - 2
+
+/** Text from `offset`, as much as fits in `limit` quoted characters (at least one character). */
+export const pagedText = (text: string, offset: number, limit: number) => {
+  const start = Math.min(text.length, Math.max(0, offset))
+  let low = Math.min(text.length, start + 1)
+  let high = Math.min(text.length, start + limit)
+  if (quotedSize(text.slice(start, high)) <= limit) low = high
+  else
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2)
+      if (quotedSize(text.slice(start, middle)) <= limit) low = middle
+      else high = middle - 1
+    }
+  let end = low
   // Never split a surrogate pair.
-  if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1] ?? "")) end--
+  if (end < text.length && end > start + 1 && /[\uD800-\uDBFF]/.test(text[end - 1] ?? "")) end--
   return {
     length: text.length,
-    text: text.slice(offset, end),
+    text: text.slice(start, end),
     ...(end < text.length ? { nextOffset: end } : {})
   }
 }
@@ -146,7 +211,7 @@ export const cardOverview = (doc: CardDocLike) => ({
   name: cut(String(doc.name ?? ""), 200),
   ...(doc.creator ? { creator: cut(String(doc.creator), 100) } : {}),
   ...(Array.isArray(doc.tags) && doc.tags.length
-    ? { tags: (doc.tags as Array<unknown>).slice(0, 30).map(String) }
+    ? { tags: (doc.tags as Array<unknown>).slice(0, 30).map((t) => cut(String(t), 60)) }
     : {}),
   fields: Object.fromEntries(
     TEXT_FIELDS.filter((key) => String(doc[key] ?? "") !== "").map((key) => {
@@ -338,11 +403,12 @@ export const cardSourceExposures: ReadonlyArray<OperationExposure> = [
     label: "Opened a card on a card source",
     explanation: "Open a card on a card source",
     description:
-      "Opens a card on a card source: its listing, then its fields' lengths and openings. Name a field to read it whole, paged by offset (alternate_greetings and character_book by entry). Opening it adds it to the user's recently viewed cards.",
+      "Opens a card on a card source: its listing, then its fields' lengths and openings. Name a field to read it whole, paged by offset (alternate_greetings and character_book by entry; add entry to read one whole). Opening it adds it to the user's recently viewed cards.",
     parameters: Schema.Struct({
       source: sourceArg,
       card: cardArg,
       field: optional(Schema.Literals(FIELDS)),
+      entry: optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100_000 }))),
       offset: offsetArg
     }),
     adapt: (args, ctx) =>
@@ -370,13 +436,16 @@ export const cardSourceExposures: ReadonlyArray<OperationExposure> = [
           card: listing,
           ...(summary.kind === "lorebook"
             ? { note: "A lorebook: its entries can be read once it's added." }
-            : { problems: problems.slice(0, 5) })
+            : { problems: problems.slice(0, 5).map((p) => cut(p, 300)) })
         })
       const field = args.field as (typeof FIELDS)[number] | undefined
+      const entry = args.entry as number | undefined
       return JSON.stringify({
         source: source.id,
         card: listing,
-        ...(field ? cardField(doc, field, Number(args.offset ?? 0)) : { definition: cardOverview(doc) })
+        ...(field
+          ? cardField(doc, field, Number(args.offset ?? 0), entry)
+          : { definition: cardOverview(doc), ...(entry !== undefined ? { problem: "entry needs a field." } : {}) })
       })
     }
   },
@@ -448,10 +517,22 @@ export const cardSourceExposures: ReadonlyArray<OperationExposure> = [
       Effect.gen(function* () {
         const found = yield* resolveLibrary(ctx, "card", String(args.card))
         if ("error" in found) return yield* Effect.fail(new Error(found.error))
+        // Its source, refused here while it's off, before anything is asked or sent (§5.1).
+        const origin = yield* ctx.reader.CardOrigin({ userId: ctx.userId, entityId: found.ref.entityId })
+        if (origin === null) return yield* Effect.fail(new Error("That card didn't come from a card source."))
+        if ((yield* sourceOff(ctx)).off(origin.sourceId)) return yield* Effect.fail(new Error(offText(origin.sourceId)))
+        ctx.cache.set(`cardsource:check:${ctx.toolCallId}`, { label: found.ref.label, sourceId: origin.sourceId })
         return { entityId: found.ref.entityId }
       }),
-    describe: () =>
-      Effect.succeed({ title: "Ask a card source whether one of your cards has a newer version", rows: [] }),
+    describe: (_payload, ctx) =>
+      Effect.sync(() => {
+        const seen = ctx.cache.get(`cardsource:check:${ctx.toolCallId}`) as
+          { label: string; sourceId: string } | undefined
+        return {
+          title: `Ask ${seen?.sourceId ?? "a card source"} whether one of your cards has a newer version`,
+          rows: seen ? [{ label: "Card", value: seen.label }] : []
+        }
+      }),
     summarize: (args) => String(args.card),
     render: (result) => {
       const origin = result as CardOrigin
@@ -477,32 +558,45 @@ export const cardSourceExposures: ReadonlyArray<OperationExposure> = [
     parameters: Schema.Struct({ source: sourceArg, card: cardArg }),
     adapt: (args, ctx) =>
       Effect.gen(function* () {
-        const prefs = yield* ctx.reader.GetSourcePrefs({ userId: ctx.userId })
+        const { prefs, off } = yield* sourceOff(ctx)
         const wanted = args.source as string | undefined
         const remoteId = String(args.card)
-        // Only a card opened here (or by the user) is offered: its name is what the approval shows.
+        // Only a card opened here (or by the user) is offered: its name is what the approval shows,
+        // and the version opened is the one added (the payload, so the approval is bound to it).
         const seen = prefs.recent.find(
           (r) => r.remoteId === remoteId && (wanted === undefined || r.sourceId === wanted)
         )
-        if (!seen) return yield* Effect.fail(new Error("Open the card with open_remote_card first."))
-        if (prefs.enabled[seen.sourceId] === false)
-          return yield* Effect.fail(
-            new Error(`${seen.sourceId} is turned off. Only the user can turn it on, in Settings → Card sources.`)
-          )
-        ctx.cache.set(`cardsource:adopt:${ctx.toolCallId}`, seen)
-        return { sourceId: seen.sourceId, remoteId }
-      }),
-    describe: (payload, ctx) =>
-      Effect.sync(() => {
-        const seen = ctx.cache.get(`cardsource:adopt:${ctx.toolCallId}`) as
-          { name: string; creator?: string; kind?: string } | undefined
-        const lorebook = seen?.kind === "lorebook"
+        if (!seen || seen.version === undefined)
+          return yield* Effect.fail(new Error("Open the card with open_remote_card first."))
+        if (off(seen.sourceId)) return yield* Effect.fail(new Error(offText(seen.sourceId)))
         return {
-          title: `Add “${seen?.name ?? String(payload.remoteId)}” from ${String(payload.sourceId)} to your ${lorebook ? "lorebooks" : "cards"}`,
+          sourceId: seen.sourceId,
+          remoteId,
+          version: seen.version,
+          name: seen.name,
+          ...(seen.creator !== undefined ? { creator: seen.creator } : {}),
+          ...(seen.kind !== undefined ? { kind: seen.kind } : {}),
+          ...(seen.versionAt !== undefined ? { versionAt: seen.versionAt } : {})
+        }
+      }),
+    // The command reads the card and its version; the rest is what the approval shows.
+    describe: (payload) =>
+      Effect.sync(() => {
+        const name = String(payload.name)
+        const lorebook = payload.kind === "lorebook"
+        return {
+          title: `Add “${name}” from ${String(payload.sourceId)} to your ${lorebook ? "lorebooks" : "cards"}`,
           rows: [
-            { label: lorebook ? "Lorebook" : "Card", value: seen?.name ?? String(payload.remoteId) },
-            ...(seen?.creator ? [{ label: "Creator", value: seen.creator }] : []),
+            { label: lorebook ? "Lorebook" : "Card", value: name },
+            ...(payload.creator !== undefined ? [{ label: "Creator", value: String(payload.creator) }] : []),
             { label: `Id on ${String(payload.sourceId)}`, value: String(payload.remoteId) },
+            {
+              label: "Version",
+              value:
+                typeof payload.versionAt === "number"
+                  ? `The one opened, from ${new Date(payload.versionAt).toISOString().slice(0, 10)}`
+                  : "The one opened"
+            },
             { label: "Executable content", value: "Its scripts and HTML stay off until you allow them." }
           ]
         }

@@ -49,10 +49,13 @@ const worded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     })
   )
 
-/** The source a call names, else the only one this user has on. */
+/**
+ * The source a call names by its id, else the only one this user has on. The tool adapters have
+ * already refused a source that's off, before asking the user (exposures/cardSources.ts).
+ */
 const chosenSource = (sources: ReadonlyArray<SourceInfo>, wanted: string | null) => {
   if (wanted !== null) {
-    const source = sources.find((s) => s.id === wanted || s.name.toLowerCase() === wanted.toLowerCase())
+    const source = sources.find((s) => s.id === wanted)
     if (!source) return refuse(`There's no card source ${JSON.stringify(wanted)}. Use list_card_sources.`)
     if (!source.enabled)
       return refuse(`${source.name} is turned off. Only the user can turn it on, in Settings → Card sources.`)
@@ -104,6 +107,9 @@ export const checkedQuery = (
   if (!caps.text && asked.text.trim() !== "") problems.push(`${info.name} doesn't search by words; use filters.`)
   if (asked.tags.length > 0 && !caps.tags.include) problems.push(`${info.name} doesn't filter by tags.`)
   if (asked.excludeTags.length > 0 && !caps.tags.exclude) problems.push(`${info.name} doesn't leave tags out.`)
+  // The panel's tag chip is either required or left out, never both.
+  const both = asked.tags.map((t) => t.trim()).filter((t) => t !== "" && asked.excludeTags.some((x) => x.trim() === t))
+  if (both.length > 0) problems.push(`A tag can't be both wanted and left out: ${[...new Set(both)].join(", ")}.`)
   const find = (key: string) => {
     const wanted = key.trim().toLowerCase()
     return caps.filters.find((f) => f.id === key || f.label.toLowerCase() === wanted)
@@ -194,25 +200,29 @@ export const checkedQuery = (
       }
     }
   }
-  // A switch the source takes only with one choice elsewhere (Chub's marks need Site to be Chub alone).
+  // A switch the source takes only with exactly the choices it needs elsewhere (Chub's marks need
+  // Site to be Chub alone): the panel's `requirementMet`, which turns the switch off otherwise.
   for (const filter of caps.filters) {
     if (filter.kind !== "toggle" || !filter.requires || filters[filter.id] !== true) continue
     const other = filters[filter.requires.filterId]
     const values = typeof other === "string" ? [other] : Array.isArray(other) ? other : []
-    if (values.length === 0 || values.some((v) => !filter.requires!.values.includes(v)))
+    const needed = filter.requires.values
+    if (values.length !== needed.length || !needed.every((v) => values.includes(v)))
       problems.push(`${filter.label}: ${filter.requires.about}`)
   }
-  let sort: string | null = null
+  // No sort named: the source's first, as the browse view sends it.
+  let sort: string | null = caps.sorts[0]?.id ?? null
   if (asked.sort !== null) {
     const wanted = asked.sort.trim().toLowerCase()
     const found = caps.sorts.find((s) => s.id === asked.sort || s.label.toLowerCase() === wanted)
     if (!found)
       problems.push(`No sort ${JSON.stringify(asked.sort)}. Sorts: ${caps.sorts.map((s) => s.id).join(", ")}.`)
-    else {
-      sort = found.id
-      if (asked.reverse && !found.reversible) problems.push(`${found.label} can't be reversed.`)
-    }
-  } else if (asked.reverse) problems.push("Reverse needs a sort.")
+    else sort = found.id
+  }
+  const sorted = caps.sorts.find((s) => s.id === sort)
+  if (asked.reverse && sorted === undefined && asked.sort === null) problems.push("Reverse needs a sort.")
+  else if (asked.reverse && sorted !== undefined && !sorted.reversible)
+    problems.push(`${sorted.label} can't be reversed.`)
   // The rating: the user's own, or narrower (the source's safe choice). Never wider.
   const mine = userRating(caps, info)
   let rating = mine
@@ -333,10 +343,14 @@ export const installCardSourceCommands = (commands: Registry<Command>) =>
               const user = yield* CurrentUser
               const info = yield* sourceFor(user, sourceId)
               const caps = yield* sources.capabilities(user, info.id)
-              const opened = yield* sources.card(user, info.id, remoteId)
-              // A card the user's Safe rating would leave out of their results stays closed (§5.3).
+              // A card the user's Safe rating would leave out of their results stays closed (§5.3),
+              // and stays out of their recently viewed cards.
               const safe = caps.ratings?.safe
-              if (safe !== undefined && userRating(caps, info) === safe && opened.summary.rating !== undefined)
+              const safeOnly = safe !== undefined && userRating(caps, info) === safe
+              const opened = yield* sources.card(user, info.id, remoteId, (summary) =>
+                safeOnly ? summary.rating === undefined : true
+              )
+              if (safeOnly && opened.summary.rating !== undefined)
                 return yield* refuse(
                   `This card is rated ${opened.summary.rating}, and the user's ${info.name} rating shows ${labelOf(caps, caps.ratings!.filterId, safe)} cards only.`
                 )
@@ -370,26 +384,53 @@ export const installCardSourceCommands = (commands: Registry<Command>) =>
       makeCommand({
         id: "sources.adopt",
         description: "Add a card from a card source to the user's cards, as Add to my cards does.",
-        input: Schema.Struct({ sourceId: Schema.String.check(Schema.isMaxLength(100)), remoteId: RemoteArg }),
+        input: Schema.Struct({
+          sourceId: Schema.String.check(Schema.isMaxLength(100)),
+          remoteId: RemoteArg,
+          /** The version the user was shown (`RecentRemote.version`): the add is bound to it. */
+          version: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(500))
+        }),
         output: Schema.Unknown,
-        execute: ({ sourceId, remoteId }) =>
+        execute: ({ sourceId, remoteId, version }) =>
           worded(
             Effect.gen(function* () {
               const call = yield* OperationCall
               const user = yield* CurrentUser
               if (!call) return yield* refuse("This command needs a workshop call.")
               const info = yield* sourceFor(user, sourceId)
+              // The user's Safe rating keeps a rated card out, as opening it would (§5.3).
+              const caps = yield* sources.capabilities(user, info.id)
+              const safe = caps.ratings?.safe
+              if (safe !== undefined && userRating(caps, info) === safe) {
+                const seen = (yield* sources.recent(user, info.id)).find((r) => r.remoteId === remoteId)
+                if (seen === undefined || seen.rating !== undefined)
+                  return yield* refuse(
+                    `The user's ${info.name} rating shows ${labelOf(caps, caps.ratings!.filterId, safe)} cards only.`
+                  )
+              }
               const added = yield* sources.adopt(user, info.id, remoteId, (payload) =>
-                writer.RunWorkshopOperation({ ...call, userId: user.id, operation: "AdoptRemoteCard", payload }).pipe(
+                (payload.remoteVersion !== version
+                  ? Effect.fail(
+                      refuse(
+                        "The card changed on its source since it was opened. Open it again with open_remote_card, then ask again."
+                      )
+                    )
+                  : Effect.void
+                ).pipe(
+                  Effect.andThen(
+                    writer.RunWorkshopOperation({ ...call, userId: user.id, operation: "AdoptRemoteCard", payload })
+                  ),
                   Effect.map((result) => result as { entityId: string; refId: string; existing: boolean }),
                   Effect.mapError((error) =>
-                    refuse(
-                      error._tag === "EffectUndoRefused"
-                        ? error.message
-                        : error._tag === "InvalidDocument"
-                          ? error.problems.join("; ")
-                          : "The card could not be added. Try again."
-                    )
+                    error instanceof HistoryRejected
+                      ? error
+                      : refuse(
+                          error._tag === "EffectUndoRefused"
+                            ? error.message
+                            : error._tag === "InvalidDocument"
+                              ? error.problems.join("; ")
+                              : "The card could not be added. Try again."
+                        )
                   )
                 )
               )

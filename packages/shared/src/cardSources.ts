@@ -296,6 +296,11 @@ export const RecentRemote = Schema.Struct({
   kind: Schema.optionalKey(Schema.Literals(["character", "lorebook"])),
   creator: Schema.optionalKey(Schema.String),
   thumb: Schema.optionalKey(Schema.String),
+  /** The version opened (`RemoteVersion.id`) and when it began: what an assistant's add is bound to. */
+  version: Schema.optionalKey(Schema.String),
+  versionAt: Schema.optionalKey(Schema.Number),
+  /** Its content rating, when it has one (`RemoteSummary.rating`). */
+  rating: Schema.optionalKey(Schema.String),
   at: Schema.Number
 })
 export type RecentRemote = typeof RecentRemote.Type
