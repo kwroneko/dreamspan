@@ -19,6 +19,8 @@
 2. **A past request keeps the price it was charged at.** Prices of open models on aggregators change by provider and over time. Correcting a wrong built-in or override price may replace estimates on past rows priced from the table or from overrides, never provider-reported charges. (A separate schema job adds a per-request snapshot of the rates used.)
 3. **We keep known prices current ourselves:** built-in tables updated with releases, and providers' public price data queried where an API exists (OpenRouter's model-list pricing and per-endpoint pricing).
 4. **A generic price endpoint extension.** A connection can opt in, per connection, to fetch prices from its base URL. Nothing is sent without that opt-in. Fetched prices win over our known prices for that connection, which allows dynamic price adjustment. Main users: people running a gateway that serves models to downstream users. Nobody has standardized this, so we define it here and publish it (§4).
+5. **Which models need a built-in price.** Owner: "For the major closed source labs, we need prices for *every model that is still available for inference* at the very minimum."
+6. **Precedence.** Owner: "Different connections can have totally different prices." A price the user sets on a specific connection beats that connection's fetched prices. An account-wide or per-connection-type price never overrides a connection's own fetched prices. Fetched prices are per connection.
 
 ## 3. Known prices
 
@@ -42,7 +44,7 @@ Over these, unchanged: `user-pricing` rules first (decision 1: the override plac
 
 - **pi-ai's catalog stays the base.** It updates with each pi-ai release (dependencies are pinned, so with our releases).
 - **Our own supplement**, `packages/server/src/providers/prices/*.ts`: data, one file per provider, for what pi-ai lacks or gets wrong (a model it hasn't added yet, a cache-write TTL rate, Vertex's 1 h rate, Bedrock's per-region differences). Each entry names its source URL and the date it was checked. A supplement entry replaces pi-ai's entry for that (provider, model) whole, never field by field, so a half-corrected price can't happen.
-- **"Main models" coverage test:** a list of (provider, model) pairs that must have a price (current Claude, GPT, Gemini, DeepSeek generations on their first-party and cloud providers). `npm run check` fails when a pi-ai upgrade drops one. **[O]** which models count as main (§8 Q1).
+- **"Main models" coverage test:** a list of (provider, model) pairs that must have a price (every still-available Claude, GPT and Gemini model, and DeepSeek's, on their first-party and cloud providers). `npm run check` fails when a pi-ai upgrade drops one. Main means every model of the major closed-source labs still available for inference (decision 5), not only the current generation.
 - **No price fetch at runtime from anything but the connection's own provider.** We don't fetch a price list from a server of ours: that would send a request nobody opted into (DESIGN §9 provider-send rule) and make the app depend on us.
 
 ### 3.3 The `Price` shape grows [P]
@@ -151,7 +153,7 @@ GET {base}/v1/prices
 - **On a timer, only if opted in:** at `valid_until` (or `Cache-Control: max-age`) if given, clamped to between 5 minutes and 24 hours; otherwise every hour. The timer runs only while the connection has been used in the last day, so an idle connection sends nothing.
 - **Before a request**, never: dispatch doesn't wait on a price fetch. A request is priced with what was known when it closed.
 - `ETag` and `304` are used when the server sends them; a `304` only moves `fetchedAt`.
-- **[O]** whether the hourly default is right for gateways that change prices often (§8 Q3).
+- **[P]** whether the hourly default is right for gateways that change prices often (§8 Q1).
 
 ### 4.7 Where fetched prices live [P]
 
@@ -163,11 +165,12 @@ GET {base}/v1/prices
 
 ### 5.1 Order, newest registration first
 
-1. `user-pricing`: the user's Settings → Costs rule for this connection or kind and model (decision 1). A rule naming this connection beats the endpoint; a kind-wide rule does too. **[O]** whether a kind-wide user rule should beat a connection's endpoint (§8 Q2).
+1. `user-pricing`: the user's Settings → Costs rule naming this connection and model (decisions 1 and 6). It beats this connection's fetched prices.
 2. `reported`: the provider's own charge for this request (OpenRouter `usage.cost`; a gateway's reported cost if one is added later). It's the actual charge, so it beats any table.
 3. `endpoint`: the opted-in price endpoint's rates for this model (decision 4: it wins over our known prices).
 4. `list`: the model list's or per-endpoint list's price.
-5. `builtin`: the built-in table.
+5. `user-pricing` with an account-wide or per-connection-type scope: it never overrides a connection's own fetched prices (decision 6), so it sits below them.
+6. `builtin`: the built-in table.
 
 Each passes (null) when it has no price, so the next one is tried; unknown fields inside a found price fall back field by field to the next table source (§4.3).
 
@@ -190,7 +193,7 @@ Each passes (null) when it has no price, so the next one is tried; unknown field
 Implements PROVIDERS §9.3 "Recomputing" under decision 2.
 
 - **Only on request:** Settings → Costs (after saving a rule) and a built-in correction offer "Apply to past requests", with the count and the date range first.
-- **Which rows may change:** rows whose `cost_formula` is `builtin:*`, `list:*` or `user:*` and matches the corrected source (the same model and connection or kind, the same `builtin` version, the same rule). Never `reported`. Never `endpoint:*`: those were the server's own price at the time, the same standing as a charge. **[O]** §8 Q4.
+- **Which rows may change:** rows whose `cost_formula` is `builtin:*`, `list:*` or `user:*` and matches the corrected source (the same model and connection or kind, the same `builtin` version, the same rule). Never `reported`. Never `endpoint:*`: those were the server's own price at the time, the same standing as a charge (§8 Q2).
 - The new cost, currency, formula and rates snapshot are written in one writer transaction per batch (the trigger already allows only cost changes on a closed row; it must be extended to allow the snapshot column the schema job adds).
 - A release that corrects a built-in price doesn't recompute anything by itself; the Costs page offers it for rows priced from the old version.
 
@@ -200,13 +203,13 @@ Implements PROVIDERS §9.3 "Recomputing" under decision 2.
 - **Model page price row:** the price and its source ("from this server's price list, fetched 18:00", "from OpenRouter", "built in", "your price"), plus unavailable and route prices when the server sends them.
 - **Settings → Costs** unchanged apart from `perRequest` and "Apply to past requests".
 
-## 8. Open questions [O]
+## 8. Coordinator decisions [P]
 
-1. **Which models count as "main"** for the coverage test: proposed, the current and previous generation of each first-party lab model on its own API and on Bedrock/Vertex/OpenRouter where we have a provider.
-2. **A kind-wide user rule versus a connection's endpoint:** proposed, any user rule wins (the user wrote it on purpose); the Costs page warns when a rule shadows an endpoint price.
-3. **Refresh interval default:** proposed one hour, `valid_until` overriding.
-4. **May an endpoint price be corrected later?** Proposed no: it's the server's own statement of what it charged; a user who disagrees writes a rule and applies it to past rows, which then record `user:*`. That last step does replace `endpoint:*` rows, so the rule would be "only through an explicit user rule".
-5. **Reporting the served route:** should the format also define a response header or usage field (`x-price-route`, or `usage.cost` in the reply) so a gateway can report the actual charge, making it `reported`? Proposed yes, as a later optional extension.
+Proposed by the coordinator; the owner has not decided these and gave no quote.
+
+1. **Refresh interval default:** one hour, `valid_until` overriding.
+2. **Past prices:** a past price is corrected only through the user's own price with "Apply to past requests"; an endpoint price is never corrected otherwise. It's the server's own statement of what it charged. That step replaces `endpoint:*` rows, recorded as `user:*`.
+3. **Reporting the served route:** a server may report the per-request cost later (a response header or usage field such as `x-price-route` or `usage.cost`), making it `reported`. A later optional extension.
 
 ## 9. Build plan [P]
 
