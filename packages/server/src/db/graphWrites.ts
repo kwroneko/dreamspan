@@ -25,7 +25,6 @@ import {
   originalSql,
   replacedIn,
   selectionIn,
-  writeInsert,
   writeSelect
 } from "./forkState.ts"
 import {
