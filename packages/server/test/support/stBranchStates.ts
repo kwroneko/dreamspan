@@ -109,9 +109,7 @@ export const branchStateFolder = (options: BranchStateOptions) => {
       header: {
         variables: vars,
         ...(world === null ? {} : { world_info: world }),
-        ...(note === null
-          ? {}
-          : { note_prompt: note, note_position: 1, note_depth: 2, note_role: 0, note_interval: 1 })
+        ...(note === null ? {} : { note_prompt: note, note_position: 1, note_depth: 2, note_role: 0, note_interval: 1 })
       }
     }
   }

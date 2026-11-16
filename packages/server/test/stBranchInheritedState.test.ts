@@ -18,7 +18,13 @@ import { KAREN, KIM, RHEE } from "./support/stPersonaSwitches.ts"
 const say = (i: number, label: string, persona: typeof KIM | null) =>
   persona === null
     ? message({ name: KAREN, mes: `${KAREN} (${label}, ${i}) speaks.`, minute: i })
-    : message({ name: persona.name, user: true, mes: `${persona.name} (${label}, ${i}) answers.`, minute: i, persona: persona.avatar })
+    : message({
+        name: persona.name,
+        user: true,
+        mes: `${persona.name} (${label}, ${i}) answers.`,
+        minute: i,
+        persona: persona.avatar
+      })
 const lines = (from: number, count: number, label: string, persona: (i: number) => typeof KIM) =>
   Array.from({ length: count }, (_, k) => say(from + k, label, (from + k) % 2 === 1 ? persona(from + k) : null))
 const meta = (world: string | null, note: string | null, mood: string, file: string) => ({
@@ -74,7 +80,16 @@ const handMade = () => {
       jsonl([header({ ...meta(WORLDS[1], NOTES[1], "tense", "B"), main_chat: B }), ...d])
     ]
   ])
-  const state = (persona: string, spoke: ReadonlyArray<string>, world: string | null, note: string | null, vars: Record<string, string>, parent: string | null, forkAt: number, sharedPart: boolean): FileState => ({
+  const state = (
+    persona: string,
+    spoke: ReadonlyArray<string>,
+    world: string | null,
+    note: string | null,
+    vars: Record<string, string>,
+    parent: string | null,
+    forkAt: number,
+    sharedPart: boolean
+  ): FileState => ({
     persona,
     personasSpoke: new Set(spoke),
     world,
@@ -86,7 +101,10 @@ const handMade = () => {
   })
   const states = new Map<string, FileState>([
     [at(MAIN), state(KIM.name, [KIM.name], WORLDS[0], NOTES[0], { mood: "calm", file: "main" }, null, 0, false)],
-    [at(B), state(RHEE.name, [KIM.name, RHEE.name], WORLDS[1], NOTES[1], { mood: "tense", file: "B" }, at(MAIN), 10, false)],
+    [
+      at(B),
+      state(RHEE.name, [KIM.name, RHEE.name], WORLDS[1], NOTES[1], { mood: "tense", file: "B" }, at(MAIN), 10, false)
+    ],
     [
       at("Branch #15 - 2025-12-27@12h00m02s002ms"),
       state(KIM.name, [KIM.name], null, null, { mood: "merry", file: "C" }, at(B), 16, false)

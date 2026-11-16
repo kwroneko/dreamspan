@@ -25,7 +25,17 @@ export const checkBranchStates = (api: Api, states: ReadonlyMap<string, FileStat
     const sources = yield* reader.StImportSources({ userId: user.id })
     const books = new Map(
       sources.library.flatMap((entry) =>
-        entry.kind === "lorebook" ? [[entry.refId as string, entry.sourcePath.split("/").at(-1)!.replace(/\.json$/, "")]] : []
+        entry.kind === "lorebook"
+          ? [
+              [
+                entry.refId as string,
+                entry.sourcePath
+                  .split("/")
+                  .at(-1)!
+                  .replace(/\.json$/, "")
+              ]
+            ]
+          : []
       )
     )
     const records = new Map(sources.chats.map((r) => [r.source, r]))
