@@ -1894,15 +1894,26 @@ export class ChatSession {
     )
   }
 
-  /** A finished version the user wrote changes in place; anything else gets a new version. */
+  /**
+   * A finished version the user wrote changes in place; anything else gets a new version.
+   * `thinking`: the edit's thinking field, plain text ("" removes it), with the draft it was
+   * typed into; absent, the version's thinking stays as it is.
+   */
   async edit(
     entry: PathEntry,
     content: string,
     draft: DraftCommit | null = null,
-    images?: import("@rp/shared/chat.ts").MessageImages
+    images?: import("@rp/shared/chat.ts").MessageImages,
+    thinking?: { readonly text: string; readonly draft: DraftCommit | null }
   ): Promise<Outcome<unknown>> {
     const { version } = entry
-    const commit = { ...(draft === null ? {} : { draft }), ...(images === undefined ? {} : { images }) }
+    const commit = {
+      ...(draft === null ? {} : { draft }),
+      ...(images === undefined ? {} : { images }),
+      ...(thinking === undefined
+        ? {}
+        : { reasoning: thinking.text, ...(thinking.draft === null ? {} : { reasoningDraft: thinking.draft }) })
+    }
     if (version.writer === "human" && version.status !== "generating") {
       const result = await this.call((client) =>
         client("AmendVersion", {

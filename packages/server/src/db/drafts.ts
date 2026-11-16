@@ -31,6 +31,7 @@ import { getAt, isHeldField, parseField } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { MessageImages, EntityId } from "@rp/shared/chat.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
+import { EDIT_THINKING_FIELD } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { DraftTooLarge, NotFound, StaleWrite } from "./ops.ts"
@@ -298,17 +299,26 @@ export const makeDraftStore = (
               Effect.map(([row]) => row?.content ?? null)
             )
       case "version_edit":
-        return sql<{ content: string }>`SELECT content FROM version_records WHERE id = ${key.targetId}`.pipe(
-          Effect.map(([row]) => row?.content ?? null)
-        )
+        // The edit's thinking field starts from the version's thinking ("" without one).
+        return key.field === EDIT_THINKING_FIELD
+          ? sql<{ reasoning: string | null }>`SELECT reasoning FROM version_records WHERE id = ${key.targetId}`.pipe(
+              Effect.map(([row]) => (row ? (row.reasoning ?? "") : null))
+            )
+          : sql<{ content: string }>`SELECT content FROM version_records WHERE id = ${key.targetId}`.pipe(
+              Effect.map(([row]) => row?.content ?? null)
+            )
       default:
         return Effect.succeed(null)
     }
   }
 
   /** Inherited images must become a snapshot: the version can be amended after this edit. */
-  const startImages = (key: { readonly targetKind: DraftKey["targetKind"]; readonly targetId: string }) =>
-    key.targetKind === "version_edit"
+  const startImages = (key: {
+    readonly targetKind: DraftKey["targetKind"]
+    readonly targetId: string
+    readonly field?: string
+  }) =>
+    key.targetKind === "version_edit" && key.field !== EDIT_THINKING_FIELD
       ? sql<{ media_id: string; alt_text: string | null }>`
           SELECT media_id, alt_text FROM version_attachments WHERE version_id = ${key.targetId} ORDER BY ordinal`.pipe(
           Effect.map((rows) => imageJson(rows.map((row) => ({ mediaId: row.media_id, altText: row.alt_text ?? "" }))))
@@ -358,7 +368,9 @@ export const makeDraftStore = (
   const listMessageDrafts = (userId: UserId, chatId: string) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
-      FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND (d.content <> '' OR d.images_json IS NOT NULL OR d.target_kind = 'queue_edit') AND (
+      FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND (d.content <> '' OR d.images_json IS NOT NULL OR d.target_kind = 'queue_edit'
+        -- An edit's thinking emptied is its thinking removed, still to be saved.
+        OR (d.target_kind = 'version_edit' AND d.field = ${EDIT_THINKING_FIELD})) AND (
         (d.target_kind = 'version_edit' AND d.target_id IN (SELECT v.id FROM versions v JOIN slots s ON s.id = v.slot_id
           WHERE s.chat_id = ${chatId} AND v.deleted_at IS NULL AND s.deleted_at IS NULL))
         OR (d.target_kind = 'scratchpad' AND d.target_id IN (SELECT s.id FROM slots s

@@ -841,7 +841,9 @@ export const baseline: ReadonlyArray<string> = [
     content TEXT NOT NULL,
     replaced_at INTEGER NOT NULL,
     -- The version's complete image set before this amendment.
-    images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json))
+    images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)),
+    -- Its thinking before this amendment, as JSON (a string, or null for none); NULL: not recorded.
+    reasoning_json TEXT CHECK (reasoning_json IS NULL OR json_valid(reasoning_json))
   ) STRICT`,
   `CREATE INDEX version_history_version ON version_history(version_id, id)`,
   `CREATE TABLE version_attachments (
@@ -1118,10 +1120,11 @@ export const baseline: ReadonlyArray<string> = [
     WHEN NEW.content IS NOT OLD.content AND EXISTS (
       SELECT 1 FROM versions WHERE seq = OLD.version_seq AND writer = 'human' AND status <> 'generating')
     BEGIN
-      INSERT INTO version_history(version_id, content, replaced_at, images_json)
+      INSERT INTO version_history(version_id, content, replaced_at, images_json, reasoning_json)
       SELECT v.id, OLD.content, v.updated_at, (SELECT json_group_array(json_object(
         'mediaId', media_id, 'altText', coalesce(alt_text, ''))) FROM
-        (SELECT media_id, alt_text FROM version_attachments WHERE version_id = v.id ORDER BY ordinal))
+        (SELECT media_id, alt_text FROM version_attachments WHERE version_id = v.id ORDER BY ordinal)),
+        json_quote(OLD.reasoning)
       FROM versions v WHERE v.seq = OLD.version_seq;
     END`,
   `CREATE TRIGGER versions_identity_fixed BEFORE UPDATE OF seq, id, slot_id, ordinal, writer, origin ON versions

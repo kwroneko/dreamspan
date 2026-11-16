@@ -272,7 +272,9 @@ export const makeChatHandlers = Effect.gen(function* () {
     slotId: SlotId,
     forkId: ForkId | null | undefined,
     versionId: import("@rp/shared/chat.ts").VersionId,
-    content: string
+    content: string,
+    /** Thinking typed in the edit: the reasoning scripts that run on edits rewrite it too. */
+    reasoning?: string
   ) =>
     Effect.gen(function* () {
       const { chatId } = yield* reader.GetSlot({ userId: user, slotId, forkId: forkId ?? null })
@@ -282,7 +284,8 @@ export const makeChatHandlers = Effect.gen(function* () {
         forkId,
         at: { slotId, versionId },
         edit: true,
-        content
+        content,
+        ...(reasoning ? { reasoning } : {})
       })
     })
 
@@ -631,13 +634,27 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // An edit or a version the user writes is still the message's speaker's, as a swipe is:
     // an edit its source's, a written version the one shown's.
-    EditVersion: ({ images, slotId, forkId, sourceVersionId, content, expectedRowVersion, draft }) =>
+    // Its thinking is the source's unless the edit changed it: plain text either way, since a
+    // version keeps no provider signature (signed blocks stay in the source's run transcript).
+    EditVersion: ({
+      images,
+      slotId,
+      forkId,
+      sourceVersionId,
+      content,
+      reasoning,
+      expectedRowVersion,
+      draft,
+      reasoningDraft
+    }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const source = yield* reader.GetVersion({ userId: id, versionId: sourceVersionId })
-        // An edit goes through the scripts that run on edits (ST's updateMessage).
-        const written = yield* editRewrite(id, slotId, forkId, sourceVersionId, content)
+        // An edit goes through the scripts that run on edits (ST's updateMessage), its thinking too.
+        const typed = reasoning === undefined || reasoning === (source.reasoning ?? "") ? undefined : reasoning
+        const written = yield* editRewrite(id, slotId, forkId, sourceVersionId, content, typed)
         const version = userText(written.content, "edited", source.speakerEntityId, sourceVersionId)
+        const thinking = typed === undefined ? source.reasoning : (written.reasoning ?? typed)
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
@@ -645,10 +662,12 @@ export const makeChatHandlers = Effect.gen(function* () {
           version: {
             ...version,
             ...(images === undefined ? {} : { images }),
+            ...(thinking ? { reasoning: thinking } : {}),
             ...(written.rewrite ? { rewrite: written.rewrite } : {})
           },
           expectedRowVersion,
-          commitDraft: draft ?? null
+          commitDraft: draft ?? null,
+          commitReasoningDraft: reasoningDraft ?? null
         })
         return yield* publishSlot(id, slotId, added.forkId)
       }).pipe(internal("EditVersion")),
@@ -746,6 +765,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           forkId,
           content: state.content,
           ...(state.images === undefined ? {} : { images: state.images }),
+          ...(state.reasoning === undefined ? {} : { reasoning: state.reasoning }),
           expectedRowVersion,
           commitDraft: null
         })
@@ -834,11 +854,13 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // An amend another fork shows gives this fork a copy in its place: its message changed
     // here only, and tabs on other forks read it again as theirs shows it.
-    AmendVersion: ({ versionId, forkId, content, images, expectedRowVersion, draft }) =>
+    AmendVersion: ({ versionId, forkId, content, images, reasoning, expectedRowVersion, draft, reasoningDraft }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const amended = yield* reader.GetVersion({ userId: id, versionId })
-        const written = yield* editRewrite(id, amended.slotId, forkId, versionId, content)
+        // Thinking typed differently from what it has is plain text, through the edit scripts.
+        const typed = reasoning === undefined || reasoning === (amended.reasoning ?? "") ? undefined : reasoning
+        const written = yield* editRewrite(id, amended.slotId, forkId, versionId, content, typed)
         const version = yield* writer.AmendVersion({
           userId: id,
           versionId,
@@ -846,8 +868,10 @@ export const makeChatHandlers = Effect.gen(function* () {
           content: written.content,
           ...(written.rewrite ? { rewrite: written.rewrite } : {}),
           ...(images === undefined ? {} : { images }),
+          ...(typed === undefined ? {} : { reasoning: (written.reasoning ?? typed) || null }),
           expectedRowVersion,
-          commitDraft: draft ?? null
+          commitDraft: draft ?? null,
+          commitReasoningDraft: reasoningDraft ?? null
         })
         const { chatId, entry } = yield* reader.GetSlot({ userId: id, slotId: version.slotId, forkId: forkId ?? null })
         if (version.id === versionId) hub.publish(chatId, { _tag: "Version", version })

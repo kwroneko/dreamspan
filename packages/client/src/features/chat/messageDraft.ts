@@ -11,7 +11,7 @@ import type { MessageImages } from "@rp/shared/chat.ts"
 // server has it: a save that fails, a closed tab or a reload leaves the copy, filed under
 // the chat, which opening the chat again replays, with the draft it was typed on.
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import type { MessageDraftSave, MessageDraftTarget } from "@rp/shared/chatApi.ts"
+import { EDIT_THINKING_FIELD, type MessageDraftSave, type MessageDraftTarget } from "@rp/shared/chatApi.ts"
 import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, dropCopy, keepCopy, makeCopy, pendingOf, type ReplayConflict } from "../editor/backup.ts"
@@ -21,16 +21,19 @@ import { appended } from "./composition.ts"
 /** How long typing pauses before the text is saved. */
 const SAVE_DELAY_MS = 400
 
-export type MessageEditorKey = `edit:${string}` | `write:${string}` | `queue:${string}` | `insert:${string}`
+export type MessageEditorKey =
+  `edit:${string}` | `think:${string}` | `write:${string}` | `queue:${string}` | `insert:${string}`
 
 export const editorKey = (target: MessageDraftTarget): MessageEditorKey =>
   target._tag === "Edit"
     ? `edit:${target.versionId}`
-    : target._tag === "Write"
-      ? `write:${target.slotId}`
-      : target._tag === "Queue"
-        ? `queue:${target.queuedId}`
-        : `insert:${target.forkId}:${target.anchor ?? ""}`
+    : target._tag === "EditThinking"
+      ? `think:${target.versionId}`
+      : target._tag === "Write"
+        ? `write:${target.slotId}`
+        : target._tag === "Queue"
+          ? `queue:${target.queuedId}`
+          : `insert:${target.forkId}:${target.anchor ?? ""}`
 
 /** What this browser's copies (backup.ts) file a chat's message editors under. */
 export const messageCopies = (chatId: string) => `messages:${chatId}`
@@ -38,7 +41,9 @@ export const messageCopies = (chatId: string) => `messages:${chatId}`
 /** Which message editor a server draft is the text of, if it's one's. */
 export const targetOf = (draft: Draft): MessageDraftTarget | null =>
   draft.key.targetKind === "version_edit"
-    ? { _tag: "Edit", versionId: draft.key.targetId as VersionId }
+    ? draft.key.field === EDIT_THINKING_FIELD
+      ? { _tag: "EditThinking", versionId: draft.key.targetId as VersionId }
+      : { _tag: "Edit", versionId: draft.key.targetId as VersionId }
     : draft.key.targetKind === "scratchpad"
       ? { _tag: "Write", slotId: draft.key.targetId as SlotId }
       : draft.key.targetKind === "queue_edit"
@@ -380,6 +385,16 @@ export class MessageDraft {
     this.set({ text, unsaved: true })
     this.cancelTimer()
     this.timer = setTimeout(() => void this.save(), SAVE_DELAY_MS)
+  }
+
+  /**
+   * Saves the text as it stands when the server holds no open draft of it: another field of
+   * the same edit (its thinking) was typed into, and the edit must open again with it after a
+   * reload, which opens message editors from their drafts.
+   */
+  keepOpen() {
+    if (this.local !== null || this.view.loading || !this.opened || this.draft?.status === "active") return
+    this.setText(this.view.text)
   }
 
   /**

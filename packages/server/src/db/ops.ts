@@ -2078,7 +2078,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
        * a version the user wrote (`scratchpad`, the slot), committed with it if it still
        * holds that text.
        */
-      commitDraft: Schema.optionalKey(CommitDraft)
+      commitDraft: Schema.optionalKey(CommitDraft),
+      /** An edit's thinking draft (`version_edit`, field `reasoning`, its source version), committed the same way. */
+      commitReasoningDraft: Schema.optionalKey(CommitDraft)
     },
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])
@@ -2097,10 +2099,14 @@ export class WriteOpsLibrary extends RpcGroup.make(
       content: Schema.String,
       /** Its images from now on (absent: kept); the earlier set stays in its history. */
       images: Schema.optionalKey(MessageImages),
+      /** Its thinking from now on (null: none; absent: kept); the earlier one stays in its history. */
+      reasoning: Schema.optionalKey(Schema.NullOr(Schema.String)),
       expectedRowVersion: Schema.Int,
       /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
       commitDraft: Schema.optionalKey(CommitDraft),
-      /** What regex scripts did to `content` (an edit's run-on-edit scripts), and the text typed. */
+      /** The edit's thinking draft (field `reasoning`), committed with it if it holds the thinking typed. */
+      commitReasoningDraft: Schema.optionalKey(CommitDraft),
+      /** What regex scripts did to `content` and the thinking (an edit's run-on-edit scripts), and the text typed. */
       rewrite: Schema.optionalKey(StoredRewrite)
     },
     success: Version,

@@ -42,8 +42,13 @@ export const VersionAmendment = Schema.Struct({
   content: Schema.String,
   at: Schema.Number,
   /** The complete image set it had before this amendment, including text-only amendments. */
-  images: Schema.optionalKey(MessageImages)
+  images: Schema.optionalKey(MessageImages),
+  /** Its thinking before this amendment (null: none); absent where the amendment didn't record it. */
+  reasoning: Schema.optionalKey(Schema.NullOr(Schema.String))
 })
+
+/** The draft field an edit's thinking is typed into (`version_edit` drafts; the text's field is ""). */
+export const EDIT_THINKING_FIELD = "reasoning"
 export type VersionAmendment = typeof VersionAmendment.Type
 
 /** Generation needs a generator, and this server has none (only tests run one without). */
@@ -406,6 +411,8 @@ const ComposerCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String
  */
 export const MessageDraftTarget = Schema.Union([
   Schema.TaggedStruct("Edit", { versionId: VersionId }),
+  /** The thinking of that edit: a second field of the same edit, typed into a draft of its own. */
+  Schema.TaggedStruct("EditThinking", { versionId: VersionId }),
   Schema.TaggedStruct("Write", { slotId: SlotId }),
   Schema.TaggedStruct("Queue", { chatId: ChatId, queuedId: Schema.String, rowVersion: Schema.Int }),
   /** A message being inserted below `anchor` (null: above the first message), spec/MESSAGE-INSERT.md §4.2. */
@@ -417,11 +424,13 @@ export type MessageDraftTarget = typeof MessageDraftTarget.Type
 export const messageDraftKey = (target: MessageDraftTarget) =>
   target._tag === "Edit"
     ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: "" })
-    : target._tag === "Write"
-      ? new DraftKey({ targetKind: "scratchpad", targetId: target.slotId, field: "" })
-      : target._tag === "Queue"
-        ? new DraftKey({ targetKind: "queue_edit", targetId: target.chatId, field: target.queuedId })
-        : insertDraftKey(target.chatId, target.forkId, target.anchor)
+    : target._tag === "EditThinking"
+      ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: EDIT_THINKING_FIELD })
+      : target._tag === "Write"
+        ? new DraftKey({ targetKind: "scratchpad", targetId: target.slotId, field: "" })
+        : target._tag === "Queue"
+          ? new DraftKey({ targetKind: "queue_edit", targetId: target.chatId, field: target.queuedId })
+          : insertDraftKey(target.chatId, target.forkId, target.anchor)
 
 /**
  * Text typed into a message editor, onto the draft as the tab last saw it (null before it
@@ -768,8 +777,12 @@ export class ChatApi extends RpcGroup.make(
       sourceVersionId: VersionId,
       content: Schema.String,
       images: Schema.optionalKey(MessageImages),
+      /** Its thinking as typed in the edit, plain text ("": none); absent: the source's is kept. */
+      reasoning: Schema.optionalKey(Schema.String),
       expectedRowVersion: Schema.Int,
-      draft: DraftCommit
+      draft: DraftCommit,
+      /** The draft the thinking was typed into (`EditThinking`), committed with it if it holds exactly that text. */
+      reasoningDraft: DraftCommit
     },
     success: PathEntry,
     error: Schema.Union([...WriteErrors])
@@ -816,8 +829,12 @@ export class ChatApi extends RpcGroup.make(
       content: Schema.String,
       /** Its images from now on (absent: kept); the earlier set stays in its history. */
       images: Schema.optionalKey(MessageImages),
+      /** Its thinking from now on, plain text ("": none; absent: kept); the earlier one stays in its history. */
+      reasoning: Schema.optionalKey(Schema.String),
       expectedRowVersion: Schema.Int,
-      draft: DraftCommit
+      draft: DraftCommit,
+      /** The draft the thinking was typed into (`EditThinking`), committed with it if it holds exactly that text. */
+      reasoningDraft: DraftCommit
     },
     success: Version,
     error: Schema.Union([...WriteErrors, NotAmendable])

@@ -44,8 +44,8 @@ export const forkImportSlot = (sql: SqlClient.SqlClient, source: string, parent:
         authoring_fork_id: forkId,
         source_version_id: ids.get(version.source_version_id) ?? version.source_version_id
       })}`
-      yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
-        SELECT ${versionId}, content, replaced_at, images_json FROM version_history WHERE version_id = ${shownId} ORDER BY id`
+      yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json)
+        SELECT ${versionId}, content, replaced_at, images_json, reasoning_json FROM version_history WHERE version_id = ${shownId} ORDER BY id`
       yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
         SELECT ${versionId}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${shownId}`
     }

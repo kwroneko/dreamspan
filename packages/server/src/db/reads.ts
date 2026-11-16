@@ -1034,12 +1034,20 @@ export const makeReadHandlers = Effect.gen(function* () {
           AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND v.deleted_at IS NULL AND v.purged_at IS NULL
           AND v.writer='human'`
         if (!owned) return yield* new NotFound({ entity: "human version", id: versionId })
-        const rows = yield* sql<{ id: number; content: string; at: number; images_json: string | null }>`
-          SELECT id, content, replaced_at AS at, images_json
+        const rows = yield* sql<{
+          id: number
+          content: string
+          at: number
+          images_json: string | null
+          reasoning_json: string | null
+        }>`
+          SELECT id, content, replaced_at AS at, images_json, reasoning_json
           FROM version_history WHERE version_id=${versionId} ORDER BY id DESC`
-        return rows.map(({ images_json, ...row }) =>
-          images_json === null ? row : { ...row, images: JSON.parse(images_json) as MessageImages }
-        )
+        return rows.map(({ images_json, reasoning_json, ...row }) => ({
+          ...row,
+          ...(images_json === null ? {} : { images: JSON.parse(images_json) as MessageImages }),
+          ...(reasoning_json === null ? {} : { reasoning: JSON.parse(reasoning_json) as string | null })
+        }))
       }).pipe(query("VersionAmendments")),
 
     GetVersion: ({ userId, versionId }) =>
