@@ -139,10 +139,10 @@ for (const width of [1440, 390]) {
     await openPanel(page, "Cast")
     const castList = page.getByRole("list", { name: "Characters in this chat" })
     await expect(castList).toContainText("Aria Vance")
-    // A Cast row shows the version only to tell two cards of one name apart; Aria's is unique here.
+    // Cast rows retain the card's version subtitle, including a uniquely named card (bc3e62e2).
     const row = castList.getByRole("listitem", { name: "Aria Vance", exact: true })
     await expect(row).toContainText("Aria Vance")
-    await expect(row).not.toContainText("1")
+    await expect(row.locator("[data-card-version]")).toHaveText("1")
     await shoot("chat-cast")
     // A normal name/version save refreshes the mounted sidebar, and History cannot
     // restore an occupied imported pair. All surrounding data is the realistic import.

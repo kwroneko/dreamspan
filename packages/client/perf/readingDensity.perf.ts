@@ -64,10 +64,11 @@ test("reading spacing: full top-bottom-top round trips", async ({ page }, info) 
           if (state.on) for (const e of entries.getEntries()) state.long.push(e.duration)
         }).observe({ type: "long-animation-frame" })
         let previous = performance.now()
-        const tick = (now: number) => {
-          if (!state.on) return
-          state.frames.push(now - previous)
-          previous = now
+        // What a frame paints: the rows as they stand after the frame's resize observers (the
+        // virtualizer measures newly mounted rows in its own, before the paint). A frame callback
+        // runs before them and sees rows the frame never shows at their estimated places, so the
+        // rows are read in an observer of this frame's own, which runs after the virtualizer's.
+        const inspect = () => {
           const list = document.querySelector('[data-testid="messages"]')!
           const view = list.getBoundingClientRect()
           const rows = [...list.querySelectorAll(".chat-row")]
@@ -94,6 +95,16 @@ test("reading spacing: full top-bottom-top round trips", async ({ page }, info) 
                 rows: rows.map((r) => ({ top: r.top, bottom: r.bottom }))
               })
           }
+        }
+        const tick = (now: number) => {
+          if (!state.on) return
+          state.frames.push(now - previous)
+          previous = now
+          const probe = new ResizeObserver(() => {
+            probe.disconnect()
+            if (state.on) inspect()
+          })
+          probe.observe(document.querySelector('[data-testid="messages"]')!)
           requestAnimationFrame(tick)
         }
         requestAnimationFrame(tick)

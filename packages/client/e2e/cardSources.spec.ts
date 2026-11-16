@@ -187,13 +187,13 @@ for (const width of [1440, 390])
         await third.click()
         await expect(page).toHaveURL(/\/sources\/cardex\/cards\/[^/]+\/chat/)
         // The header's portrait opens the card's tab; a phone's header leaves it to the panel's link.
-        if (width === 1440) await page.getByRole("button", { name: `Show ${edited}'s card`, exact: true }).click()
+        if (width === 1440) await page.getByRole("button", { name: `Show ${edited} · 1.0's card`, exact: true }).click()
         else
           await page.goto(
             `${page.url().split("?")[0]}?panel=${encodeURIComponent(`card:src:cardex:${/\/cards\/([^/]+)\/chat/.exec(page.url())![1]}`)}`
           )
         await expect(page).toHaveURL(/panel=card(:|%3A)src/)
-        const tab = page.getByRole("tabpanel", { name: edited, exact: true })
+        const tab = page.getByRole("tabpanel", { name: `${edited} · 1.0`, exact: true })
         await expect(tab.getByText("From cardex · not in your cards", { exact: true })).toBeVisible({
           timeout: 30_000
         })

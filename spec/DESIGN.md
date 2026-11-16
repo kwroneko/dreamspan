@@ -1339,6 +1339,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 **Built (centerheader, 2026-11-04):** These decisions are implemented and obsolete as implementation requirements; see ARCHITECTURE §5 and §14.6.
 
+**Built follow-up (cardheader1, 2026-11-16):** The full card editor bounds its version within the existing identity row so the display-name switcher retains readable text on phones, including an empty version’s add prompt and long versions. Browser glyph-width checks and the center-identity layout audit cover 1440/390 in both themes; see ARCHITECTURE §14.6. This correction is obsolete as an implementation requirement; no Proposed/Open item changes status.
+
 - **[D] Owner, 2026-11-04 (snippettitle):** “After renaming a snippet, its History dialog/label must show the new title”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 
 - **[D] Owner, 2026-11-04 (navtiles Home and Library copy):** “The tool tip for library implies the library doesn't have characters but it literally opens on them. I think "characters" in this footer menu should probably become "home", it's the home page.” Rename the footer tile Home with a home icon; describe Library's actual contents, including characters. **[P]** Home: “Open the home page.” Library: “Browse characters, personas, lorebooks and presets.” **Built; obsolete as an implementation requirement**, see ARCHITECTURE §5.

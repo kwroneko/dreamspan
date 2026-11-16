@@ -65,10 +65,9 @@ for (const width of [1440, 390]) {
       })
       .click()
     await expect(page).toHaveURL(new RegExp(`/chats/${latest.chat.id}`))
-    await expect(page.getByRole("tab", { name: character.card.label, exact: true })).toHaveAttribute(
-      "aria-selected",
-      "true"
-    )
+    const version = character.card.subtitle.trim()
+    const tabLabel = version ? `${character.card.name} · ${version}` : character.card.name
+    await expect(page.getByRole("tab", { name: tabLabel, exact: true })).toHaveAttribute("aria-selected", "true")
     expect(new URL(page.url()).searchParams.get("slot")).toBe(
       latest.activity.find((a) => a.entityId === character.card.entityId)?.slot ?? null
     )
@@ -270,6 +269,8 @@ for (const width of [1440, 390]) {
         .getByRole("button", { name: "Never used", exact: true })
         .click()
       const unused = data.cards.find((c) => !c.card.chats)!
+      const unusedVersion = unused.card.subtitle.trim()
+      const unusedChoice = unusedVersion ? `${unused.card.name} · ${unusedVersion}` : unused.card.name
       await page
         .getByRole("main")
         .getByRole("link", {
@@ -286,7 +287,7 @@ for (const width of [1440, 390]) {
       await shoot("new-chat")
       // The header's faces open the card's tab; a phone's header leaves them out, as in any chat.
       if (width === 390) await openPanel(page, unused.card.label)
-      else await page.getByRole("button", { name: `Show ${unused.card.name}'s card`, exact: true }).click()
+      else await page.getByRole("button", { name: `Show ${unusedChoice}'s card`, exact: true }).click()
       await expect(fullEditor).toBeVisible()
       await page.goto(`${server().url}/cards/${card}`)
       await expect(page.getByRole("heading", { name: "Definition", exact: true })).toBeVisible()

@@ -187,11 +187,35 @@ const helpers = {
 function onPress(event: PointerEvent) {
   if (!event.isTrusted) return
   pressedAt = clock()
+  if (event.type === "pointerdown") pressFocus = null
   post({ type: "rp:focus", token: actionToken }, hostOrigin)
+}
+
+/**
+ * What a press focused here, kept a moment: the app may take focus back before the press's
+ * `rp:focus` reaches it (its pointer events wait for its next frame, so on a busy host it can
+ * see the focus move before the pointer's arrival) and gives it back once it does. Taking it
+ * back blurs the press's field, and the frame gets the focus back without it, so the typing
+ * would go nowhere: the frame's focus coming back that soon after the press puts it back there.
+ */
+let pressFocus: Element | null = null
+const PRESS_FOCUS_MS = 2000
+function onFocusIn(event: FocusEvent) {
+  if (event.isTrusted && clock() - pressedAt < PRESS_FOCUS_MS && event.target instanceof Element)
+    pressFocus = event.target
+}
+function onWindowFocus(event: FocusEvent) {
+  if (!event.isTrusted || event.target !== window || clock() - pressedAt >= PRESS_FOCUS_MS) return
+  const field = pressFocus
+  if (field === null || !field.isConnected || document.activeElement === field) return
+  if (document.activeElement !== null && document.activeElement !== document.body) return
+  ;(field as HTMLElement).focus?.({ preventScroll: true })
 }
 
 function listen() {
   addEventListener("message", onMessage)
+  addEventListener("focus", onWindowFocus)
+  document.addEventListener("focusin", onFocusIn, true)
   document.addEventListener("pointerdown", onPress, true)
   document.addEventListener("pointerup", onPress, true)
   document.addEventListener("click", onClick, true)

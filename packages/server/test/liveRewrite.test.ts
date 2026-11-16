@@ -44,8 +44,17 @@ const hideWord = script("hide-word", { find_regex: "/PRIVATE/g", replace_string:
 const BODY = "Hello there, traveller. The road is long and the mill is closed tonight, so Mira lights the lantern."
 const REPLY = `<thinking>Plan: take the PRIVATE road.</thinking>\n<cot>secret chain of thought</cot>${BODY}`
 
-/** A mock model streaming `reply` a few characters at a time, `gapMs` apart. */
-const slowModel = (reply: string, size = 3, gapMs = 25) =>
+/**
+ * A mock model streaming `reply` a few characters at a time, `gapMs` apart. `pace`, if given,
+ * is awaited before each piece after the first, with the range of the reply the piece before
+ * it carried: a test can hold the stream until that piece was shown.
+ */
+const slowModel = (
+  reply: string,
+  size = 3,
+  gapMs = 25,
+  pace?: (previous: { readonly start: number; readonly end: number }) => Promise<void>
+) =>
   Effect.acquireRelease(
     Effect.promise(() =>
       startMockProvider((_request, res) => {
@@ -57,7 +66,11 @@ const slowModel = (reply: string, size = 3, gapMs = 25) =>
         const next = () => {
           if (i < events.length) {
             res.write(`data: ${JSON.stringify(events[i++])}\n\n`)
-            setTimeout(next, gapMs)
+            const previous = { start: (i - 1) * size, end: Math.min(i * size, reply.length) }
+            setTimeout(() => {
+              if (pace && i < pieces.length) void pace(previous).then(next)
+              else next()
+            }, gapMs)
           } else {
             res.write("data: [DONE]\n\n")
             res.end()
@@ -68,6 +81,20 @@ const slowModel = (reply: string, size = 3, gapMs = 25) =>
     ),
     (mock) => Effect.promise(() => mock.close())
   )
+
+/**
+ * Resolves once `events` holds more than `count` events of `tag`, or after `ms` (never hangs a
+ * run: a frame that doesn't come shows in the assertions instead).
+ */
+const shownMore = (events: ReadonlyArray<ChatEvent>, tag: ChatEvent["_tag"], count: number, ms = 10_000) =>
+  new Promise<void>((resolve) => {
+    const until = Date.now() + ms
+    const check = () => {
+      if (events.filter((event) => event._tag === tag).length > count || Date.now() > until) resolve()
+      else setTimeout(check, 5)
+    }
+    check()
+  })
 
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(testConfig()), Builtins.layer))) as Effect.Effect<
@@ -94,13 +121,26 @@ it.live(
   () =>
     run(
       Effect.gen(function* () {
-        const model = yield* slowModel(REPLY)
+        // The thinking is under 30 characters, a few hundred milliseconds of stream: no longer
+        // than the first rewrite can take on a busy host (nothing shows until it answers, and
+        // chunks arriving during one are taken together, ARCHITECTURE §12 "Live rewrites"), so
+        // it could arrive in one frame. Each piece of the thinking waits until the one before
+        // it was shown; the frames and what they show are still the server's own.
+        const live: Array<ChatEvent> = []
+        const open = REPLY.indexOf(">") + 1
+        const close = REPLY.indexOf("</thinking>")
+        let seen = 0
+        const model = yield* slowModel(REPLY, 3, 25, async ({ start, end }) => {
+          if (end > open && start < close) await shownMore(live, "Section", seen)
+          seen = live.filter((event) => event._tag === "Section").length
+        })
         const api = yield* client()
         const reply = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: model.url + "/v1" },
           model: {},
           preset: { extensions: { regex_scripts: regexToSt([stripCot, hideWord]) } },
-          approveRegex: true
+          approveRegex: true,
+          events: live
         })
         const id = reply.version.id
         const body = frames(reply.events, id, "Delta")
