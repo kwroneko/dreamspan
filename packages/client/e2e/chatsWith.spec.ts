@@ -239,7 +239,7 @@ for (const width of [1440, 390]) {
     test.skip(!process.env.LAYOUT_AUDIT, "opt-in geometry audit")
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    const work = process.env.LAYOUT_AUDIT_WORK!
+    const work = process.env.LAYOUT_AUDIT_WORK ?? info.outputDir
     mkdirSync(work, { recursive: true })
     const findings: unknown[] = []
     const audit = async (surface: string) => {
