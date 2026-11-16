@@ -184,7 +184,7 @@ test("a reply's cost sits in its header, opens the panel, and never adds a line"
     ["Input tokens", "120 (20 uncached, 100 cache read, 0 cache write)"],
     ["Cached", "83% of input"],
     ["Output tokens", "6, reasoning included"]
-  ])
+  ] as const)
     await expect(panel.locator("dt", { hasText: label }).locator("+ dd")).toHaveText(value)
   await expect(panel).not.toContainText("Provider charged")
   await shoot(page, "panel-group-1440")
