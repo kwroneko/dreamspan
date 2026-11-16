@@ -225,13 +225,10 @@ const castStage: AssemblerStage = {
         need(assembly, "state"),
         swappedCard(
           need(assembly, "events").map((e) => e.event),
-          target.draft ? (need(assembly, "state").playedByMe.at(-1) ?? null) : target.speaker
+          target.speaker
         ),
         target.ordinal
       )
-      if (target.draft) {
-        assembly.cast = { ...assembly.cast, speaker: assembly.cast.personas[0] ?? null, type: "impersonate" }
-      }
       if (assembly.request.summarizing) assembly.cast = { ...assembly.cast, type: "quiet" }
       // ST's Continue: its own generation type, which a preset prompt's trigger can name.
       else if (target.continues) assembly.cast = { ...assembly.cast, type: "continue" }
@@ -573,11 +570,7 @@ const macrosStage = sync("macros", (assembly) => {
     ...(assembly.request.summarizing
       ? {}
       : {
-          speaker: cast.speaker
-            ? modelName(cast.speaker.doc)
-            : need(assembly, "target").draft
-              ? namesFor(need(assembly, "state"), cast).user
-              : namesFor(need(assembly, "state"), cast).char,
+          speaker: cast.speaker ? modelName(cast.speaker.doc) : namesFor(need(assembly, "state"), cast).char,
           direction: need(assembly, "target").direction ?? ""
         })
   })
@@ -2670,7 +2663,7 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
     const { speaker, personas } = need(assembly, "cast")
     const turn = continuesWithoutPrefill(assembly)
       ? CONTINUE_NUDGE
-      : need(assembly, "target").draft || (speaker !== null && personas.includes(speaker))
+      : speaker !== null && personas.includes(speaker)
         ? IMPERSONATION_PROMPT
         : GROUP_NUDGE
     const direction = need(assembly, "target").direction?.trim() ? [DIRECTION_PROMPT] : []

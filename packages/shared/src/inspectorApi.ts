@@ -301,8 +301,8 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
     })
   ),
   chatId: ChatId,
-  slotId: Schema.NullOr(SlotId),
-  versionId: Schema.NullOr(VersionId),
+  slotId: SlotId,
+  versionId: VersionId,
   builtAt: Schema.Number,
   /** The rollout's status: running, completed, stopped, failed, interrupted. */
   status: Schema.String,

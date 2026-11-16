@@ -1,8 +1,5 @@
 // Each unexposed RPC is an explicit decision. New operations must be classified here or exposed.
 export const operationExclusions: Readonly<Record<string, string>> = {
-  WriteForMe: "Only a user's composer submit authorizes this single draft request.",
-  GetDraftRunContext: "The user inspects their own composer request.",
-  GetLastDraftRollout: "The user opens their own branch's composer request.",
   GoBackPlugin: "Plugin management stays user-only until P4 supplies its approval workflow.",
   ListBuiltinParts: "Dedicated plugin authoring tools retain source and permission boundaries.",
   CopyBuiltin: "Dedicated plugin authoring tools retain inertness, receipts and exact-version consent.",
