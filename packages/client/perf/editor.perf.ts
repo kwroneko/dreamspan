@@ -8,6 +8,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { textField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
 import { budgets } from "./budgets.ts"
+import { expectSaveState, NOTHING_TO_SAVE, UNSAVED } from "../e2e/support/saveRevision.ts"
 import { type PerfServer, startServer, withClient } from "./support.ts"
 
 let server: PerfServer
@@ -51,8 +52,10 @@ const measured = (page: Page) =>
 const p95 = (values: ReadonlyArray<number>) =>
   values.length === 0 ? 0 : [...values].sort((a, b) => a - b)[Math.floor(0.95 * values.length)]!
 
-const ready = (page: Page) =>
-  expect(page.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
+const ready = async (page: Page) => {
+  await expectSaveState(page, NOTHING_TO_SAVE)
+  await expect(page.locator(".cm-content[contenteditable=true]").first()).toBeVisible()
+}
 
 const check = (scenario: string, openMs: number, m: { loaf: Array<number>; inputs: Array<number> }) => {
   const values = {
@@ -105,7 +108,7 @@ test("a card with a 50 KB description: typing in it, and in another field", asyn
   await page.keyboard.type(" Another line, typed key by key.", { delay: 40 })
   await page.getByRole("textbox", { name: /^Scenario/ }).focus()
   await page.keyboard.type("A storm.", { delay: 40 })
-  await expect(page.getByRole("status").filter({ hasText: /^Changed since revision \d+$/ })).toBeVisible()
+  await expectSaveState(page, UNSAVED)
   // The token counts follow the typing (tokenCounts.ts): each field counted once it rests.
   await expect(page.locator("[data-card-tokens]")).toHaveText(/^~?[\d,]+ tokens · ~?[\d,]+ permanent$/)
   check("editor-long-card", openMs, await measured(page))
@@ -138,16 +141,20 @@ test("a preset with 100 prompts: toggling, reordering and typing", async ({ page
   await ready(page)
   const openMs = Date.now() - started
   const order = page.getByRole("list", { name: "Prompt order" })
-  await expect(order.getByRole("listitem")).toHaveCount(100)
+  // Count the imported prompts; registered landmarks may add other rows.
+  expect(file.prompts).toHaveLength(100)
+  await expect(
+    order.locator(file.prompts.map((prompt) => `[data-prompt="${String(prompt.identifier)}"]`).join(","))
+  ).toHaveCount(100)
   await measured(page)
 
   for (let i = 0; i < 10; i++) await page.getByRole("switch", { name: `Send Rule ${i * 7}`, exact: true }).click()
-  await page.getByRole("button", { name: "Move Rule 50", exact: true }).focus()
+  await order.getByRole("button", { name: "Move Rule 50", exact: true }).focus()
   for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowUp")
-  await page.getByRole("button", { name: "Edit Rule 3", exact: true }).click()
-  await page.getByRole("textbox", { name: /^Prompt/ }).focus()
+  // The document opens prompt editors directly.
+  await page.getByRole("textbox", { name: "Prompt: Rule 3", exact: true }).focus()
   await page.keyboard.press("End")
   await page.keyboard.type(" And keep it short.", { delay: 40 })
-  await expect(page.getByRole("status").filter({ hasText: "kept as drafts" })).toBeVisible()
+  await expectSaveState(page, UNSAVED)
   check("editor-hundred-prompts", openMs, await measured(page))
 })

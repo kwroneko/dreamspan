@@ -426,9 +426,9 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   // What a call reads when it's made, so `show` stays the same function from tab to tab and as
   // the chat updates: the message rows, the composer and the header take it, and a new one
   // re-rendered every row on each tab switch (night/tabperf).
-  const latest = useRef({ view, urlPanel, panel })
+  const latest = useRef({ view, urlPanel, panel, router })
   useLayoutEffect(() => {
-    latest.current = { view, urlPanel, panel }
+    latest.current = { view, urlPanel, panel, router }
   })
   const show = useCallback(
     (next: PanelTab | null) => {
@@ -455,13 +455,12 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   useEffect(() => {
     if (!wide && away && latest.current.panel !== null) show(null)
   }, [wide, away, show])
+  // The router is read through the ref too: React Compiler otherwise infers its mutable search
+  // object as a dependency and replaces this callback, and every row with it, on each tab switch.
   /** Search params that keep the panel's tab: the one shown when the call is made. */
-  const withPanel = useCallback(
-    (search: Record<string, string>) => {
-      const shown = latest.current.panel
-      return { ...router.state.location.search, ...search, panel: shown ?? undefined }
-    },
-    [router]
-  )
+  const withPanel = useCallback((search: Record<string, string>) => {
+    const shown = latest.current.panel
+    return { ...latest.current.router.state.location.search, ...search, panel: shown ?? undefined }
+  }, [])
   return { panel, show, withPanel, wide, userId }
 }

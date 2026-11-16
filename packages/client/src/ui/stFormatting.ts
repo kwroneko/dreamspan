@@ -1,33 +1,73 @@
-import { sliceText } from "./sourcePositions.ts"
+import { sliceText, type SourceRun } from "./sourcePositions.ts"
 
 // ST 1.19 public/scripts/power-user.js fixMarkdown(text, true). This is deliberately
 // line-based, including its last-character-wins behavior when both checks match a line.
 export function fixMarkdown(text: string): string {
-  return fixMarkdownMapped(text).text
+  return fixMarkdownRuns(text).text
 }
 
 /** Original UTF-16 offsets; display-only closing marks have no source. */
 export function fixMarkdownMapped(text: string): { text: string; offsets: Array<number | null> } {
+  const fixed = fixMarkdownRuns(text)
+  return {
+    text: fixed.text,
+    offsets: fixed.runs.flatMap((run) =>
+      Array.from({ length: run.to - run.from }, (_, i) => (run.source === null ? null : run.source + i))
+    )
+  }
+}
+
+/** Formatting's copy map as contiguous runs, without allocating an offset for every character. */
+export function fixMarkdownRuns(text: string): { text: string; runs: Array<SourceRun> } {
   const matches = [...text.matchAll(/([*_]{1,2})([\s\S]*?)\1/gm)]
   let fixed = text
-  let offsets: Array<number | null> = Array.from({ length: text.length }, (_, i) => i)
+  const removed = new Set<number>()
   for (const match of matches.reverse()) {
-    const removedOffsets: number[] = []
     const replacement = match[0].replace(
       /(\*|_)([\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]+)|([\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]+)(\*|_)/g,
       (whole: string, left: string | undefined, _a: string, _b: string, right: string | undefined, at: number) => {
         for (let i = 0; i < whole.length; i++)
-          if (i !== (left ? 0 : whole.length - 1)) removedOffsets.push(match.index + at + i)
+          if (i !== (left ? 0 : whole.length - 1)) removed.add(match.index + at + i)
         return left ?? right ?? ""
       }
     )
-    const removed = new Set(removedOffsets)
-    if (removed.size) offsets = offsets.filter((_, i) => !removed.has(i))
     if (replacement !== match[0])
       fixed = fixed.slice(0, match.index) + replacement + fixed.slice(match.index + match[0].length)
   }
+  const original: SourceRun[] = []
+  let source = 0
+  let at = 0
+  for (const offset of [...removed].sort((a, b) => a - b)) {
+    if (offset > source) original.push({ from: at, to: at + offset - source, source })
+    at += offset - source
+    source = offset + 1
+  }
+  if (source < text.length) original.push({ from: at, to: at + text.length - source, source })
+  const runs: SourceRun[] = []
+  let length = 0
+  const append = (count: number, source: number | null) => {
+    if (!count) return
+    const last = runs.at(-1)
+    if (
+      last &&
+      (source === null ? last.source === null : last.source !== null && last.source + last.to - last.from === source)
+    )
+      runs[runs.length - 1] = { ...last, to: length + count }
+    else runs.push({ from: length, to: length + count, source })
+    length += count
+  }
+  let runAt = 0
+  const copy = (from: number, to: number) => {
+    while (runAt < original.length && original[runAt]!.to <= from) runAt++
+    while (from < to && runAt < original.length) {
+      const run = original[runAt]!
+      const end = Math.min(to, run.to)
+      append(end - from, run.source! + from - run.from)
+      from = end
+      if (from >= run.to) runAt++
+    }
+  }
   let cursor = 0
-  const mapped: Array<number | null> = []
   const result = fixed
     .split("\n")
     .map((line, index) => {
@@ -37,14 +77,14 @@ export function fixMarkdownMapped(text: string): { text: string; offsets: Array<
       }
       const closed = result !== line
       const length = closed ? line.trimEnd().length : line.length
-      if (index) mapped.push(offsets[cursor - 1] ?? null)
-      for (let i = cursor; i < cursor + length; i++) mapped.push(offsets[i] ?? null)
-      if (closed) mapped.push(null)
+      if (index) copy(cursor - 1, cursor)
+      copy(cursor, cursor + length)
+      if (closed) append(1, null)
       cursor += line.length + 1
       return result
     })
     .join("\n")
-  return { text: result, offsets: mapped }
+  return { text: result, runs }
 }
 
 // A small structural AST contract avoids coupling the replaceable formatter to a
