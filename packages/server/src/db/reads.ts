@@ -38,11 +38,11 @@ import {
   displayLength,
   type PathPiece,
   pathPieces,
-  placedInsertions,
   positionOf,
   slotAtPosition,
   slotPlace,
-  windowPieces
+  windowPieces,
+  rearranges
 } from "./displayPath.ts"
 import {
   effectiveOverride,
@@ -468,7 +468,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
         const fork = yield* liveFork(chat, forkId ?? null)
         const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
-        if ((yield* placedInsertions(sql, chatId, fork.id)).length === 0) {
+        if (!(yield* rearranges(sql, chatId, fork.id))) {
           // No insertions: the display path is the structural one, read as before.
           if (leaf === null) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
           const rows = byDepth(yield* pathWindow(sql, chatId, leaf, limit, fork.id))
@@ -879,8 +879,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         let shownFork = (leafSlotId === null ? fork.id : null) as ForkId | null
         let view: string = fork.id
         // A fork with insertions is read by position on its display path.
-        if ((yield* placedInsertions(sql, chatId, fork.id)).length > 0)
-          return yield* readDisplay(chatId, fork, leafSlotId, range, limit)
+        if (yield* rearranges(sql, chatId, fork.id)) return yield* readDisplay(chatId, fork, leafSlotId, range, limit)
         if (leaf === null)
           return new PathWindow({ leafSlotId: null, forkId: shownFork, entries: [], older: null, newer: null })
         // Deleted messages are walked through but not shown; their replies stay in place.
@@ -921,7 +920,7 @@ export const makeReadHandlers = Effect.gen(function* () {
               // A slot on another path opens the fork through it that was current most
               // recently, or with none, the path through it on its latest replies.
               const through = yield* forkThrough(sql, chatId, anchor.id)
-              if (through !== null && (yield* placedInsertions(sql, chatId, through.id)).length > 0)
+              if (through !== null && (yield* rearranges(sql, chatId, through.id)))
                 return yield* readDisplay(chatId, fork, leafSlotId, range, limit)
               shownFork = (through?.id ?? null) as ForkId | null
               view = through?.id ?? view

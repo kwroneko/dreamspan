@@ -16,6 +16,7 @@ import * as bin from "./bin/index.ts"
 import * as characters from "./characters/index.ts"
 import * as chat from "./chat/index.tsx"
 import * as insertMessage from "./chat/insertMessage/index.tsx"
+import * as moveMessage from "./chat/moveMessage.tsx"
 import * as connections from "./connections/index.ts"
 import * as decisions from "./decisions/index.tsx"
 import * as credentials from "./credentials.tsx"
@@ -62,6 +63,7 @@ export const registerFeatures = () => {
   ownTurnNotes.register()
   pickers.register()
   insertMessage.register()
+  moveMessage.register()
   threads.register()
   autoRun.register()
 

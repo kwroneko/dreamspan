@@ -61,13 +61,13 @@ import {
   providerChanges,
   resolveProviderSettings
 } from "@rp/shared/providerDefinitions.ts"
-import type { Cost, LlmRequestId, RequestPurpose, TokenCounts } from "@rp/shared/usage.ts"
+import type { Cost, LlmRequestId, RequestPurpose, RequestRoute, TokenCounts } from "@rp/shared/usage.ts"
 import { createHash, timingSafeEqual } from "node:crypto"
 import { ServerError, StaleWrite } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Layer, Option, Queue, Semaphore, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { Network, type ProxyOverride, type RequestNetwork, RedirectRefused } from "../net/Network.ts"
-import { describeRoute, proxyUrlProblem } from "../net/route.ts"
+import { describeRoute, proxyUrlProblem, requestRoute, type Route } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
 import { catalogEntry, withCatalog } from "./catalog.ts"
 import { withCatalogs } from "./contextCatalog.ts"
@@ -744,8 +744,8 @@ export const layer = (options: ProvidersOptions = {}) =>
         providerError(error.reason, prepared.scrub(error.message), error)
 
       /** The fetch for a prepared connection's requests, reporting each route. */
-      const fetchFor = (prepared: Prepared, onRoute: (description: string) => void) =>
-        prepared.transport.fetchFor((route, target) => onRoute(describeRoute(route, target)))
+      const fetchFor = (prepared: Prepared, onRoute: (description: string, route: Route) => void) =>
+        prepared.transport.fetchFor((route, target) => onRoute(describeRoute(route, target), route))
 
       // --- Connection operations that need the secret ------------------------------
 
@@ -1186,7 +1186,9 @@ export const layer = (options: ProvidersOptions = {}) =>
           /** The wire's signed-thinking binding, and the payload as it went out (thinkingBinding.ts). */
           binding: undefined as ThinkingBinding | undefined,
           sent: null as Record<string, unknown> | null,
-          signed: { sent: false, dropped: false }
+          signed: { sent: false, dropped: false },
+          /** The network route the request took, once one was chosen. */
+          route: null as RequestRoute | null
         }
         /** What the request produced so far, for a close after an interruption or a defect. */
         const partialMessage = (stopReason: "aborted" | "error", errorMessage?: string): AssistantMessage => ({
@@ -1336,6 +1338,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                     : {}),
                   reportedCost: state.capture.reportedCost,
                   cost,
+                  route: state.route,
                   error: error === null ? null : { reason: error.reason, message: error.message, status: error.status }
                 }
               })
@@ -1457,10 +1460,14 @@ export const layer = (options: ProvidersOptions = {}) =>
               ),
             catch: (error) => providerError("bad_request", `the request context is invalid: ${String(error)}`)
           })
-          const onRoute = (description: string) => offer({ type: "route", description })
+          const onRoute = (description: string, route: Route) => {
+            // The ledger keeps the route (the proxy by scheme, host and port only).
+            state.route = requestRoute(route)
+            offer({ type: "route", description })
+          }
           if (!prepared.kind.acceptsFetch) {
             const route = yield* prepared.transport.route(new URL(prepared.baseUrl))
-            onRoute(describeRoute(route, new URL(prepared.baseUrl)))
+            onRoute(describeRoute(route, new URL(prepared.baseUrl)), route)
           }
           // pi-ai reports onResponse only for successful responses (the SDKs throw first on
           // errors), so the status and Retry-After are read here, on every response.

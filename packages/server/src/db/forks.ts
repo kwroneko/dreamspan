@@ -5,7 +5,7 @@
 import type { SqlClient } from "effect/sql"
 import { Effect } from "effect"
 import { effectiveOverrideSql, shownIn, shownInSql, slotDeletedIn, versionDeletedIn, withFork } from "./forkState.ts"
-import { onDisplayPath, pathPieces, placedInsertions, slotPlace } from "./displayPath.ts"
+import { onDisplayPath, pathPieces, slotPlace, rearranges } from "./displayPath.ts"
 import { pathSegments } from "./pathSegments.ts"
 import type { ForkRow } from "./rows.ts"
 
@@ -30,11 +30,12 @@ export const lastShown = (
   fork: { readonly id: string; readonly tip_slot_id: string | null }
 ) =>
   Effect.gen(function* () {
-    if ((yield* placedInsertions(sql, chatId, fork.id)).length === 0) return fork.tip_slot_id
+    if (!(yield* rearranges(sql, chatId, fork.id))) return fork.tip_slot_id
     const pieces = yield* pathPieces(sql, chatId, fork.id, fork.tip_slot_id)
     for (let i = pieces.length - 1; i >= 0; i--) {
       const piece = pieces[i]!
-      if (piece.kind === "run") break
+      // A run a move cut short ends before the moved slot.
+      if (piece.kind === "run") return piece.endId ?? fork.tip_slot_id
       const [row] = yield* sql<{ deleted: number }>`
         SELECT ${slotDeletedIn(sql, fork.id, "s")} AS deleted FROM slots s WHERE s.id = ${piece.slotId}`
       if (row?.deleted === 0) return piece.slotId
@@ -71,11 +72,7 @@ export const lastText = Effect.fn("lastText")(function* (
   tip: string | null
 ) {
   const pieces = yield* pathPieces(sql, chatId, forkId, tip)
-  const ranges = pieces.map((p) => [
-    p.chainId,
-    p.kind === "inserted" ? p.depth : p.lo,
-    p.kind === "inserted" ? p.depth : p.hi
-  ])
+  const ranges = pieces.map((p) => [p.chainId, p.kind !== "run" ? p.depth : p.lo, p.kind !== "run" ? p.depth : p.hi])
   // Each chain range supplies its newest visible nonblank version with an index
   // walk. Sorting every message body before LIMIT 1 defeats the payload split.
   const [row] = yield* sql<{ speaker: string | null; writer: string; text: string }>`

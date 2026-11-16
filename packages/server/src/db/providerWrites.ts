@@ -454,6 +454,9 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           cost: cost?.amount ?? null,
           cost_currency: cost?.currency ?? null,
           cost_formula: cost?.formula ?? null,
+          // A provider-reported charge is the provider's, never priced from rates here.
+          cost_rates_json: cost?.rates === undefined || cost.formula === "reported" ? null : JSON.stringify(cost.rates),
+          route_json: request.route == null ? null : JSON.stringify(request.route),
           error_json: request.error === null ? null : JSON.stringify(request.error)
         })}
         WHERE id = ${request.id} AND owner_user_id = ${userId} AND status = 'running' RETURNING id`

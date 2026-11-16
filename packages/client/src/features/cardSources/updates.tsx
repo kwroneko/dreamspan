@@ -17,6 +17,7 @@ import { lazy, Suspense, useContext, useMemo, useState } from "react"
 import { invalidateKeys, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
+import { Checkbox } from "../../ui/Choice.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { stageVersion } from "../cardImport/upload.ts"
@@ -135,7 +136,7 @@ function UpdateNotice({
 }) {
   const origin = useOrigin(entityId)
   const [open, setOpen] = useState<Open | null>(null)
-  const [busy, setBusy] = useState<"merge" | "choices" | null>(null)
+  const [busy, setBusy] = useState<"merge" | "choices" | "ignore" | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const action = useAction()
 
@@ -185,6 +186,21 @@ function UpdateNotice({
       setOpen({ _tag: "Choices", file: file.file, version: file.version, link: file.link, receipt: file.receipt })
   }
 
+  // Ignore future updates (owner, 2026-11-16): the notice and badges stay away until it's turned back on.
+  const ignore = async () => {
+    setBusy("ignore")
+    const result = await action.run(
+      (client) => client("SetRemoteUpdatesIgnored", { entityId, ignored: true }),
+      ORIGIN_KEYS
+    )
+    setBusy(null)
+    if (result.ok)
+      showToast({
+        title: `Ignoring updates to ${label || `this ${what}`}`,
+        description: "Turn them back on in Metadata, under Sources."
+      })
+  }
+
   const addSeparate = async () => {
     const result = await action.run((client) => client("AddRemoteVersionAsCard", { entityId }), ORIGIN_KEYS)
     if (!result.ok) return result.error.message
@@ -221,6 +237,14 @@ function UpdateNotice({
                   More choices…
                 </Button>
               )}
+              <Button
+                hint={`Stops update notices and badges for this ${what}. You can turn them back on in its Sources.`}
+                pending={busy === "ignore"}
+                disabled={busy !== null}
+                onClick={() => void ignore()}
+              >
+                Ignore future updates
+              </Button>
             </>
           }
         >
@@ -274,7 +298,10 @@ export function CheckForNewer({
   const registry = useContext(RegistryContext)
   const [pending, setPending] = useState(false)
   const [said, setSaid] = useState<string | null>(null)
+  const action = useAction()
   if (!origin) return null
+  const setIgnored = (ignored: boolean) =>
+    void action.run((client) => client("SetRemoteUpdatesIgnored", { entityId, ignored }), ORIGIN_KEYS)
   const check = async () => {
     setPending(true)
     setSaid(null)
@@ -304,6 +331,14 @@ export function CheckForNewer({
           {said}
         </span>
       )}
+      <Checkbox
+        checked={origin.ignoreUpdates === true}
+        onCheckedChange={setIgnored}
+        hint={`While it's ticked, ${origin.sourceName}'s newer versions of this ${what} show no badge or notice.`}
+      >
+        Ignore future updates
+      </Checkbox>
+      {action.error && <span className="text-sm text-danger">{action.error.message}</span>}
     </div>
   )
 }

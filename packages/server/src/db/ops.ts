@@ -46,7 +46,7 @@ import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from "@rp/shared/snippetsApi.ts"
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected, HistoryEdit } from "@rp/shared/historyApi.ts"
-import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
+import { InsertBody, InsertRefused, MoveRefused, MoveStep } from "@rp/shared/messagesApi.ts"
 import {
   JoinThreadsInput,
   MergeChanged,
@@ -204,6 +204,7 @@ import {
   LlmRequestId,
   CacheStagger,
   RequestPurpose,
+  RequestRoute,
   RequestStatus,
   TokenCounts,
   UsageSource
@@ -409,6 +410,8 @@ const CloseLlmRequest = Schema.Struct({
   rawUsage: Schema.NullOr(Schema.Unknown),
   reportedCost: Schema.NullOr(Schema.Number),
   cost: Schema.NullOr(Cost),
+  /** The network route the request took, when one was chosen (it went out). */
+  route: Schema.optionalKey(Schema.NullOr(RequestRoute)),
   error: Schema.NullOr(Schema.Unknown)
 })
 
@@ -1812,6 +1815,30 @@ export class WriteOpsChat extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, InsertRefused, StorageError])
   }),
   /**
+   * Slot `slotId` one shown message up or down in fork `forkId` (owner, 2026-11-16; db/moves.ts):
+   * `move` rows in that fork only. Skips neighbours the fork deletes. The slot must be shown and
+   * not deleted there (`StaleWrite`, with `expectedRowVersion` reported). `undo` lists each
+   * slot's place before and after, for `UndoMove`.
+   */
+  Rpc.make("MoveMessage", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      slotId: SlotId,
+      direction: Schema.Literals(["up", "down"]),
+      expectedRowVersion: Schema.Int
+    },
+    success: Schema.Struct({ position: Schema.Int, undo: Schema.Array(MoveStep), chat: Chat }),
+    error: Schema.Union([NotFound, StaleWrite, MoveRefused, StorageError])
+  }),
+  /** A move's `undo` written back, when every slot is still where it put it (`StaleWrite` otherwise). */
+  Rpc.make("UndoMove", {
+    payload: { userId: UserId, chatId: ChatId, forkId: ForkId, undo: Schema.Array(MoveStep) },
+    success: Chat,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /**
    * A new version in place: a swipe, an edit, or "write your own" (DESIGN §3.1). An
    * edit's `sourceVersionId` is a live version of the same slot. A new slot's first
    * version has no source.
@@ -1983,8 +2010,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       replace: Schema.optionalKey(Schema.Struct({ expectedHeadRevisionId: Schema.String })),
       /**
        * Card-source identities named in Sources (§3.7), found locally by the registered adapter.
-       * These are unverified hints (empty remote_version); only a trusted matching file hash
-       * can confirm a hint, mark the card as held or enable update tracking.
+       * Each makes the card count as the user's copy of that entry (`linked`, owner 2026-11-16),
+       * its version unknown (empty) until one is taken; a matching archive hash confirms it.
        */
       recognized: Schema.optionalKey(
         Schema.Array(Schema.Struct({ sourceId: Schema.String, remoteId: Schema.String })).check(Schema.isMaxLength(40))
@@ -2057,10 +2084,16 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** "Ignore future updates" on a card from a card source (owner, 2026-11-16), or back on. */
+  Rpc.make("SetRemoteUpdatesIgnored", {
+    payload: { userId: UserId, entityId: EntityId, ignored: Schema.Boolean },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /**
    * Add as a separate card (§3.8): the source's newer file as a new card, stored as an import
-   * of it is, with no origin row (the first card keeps it), and that version taken on the
-   * first card, in one transaction.
+   * of it is, with an origin row of its own at that version (owner, 2026-11-16: both cards get
+   * future update notices), and that version taken on the first card, in one transaction.
    */
   Rpc.make("AdoptRemoteVersionAsCard", {
     payload: {
@@ -5540,8 +5573,12 @@ export class ReadOps extends RpcGroup.make(
         locator: Schema.NullOr(Schema.String),
         seenRemoteId: Schema.NullOr(Schema.String),
         seenVersion: Schema.NullOr(Schema.String),
-        /** An imported file confirmed by its archive hash, rather than added from the source. */
-        recognized: Schema.Boolean
+        /** An imported file (confirmed by its archive hash, or `linked` by its source link), rather than added from the source. */
+        recognized: Schema.Boolean,
+        /** Recognized by its source link alone: the version it has is unknown until one is taken. */
+        linked: Schema.Boolean,
+        /** "Ignore future updates": no badges or notices for this card. */
+        ignoreUpdates: Schema.Boolean
       })
     ),
     error: StorageError

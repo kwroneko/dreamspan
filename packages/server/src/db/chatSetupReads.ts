@@ -23,7 +23,7 @@ import { query } from "./tx.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { forkAt, selectedInSql, shownIn, shownInSql, slotDeletedInSql } from "./forkState.ts"
 import { lastShown, lastText } from "./forks.ts"
-import { displayLength, displayThrough, pathPieces, placedInsertions } from "./displayPath.ts"
+import { displayLength, displayThrough, pathPieces, rearranges } from "./displayPath.ts"
 
 /** A card's binding from the payload's, without the nulls; undefined for none. */
 const bindingOf = (
@@ -261,7 +261,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
           if (!chat) continue
           const cast = yield* chatCast(sql, userId, chatId, chat.leaf)
-          const inserted = (yield* placedInsertions(sql, chatId, chat.fork)).length > 0
+          const inserted = yield* rearranges(sql, chatId, chat.fork)
           const end = inserted ? yield* lastShown(sql, chatId, { id: chat.fork, tip_slot_id: chat.leaf }) : chat.leaf
           const positions = inserted ? displayLength(yield* pathPieces(sql, chatId, chat.fork, chat.leaf)) : null
           const [leaf] =
@@ -297,8 +297,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             : yield* pathPieces(sql, chat.chatId, fork, view.tip_slot_id)
           const pieces = path.map((p) => [
             p.chainId,
-            p.kind === "inserted" ? p.depth : p.lo,
-            p.kind === "inserted" ? p.depth : p.hi
+            p.kind !== "run" ? p.depth : p.lo,
+            p.kind !== "run" ? p.depth : p.hi
           ])
           const used = yield* sql<{ entity_id: string }>`SELECT j.value AS entity_id
             FROM json_each(${JSON.stringify(entityIds)}) j WHERE EXISTS (

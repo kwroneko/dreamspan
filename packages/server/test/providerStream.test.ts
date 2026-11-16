@@ -181,6 +181,12 @@ describe("streaming through OpenRouter's Chat Completions", () => {
       // 1000 × $2/M + 100 × $10/M
       assert.strictEqual(done.cost?.formula, "builtin")
       assert.closeTo(done.cost!.amount, 0.003, 1e-12)
+      // The ledger keeps the rates it was priced with and the route it took (DESIGN §9, 2026-11-16).
+      const reader = yield* Database.Reader
+      const [row] = yield* reader.ListLlmRequests({ userId, limit: 10, before: null })
+      assert.strictEqual(row!.cost?.formula, "builtin")
+      assert.deepStrictEqual(row!.cost?.rates, { input: 2, read: 0, write: 0, writeLong: 4, output: 10 })
+      assert.strictEqual(row!.route?.via, "direct")
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 })
@@ -1634,7 +1640,12 @@ describe("provider registry", () => {
       yield* Scope.close(flat, Exit.void)
       // Without the provider's figure, the price table prices it: 100 in, 5 out.
       yield* registry.costs.disable("reported")
-      assert.deepStrictEqual(yield* costOfRun, { amount: 0.00011, currency: "USD", formula: "builtin" })
+      assert.deepStrictEqual(yield* costOfRun, {
+        amount: 0.00011,
+        currency: "USD",
+        rates: { input: 1, read: 0, write: 0, writeLong: 2, output: 2 },
+        formula: "builtin"
+      })
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
@@ -2038,14 +2049,20 @@ it.live("user pricing persists, snapshots in-flight requests and never reprices 
     release.resolve()
     yield* Fiber.join(running)
     const [first] = yield* reader.ListLlmRequests({ userId, limit: 10, before: null })
-    assert.deepStrictEqual(first!.cost, { amount: 230 / 1e6, currency: "credits", formula: "user:private:1" })
+    assert.deepStrictEqual(first!.cost, {
+      amount: 230 / 1e6,
+      currency: "credits",
+      formula: "user:private:1",
+      rates: { input: 2, read: 0, write: 0, writeLong: 0, output: 3 }
+    })
     yield* stream()
     const rows = yield* reader.ListLlmRequests({ userId, limit: 10, before: null })
     assert.deepStrictEqual(rows.find((r) => r.id === first!.id)!.cost, first!.cost)
     assert.deepStrictEqual(rows.find((r) => r.id !== first!.id)!.cost, {
       amount: 2030 / 1e6,
       currency: "credits",
-      formula: "user:private:2"
+      formula: "user:private:2",
+      rates: { input: 20, read: 0, write: 0, writeLong: 0, output: 3 }
     })
     assert.isTrue(
       Exit.isFailure(yield* Effect.exit(writer.SetCostSettings({ userId, expectedRevision: 1, rules: [] })))
@@ -2069,7 +2086,12 @@ it.live("user pricing persists, snapshots in-flight requests and never reprices 
       output: 10,
       reasoning: 0
     })
-    assert.deepStrictEqual(ownEstimate, { amount: 230 / 1e6, currency: "credits", formula: "user:private:3" })
+    assert.deepStrictEqual(ownEstimate, {
+      amount: 230 / 1e6,
+      currency: "credits",
+      formula: "user:private:3",
+      rates: { input: 2, read: 0, write: 0, writeLong: 0, output: 3 }
+    })
     yield* writer.SetCostSettings({ userId, expectedRevision: 3, rules: [] })
     yield* stream()
     const after = yield* reader.ListLlmRequests({ userId, limit: 10, before: null })

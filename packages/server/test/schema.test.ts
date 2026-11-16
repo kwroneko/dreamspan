@@ -1261,9 +1261,65 @@ describe("connections and the usage ledger", () => {
     close(r)
     expect(() => run(`UPDATE llm_requests SET output = 6 WHERE id = ?`, r)).toThrow(/record/)
     expect(() => run(`UPDATE llm_requests SET status = 'failed' WHERE id = ?`, r)).toThrow(/record/)
-    // Only the cost can be recomputed, and it always names its formula.
-    expect(() => run(`UPDATE llm_requests SET cost = 0.01 WHERE id = ?`, r)).toThrow(/CHECK/)
-    run(`UPDATE llm_requests SET cost = 0.01, cost_currency = 'USD', cost_formula = 'builtin' WHERE id = ?`, r)
+    // A cost always names its formula, and a rate-less closed row is never recomputed.
+    expect(() => run(`UPDATE llm_requests SET cost = 0.01 WHERE id = ?`, r)).toThrow(/CHECK|priced from rates/)
+    // A closed row priced from no rates is never recomputed (spec/PRICES.md).
+    expect(() =>
+      run(`UPDATE llm_requests SET cost = 0.01, cost_currency = 'USD', cost_formula = 'builtin' WHERE id = ?`, r)
+    ).toThrow(/priced from rates/)
+    // The route it took is part of the record.
+    expect(() =>
+      run(`UPDATE llm_requests SET route_json = '{"via":"direct","reason":"no_proxy"}' WHERE id = ?`, r)
+    ).toThrow(/record/)
+    const rates = (input: number) => JSON.stringify({ input, read: 0, write: 0, writeLong: input * 2, output: 1 })
+    // Priced from rates when it closed: a recompute re-prices it from rates, cost, formula and rates together.
+    const priced = request(owner, connection(owner))
+    run(
+      `UPDATE llm_requests SET status = 'complete', ended_at = 2, input_uncached = 10, output = 5,
+         usage_source = 'reported', cost = 0.002, cost_currency = 'USD', cost_formula = 'builtin',
+         cost_rates_json = ?, route_json = '{"via":"direct","reason":"no_proxy"}' WHERE id = ?`,
+      rates(1),
+      priced
+    )
+    run(
+      `UPDATE llm_requests SET cost = 0.003, cost_formula = 'user:rule:2', cost_rates_json = ? WHERE id = ?`,
+      rates(2),
+      priced
+    )
+    expect(get(`SELECT cost, cost_formula FROM llm_requests WHERE id = ?`, priced)).toEqual({
+      cost: 0.003,
+      cost_formula: "user:rule:2"
+    })
+    // It can't be turned into a reported charge, nor lose its rates.
+    expect(() =>
+      run(`UPDATE llm_requests SET cost_formula = 'reported', cost_rates_json = NULL WHERE id = ?`, priced)
+    ).toThrow(/priced from rates|CHECK/)
+    expect(() => run(`UPDATE llm_requests SET cost_rates_json = NULL WHERE id = ?`, priced)).toThrow(
+      /priced from rates/
+    )
+    // A provider-reported charge has no rates and is never recomputed.
+    const reported = request(owner, connection(owner))
+    expect(() =>
+      run(
+        `UPDATE llm_requests SET cost = 0.01, cost_currency = 'USD', cost_formula = 'reported', cost_rates_json = ?
+           WHERE id = ?`,
+        rates(1),
+        reported
+      )
+    ).toThrow(/CHECK/)
+    run(
+      `UPDATE llm_requests SET status = 'complete', ended_at = 2, input_uncached = 10, output = 5,
+         usage_source = 'reported', reported_cost = 0.01, cost = 0.01, cost_currency = 'USD',
+         cost_formula = 'reported' WHERE id = ?`,
+      reported
+    )
+    expect(() =>
+      run(
+        `UPDATE llm_requests SET cost = 0.02, cost_formula = 'builtin', cost_rates_json = ? WHERE id = ?`,
+        rates(1),
+        reported
+      )
+    ).toThrow(/priced from rates/)
   })
 
   it("outlives a chat deleted for good", () => {
@@ -1397,6 +1453,49 @@ describe("inserted messages (spec/MESSAGE-INSERT.md §2.2)", () => {
     run("UPDATE slots SET inserted = 1 WHERE id = ?", x.slotId) // unchanged
     // A duplicate's version keeps its origin like any other.
     expect(() => run("UPDATE versions SET origin = 'user_written' WHERE id = ?", x.versionId)).toThrow()
+  })
+
+  it("moves a slot of the override's chat after another of its slots, or back to its own place", () => {
+    const owner = user()
+    const c = chat(owner)
+    const other = chat(owner)
+    const a = slot(c, null)
+    const b = slot(c, a)
+    const elsewhere = slot(other, null)
+    const moveRow = (
+      target: string,
+      slotId: string | null,
+      value: string | null,
+      flag: number | null,
+      depth?: number
+    ) =>
+      run(
+        `INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag)
+         VALUES (?, ?, ?, ?, 'move', ?, ?, coalesce(?, (SELECT depth FROM slots WHERE id = ?)), ?, ?)`,
+        id("o"),
+        c.chatId,
+        c.chatId,
+        ++n,
+        target,
+        slotId,
+        depth ?? null,
+        slotId,
+        value,
+        flag
+      )
+    const message = /a move shows a slot of its chat after another of its slots/
+    expect(() => moveRow(b.slotId, a.slotId, null, 1)).toThrow(message) // slot_id is the moved slot
+    expect(() => moveRow(b.slotId, b.slotId, b.slotId, 1)).toThrow(message) // never after itself
+    expect(() => moveRow(b.slotId, b.slotId, elsewhere.slotId, 1)).toThrow(message) // anchor in another chat
+    expect(() => moveRow(b.slotId, b.slotId, a.slotId, null)).toThrow(message) // no flag
+    expect(() => moveRow(b.slotId, b.slotId, a.slotId, 0)).toThrow(message) // own place names no anchor
+    expect(() => moveRow(b.slotId, b.slotId, null, 1, 7)).toThrow(message) // the slot's own depth
+    moveRow(b.slotId, b.slotId, null, 1) // above the first message
+    const [row] = all<{ id: string }>("SELECT id FROM fork_overrides WHERE kind = 'move' AND target_id = ?", b.slotId)
+    run("UPDATE fork_overrides SET value_id = ?, seq = ? WHERE id = ?", a.slotId, ++n, row!.id)
+    expect(() => run("UPDATE fork_overrides SET value_id = ? WHERE id = ?", b.slotId, row!.id)).toThrow(message)
+    expect(() => run("UPDATE fork_overrides SET flag = 0 WHERE id = ?", row!.id)).toThrow(message)
+    run("UPDATE fork_overrides SET flag = 0, value_id = NULL, seq = ? WHERE id = ?", ++n, row!.id)
   })
 
   it("places only an inserted slot of the override's chat, below the anchor the row names", () => {

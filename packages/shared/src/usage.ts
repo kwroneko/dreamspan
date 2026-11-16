@@ -50,9 +50,48 @@ export const unknownCounts: TokenCounts = {
 export const UsageSource = Schema.Literals(["reported", "estimated", "none"])
 export type UsageSource = typeof UsageSource.Type
 
+/**
+ * The rates a cost was priced with, per million tokens, as the formula applied them (the
+ * request's tier included): uncached input, cache reads, short and long cache writes, output.
+ * A snapshot kept beside the formula's id, so a later recalculation knows what it replaces.
+ * A provider-reported charge has none.
+ */
+export const PricedRates = Schema.Struct({
+  input: Schema.Number,
+  read: Schema.Number,
+  write: Schema.Number,
+  writeLong: Schema.Number,
+  output: Schema.Number
+})
+export type PricedRates = typeof PricedRates.Type
+
 /** A computed cost and what produced it. The currency is only a label. */
-export const Cost = Schema.Struct({ amount: Schema.Number, currency: Schema.String, formula: Schema.String })
+export const Cost = Schema.Struct({
+  amount: Schema.Number,
+  currency: Schema.String,
+  formula: Schema.String,
+  /** The rates applied, for costs priced from a price table or the user's rules. */
+  rates: Schema.optionalKey(PricedRates)
+})
 export type Cost = typeof Cost.Type
+
+/**
+ * The network route a request took (spec/PROVIDERS.md §6.2): direct, and why, or through a
+ * proxy, shown by scheme, host and port only (never its credentials).
+ */
+export const RequestRoute = Schema.Union([
+  Schema.Struct({
+    via: Schema.Literal("direct"),
+    reason: Schema.Literals(["no_proxy", "bypass", "override"]),
+    pinned: Schema.optionalKey(Schema.Boolean)
+  }),
+  Schema.Struct({
+    via: Schema.Literal("proxy"),
+    source: Schema.Literals(["instance", "connection"]),
+    proxy: Schema.String.check(Schema.isMaxLength(300))
+  })
+])
+export type RequestRoute = typeof RequestRoute.Type
 
 /** Follower outcome, proved by reported cache tokens; null means usage was unavailable. */
 export const CacheStagger = Schema.Struct({
@@ -81,5 +120,7 @@ export class LlmRequest extends Schema.Class<LlmRequest>("LlmRequest")({
   counts: TokenCounts,
   usageSource: UsageSource,
   reportedCost: Schema.NullOr(Schema.Number),
-  cost: Schema.NullOr(Cost)
+  cost: Schema.NullOr(Cost),
+  /** The network route it took, when it went out. */
+  route: Schema.optionalKey(RequestRoute)
 }) {}

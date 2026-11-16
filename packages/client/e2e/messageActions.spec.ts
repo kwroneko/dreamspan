@@ -38,6 +38,8 @@ const DEFAULTS = {
   "message.add-guidance": false,
   "message.insert-below": false,
   "message.duplicate": false,
+  "message.move-up": false,
+  "message.move-down": false,
   "message.merge": false,
   "message.threads": false,
   "message.join-thread": false,
@@ -97,6 +99,8 @@ const EVERY_REPLY_ACTION = [
   "Start parallel threads here…",
   "Insert message below",
   "Duplicate",
+  "Move up",
+  "Move down",
   "Merge a chat here…",
   "Hide from the model",
   // "Request it was generated from" is on a version with a recorded request: not the fake

@@ -2,6 +2,7 @@
 // proxy, through a connection's own proxy, or direct. Pure, so every rule is testable
 // without a network.
 import { BlockList, isIP } from "node:net"
+import type { RequestRoute } from "@rp/shared/usage.ts"
 import { addAddressRange, inAddresses } from "./addresses.ts"
 
 /**
@@ -136,6 +137,12 @@ export const displayProxy = (raw: string) => {
     return "(invalid proxy URL)"
   }
 }
+
+/** The route as the usage ledger keeps it: a proxy by scheme, host and port, never credentials. */
+export const requestRoute = (route: Route): RequestRoute =>
+  route.via === "proxy"
+    ? { via: "proxy", source: route.source, proxy: displayProxy(route.proxy).slice(0, 300) }
+    : { via: "direct", reason: route.reason, ...(route.pinned ? { pinned: true } : {}) }
 
 /** One line on the route a request took, for the connection test and the request inspector. */
 export const describeRoute = (route: Route, target: URL) => {

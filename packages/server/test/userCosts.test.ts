@@ -35,7 +35,12 @@ const cost = (p = pricing, capture = emptyCapture(), input: TokenCounts = counts
 const bound = (p = pricing, inputTokens = 60) =>
   userCostFormula.upperBound!({ pricing: p, inputTokens, outputTokens: 40, price: { input: 7, output: 8 } })
 it("prices the five normalized counts with an independent long-write rate and display label", () => {
-  assert.deepEqual(cost(), { amount: 350 / 1e6, currency: "credits", formula: "user:contract:3" })
+  assert.deepEqual(cost(), {
+    amount: 350 / 1e6,
+    currency: "credits",
+    formula: "user:contract:3",
+    rates: { input: 1, read: 2, write: 3, writeLong: 4, output: 5 }
+  })
 })
 it("switches the whole request at the highest exceeded context threshold", () => {
   const p = {

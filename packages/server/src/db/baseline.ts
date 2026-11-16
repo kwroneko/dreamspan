@@ -93,7 +93,7 @@ const shellSummaries: ReadonlyArray<string> = [
   ...(["insert", "update", "delete"] as const).map((op) => {
     const row = op === "delete" ? "OLD" : "NEW"
     return `CREATE TRIGGER shell_fork_overrides_${op} AFTER ${op.toUpperCase()} ON fork_overrides
-    WHEN ${row}.kind IN ('select', 'replace', 'delete_slot', 'insert', 'suppress_event')
+    WHEN ${row}.kind IN ('select', 'replace', 'delete_slot', 'insert', 'move', 'suppress_event')
     BEGIN ${bumpChat(`${row}.chat_id`)} END`
   }),
   `CREATE TRIGGER shell_state_events_insert AFTER INSERT ON state_events BEGIN ${bumpChat("NEW.chat_id")} END`,
@@ -625,10 +625,19 @@ export const baseline: ReadonlyArray<string> = [
     seen_version TEXT,
     seen_remote_id TEXT,
     remote_sha256 TEXT NOT NULL,
-    recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized')),
-    created_at INTEGER NOT NULL
+    -- adopted: added from the source (also a newer version added as a separate card);
+    -- recognized: an imported file whose bytes matched the archive's; linked: an imported file
+    -- whose source link names the entry, without a byte match (owner, 2026-11-16), whose
+    -- version is unknown ('') until one is taken.
+    recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized', 'linked')),
+    -- "Ignore future updates" (owner, 2026-11-16): no badges or notices while it's set.
+    ignore_updates INTEGER NOT NULL DEFAULT 0 CHECK (ignore_updates IN (0, 1)),
+    created_at INTEGER NOT NULL,
+    CHECK (remote_version <> '' OR recognized_by = 'linked')
   ) STRICT`,
-  `CREATE UNIQUE INDEX card_origins_remote ON card_origins(owner_user_id, source_id, remote_id)`,
+  // Several of the user's cards can track one archive entry (a newer version added as a
+  // separate card, owner 2026-11-16), so this is a lookup, not a uniqueness rule.
+  `CREATE INDEX card_origins_remote ON card_origins(owner_user_id, source_id, remote_id)`,
   `CREATE INDEX card_origins_current ON card_origins(owner_user_id, source_id, current_remote_id)`,
   // The same file imported from disk (§3.7's third check; the join to entities adds the owner).
   `CREATE INDEX entity_refs_source_hash ON entity_refs(source_hash) WHERE source_hash IS NOT NULL`,
@@ -1357,6 +1366,14 @@ export const baseline: ReadonlyArray<string> = [
     cost_currency TEXT,
     -- What produced cost: a built-in price source, 'reported', or a user formula.
     cost_formula TEXT,
+    -- The rates cost was priced with (per million tokens: input, read, write, writeLong,
+    -- output), beside its formula: a later recalculation applies only to rows priced from a
+    -- price table or the user's rules, never to a provider-reported charge, which has none.
+    cost_rates_json TEXT CHECK (cost_rates_json IS NULL OR (json_valid(cost_rates_json) AND cost IS NOT NULL
+      AND cost_formula IS NOT 'reported')),
+    -- The network route the request took (direct and why, or the proxy by scheme, host and
+    -- port), for the requests that went out.
+    route_json TEXT CHECK (route_json IS NULL OR json_valid(route_json)),
     error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), cache_stagger_json TEXT CHECK (cache_stagger_json IS NULL OR json_valid(cache_stagger_json)), cache_identity_json TEXT CHECK (cache_identity_json IS NULL OR json_valid(cache_identity_json)), backfill_id TEXT REFERENCES jobs(id), reserved_tokens INTEGER, reserved_cost REAL, reserved_currency TEXT,
     CHECK ((status = 'running') = (ended_at IS NULL)),
     CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL))
@@ -1431,8 +1448,19 @@ export const baseline: ReadonlyArray<string> = [
       OR NEW.cache_write IS NOT OLD.cache_write OR NEW.cache_write_long IS NOT OLD.cache_write_long
       OR NEW.output IS NOT OLD.output OR NEW.reasoning IS NOT OLD.reasoning OR NEW.usage_source IS NOT OLD.usage_source
       OR NEW.raw_usage_json IS NOT OLD.raw_usage_json OR NEW.reported_cost IS NOT OLD.reported_cost
-      OR NEW.error_json IS NOT OLD.error_json)
+      OR NEW.error_json IS NOT OLD.error_json OR NEW.route_json IS NOT OLD.route_json)
     BEGIN SELECT RAISE(ABORT, 'a closed request is a record; only its cost can be recomputed'); END`,
+  // An explicit recompute (spec/PRICES.md) re-prices a closed row that was priced from rates
+  // (a price table, an override or a price endpoint): its cost, currency, formula and rates
+  // change together, and it stays priced from rates. A provider-reported charge, or a row
+  // priced from no rates, is never recomputed.
+  `CREATE TRIGGER llm_requests_recompute_priced BEFORE UPDATE OF cost, cost_currency, cost_formula, cost_rates_json
+    ON llm_requests
+    WHEN OLD.status <> 'running' AND (NEW.cost IS NOT OLD.cost OR NEW.cost_currency IS NOT OLD.cost_currency
+      OR NEW.cost_formula IS NOT OLD.cost_formula OR NEW.cost_rates_json IS NOT OLD.cost_rates_json)
+      AND (OLD.cost_rates_json IS NULL OR OLD.cost_formula IS 'reported'
+        OR NEW.cost_rates_json IS NULL OR NEW.cost_formula IS 'reported')
+    BEGIN SELECT RAISE(ABORT, 'only a closed request priced from rates can be recomputed, and from rates'); END`,
   `CREATE TABLE "bin_items" (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
@@ -2387,6 +2415,25 @@ export const baseline: ReadonlyArray<string> = [
     WHEN NEW.kind = 'insert' AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NEW.bin_item_id IS NOT NULL
       OR NEW.changeset_id IS NOT NULL)
     BEGIN ${raise("an insertion places an inserted slot of its chat below its parent")}; END`,
+  // A move (owner, 2026-11-16: moving a message up or down changes the story order, in that
+  // branch only): slot_id is the moved slot itself (target_id) at its depth; value_id is the
+  // slot it now follows on the branch's display path (null: above the first message), never
+  // itself; flag 1 shows it there, 0 at its own place; no bin item or changeset.
+  `CREATE TRIGGER fork_overrides_move BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'move'
+    AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL
+      OR NEW.slot_id IS NOT NEW.target_id OR NEW.value_id IS NEW.target_id
+      OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.target_id)
+      OR NOT EXISTS (SELECT 1 FROM slots x WHERE x.id = NEW.target_id AND x.chat_id = NEW.chat_id)
+      OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id
+        AND a.chat_id = NEW.chat_id))
+      OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL))
+    BEGIN ${raise("a move shows a slot of its chat after another of its slots, or at its own place")}; END`,
+  `CREATE TRIGGER fork_overrides_move_update BEFORE UPDATE OF flag, value_id, bin_item_id, changeset_id ON fork_overrides
+    WHEN NEW.kind = 'move' AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL
+      OR NEW.value_id IS NEW.target_id OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL)
+      OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id
+        AND a.chat_id = NEW.chat_id)))
+    BEGIN ${raise("a move shows a slot of its chat after another of its slots, or at its own place")}; END`,
   `CREATE TRIGGER fork_overrides_delete_version_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'delete_version'
     AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM versions o JOIN slots s ON s.id = o.slot_id
       WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth))

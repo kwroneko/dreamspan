@@ -183,7 +183,7 @@ const computeSummaries = (
           ])
     const insertionChats = new Set(
       (yield* sql<{ chat_id: string }>`SELECT DISTINCT o.chat_id FROM json_each(${chatIds}) j
-        CROSS JOIN fork_overrides o ON o.chat_id = j.value AND o.kind = 'insert'`).map((row) => row.chat_id)
+        CROSS JOIN fork_overrides o ON o.chat_id = j.value AND o.kind IN ('insert', 'move')`).map((row) => row.chat_id)
     )
     const raw =
       resolver !== undefined
@@ -247,7 +247,7 @@ const computeSummaries = (
       const base = record.base_slot_id === null ? undefined : path.find((s) => s.id === record.base_slot_id)
       if (insertionChats.has(record.chat_id)) {
         const pieces = yield* pathPieces(sql, record.chat_id, record.id, record.tip_slot_id)
-        const ids = pieces.flatMap((piece) => (piece.kind === "inserted" ? [piece.slotId] : []))
+        const ids = pieces.flatMap((piece) => (piece.kind !== "run" ? [piece.slotId] : []))
         const inserted =
           ids.length === 0
             ? []
@@ -264,12 +264,14 @@ const computeSummaries = (
         const shown: Array<Slot> = []
         let structural = 0
         // `path` is already this fork's structural path, with one slot per depth.
-        // Consume its runs once and splice the single inserted pieces between them.
+        // Consume its runs once and splice the single inserted and moved pieces between them;
+        // a run a move split skips the moved slot, which shows at its own piece.
         for (const piece of pieces) {
-          if (piece.kind === "inserted") {
+          if (piece.kind !== "run") {
             const slot = byId.get(piece.slotId)
             if (slot) shown.push(slot)
           } else {
+            while (structural < path.length && path[structural]!.depth < piece.lo) structural++
             while (structural < path.length && path[structural]!.depth <= piece.hi) shown.push(path[structural++]!)
           }
         }

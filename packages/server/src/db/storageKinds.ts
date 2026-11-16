@@ -123,6 +123,8 @@ export const storageKinds = makeRegistry<StorageKind>([
       "summary_superseded",
       "suppress_event",
       "insert",
+      // A message shown out of its place in a branch (MoveMessage; owner, 2026-11-16).
+      "move",
       "image_exclude",
       // A version's thinking hidden from the model in a branch (SetThinkingHidden).
       "thinking_hide",

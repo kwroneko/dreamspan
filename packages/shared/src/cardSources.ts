@@ -390,7 +390,14 @@ export const CardOrigin = Schema.Struct({
    * Imported as a file and confirmed by a matching archive hash (§3.7), rather than added
    * directly from the source. Its recorded archive version supports the usual update checks.
    */
-  recognized: Schema.optionalKey(Schema.Boolean)
+  recognized: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Imported as a file whose source link names this entry, without a byte match (owner,
+   * 2026-11-16): it counts as the user's copy, its version unknown until one is taken.
+   */
+  linked: Schema.optionalKey(Schema.Boolean),
+  /** "Ignore future updates" is set: no badges or notices (`newerVersion` stays null). */
+  ignoreUpdates: Schema.optionalKey(Schema.Boolean)
 })
 export type CardOrigin = typeof CardOrigin.Type
 
@@ -522,6 +529,12 @@ export class CardSourcesApi extends RpcGroup.make(
       version: Schema.String.check(Schema.isMaxLength(500)),
       receipt: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(8192)))
     },
+    success: CardOrigin,
+    error: sourceErrors
+  }),
+  /** "Ignore future updates" for the card (owner, 2026-11-16), or turns its notices back on. Never contacts a source. */
+  Rpc.make("SetRemoteUpdatesIgnored", {
+    payload: { entityId: Schema.String.check(Schema.isMaxLength(100)), ignored: Schema.Boolean },
     success: CardOrigin,
     error: sourceErrors
   }),

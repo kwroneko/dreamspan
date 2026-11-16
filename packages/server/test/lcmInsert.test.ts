@@ -103,7 +103,7 @@ const setup = (dataDir: string) =>
             const ids: Array<SlotId> = []
             const spliced = new Set<SlotId>()
             for (const piece of yield* pathPieces(sql, chatId, forkId, at))
-              if (piece.kind === "inserted") {
+              if (piece.kind !== "run") {
                 ids.push(piece.slotId as SlotId)
                 spliced.add(piece.slotId as SlotId)
               } else
@@ -327,6 +327,44 @@ describe("an insertion inside a summarized range", () => {
             (yield* h.layerIn(g)).summaries.map((t) => [t.id, t.fresh]),
             [[s.id, true]]
           )
+        })
+      ),
+    60_000
+  )
+})
+
+describe("a moved message (owner, 2026-11-16)", () => {
+  it.effect(
+    "makes a summary over the old order stale in that fork only, and Undo makes it fresh again",
+    () =>
+      run((h) =>
+        Effect.gen(function* () {
+          const [m0, m1, m2, m3] = yield* messages(h, 5)
+          const s = yield* h.summarize(h.main, [m0!, m1!, m2!])
+          const g = yield* h.fork(h.main, (yield* h.tip(h.main))!)
+          const move = (slotId: SlotId, direction: "up" | "down") =>
+            h.writer.MoveMessage({
+              userId: h.userId,
+              chatId: h.chatId,
+              forkId: h.main,
+              slotId,
+              direction,
+              expectedRowVersion: 0
+            })
+          // Reordered inside it: its inputs are out of order on the display path.
+          const inside = yield* move(m1!, "down")
+          assert.deepStrictEqual((yield* h.display(h.main)).slice(0, 4), [m0, m2, m1, m3])
+          assert.isFalse((yield* h.summaryIn(h.main, s.id)).fresh)
+          assert.isTrue((yield* h.summaryIn(g, s.id)).fresh)
+          yield* h.writer.UndoMove({ userId: h.userId, chatId: h.chatId, forkId: h.main, undo: inside.undo })
+          assert.isTrue((yield* h.summaryIn(h.main, s.id)).fresh)
+          // A message moved into its range from outside: its range holds a slot it didn't read.
+          yield* move(m3!, "up")
+          assert.deepStrictEqual((yield* h.display(h.main)).slice(0, 4), [m0, m1, m3, m2])
+          const into = yield* h.summaryIn(h.main, s.id)
+          assert.isFalse(into.fresh)
+          assert.deepStrictEqual([into.from, into.to], [1, 4])
+          assert.isTrue((yield* h.summaryIn(g, s.id)).fresh)
         })
       ),
     60_000

@@ -927,8 +927,9 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             if (flag?.fav !== null && flag?.fav !== undefined)
               yield* importFavourite(sql, userId, upstream.entity_id, isFav(flag.fav))
           }
-          // Sources name candidates, never authenticated identities. An empty version keeps
-          // the claim inert until the archive supplies a matching hash. A card keeps one origin.
+          // A source link naming an archive entry makes the card count as the user's copy of it
+          // (owner, 2026-11-16), with its version unknown (empty) until one is taken; updates
+          // still go through Review and merge. A card keeps one origin.
           if (kind === "card")
             for (const { sourceId, remoteId } of input.recognized ?? []) {
               const [held] = yield* sql<{ entity_id: string; gone: number }>`
@@ -945,7 +946,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
                 remote_id: remoteId,
                 remote_version: "",
                 remote_sha256: input.sourceHash,
-                recognized_by: "recognized",
+                recognized_by: "linked",
                 created_at: Date.now()
               })}`
             }

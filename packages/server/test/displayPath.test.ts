@@ -89,7 +89,7 @@ const world = Effect.gen(function* () {
     Effect.gen(function* () {
       const ids: Array<string> = []
       for (const piece of all) {
-        if (piece.kind === "inserted") ids.push(piece.slotId)
+        if (piece.kind !== "run") ids.push(piece.slotId)
         else {
           const rows = yield* sql<{ id: string }>`
             SELECT id FROM slots WHERE chain_id = ${piece.chainId} AND depth BETWEEN ${piece.lo} AND ${piece.hi}

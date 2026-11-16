@@ -107,7 +107,7 @@ const setup = (dataDir: string) =>
         const slots: Array<{ id: SlotId; content: string; deleted: number }> = []
         for (const piece of yield* pathPieces(sql, chatId, forkId, row!.tip)) {
           const found =
-            piece.kind === "inserted"
+            piece.kind !== "run"
               ? yield* sql<{ id: SlotId; content: string; deleted: number }>`
                   SELECT s.id, (SELECT content FROM version_records WHERE id = ${shownIn(sql, forkId, "s")}) AS content,
                     ${slotDeletedIn(sql, forkId, "s")} AS deleted FROM slots s WHERE s.id = ${piece.slotId}`

@@ -60,6 +60,47 @@ export class InsertedMessage extends Schema.Class<InsertedMessage>("InsertedMess
   chat: Chat
 }) {}
 
+/**
+ * Where a fork shows a slot, as a move left it: after `anchor` (null: above the first message),
+ * or at its own place (null). `seq` orders it among the slots moved after the same anchor.
+ */
+const MovePlace = Schema.NullOr(Schema.Struct({ anchor: Schema.NullOr(SlotId), seq: Schema.optionalKey(Schema.Int) }))
+
+/** One slot a move placed: where the fork showed it before and after. Undo writes `before` back. */
+export const MoveStep = Schema.Struct({ slotId: SlotId, before: MovePlace, after: MovePlace })
+export type MoveStep = typeof MoveStep.Type
+
+/**
+ * The input of `message.move` (owner, 2026-11-16): message `slotId` one shown message up or
+ * down in fork `forkId`, in that fork only. `expectedRowVersion` is the slot's as the tab saw it.
+ */
+export const MoveMessageInput = Schema.Struct({
+  chatId: ChatId,
+  forkId: ForkId,
+  slotId: SlotId,
+  direction: Schema.Literals(["up", "down"]),
+  expectedRowVersion: Schema.Int
+})
+export type MoveMessageInput = typeof MoveMessageInput.Type
+
+/** A move's result: the moved message's new position, and what Undo writes back. */
+export class MovedMessage extends Schema.Class<MovedMessage>("MovedMessage")({
+  slotId: SlotId,
+  forkId: ForkId,
+  position: Schema.Int,
+  undo: Schema.Array(MoveStep),
+  chat: Chat
+}) {}
+
+/** The input of `message.move.undo`: a move's steps, undone while nothing changed them since. */
+export const UndoMoveInput = Schema.Struct({ chatId: ChatId, forkId: ForkId, undo: Schema.Array(MoveStep) })
+export type UndoMoveInput = typeof UndoMoveInput.Type
+
+/** A message that can't move that way: it's the first (up) or last (down) shown message. */
+export class MoveRefused extends Schema.TaggedError<MoveRefused>()("MoveRefused", {
+  message: Schema.String
+}) {}
+
 export const MessagesApi = RpcGroup.make(
   /**
    * Inserts a message directly below `anchor`, whatever was inserted there before. The anchor
@@ -72,5 +113,25 @@ export const MessagesApi = RpcGroup.make(
     payload: InsertMessageInput,
     success: InsertedMessage,
     error: Schema.Union([NotFound, StaleWrite, InsertRefused, GenerationUnavailable, HistoryRejected, ServerError])
+  })
+)
+
+/** Moving messages: a group of its own, merged into AppApi beside AppCoreApi. */
+export const MoveApi = RpcGroup.make(
+  /**
+   * Moves a message one shown message up or down in a fork (owner, 2026-11-16): later replies
+   * there see it in its new place; other forks keep their order. Summaries over the old order
+   * are marked stale there. `UndoMoveMessage` takes the result's `undo` back.
+   */
+  Rpc.make("MoveMessage", {
+    payload: MoveMessageInput,
+    success: MovedMessage,
+    error: Schema.Union([NotFound, StaleWrite, MoveRefused, HistoryRejected, ServerError])
+  }),
+  /** Undoes a move while its slots are still where it put them (StaleWrite otherwise). */
+  Rpc.make("UndoMoveMessage", {
+    payload: UndoMoveInput,
+    success: Chat,
+    error: Schema.Union([NotFound, StaleWrite, HistoryRejected, ServerError])
   })
 )

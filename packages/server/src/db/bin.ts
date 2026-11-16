@@ -387,7 +387,9 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         placed.length === 0
           ? []
           : (yield* pathPieces(sql, fork.chat_id, fork.id, fork.tip_slot_id)).flatMap((piece) =>
-              piece.kind === "inserted" ? [{ id: piece.slotId, chainId: piece.chainId, depth: piece.depth }] : []
+              piece.kind === "inserted" || (piece.kind === "moved" && piece.inserted)
+                ? [{ id: piece.slotId, chainId: piece.chainId, depth: piece.depth }]
+                : []
             )
       if (structural.length === 0 && shown.length === 0) return { marked: [], kept: [] }
       const views = yield* Effect.forEach(others, (other) => pathPieces(sql, fork.chat_id, other.id, other.tip_slot_id))
@@ -1025,7 +1027,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           placed.length === 0
             ? []
             : (yield* pathPieces(sql, chatId, fork!.id, fork!.tip_slot_id)).flatMap((piece) =>
-                piece.kind === "inserted" ? [piece.slotId] : []
+                piece.kind === "inserted" || (piece.kind === "moved" && piece.inserted) ? [piece.slotId] : []
               )
         if (insertedIds.length > 0) {
           yield* sql`UPDATE slots SET deleted_at = NULL, bin_item_id = NULL, branch_deleted = 0

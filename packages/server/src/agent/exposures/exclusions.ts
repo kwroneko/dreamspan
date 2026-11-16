@@ -145,6 +145,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   HistoryEditCost: "Not in W6's first exposures; use the bounded workshop read tools.",
   ImpersonationNotice: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   InsertMessage: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  MoveMessage: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  UndoMoveMessage: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   JoinThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   LibraryGenealogy: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   LinkStImportChat: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
@@ -312,6 +314,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   SubscribeNotices: "Streaming UI subscription; a tool must return a bounded result.",
   SummaryDraftHistory: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SwitchBranch: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  SetRemoteUpdatesIgnored: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   TakeRemoteVersion: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   TestConnection: "User-only security, consent, account, credential or network configuration.",
   ThreadsOf: "Not in W6's first exposures; use the bounded workshop read tools.",
@@ -341,7 +344,9 @@ export const commandExclusions: Readonly<Record<string, string>> = {
   "thread.send":
     "Sending to several threads posts and starts replies in each: outside W6 and needs its own undo adapter.",
   "thread.start": "Starting threads is outside W6; its Undo goes through the bin, not an approved undo adapter.",
-  "message.insert": "The insertion workflow is not in W6 and needs its own undo adapter."
+  "message.insert": "The insertion workflow is not in W6 and needs its own undo adapter.",
+  "message.move": "Moving messages is not in W6 and needs its own undo adapter.",
+  "message.move.undo": "Moving messages is not in W6 and needs its own undo adapter."
 }
 
 export const unclassifiedOperations = (

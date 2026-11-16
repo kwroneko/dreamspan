@@ -6,7 +6,7 @@
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai"
 import { estimateContextTokens, estimateTextTokens } from "@earendil-works/pi-ai/utils/estimate"
 import type { Price } from "@rp/shared/providers.ts"
-import { type Cost, type TokenCounts, unknownCounts, type UsageSource } from "@rp/shared/usage.ts"
+import { type Cost, type PricedRates, type TokenCounts, unknownCounts, type UsageSource } from "@rp/shared/usage.ts"
 import { Option, Predicate, Schema } from "effect"
 import type { CostFormula, RequestTarget } from "./registry.ts"
 
@@ -204,7 +204,10 @@ export const finalCounts = (
  * for the request's total input. Long cache writes are priced at twice the input rate,
  * Anthropic's rule, which pi-ai applies too; nobody else bills long writes.
  */
-export const priceCost = (counts: TokenCounts, price: Price): number | null => {
+export const priceCost = (counts: TokenCounts, price: Price): number | null => pricedCost(counts, price)?.amount ?? null
+
+/** `priceCost` with the rates it applied (the request's tier), which the ledger keeps beside the cost. */
+const pricedCost = (counts: TokenCounts, price: Price): { amount: number; rates: PricedRates } | null => {
   const { inputUncached, cacheRead, cacheWrite, output } = counts
   if (inputUncached === null || output === null) return null
   const read = cacheRead ?? 0
@@ -217,16 +220,24 @@ export const priceCost = (counts: TokenCounts, price: Price): number | null => {
       (best, t) => (best === null || t.inputTokensAbove > best.inputTokensAbove ? t : best),
       null
     )
-  const rates = tier ?? price
-  const rate = (value: number | undefined) => value ?? 0
-  return (
-    (inputUncached * rates.input +
-      read * rate(rates.cacheRead) +
-      (write - long) * rate(rates.cacheWrite) +
-      long * rates.input * 2 +
-      output * rates.output) /
-    1e6
-  )
+  const chosen = tier ?? price
+  const rates: PricedRates = {
+    input: chosen.input,
+    read: chosen.cacheRead ?? 0,
+    write: chosen.cacheWrite ?? 0,
+    writeLong: chosen.input * 2,
+    output: chosen.output
+  }
+  return {
+    amount:
+      (inputUncached * rates.input +
+        read * rates.read +
+        (write - long) * rates.write +
+        long * rates.writeLong +
+        output * rates.output) /
+      1e6,
+    rates
+  }
 }
 
 /** The cost to record: the first formula, newest registration first, that returns one. */
@@ -263,8 +274,8 @@ export const builtinCostFormulas: ReadonlyArray<CostFormula> = [
       return { amount: (inputTokens * input + outputTokens * output) / 1e6, currency: "USD" }
     },
     cost: ({ counts, price }) => {
-      const amount = price === null ? null : priceCost(counts, price)
-      return amount === null ? null : { amount, currency: "USD" }
+      const priced = price === null ? null : pricedCost(counts, price)
+      return priced === null ? null : { amount: priced.amount, currency: "USD", rates: priced.rates }
     }
   },
   {

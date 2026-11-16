@@ -178,6 +178,8 @@ export interface LlmRequestRow {
   readonly cost_currency: string | null
   readonly cache_stagger_json: string | null
   readonly cost_formula: string | null
+  readonly cost_rates_json?: string | null
+  readonly route_json?: string | null
 }
 
 export const toLlmRequest = (row: LlmRequestRow) =>
@@ -211,7 +213,13 @@ export const toLlmRequest = (row: LlmRequestRow) =>
     cost:
       row.cost === null
         ? null
-        : { amount: row.cost, currency: row.cost_currency ?? "", formula: row.cost_formula ?? "" }
+        : {
+            amount: row.cost,
+            currency: row.cost_currency ?? "",
+            formula: row.cost_formula ?? "",
+            ...(row.cost_rates_json ? { rates: JSON.parse(row.cost_rates_json) } : {})
+          },
+    ...(row.route_json ? { route: JSON.parse(row.route_json) } : {})
   })
 
 /**

@@ -18,8 +18,8 @@ import { Context, Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
-import { positionOf } from "./displayPath.ts"
-import { lcmView, type LcmView } from "./lcmDisplay.ts"
+import { positionOf, showsMoves } from "./displayPath.ts"
+import { lcmView, type LcmView, placesOf, positionIn } from "./lcmDisplay.ts"
 import { imagesMatch } from "./lcmImages.ts"
 import { audienceIds, knownVersions } from "./lcmAudience.ts"
 
@@ -431,7 +431,7 @@ export const primeSummaryReads = (sql: SqlClient.SqlClient, userId: UserId, chat
       }>`SELECT id,chain_id,depth FROM slots WHERE id=${leaf} AND chat_id=${chatId}`
       const end = last ? positionOf(view.pieces, { id: last.id, chainId: last.chain_id, depth: last.depth }) : null
       const inserted = view.pieces.flatMap((p) =>
-        p.kind === "inserted" && end !== null && p.start <= end ? [p.slotId] : []
+        p.kind !== "run" && end !== null && p.start <= end ? [p.slotId] : []
       )
       const ids = (yield* sql<{ id: string }>` ${pathSegments(sql, chatId, leaf, null)}, endpoints(id) AS (
         SELECT s.id FROM segments g CROSS JOIN slots s ON s.chain_id=g.chain_id AND s.depth BETWEEN g.lo AND g.hi
@@ -845,6 +845,28 @@ export const readSummary = (
           from = first + 1
           to = last + 1
           if (to - from + 1 > row.slot_count) fresh = false
+        }
+        // A fork that moves messages (owner, 2026-11-16): a summary over the old order is stale
+        // there, as after an edit: its first and last are out of order, or its inputs, in the
+        // order it read them, aren't in order on the display path.
+        if (showsMoves(shown.pieces)) {
+          if (first === null || last === null || last < first) fresh = false
+          else if (fresh && inputs.length > 0) {
+            const places = yield* placesOf(
+              sql,
+              row.chat_id,
+              inputs.map((i) => i.slot_id)
+            )
+            let previous = -1
+            for (const i of inputs) {
+              const position = positionIn(shown.pieces, places.get(i.slot_id))
+              if (position === null || position <= previous) {
+                fresh = false
+                break
+              }
+              previous = position
+            }
+          }
         }
       }
       const summary = decodeSummary({

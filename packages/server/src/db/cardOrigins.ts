@@ -104,7 +104,11 @@ interface HeldRow {
   readonly remote_locator?: string | null
 }
 
-/** Sources are hints, not proof. Only a hash from the archive may confirm an imported file. */
+/**
+ * An imported file whose bytes match a trusted archive response: its card's origin records the
+ * archive's version (`recognized`). A card that already tracks this entry by its source link
+ * (`linked`, version unknown) is confirmed in place; one with another origin keeps it.
+ */
 const recognizeRemoteFile = (
   sql: SqlClient.SqlClient,
   userId: UserId,
@@ -116,26 +120,19 @@ const recognizeRemoteFile = (
 ) =>
   Effect.gen(function* () {
     if (!/^[0-9a-f]{64}$/.test(sha256) || version === "") return
-    const [origin] = yield* sql<{ entity_id: string; remote_version: string; gone: number }>`
-    SELECT o.entity_id, o.remote_version, (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone
-    FROM card_origins o JOIN entities e ON e.id = o.entity_id
-    WHERE o.owner_user_id = ${userId} AND o.source_id = ${sourceId} AND (o.remote_id = ${remoteId} OR o.current_remote_id = ${remoteId})`
-    if (
-      origin &&
-      origin.remote_version !== "" &&
-      (origin.gone === 0 || (yield* newestLiveFork(sql, userId, origin.entity_id)))
-    )
-      return
     const [match] = yield* sql<{ entity_id: string }>`
     SELECT e.id AS entity_id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
     WHERE e.owner_user_id = ${userId} AND e.kind = 'card'
       AND e.deleted_at IS NULL AND e.purged_at IS NULL AND r.source_hash = ${sha256}
     ORDER BY e.created_at, e.id LIMIT 1`
     if (!match) return
-    // A mistaken claim must not prevent a different, byte-identical import from being recognized.
-    if (origin)
-      yield* sql`DELETE FROM card_origins WHERE entity_id = ${origin.entity_id}
-    AND owner_user_id = ${userId}`
+    yield* sql`UPDATE card_origins SET recognized_by = 'recognized', remote_version = ${version},
+        current_remote_id = coalesce(current_remote_id, ${remoteId}), remote_locator = coalesce(${locator ?? null}, remote_locator),
+        remote_sha256 = ${sha256},
+        seen_version = CASE WHEN seen_version = ${version} THEN NULL ELSE seen_version END,
+        seen_remote_id = CASE WHEN seen_version = ${version} THEN NULL ELSE seen_remote_id END
+      WHERE entity_id = ${match.entity_id} AND owner_user_id = ${userId} AND recognized_by = 'linked'
+        AND source_id = ${sourceId} AND (remote_id = ${remoteId} OR current_remote_id = ${remoteId})`
     yield* sql`INSERT OR IGNORE INTO card_origins ${sql.insert({
       entity_id: match.entity_id,
       owner_user_id: userId,
@@ -165,13 +162,14 @@ export const makeCardOriginReadHandlers = Effect.gen(function* () {
           current_remote_id: string | null
           remote_locator: string | null
           seen_remote_id: string | null
+          ignore_updates: number
         }>`
           SELECT o.source_id, o.remote_id, o.remote_version, o.seen_version, o.recognized_by,
-            o.current_remote_id, o.remote_locator, o.seen_remote_id
+            o.current_remote_id, o.remote_locator, o.seen_remote_id, o.ignore_updates
           FROM card_origins o
           JOIN entities e ON e.id = o.entity_id
           WHERE o.entity_id = ${entityId} AND o.owner_user_id = ${userId}
-            AND e.deleted_at IS NULL AND e.purged_at IS NULL AND o.remote_version <> ''`
+            AND e.deleted_at IS NULL AND e.purged_at IS NULL`
         return row
           ? {
               sourceId: row.source_id,
@@ -181,7 +179,9 @@ export const makeCardOriginReadHandlers = Effect.gen(function* () {
               locator: row.remote_locator,
               seenRemoteId: row.seen_remote_id,
               seenVersion: row.seen_version,
-              recognized: row.recognized_by === "recognized"
+              recognized: row.recognized_by !== "adopted",
+              linked: row.recognized_by === "linked",
+              ignoreUpdates: row.ignore_updates === 1
             }
           : null
       }).pipe(query("CardOrigin")),
@@ -200,25 +200,34 @@ export const makeCardOriginReadHandlers = Effect.gen(function* () {
         const ids = [...new Set(items.map((item) => item.remoteId))]
         const origins = yield* sql<HeldRow & { gone: number; recognized_by: string }>`
           SELECT o.remote_id, o.entity_id, r.id AS ref_id, e.archived_at IS NOT NULL AS archived,
-            o.remote_version, o.seen_version, o.recognized_by, o.current_remote_id, o.remote_locator,
-            (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone
+            o.remote_version, CASE WHEN o.ignore_updates = 1 THEN NULL ELSE o.seen_version END AS seen_version,
+            o.recognized_by, o.current_remote_id, o.remote_locator,
+            (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone, o.recognized_by = 'linked' AS weak, 0 AS successor
           FROM card_origins o JOIN entities e ON e.id = o.entity_id LEFT JOIN entity_refs r ON r.entity_id = e.id
-          WHERE o.owner_user_id = ${userId} AND o.source_id = ${sourceId} AND ${sql.in("o.remote_id", ids)} AND o.remote_version <> ''
+          WHERE o.owner_user_id = ${userId} AND o.source_id = ${sourceId} AND ${sql.in("o.remote_id", ids)}
           UNION ALL
           SELECT o.current_remote_id AS remote_id, o.entity_id, r.id AS ref_id, e.archived_at IS NOT NULL AS archived,
-            o.remote_version, o.seen_version, o.recognized_by, o.current_remote_id, o.remote_locator,
-            (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone
+            o.remote_version, CASE WHEN o.ignore_updates = 1 THEN NULL ELSE o.seen_version END AS seen_version,
+            o.recognized_by, o.current_remote_id, o.remote_locator,
+            (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone, o.recognized_by = 'linked' AS weak, 1 AS successor
           FROM card_origins o JOIN entities e ON e.id = o.entity_id LEFT JOIN entity_refs r ON r.entity_id = e.id
           WHERE o.owner_user_id = ${userId} AND o.source_id = ${sourceId}
-            AND ${sql.in("o.current_remote_id", ids)} AND o.current_remote_id <> o.remote_id AND o.remote_version <> ''`
+            AND ${sql.in("o.current_remote_id", ids)} AND o.current_remote_id <> o.remote_id
+          ORDER BY weak, successor`
         const found = new Map<string, HeldRow>()
-        // Confirmed imports and additions record versions; a bin fallback does not.
+        // Entries held only by a linked card (no byte match yet): an imported file whose bytes
+        // match still goes before it, so the match can be recognized.
+        const linkedOnly = new Set<string>()
+        // A byte-confirmed or added card goes before one only linked to the entry, and an entry's
+        // own id before a successor's. Confirmed imports and additions record versions; a bin
+        // fallback does not.
         const tracked = new Set<string>()
         for (const row of origins) {
           if (found.has(row.remote_id)) continue
           if (row.gone === 0 && row.ref_id !== null) {
             found.set(row.remote_id, row)
             tracked.add(row.remote_id)
+            if (row.recognized_by === "linked") linkedOnly.add(row.remote_id)
             continue
           }
           // The card is in the bin: its newest live fork stands for the family.
@@ -232,7 +241,8 @@ export const makeCardOriginReadHandlers = Effect.gen(function* () {
             })
         }
         // The same file imported from disk: its hash is the source's version id, when that's a SHA-256.
-        const hashes = items.filter((item) => !found.has(item.remoteId) && item.sha256 !== null)
+        const open = (remoteId: string) => !found.has(remoteId) || linkedOnly.has(remoteId)
+        const hashes = items.filter((item) => open(item.remoteId) && item.sha256 !== null)
         if (hashes.length > 0) {
           const byHash = yield* sql<{ source_hash: string; entity_id: string; ref_id: string; archived: number }>`
             SELECT r.source_hash, e.id AS entity_id, r.id AS ref_id, e.archived_at IS NOT NULL AS archived
@@ -248,13 +258,16 @@ export const makeCardOriginReadHandlers = Effect.gen(function* () {
           for (const row of byHash) if (!first.has(row.source_hash)) first.set(row.source_hash, row)
           for (const item of hashes) {
             const row = first.get(item.sha256!)
-            if (row && !found.has(item.remoteId))
+            if (row && open(item.remoteId)) {
               found.set(item.remoteId, {
                 ...row,
                 remote_id: item.remoteId,
                 remote_version: item.sha256,
                 seen_version: null
               })
+              linkedOnly.delete(item.remoteId)
+              tracked.delete(item.remoteId)
+            }
           }
         }
         return [...found.values()].map((row) => ({
@@ -316,8 +329,8 @@ export const makeAdoptWriteHandlers = (
           FROM card_origins o
           JOIN entities e ON e.id = o.entity_id
           LEFT JOIN entity_refs r ON r.entity_id = e.id
-          WHERE o.owner_user_id = ${userId} AND o.source_id = ${sourceId} AND (o.remote_id = ${remoteId} OR o.current_remote_id = ${remoteId}) AND o.remote_version <> ''
-          ORDER BY (o.remote_id = ${remoteId}) DESC, o.created_at LIMIT 1`
+          WHERE o.owner_user_id = ${userId} AND o.source_id = ${sourceId} AND (o.remote_id = ${remoteId} OR o.current_remote_id = ${remoteId})
+          ORDER BY o.recognized_by = 'linked', (o.remote_id = ${remoteId}) DESC, o.created_at LIMIT 1`
         if (!origin) return null
         if (origin.gone === 1 || origin.ref_id === null) {
           // In the bin: its newest live fork is the user's card from there (§3.7).
@@ -346,9 +359,6 @@ export const makeAdoptWriteHandlers = (
           yield* moveDrafts(userId, sourceId, remoteId, held.refId)
           return { ...held, existing: true }
         }
-        // Unverified Sources claims cannot reserve an archive identity or block a real Add.
-        yield* sql`DELETE FROM card_origins WHERE owner_user_id = ${userId}
-          AND source_id = ${sourceId} AND remote_id = ${remoteId} AND remote_version = ''`
         const imported = yield* importFile({ userId, intoRefId: null, kind, ...file })
         yield* sql`INSERT INTO card_origins ${sql.insert({
           entity_id: imported.ref.entityId,
@@ -410,20 +420,40 @@ export const makeAdoptWriteHandlers = (
                 seen_remote_id = CASE WHEN ${version} = remote_version THEN NULL ELSE ${currentId ?? remoteId} END,
                 remote_locator = coalesce(${locator ?? null}, remote_locator)
               WHERE owner_user_id = ${userId} AND source_id = ${sourceId} AND (remote_id = ${remoteId} OR current_remote_id = ${remoteId})
-                AND remote_version <> '' AND (coalesce(seen_version, remote_version) IS NOT ${version}
+                AND (coalesce(seen_version, remote_version) IS NOT ${version}
                   OR (${locator ?? null} IS NOT NULL AND remote_locator IS NOT ${locator ?? null}))
               RETURNING entity_id`
             noted += changed.length
           }
           return { noted }
         }).pipe(transaction(sql, "NoteRemoteVersions")),
+      SetRemoteUpdatesIgnored: ({ userId, entityId, ignored }) =>
+        Effect.gen(function* () {
+          yield* ownOrigin(userId, entityId)
+          yield* sql`UPDATE card_origins SET ignore_updates = ${ignored ? 1 : 0}
+            WHERE entity_id = ${entityId} AND owner_user_id = ${userId}`
+        }).pipe(transaction(sql, "SetRemoteUpdatesIgnored")),
       TakeRemoteVersion: ({ userId, entityId, version, currentId, locator, sha256 }) =>
         take(userId, entityId, version, currentId, locator, sha256).pipe(transaction(sql, "TakeRemoteVersion")),
       AdoptRemoteVersionAsCard: ({ userId, entityId, version, file, currentId, locator }) =>
         Effect.gen(function* () {
-          yield* ownOrigin(userId, entityId)
-          // A card of its own: an import of the file, with no origin row (the first card keeps it).
+          const origin = yield* ownOrigin(userId, entityId)
+          // A card of its own, which tracks the entry too, from the version it was added from
+          // (owner, 2026-11-16): both cards get future update notices.
           const imported = yield* importFile({ userId, intoRefId: null, kind: "card", ...file })
+          yield* sql`INSERT INTO card_origins ${sql.insert({
+            entity_id: imported.ref.entityId,
+            owner_user_id: userId,
+            source_id: origin.source_id,
+            remote_id: origin.remote_id,
+            remote_version: version,
+            current_remote_id: currentId ?? origin.remote_id,
+            remote_locator: locator ?? null,
+            remote_sha256: file.sourceHash,
+            recognized_by: "adopted",
+            created_at: Date.now()
+          })}`
+          // The first card's notice for this version ends; a later version notifies both.
           yield* take(userId, entityId, version, currentId, locator, file.sourceHash)
           return { entityId: imported.ref.entityId, refId: imported.ref.id }
         }).pipe(transaction(sql, "AdoptRemoteVersionAsCard")),

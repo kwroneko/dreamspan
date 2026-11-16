@@ -27,7 +27,7 @@ import type { FrozenTool } from "../agent/tools.ts"
 import { loadPoints } from "../agent/toolLoading.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { STRETCH_VIEW } from "@rp/shared/knowledge.ts"
-import { pathPieces, placedInsertions, positionOf } from "./displayPath.ts"
+import { pathPieces, positionOf, rearranges } from "./displayPath.ts"
 import { shownIn, slotDeletedIn } from "./forkState.ts"
 import { forkThrough } from "./forks.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -371,7 +371,7 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
         const fork = forkId ?? (yield* forkThrough(sql, chatId, leafSlotId, chat.current_fork_id))?.id ?? null
         if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
-        if ((yield* placedInsertions(sql, chatId, fork)).length > 0) return null
+        if (yield* rearranges(sql, chatId, fork)) return null
         // FTS indexes a join as one text: the tools read it row by row, each row as its viewer
         // knew it (spec/THREADS.md §11), so a merged chat is searched over its path.
         const [merged] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM chat_merges WHERE chat_id = ${chatId}`

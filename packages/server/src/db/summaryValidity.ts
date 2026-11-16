@@ -50,7 +50,7 @@ const touch = (kind: string, chat: string, ref = "NULL", seq = "NULL", when = "1
   `INSERT INTO shell_touches (kind, chat_id, ref, seq) SELECT '${kind}', ${chat}, ${ref}, ${seq} WHERE ${when};`
 
 /** The kinds of override a summary reads (baseline's shell_fork_overrides_* triggers). */
-const READ_OVERRIDES = `('select', 'replace', 'delete_slot', 'insert', 'suppress_event')`
+const READ_OVERRIDES = `('select', 'replace', 'delete_slot', 'insert', 'move', 'suppress_event')`
 
 /** Placement, like selection, belongs to the fork's frozen lineage, including insert=0 at a new fork's base. */
 const overrideTouch = (row: string) =>

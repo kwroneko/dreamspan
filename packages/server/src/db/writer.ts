@@ -7,6 +7,7 @@ import { stateModuleHandlers } from "./stateModules.ts"
 import { providerDefinitionHandlers } from "../providers/definitions.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
 import { makeInsertWriteHandlers } from "./insertWrites.ts"
+import { makeMoveWriteHandlers } from "./moveWrites.ts"
 import { makeMergeWriteHandlers } from "./merges.ts"
 import { makeThreadWriteHandlers } from "./threadWrites.ts"
 import { makeNoteCopyWriteHandlers } from "./noteCopyWrites.ts"
@@ -83,6 +84,7 @@ const handlers = Layer.unwrap(
             {
               ...(yield* makeHistoryWriteHandlers),
               ...(yield* makeInsertWriteHandlers(bin)),
+              ...(yield* makeMoveWriteHandlers(bin)),
               ...(yield* makeMergeWriteHandlers(bin)),
               // --- Parallel threads (spec/THREADS.md §5)
               ...(yield* makeThreadWriteHandlers(bin)),

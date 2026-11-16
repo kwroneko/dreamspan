@@ -2067,6 +2067,30 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  MoveMessage: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.MoveMessage({
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId,
+          slotId: owner.chat.slotId,
+          direction: "up",
+          expectedRowVersion: 0
+        }),
+        "NotFound"
+      )
+  },
+  UndoMoveMessage: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.UndoMoveMessage({
+          chatId: owner.chat.chatId,
+          forkId: owner.chat.forkId,
+          undo: [{ slotId: owner.chat.slotId, before: null, after: null }]
+        }),
+        "NotFound"
+      )
+  },
   InsertMessage: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -3332,6 +3356,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   },
   TakeRemoteVersion: {
     probe: (actor, owner) => refused(actor.api.TakeRemoteVersion({ entityId: owner.cardId, version: "v" }), "NotFound")
+  },
+  SetRemoteUpdatesIgnored: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetRemoteUpdatesIgnored({ entityId: owner.cardId, ignored: true }), "NotFound")
   },
   AddRemoteVersionAsCard: {
     probe: (actor, owner) => refused(actor.api.AddRemoteVersionAsCard({ entityId: owner.cardId }), "NotFound")

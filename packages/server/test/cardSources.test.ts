@@ -847,12 +847,32 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       }
       assert.include(doc.description ?? "", "now keeps a garden")
       assert.include(doc.source ?? [], `${archive.origin}/c/${card.slug}`)
-      // The first card keeps its text and its origin, now at that version; the new one has none.
+      // The first card keeps its text and its origin, now at that version; the new one tracks the
+      // source too, from the version it was added from (owner, 2026-11-16).
       const first = (yield* api.OpenEditor({ refId: added.refId as RefId })).doc as { description?: string }
       assert.notInclude(first.description ?? "", "now keeps a garden")
       const origin = yield* api.CardOrigin({ entityId: added.entityId })
       assert.deepStrictEqual([origin?.remoteVersion, origin?.newerVersion], [next.sha256, null])
-      assert.isNull(yield* api.CardOrigin({ entityId: separate.entityId }))
+      const copy = yield* api.CardOrigin({ entityId: separate.entityId })
+      assert.deepStrictEqual([copy?.remoteId, copy?.remoteVersion, copy?.newerVersion], [card.slug, next.sha256, null])
+      // A later version is offered to both.
+      const third = archive.publish(card.slug)
+      yield* api.CheckRemoteVersion({ entityId: added.entityId })
+      for (const entityId of [added.entityId, separate.entityId])
+        assert.strictEqual((yield* api.CardOrigin({ entityId }))?.newerVersion, third.sha256)
+      // Ignore future updates: no notice or badge for that card until it's turned back on.
+      const ignored = yield* api.SetRemoteUpdatesIgnored({ entityId: added.entityId, ignored: true })
+      assert.deepStrictEqual([ignored.newerVersion, ignored.ignoreUpdates], [null, true])
+      const listed = (yield* api.ListLibrary({ kind: "card" })).find((r) => r.id === added.refId)!
+      assert.isFalse(listed.updateAvailable)
+      assert.strictEqual((yield* api.CardOrigin({ entityId: separate.entityId }))?.newerVersion, third.sha256)
+      const back = yield* api.SetRemoteUpdatesIgnored({ entityId: added.entityId, ignored: false })
+      assert.deepStrictEqual([back.newerVersion, back.ignoreUpdates], [third.sha256, undefined])
+      // Nobody else can change it.
+      assert.strictEqual(
+        yield* outcome((yield* client(bob)).SetRemoteUpdatesIgnored({ entityId: added.entityId, ignored: true })),
+        "NotFound"
+      )
     })
   )
 
@@ -1052,27 +1072,34 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       Effect.map((body) => body.library.ref.entityId as EntityId)
     )
 
-  it.effect("a Sources claim cannot hold another card, block Add, or receive its updates", () =>
+  it.effect("a card whose Sources link names an entry counts as the user's, with updates through review", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)
       const card = archive.cards[30]!
-      const response = yield* importFile(namingFile("Unrelated import", [`${archive.origin}/c/${card.slug}`]), {
-        name: "unrelated.json"
+      const response = yield* importFile(namingFile("Linked import", [`${archive.origin}/c/${card.slug}`]), {
+        name: "linked.json"
       })
       assert.strictEqual(response.status, 200)
       const entityId = yield* importedEntity(response)
-      assert.isNull(yield* api.CardOrigin({ entityId }))
-      assert.isUndefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held)
-      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
-      assert.isFalse(added.existing)
-      assert.notStrictEqual(added.entityId, entityId)
-      archive.publish(card.slug)
-      yield* api.CheckRemoteVersion({ entityId: added.entityId })
-      assert.isNull(yield* api.CardOrigin({ entityId }))
-      assert.strictEqual(yield* outcome(api.CheckRemoteVersion({ entityId })), "NotFound")
-      assert.isUndefined(
-        (yield* (yield* client(bob)).SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held
+      // Linked without a byte match (owner, 2026-11-16): the version it holds is unknown.
+      const origin = yield* api.CardOrigin({ entityId })
+      assert.deepStrictEqual(
+        [origin?.remoteId, origin?.remoteVersion, origin?.linked, origin?.newerVersion],
+        [card.slug, "", true, null]
       )
+      assert.strictEqual(
+        (yield* api.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held?.entityId,
+        entityId
+      )
+      const added = yield* api.AdoptRemoteCard({ sourceId: "cardex", remoteId: card.slug })
+      assert.deepStrictEqual([added.existing, added.entityId], [true, entityId])
+      const next = archive.publish(card.slug)
+      assert.strictEqual((yield* api.CheckRemoteVersion({ entityId })).newerVersion, next.sha256)
+      // Nobody else sees it, holds it or changes it.
+      const theirs = yield* client(bob)
+      assert.isNull(yield* theirs.CardOrigin({ entityId }))
+      assert.strictEqual(yield* outcome(theirs.CheckRemoteVersion({ entityId })), "NotFound")
+      assert.isUndefined((yield* theirs.SourceCard({ sourceId: "cardex", remoteId: card.slug })).summary.held)
     })
   )
 
@@ -1249,19 +1276,24 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
     })
   )
 
-  it.effect("an unconfirmed Sources hint cannot follow a successor or gain its update tracking", () =>
+  it.effect("a Sources link alone holds the entry and follows its successor (owner, 2026-11-16)", () =>
     Effect.gen(function* () {
       const api = yield* client(alice)
       const root = archive.cards[76]!
       archive.publishSuccessor(root.slug)
-      const imported = yield* importFile(namingFile("Only an untrusted claim", [`cardex:${root.slug}`]), {
-        name: "inert-successor.json"
+      const imported = yield* importFile(namingFile("Only a link", [`cardex:${root.slug}`]), {
+        name: "linked-successor.json"
       })
       const entityId = yield* importedEntity(imported)
-      archive.reset()
-      assert.isUndefined((yield* api.SourceCard({ sourceId: "cardex", remoteId: root.slug })).summary.held)
-      assert.isFalse(archive.paths().some((path) => path.startsWith("/api/v1/origins/")))
-      assert.strictEqual(yield* outcome(api.CheckRemoteVersion({ entityId })), "NotFound")
+      assert.strictEqual(
+        (yield* api.SourceCard({ sourceId: "cardex", remoteId: root.slug })).summary.held?.entityId,
+        entityId
+      )
+      // Its version is unknown, so the source's newest is an update, reviewed and merged as any is.
+      assert.isNotNull((yield* api.CheckRemoteVersion({ entityId })).newerVersion)
+      assert.isUndefined(
+        (yield* (yield* client(bob)).SourceCard({ sourceId: "cardex", remoteId: root.slug })).summary.held
+      )
     })
   )
 

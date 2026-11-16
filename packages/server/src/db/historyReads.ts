@@ -15,7 +15,7 @@ import {
 } from "./forkState.ts"
 import { historyCurrent, historyFork, historySummaryRevision } from "./historyShared.ts"
 import { pathSegments } from "./pathSegments.ts"
-import { displayLength, displayPositionSql, displaySlots, pathPieces, placedInsertions } from "./displayPath.ts"
+import { displayLength, displayPositionSql, displaySlots, pathPieces, rearranges } from "./displayPath.ts"
 import { scanHistory } from "./historyScan.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { displayEndOf } from "./displayPath.ts"
@@ -33,7 +33,7 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
    */
   const displayPieces = (chatId: string, forkId: string, tipSlotId: string | null) =>
     Effect.gen(function* () {
-      if ((yield* placedInsertions(sql, chatId, forkId)).length === 0) return null
+      if (!(yield* rearranges(sql, chatId, forkId))) return null
       return yield* pathPieces(sql, chatId, forkId, tipSlotId)
     })
   return {

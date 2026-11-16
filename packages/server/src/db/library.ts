@@ -128,7 +128,7 @@ const refSelect = `
       ELSE NULL END AS lorebook_entries,
     CASE WHEN e.kind = 'lorebook' THEN ${refSourcePathSql} ELSE NULL END AS lorebook_source_path,
     CASE WHEN e.kind = 'card' THEN
-      (SELECT o.seen_version IS NOT NULL AND o.seen_version <> o.remote_version FROM card_origins o
+      (SELECT o.ignore_updates = 0 AND o.seen_version IS NOT NULL AND o.seen_version <> o.remote_version FROM card_origins o
         WHERE o.entity_id = r.entity_id)
       ELSE NULL END AS source_update
   FROM entity_refs r

@@ -1,11 +1,20 @@
 // Inserting a message anywhere in a fork's history (spec/MESSAGE-INSERT.md §4, §5; owner
 // decision DESIGN §3.1, 2026-10-30). The RPC dispatches through the registered command
 // `message.insert`, so a plugin can replace it and an agent inserts messages the same way.
-import { CurrentUser, type AppApi } from "@rp/shared/api.ts"
+import { type AuthenticatedMoveApi, CurrentUser, type AppApi } from "@rp/shared/api.ts"
 import { PathEntry } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { StaleWrite } from "@rp/shared/errors.ts"
-import { InsertedMessage, InsertMessageInput, InsertRefused } from "@rp/shared/messagesApi.ts"
+import { Chat, type ChatId } from "@rp/shared/chat.ts"
+import {
+  InsertedMessage,
+  InsertMessageInput,
+  InsertRefused,
+  MovedMessage,
+  MoveMessageInput,
+  MoveRefused,
+  UndoMoveInput
+} from "@rp/shared/messagesApi.ts"
 import { Effect, Option } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
@@ -76,4 +85,63 @@ export const makeMessageHandlers = Effect.gen(function* () {
         GenerationUnavailable
       ])
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
+})
+
+/** The `message.move` commands and their RPCs (owner, 2026-11-16). */
+export const makeMoveHandlers = Effect.gen(function* () {
+  const writer = yield* Writer
+  const hub = yield* ChatHub
+  const commands = yield* Commands
+
+  // Moving a message (owner, 2026-11-16): the fork's tabs reload its order; summaries over the
+  // old order are stale there now.
+  const moved = (chatId: ChatId, chat: Chat) => {
+    hub.publish(chatId, { _tag: "Reload" })
+    hub.publish(chatId, { _tag: "Chat", chat })
+    hub.publish(chatId, { _tag: "Lcm" })
+  }
+  const move = ({ chatId, forkId, slotId, direction, expectedRowVersion }: MoveMessageInput) =>
+    Effect.gen(function* () {
+      const user = yield* CurrentUser
+      const result = yield* writer.MoveMessage({
+        userId: user.id,
+        chatId,
+        forkId,
+        slotId,
+        direction,
+        expectedRowVersion
+      })
+      moved(chatId, result.chat)
+      return new MovedMessage({ slotId, forkId, ...result })
+    }).pipe(internal("MoveMessage"))
+  const undoMove = ({ chatId, forkId, undo }: UndoMoveInput) =>
+    Effect.gen(function* () {
+      const user = yield* CurrentUser
+      const chat = yield* writer.UndoMove({ userId: user.id, chatId, forkId, undo })
+      moved(chatId, chat)
+      return chat
+    }).pipe(internal("UndoMoveMessage"))
+  yield* commands.register(
+    makeCommand({
+      id: "message.move",
+      description: "Move a message one message up or down in a branch, changing the order later replies see there.",
+      input: MoveMessageInput,
+      output: MovedMessage,
+      execute: move
+    })
+  )
+  yield* commands.register(
+    makeCommand({
+      id: "message.move.undo",
+      description: "Undo a message move, while nothing has moved those messages since.",
+      input: UndoMoveInput,
+      output: Chat,
+      execute: undoMove
+    })
+  )
+
+  return {
+    MoveMessage: (params) => runCommand(commands, "message.move", params, MovedMessage, [StaleWrite, MoveRefused]),
+    UndoMoveMessage: (params) => runCommand(commands, "message.move.undo", params, Chat, [StaleWrite])
+  } satisfies Parameters<typeof AuthenticatedMoveApi.of>[0]
 })

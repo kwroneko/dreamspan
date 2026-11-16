@@ -39,7 +39,7 @@ import type {
 } from "@rp/shared/chatApi.ts"
 import type { CacheWarmth, NextContext } from "@rp/shared/inspectorApi.ts"
 import type { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
-import type { InsertBody, InsertedMessage } from "@rp/shared/messagesApi.ts"
+import type { InsertBody, InsertedMessage, MovedMessage } from "@rp/shared/messagesApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
 import { Atom, type AtomRegistry, AtomRegistry as Registry, Reactivity } from "effect/reactivity"
 import { type AppError, describeCause } from "../../errors.ts"
@@ -2024,6 +2024,40 @@ export class ChatSession {
       this.applySlot(result.value.entry)
       this.highlightSlot(result.value.entry.slotId)
     } else if (result.error.tag === "StaleWrite") this.reload()
+    return result
+  }
+
+  /**
+   * Moves a message one shown message up or down in the fork shown (owner, 2026-11-16). The
+   * fork's tabs reload its order; the moved message is highlighted where it went.
+   */
+  async moveMessage(entry: PathEntry, direction: "up" | "down"): Promise<Outcome<MovedMessage>> {
+    const forkId = this.view.forkId ?? this.view.chat?.currentForkId ?? null
+    if (forkId === null)
+      return { ok: false, error: { tag: "NotFound", message: "The chat isn't open yet.", problems: [], reason: null } }
+    const result = await this.call((client) =>
+      client("MoveMessage", {
+        chatId: this.chatId,
+        forkId,
+        slotId: entry.slotId,
+        direction,
+        expectedRowVersion: entry.rowVersion
+      })
+    )
+    if (result.ok) {
+      this.update({ chat: result.value.chat })
+      this.reload()
+      this.highlightSlot(entry.slotId)
+    } else if (result.error.tag === "StaleWrite") this.reload()
+    return result
+  }
+
+  /** Undoes a move while those messages are still where it put them. */
+  async undoMove(moved: MovedMessage): Promise<Outcome<unknown>> {
+    const result = await this.call((client) =>
+      client("UndoMoveMessage", { chatId: this.chatId, forkId: moved.forkId, undo: moved.undo })
+    )
+    if (result.ok) this.reload()
     return result
   }
 

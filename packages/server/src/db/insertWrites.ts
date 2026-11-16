@@ -8,8 +8,8 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
-import { onDisplayPath, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
-import { selectionIn, shownIn, slotDeletedIn, versionAsShown, writeInsert } from "./forkState.ts"
+import { onDisplayPath, pathPieces, placedMoves, positionOf, slotPlace } from "./displayPath.ts"
+import { selectionIn, shownIn, slotDeletedIn, versionAsShown, writeInsert, writeOverride } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { presenceAt, presenceJson } from "./participation.ts"
 import { InsertRefused } from "@rp/shared/messagesApi.ts"
@@ -156,6 +156,19 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
           }
 
           yield* writeInsert(sql, { id: fork.id, chatId }, slotId, 1)
+          // What the fork shows moved after the anchor follows the new message instead, so it
+          // still goes directly below the anchor (owner, 2026-11-16).
+          // Below a moved anchor, the new message is moved after it too, not left at its own place.
+          const moves = yield* placedMoves(sql, chatId, fork.id)
+          const follow = (target: string, after: string) =>
+            writeOverride(
+              sql,
+              { id: fork.id, chatId },
+              { kind: "move", targetId: target, slotId: target, valueId: after, flag: 1 }
+            )
+          for (const moved of moves.filter((m) => m.anchorId === (anchor?.id ?? null)).sort((a, b) => a.seq - b.seq))
+            yield* follow(moved.id, slotId)
+          if (anchor !== null && moves.some((m) => m.id === anchor!.id)) yield* follow(slotId, anchor.id)
           // The editor's draft, if it still holds what was inserted (§3.10).
           if (body._tag !== "Duplicate" && body.draft !== undefined)
             yield* bin.drafts.commit(userId, body.draft, {

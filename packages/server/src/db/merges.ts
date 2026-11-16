@@ -198,8 +198,8 @@ export const sharedPrefix = (a: ReadonlyArray<PathPiece>, b: ReadonlyArray<PathP
   let pb: PathPiece | undefined = b[0]
   let shared = 0
   while (pa && pb) {
-    if (pa.kind === "inserted" || pb.kind === "inserted") {
-      if (pa.kind !== "inserted" || pb.kind !== "inserted" || pa.slotId !== pb.slotId) break
+    if (pa.kind !== "run" || pb.kind !== "run") {
+      if (pa.kind === "run" || pb.kind === "run" || pa.slotId !== pb.slotId) break
       shared++
       pa = a[++i]
       pb = b[++j]

@@ -13,6 +13,7 @@ import {
   AuthenticatedWorkshopApi,
   AuthenticatedChatEventsApi,
   AuthenticatedMessageVersionApi,
+  AuthenticatedMoveApi,
   AuthenticatedStImportPlanApi,
   AuthenticatedChatMergeApi,
   AuthenticatedDecisionApi,
@@ -31,7 +32,7 @@ import { makeChatContextsHandlers } from "./api/contexts.ts"
 import { makeThreadHandlers } from "./api/threads.ts"
 import { Commands } from "./commands.ts"
 import { makeHistoryHandlers } from "./api/history.ts"
-import { makeMessageHandlers } from "./api/messages.ts"
+import { makeMessageHandlers, makeMoveHandlers } from "./api/messages.ts"
 import { ExecutionRegistry } from "./execution.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
 import { DecisionEngine } from "./decision/engine.ts"
@@ -195,6 +196,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedOwnTurnNoteApi.toLayer(makeOwnTurnNoteHandlers),
   AuthenticatedWorkshopPresetApi.toLayer(makeWorkshopPresetHandlers),
   AuthenticatedMessageVersionApi.toLayer(makeMessageVersionHandlers),
+  AuthenticatedMoveApi.toLayer(makeMoveHandlers),
   AuthenticatedStImportPlanApi.toLayer(makeStImportPlanHandlers),
   AuthenticatedShellUpdatesApi.toLayer(
     Effect.map(makeChatSetupHandlers, ({ WatchShellCards, WatchShellForks }) => ({

@@ -109,7 +109,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       if (depths.some((row) => row.depth >= 5000)) return false
       const inserted =
         yield* sql`SELECT 1 FROM json_each(${JSON.stringify([...new Set(stale.map((row) => row.chat_id))])}) j
-      CROSS JOIN fork_overrides o ON o.chat_id = j.value AND o.kind = 'insert' LIMIT 1`
+      CROSS JOIN fork_overrides o ON o.chat_id = j.value AND o.kind IN ('insert', 'move') LIMIT 1`
       return inserted.length === 0
     })
   /**
@@ -300,9 +300,9 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             SELECT f.id,f.chat_id,f.tip_slot_id FROM json_each(${JSON.stringify(stale)}) j
               CROSS JOIN forks f ON f.id=j.value
           ), insert_ends AS MATERIALIZED (
-            SELECT o.chat_id,max(coalesce(o.slot_depth,-1)) AS hi
+            SELECT o.chat_id,max(CASE WHEN o.kind='move' THEN 1000000000 ELSE coalesce(o.slot_depth,-1) END) AS hi
             FROM (SELECT DISTINCT chat_id FROM waiting) c
-              CROSS JOIN fork_overrides o ON o.chat_id=c.chat_id AND o.kind='insert'
+              CROSS JOIN fork_overrides o ON o.chat_id=c.chat_id AND o.kind IN ('insert','move')
             GROUP BY o.chat_id
           )
           SELECT f.id, f.chat_id,

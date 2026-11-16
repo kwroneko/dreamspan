@@ -85,6 +85,19 @@ export function cardSourceUpdateTests() {
           await expectLayout(page, info, `source-update-notice-${width}-${theme}`)
           await page.screenshot({ path: info.outputPath("recognized-update.png") })
 
+          // Ignore future updates (owner, 2026-11-16): the notice goes until it's turned back on
+          // from the card's Sources row in Metadata.
+          await page.getByRole("button", { name: "Ignore future updates", exact: true }).click()
+          await expect(notice).toHaveCount(0)
+          await page.getByRole("tab", { name: "Metadata", exact: true }).click()
+          const ignoring = page.getByRole("checkbox", { name: "Ignore future updates" })
+          await expect(ignoring).toBeChecked()
+          await expectLayout(page, info, `source-update-ignored-${width}-${theme}`)
+          await ignoring.click()
+          await expect(ignoring).not.toBeChecked()
+          await expect(notice).toBeVisible()
+          await notice.scrollIntoViewIfNeeded()
+
           // More choices…: the comparison with the newer version, then Add as a separate card.
           await page.getByRole("button", { name: "More choices…", exact: true }).click()
           // Closed hint popovers and toasts are dialogs too: find it by its title.

@@ -67,7 +67,14 @@ export const userCostFormula: CostFormula = {
           counts.output * rates.output) /
         1e6,
       currency: rule.currency,
-      formula: `user:${rule.id}:${pricing.settings.revision}`
+      formula: `user:${rule.id}:${pricing.settings.revision}`,
+      rates: {
+        input: rates.input,
+        read: rates.read,
+        write: rates.write,
+        writeLong: rates.writeLong,
+        output: rates.output
+      }
     }
   },
   upperBound: ({ inputTokens, outputTokens, pricing, price }) => {

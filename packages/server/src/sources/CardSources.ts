@@ -193,6 +193,12 @@ export interface CardSourcesShape {
     user: User,
     entityId: string
   ) => Effect.Effect<CardOrigin, SourceFailed | NotFound | ServerError>
+  /** "Ignore future updates" on or off for the card; local. */
+  readonly setUpdatesIgnored: (
+    user: User,
+    entityId: string,
+    ignored: boolean
+  ) => Effect.Effect<CardOrigin, SourceFailed | NotFound | ServerError>
   /** The version the user took into the card (Review and merge, Replace); local. */
   readonly takeVersion: (
     user: User,
@@ -771,8 +777,13 @@ const make = (options: CardSourcesOptions = {}) =>
       sourceName: adapter.name,
       remoteId: row.currentRemoteId,
       remoteVersion: row.remoteVersion,
-      newerVersion: row.seenVersion !== null && row.seenVersion !== row.remoteVersion ? row.seenVersion : null,
-      ...(row.recognized ? { recognized: true } : {})
+      newerVersion:
+        !row.ignoreUpdates && row.seenVersion !== null && row.seenVersion !== row.remoteVersion
+          ? row.seenVersion
+          : null,
+      ...(row.recognized ? { recognized: true } : {}),
+      ...(row.linked ? { linked: true } : {}),
+      ...(row.ignoreUpdates ? { ignoreUpdates: true } : {})
     })
     const noOrigin = (entityId: string) => new NotFound({ entity: "card from a card source", id: entityId })
     /** The card's origin, on a source that's on for this user: else NotFound, or `disabled`. */
@@ -1136,6 +1147,14 @@ const make = (options: CardSourcesOptions = {}) =>
               ...(latest.locator ? { locator: latest.locator } : {})
             }
           ])
+          return yield* originAgain(user, entityId, adapter)
+        }),
+      setUpdatesIgnored: (user, entityId, ignored) =>
+        Effect.gen(function* () {
+          const { adapter } = yield* heldOrigin(user, entityId)
+          yield* writer
+            .SetRemoteUpdatesIgnored({ userId: user.id, entityId: entityId as EntityId, ignored })
+            .pipe(Effect.catchIf((error) => error._tag !== "NotFound", storage("saving the update choice")))
           return yield* originAgain(user, entityId, adapter)
         }),
       takeVersion: (user, entityId, version, receipt) =>

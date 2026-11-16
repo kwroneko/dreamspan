@@ -11,7 +11,7 @@ import { ChatMergeApi } from "./mergeApi.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import { SnippetsApi } from "./snippetsApi.ts"
 import { HistoryApi } from "./historyApi.ts"
-import { MessagesApi } from "./messagesApi.ts"
+import { MessagesApi, MoveApi } from "./messagesApi.ts"
 import { ExportFormatInfo } from "./libraryImport.ts"
 import { StSettingsImport } from "./modelSettings.ts"
 import { LcmApi, LcmSettingsInvalid, SummaryRequestApi } from "./lcm.ts"
@@ -476,6 +476,9 @@ export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Aut
 
 export const AuthenticatedMessageVersionApi = MessageVersionApi.middleware(Authentication)
 
+/** Moving messages up and down (messagesApi.ts). */
+export const AuthenticatedMoveApi = MoveApi.middleware(Authentication)
+
 /** The ST re-import preview (stImportApi.ts). */
 export class AuthenticatedStImportPlanApi extends StImportPlanApi.middleware(Authentication) {}
 
@@ -484,6 +487,7 @@ export class AuthenticatedPluginApi extends PluginApi.middleware(Authentication)
 export const AuthenticatedDraftGenerationApi = DraftGenerationApi.middleware(Authentication)
 
 export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
+  .merge(AuthenticatedMoveApi)
   .merge(AuthenticatedDraftGenerationApi)
   .merge(AuthenticatedPluginApi)
   .merge(AuthenticatedOwnTurnNoteApi)

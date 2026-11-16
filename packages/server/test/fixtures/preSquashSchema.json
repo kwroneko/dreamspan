@@ -28,7 +28,7 @@
       "type": "index",
       "name": "card_origins_remote",
       "tbl_name": "card_origins",
-      "sql": "CREATE UNIQUE INDEX card_origins_remote ON card_origins(owner_user_id, source_id, remote_id)"
+      "sql": "CREATE INDEX card_origins_remote ON card_origins(owner_user_id, source_id, remote_id)"
     },
     {
       "type": "index",
@@ -1114,7 +1114,7 @@
       "type": "table",
       "name": "card_origins",
       "tbl_name": "card_origins",
-      "sql": "CREATE TABLE card_origins ( entity_id TEXT PRIMARY KEY REFERENCES entities(id), owner_user_id TEXT NOT NULL REFERENCES users(id), source_id TEXT NOT NULL, remote_id TEXT NOT NULL, remote_version TEXT NOT NULL, current_remote_id TEXT, remote_locator TEXT, seen_version TEXT, seen_remote_id TEXT, remote_sha256 TEXT NOT NULL, recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized')), created_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE card_origins ( entity_id TEXT PRIMARY KEY REFERENCES entities(id), owner_user_id TEXT NOT NULL REFERENCES users(id), source_id TEXT NOT NULL, remote_id TEXT NOT NULL, remote_version TEXT NOT NULL, current_remote_id TEXT, remote_locator TEXT, seen_version TEXT, seen_remote_id TEXT, remote_sha256 TEXT NOT NULL, -- adopted: added from the source (also a newer version added as a separate card); -- recognized: an imported file whose bytes matched the archive's; linked: an imported file -- whose source link names the entry, without a byte match (owner, 2026-11-16), whose -- version is unknown ('') until one is taken. recognized_by TEXT NOT NULL CHECK (recognized_by IN ('adopted', 'recognized', 'linked')), -- \"Ignore future updates\" (owner, 2026-11-16): no badges or notices while it's set. ignore_updates INTEGER NOT NULL DEFAULT 0 CHECK (ignore_updates IN (0, 1)), created_at INTEGER NOT NULL, CHECK (remote_version <> '' OR recognized_by = 'linked') ) STRICT"
     },
     {
       "type": "table",
@@ -1372,7 +1372,7 @@
       "type": "table",
       "name": "llm_requests",
       "tbl_name": "llm_requests",
-      "sql": "CREATE TABLE llm_requests ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL REFERENCES connections(id), model_id TEXT REFERENCES models(id), chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL, version_id TEXT REFERENCES versions(id) ON DELETE SET NULL, purpose TEXT NOT NULL, -- What was requested. api TEXT NOT NULL, provider TEXT NOT NULL, model_key TEXT NOT NULL, -- What served it: the model the response named, and the routed upstream where a -- gateway reports one (OpenRouter). response_model TEXT, upstream TEXT, status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'aborted', 'interrupted')), started_at INTEGER NOT NULL, first_token_at INTEGER, ended_at INTEGER, -- Normalized counts (PROVIDERS §9.2). cache_write_long is the subset of cache_write -- written with the long TTL; reasoning is the subset of output. estimated_input INTEGER, input_tokenizer TEXT, input_uncached INTEGER, cache_read INTEGER, cache_write INTEGER, cache_write_long INTEGER, output INTEGER, reasoning INTEGER, usage_source TEXT NOT NULL DEFAULT 'none' CHECK (usage_source IN ('reported', 'estimated', 'none')), -- The provider's usage object verbatim, so counts can be recomputed if a -- normalization turns out wrong. raw_usage_json TEXT CHECK (raw_usage_json IS NULL OR json_valid(raw_usage_json)), reported_cost REAL, cost REAL, cost_currency TEXT, -- What produced cost: a built-in price source, 'reported', or a user formula. cost_formula TEXT, error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), cache_stagger_json TEXT CHECK (cache_stagger_json IS NULL OR json_valid(cache_stagger_json)), cache_identity_json TEXT CHECK (cache_identity_json IS NULL OR json_valid(cache_identity_json)), backfill_id TEXT REFERENCES jobs(id), reserved_tokens INTEGER, reserved_cost REAL, reserved_currency TEXT, CHECK ((status = 'running') = (ended_at IS NULL)), CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL)) ) STRICT"
+      "sql": "CREATE TABLE llm_requests ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL REFERENCES connections(id), model_id TEXT REFERENCES models(id), chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL, version_id TEXT REFERENCES versions(id) ON DELETE SET NULL, purpose TEXT NOT NULL, -- What was requested. api TEXT NOT NULL, provider TEXT NOT NULL, model_key TEXT NOT NULL, -- What served it: the model the response named, and the routed upstream where a -- gateway reports one (OpenRouter). response_model TEXT, upstream TEXT, status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'aborted', 'interrupted')), started_at INTEGER NOT NULL, first_token_at INTEGER, ended_at INTEGER, -- Normalized counts (PROVIDERS §9.2). cache_write_long is the subset of cache_write -- written with the long TTL; reasoning is the subset of output. estimated_input INTEGER, input_tokenizer TEXT, input_uncached INTEGER, cache_read INTEGER, cache_write INTEGER, cache_write_long INTEGER, output INTEGER, reasoning INTEGER, usage_source TEXT NOT NULL DEFAULT 'none' CHECK (usage_source IN ('reported', 'estimated', 'none')), -- The provider's usage object verbatim, so counts can be recomputed if a -- normalization turns out wrong. raw_usage_json TEXT CHECK (raw_usage_json IS NULL OR json_valid(raw_usage_json)), reported_cost REAL, cost REAL, cost_currency TEXT, -- What produced cost: a built-in price source, 'reported', or a user formula. cost_formula TEXT, -- The rates cost was priced with (per million tokens: input, read, write, writeLong, -- output), beside its formula: a later recalculation applies only to rows priced from a -- price table or the user's rules, never to a provider-reported charge, which has none. cost_rates_json TEXT CHECK (cost_rates_json IS NULL OR (json_valid(cost_rates_json) AND cost IS NOT NULL AND cost_formula IS NOT 'reported')), -- The network route the request took (direct and why, or the proxy by scheme, host and -- port), for the requests that went out. route_json TEXT CHECK (route_json IS NULL OR json_valid(route_json)), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), cache_stagger_json TEXT CHECK (cache_stagger_json IS NULL OR json_valid(cache_stagger_json)), cache_identity_json TEXT CHECK (cache_identity_json IS NULL OR json_valid(cache_identity_json)), backfill_id TEXT REFERENCES jobs(id), reserved_tokens INTEGER, reserved_cost REAL, reserved_currency TEXT, CHECK ((status = 'running') = (ended_at IS NULL)), CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL)) ) STRICT"
     },
     {
       "type": "table",
@@ -2048,6 +2048,18 @@
     },
     {
       "type": "trigger",
+      "name": "fork_overrides_move",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_move BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'move' AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL OR NEW.slot_id IS NOT NEW.target_id OR NEW.value_id IS NEW.target_id OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.target_id) OR NOT EXISTS (SELECT 1 FROM slots x WHERE x.id = NEW.target_id AND x.chat_id = NEW.chat_id) OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id AND a.chat_id = NEW.chat_id)) OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL)) BEGIN SELECT RAISE(ABORT, 'a move shows a slot of its chat after another of its slots, or at its own place'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_move_update",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_move_update BEFORE UPDATE OF flag, value_id, bin_item_id, changeset_id ON fork_overrides WHEN NEW.kind = 'move' AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL OR NEW.value_id IS NEW.target_id OR (NEW.flag = 0 AND NEW.value_id IS NOT NULL) OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM slots a WHERE a.id = NEW.value_id AND a.chat_id = NEW.chat_id))) BEGIN SELECT RAISE(ABORT, 'a move shows a slot of its chat after another of its slots, or at its own place'); END"
+    },
+    {
+      "type": "trigger",
       "name": "fork_overrides_presence_away",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TRIGGER fork_overrides_presence_away BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'presence_away' AND (NEW.flag IS NULL OR NEW.slot_id IS NULL OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.slot_id) OR NEW.value_id IS NULL OR NOT json_valid(NEW.value_id) OR json_type(NEW.value_id) <> 'object' OR length(NEW.target_id) <= length(NEW.slot_id) + 1 OR substr(NEW.target_id, 1, length(NEW.slot_id) + 1) IS NOT NEW.slot_id || ':') BEGIN SELECT RAISE(ABORT, 'a presence correction names a message of its chat and a card'); END"
@@ -2602,7 +2614,7 @@
       "type": "trigger",
       "name": "llm_requests_closed_frozen",
       "tbl_name": "llm_requests",
-      "sql": "CREATE TRIGGER llm_requests_closed_frozen BEFORE UPDATE ON llm_requests WHEN OLD.status <> 'running' AND ( NEW.status IS NOT OLD.status OR NEW.ended_at IS NOT OLD.ended_at OR NEW.first_token_at IS NOT OLD.first_token_at OR NEW.response_model IS NOT OLD.response_model OR NEW.upstream IS NOT OLD.upstream OR NEW.estimated_input IS NOT OLD.estimated_input OR NEW.input_tokenizer IS NOT OLD.input_tokenizer OR NEW.input_uncached IS NOT OLD.input_uncached OR NEW.cache_read IS NOT OLD.cache_read OR NEW.cache_write IS NOT OLD.cache_write OR NEW.cache_write_long IS NOT OLD.cache_write_long OR NEW.output IS NOT OLD.output OR NEW.reasoning IS NOT OLD.reasoning OR NEW.usage_source IS NOT OLD.usage_source OR NEW.raw_usage_json IS NOT OLD.raw_usage_json OR NEW.reported_cost IS NOT OLD.reported_cost OR NEW.error_json IS NOT OLD.error_json) BEGIN SELECT RAISE(ABORT, 'a closed request is a record; only its cost can be recomputed'); END"
+      "sql": "CREATE TRIGGER llm_requests_closed_frozen BEFORE UPDATE ON llm_requests WHEN OLD.status <> 'running' AND ( NEW.status IS NOT OLD.status OR NEW.ended_at IS NOT OLD.ended_at OR NEW.first_token_at IS NOT OLD.first_token_at OR NEW.response_model IS NOT OLD.response_model OR NEW.upstream IS NOT OLD.upstream OR NEW.estimated_input IS NOT OLD.estimated_input OR NEW.input_tokenizer IS NOT OLD.input_tokenizer OR NEW.input_uncached IS NOT OLD.input_uncached OR NEW.cache_read IS NOT OLD.cache_read OR NEW.cache_write IS NOT OLD.cache_write OR NEW.cache_write_long IS NOT OLD.cache_write_long OR NEW.output IS NOT OLD.output OR NEW.reasoning IS NOT OLD.reasoning OR NEW.usage_source IS NOT OLD.usage_source OR NEW.raw_usage_json IS NOT OLD.raw_usage_json OR NEW.reported_cost IS NOT OLD.reported_cost OR NEW.error_json IS NOT OLD.error_json OR NEW.route_json IS NOT OLD.route_json) BEGIN SELECT RAISE(ABORT, 'a closed request is a record; only its cost can be recomputed'); END"
     },
     {
       "type": "trigger",
@@ -2615,6 +2627,12 @@
       "name": "llm_requests_owner_fixed",
       "tbl_name": "llm_requests",
       "sql": "CREATE TRIGGER llm_requests_owner_fixed BEFORE UPDATE OF owner_user_id ON llm_requests WHEN NEW.owner_user_id IS NOT OLD.owner_user_id BEGIN SELECT RAISE(ABORT, 'llm_requests never change owner'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "llm_requests_recompute_priced",
+      "tbl_name": "llm_requests",
+      "sql": "CREATE TRIGGER llm_requests_recompute_priced BEFORE UPDATE OF cost, cost_currency, cost_formula, cost_rates_json ON llm_requests WHEN OLD.status <> 'running' AND (NEW.cost IS NOT OLD.cost OR NEW.cost_currency IS NOT OLD.cost_currency OR NEW.cost_formula IS NOT OLD.cost_formula OR NEW.cost_rates_json IS NOT OLD.cost_rates_json) AND (OLD.cost_rates_json IS NULL OR OLD.cost_formula IS 'reported' OR NEW.cost_rates_json IS NULL OR NEW.cost_formula IS 'reported') BEGIN SELECT RAISE(ABORT, 'only a closed request priced from rates can be recomputed, and from rates'); END"
     },
     {
       "type": "trigger",
@@ -2854,19 +2872,19 @@
       "type": "trigger",
       "name": "shell_fork_overrides_delete",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TRIGGER shell_fork_overrides_delete AFTER DELETE ON fork_overrides WHEN OLD.kind IN ('select', 'replace', 'delete_slot', 'insert', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = OLD.chat_id; END"
+      "sql": "CREATE TRIGGER shell_fork_overrides_delete AFTER DELETE ON fork_overrides WHEN OLD.kind IN ('select', 'replace', 'delete_slot', 'insert', 'move', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = OLD.chat_id; END"
     },
     {
       "type": "trigger",
       "name": "shell_fork_overrides_insert",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TRIGGER shell_fork_overrides_insert AFTER INSERT ON fork_overrides WHEN NEW.kind IN ('select', 'replace', 'delete_slot', 'insert', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+      "sql": "CREATE TRIGGER shell_fork_overrides_insert AFTER INSERT ON fork_overrides WHEN NEW.kind IN ('select', 'replace', 'delete_slot', 'insert', 'move', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
     },
     {
       "type": "trigger",
       "name": "shell_fork_overrides_update",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TRIGGER shell_fork_overrides_update AFTER UPDATE ON fork_overrides WHEN NEW.kind IN ('select', 'replace', 'delete_slot', 'insert', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+      "sql": "CREATE TRIGGER shell_fork_overrides_update AFTER UPDATE ON fork_overrides WHEN NEW.kind IN ('select', 'replace', 'delete_slot', 'insert', 'move', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
     },
     {
       "type": "trigger",

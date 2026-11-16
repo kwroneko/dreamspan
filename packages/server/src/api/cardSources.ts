@@ -41,6 +41,8 @@ export const makeCardSourceHandlers = Effect.gen(function* () {
     CheckRemoteVersion: ({ entityId }) => withUser((user) => sources.checkVersion(user, entityId)),
     TakeRemoteVersion: ({ entityId, version, receipt }) =>
       withUser((user) => sources.takeVersion(user, entityId, version, receipt)),
+    SetRemoteUpdatesIgnored: ({ entityId, ignored }) =>
+      withUser((user) => sources.setUpdatesIgnored(user, entityId, ignored)),
     AddRemoteVersionAsCard: ({ entityId }) => withUser((user) => sources.addVersionAsCard(user, entityId)),
     SourceCreator: ({ sourceId, creator }) => withUser((user) => sources.creator(user, sourceId, creator)),
     SourceFamily: ({ sourceId, remoteId }) => withUser((user) => sources.family(user, sourceId, remoteId)),
