@@ -746,7 +746,8 @@ const make = (options: CardSourcesOptions = {}) =>
               entityId: card.entityId,
               refId: card.refId,
               archived: card.archived,
-              update: card.tracked && newest !== null && newest !== card.remoteVersion
+              // Ignore future updates (owner, 2026-11-16): no badge, even for a version just reported.
+              update: card.tracked && !card.ignored && newest !== null && newest !== card.remoteVersion
             }
           }
         })

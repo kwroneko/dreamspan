@@ -1037,6 +1037,14 @@ layer(testServer, { timeout: 60_000 })("through the server", (it) => {
       // The cached page now shows it too, from what was recorded, and doesn't undo it.
       assert.isTrue(held(yield* api.SourceSearch({ sourceId: "cardex", query, page: null }))!.update)
       assert.strictEqual((yield* api.CardOrigin({ entityId: added.entityId }))!.newerVersion, next.sha256)
+      // Ignore future updates: no badge from the cache, nor from a page that just reported a newer version.
+      yield* api.SetRemoteUpdatesIgnored({ entityId: added.entityId, ignored: true })
+      assert.isFalse(held(yield* api.SourceSearch({ sourceId: "cardex", query, page: null }))!.update)
+      archive.publish(card.slug)
+      const reported = yield* api.SourceSearch({ sourceId: "cardex", query: { ...query, sort: "newest" }, page: null })
+      assert.isFalse(held(reported)!.update)
+      yield* api.SetRemoteUpdatesIgnored({ entityId: added.entityId, ignored: false })
+      assert.isTrue(held(yield* api.SourceSearch({ sourceId: "cardex", query, page: null }))!.update)
     })
   )
 

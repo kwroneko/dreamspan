@@ -102,6 +102,7 @@ interface HeldRow {
   readonly seen_version: string | null
   readonly current_remote_id?: string | null
   readonly remote_locator?: string | null
+  readonly ignored?: number
 }
 
 /**
@@ -202,14 +203,14 @@ export const makeCardOriginReadHandlers = Effect.gen(function* () {
           SELECT o.remote_id, o.entity_id, r.id AS ref_id, e.archived_at IS NOT NULL AS archived,
             o.remote_version, CASE WHEN o.ignore_updates = 1 THEN NULL ELSE o.seen_version END AS seen_version,
             o.recognized_by, o.current_remote_id, o.remote_locator,
-            (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone, o.recognized_by = 'linked' AS weak, 0 AS successor
+            (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone, o.ignore_updates AS ignored, o.recognized_by = 'linked' AS weak, 0 AS successor
           FROM card_origins o JOIN entities e ON e.id = o.entity_id LEFT JOIN entity_refs r ON r.entity_id = e.id
           WHERE o.owner_user_id = ${userId} AND o.source_id = ${sourceId} AND ${sql.in("o.remote_id", ids)}
           UNION ALL
           SELECT o.current_remote_id AS remote_id, o.entity_id, r.id AS ref_id, e.archived_at IS NOT NULL AS archived,
             o.remote_version, CASE WHEN o.ignore_updates = 1 THEN NULL ELSE o.seen_version END AS seen_version,
             o.recognized_by, o.current_remote_id, o.remote_locator,
-            (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone, o.recognized_by = 'linked' AS weak, 1 AS successor
+            (e.deleted_at IS NOT NULL OR e.purged_at IS NOT NULL) AS gone, o.ignore_updates AS ignored, o.recognized_by = 'linked' AS weak, 1 AS successor
           FROM card_origins o JOIN entities e ON e.id = o.entity_id LEFT JOIN entity_refs r ON r.entity_id = e.id
           WHERE o.owner_user_id = ${userId} AND o.source_id = ${sourceId}
             AND ${sql.in("o.current_remote_id", ids)} AND o.current_remote_id <> o.remote_id
@@ -279,6 +280,7 @@ export const makeCardOriginReadHandlers = Effect.gen(function* () {
           seenVersion: row.seen_version,
           // A confirmed origin records versions; a hash match still needs confirmation.
           tracked: tracked.has(row.remote_id),
+          ignored: row.ignored === 1,
           currentRemoteId: row.current_remote_id ?? row.remote_id,
           locator: row.remote_locator ?? null
         }))

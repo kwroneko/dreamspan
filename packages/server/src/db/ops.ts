@@ -5555,6 +5555,8 @@ export class ReadOps extends RpcGroup.make(
         seenVersion: Schema.NullOr(Schema.String),
         /** Found by a confirmed origin row, which records versions (not an unverified Sources hint). */
         tracked: Schema.Boolean,
+        /** The user chose "Ignore future updates" for the card: no update badge. */
+        ignored: Schema.Boolean,
         currentRemoteId: Schema.String,
         locator: Schema.NullOr(Schema.String)
       })
