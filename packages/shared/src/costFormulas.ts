@@ -14,6 +14,8 @@ export const CostRule = Schema.Struct({
   upstream: Schema.NullOr(Text),
   currency: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   rates: CostRates,
+  /** A flat amount per request, in `currency`, on top of the token rates. */
+  perRequest: Schema.optionalKey(Rate),
   tiers: Schema.Array(
     Schema.Struct({
       above: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(1e9)),

@@ -4,7 +4,7 @@ import { CostRules } from "@rp/shared/costFormulas.ts"
 import { type TokenCounts, unknownCounts } from "@rp/shared/usage.ts"
 import { Schema } from "effect"
 import { costOf, builtinCostFormulas, emptyCapture } from "../src/providers/usage.ts"
-import { userCostFormula, type UserPricing } from "../src/providers/userCosts.ts"
+import { userCostFormula, userGeneralCostFormula, type UserPricing } from "../src/providers/userCosts.ts"
 
 const rule: CostRule = {
   id: "contract",
@@ -26,16 +26,21 @@ const pricing: UserPricing = {
 const counts = { ...unknownCounts, inputUncached: 10, cacheRead: 20, cacheWrite: 30, cacheWriteLong: 10, output: 40 }
 const target = { kind: pricing.kind, api: "openai-completions", model: pricing.model }
 const cost = (p = pricing, capture = emptyCapture(), input: TokenCounts = counts) =>
-  costOf([...builtinCostFormulas, userCostFormula], target, {
+  costOf(builtinCostFormulas, target, {
     counts: input,
     capture,
     pricing: p,
     price: { input: 7, output: 8 }
   })
 const bound = (p = pricing, inputTokens = 60) =>
-  userCostFormula.upperBound!({ pricing: p, inputTokens, outputTokens: 40, price: { input: 7, output: 8 } })
+  userGeneralCostFormula.upperBound!({ pricing: p, inputTokens, outputTokens: 40, price: { input: 7, output: 8 } })
 it("prices the five normalized counts with an independent long-write rate and display label", () => {
   assert.deepEqual(cost(), { amount: 350 / 1e6, currency: "credits", formula: "user:contract:3" })
+})
+it("adds a flat per-request amount, in the bound too", () => {
+  const flat = { ...pricing, settings: { revision: 3, rules: [{ ...rule, perRequest: 0.5 }] } }
+  assert.equal(cost(flat)!.amount, 350 / 1e6 + 0.5)
+  assert.equal(bound(flat)!.amount, bound()!.amount + 0.5)
 })
 it("switches the whole request at the highest exceeded context threshold", () => {
   const p = {
@@ -80,8 +85,16 @@ it("matches exact model, provider, connection and routed upstream, with specific
     "user:last:4"
   )
 })
-it("overrides provider-reported prices, preserves unknown counts and falls back when no rule matches", () => {
-  assert.equal(cost(pricing, { ...emptyCapture(), reportedCost: 9 })!.formula, "user:contract:3")
+it("overrides provider-reported prices only for this connection, preserves unknown counts and falls back when no rule matches", () => {
+  // An account-wide or per-type price is below the provider's own charge (PRICES §5.1).
+  assert.equal(cost(pricing, { ...emptyCapture(), reportedCost: 9 })!.formula, "reported")
+  const own = { ...rule, connectionId: "connection" as CostRule["connectionId"] }
+  assert.equal(
+    cost({ ...pricing, settings: { revision: 3, rules: [own] } }, { ...emptyCapture(), reportedCost: 9 })!.formula,
+    "user:contract:3"
+  )
+  assert.isTrue(userCostFormula.reserves!({ pricing: { ...pricing, settings: { revision: 3, rules: [own] } } }))
+  assert.isFalse(userCostFormula.reserves!({ pricing }))
   assert.isNull(cost(pricing, emptyCapture(), { ...counts, inputUncached: null }))
   assert.equal(
     cost({ ...pricing, settings: { revision: 0, rules: [] } }, { ...emptyCapture(), reportedCost: 9 })!.formula,
@@ -115,9 +128,9 @@ it("bounds every cache split, reachable tier and route, including decreasing tie
     }
   }
   assert.equal(bound(routes)!.amount, 6200 / 1e6)
-  assert.isTrue(userCostFormula.reserves!({ pricing: routes }))
+  assert.isTrue(userGeneralCostFormula.reserves!({ pricing: routes }))
   assert.isNull(bound({ ...routes, settings: { revision: 1, rules: [{ ...rule, upstream: "route" }] } }))
-  assert.isNull(userCostFormula.upperBound!({ pricing: routes, inputTokens: 60, outputTokens: 40, price: null }))
+  assert.isNull(userGeneralCostFormula.upperBound!({ pricing: routes, inputTokens: 60, outputTokens: 40, price: null }))
 })
 it("rejects code, non-finite or negative rates, duplicate ids and oversized expressions", () => {
   for (const rules of [
@@ -135,7 +148,7 @@ it("estimates unknown upstream routes conservatively, and refuses mixed labels",
   const route = { ...rule, id: "route", upstream: "route", rates: { ...rule.rates, input: 100 } }
   const p = { ...pricing, settings: { revision: 1, rules: [rule, route] } }
   const estimate = costOf(
-    [...builtinCostFormulas, userCostFormula],
+    builtinCostFormulas,
     target,
     { counts, pricing: p, capture: emptyCapture(), price: { input: 1, output: 1 } },
     true
@@ -145,7 +158,7 @@ it("estimates unknown upstream routes conservatively, and refuses mixed labels",
   const mixed = { ...p, settings: { revision: 2, rules: [{ ...rule, currency: "USD" }, route] } }
   assert.isNull(
     costOf(
-      [...builtinCostFormulas, userCostFormula],
+      builtinCostFormulas,
       target,
       { counts, pricing: mixed, capture: emptyCapture(), price: { input: 1, output: 1 } },
       true

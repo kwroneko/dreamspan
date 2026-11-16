@@ -179,7 +179,8 @@ describe("streaming through OpenRouter's Chat Completions", () => {
       const done = events.at(-1)!
       if (done.type !== "done") return assert.fail("no done event")
       // 1000 × $2/M + 100 × $10/M
-      assert.strictEqual(done.cost?.formula, "builtin")
+      // Priced from the model list's own price (PRICES §6: `list:<fetched at>`).
+      assert.match(done.cost!.formula, /^list:\d+$/)
       assert.closeTo(done.cost!.amount, 0.003, 1e-12)
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
@@ -280,7 +281,7 @@ describe("a model pinned to one OpenRouter provider", () => {
       const { reply, settled } = yield* pinned((res) => json(res, 200, priced), { gate: true })
       const done = yield* reply
       // 1000 × $0.5/M + 100 × $1/M, not the model's $2/M and $10/M (0.003).
-      assert.strictEqual(done.cost?.formula, "builtin")
+      assert.match(done.cost!.formula, /^list:endpoints:\d+$/)
       assert.closeTo(done.cost!.amount, 0.0006, 1e-12)
       assert.strictEqual((yield* settled).list.length, 2)
     }).pipe(Effect.scoped, Effect.provide(pinnedLayer()))
@@ -589,9 +590,10 @@ describe("provider quirks", () => {
         output: 7,
         reasoning: null
       })
-      // Catalog price for claude-sonnet-5-5: $2 in, $10 out, $0.20 read, $2.50 write (5 min), long writes at 2× input.
-      assert.strictEqual(done.cost?.formula, "builtin")
-      assert.closeTo(done.cost!.amount, (10 * 2 + 90 * 0.2 + 15 * 2.5 + 5 * 4 + 7 * 10) / 1e6, 1e-12)
+      // Built-in price for claude-sonnet-5-5 (Anthropic's page, over pi-ai's $0.20 read): $2 in, $10 out,
+      // $0.10 read, $2.50 write (5 min), $4 write (1 h).
+      assert.match(done.cost!.formula, /^builtin:pi-ai@/)
+      assert.closeTo(done.cost!.amount, (10 * 2 + 90 * 0.1 + 15 * 2.5 + 5 * 4 + 7 * 10) / 1e6, 1e-12)
       const sent = server.requests().find((r) => r.path.startsWith("/v1/messages"))!
       assert.strictEqual(sent.headers["x-api-key"], "sk-ant-test")
     }).pipe(Effect.scoped, Effect.provide(layer()))
@@ -1632,9 +1634,12 @@ describe("provider registry", () => {
       )
       assert.deepStrictEqual(yield* costOfRun, { amount: 1, currency: "EUR", formula: "flat-fee" })
       yield* Scope.close(flat, Exit.void)
-      // Without the provider's figure, the price table prices it: 100 in, 5 out.
+      // Without the provider's figure, the model list's price prices it: 100 in, 5 out.
       yield* registry.costs.disable("reported")
-      assert.deepStrictEqual(yield* costOfRun, { amount: 0.00011, currency: "USD", formula: "builtin" })
+      const listed = (yield* costOfRun) as { amount: number; currency: string; formula: string }
+      assert.closeTo(listed.amount, 0.00011, 1e-15)
+      assert.strictEqual(listed.currency, "USD")
+      assert.match(listed.formula, /^list:\d+$/)
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 

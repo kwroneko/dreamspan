@@ -181,6 +181,7 @@ import {
   ModelOverrides,
   ModelUse,
   ModelUpstream,
+  PriceFeed,
   ProviderKind,
   ProxyMode
 } from "@rp/shared/providers.ts"
@@ -1668,6 +1669,19 @@ export class WriteOpsChat extends RpcGroup.make(
   Rpc.make("SetModelEndpoints", {
     payload: { userId: UserId, modelId: ModelId, endpoints: ModelEndpoints },
     success: Model,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Stores what a connection's price endpoint said (PRICES §4.7), by model key: each named model's
+   * feed is replaced, and a null feed removed (the list no longer names the model).
+   */
+  Rpc.make("SetModelPriceFeeds", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      feeds: Schema.Array(Schema.Struct({ key: Schema.String, feed: Schema.NullOr(PriceFeed) }))
+    },
+    success: Schema.Struct({ updated: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SetModelHidden", {

@@ -6,6 +6,7 @@ import type { ModelUpstream } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
 import { documentedCachePolicy } from "./cachePolicy.ts"
 import type { ListedModel } from "./modelLists.ts"
+import { supplementPrice } from "./prices/index.ts"
 import type { Catalog, ProviderKindEntry } from "./registry.ts"
 
 /** Loaders for pi-ai's per-provider catalogs, by pi provider id. */
@@ -68,6 +69,22 @@ const upstreamFromCatalog = (entry: Model<Api>, sameApi: boolean): ModelUpstream
 }
 
 /**
+ * A listed model's price and where it came from (PRICES §3.1): the list's own price, else the
+ * built-in table (our supplement replacing pi-ai's entry whole, else pi-ai's catalog).
+ */
+const pricedFrom = (
+  kind: ProviderKindEntry,
+  model: ListedModel,
+  catalog: ModelUpstream["price"]
+): Pick<ModelUpstream, "price" | "priceFrom"> => {
+  // A model already described once (a kind's lister applies this too) keeps the built-in mark.
+  if (model.upstream.price !== undefined && model.upstream.priceFrom !== "builtin")
+    return { price: model.upstream.price, priceFrom: "list" }
+  const table = supplementPrice({ provider: kind.piProvider }, model.key, Date.now()) ?? catalog
+  return table === undefined ? {} : { price: table, priceFrom: "builtin" }
+}
+
+/**
  * Listed models merged over what the kind's catalog knows: the list's own fields win,
  * and the catalog fills the rest (price, thinking levels, compat).
  */
@@ -75,7 +92,7 @@ export const withCatalog = (kind: ProviderKindEntry, listed: ReadonlyArray<Liste
   Effect.forEach(listed, (model) =>
     Effect.promise(() => catalogEntry(kind, model.key)).pipe(
       Effect.map((found): ListedModel => {
-        if (!found) return model
+        if (!found) return { key: model.key, upstream: { ...model.upstream, ...pricedFrom(kind, model, undefined) } }
         const fromCatalog = upstreamFromCatalog(found.entry, found.sameApi)
         const fields = Object.keys(fromCatalog).filter(
           (field) => field !== "price" && model.upstream[field as keyof ModelUpstream] === undefined
@@ -85,6 +102,7 @@ export const withCatalog = (kind: ProviderKindEntry, listed: ReadonlyArray<Liste
           upstream: {
             ...fromCatalog,
             ...model.upstream,
+            ...pricedFrom(kind, model, fromCatalog.price),
             ...(fields.length
               ? { catalog: { catalog: "pi-ai", label: "pi-ai's catalog", match: found.entry.id, fields } }
               : {})

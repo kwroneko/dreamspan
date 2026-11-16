@@ -104,7 +104,12 @@ export const ProviderSettings = Schema.Struct({
    */
   cacheMarker: Schema.optionalKey(Schema.Literal("prompt_cache_breakpoint")),
   /** Seconds without a byte from the provider before a request fails as "no response". Unset: DEFAULT_IDLE_TIMEOUT_S. */
-  idleTimeoutS: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)))
+  idleTimeoutS: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+  /**
+   * Asks the connection's own server for its prices (`GET {base}/v1/prices`, spec/PRICES.md §4)
+   * when models are refreshed. Off unless the user turns it on: nothing is sent otherwise.
+   */
+  priceEndpoint: Schema.optionalKey(Schema.Boolean)
 })
 export type ProviderSettings = typeof ProviderSettings.Type
 
@@ -213,7 +218,14 @@ export const Price = Schema.Struct({
   input: Schema.Number,
   output: Schema.Number,
   cacheRead: Schema.optionalKey(Schema.Number),
+  /** The (short-TTL) cache write rate. */
   cacheWrite: Schema.optionalKey(Schema.Number),
+  /** The long-TTL cache write rate (Anthropic's 1 h, OpenAI's 12 h). Absent: twice `input`. */
+  cacheWriteLong: Schema.optionalKey(Schema.Number),
+  /** A flat price per request, in `currency`, not per million tokens. */
+  perRequest: Schema.optionalKey(Schema.Number),
+  /** A label for the amounts; nothing converts. Absent: USD. */
+  currency: Schema.optionalKey(Schema.String),
   /** Total input above this many tokens is billed at the tier's rates, for the whole request. */
   tiers: Schema.optionalKey(
     Schema.Array(
@@ -222,7 +234,8 @@ export const Price = Schema.Struct({
         input: Schema.Number,
         output: Schema.Number,
         cacheRead: Schema.optionalKey(Schema.Number),
-        cacheWrite: Schema.optionalKey(Schema.Number)
+        cacheWrite: Schema.optionalKey(Schema.Number),
+        cacheWriteLong: Schema.optionalKey(Schema.Number)
       })
     )
   )
@@ -330,6 +343,20 @@ export const endpointsStale = (endpoints: ModelEndpoints | undefined, now: numbe
   endpoints === undefined ||
   now - endpoints.fetchedAt > (endpoints.error === undefined ? ENDPOINTS_TTL_MS : ENDPOINTS_RETRY_MS)
 
+/**
+ * A model's price from its connection's own price endpoint (spec/PRICES.md §4.7), when the user
+ * opted in. `price` is null when the server lists the model without a known input or output rate.
+ */
+export const PriceFeed = Schema.Struct({
+  fetchedAt: Schema.Number,
+  validUntil: Schema.optionalKey(Schema.Number),
+  etag: Schema.optionalKey(Schema.String),
+  currency: Schema.String,
+  price: Schema.NullOr(Price),
+  available: Schema.optionalKey(Schema.Boolean)
+})
+export type PriceFeed = typeof PriceFeed.Type
+
 /** What pi-ai's catalog and the upstream list report. Rewritten by every refresh. */
 export const ModelUpstream = Schema.Struct({
   ...capabilityFields,
@@ -341,7 +368,14 @@ export const ModelUpstream = Schema.Struct({
   /** Shims for some of the router's upstreams, applied when the routing pins one. */
   routes: Schema.optionalKey(Schema.Array(RouteRule)),
   /** OpenRouter's endpoint list for the model, fetched when its routing pins one provider. Kept across refreshes. */
-  endpoints: Schema.optionalKey(ModelEndpoints)
+  endpoints: Schema.optionalKey(ModelEndpoints),
+  /**
+   * Where `price` came from (spec/PRICES.md §3.1): the provider's model list, or the built-in table.
+   * Absent on models stored before it was recorded: treated as built-in.
+   */
+  priceFrom: Schema.optionalKey(Schema.Literals(["list", "builtin"])),
+  /** The connection's price endpoint's price for the model. Kept across refreshes; rewritten only by a price fetch. */
+  priceFeed: Schema.optionalKey(PriceFeed)
 })
 export type ModelUpstream = typeof ModelUpstream.Type
 

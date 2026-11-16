@@ -8,7 +8,8 @@ import { estimateContextTokens, estimateTextTokens } from "@earendil-works/pi-ai
 import type { Price } from "@rp/shared/providers.ts"
 import { type Cost, type TokenCounts, unknownCounts, type UsageSource } from "@rp/shared/usage.ts"
 import { Option, Predicate, Schema } from "effect"
-import type { CostFormula, RequestTarget } from "./registry.ts"
+import type { CostFormula, PriceSources, RequestTarget } from "./registry.ts"
+import { userCostFormula, userGeneralCostFormula } from "./userCosts.ts"
 
 /** What a request's raw provider events told us, beyond pi's normalized message. */
 export interface Capture {
@@ -200,9 +201,9 @@ export const finalCounts = (
 }
 
 /**
- * The built-in formula (PROVIDERS §9.3): multipliers per million tokens, with the tier
- * for the request's total input. Long cache writes are priced at twice the input rate,
- * Anthropic's rule, which pi-ai applies too; nobody else bills long writes.
+ * A rate table's cost (PROVIDERS §9.3, PRICES §3.3): multipliers per million tokens, with the tier
+ * for the request's total input, plus any flat per-request price. Long cache writes use the
+ * table's long-write rate, else twice the input rate (Anthropic's rule, which pi-ai applies too).
  */
 export const priceCost = (counts: TokenCounts, price: Price): number | null => {
   const { inputUncached, cacheRead, cacheWrite, output } = counts
@@ -223,10 +224,24 @@ export const priceCost = (counts: TokenCounts, price: Price): number | null => {
     (inputUncached * rates.input +
       read * rate(rates.cacheRead) +
       (write - long) * rate(rates.cacheWrite) +
-      long * rates.input * 2 +
+      long * (rates.cacheWriteLong ?? rates.input * 2) +
       output * rates.output) /
-    1e6
+      1e6 +
+    (price.perRequest ?? 0)
   )
+}
+
+/** The most a request of this size can cost at a rate table: every cache split and reachable tier. */
+const priceBound = (price: Price, inputTokens: number, outputTokens: number) => {
+  const rates = [price, ...(price.tiers ?? [])]
+  const input = Math.max(
+    ...rates.flatMap((r) => [r.input, r.cacheRead ?? 0, r.cacheWrite ?? 0, r.cacheWriteLong ?? r.input * 2])
+  )
+  const output = Math.max(...rates.map((r) => r.output))
+  return {
+    amount: (inputTokens * input + outputTokens * output) / 1e6 + (price.perRequest ?? 0),
+    currency: price.currency ?? "USD"
+  }
 }
 
 /** The cost to record: the first formula, newest registration first, that returns one. */
@@ -247,29 +262,62 @@ export const costOf = (
 }
 
 /**
- * The built-in formulas, registered oldest first (builtins.ts): the price table, then the
- * provider's own figure when it reports one, which reflects the actual route and any
- * discount and so is tried before the table.
+ * A formula over one price source. A caller that passes no `sources` (a plugin's own call) gets
+ * the built-in formula over `price`, as before sources were told apart.
  */
-export const builtinCostFormulas: ReadonlyArray<CostFormula> = [
-  {
-    id: "builtin",
+const tableFormula = (
+  id: string,
+  pick: (sources: PriceSources) => { readonly price: Price; readonly formula: string } | null,
+  legacy = false
+): CostFormula => {
+  const chosen = (input: { readonly price: Price | null; readonly sources?: PriceSources }) =>
+    input.sources !== undefined
+      ? pick(input.sources)
+      : legacy && input.price !== null
+        ? { price: input.price, formula: id }
+        : null
+  return {
+    id,
     appliesTo: () => true,
-    upperBound: ({ inputTokens, outputTokens, price }) => {
-      if (!price) return null
-      const rates = [price, ...(price.tiers ?? [])]
-      const input = Math.max(...rates.flatMap((r) => [r.input, r.cacheRead ?? 0, r.cacheWrite ?? 0, r.input * 2]))
-      const output = Math.max(...rates.map((r) => r.output))
-      return { amount: (inputTokens * input + outputTokens * output) / 1e6, currency: "USD" }
+    upperBound: ({ inputTokens, outputTokens, price, sources }) => {
+      const found = chosen({ price, ...(sources ? { sources } : {}) })
+      return found === null ? null : priceBound(found.price, inputTokens, outputTokens)
     },
-    cost: ({ counts, price }) => {
-      const amount = price === null ? null : priceCost(counts, price)
-      return amount === null ? null : { amount, currency: "USD" }
+    cost: (input) => {
+      const found = chosen(input)
+      const amount = found === null ? null : priceCost(input.counts, found.price)
+      return amount === null ? null : { amount, currency: found!.price.currency ?? "USD", formula: found!.formula }
     }
-  },
+  }
+}
+
+const at = (time: number | null) => (time === null ? "" : `:${time}`)
+
+/**
+ * The built-in formulas, registered oldest first (builtins.ts), so tried in the owner's order
+ * (PRICES §5.1, DESIGN §9): the user's price naming this connection; the provider's own charge;
+ * the connection's price endpoint; the provider's price list; the user's account-wide or
+ * per-type price; the built-in table.
+ */
+export const builtinCostFormulas: Array<CostFormula> = [
+  tableFormula(
+    "builtin",
+    (s) => (s.builtin ? { price: s.builtin.price, formula: `builtin:${s.builtin.version}` } : null),
+    true
+  ),
+  userGeneralCostFormula,
+  tableFormula("list", (s) =>
+    s.list
+      ? { price: s.list.price, formula: `list${s.list.endpoints ? ":endpoints" : ""}${at(s.list.fetchedAt)}` }
+      : null
+  ),
+  tableFormula("endpoint", (s) =>
+    s.endpoint ? { price: s.endpoint.price, formula: `endpoint:${s.endpoint.fetchedAt}` } : null
+  ),
   {
     id: "reported",
     appliesTo: () => true,
     cost: ({ capture }) => (capture.reportedCost === null ? null : { amount: capture.reportedCost, currency: "USD" })
-  }
+  },
+  userCostFormula
 ]

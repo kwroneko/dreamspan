@@ -1,5 +1,4 @@
 import { outputLimiters } from "./outputLimit.ts"
-import { userCostFormula } from "./userCosts.ts"
 import { openAICompletionsApi, openAIResponsesApi, anthropicMessagesApi, googleGenerativeAIApi } from "./sdk.ts"
 // The built-in provider kinds, request transforms and response observers, registered
 // through the provider registry exactly as a plugin's would be (spec/PLUGINS.md §3.1).
@@ -237,7 +236,7 @@ export const layer = Layer.effectDiscard(
       yield* registry.observers.register({ id: `usage:${api}`, appliesTo: (target) => target.api === api, observe })
     }
     // Cost formulas (PROVIDERS §9.3): the price table, then the provider's own figure.
-    for (const formula of [...builtinCostFormulas, userCostFormula]) yield* registry.costs.register(formula)
+    for (const formula of builtinCostFormulas) yield* registry.costs.register(formula)
     // Exact image token counts where the provider has an endpoint for them (ARCHITECTURE §6).
     for (const counter of builtinImageCounters) yield* registry.imageCounters.register(counter)
     // The model's own text tokenizer for the editors' counts (ARCHITECTURE §6 "Text tokens").
