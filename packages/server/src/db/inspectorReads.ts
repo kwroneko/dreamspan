@@ -504,6 +504,14 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           output: number | null
           reasoning: number | null
           usage_source: RequestFigures["usageSource"]
+          input_uncached: number | null
+          cache_read: number | null
+          cache_write: number | null
+          cache_write_long: number | null
+          cost: number | null
+          cost_currency: string | null
+          cost_formula: string | null
+          reported_cost: number | null
         }>`
           WITH RECURSIVE chain(root, id) AS (
             SELECT v.id, v.id FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
@@ -514,7 +522,9 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             SELECT chain.root, v.source_version_id FROM chain JOIN versions v ON v.id = chain.id
             WHERE v.source_version_id IS NOT NULL
           )
-          SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source
+          SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source,
+            q.input_uncached, q.cache_read, q.cache_write, q.cache_write_long, q.cost, q.cost_currency, q.cost_formula,
+            q.reported_cost
           FROM chain JOIN llm_requests q INDEXED BY llm_requests_version ON q.version_id = chain.id
           WHERE q.purpose IN ('generation', 'workshop') AND q.owner_user_id = ${userId}
           ORDER BY chain.root, q.started_at, q.id`
@@ -528,7 +538,17 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             endedAt: row.ended_at,
             output: row.output,
             reasoning: row.reasoning,
-            usageSource: row.usage_source
+            usageSource: row.usage_source,
+            inputUncached: row.input_uncached,
+            cacheRead: row.cache_read,
+            cacheWrite: row.cache_write,
+            cacheWriteLong: row.cache_write_long,
+            // The schema keeps cost, currency and formula set together.
+            cost:
+              row.cost === null
+                ? null
+                : { amount: row.cost, currency: row.cost_currency ?? "", formula: row.cost_formula ?? "" },
+            reportedCost: row.reported_cost
           })
           byVersion.set(row.root, list)
         }
