@@ -11,8 +11,15 @@ const request = (overrides: Partial<RequestFigures>): RequestFigures => ({
   output: 40,
   reasoning: null,
   usageSource: "reported",
+  inputUncached: 20,
+  cacheRead: 100,
+  cacheWrite: 0,
+  cacheWriteLong: 0,
+  cost: null,
+  reportedCost: null,
   ...overrides
 })
+const usd = (amount: number, formula = "builtin") => ({ amount, currency: "USD", formula })
 
 describe("version metrics", () => {
   it("sums ended requests and keeps the last apart", () => {
@@ -53,5 +60,48 @@ describe("version metrics", () => {
     const metrics = versionMetricsOf(id, [request({ reasoning: 2 }), request({ firstTokenAt: null, reasoning: null })])
     expect(metrics.streamingMs).toBeNull()
     expect(metrics.reasoning).toBeNull()
+  })
+
+  it("sums the ended requests' costs and input counts, the running one left out", () => {
+    const metrics = versionMetricsOf(id, [
+      request({ cost: usd(0.002, "reported"), reportedCost: 0.002, cacheWrite: 30, cacheWriteLong: 10 }),
+      request({ cost: usd(0.0005), usageSource: "estimated" }),
+      request({ status: "running", endedAt: null, cost: null, inputUncached: null })
+    ])
+    expect(metrics).toMatchObject({
+      costs: [{ amount: 0.0025, currency: "USD" }],
+      costUnknown: 0,
+      costSources: ["reported", "builtin"],
+      costEstimated: true,
+      reportedCost: 0.002,
+      reportedRequests: 1,
+      inputUncached: 40,
+      cacheRead: 200,
+      cacheWrite: 30,
+      cacheWriteLong: 10
+    })
+  })
+
+  it("never adds up currencies, counts requests without a cost, and keeps unknown counts unknown", () => {
+    const metrics = versionMetricsOf(id, [
+      request({ cost: usd(0.01) }),
+      request({ cost: { amount: 2, currency: "EUR", formula: "user:r1:3" }, cacheRead: null }),
+      request({ cost: usd(0.02) }),
+      request({ cost: null })
+    ])
+    expect(metrics.costs).toEqual([
+      { amount: 0.03, currency: "USD" },
+      { amount: 2, currency: "EUR" }
+    ])
+    expect(metrics.costUnknown).toBe(1)
+    expect(metrics.costSources).toEqual(["builtin", "user:r1:3"])
+    expect(metrics.cacheRead).toBeNull()
+    expect(metrics.inputUncached).toBe(80)
+    // A provider-reported cost from estimated counts is still the provider's.
+    expect(versionMetricsOf(id, [request({ cost: usd(1, "reported"), usageSource: "estimated" })]).costEstimated).toBe(
+      false
+    )
+    const none = versionMetricsOf(id, [request({ status: "running", endedAt: null })])
+    expect([none.costs, none.costUnknown, none.inputUncached, none.reportedCost]).toEqual([[], 0, null, null])
   })
 })

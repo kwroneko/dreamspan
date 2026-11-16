@@ -14,7 +14,13 @@ const metrics = (running: boolean) =>
       endedAt: running ? null : 1000,
       output: running ? null : 20,
       reasoning: null,
-      usageSource: running ? "none" : "reported"
+      usageSource: running ? "none" : "reported",
+      inputUncached: null,
+      cacheRead: null,
+      cacheWrite: null,
+      cacheWriteLong: null,
+      cost: null,
+      reportedCost: null
     }
   ])
 afterEach(() => vi.useRealTimers())
