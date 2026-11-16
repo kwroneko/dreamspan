@@ -962,6 +962,10 @@ export class StImports extends Context.Service<
               session.report.count(progress.countAs, "failed")
               return yield* new StImportFailed({ reason: ST_UNPLANNED_CHAT_MESSAGE })
             }
+            // The file's first new message, as `writeBatch` finds it once written: what a new
+            // branch's state is diffed from (`inheritedState`), known before the commit places it.
+            if (plan.added > 0 && progress.firstAddedAt === null)
+              progress.firstAddedAt = prepared.index + plan.slotIds.length - plan.added
             fields = {
               ...fields,
               cached: planned.unchangedSlots ?? [],
@@ -1370,6 +1374,7 @@ export class StImports extends Context.Service<
           progress.firstSlot = progress.index > 0 ? stIndexSlot(0) : null
           progress.throughSlot = progress.hiddenRun > 0 ? stIndexSlot(progress.hiddenRun - 1) : null
           const change = stateChangeOf(session, progress)
+          const inherited = inheritedState(session, progress)
           const own = progress.target
           const committed = yield* writer.StImportCommitChat({
             userId: user.id,
@@ -1398,12 +1403,13 @@ export class StImports extends Context.Service<
               hiddenRun: progress.hiddenRun,
               events: change.events,
               notes: datedNotes(session, progress, change),
-              previousNotes: progress.prevNotes,
+              previousNotes: inherited.notes,
               removedNotes: change.removedNotes,
               lastMessageAt: progress.lastMessageAt,
               sha256: stPartsHash(progress.partHashes),
               stateJson: JSON.stringify(change.state),
               prevStateJson: JSON.stringify(progress.prevState),
+              ...(inherited.state === progress.prevState ? {} : { baseSummary: inherited.state?.summary ?? null }),
               fork: progress.fork,
               stCurrent: progress.stCurrent
             },

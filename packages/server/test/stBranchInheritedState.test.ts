@@ -5,10 +5,14 @@
 // it. Before, such a branch kept the grandparent's lorebook, variables and note when its own
 // matched its parent's, and a persona the parent switched to later stayed in its cast as a
 // character. Owner-shaped synthetic data at scale: stBranchInheritedStateScale.test.ts.
+//
+// A confirmed re-import (the check first, then the import held to it) that brings a branch
+// file new since the first import does the same: its state is diffed where it leaves its
+// parent, though the transaction that writes it computes the state before placing messages.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { client, serverLayer, testConfig } from "./support/config.ts"
-import { checkBranchStates } from "./support/branchStates.ts"
+import { checkBranchStates, checkReimportedBranchStates } from "./support/branchStates.ts"
 import { branchStateFolder, type FileState, NOTES, WORLDS } from "./support/stBranchStates.ts"
 import { card, encode, header, jsonl, message } from "./support/stFolder.ts"
 import { png, worldInfo } from "./formats/support.ts"
@@ -142,6 +146,21 @@ describe("a branch file's inherited state", () => {
         assert.isFalse([...answers.values()].some((r) => r.outcome === "failed"))
         yield* checkBranchStates(yield* client(), folder.states)
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig()))),
+    600_000
+  )
+
+  it.live(
+    "is what applies where it leaves its parent: a hand-made family's files new at a confirmed re-import",
+    () => checkReimportedBranchStates(handMade()).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig()))),
+    180_000
+  )
+
+  it.live(
+    "is what applies where it leaves its parent: generated branch files new at a confirmed re-import",
+    () =>
+      checkReimportedBranchStates(
+        branchStateFolder({ messages: 400, switchEvery: 100, singleBranches: 15, groupBranches: 25 })
+      ).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig()))),
     600_000
   )
 })

@@ -1,14 +1,16 @@
 // What an import must leave at the tip of every chat file's fork: the file's own variables,
 // lorebook, author's note and persona, whatever its ancestors had where it leaves them
-// (stBranchStates.ts). Shared by stBranchInheritedState.test.ts and its scale run.
+// (stBranchStates.ts), after a first import or a confirmed re-import that brings branch files
+// new since. Shared by stBranchInheritedState.test.ts and its scale run.
 import { assert } from "@effect/vitest"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { Reader } from "../../src/db/Database.ts"
-import type { client } from "./config.ts"
+import { client } from "./config.ts"
 import { INN, KAREN, KIM, RHEE } from "./stPersonaSwitches.ts"
 import type { FileState } from "./stBranchStates.ts"
+import { importStFolder } from "./stUpload.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -74,4 +76,40 @@ export const checkBranchStates = (api: Api, states: ReadonlyMap<string, FileStat
       )
       for (const id of characters) assert.isFalse(personaIds.has(id), `${where}: a persona is a character`)
     }
+  })
+
+/**
+ * The folder without its nested leaf branch files (branches of branches no file branches
+ * from), as a first import found it before ST gained them; `later`: those left out.
+ */
+const withoutNestedLeaves = (files: ReadonlyMap<string, Uint8Array>, states: ReadonlyMap<string, FileState>) => {
+  const parents = new Set([...states.values()].flatMap((s) => (s.parent === null ? [] : [s.parent])))
+  const later = new Set(
+    [...states].flatMap(([path, s]) =>
+      s.parent !== null && states.get(s.parent)?.parent != null && !parents.has(path) ? [path] : []
+    )
+  )
+  return { first: new Map([...files].filter(([path]) => !later.has(path))), later: [...later] }
+}
+
+/**
+ * Imports the folder without its nested leaf branch files, then the whole folder as a confirmed
+ * re-import (checked first, then imported held to the check), and checks every file's state.
+ */
+export const checkReimportedBranchStates = (folder: {
+  readonly files: ReadonlyMap<string, Uint8Array>
+  readonly states: ReadonlyMap<string, FileState>
+}) =>
+  Effect.gen(function* () {
+    const { first, later } = withoutNestedLeaves(folder.files, folder.states)
+    const leaving = later.map((path) => folder.states.get(path)!)
+    assert.isAbove(leaving.filter((s) => s.sharedPart).length, 0, "some new files leave in a shared part")
+    assert.isAbove(leaving.filter((s) => !s.sharedPart).length, 0, "some in their parent's own part")
+    const before = yield* importStFolder(first)
+    assert.isFalse([...before.answers.values()].some((r) => r.outcome === "failed"))
+    const { answers } = yield* importStFolder(folder.files, { checked: true })
+    for (const path of later) assert.include(["added", "updated"], answers.get(path)?.outcome, path)
+    assert.isFalse([...answers.values()].some((r) => r.outcome === "failed" || r.outcome === "skipped"))
+    yield* checkBranchStates(yield* client(), folder.states)
+    return leaving
   })
