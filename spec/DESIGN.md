@@ -1114,6 +1114,11 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 
 - **[D] Decided (owner, 2026-11-13, calltool1):** for providers without cache-safe native loading, asked "build the dispatcher for those providers, or leave them on every tool from the start?", the owner answered "Ok, build it." TOOL-LOADING §11.1 option (b) is Decided; the rest retains its existing markings. **Built; obsolete as an implementation proposal:** fixed `call_tool`, canonical transcripts and validation, measured defaults and an untested per-connection override (ARCHITECTURE §16, TOOL-LOADING §15).
 
+### 7.8 MCP servers
+
+- **[D]** (owner, 2026-11-16, relayed by the coordinator) MCP support is essential, for both agentic RP (story chats with tools) and the workshop, and each MCP connection can be enabled separately for each. Nothing of it is built yet.
+- **[P]** (mcpspec, 2026-11-16) The design is [MCP.md](MCP.md), as deltas from reference-harness `latest` (`src/mcp/`, `src/tools/side-effects.ts`) and from the built agent machinery: per-user connections in Settings → MCP servers, optionally shared by an admin; Streamable HTTP and SSE, local programs (stdio) for admins only where the instance allows them from outside the app, keys as host-bound credentials and sign-in with the server; account defaults for Stories and Workshops, overridden per branch in This chat and per workshop in the capability chip, with a per-tool allow list; nothing sent to a server before a use the user enabled; `readOnlyHint` tools as `read`, everything else `outside`; stories offered only `read` tools; workshops asking before `outside` calls by default; never re-running a non-read call silently; results through the data-only boundary; a new MCP call ledger. Its §15 holds the questions for the owner. It promotes nothing here.
+
 ## 8. LCM (hierarchical summarization)
 
 - **[D], 2026-11-03:** “summarization should be able to set its own preset, in addition to being able to set its own model.” (owner). **Built (summarypreset; obsolete as an implementation requirement):** account defaults and per-chat overrides select the current preset, a specific preset, or instruction and messages only; unavailable specific presets fall back to the current one with a warning. ARCHITECTURE §16 records the implementation.
