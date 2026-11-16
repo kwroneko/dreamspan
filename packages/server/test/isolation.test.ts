@@ -4817,6 +4817,11 @@ const storage: Record<
       yield* writer.StImportStage({ userId: owner.user.id, lease: theirs.importId, path, seq: 0, batchJson: null })
       yield* writer.StImportStage({ userId: actor.user.id, lease: mine.importId, path, seq: 0, batchJson: null })
     }),
+  StImportGlobalRegex: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(writer.StImportGlobalRegex({ userId: actor.user.id, importId, scripts: [] }), "ImportLeaseLost")
+    }),
   StImportSummarySettings: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
       const { importId } = yield* owner.api.StartStImport({ unsupported: [] })

@@ -814,7 +814,7 @@ export const readRegex = (
   raw: unknown,
   r: ReportBuilder,
   base: ReadonlyArray<string | number> = ["extensions", "regex_scripts"],
-  owner: "preset" | "card" = "preset"
+  owner: "preset" | "card" | "global" = "preset"
 ): Array<RegexScript> => {
   if (raw === undefined || raw === null) return []
   if (!Array.isArray(raw)) {
@@ -874,7 +874,9 @@ export const readRegex = (
     r.add(
       "info",
       "preset.regex_imported",
-      `${scripts.size} regex scripts were imported as data. As in ST, none runs until you allow this ${owner}'s scripts.`,
+      owner === "global"
+        ? `${scripts.size} global regex scripts were imported. As in ST, they run in every chat, except those switched off.`
+        : `${scripts.size} regex scripts were imported as data. As in ST, none runs until you allow this ${owner}'s scripts.`,
       base
     )
   return [...scripts.values()]

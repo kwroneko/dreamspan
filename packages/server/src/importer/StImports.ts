@@ -1822,6 +1822,15 @@ export class StImports extends Context.Service<
               prompt: settings.summary.prompt,
               settings: JSON.stringify(settings.summary)
             })
+            if (settings.globalRegex !== undefined && settings.globalRegex.length > 0) {
+              // Only into an empty list: scripts the account already has are never replaced.
+              const written = yield* writer.StImportGlobalRegex({
+                userId: user.id,
+                importId,
+                scripts: settings.globalRegex
+              })
+              for (const _ of settings.globalRegex) session.report.count("regex", written ? "added" : "skipped")
+            }
             session.settings = settings
             session.settingsModifiedAt = request.modifiedAt ?? session.importedAt
             session.report.selectedPreset =

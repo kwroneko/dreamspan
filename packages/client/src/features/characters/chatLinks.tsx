@@ -37,8 +37,8 @@ function useCardChats(entityId: EntityId) {
 /** Registered on every card header; the count is over chats, independent of the viewed branch. */
 export function CardChatsLink({ entityId, label }: CardSurfaceContext) {
   const { search, open } = useCardChats(entityId)
-  // ShellCard.card.chats counts branches for characters. The card list's total deduplicates
-  // chats and includes recorded participation on any branch, without transferring its rows.
+  // The card list's total deduplicates chats and includes recorded participation on any
+  // branch, without transferring its rows; ShellCard.card.chats (the tiles) counts the same.
   const count = useShellForks({
     entity: entityId,
     chat: null,

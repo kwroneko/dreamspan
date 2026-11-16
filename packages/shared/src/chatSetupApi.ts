@@ -258,7 +258,10 @@ export const ShellForksView = Schema.Struct({
   chat: Schema.NullOr(ChatId),
   /** Only these chats (a list's rows), when given. */
   chats: Schema.optionalKey(Schema.Array(ChatId).check(Schema.isMaxLength(500))),
-  /** Matched against each fork's name and its cast's names, ignoring case. */
+  /**
+   * Matched against each fork's name and its cast's names, ignoring case; within one `chat`,
+   * every word against the branch's own name and its last message (`branchMatches`).
+   */
   search: Schema.String,
   sort: ShellForkSort,
   /** Chats tab choices; other surfaces retain their existing ordering. */

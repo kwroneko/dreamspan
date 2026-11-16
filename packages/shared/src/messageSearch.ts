@@ -6,25 +6,66 @@
 import { Schema } from "effect"
 import { ChatId, EntityId, ForkId, ForkSplit, SlotId, VersionId } from "./chat.ts"
 
-/** What's typed: words, each found as the start of a word in a message, in any order. */
+/**
+ * What's typed: words, each found as the start of a word in a message, in any order; words in
+ * quotes, a phrase found exactly as written.
+ */
 export const MessageQuery = Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(200))
 
 /** Words at most; the rest of a long query is left out. */
 const MAX_WORDS = 8
 
+/** A text's words as the full-text index splits it (letters and digits; everything else separates), lower case. */
+const tokens = (text: string): ReadonlyArray<string> =>
+  text
+    .normalize("NFC")
+    .toLowerCase()
+    .match(/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu) ?? []
+
 /**
- * The words of a query, as the full-text index splits text (letters and digits; everything
- * else separates), lower case, without repeats.
+ * A query's parts: phrases in quotes ("…" or “…”; an unclosed quote runs to the end), each its
+ * words in order, found exactly as written; and the words outside them in the order typed,
+ * without repeats, each found as the start of a word. At most MAX_WORDS words in all.
  */
-export const queryWords = (query: string): ReadonlyArray<string> =>
-  [
-    ...new Set(
-      query
-        .normalize("NFC")
-        .toLowerCase()
-        .match(/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu) ?? []
-    )
-  ].slice(0, MAX_WORDS)
+export interface ParsedQuery {
+  readonly phrases: ReadonlyArray<ReadonlyArray<string>>
+  readonly words: ReadonlyArray<string>
+}
+
+export const parseQuery = (query: string): ParsedQuery => {
+  const phrases: Array<Array<string>> = []
+  const words: Array<string> = []
+  let budget = MAX_WORDS
+  const parts = query.split(/["“”„]/)
+  parts.forEach((part, i) => {
+    const found = tokens(part)
+    if (i % 2 === 1) {
+      const phrase = found.slice(0, budget)
+      if (phrase.length > 0) phrases.push(phrase)
+      budget -= phrase.length
+    } else {
+      const fresh = found.filter((word, k) => !words.includes(word) && found.indexOf(word) === k)
+      words.push(...fresh.slice(0, budget))
+      budget -= Math.min(budget, fresh.length)
+    }
+  })
+  return { phrases, words }
+}
+
+/** Every word a query looks for, without repeats: what marks a found message's text. */
+export const queryWords = (query: string): ReadonlyArray<string> => {
+  const { phrases, words } = parseQuery(query)
+  return [...new Set([...phrases.flat(), ...words])]
+}
+
+/**
+ * The phrase a found message is shown around: the query's first quoted phrase, else its words
+ * in the order typed when there are two or more (a match with them side by side ranks first).
+ */
+export const focusPhrase = (query: string): ReadonlyArray<string> | null => {
+  const { phrases, words } = parseQuery(query)
+  return phrases[0] ?? (words.length >= 2 ? words : null)
+}
 
 /** A text's letters with case and accents folded away, as the index compares them. */
 const fold = (char: string) => char.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase()
@@ -34,14 +75,8 @@ export interface Mark {
   readonly length: number
 }
 
-/**
- * Where `words` start words of `text` (UTF-16 offsets into it), earliest first and not
- * overlapping: each word matches where a word of the text starts with it, ignoring case and
- * accents, as the index matched it.
- */
-export const markWords = (text: string, words: ReadonlyArray<string>): ReadonlyArray<Mark> => {
-  if (words.length === 0) return []
-  // Folded text with each folded unit's offset in the original.
+/** Folded text with each folded unit's offset in the original (one past the end last). */
+const foldText = (text: string) => {
   let folded = ""
   const origin: Array<number> = []
   for (let i = 0; i < text.length;) {
@@ -53,9 +88,47 @@ export const markWords = (text: string, words: ReadonlyArray<string>): ReadonlyA
     i += char.length
   }
   origin.push(text.length)
+  return { folded, origin }
+}
+
+const isWord = /[\p{L}\p{N}]/u
+
+/**
+ * Where `phrase` first stands in `text` (a UTF-16 offset), its words side by side in order,
+ * each the start of a word of the text with only spaces or punctuation between; null without.
+ */
+export const findPhrase = (text: string, phrase: ReadonlyArray<string>): number | null => {
+  if (phrase.length === 0) return null
+  const { folded, origin } = foldText(text)
+  const targets = phrase.map(fold)
+  // The text's words: where each starts and ends in the folded text.
+  const starts: Array<number> = []
+  const ends: Array<number> = []
+  for (let i = 0; i < folded.length; i++) {
+    if (!isWord.test(folded[i]!) || (i > 0 && isWord.test(folded[i - 1]!))) continue
+    let end = i + 1
+    while (end < folded.length && isWord.test(folded[end]!)) end++
+    starts.push(i)
+    ends.push(end)
+    i = end - 1
+  }
+  for (let w = 0; w + targets.length <= starts.length; w++) {
+    if (targets.every((target, k) => folded.slice(starts[w + k]!, ends[w + k]!).startsWith(target)))
+      return origin[starts[w]!]!
+  }
+  return null
+}
+
+/**
+ * Where `words` start words of `text` (UTF-16 offsets into it), earliest first and not
+ * overlapping: each word matches where a word of the text starts with it, ignoring case and
+ * accents, as the index matched it.
+ */
+export const markWords = (text: string, words: ReadonlyArray<string>): ReadonlyArray<Mark> => {
+  if (words.length === 0) return []
+  const { folded, origin } = foldText(text)
   const targets = words.map(fold)
   const marks: Array<Mark> = []
-  const isWord = /[\p{L}\p{N}]/u
   for (let i = 0; i < folded.length; i++) {
     if (i > 0 && isWord.test(folded[i - 1]!)) continue
     if (!isWord.test(folded[i]!)) continue
@@ -84,11 +157,19 @@ export const Excerpt = Schema.Struct({
 })
 export type Excerpt = typeof Excerpt.Type
 
-/** The part of `text` around its first match, with the matches in it marked; its start without one. */
-export const excerpt = (text: string, words: ReadonlyArray<string>, length = EXCERPT_LENGTH): Excerpt => {
+/**
+ * The part of `text` around its first match, with the matches in it marked; its start without
+ * one. With `phrase`, around where that phrase first stands, when it does.
+ */
+export const excerpt = (
+  text: string,
+  words: ReadonlyArray<string>,
+  length = EXCERPT_LENGTH,
+  phrase: ReadonlyArray<string> | null = null
+): Excerpt => {
   const flat = text.replace(/\s+/g, " ")
   const marks = markWords(flat, words)
-  const first = marks[0]?.at ?? 0
+  const first = (phrase === null ? null : findPhrase(flat, phrase)) ?? marks[0]?.at ?? 0
   let start = Math.max(0, first - Math.floor(length / 3))
   // Start at a word, unless that's far back.
   if (start > 0) {
@@ -147,8 +228,11 @@ export const MessageHit = Schema.Struct({
 })
 export type MessageHit = typeof MessageHit.Type
 
-/** Where the next page starts: below this version (newest first). */
-export const MessageCursor = Schema.Struct({ before: Schema.Int })
+/**
+ * Where the next page starts: below this version (newest first). `phase` "words": among the
+ * messages that have the words apart, after every one that has them side by side.
+ */
+export const MessageCursor = Schema.Struct({ before: Schema.Int, phase: Schema.optionalKey(Schema.Literal("words")) })
 export type MessageCursor = typeof MessageCursor.Type
 
 export const MessageSearchPage = Schema.Struct({

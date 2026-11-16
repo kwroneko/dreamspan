@@ -68,13 +68,15 @@ describe("message search", () => {
       for (const query of [
         '"École"',
         "e\u0301cole",
-        '"東京"*',
+        // Quotes make a phrase of whole words; the index keeps 東京の灯台 as one word, so 東京 is its start.
+        "東京*",
+        '東京 "*"',
         "AND OR NEAR",
         "café + école - 東京",
         "école ".repeat(28).trim()
       ])
         assert.lengthOf((yield* f.search(query)).hits, 1, query)
-      for (const query of ["🌊🌊", "***", '""']) assert.lengthOf((yield* f.search(query)).hits, 0, query)
+      for (const query of ["🌊🌊", "***", '""', '"東京"']) assert.lengthOf((yield* f.search(query)).hits, 0, query)
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 
@@ -231,6 +233,70 @@ describe("message search", () => {
       assert.strictEqual(pages, 3)
       assert.lengthOf(new Set(seen), 45)
       assert.strictEqual(seen[0], "Tide number 44.")
+    }).pipe(Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.effect("ranks words side by side above the same words apart, and quotes find only the phrase", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      let parent = f.mainOnly.slotId
+      const add = (content: string) =>
+        Effect.map(
+          f.writer.AppendMessage({
+            userId: f.userId,
+            chatId: f.chatId,
+            forkId: f.main,
+            parentSlotId: parent,
+            branch: false,
+            version: said(content),
+            commitDraft: null
+          }),
+          (slot) => {
+            parent = slot.slotId
+            return slot.slotId
+          }
+        )
+      // Oldest first: the phrase, then newer messages with the words apart.
+      const phrase = yield* add(
+        `${"Rain on the glass. ".repeat(12)}The note on the desk: her handwriting was unmistakable, even now.`
+      )
+      const prefix = yield* add("Their handwritings were unmistakably hers.")
+      const apart = yield* add("The handwriting was smudged, but the seal was unmistakable.")
+      const newest = yield* add("Unmistakable, he said: it was the handwriting of a stranger.")
+      const slots = (page: MessageSearchPage) => page.hits.map((h) => h.slotId)
+
+      const ranked = yield* f.search("handwriting was unmistakable")
+      assert.deepStrictEqual(slots(ranked), [phrase, newest, apart])
+      // The excerpt is centred on the phrase, every word of it marked.
+      const shown = ranked.hits[0]!.excerpt
+      const marked = shown.marks.map((m) => shown.text.slice(m.at, m.at + m.length))
+      assert.includeMembers(marked, ["handwriting", "was", "unmistakable"])
+      assert.include(shown.text, "her handwriting was unmistakable")
+      // Each word is still the start of a word; with no message having them side by side, newest first.
+      assert.deepStrictEqual(slots(yield* f.search("handwriting unmistakabl")), [newest, apart, prefix, phrase])
+
+      assert.deepStrictEqual(slots(yield* f.search('"handwriting was unmistakable"')), [phrase])
+      assert.deepStrictEqual(slots(yield* f.search("“Handwriting, was unmistakable”")), [phrase])
+      // Quoted words are whole words, and other words beside a phrase are required too.
+      assert.deepStrictEqual(slots(yield* f.search('"handwriting was unmistak"')), [])
+      assert.deepStrictEqual(slots(yield* f.search('"the seal" smudged')), [apart])
+
+      // Pages go on from the side-by-side matches into the rest without repeats.
+      const seen: Array<string> = []
+      let cursor: MessageSearchPage["next"] = null
+      for (let page = 0; page < 6; page++) {
+        const read: MessageSearchPage = yield* f.reader.SearchMessages({
+          userId: f.userId,
+          text: "handwriting was unmistakable",
+          cursor,
+          limit: 1
+        })
+        seen.push(...read.hits.map((h) => h.slotId))
+        cursor = read.next
+        if (cursor === null) break
+      }
+      assert.deepStrictEqual(seen, [phrase, newest, apart])
+      assert.isNull(cursor)
     }).pipe(Effect.provide(serverLayer(testConfig())))
   )
 })
