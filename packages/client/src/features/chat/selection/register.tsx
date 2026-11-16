@@ -1,8 +1,9 @@
 // Selecting several messages to delete together (job msgactions1; ST-COMPARISON item 24). "Select
 // messages" on a message's menu starts it with that message ticked; every message then shows a
 // tick before its portrait, and a bar above the composer counts them and offers Select range,
-// Cancel and Delete. Delete confirms, then deletes them in this branch as one change, one toast,
-// one Undo, as Delete message would each.
+// Cancel, Hide from the model / Show to the model (job selecthide1) and Delete. Delete confirms,
+// then deletes them in this branch as one change, one toast, one Undo, as Delete message would
+// each; Hide and Show act at once, as the message menu's do, also as one change with one Undo.
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
@@ -14,7 +15,7 @@ import { useDeletedManyToast } from "../../bin/deleted.ts"
 import { messageActions, viewOf } from "../messageActions.tsx"
 import { chatComposerNotes, messageSelect } from "../presentation.tsx"
 import type { ChatSession, ChatView } from "../session.ts"
-import { selectionOf, type Ticked, untickable } from "./store.ts"
+import { orderedOf, selectionOf, type Ticked, untickable } from "./store.ts"
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 
@@ -36,7 +37,7 @@ function MessageTick({ entry, session }: { entry: PathEntry; session: ChatSessio
       checked={tick === 2}
       disabled={why !== null}
       label="Select this message"
-      hint={why ?? "Selects this message to delete with the others. Shift-click selects every message up to it."}
+      hint={why ?? "Selects this message to act on with the others. Shift-click selects every message up to it."}
       onToggle={(checked, shift) => selectionOf(session).toggle(entry, checked, shift)}
       // Compact rows have less room above the portrait: the tick keeps the row's own inset.
       className="-mt-0.5 compact:mt-0"
@@ -145,7 +146,45 @@ function SelectionBar({ session }: { view: ChatView; session: ChatSession }) {
         description: "They changed or went since. Delete them in their threads."
       })
   }
-  const ordered = store.ordered()
+  /** Hides the ticked messages from the model, or shows them again, as one change with one Undo. */
+  const setHidden = async (fork: ForkId, ticked: ReadonlyArray<Ticked>, hidden: boolean) => {
+    const targets = ticked.filter((t) => t.hidden !== hidden).map((t) => t.slotId)
+    if (targets.length === 0) return
+    setPending(true)
+    const result = await session.setMessagesHidden(fork, targets, hidden)
+    setPending(false)
+    if (!result.ok) {
+      if (result.error.tag === "NotFound") store.stop()
+      showToast({
+        title: "Nothing changed",
+        description:
+          result.error.tag === "NotFound"
+            ? "Some of these messages changed or went since. Select them again."
+            : result.error.message
+      })
+      return
+    }
+    store.stop()
+    const changed = result.value.changed
+    if (changed.length === 0) return
+    showToast({
+      title: `${plural(changed.length, "message", "messages")} ${hidden ? "hidden from the model" : "shown to the model again"}.`,
+      timeout: 10_000,
+      actions: [
+        {
+          label: "Undo",
+          hint: hidden ? "Sends them to the model again." : "Hides them from the model again.",
+          onClick: () =>
+            void session.setMessagesHidden(fork, changed, !hidden).then((undo) => {
+              if (!undo.ok) showToast({ title: "Couldn't undo", description: undo.error.message })
+            })
+        }
+      ]
+    })
+  }
+  const ordered = orderedOf(state.ticked)
+  const anyShown = ordered.some((t) => !t.hidden)
+  const anyHidden = ordered.some((t) => t.hidden)
   return (
     <div className="chat-column pb-2">
       <div
@@ -179,6 +218,28 @@ function SelectionBar({ session }: { view: ChatView; session: ChatSession }) {
         >
           Cancel
         </Button>
+        {(anyShown || count === 0) && (
+          <Button
+            variant="ghost"
+            className="h-8 px-2"
+            disabled={count === 0 || forkId === null || pending}
+            hint="Hides the selected messages from the model, in this branch only. They stay in the chat."
+            onClick={() => forkId !== null && void setHidden(forkId, ordered, true)}
+          >
+            Hide from the model
+          </Button>
+        )}
+        {anyHidden && (
+          <Button
+            variant="ghost"
+            className="h-8 px-2"
+            disabled={forkId === null || pending}
+            hint="Sends the selected hidden messages to the model again, in this branch only."
+            onClick={() => forkId !== null && void setHidden(forkId, ordered, false)}
+          >
+            Show to the model
+          </Button>
+        )}
         <Button
           variant="danger"
           className="h-8 px-3"
@@ -216,7 +277,7 @@ export const registerMessageSelection = () => [
     describe: viewOf(({ entry, session }) => ({
       label: "Select messages",
       icon: "select",
-      hint: "Ticks this message and shows a tick on every message, to delete several together.",
+      hint: "Ticks this message and shows a tick on every message, to delete, hide or show several together.",
       onSelect: () => selectionOf(session).start(entry)
     }))
   })

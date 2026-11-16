@@ -1812,6 +1812,17 @@ export class WriteOpsChat extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /**
+   * Hides several messages of fork `forkId` from the model, or shows them again, in one
+   * transaction: each as SetSlotHidden would (Select messages, job selecthide1). NotFound, and
+   * nothing written, if any isn't a live message of the fork's chat. `changed`: those that
+   * weren't so already, in the order given; the Undo sets those back. `chatId`: the fork's chat.
+   */
+  Rpc.make("SetSlotsHidden", {
+    payload: { userId: UserId, forkId: ForkId, slotIds: DeletedSlots, hidden: Schema.Boolean },
+    success: Schema.Struct({ chatId: ChatId, changed: Schema.Array(SlotId) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
    * Hides a live message of the user's from the model, or shows it again (ST's ghost
    * toggle): the slot's `context_excluded`, marked as the user's doing. Writes nothing
    * else but the history reduction a hide records (historyChanges.ts); summaries read

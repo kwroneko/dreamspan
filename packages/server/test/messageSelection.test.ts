@@ -697,3 +697,153 @@ describe("deleting several messages", () => {
     }).pipe(Effect.provide(database()))
   )
 })
+
+// Hiding several from the model, or showing them, as one change (job selecthide1): each exactly as
+// SetSlotHidden hides one, in that fork only, all or nothing.
+describe("hiding several messages from the model", () => {
+  const hiddenIn = (s: Effect.Success<ReturnType<typeof setup>>, forkId: ForkId) =>
+    s.reader
+      .GetPath({ userId: s.userId, chatId: s.chat.id, forkId, leafSlotId: null, limit: 100 })
+      .pipe(Effect.map((w) => w.entries.filter((e) => e.contextExcluded).map((e) => e.version.content)))
+
+  it.live("hides and shows in one call, in this branch only; changed names what wasn't so", () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const other = yield* s.append(s.c.slotId, "other", true)
+      yield* s.writer.SetSlotHidden({ userId: s.userId, forkId: s.fork, slotId: s.a.slotId, hidden: true })
+      const hid = yield* s.writer.SetSlotsHidden({
+        userId: s.userId,
+        forkId: s.fork,
+        slotIds: [s.a.slotId, s.b.slotId, s.c.slotId],
+        hidden: true
+      })
+      assert.strictEqual(hid.chatId, s.chat.id)
+      assert.deepStrictEqual(hid.changed, [s.b.slotId, s.c.slotId])
+      assert.deepStrictEqual(yield* hiddenIn(s, s.fork), ["a", "b", "c"])
+      assert.deepStrictEqual(yield* hiddenIn(s, other.forkId as ForkId), [])
+      // The Undo: the same call, the other way, with what changed.
+      const undo = yield* s.writer.SetSlotsHidden({
+        userId: s.userId,
+        forkId: s.fork,
+        slotIds: hid.changed,
+        hidden: false
+      })
+      assert.deepStrictEqual(undo.changed, [s.b.slotId, s.c.slotId])
+      assert.deepStrictEqual(yield* hiddenIn(s, s.fork), ["a"])
+      const path = yield* s.reader.GetPath({
+        userId: s.userId,
+        chatId: s.chat.id,
+        forkId: s.fork,
+        leafSlotId: null,
+        limit: 100
+      })
+      assert.isTrue(path.entries.find((e) => e.slotId === s.a.slotId)!.hiddenByUser)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("all or nothing: a message not shown in the fork, or another's, hides none", () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const side = yield* s.append(s.b.slotId, "side", true)
+      yield* s.writer.DeleteMessage({ userId: s.userId, slotId: s.c.slotId, forkId: s.fork })
+      for (const slotIds of [
+        [s.a.slotId, s.c.slotId],
+        [s.a.slotId, side.slotId]
+      ]) {
+        const exit = yield* Effect.exit(
+          s.writer.SetSlotsHidden({ userId: s.userId, forkId: s.fork, slotIds, hidden: true })
+        )
+        assert.isTrue(Exit.isFailure(exit))
+      }
+      const other = yield* setup("bo")
+      const mixed = yield* Effect.exit(
+        s.writer.SetSlotsHidden({
+          userId: other.userId,
+          forkId: other.fork,
+          slotIds: [other.a.slotId, s.a.slotId],
+          hidden: true
+        })
+      )
+      assert.isTrue(Exit.isFailure(mixed))
+      assert.deepStrictEqual(yield* hiddenIn(s, s.fork), [])
+      assert.deepStrictEqual(yield* hiddenIn(other, other.fork), [])
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("summaries, context and stored state are as hiding them one at a time leaves them", () =>
+    Effect.gen(function* () {
+      const run = (mode: "single" | "multi") => {
+        const dir = tempDir(`hide-summary-${mode}`)
+        return Effect.gen(function* () {
+          const s = yield* setup()
+          const leaf = yield* completeFixture(
+            dir,
+            s.writer,
+            s.userId,
+            s.chat.id,
+            [s.root, s.a, s.b, s.c].map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: 0 })),
+            [],
+            " summary containing b and c"
+          )
+          const other = (yield* s.writer.CreateFork({
+            userId: s.userId,
+            chatId: s.chat.id,
+            fromForkId: s.fork,
+            atSlotId: s.d.slotId
+          })).fork.id
+          const read = (forkId: ForkId) => s.reader.GetSummary({ userId: s.userId, forkId, summaryId: leaf.id })
+          if (mode === "multi")
+            yield* s.writer.SetSlotsHidden({
+              userId: s.userId,
+              forkId: s.fork,
+              slotIds: [s.b.slotId, s.c.slotId],
+              hidden: true
+            })
+          else
+            for (const entry of [s.b, s.c])
+              yield* s.writer.SetSlotHidden({ userId: s.userId, forkId: s.fork, slotId: entry.slotId, hidden: true })
+          const fresh = [(yield* read(s.fork)).fresh, (yield* read(other)).fresh]
+          const next = yield* s.append(s.d.slotId, "", false, s.fork)
+          const assembled = yield* s.reader.AssembleContext({
+            userId: s.userId,
+            chatId: s.chat.id,
+            forkId: s.fork,
+            slotId: next.slotId,
+            versionId: next.version.id,
+            now: Date.UTC(2026, 0, 1),
+            timeZone: "UTC",
+            frozen: null
+          })
+          const messages = (JSON.parse(assembled.snapshot).request.messages as Array<{ content: unknown }>).map(
+            // The fixture writes its input ids into the summary text: each run has its own.
+            (m) => (typeof m.content === "string" ? m.content.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, "id") : m.content)
+          )
+          const ids = new Map<string, string>()
+          for (const [i, e] of [s.root, s.a, s.b, s.c, s.d].entries()) ids.set(e.slotId, `slot-${i}`)
+          ids.set(s.fork, "main")
+          ids.set(other, "other")
+          ids.set(s.chat.id, "chat")
+          const [overrides, changes] = yield* fixtureSql(
+            dir,
+            [
+              {
+                sql: "SELECT fork_id, kind, target_id, slot_id, flag FROM fork_overrides WHERE kind = 'hide' ORDER BY seq"
+              },
+              { sql: "SELECT slot_id, fork_id, chat_id, depth FROM history_changes ORDER BY seq" }
+            ],
+            { readOnly: true }
+          )
+          const stored = JSON.parse(
+            JSON.stringify({ overrides, changes }, (_, v) => (typeof v === "string" ? (ids.get(v) ?? v) : v))
+          )
+          return { fresh, messages, stored }
+        }).pipe(Effect.provide(database(dir)))
+      }
+      const single = yield* run("single")
+      const multi = yield* run("multi")
+      assert.deepStrictEqual(multi, single)
+      assert.isFalse(JSON.stringify(multi.messages).includes('"b"'))
+      assert.isAtLeast(multi.stored.overrides.length, 2)
+    })
+  )
+})

@@ -51,6 +51,19 @@ export const makeMessageSelectionHandlers = Effect.gen(function* () {
         return items
       }).pipe(Effect.uninterruptible, internal("DeleteMessages")),
 
+    // As SetMessageHidden (api/chats.ts): an edit that starts nothing. The chat's tabs read it
+    // again and the cache estimate is refreshed.
+    SetMessagesHidden: ({ forkId, slotIds, hidden }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const result = yield* writer.SetSlotsHidden({ userId: id, forkId, slotIds, hidden })
+        if (result.changed.length > 0) {
+          yield* reload(id, result.chatId)
+          yield* warmth.refreshUser(id)
+        }
+        return { changed: result.changed }
+      }).pipe(Effect.uninterruptible, internal("SetMessagesHidden")),
+
     RestoreBinItems: ({ itemIds }) =>
       Effect.gen(function* () {
         const id = yield* userId

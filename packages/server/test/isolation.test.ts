@@ -2039,6 +2039,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  SetMessagesHidden: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.SetMessagesHidden({ forkId: owner.chat.forkId, slotIds: [owner.chat.slotId], hidden: true }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SetMessagesHidden({
+            forkId: actor.chat.forkId,
+            slotIds: [actor.chat.slotId, owner.chat.slotId],
+            hidden: true
+          }),
+          "NotFound"
+        )
+      })
+  },
   InsertMessage: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
