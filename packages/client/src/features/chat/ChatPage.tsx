@@ -257,16 +257,22 @@ export function MessageList({
   // estimate (masterfix1: readingDensity.perf.ts' blank frames, 32 px in Comfortable). Apply
   // such a measurement before the paint: a microtask after the observer's callback is still
   // before it, and outside React's own render and commit, so flushSync is allowed there.
+  // Not while the list is held at the end: there the virtualizer's own end-follow writes the
+  // scroll position and renders synchronously, and an extra render in between let a reply's
+  // burst land unfollowed (masterfix1: chat.perf.ts' bursty stream, 465-570 px from the end).
   const [, repaint] = useReducer((n: number) => n + 1, 0)
   const repaintQueued = useRef(false)
-  const onVirtualChange = useCallback((_instance: Virtualizer<HTMLDivElement, Element>, sync: boolean) => {
-    if (sync || repaintQueued.current) return
-    repaintQueued.current = true
-    queueMicrotask(() => {
-      repaintQueued.current = false
-      flushSync(repaint)
-    })
-  }, [])
+  const onVirtualChange = useCallback(
+    (_instance: Virtualizer<HTMLDivElement, Element>, sync: boolean) => {
+      if (sync || follow.stuck || repaintQueued.current) return
+      repaintQueued.current = true
+      queueMicrotask(() => {
+        repaintQueued.current = false
+        flushSync(repaint)
+      })
+    },
+    [follow]
+  )
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
     onChange: onVirtualChange,
