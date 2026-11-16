@@ -24,13 +24,15 @@ import { InvalidDocument } from "@rp/shared/editorApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Rpc } from "effect/rpc"
 import type { OpsOf } from "./opsOf.ts"
-import type { RefId, RevisionId } from "@rp/shared/library.ts"
+import type { Doc, EntityKind, RefId, RevisionId } from "@rp/shared/library.ts"
+import { encodeLibraryDoc } from "./libraryWrites.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeRegistry } from "@rp/shared/registry.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
-import type { Bin } from "./bin.ts"
+import { toBinItem, type Bin } from "./bin.ts"
 import { NotFound, WriteOps } from "./ops.ts"
+import { adoptedKind } from "./cardOrigins.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { transaction } from "./tx.ts"
 import { workshopLimits as limits } from "../workshopLimits.ts"
@@ -56,6 +58,9 @@ type OperationName =
   | "UndoHistoryEdit"
   | "SendOrQueue"
   | "DeleteMessage"
+  | "RestoreBinItem"
+  | "SetPersona"
+  | "AdoptRemoteCard"
 type OperationRpc<K> = Extract<OpsOf<typeof WriteOps>, { readonly _tag: K }>
 type Operations = {
   [K in OperationName]: (
@@ -132,6 +137,17 @@ interface UndoContext {
 }
 const refuse = (message = "Changed since; open its history before undoing this change.") =>
   new EffectUndoRefused({ message })
+/** Operations whose whole effect is new library entries, with the capability each needs: Undo bins them. */
+const creations: Readonly<Record<string, string>> = {
+  CreateEntity: "library.write",
+  ForkWithDrafts: "library.write",
+  CreateCardNote: "library.write",
+  CreateSharedNote: "library.write",
+  CreateChatNote: "chats.setup",
+  ImportFile: "library.write",
+  // Add to my cards from a card source (cardextools1): its Undo bins the added card.
+  AdoptRemoteCard: "library.write"
+}
 
 // A reverse-order undo restores content through new revisions. Only those known restores
 // may advance a previous effect's expected head; a user's intervening edit still refuses.
@@ -411,6 +427,7 @@ export const rolloutUndoers = makeRegistry<Undoer>([
   chatUndoer,
   operationUndo,
   { ...operationUndo, id: "setting.set" },
+  { ...operationUndo, id: "library.delete" },
   { ...operationUndo, id: "reply.generate" },
   { ...operationUndo, id: "changeset.apply" }
 ])
@@ -590,8 +607,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
       RunWorkshopOperation: (input) =>
         Effect.gen(function* () {
           const policy = operationPolicies.get(input.operation)
-          const creates = ["CreateEntity", "ForkWithDrafts"].includes(input.operation)
-          if ((!policy && !creates) || input.capability !== (policy?.capability ?? "library.write"))
+          const creates = Object.hasOwn(creations, input.operation)
+          if ((!policy && !creates) || input.capability !== (policy?.capability ?? creations[input.operation]))
             return yield* refuseOperation("This operation has no safe undo recipe, so it wasn't done.")
           const value = input.payload as Record<string, unknown>
           const rpc = WriteOps.requests.get(input.operation as never)
@@ -691,21 +708,151 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                   if (proof.chat && JSON.stringify(current!.proof) !== JSON.stringify(proof.chat))
                     return yield* refuseOperation("The saved chat changed while waiting. Read it again and ask again.")
                 }
+                if (creates && input.operation === "AdoptRemoteCard") {
+                  // The user's Add to my cards, with the same rule as a file the assistant imports:
+                  // nothing in it grants a permission, and scripts and HTML stay off.
+                  const file = value.file as Record<string, unknown>
+                  const kind = adoptedKind(String(file.docJson))
+                  const safe = yield* Effect.try({
+                    try: () => {
+                      const doc = JSON.parse(String(file.docJson)) as Doc
+                      const ours = (doc.extensions as { rp_harness?: { skills?: unknown } } | undefined)?.rp_harness
+                      if (ours?.skills !== undefined) return null
+                      return encodeLibraryDoc(
+                        safeAgentDocument(
+                          kind,
+                          {},
+                          withHtmlApprovals(
+                            {},
+                            {
+                              ...withoutGrantedAgentEdits(kind, {}, doc),
+                              ...(kind === "lorebook" ? {} : { regex_approved: false })
+                            }
+                          )
+                        )
+                      )
+                    },
+                    catch: () => refuseOperation("This card can't be added here. Add it from its page.")
+                  })
+                  if (safe === null)
+                    return yield* refuseOperation("This card carries its own skills. Add it from its page.")
+                  yield* checkDocument(JSON.parse(safe.json))
+                  const result = (yield* handler!({
+                    ...(payload as object),
+                    file: { ...file, docJson: safe.json, docHash: safe.hash, searchText: safe.searchText }
+                  })) as { entityId: string; refId: RefId; existing: boolean }
+                  // A card the user has from there already: nothing was added, so nothing to undo.
+                  if (result.existing) return { result: pendingOperationResult(input.operation, result), effects: [] }
+                  const first = yield* creation(result.refId)
+                  const effects = [first]
+                  for (const note of first.undo.notes) {
+                    const [ref] = yield* sql<{ id: RefId }>`SELECT id FROM entity_refs WHERE entity_id = ${note}
+                      ORDER BY id LIMIT 1`
+                    effects.push(yield* creation(ref!.id))
+                  }
+                  return { result: pendingOperationResult(input.operation, result), effects }
+                }
                 if (creates) {
                   if (input.operation === "ForkWithDrafts" && value.moveDrafts !== false)
                     return yield* refuseOperation(
                       "Moving unsaved drafts cannot be undone by this tool. Set moveDrafts to false."
                     )
+                  // These also write a note slot or a branch's revision, which binning the
+                  // new note would not put back.
+                  if (
+                    (input.operation === "CreateSharedNote" && value.fromNoteRefId !== undefined) ||
+                    (["CreateSharedNote", "CreateCardNote"].includes(input.operation) && value.chatNote !== undefined)
+                  )
+                    return yield* refuseOperation("Make this note from the note's own editor.")
+                  // A file may only add a new entry here: a new version of an existing one
+                  // merges into it and its followers, which binning a creation cannot undo.
+                  if (
+                    input.operation === "ImportFile" &&
+                    (value.intoRefId !== null ||
+                      value.replace !== undefined ||
+                      value.stageMerge !== undefined ||
+                      value.arrival !== undefined ||
+                      value.recognized !== undefined ||
+                      value.presetLorebooks !== undefined ||
+                      (value.media as ReadonlyArray<unknown>).length > 0)
+                  )
+                    return yield* refuseOperation("Import this file from the library page.")
+                  // A file the assistant imports is its own writing: as with its edits, changed
+                  // scripts and HTML stay off and nothing in it grants a permission.
+                  let imported: Record<string, unknown> = {}
+                  if (input.operation === "ImportFile") {
+                    const kind = value.kind as EntityKind
+                    const note = (json: unknown) =>
+                      typeof json === "string"
+                        ? JSON.stringify(withoutGrantedAgentEdits("note", {}, JSON.parse(json) as Doc))
+                        : null
+                    const safe = yield* Effect.try({
+                      try: () => {
+                        const file = JSON.parse(String(value.docJson)) as Doc
+                        const ours = (file.extensions as { rp_harness?: { skills?: unknown } } | undefined)?.rp_harness
+                        if (kind === "note" || ours?.skills !== undefined) return null
+                        const whole = kind === "preset" ? (JSON.parse(encodeLibraryDoc(file).json) as Doc) : file
+                        return encodeLibraryDoc(
+                          safeAgentDocument(
+                            kind,
+                            {},
+                            withHtmlApprovals(
+                              {},
+                              {
+                                ...withoutGrantedAgentEdits(kind, {}, whole),
+                                ...(kind === "lorebook" ? {} : { regex_approved: false })
+                              }
+                            )
+                          )
+                        )
+                      },
+                      catch: () => refuseOperation("This file can't be imported here. Import it from the library page.")
+                    })
+                    if (safe === null)
+                      return yield* refuseOperation(
+                        "This file is a note or a card with its own skills. Import it from the library page."
+                      )
+                    imported = {
+                      docJson: safe.json,
+                      docHash: safe.hash,
+                      searchText: safe.searchText,
+                      noteDocJson: note(value.noteDocJson),
+                      ...(value.notesDocJson === undefined
+                        ? {}
+                        : { notesDocJson: (value.notesDocJson as ReadonlyArray<unknown>).map(note) })
+                    }
+                    for (const json of [
+                      imported.docJson,
+                      imported.noteDocJson,
+                      ...((imported.notesDocJson ?? []) as unknown[])
+                    ])
+                      if (typeof json === "string") yield* checkDocument(JSON.parse(json))
+                  }
+                  const origin = `${input.rolloutId}:${input.toolCallId}`
                   const result = yield* handler!({
                     ...(payload as object),
-                    ...(input.operation === "CreateEntity"
-                      ? { origin: "agent", originRef: `${input.rolloutId}:${input.toolCallId}` }
+                    ...imported,
+                    ...(input.operation === "CreateEntity" ? { origin: "agent", originRef: origin } : {}),
+                    ...(["CreateCardNote", "CreateChatNote", "CreateSharedNote"].includes(input.operation)
+                      ? { agentOriginRef: origin }
                       : {})
                   })
-                  const ref = (input.operation === "CreateEntity" ? (result as { ref: unknown }).ref : result) as {
-                    id: RefId
+                  const made = (
+                    input.operation === "CreateEntity" || input.operation === "ImportFile"
+                      ? (result as { ref: unknown }).ref
+                      : result
+                  ) as { id: RefId }
+                  if (input.operation === "ImportFile" && (result as { created: boolean }).created !== true)
+                    return yield* refuseOperation("Import this file from the library page.")
+                  const first = yield* creation(made.id)
+                  const effects = [first]
+                  // A card's Undo answers for the notes that came with it (`createUndoer`).
+                  for (const note of input.operation === "ImportFile" ? first.undo.notes : []) {
+                    const [ref] = yield* sql<{ id: RefId }>`SELECT id FROM entity_refs WHERE entity_id = ${note}
+                      ORDER BY id LIMIT 1`
+                    effects.push(yield* creation(ref!.id))
                   }
-                  return { result: pendingOperationResult(input.operation, result), effects: [yield* creation(ref.id)] }
+                  return { result: pendingOperationResult(input.operation, result), effects }
                 }
                 if (input.operation === "SendOrQueue") {
                   const running = yield* sql`SELECT 1 FROM versions v JOIN slots s ON s.id = v.slot_id
@@ -786,6 +933,11 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       agentOriginRef: `${input.rolloutId}:${input.toolCallId}`
                     })
                   else result = yield* handler!(payload)
+                } else if (input.operation === "DeleteEntity") {
+                  // The bin's own delete, as Undo of a creation uses it: a tool's delete
+                  // never pushes older items out of a full bin.
+                  const itemId = yield* bin.deleteEntity(input.userId, String(value.entityId))
+                  result = toBinItem(yield* bin.loadItem(input.userId, itemId))
                 } else result = yield* handler!(payload)
                 const after = yield* policy!.before(sql, input.userId, value as never)
                 const priorRef = before as { ref?: { id: string; head_revision_id: string; row_version: number } }
@@ -799,7 +951,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       targetId: policy!.target(value as never, after as never),
                       title: storyPosition
                         ? `${policy!.label} · ${storyPosition.label} · from message ${storyPosition.upTo}`
-                        : policy!.label,
+                        : policy!.kind === "library.delete"
+                          ? `Moved the note ${(after as { label: string }).label} to the bin`
+                          : policy!.label,
                       undo: {
                         operation: input.operation,
                         ...(storyPosition
@@ -825,7 +979,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                               before: priorRef.ref!.head_revision_id,
                               beforeRowVersion: priorRef.ref!.row_version
                             }
-                          : {})
+                          : {}),
+                        // Open leads to the note once Undo has taken it back out of the bin.
+                        ...(policy!.kind === "library.delete" ? { refId: (after as { refId: string }).refId } : {})
                       }
                     }
                   ]

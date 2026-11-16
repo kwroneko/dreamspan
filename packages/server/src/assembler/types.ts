@@ -318,6 +318,25 @@ export interface AgentAssembly {
   readonly stepSummaries?: Readonly<Record<string, string>>
   /** "model": the reply reserve is the model's max output within a quarter of the context. */
   readonly response?: "model"
+  /**
+   * The run's skills, for the preset's Skills and Card skills markers (spec/WORKSHOP-CONTEXT.md
+   * §4.2): the kind, its registered skills without their instructions, and the offered tools its
+   * profile leaves for loading. The stage lists them with `offeredSkills`, as the loading plan
+   * freezes them. Absent: the markers send nothing.
+   */
+  readonly skills?: AgentSkills
+}
+
+export interface AgentSkills {
+  readonly kind: string
+  readonly registered: ReadonlyArray<{
+    readonly id: string
+    readonly description: string
+    readonly tools: ReadonlyArray<string>
+    readonly kinds?: ReadonlyArray<string>
+    readonly always?: boolean
+  }>
+  readonly loadable: ReadonlyArray<string>
 }
 
 /** What decision models decided for this context (spec/AGENTIC.md §7): the lorebook entries admitted. */

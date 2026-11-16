@@ -1,5 +1,7 @@
 import { rewriteTools } from "../src/agent/tools/rewrite.ts"
 import { builtinOperationExposures } from "../src/agent/exposures/builtins.ts"
+import { parityTools } from "../src/agent/exposures/parity.ts"
+import { cardSourceExposures } from "../src/agent/exposures/cardSources.ts"
 import { PLUGIN_TOOLS } from "../src/agent/tools/plugins.ts"
 import { WORKSHOP_HISTORY_TOOLS } from "../src/agent/tools/runs.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -244,6 +246,10 @@ describe("workshop", () => {
           ...PLUGIN_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
+          ...cardSourceExposures.map((e) => e.id),
+          ...parityTools,
+          // Every tool from the start still offers the skills' instructions (spec/TOOL-LOADING.md §5).
+          "load_skill",
           "send_message"
         ])
         assert.deepStrictEqual(bodies[1]!.tools, first.tools)
@@ -528,6 +534,10 @@ describe("workshop", () => {
           ...PLUGIN_TOOLS,
           ...rewriteTools.map((tool) => tool.id),
           ...builtinOperationExposures.filter((e) => e.id !== "list_library").map((e) => e.id),
+          ...cardSourceExposures.map((e) => e.id),
+          ...parityTools,
+          // Every tool from the start still offers the skills' instructions (spec/TOOL-LOADING.md §5).
+          "load_skill",
           "send_message"
         ]
       )

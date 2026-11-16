@@ -87,7 +87,9 @@ export const EffectList = {
 export const WorkshopDefaults = Schema.Struct({
   card: Schema.NullOr(Schema.String),
   preset: Schema.NullOr(Schema.String),
-  persona: Schema.NullOr(Schema.String)
+  persona: Schema.NullOr(Schema.String),
+  /** True while no workshop persona was ever chosen: the next workshop makes one from the account's name. */
+  makesPersona: Schema.optionalKey(Schema.Boolean)
 })
 export type WorkshopDefaults = typeof WorkshopDefaults.Type
 

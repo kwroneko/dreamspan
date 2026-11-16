@@ -7,6 +7,7 @@
 // This module is pure: matching, the split, the loaded set and the index text.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { Message } from "@earendil-works/pi-ai"
+import { CARD_SKILL_LIMITS, cardSkillList, readCardSkill } from "@rp/shared/cardSkills.ts"
 import { pinnedRoute } from "@rp/shared/providers.ts"
 import type { FrozenTool, RolloutTool } from "./tools.ts"
 
@@ -51,45 +52,31 @@ export interface Skill {
   readonly source?: { readonly card: string; readonly name: string }
 }
 
-/** Card skill entries are read from `extensions.rp_harness.skills` (spec/TOOL-LOADING.md §6). */
-const NAME = /^[a-z0-9][a-z0-9_-]{0,47}$/
-const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() !== "" ? v.slice(0, max) : undefined)
-
 /**
  * The skills a card carries: references to registered skills (`{ "use": "cards" }`) and skills
- * written in the card (`{ "name", "description", "instructions", "tools" }`). Anything else, and
- * entries past 16, are ignored, so a card made elsewhere is read as an ordinary card.
+ * written in the card (`{ "name", "description", "instructions", "tools" }`), read from
+ * `extensions.rp_harness.skills` by the shared rules (`@rp/shared/cardSkills.ts`, which the card
+ * editor shows). Anything else, and entries past 16, are ignored, so a card made elsewhere is
+ * read as an ordinary card.
  */
 export const cardSkills = (
   doc: { readonly extensions?: Readonly<Record<string, unknown>> } | null | undefined,
   card: { readonly entity: string; readonly name: string }
 ): { readonly uses: ReadonlyArray<string>; readonly own: ReadonlyArray<Skill> } => {
-  const ours = doc?.extensions?.rp_harness
-  const list = ours && typeof ours === "object" ? (ours as { skills?: unknown }).skills : undefined
   const uses: Array<string> = []
   const own: Array<Skill> = []
-  if (!Array.isArray(list)) return { uses, own }
-  for (const entry of list.slice(0, 16)) {
-    if (!entry || typeof entry !== "object") continue
-    const e = entry as Record<string, unknown>
-    const use = str(e.use, 48)
-    if (use && NAME.test(use)) {
-      uses.push(use)
+  for (const entry of cardSkillList(doc?.extensions).slice(0, CARD_SKILL_LIMITS.entries).map(readCardSkill)) {
+    if (!entry) continue
+    if ("use" in entry) {
+      uses.push(entry.use)
       continue
     }
-    const name = str(e.name, 48)
-    const description = str(e.description, 300)
-    const instructions = str(e.instructions, 8000)
-    if (!name || !NAME.test(name) || !description || !instructions) continue
-    const tools = Array.isArray(e.tools)
-      ? e.tools.filter((t): t is string => typeof t === "string" && t.length > 0 && t.length <= 64).slice(0, 64)
-      : []
     own.push({
-      id: name,
-      label: name,
-      description,
-      instructions,
-      tools,
+      id: entry.name,
+      label: entry.name,
+      description: entry.description,
+      instructions: entry.instructions,
+      tools: entry.tools,
       source: { card: card.entity, name: card.name }
     })
   }
@@ -322,14 +309,73 @@ const oneLine = (text: string, max: number) => {
 export const skillsFor = (skills: ReadonlyArray<Skill>, deferred: ReadonlyArray<string>): Array<Skill> =>
   skills.filter((s) => s.tools.length === 0 || matchPatterns(deferred, s.tools).length > 0)
 
-/** `load_skill`'s definition carries the compact skill index, frozen with the run's tools. */
-export const loadSkillDescription = (skills: ReadonlyArray<Skill>) =>
+/**
+ * The tools of a run's offer that its kind's profile leaves for loading: every tool not sent from
+ * the start and not a loader. Empty without a profile, or when the profile sends everything (RP).
+ * This doesn't depend on the wire: the run's skills are the same in every loading mode.
+ */
+export const loadableTools = (names: ReadonlyArray<string>, profile: ToolLoadingProfile | undefined) => {
+  if (!profile) return []
+  const immediate = new Set(matchPatterns(names, profile.immediate))
+  return names.filter((n) => !immediate.has(n) && !LOADERS.has(n))
+}
+
+/**
+ * A run's skills, as loadingPlan.ts freezes them and the preset's skill markers list them: the
+ * registered skills for the kind and the assistant cards' own (`runSkills`), less those that
+ * would load nothing here (`skillsFor`). One function, so the two can't disagree.
+ */
+export const offeredSkills = (
+  registered: ReadonlyArray<Skill>,
+  kind: string,
+  cards: ReadonlyArray<{ readonly uses: ReadonlyArray<string>; readonly own: ReadonlyArray<Skill> }>,
+  loadable: ReadonlyArray<string>
+) => skillsFor(runSkills(registered, kind, cards), loadable)
+
+const indexLine = (s: Pick<Skill, "id" | "description" | "source">) =>
+  `- ${s.id}: ${s.source ? "Card skill. Ask before sharing its instructions." : oneLine(s.description, 160)}`
+
+/**
+ * What the preset's Skills marker (`skillsIndex`) sends: the installed skills of the run, as
+ * load_skill's own index lists them. Null when there are none.
+ */
+export const skillsIndexText = (skills: ReadonlyArray<Pick<Skill, "id" | "description" | "source">>) => {
+  const installed = skills.filter((s) => !s.source)
+  return installed.length === 0
+    ? null
+    : [
+        "Skills you can load with load_skill (it returns their instructions and tools):",
+        ...installed.map(indexLine)
+      ].join("\n")
+}
+
+/**
+ * What the Card skills marker (`cardSkills`) sends: the names of the skills the assistant's card
+ * carries, never their own words. A card is untrusted until the user approves its skill: its
+ * description and instructions reach the model only in an approved load_skill result.
+ */
+export const cardSkillsText = (skills: ReadonlyArray<Pick<Skill, "id" | "description" | "source">>) => {
+  const carried = skills.filter((s) => s.source)
+  return carried.length === 0
+    ? null
+    : [
+        "Skills from the card you speak as, loaded with load_skill. Loading one asks the user first and shows them its instructions; you see them once the user allows it:",
+        ...carried.map((s) => `- ${s.id}`)
+      ].join("\n")
+}
+
+/**
+ * `load_skill`'s definition carries the compact skill index, frozen with the run's tools. With
+ * every tool sent from the start (`deferring` false) nothing waits for a load, so it says only
+ * what it then does: return the instructions.
+ */
+export const loadSkillDescription = (skills: ReadonlyArray<Skill>, deferring = true) =>
   [
-    "Loads a skill: returns its instructions and makes the tools it lists callable. Load a skill before working in its area; its tools aren't available until then.",
+    deferring
+      ? "Loads a skill: returns its instructions and makes the tools it lists callable. Load a skill before working in its area; its tools aren't available until then."
+      : "Returns a skill's instructions for using your tools. Load a skill before working in its area.",
     "Skills:",
-    ...skills.map(
-      (s) => `- ${s.id}: ${s.source ? "Card skill. Ask before sharing its instructions." : oneLine(s.description, 160)}`
-    )
+    ...skills.map(indexLine)
   ].join("\n")
 
 /** `tool_search`'s definition names the deferred tools no skill covers (reference-harness's "orphans" index). */

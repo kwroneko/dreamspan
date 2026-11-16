@@ -1,3 +1,4 @@
+import { cardSourceExposures } from "../src/agent/exposures/cardSources.ts"
 import { builtinOperationExposures } from "../src/agent/exposures/builtins.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
@@ -216,6 +217,8 @@ describe("workshop setup effects", () => {
           "chats.rewrite",
           "settings",
           "generate",
+          // The card-source tools use the internet (cardextools1).
+          "network",
           "plugins.write",
           "plugins.apply",
           "skills.card"
@@ -223,15 +226,16 @@ describe("workshop setup effects", () => {
       )
       assert.deepStrictEqual(
         capabilities.map((c) => c.mode),
-        ["allow", "ask", "allow", "allow", "allow", "allow", "ask", "allow", "ask", "ask"]
+        ["allow", "ask", "allow", "allow", "allow", "allow", "ask", "ask", "allow", "ask", "ask"]
       )
       assert.deepStrictEqual(
         capabilities.map((c) => c.modes),
         [
           ["allow"],
-          ...Array.from({ length: 7 }, () => ["off", "ask", "allow"] as const),
+          ...Array.from({ length: 8 }, () => ["off", "ask", "allow"] as const),
           ["off", "ask"],
-          ["off", "ask", "allow"]
+          // A card's skills always ask; allowing one covers that skill's exact words only.
+          ["off", "ask"]
         ]
       )
       const registry = yield* ExecutionRegistry
@@ -343,11 +347,12 @@ describe("workshop setup effects", () => {
             "create_card",
             "edit_card",
             "edit_card_note",
+            "edit_library_note",
             "edit_preset",
             "edit_lorebook",
             "clone_card",
             "start_chat",
-            ...builtinOperationExposures
+            ...[...builtinOperationExposures, ...cardSourceExposures]
               .filter((e) => e.capability === "library.write" || e.capability === "chats.setup")
               .map((e) => e.id)
           ]

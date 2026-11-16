@@ -27,7 +27,7 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     id: "library.read",
     order: 10,
     label: "Read your library",
-    explanation: "Looks up your cards, presets and lorebooks. Always on: the assistant can't help without it.",
+    explanation: "Looks up your cards, presets, lorebooks and notes. Always on: the assistant can't help without it.",
     example: "Lists your cards to find one called Mara.",
     modes: ["allow"]
   },
@@ -35,7 +35,7 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     id: "chats.read",
     order: 15,
     label: "Read your chats",
-    explanation: "Reads the messages of your other chats.",
+    explanation: "Reads the messages and notes of your other chats, and your folder import reports.",
     example: "Reads the last ten messages of a story to sum it up. Those messages go to this workshop's model."
   },
   {
@@ -43,14 +43,15 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     order: 20,
     label: "Create and edit library items",
     explanation:
-      "Creates, edits, copies, archives and restores cards, presets and lorebooks in your library. Each change can be undone.",
+      "Creates, edits, copies, archives and restores cards, presets, lorebooks and notes in your library, imports files you give it, marks personas and moves notes to the bin. Each change can be undone.",
     example: "Makes a new card for a lighthouse keeper, or rewrites a card's description."
   },
   {
     id: "chats.setup",
     order: 30,
     label: "Set up chats",
-    explanation: "Starts story chats with your cards and their greetings. Each can be undone.",
+    explanation:
+      "Starts story chats with your cards and their greetings, and changes their cast, settings and notes. Each can be undone.",
     example: "Starts a chat with Mara that opens on her greeting. No reply is written."
   },
   {
@@ -78,8 +79,8 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     id: "network",
     order: 70,
     label: "Use the internet",
-    explanation: "Fetches pages from other sites.",
-    example: "Opens a page you linked to read a character's description."
+    explanation: "Searches and opens cards on the card sources you've turned on.",
+    example: "Searches cardex for fantasy cards and opens one to read it."
   },
   {
     id: "plugins.write",
@@ -101,8 +102,11 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     id: "skills.card",
     order: 95,
     label: "Use skills from cards",
-    explanation: "Follows instructions written in the workshop's card. They only choose among the tools allowed here.",
-    example: "A card's “proofreading” skill tells the assistant how to check a card's spelling."
+    explanation:
+      "Follows instructions written in the workshop's card. It asks first and shows them; allowing one here covers that skill only, until it changes.",
+    example: "A card's “proofreading” skill tells the assistant how to check a card's spelling.",
+    // No standing Allowed: a card's words are shown before they're used, each skill as written.
+    modes: ["off", "ask"]
   }
 ])
 

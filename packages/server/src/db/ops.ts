@@ -3279,7 +3279,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
       userId: UserId,
       cardRefId: RefId,
       title: Schema.String,
-      link: Schema.optionalKey(EntityId)
+      link: Schema.optionalKey(EntityId),
+      /** A workshop tool's call (`rollout:call`): the first revision is the assistant's. */
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
@@ -3293,7 +3295,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       title: Schema.String,
       link: Schema.optionalKey(EntityId),
       replaces: Schema.optionalKey(ReplaceTarget),
-      content: Schema.optionalKey(Schema.String)
+      content: Schema.optionalKey(Schema.String),
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, InvalidDocument, StorageError])
@@ -3308,7 +3311,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       title: Schema.String,
       content: Schema.String,
       fromNoteRefId: Schema.optionalKey(RefId),
-      chatNote: Schema.optionalKey(ChatNotePosition)
+      chatNote: Schema.optionalKey(ChatNotePosition),
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
@@ -4778,7 +4782,23 @@ export class ReadOps extends RpcGroup.make(
           speakerCardOnly: Schema.Boolean,
           workshop: Schema.optionalKey(Schema.Boolean),
           stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-          response: Schema.optionalKey(Schema.Literals(["model"]))
+          response: Schema.optionalKey(Schema.Literals(["model"])),
+          /** The run's skills for the preset's skill markers (spec/WORKSHOP-CONTEXT.md §4.2). */
+          skills: Schema.optionalKey(
+            Schema.Struct({
+              kind: Schema.String,
+              registered: Schema.Array(
+                Schema.Struct({
+                  id: Schema.String,
+                  description: Schema.String,
+                  tools: Schema.Array(Schema.String),
+                  kinds: Schema.optionalKey(Schema.Array(Schema.String)),
+                  always: Schema.optionalKey(Schema.Boolean)
+                })
+              ),
+              loadable: Schema.Array(Schema.String)
+            })
+          )
         })
       ),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
@@ -5058,7 +5078,13 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** A workshop's grants (workshopGrants.ts): capability → mode, expired ones left out. */
   Rpc.make("WorkshopGrants", {
-    payload: { userId: UserId, chatId: ChatId, now: Schema.Number },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      now: Schema.Number,
+      /** Absent: the capabilities' own standing. Set: what was allowed for that exact content. */
+      target: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Array(Schema.Struct({ capability: Schema.String, mode: CapabilityMode })),
     error: Schema.Union([NotFound, StorageError])
   }),

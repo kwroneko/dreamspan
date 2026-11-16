@@ -12,7 +12,7 @@ import type { ChatCardActionProps } from "../chat/CardForkDialogs.tsx"
 import { chatCardActions } from "../chat/presentation.tsx"
 import { AppClient } from "../../rpc.ts"
 
-const workshopDefaultsAtom = AppClient.query(
+export const workshopDefaultsAtom = AppClient.query(
   "GetWorkshopDefaults",
   {},
   {

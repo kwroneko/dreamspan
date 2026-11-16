@@ -25,6 +25,16 @@ import { registerWorkshopPersona } from "./workshopPersona.tsx"
 import { editorActions } from "../editor/editorSlots.ts"
 import { panelEditorActions } from "../editor/panelActions.tsx"
 import type { EditorStore } from "../editor/store.ts"
+import { cardEditorSections } from "../editor/cardSections.ts"
+
+const CardSkills = lazy(() => import("./CardSkills.tsx").then((m) => ({ default: m.CardSkills })))
+function CardSkillsSection({ store }: { store: EditorStore }) {
+  return (
+    <Suspense fallback={null}>
+      <CardSkills store={store} />
+    </Suspense>
+  )
+}
 
 const convert = (compact: boolean) =>
   function ConvertAction({ store }: { store: EditorStore }) {
@@ -37,6 +47,8 @@ export const register = () => [
   chatKindLooks.register(workshopLook),
   ...registerWorkshopPersona(),
   chatStartSections.register({ id: "workshop.start", order: 20, component: WorkshopStartCard }),
+  // The skills a card carries for a workshop assistant (spec/TOOL-LOADING.md §6), in its Extra tab.
+  cardEditorSections.register({ id: "card.skills", order: 112, component: CardSkillsSection }),
   // A story preset made into a workshop one (spec/WORKSHOP-CONTEXT.md §4.4), in the large and side-panel editors.
   editorActions.register({ id: "workshop.convert-preset", order: 20, component: convert(false) }),
   panelEditorActions.register({ id: "workshop.convert-preset", order: 30, component: convert(true) }),

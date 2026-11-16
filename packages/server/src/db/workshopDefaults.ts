@@ -30,11 +30,16 @@ export const ownedCard = (sql: SqlClient.SqlClient, userId: UserId, entityId: st
 export const workshopDefaultsOf = (sql: SqlClient.SqlClient, userId: UserId) =>
   Effect.gen(function* () {
     const stored = yield* readStoredWorkshopDefaults(sql, userId)
-    if (!stored) return { card: null, preset: null, persona: null } satisfies WorkshopDefaults
+    if (!stored) return { card: null, preset: null, persona: null, makesPersona: true } satisfies WorkshopDefaults
     const persona =
       typeof stored.persona === "string" && (yield* ownedPersona(sql, userId, stored.persona)) ? stored.persona : null
     const card = (yield* ownedCard(sql, userId, stored.card)) ? stored.card : null
     const [preset] = yield* sql<{ id: string }>`SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
       WHERE r.id = ${stored.preset} AND e.owner_user_id = ${userId} AND e.kind = 'preset' AND e.deleted_at IS NULL`
-    return { card, preset: preset?.id ?? null, persona } satisfies WorkshopDefaults
+    return {
+      card,
+      preset: preset?.id ?? null,
+      persona,
+      ...(stored.persona === undefined ? { makesPersona: true } : {})
+    } satisfies WorkshopDefaults
   })
