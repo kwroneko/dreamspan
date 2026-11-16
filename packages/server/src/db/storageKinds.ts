@@ -89,7 +89,7 @@ export const storageKinds = makeRegistry<StorageKind>([
   },
   {
     id: "rollouts.kind",
-    values: ["generation", "draft", "summarize", "condense", "decision", "workshop", "idle_job", "edit"]
+    values: ["generation", "summarize", "condense", "decision", "workshop", "idle_job", "edit"]
   },
   {
     id: "changesets.origin",

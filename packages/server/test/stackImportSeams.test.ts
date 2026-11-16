@@ -2,7 +2,7 @@
 // handles. Staging is bookkeeping; publication is foreign story content.
 import { assert } from "@effect/vitest"
 import { vi } from "vitest"
-import { Deferred, Effect, Exit, Fiber, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber } from "effect"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest, PAIRS_8K } from "./support/lcmHarness.ts"
@@ -274,15 +274,6 @@ lcmTest(
         reason: "reply"
       })
       assert.lengthOf(plan.chunks, 0, "unfinished imports start with LCM off")
-      const draft = yield* h.api.OpenComposer({ chatId: chat.id, forkId })
-      yield* h.api
-        .WriteForMe({
-          target: { kind: "draft", chatId: chat.id, forkId, leafSlotId: current.activeLeafSlotId, draftId: draft.id }
-        })
-        .pipe(Stream.runDrain)
-      const raw = h.mock.requests().at(-1)!.raw!
-      assert.include(raw, "m0.")
-      assert.notInclude(raw, "m39.")
       assert.strictEqual((yield* h.api.GetChat({ chatId: chat.id })).title, "Seam (import unfinished)")
       const admitted = yield* h.writer.SendOrQueue({
         userId: h.userId,

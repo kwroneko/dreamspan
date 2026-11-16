@@ -60,7 +60,6 @@ import {
   AuthenticatedCardArchiveApi,
   AuthenticatedTextSearchApi,
   AuthenticatedDraftPreviewApi,
-  AuthenticatedDraftGenerationApi,
   AuthenticatedCardSourcesApi,
   AuthenticatedSummaryRequestApi,
   AuthenticatedForkMergeApi,
@@ -94,7 +93,6 @@ import {
 } from "./api/editor.ts"
 import { makeGenerationHandlers } from "./api/generation.ts"
 import { makeBinHandlers } from "./api/bin.ts"
-import { makeDraftGenerationHandlers } from "./api/draftGeneration.ts"
 import { makeComposerHandlers } from "./api/composer.ts"
 import { makeNoticeHandlers } from "./api/notices.ts"
 import { makeInspectorHandlers } from "./api/inspector.ts"
@@ -227,7 +225,6 @@ const HandlerLayers = Layer.mergeAll(
 
   AuthenticatedTextSearchApi.toLayer(makeTextSearchHandlers),
   AuthenticatedDraftPreviewApi.toLayer(makeDraftPreviewHandlers),
-  AuthenticatedDraftGenerationApi.toLayer(makeDraftGenerationHandlers),
   AuthenticatedPanelApprovalApi.toLayer(makePanelApprovalHandlers)
 )
 

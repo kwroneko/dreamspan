@@ -1,14 +1,12 @@
 // Composer work outlives its mounted surface, like the session's message editors.
 // A fork-scoped surface may remount while a send/save is in flight. Its replacement
 // must keep the same draft queue, source composer for branching, and operation status.
-import { DraftWriter } from "./draftWriter.ts"
 import type { AppError } from "../../errors.ts"
 import { ComposerDraft } from "./composerDraft.ts"
 import type { ChatSession } from "./session.ts"
 
 class ComposerWorkspace {
   readonly draft: ComposerDraft
-  readonly writing: DraftWriter
   private state: { busy: boolean; error: AppError | null } = { busy: false, error: null }
   private readonly listeners = new Set<() => void>()
   private readonly session: ChatSession
@@ -16,7 +14,6 @@ class ComposerWorkspace {
   constructor(session: ChatSession, userId: string) {
     this.session = session
     this.draft = new ComposerDraft(session, userId)
-    this.writing = new DraftWriter(session, this.draft)
   }
   /** A surface remount is still the same tip. A moved tip or new open generation reads again. */
   readonly syncFork = () => {

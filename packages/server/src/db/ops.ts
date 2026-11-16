@@ -1,4 +1,3 @@
-import { DraftGenerationTarget } from "@rp/shared/generationTarget.ts"
 import { PluginId, PluginPins, PluginData, PluginRejected } from "@rp/shared/plugins.ts"
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
 import {
@@ -3337,19 +3336,6 @@ export class WriteOpsLibrary extends RpcGroup.make(
    * events of the version, and the values its template messages drew. The version must be the user's and still generating, and the
    * model one of the user's live connections'.
    */
-  Rpc.make("StartDraftRollout", {
-    payload: {
-      userId: UserId,
-      target: DraftGenerationTarget,
-      rolloutId: Schema.String,
-      connectionId: ConnectionId,
-      modelId: ModelId,
-      snapshot: Schema.String,
-      issues: Schema.Array(ContextIssue)
-    },
-    success: Schema.Void,
-    error: Schema.Union([NotFound, StaleWrite, StorageError])
-  }),
   Rpc.make("StartRollout", {
     payload: {
       userId: UserId,
@@ -4746,21 +4732,6 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The context views installed (`contextViews`), as This chat's Context setting offers them. */
   Rpc.make("ContextViews", { success: Schema.Array(RoleProjectionOption) }),
-  Rpc.make("AssembleDraftTurn", {
-    payload: { userId: UserId, target: DraftGenerationTarget, now: Schema.Number, timeZone: Schema.String },
-    success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
-    error: Schema.Union([NotFound, StaleWrite, AssemblyFailed, StorageError])
-  }),
-  Rpc.make("DraftRunContext", {
-    payload: { userId: UserId, rolloutId: Schema.String },
-    success: RunContext,
-    error: Schema.Union([NotFound, StorageError])
-  }),
-  Rpc.make("LastDraftRollout", {
-    payload: { userId: UserId, chatId: ChatId, forkId: ForkId },
-    success: Schema.NullOr(Schema.String),
-    error: Schema.Union([NotFound, StorageError])
-  }),
   Rpc.make("AssembleContext", {
     payload: {
       partialBatch: Schema.optionalKey(Schema.Boolean),

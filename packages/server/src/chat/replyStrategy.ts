@@ -27,7 +27,7 @@ export const defaultReplyStrategy: ReplyStrategy = {
   run: (input) => runPlainReply({ ...input, target: { kind: "version", versionId: input.request.versionId } })
 }
 
-export const runPlainReply = ({
+const runPlainReply = ({
   request,
   generation,
   rolloutId,
@@ -72,12 +72,11 @@ export const runPlainReply = ({
             breakpoints: wire.breakpoints,
             ...(wire.stable ? { stable: wire.stable } : {})
           },
-          ...(target.kind === "draft" ? { singleRequest: true } : {}),
           attribution: {
             purpose: purpose ?? "generation",
             chatId,
             rolloutId,
-            ...(target.kind === "version" ? { versionId: target.versionId } : {})
+            versionId: target.versionId
           }
         })
         .pipe(
