@@ -137,6 +137,14 @@ describe("version metrics display", () => {
       "$0"
     ])
     expect(formatCost({ amount: 0.0123, currency: "EUR" })).toBe("0.012 EUR")
+    // Rounding into the next band takes that band's digits.
+    expect([usd(0.00999), usd(0.000999), usd(0.9996), usd(0.0099999), usd(1e-15)]).toEqual([
+      "$0.010",
+      "$0.0010",
+      "$1.00",
+      "$0.010",
+      "$0"
+    ])
   })
 
   it("marks an estimated cost with ~ and a request without one, or in another currency, with +", () => {

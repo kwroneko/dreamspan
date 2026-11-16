@@ -264,3 +264,95 @@ test("a reply's cost sits in its header, opens the panel, and never adds a line"
   await expect(lastReply(page)).toContainText(REPLY)
   await expect(page.locator("article header").getByRole("button", { name: /^Cost: / })).toHaveCount(0)
 })
+
+// Where the header wraps (a phone), a longer connection name filled the time's line, so the
+// cost pushed the model's label onto a third line between about 328 and 368 px. Neither the
+// cost nor the label starts a line now: at every width the header and message keep the height
+// they have with the cost hidden, in both spacing modes.
+test("the cost never adds a line at any phone width, with a long connection name", async ({ page }) => {
+  const { importId } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Workstation server at home",
+          baseUrl: provider.baseUrl,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "sk-msgcost-test-key"
+      })
+      yield* api.RefreshModels({ connectionId: connection.id })
+      const model = (yield* api.ListModels({ connectionId: connection.id, includeHidden: false })).find(
+        (m) => m.key === "fake-large"
+      )!
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
+      return yield* api.StartStImport({ unsupported: [] })
+    })
+  )
+  const cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+  for (const [path, body] of [
+    ["characters/Mira.png", card("Mira", "Hi.")],
+    ["chats/Mira/Wide.jsonl", jsonl([header({}), reply("Mira", "Hi."), user("Go on."), reply("Mira", "Yes.")])]
+  ] as const) {
+    const response = await fetch(`${server().url}/st-import/file?${new URLSearchParams({ import: importId, path })}`, {
+      method: "POST",
+      headers: { origin: server().url, cookie, "content-type": "application/octet-stream" },
+      body: new Uint8Array(body)
+    })
+    expect(response.status).toBe(200)
+  }
+  const list = () => asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListChats({ limit: 20, before: null }))
+  await expect.poll(async () => (await list()).some((c) => c.title === "Wide"), { timeout: 30_000 }).toBe(true)
+  const id = (await list()).find((c) => c.title === "Wide")!.id
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  // The first test turned it off; the choices merge by id.
+  await setDetails({ chatDensity: "comfortable", messageDetails: { "message.cost": true } })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${server().url}/chats/${id}`)
+  const last = lastReply(page)
+  await last.hover()
+  await last.getByRole("button", { name: "Generate another version" }).click()
+  await expect(last).toContainText(REPLY)
+  await expect(last.getByText("generating", { exact: true })).toHaveCount(0)
+  await expect(costOf(last)).toHaveText("$0.012")
+
+  const widths = Array.from({ length: 41 }, (_, i) => 320 + i * 8)
+  for (const density of ["comfortable", "compact"] as const) {
+    const measured: Array<Array<Array<Array<number>>>> = []
+    for (const shown of [false, true]) {
+      await setDetails({ chatDensity: density, messageDetails: { "message.cost": shown } })
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await page.reload()
+      await expect(lastReply(page)).toContainText(REPLY)
+      await expect(costOf(lastReply(page))).toHaveCount(shown ? 1 : 0)
+      const atWidths: Array<Array<Array<number>>> = []
+      for (const width of widths) {
+        await page.setViewportSize({ width, height: 900 })
+        // Two frames: the model label's observer settles after the resize.
+        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
+        atWidths.push(await heights(page))
+        if (shown) {
+          // Shown in full, on the time's line.
+          const cost = costOf(lastReply(page))
+          expect(await cost.evaluate((e) => e.scrollWidth <= e.clientWidth), `${density} ${width}: cost clipped`).toBe(
+            true
+          )
+          const at = await box(lastReply(page).locator("header time"))
+          expect(Math.abs((await box(cost)).y - at.y), `${density} ${width}: cost off the time's line`).toBeLessThan(2)
+        }
+      }
+      measured.push(atWidths)
+    }
+    const [hidden, withCost] = measured
+    for (const [w, width] of widths.entries())
+      for (const [i, [row, headRow]] of withCost![w]!.entries()) {
+        expect(Math.abs(row! - hidden![w]![i]![0]!), `${density} ${width}: message ${i} height`).toBeLessThan(0.5)
+        expect(Math.abs(headRow! - hidden![w]![i]![1]!), `${density} ${width}: header ${i} height`).toBeLessThan(0.5)
+      }
+  }
+})

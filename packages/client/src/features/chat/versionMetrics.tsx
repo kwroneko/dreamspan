@@ -41,9 +41,12 @@ export const metricsSummary = (m: VersionMetrics) => {
  * digits under a cent ("$0.0041"); another currency's label after the number ("0.012 EUR").
  */
 export const formatCost = ({ amount, currency }: CostAmount) => {
-  const digits =
-    amount <= 0 ? 0 : amount >= 1 ? 2 : amount >= 0.01 ? 3 : Math.min(12, 1 - Math.floor(Math.log10(amount)))
-  const n = amount.toFixed(digits)
+  const digitsOf = (a: number) =>
+    a <= 0 ? 0 : a >= 1 ? 2 : a >= 0.01 ? 3 : Math.min(12, 1 - Math.floor(Math.log10(a)))
+  // Rounding can carry it into the next band ($0.00999 is "$0.010", $0.9996 is "$1.00").
+  const first = digitsOf(Math.abs(amount))
+  const digits = digitsOf(Number(Math.abs(amount).toFixed(first)))
+  const n = (Math.abs(amount) < 10 ** -digits / 2 ? 0 : amount).toFixed(digits)
   return currency === "USD" ? `$${n}` : `${n} ${currency}`
 }
 
@@ -225,6 +228,8 @@ function useFigures({ entry, session, generating }: MessageDetailProps): Figures
 }
 
 const triggerNames = { time: "Generation", tokens: "Tokens", cost: "Cost" } as const
+const costClass =
+  "shrink-0 overflow-hidden text-xs whitespace-nowrap text-muted max-sm:min-w-0 max-sm:shrink max-sm:basis-0 max-sm:grow-[100] max-sm:max-w-max @max-[30rem]/chat:min-w-0 @max-[30rem]/chat:shrink @max-[30rem]/chat:basis-0 @max-[30rem]/chat:grow-[100] @max-[30rem]/chat:max-w-max"
 const focusRing = "rounded-sm tabular-nums outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
 
 function Figure({ which, ...props }: MessageDetailProps & { which: "time" | "tokens" | "cost" }) {
@@ -240,7 +245,9 @@ function Figure({ which, ...props }: MessageDetailProps & { which: "time" | "tok
       title="Generation"
       triggerLabel={`${triggerNames[which]}: ${which === "cost" ? `${shown} · ` : ""}${figures.summary}`}
       // In the header it keeps its width, as the time does: the model's label gives way instead.
-      triggerClassName={which === "cost" ? `shrink-0 text-xs whitespace-nowrap text-muted ${focusRing}` : focusRing}
+      // Where the header wraps, it never starts a line: it takes its width from what the line
+      // leaves, ahead of the model's label, so showing it can't make the header taller.
+      triggerClassName={which === "cost" ? `${costClass} ${focusRing}` : focusRing}
       trigger={shown}
       align="start"
       hint={rows.map(([label, value]) => (

@@ -149,6 +149,13 @@ function ModelIcon({ entry }: MessageDetailProps) {
 }
 
 /**
+ * A header item that never moves the wrapping header (a phone's, a narrow column's) onto
+ * another line: no width of its own, it grows into what its line leaves, up to its content.
+ */
+export const headerGives =
+  "max-sm:shrink max-sm:basis-0 max-sm:grow max-sm:max-w-max @max-[30rem]/chat:shrink @max-[30rem]/chat:basis-0 @max-[30rem]/chat:grow @max-[30rem]/chat:max-w-max"
+
+/**
  * Uses the header's available width: show "connection · model" in full or hide the
  * connection entirely, then cut the model only if it alone is too wide. The invisible
  * full label keeps the intrinsic size stable as the observer switches the connection;
@@ -176,7 +183,9 @@ function ModelLabel({ model, ...props }: { model: string } & ComponentProps<"spa
       {...props}
       tabIndex={0}
       data-model-label=""
-      className="relative grid min-w-0 overflow-hidden text-xs whitespace-nowrap text-muted outline-none"
+      // Where the header wraps (a phone, a narrow column), it never starts a line of its own: it
+      // takes what its line leaves, up to its full width, and the model truncates instead.
+      className={`relative grid min-w-0 overflow-hidden text-xs whitespace-nowrap text-muted outline-none ${headerGives}`}
     >
       <span ref={measure} aria-hidden="true" className="invisible w-max">
         {model}
