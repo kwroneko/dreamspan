@@ -190,16 +190,31 @@ test("a key or header typed for one address isn't sent to the one another sessio
 test("a key isn't sent to a new address until it's typed again", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await createConnection(page, "Bound", provider.baseUrl, "sk-bound-key-abcdef")
-  await page.getByLabel("Base URL", { exact: true }).fill(other.baseUrl)
-  await page.getByRole("button", { name: "Save", exact: true }).click()
-
   const origin = new URL(other.baseUrl).origin
-  await expect(page.getByText(`This key isn't allowed for ${origin}`)).toBeVisible()
+  await page.getByLabel("Base URL", { exact: true }).fill(other.baseUrl)
+  // Said before saving: beside the field, and again when Save is pressed.
+  await expect(page.getByRole("status").filter({ hasText: "The key won't go to this address" })).toContainText(origin)
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  const confirm = page.getByRole("alertdialog")
+  await expect(confirm).toContainText(`won't be sent to ${origin}`)
+  await confirm.getByRole("button", { name: "Cancel" }).click()
+  await expect(page.getByLabel("Base URL", { exact: true })).toHaveValue(other.baseUrl)
+  expect(
+    (await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListConnections())).find(
+      (c) => c.name === "Bound"
+    )!.baseUrl
+  ).toBe(provider.baseUrl)
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "Save, then enter the key" }).click()
+  // Saved; the key is asked for at once. Closed without it, the page says plainly what's needed.
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click()
+  const blocked = page.getByRole("status").filter({ hasText: `isn't allowed for ${origin}` })
+  await expect(blocked).toContainText("replies through this connection fail")
   await page.getByRole("button", { name: "Check", exact: true }).click()
   await expect(page.getByText("It doesn't work")).toBeVisible()
   expect(other.keys).not.toContain("sk-bound-key-abcdef")
 
-  await page.getByRole("button", { name: "Allow it" }).click()
+  await blocked.getByRole("button", { name: "Enter the key again" }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Key", { exact: true }).fill("not-the-key")
   await dialog.getByRole("button", { name: "Allow" }).click()
@@ -207,7 +222,8 @@ test("a key isn't sent to a new address until it's typed again", async ({ page }
   await dialog.getByLabel("Key", { exact: true }).fill("sk-bound-key-abcdef")
   await dialog.getByRole("button", { name: "Allow" }).click()
   await expect(dialog).toBeHidden()
-  await expect(page.getByText(`This key isn't allowed for ${origin}`)).toBeHidden()
+  await expect(blocked).toBeHidden()
+  await expect(page.getByText(`Not allowed for ${origin}`)).toBeHidden()
   await page.getByRole("button", { name: "Check", exact: true }).click()
   await expect(page.getByText("It works")).toBeVisible()
   expect(other.keys).toContain("sk-bound-key-abcdef")

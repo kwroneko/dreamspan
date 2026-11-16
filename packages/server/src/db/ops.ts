@@ -2688,6 +2688,15 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
   }),
+  /**
+   * ST's global regex scripts as the account's global list, only while that list is empty:
+   * a re-import never replaces scripts the user has (ARCHITECTURE §13). True when written.
+   */
+  Rpc.make("StImportGlobalRegex", {
+    payload: { userId: UserId, importId: Schema.String, scripts: GlobalScripts },
+    success: Schema.Boolean,
+    error: Schema.Union([ImportLeaseLost, StorageError])
+  }),
   /** Adopts ST's default persona only while the user has no stored default. */
   Rpc.make("StImportDefaultPersona", {
     payload: { userId: UserId, importId: Schema.String, entityId: EntityId },

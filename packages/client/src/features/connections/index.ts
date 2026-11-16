@@ -4,6 +4,7 @@ import {
   ConnectionPage,
   DeleteSection,
   HeadersSection,
+  KeyBlockedSection,
   KeySection,
   RouteSection,
   SettingsSection,
@@ -38,6 +39,8 @@ export const register = () => {
     path: "connections/$connectionId",
     component: ConnectionPage
   })
+  // A key that no longer goes to the address: replies fail until it is entered again.
+  connectionSections.register({ id: "key-blocked", order: 1, component: KeyBlockedSection })
   // Which model new chats use; a new connection fetches its models here at once.
   connectionSections.register({ id: "default-model", order: 5, component: DefaultModelSection })
   connectionSections.register({ id: "settings", order: 10, component: SettingsSection })

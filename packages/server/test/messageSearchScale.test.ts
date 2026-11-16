@@ -7,7 +7,7 @@
 // shared host; the first page of a rare word, and of a common one, well under that.
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
-import type { MessageSearchPage } from "@rp/shared/messageSearch.ts"
+import type { MessageCursor, MessageSearchPage } from "@rp/shared/messageSearch.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -89,7 +89,7 @@ describe("message search at scale", () => {
             params: [c, c, c, c, c, c]
           }
         ])
-        const page = (text: string, cursor: { before: number } | null) =>
+        const page = (text: string, cursor: MessageCursor | null) =>
           reader.SearchMessages({ userId: userId as UserId, text, cursor, limit: 20 })
 
         // Every 50th message once, newest first, with the branches whose path holds it.
@@ -189,8 +189,53 @@ describe("message search at scale", () => {
             .map((t) => t.toFixed(0))
             .join(", ")} ms, common first page ${common.toFixed(0)} ms\n`
         )
+        // Phrases (stgapfix1): two or more words are read side by side first, then apart; quoted
+        // words only side by side. The slow shape is a phrase that's rare or absent among words
+        // that are everywhere: FTS checks positions in every version that has them all.
+        const phrased = (text: string, most: number) =>
+          Effect.gen(function* () {
+            const times: Array<number> = []
+            const seen: Array<string> = []
+            let at: MessageCursor | null = null
+            for (let i = 0; i < most; i++) {
+              const from: MessageCursor | null = at
+              times.push(yield* median(page(text, from)))
+              const read: MessageSearchPage = yield* page(text, from)
+              seen.push(...read.hits.map((h) => h.excerpt.text))
+              at = read.next
+              if (at === null) break
+            }
+            return { times, seen, done: at === null }
+          })
+        const phraseTimes: Array<[string, ReadonlyArray<number>]> = []
+        // Side by side in every 50th message, and nothing apart.
+        const burns = yield* phrased("lighthouse burns", 10)
+        phraseTimes.push(["lighthouse burns", burns.times])
+        assert.isTrue(burns.done)
+        assert.lengthOf(burns.seen, LENGTH / 50)
+        const quotedBurns = yield* phrased('"lighthouse burns at"', 10)
+        phraseTimes.push(['"lighthouse burns at"', quotedBurns.times])
+        assert.lengthOf(quotedBurns.seen, LENGTH / 50)
+        // Side by side in nearly every version: the first pages from the newest.
+        phraseTimes.push(["tide turns", (yield* phrased("tide turns", 3)).times])
+        phraseTimes.push(['"the lighthouse"', (yield* phrased('"the lighthouse"', 3)).times])
+        // Never side by side in this order: the first phase reads to its end, then the words apart.
+        const apart = yield* phrased("tide lighthouse", 3)
+        phraseTimes.push(["tide lighthouse", apart.times])
+        assert.isAbove(apart.seen.length, 0)
+        // Quoted and absent, among words in almost every version.
+        const absent = yield* phrased('"lighthouse tide"', 10)
+        phraseTimes.push(['"lighthouse tide"', absent.times])
+        assert.lengthOf(absent.seen, 0)
+        process.stderr.write(
+          `SearchMessages phrases: ${phraseTimes
+            .map(([text, times]) => `${text}: ${times.map((t) => t.toFixed(0)).join(", ")} ms`)
+            .join("; ")}\n`
+        )
+        // Every measurement is printed before any is checked.
         for (const t of pages) assert.isBelow(t, BUDGET_MS)
         assert.isBelow(common, BUDGET_MS)
+        for (const [text, times] of phraseTimes) for (const t of times) assert.isBelow(t, BUDGET_MS, text)
       }).pipe(Effect.provide(serverLayer(config))),
     600_000
   )

@@ -14,11 +14,14 @@ import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@rp/shared/cha
 import type { UserId } from "@rp/shared/domain.ts"
 import {
   excerpt,
+  focusPhrase,
   HIT_BRANCHES,
   type HitBranch,
   type MessageCursor,
   type MessageHit,
   type MessageSearchPage,
+  type ParsedQuery,
+  parseQuery,
   queryWords
 } from "@rp/shared/messageSearch.ts"
 import { Effect } from "effect"
@@ -60,6 +63,23 @@ interface ChatForks {
   readonly splits: Map<string, HitBranch["split"]>
 }
 
+/**
+ * The full-text queries a search reads, in the order their matches are listed. Each word is
+ * quoted so FTS syntax in it is only text; a word as the start of a word (`*`), a quoted
+ * phrase's words exactly and side by side. Two or more words outside quotes are read twice:
+ * first where they stand side by side in the order typed (an FTS phrase of prefixes), then
+ * where they're all present but apart, so a phrase match ranks above scattered words.
+ */
+const matchPhases = ({ phrases, words }: ParsedQuery): ReadonlyArray<string> => {
+  const quote = (word: string) => `"${word.replaceAll('"', '""')}"`
+  const all = [...phrases.map((phrase) => quote(phrase.join(" "))), ...words.map((word) => `${quote(word)}*`)].join(
+    " AND "
+  )
+  if (phrases.length > 0 || words.length < 2) return [all]
+  const together = words.map((word) => `${quote(word)}*`).join(" + ")
+  return [together, `(${all}) NOT (${together})`]
+}
+
 const searchMessages = (
   sql: SqlClient.SqlClient,
   userId: UserId,
@@ -70,46 +90,56 @@ const searchMessages = (
   Effect.gen(function* () {
     const words = queryWords(text)
     if (words.length === 0) return { hits: [], next: null } satisfies MessageSearchPage
-    // Each word as the start of a word, quoted so FTS syntax in it is only text.
-    const match = words.map((w) => `"${w.replaceAll('"', '""')}"*`).join(" AND ")
+    const phases = matchPhases(parseQuery(text))
+    const phrase = focusPhrase(text)
     const chats = new Map<string, ChatForks | null>()
     const hits: Array<MessageHit> = []
-    let before = cursor?.before ?? null
+    let phase = cursor?.phase === "words" && phases.length > 1 ? 1 : 0
+    let before = cursor?.before ?? Number.MAX_SAFE_INTEGER
     let scanned = 0
     let finished = false
-    while (scanned < SCAN) {
-      const batch = yield* sql<Candidate>`
-        WITH h(seq) AS MATERIALIZED (
-          SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${match}
-            AND rowid < ${before ?? Number.MAX_SAFE_INTEGER} ORDER BY rowid DESC LIMIT ${BATCH})
-        SELECT h.seq, v.id, v.slot_id, v.speaker_entity_id, v.writer, v.created_at, s.chat_id, s.chain_id,
-          s.depth, s.inserted,
-          (c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND v.status NOT IN ('generating', 'failed')
-            AND v.deleted_at IS NULL AND v.purged_at IS NULL AND s.deleted_at IS NULL AND s.purged_at IS NULL
-            AND (s.selected_version_id = v.id
-              OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = s.id AND o.kind = 'select' AND o.value_id = v.id)
-              OR (v.fork_id IS NOT NULL AND EXISTS (SELECT 1 FROM fork_overrides o
-                WHERE o.target_id = v.source_version_id AND o.kind = 'replace' AND o.value_id = v.id)))) AS eligible
-        FROM h LEFT JOIN versions v ON v.seq = h.seq LEFT JOIN slots s ON s.id = v.slot_id
-          LEFT JOIN chats c ON c.id = s.chat_id
-        ORDER BY h.seq DESC`
-      let read = 0
-      for (const row of batch) {
-        read++
-        scanned++
-        before = row.seq
-        if (row.eligible !== 1) continue
-        const hit = yield* hitOf(sql, userId, chats, row, words)
-        if (hit !== null) hits.push(hit)
+    for (;;) {
+      while (scanned < SCAN) {
+        const batch = yield* sql<Candidate>`
+          WITH h(seq) AS MATERIALIZED (
+            SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${phases[phase]!}
+              AND rowid < ${before} ORDER BY rowid DESC LIMIT ${BATCH})
+          SELECT h.seq, v.id, v.slot_id, v.speaker_entity_id, v.writer, v.created_at, s.chat_id, s.chain_id,
+            s.depth, s.inserted,
+            (c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND v.status NOT IN ('generating', 'failed')
+              AND v.deleted_at IS NULL AND v.purged_at IS NULL AND s.deleted_at IS NULL AND s.purged_at IS NULL
+              AND (s.selected_version_id = v.id
+                OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = s.id AND o.kind = 'select' AND o.value_id = v.id)
+                OR (v.fork_id IS NOT NULL AND EXISTS (SELECT 1 FROM fork_overrides o
+                  WHERE o.target_id = v.source_version_id AND o.kind = 'replace' AND o.value_id = v.id)))) AS eligible
+          FROM h LEFT JOIN versions v ON v.seq = h.seq LEFT JOIN slots s ON s.id = v.slot_id
+            LEFT JOIN chats c ON c.id = s.chat_id
+          ORDER BY h.seq DESC`
+        let read = 0
+        for (const row of batch) {
+          read++
+          scanned++
+          before = row.seq
+          if (row.eligible !== 1) continue
+          const hit = yield* hitOf(sql, userId, chats, row, words, phase === 0 ? phrase : null)
+          if (hit !== null) hits.push(hit)
+          if (hits.length === limit) break
+        }
+        if (batch.length < BATCH && read === batch.length) {
+          finished = true
+          break
+        }
         if (hits.length === limit) break
       }
-      if (batch.length < BATCH && read === batch.length) {
-        finished = true
-        break
-      }
-      if (hits.length === limit) break
+      // A phase read to its end goes on with the next, from the newest, while the page has room.
+      if (!finished || phase === phases.length - 1) break
+      phase++
+      before = Number.MAX_SAFE_INTEGER
+      finished = false
+      if (hits.length === limit || scanned >= SCAN) break
     }
-    return { hits, next: finished || before === null ? null : { before } } satisfies MessageSearchPage
+    const next: MessageCursor | null = finished ? null : { before, ...(phase === 1 ? { phase: "words" as const } : {}) }
+    return { hits, next } satisfies MessageSearchPage
   })
 
 /** The chat's name and live forks, read once per search. */
@@ -153,7 +183,9 @@ const hitOf = (
   userId: UserId,
   chats: Map<string, ChatForks | null>,
   row: Candidate,
-  words: ReadonlyArray<string>
+  words: ReadonlyArray<string>,
+  /** Where the excerpt is centred, when the message has it side by side. */
+  phrase: ReadonlyArray<string> | null
 ) =>
   Effect.gen(function* () {
     const chatId = row.chat_id!
@@ -217,7 +249,7 @@ const hitOf = (
       speaker: speaker?.label ?? (row.writer === "human" ? "You" : "Model"),
       position: shown[0]!.position,
       createdAt: row.created_at!,
-      excerpt: excerpt(content?.content ?? "", words),
+      excerpt: excerpt(content?.content ?? "", words, undefined, phrase),
       branches,
       branchCount: shown.length
     } satisfies MessageHit

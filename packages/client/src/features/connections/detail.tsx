@@ -84,8 +84,26 @@ const draftOf = (connection: Connection): SettingsDraft => ({
   provider: providerDraftOf(connection.providerSettings)
 })
 
-export function SettingsSection({ connection, kinds, providers }: ConnectionSectionProps) {
+/**
+ * The origin a draft's base URL would send to, and whether the connection's key isn't allowed
+ * there while it is allowed where the connection points now: saving would stop the key.
+ */
+const keyStopsAt = (
+  props: ConnectionSectionProps,
+  draftUrl: string,
+  defaultUrl: string | null
+): { origin: string; credential: Credential } | null => {
+  const credential = props.credentials.find((entry) => entry.id === props.connection.credentialId)
+  const origin = originOf(draftUrl.trim() || defaultUrl || "")
+  if (credential === undefined || origin === null || credential.origins.includes(origin)) return null
+  return origin === effectiveOrigin(props.connection, props) ? null : { origin, credential }
+}
+
+export function SettingsSection(props: ConnectionSectionProps) {
+  const { connection, kinds, providers } = props
   const action = useAction()
+  /** Asking before a save that stops the key; then letting the key go to the new address. */
+  const [keyStep, setKeyStep] = useState<{ step: "confirm" | "allow"; url: string } | null>(null)
   const [presets, setPresets] = useState<{ live: ReadonlyArray<LibraryRef>; archived: ReadonlyArray<LibraryRef> }>({
     live: [],
     archived: []
@@ -133,12 +151,19 @@ export function SettingsSection({ connection, kinds, providers }: ConnectionSect
     cacheTtlS: ttl.problem
   }
   const shown = (problem: string | null) => (submitted ? problem : null)
+  const stops = keyStopsAt(props, values.baseUrl, defaultUrl)
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSubmitted(true)
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
+    if (stops !== null) return setKeyStep({ step: "confirm", url: values.baseUrl.trim() || defaultUrl || stops.origin })
+    void save()
+  }
+
+  const save = async () => {
     let savedVersion = values.rowVersion
+    let saved = false
     await durable.commit(
       durable.text,
       async () => {
@@ -161,12 +186,14 @@ export function SettingsSection({ connection, kinds, providers }: ConnectionSect
         )
         if (result.ok) {
           savedVersion = result.value.rowVersion
+          saved = true
           setSubmitted(false)
         }
         return result.ok
       },
       (text) => JSON.stringify({ ...JSON.parse(text), rowVersion: savedVersion })
     )
+    return saved
   }
 
   const discard = () => {
@@ -213,6 +240,12 @@ export function SettingsSection({ connection, kinds, providers }: ConnectionSect
             spellCheck={false}
           />
         </Field>
+        {stops !== null && (
+          <Alert tone="warning" title="The key won't go to this address">
+            The key “{stops.credential.name}” is allowed only for addresses you entered it for. After you save, enter it
+            again to allow {stops.origin}, or keep the old address.
+          </Alert>
+        )}
         <Field
           label="Select a prompt preset"
           about="Switching to this connection selects this preset. You can still switch the preset afterward."
@@ -314,8 +347,49 @@ export function SettingsSection({ connection, kinds, providers }: ConnectionSect
           )}
         </div>
       </form>
+      {stops !== null && (
+        <ConfirmDialog
+          open={keyStep?.step === "confirm"}
+          onOpenChange={(open) => !open && setKeyStep(null)}
+          title="Save the new address?"
+          description={`The key “${stops.credential.name}” won't be sent to ${stops.origin}. Enter it again to allow that address, or keep the old one.`}
+          confirmLabel="Save, then enter the key"
+          confirmHint="Saves the settings, then asks for the key again to allow the new address."
+          pending={action.pending}
+          onConfirm={async () => {
+            const url = keyStep?.url ?? stops.origin
+            if (await save()) setKeyStep({ step: "allow", url })
+            else setKeyStep(null)
+          }}
+        />
+      )}
+      {keyStep?.step === "allow" && (
+        <KeyAgain
+          credentialId={connection.credentialId}
+          credentials={props.credentials}
+          url={keyStep.url}
+          onClose={() => setKeyStep(null)}
+        />
+      )}
     </Card>
   )
+}
+
+/** Asks for the key again for the address just saved (`AllowHostDialog`), while that key is the connection's. */
+function KeyAgain({
+  credentialId,
+  credentials,
+  url,
+  onClose
+}: {
+  credentialId: CredentialId | null
+  credentials: ReadonlyArray<Credential>
+  url: string
+  onClose: () => void
+}) {
+  const credential = credentials.find((entry) => entry.id === credentialId)
+  if (credential === undefined) return null
+  return <AllowHostDialog credential={credential} url={url} open onOpenChange={(open) => !open && onClose()} />
 }
 
 /**
@@ -468,6 +542,43 @@ function UseSavedKeyDialog({
   )
 }
 
+/**
+ * First on the page while the connection's key isn't allowed for its address: every reply
+ * fails until the key is entered again (ARCHITECTURE §3.12, keys bound to origins).
+ */
+export function KeyBlockedSection(props: ConnectionSectionProps) {
+  const { connection, credentials } = props
+  const [open, setOpen] = useState(false)
+  const origin = effectiveOrigin(connection, props)
+  const credential = credentials.find((entry) => entry.id === connection.credentialId)
+  if (credential === undefined || origin === null || credential.origins.includes(origin)) return null
+  return (
+    <>
+      <Alert
+        tone="warning"
+        title="Enter the key again"
+        actions={
+          <Button hint="Asks for the key again, then lets it go to this address." onClick={() => setOpen(true)}>
+            Enter the key again
+          </Button>
+        }
+      >
+        The key “{credential.name}” isn't allowed for {origin}, so replies through this connection fail. That happens
+        when the address changes, or when the key is replaced without allowing it. If you made neither change, check the
+        address first.
+      </Alert>
+      {open && (
+        <AllowHostDialog
+          credential={credential}
+          url={effectiveBaseUrl(connection, props) ?? origin}
+          open
+          onOpenChange={setOpen}
+        />
+      )}
+    </>
+  )
+}
+
 export function KeySection(props: ConnectionSectionProps) {
   const { connection, credentials } = props
   const remove = useAction()
@@ -533,23 +644,11 @@ export function KeySection(props: ConnectionSectionProps) {
         <p className="text-sm text-muted">No key. Requests go without one.</p>
       )}
       {blocked && (
-        <div className="mt-3">
-          <Alert
-            tone="warning"
-            title={`This key isn't allowed for ${origin}`}
-            actions={
-              <Button
-                hint="Asks for the key again, then lets it go to this address."
-                onClick={() => setDialog("allow")}
-              >
-                Allow it
-              </Button>
-            }
-          >
-            Requests are refused until you type the key again to allow this address. That happens when the address
-            changes, or when the key is replaced without allowing it. If you made neither change, check the address
-            before you allow it.
-          </Alert>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+          <span className="font-medium text-warning">Not allowed for {origin}, so replies fail.</span>
+          <Button hint="Asks for the key again, then lets it go to this address." onClick={() => setDialog("allow")}>
+            Enter the key again
+          </Button>
         </div>
       )}
       {dialog === "set" && (

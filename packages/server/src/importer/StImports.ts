@@ -1822,6 +1822,28 @@ export class StImports extends Context.Service<
               prompt: settings.summary.prompt,
               settings: JSON.stringify(settings.summary)
             })
+            if (settings.globalRegex !== undefined && settings.globalRegex.length > 0) {
+              // Only into an empty list: scripts the account already has are never replaced.
+              const written = yield* writer.StImportGlobalRegex({
+                userId: user.id,
+                importId,
+                scripts: settings.globalRegex
+              })
+              const n = settings.globalRegex.length
+              for (let i = 0; i < n; i++) session.report.count("regex", written ? "added" : "skipped")
+              // The report's counts show what came in; these say what didn't, and why (a file's
+              // own warnings aren't kept in the report).
+              if (!written)
+                session.report.issue(
+                  path,
+                  "warning",
+                  "st.global_regex_kept",
+                  `${n} global regex ${n === 1 ? "script wasn't" : "scripts weren't"} imported, because Settings → Regex scripts already has scripts and an import never replaces them. To take these instead, empty that list and import again.`
+                )
+              for (const issue of parsed.report.issues)
+                if (written && issue.code === "st_settings.regex_dropped")
+                  session.report.issue(path, "warning", issue.code, issue.message)
+            }
             session.settings = settings
             session.settingsModifiedAt = request.modifiedAt ?? session.importedAt
             session.report.selectedPreset =

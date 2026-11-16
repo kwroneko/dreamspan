@@ -1,6 +1,43 @@
 // What a message search's words are and how a hit's excerpt marks them (messageSearch.ts).
 import { describe, expect, it } from "vitest"
-import { excerpt, markWords, queryWords } from "../src/messageSearch.ts"
+import { branchMatches } from "../src/branchNaming.ts"
+import { excerpt, findPhrase, focusPhrase, markWords, parseQuery, queryWords } from "../src/messageSearch.ts"
+
+describe("message search phrases", () => {
+  it("reads quoted phrases apart from the other words, within the word limit", () => {
+    expect(parseQuery('her "handwriting was" unmistakable')).toEqual({
+      phrases: [["handwriting", "was"]],
+      words: ["her", "unmistakable"]
+    })
+    expect(parseQuery("“The Seal,” smudged „wax")).toEqual({ phrases: [["the", "seal"], ["wax"]], words: ["smudged"] })
+    expect(parseQuery('"" a b a')).toEqual({ phrases: [], words: ["a", "b"] })
+    expect(parseQuery('"a b c d e f" g h i j').words).toEqual(["g", "h"])
+    expect(queryWords('"the tide" the keeper')).toEqual(["the", "tide", "keeper"])
+    expect(focusPhrase("handwriting was unmistakable")).toEqual(["handwriting", "was", "unmistakable"])
+    expect(focusPhrase('lamp "the tide"')).toEqual(["the", "tide"])
+    expect(focusPhrase("lamp")).toBeNull()
+  })
+
+  it("finds words side by side, each the start of a word, across punctuation", () => {
+    const text = "The was, then: her Handwriting — was unmistakable."
+    expect(findPhrase(text, ["handwriting", "was", "unmistak"])).toBe(text.indexOf("Handwriting"))
+    expect(findPhrase(text, ["was", "handwriting"])).toBeNull()
+    expect(findPhrase("Café crème", ["cafe", "creme"])).toBe(0)
+    const long = `${"was ".repeat(80)}her handwriting was unmistakable ${"tail ".repeat(80)}`
+    const shown = excerpt(long, ["handwriting", "was", "unmistakable"], undefined, [
+      "handwriting",
+      "was",
+      "unmistakable"
+    ])
+    expect(shown.text).toContain("her handwriting was unmistakable")
+  })
+
+  it("matches a branch when every word typed is in its name or last message", () => {
+    expect(branchMatches("", ["Original"])).toBe(true)
+    expect(branchMatches("  docks NIGHT ", ["At the docks", "It was night."])).toBe(true)
+    expect(branchMatches("docks dawn", ["At the docks", "It was night."])).toBe(false)
+  })
+})
 
 describe("message search words", () => {
   it("splits as the index does, lower case, without repeats", () => {

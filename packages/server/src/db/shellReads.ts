@@ -11,6 +11,7 @@ import type { ForkId } from "@rp/shared/chat.ts"
 // worker keeps the last computation while the database hasn't changed (`PRAGMA data_version`
 // moves with every commit of another connection, and the writer is one), so a screen's
 // several reads cost one.
+import { branchMatches } from "@rp/shared/branchNaming.ts"
 import { CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
 import { CHAT_FILTERS, type ChatBrowse, type ChatFilterCounts } from "@rp/shared/chatBrowse.ts"
 import { chatName } from "@rp/shared/chatName.ts"
@@ -161,13 +162,19 @@ const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection):
   const forks = state.forks
   const needle = view.search.trim().toLowerCase()
   const chats = view.chats === undefined ? null : new Set<string>(view.chats)
+  // One chat's branches share its name and cast: there a search looks through each branch's
+  // own name and its last message, as the branch menu's filter does.
+  const matches = (f: Fork) =>
+    needle === "" ||
+    (view.chat !== null
+      ? branchMatches(needle, [f.named ? f.name : "", f.original ? "Original" : "", f.preview])
+      : [f.name, f.chatName, ...f.cast.flatMap((c) => [c.label, c.name])].some((n) => n.toLowerCase().includes(needle)))
   const scoped = forks.filter(
     (f) =>
       (view.entity === null || f.joined.includes(view.entity)) &&
       (view.chat === null || f.chat.id === view.chat) &&
       (chats === null || chats.has(f.chat.id)) &&
-      (needle === "" ||
-        [f.name, f.chatName, ...f.cast.flatMap((c) => [c.label, c.name])].some((n) => n.toLowerCase().includes(needle)))
+      matches(f)
   )
   // A chat's branches by their last message, newest first (owner, 2026-11-01).
   const byLast = (list: ReadonlyArray<Fork>) =>
@@ -610,7 +617,9 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                   name: c.name,
                   avatarMediaId: c.avatarMediaId,
                   ...(c.avatarCrop ? { avatarCrop: c.avatarCrop } : {}),
-                  chats: m.persona ? new Set(used.map((f) => f.chat.id)).size : used.length,
+                  // One per chat, however many of its branches the card is in: the count the
+                  // card's header and the left panel give (`sectionRows` "card").
+                  chats: new Set(used.map((f) => f.chat.id)).size,
                   lastMessageAt: spoke[0]?.a.at ?? (m.persona ? recent : null),
                   latestChatId: (latest?.sourceChatId as ChatId) ?? null
                 },

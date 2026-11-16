@@ -1,8 +1,12 @@
 // The rest of an ST data folder that chats depend on (DATA-MODEL §14): `settings.json` for
 // personas, global lorebooks, the default author's note and the Summarize extension's
-// settings, and `groups/*.json` for group chats. Read from ST's public source
-// (`personas.js`, `world-info.js`, `authors-note.js`, `extensions/memory`, `global.d.ts`).
-// Only what the importer maps is read; the rest of `settings.json` is dropped unread.
+// settings, its global regex scripts, and `groups/*.json` for group chats. Read from ST's
+// public source (`personas.js`, `world-info.js`, `authors-note.js`, `extensions/memory`,
+// `extensions/regex`, `global.d.ts`). Only what the importer maps is read; the rest of
+// `settings.json` is dropped unread.
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import { MAX_GLOBAL_SCRIPTS } from "@rp/shared/regexScripts.ts"
+import { readRegex } from "./preset.ts"
 import { stIdTime } from "./sourceTime.ts"
 import { parseStCreatedAt } from "./stCreatedAt.ts"
 import { type ReplySectionSettings } from "@rp/shared/replySections.ts"
@@ -85,6 +89,8 @@ export interface StSettings {
   }>
   /** ST's "Include in World Info Scanning" for its author's notes (`note.allowWIScan`). */
   readonly allowWIScan: boolean
+  /** ST's global regex scripts (`extension_settings.regex`), as data; absent when it has none. */
+  readonly globalRegex?: ReadonlyArray<RegexScript>
   readonly summary: StSummarySettings
 }
 
@@ -131,6 +137,24 @@ const replySectionsFrom = (reasoning: Record<string, unknown>): ReplySectionSett
     pairs: prefix !== "" && suffix !== "" ? [{ open: prefix, close: suffix, case_sensitive: true }] : [],
     send_back: reasoning.add_to_prompts === true ? Math.min(1000, Math.max(0, additions)) : 0
   }
+}
+
+/**
+ * ST's global regex scripts: the regex extension's `extension_settings.regex` (ST 1.19 keeps
+ * no regex files of its own; its regex presets only name which of these are on). Read as a
+ * preset's or a card's are, at most MAX_GLOBAL_SCRIPTS of them.
+ */
+const globalScripts = (raw: unknown, issues: ReportBuilder): ReadonlyArray<RegexScript> => {
+  const path = ["extension_settings", "regex"]
+  const scripts = readRegex(raw, issues, path, "global")
+  if (scripts.length <= MAX_GLOBAL_SCRIPTS) return scripts
+  issues.add(
+    "warning",
+    "st_settings.regex_dropped",
+    `Only the first ${MAX_GLOBAL_SCRIPTS} global regex scripts were imported; ${scripts.length - MAX_GLOBAL_SCRIPTS} more were left out.`,
+    path
+  )
+  return scripts.slice(0, MAX_GLOBAL_SCRIPTS)
 }
 
 export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSettings => {
@@ -204,6 +228,7 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
       }
     : null
   const reasoning = Predicate.isObject(powerUser.reasoning) ? replySectionsFrom(powerUser.reasoning) : null
+  const globalRegex = globalScripts(extensions.regex, issues)
   return {
     ...(switches || reasoning
       ? { textSwitches: { ...switches, ...(reasoning ? { reply_sections: reasoning } : {}) } }
@@ -234,6 +259,7 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
     ),
     characterNotes,
     allowWIScan: note.allowWIScan === true,
+    ...(globalRegex.length > 0 ? { globalRegex } : {}),
     summary: {
       prompt: typeof memory.prompt === "string" ? memory.prompt : null,
       promptWords: Math.max(1, Math.trunc(numberOr(memory.promptWords, DEFAULT_SUMMARY_SETTINGS.promptWords))),

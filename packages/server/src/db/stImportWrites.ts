@@ -57,7 +57,14 @@ import {
 import { newEvent, type PlaceEvent } from "./stImportPlace.ts"
 import { planTipRef, type StPlanTip, stepPlanTip } from "./stImportPlanOps.ts"
 import { StImportPlanChanged, ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
-import { DEFAULT_PERSONA, DEFAULT_PRESET, newChatLcmSettings, ownedPersona, ownedPreset } from "./generationSettings.ts"
+import {
+  DEFAULT_PERSONA,
+  DEFAULT_PRESET,
+  GLOBAL_REGEX,
+  newChatLcmSettings,
+  ownedPersona,
+  ownedPreset
+} from "./generationSettings.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type Payload<K extends keyof Handlers> = Parameters<Handlers[K]>[0]
@@ -1031,6 +1038,15 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         yield* putUserSetting(sql, userId, DEFAULT_PRESET, refId)
         return true
       }).pipe(transaction(sql, "StImportDefaultPreset")),
+    StImportGlobalRegex: ({ userId, importId, scripts }) =>
+      Effect.gen(function* () {
+        yield* current(userId, importId, importId)
+        if (scripts.length === 0) return false
+        const previous = yield* readSetting(sql, "user", userId, GLOBAL_REGEX)
+        if (Array.isArray(previous.value) && previous.value.length > 0) return false
+        yield* putUserSetting(sql, userId, GLOBAL_REGEX, scripts)
+        return true
+      }).pipe(transaction(sql, "StImportGlobalRegex")),
     StImportSummarySettings: ({ userId, importId, prompt, settings }) =>
       Effect.gen(function* () {
         yield* current(userId, importId, importId)

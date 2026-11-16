@@ -6,11 +6,13 @@
 // menu opens the same list (`requestBranches`), in a dialog while the header shows no control.
 // Its rows are the left panel's branch rows (ShellBrowser `BranchListRow`): the same box, title
 // line, preview, time and corner actions, grouped as the panel groups them (branchmenu).
+import { branchMatches } from "@rp/shared/branchNaming.ts"
 import type { Fork, SlotId } from "@rp/shared/chat.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Input } from "../../ui/Field.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { Popover } from "../../ui/Popover.tsx"
@@ -52,6 +54,8 @@ const GROUP_TITLES: Record<BranchGroup, string> = {
   other: "Branches"
 }
 const forkKey = (fork: Fork) => fork.id
+/** Lists longer than this get a filter field. */
+const BRANCH_FILTER_FROM = 6
 
 /**
  * One branch: the row opens it; the pencil after its name renames it in place; the corners pin
@@ -226,15 +230,21 @@ function BranchList({
   const deleted = useDeletedToast()
   const pins = useAction()
   const [failure, setFailure] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
   const keepPanel = search.panel ? { panel: search.panel } : {}
   if (forks === null) return <p className="px-1 py-2 text-sm text-muted">Loading the branches…</p>
   const live = forks.length
   // A part may list some forks apart (another thread's, spec/THREADS.md §13.2): never as branches.
   const context: BranchControlContext = { session, view, forks, shown }
   const sections = parts.flatMap((part) => (part.Section ? [{ id: part.id, Section: part.Section }] : []))
-  const ordered = orderBranches(
+  const listed = orderBranches(
     forks.filter((fork) => fork.id === shown?.id || parts.every((part) => part.listed?.(fork, context) ?? true))
   )
+  // The list is already read whole (ListForks), so filtering it asks the server nothing.
+  const filterable = listed.length > BRANCH_FILTER_FROM
+  const ordered = filterable
+    ? listed.filter((fork) => branchMatches(query, [branchLabel(fork), fork.tipExcerpt]))
+    : listed
   const groups = new Set(ordered.map(branchGroup))
   // The URL names a branch only while it isn't the one the chat opens on.
   const linkSearch = (fork: Fork) =>
@@ -287,6 +297,19 @@ function BranchList({
       {sections.map(({ id, Section }) => (
         <Section key={id} {...context} onDone={onDone} />
       ))}
+      {filterable && (
+        <Tooltip label="Shows the branches whose name or last message has these words.">
+          <Input
+            type="search"
+            aria-label="Find a branch"
+            placeholder="Find a branch"
+            className="mb-1 h-8 min-w-0 shrink-0"
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+          />
+        </Tooltip>
+      )}
+      {ordered.length === 0 && <p className="px-1 py-2 text-sm text-muted">No branch has those words.</p>}
       {/* The rows' 8 px gutter is inside the scrollport, so focus rings and borders aren't cut. */}
       <WindowedList
         items={ordered}
