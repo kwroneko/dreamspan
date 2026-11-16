@@ -14,6 +14,7 @@ import { cancelCapability, deliverAnswer } from "../agent/approvals.ts"
 import { CARD_SKILLS } from "../agent/tools/loading.ts"
 import { matchPatterns } from "../agent/toolLoading.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
+import { CacheWarmth } from "../chat/CacheWarmth.ts"
 
 export const makeWorkshopHandlers = Effect.gen(function* () {
   const writer = yield* Writer
@@ -21,9 +22,18 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
   const execution = yield* ExecutionRegistry
   const plugins = yield* PluginHost
   const hub = yield* ChatHub
+  const warmth = yield* CacheWarmth
   // Undo runs the recorded worker operation, bypassing the original UI handler's
   // notifications. Publish only after that transaction commits, on its recorded fork.
-  const notifyUndo = (effects: ReadonlyArray<RolloutEffect>) => {
+  // A library entry back or binned (a note, a card) changes what the user's open chats send
+  // and list: they read their state again, as after the same change from the library.
+  const notifyUndo = (userId: UserId, effects: ReadonlyArray<RolloutEffect>) =>
+    Effect.gen(function* () {
+      notifyChats(effects)
+      if (effects.some((effect) => effect.undoneAt !== null && effect.targetKind === "entity"))
+        yield* warmth.refreshUser(userId, true)
+    })
+  const notifyChats = (effects: ReadonlyArray<RolloutEffect>) => {
     const targets = new Map<string, { chatId: ChatId; forkId?: ForkId; state: boolean; history: boolean }>()
     for (const effect of effects) {
       if (effect.undoneAt === null || effect.targetKind !== "chat") continue
@@ -72,7 +82,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           )
         })
       }),
-      Effect.tap((effect) => Effect.sync(() => notifyUndo([effect])))
+      Effect.tap((effect) => notifyUndo(actor.id, [effect]))
     )
   /** The capabilities of the tools this chat's kind offers, as they stand in it. */
   const capabilitiesOf = (userId: UserId, chatId: ChatId) =>
@@ -180,7 +190,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           const rows = all.filter((e) => e.rolloutId === input.rolloutId && e.undoneAt === null)
           if (!rows.some((e) => e.kind.startsWith("plugin."))) {
             const result = yield* writer.UndoRolloutEffects({ ...input, userId: user.id })
-            notifyUndo(result.undone)
+            yield* notifyUndo(user.id, result.undone)
             return result
           }
           const undone: Array<(typeof rows)[number]> = []

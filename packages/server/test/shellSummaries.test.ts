@@ -567,7 +567,11 @@ describe("shell fork summaries", () => {
       const refreshed = JSON.parse(read.fresh[0]!.forks) as Array<{ forkId: string }>
       assert.deepStrictEqual(refreshed.map((fork) => fork.forkId).sort(), [main, branch].sort())
       const after = yield* t.check("retained swipe", [harbor.id])
-      assert.strictEqual(after.cards.find((card) => card.card.entityId === tam.entityId)!.card.chats, 3)
+      assert.strictEqual(
+        after.cards.find((card) => card.card.entityId === tam.entityId)!.card.chats,
+        2,
+        "two chats: both branches of Harbor count once"
+      )
       for (const fork of after.forks.filter((fork) => fork.chat.id === harbor.id)) {
         assert.include(fork.joined, tam.entityId)
         assert.include(fork.departed, tam.entityId)

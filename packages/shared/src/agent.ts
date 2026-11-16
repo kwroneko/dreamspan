@@ -35,6 +35,11 @@ export const ApprovalPrompt = Schema.Struct({
   capability: Schema.String,
   /** The capability's own label: "Create and edit library items". */
   capabilityLabel: Schema.String,
+  /**
+   * Set where "Allow in this workshop" is remembered for this exact content only (a card's own
+   * skill as shown): its digest. Changed content asks again.
+   */
+  grantTarget: Schema.optionalKey(Schema.String),
   /** What it will do, in a line: "Create the card “Mara Quill”". */
   title: Schema.String,
   /** The values it will write, as the arguments give them. */

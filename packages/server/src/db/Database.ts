@@ -111,7 +111,6 @@ const REPLY_READS: ReadonlySet<string> = new Set([
   "PlanSummaries",
   "GetSlot",
   "AssembleContext",
-  "AssembleDraftTurn",
   "ResolveConnection",
   "GetModel",
   "GetCostSettings",

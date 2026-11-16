@@ -1,4 +1,3 @@
-import { checkDraftTarget } from "./draftTarget.ts"
 import { makeExternalMediaWriteHandlers } from "./externalMedia.ts"
 import { makeSavedMediaWriteHandlers } from "./savedMedia.ts"
 import { chatKinds } from "@rp/shared/chatKinds.ts"
@@ -98,37 +97,6 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
     ...(yield* makeSavedMediaWriteHandlers),
     ...(yield* makeSourcePrefsWriteHandlers),
     ...(yield* makeTokenCountingWriteHandlers),
-    StartDraftRollout: ({ userId, target, rolloutId, connectionId, modelId, snapshot, issues }) =>
-      Effect.gen(function* () {
-        yield* checkDraftTarget(sql, userId, target)
-        if (!(yield* ownedModel(sql, userId, connectionId, modelId)))
-          return yield* new NotFound({ entity: "model", id: modelId })
-        const now = Date.now()
-        yield* sql`INSERT INTO rollouts ${sql.insert({
-          id: rolloutId,
-          chat_id: target.chatId,
-          fork_id: target.forkId,
-          kind: "draft",
-          status: "running",
-          slot_id: null,
-          leaf_slot_id: target.leafSlotId,
-          role: "narrator",
-          connection_id: connectionId,
-          model_id: modelId,
-          request_class: "interactive",
-          context_issues_json: JSON.stringify(issues),
-          created_at: now,
-          started_at: now,
-          updated_at: now
-        })}`
-        yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
-        yield* sql`INSERT INTO draft_history (draft_id, seq, kind, first_at, at, start, removed, inserted, images_before_json, images_after_json, displaced)
-          SELECT id, (SELECT coalesce(max(seq), 0)+1 FROM draft_history WHERE draft_id=d.id), 'restore', ${now}, ${now}, 0, '', '', images_json, images_json, 0
-          FROM drafts d WHERE id=${target.draftId} AND d.content <> ''
-            AND NOT EXISTS (SELECT 1 FROM draft_history h WHERE h.draft_id=d.id
-              AND h.seq=(SELECT max(seq) FROM draft_history WHERE draft_id=d.id)
-              AND h.kind='restore' AND h.removed='' AND h.inserted='')`
-      }).pipe(transaction(sql, "StartDraftRollout")),
     AuthorizeAutoRequest: ({ userId, token, configuration }) =>
       authorizeAutoRequest(sql, userId, token, configuration).pipe(transaction(sql, "AuthorizeAutoRequest")),
 
@@ -306,7 +274,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
 
     InterruptRollouts: () =>
       sql`UPDATE rollouts SET status = 'interrupted', updated_at = ${Date.now()}
-          WHERE status IN ('created', 'running') AND kind IN ('generation', 'draft', 'workshop', 'decision') RETURNING id`.pipe(
+          WHERE status IN ('created', 'running') AND kind IN ('generation', 'workshop', 'decision') RETURNING id`.pipe(
         Effect.map((rows) => ({ interrupted: rows.length })),
         transaction(sql, "InterruptRollouts")
       ),

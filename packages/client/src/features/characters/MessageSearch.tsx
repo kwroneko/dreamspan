@@ -55,7 +55,7 @@ export function MessageSearchToggle({ grid }: { grid: boolean }) {
       className={`h-9! w-9! shrink-0 px-0! ${pressedButtonClass}`}
       hint={
         on
-          ? "Searching the text of messages in all your chats. Click to search chat and character names again."
+          ? "Searching the text of messages in all your chats. Words in quotes are found as written, side by side. Click to search chat and character names again."
           : "Click to search the text of messages in all your chats instead of names."
       }
       onClick={() => set(!on)}
@@ -88,7 +88,7 @@ function Pages({ text }: { text: string }) {
     <ul aria-label="Messages found" className="flex flex-col gap-1">
       {cursors.map((cursor, i) => (
         <Page
-          key={cursor?.before ?? "first"}
+          key={cursor === null ? "first" : `${cursor.phase ?? "together"}/${cursor.before}`}
           text={text}
           cursor={cursor}
           first={i === 0}

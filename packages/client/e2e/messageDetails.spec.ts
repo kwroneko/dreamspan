@@ -357,11 +357,14 @@ test("model labels use the free header width and hide the whole connection when 
         expect(geometry.full).toBeGreaterThan(256)
       }
       // The old label showed a clipped connection at this precise available width.
-      // Constrain only this label, leaving room for the model and one connection letter.
+      // Constrain only this label, leaving room for the model and one connection letter. On a
+      // phone the label takes what the time's line leaves (it never starts a line of its own),
+      // so the width is set exactly, not only capped.
       if (width === 320) {
         const before = await head.boundingBox()
         await label.evaluate((element, max) => {
           element.style.maxWidth = `${max}px`
+          element.style.minWidth = `${max}px`
         }, geometry.modelFull + 10)
         await expect(connection).toBeHidden()
         await expect
@@ -374,6 +377,7 @@ test("model labels use the free header width and hide the whole connection when 
           .toBe(true)
         await label.evaluate((element, max) => {
           element.style.maxWidth = `${max}px`
+          element.style.minWidth = `${max}px`
         }, geometry.modelFull / 2)
         await expect(connection).toBeHidden()
         await expect
@@ -386,6 +390,7 @@ test("model labels use the free header width and hide the whole connection when 
           .toBe(true)
         await label.evaluate((element) => {
           element.style.maxWidth = ""
+          element.style.minWidth = ""
         })
         await expect(connection).toBeVisible({ visible: geometry.full <= geometry.available })
         expect((await head.boundingBox())!.height).toBe(before!.height)

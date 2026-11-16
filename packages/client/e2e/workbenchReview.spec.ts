@@ -85,7 +85,7 @@ test("two views keep their composer labels, drafts and panels independent while 
   await expect(left.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
   await expect(right.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
   const text = await left.locator("article[data-slot] .markdown").last().innerText()
-  await expect(right.locator("article[data-slot] .markdown").last()).toHaveText(text)
+  await expect(right.locator("article[data-slot] .markdown").last()).toHaveText(text, { useInnerText: true })
   await right
     .locator("article[data-slot]")
     .last()

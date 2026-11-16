@@ -191,13 +191,7 @@ type Settings = {
   readonly modelOverride?: { readonly connection: string; readonly model: string }
 } & (
   | { readonly userId: UserId; readonly chatId: ChatId; readonly slotId: string; readonly versionId: string }
-  | {
-      readonly userId: UserId
-      readonly chatId: ChatId
-      readonly next: true
-      readonly leafSlotId?: string | null
-      readonly draft?: import("@rp/shared/generationTarget.ts").DraftGenerationTarget
-    }
+  | { readonly userId: UserId; readonly chatId: ChatId; readonly next: true; readonly leafSlotId?: string | null }
 )
 
 /** A snapshot to read again: its pins and its inputs. */
@@ -474,7 +468,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   const viewedLeaf = "next" in settings ? (settings.cut ?? settings.leafSlotId ?? null) : null
   const nextTarget = sql<{ leaf: string | null; depth: number | null }>`
     SELECT s.id AS leaf, s.depth FROM chats c LEFT JOIN slots s
-      ON s.id = ${"next" in settings && settings.draft ? sql`${viewedLeaf}` : sql`coalesce(${viewedLeaf}, c.active_leaf_slot_id)`} AND s.chat_id = c.id
+      ON s.id = coalesce(${viewedLeaf}, c.active_leaf_slot_id) AND s.chat_id = c.id
     WHERE c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
       AND (${viewedLeaf} IS NULL OR (s.id IS NOT NULL AND (s.deleted_at IS NULL
         OR EXISTS (SELECT 1 FROM forks f WHERE f.chat_id = c.id AND f.tip_slot_id = s.id AND f.deleted_at IS NULL))))`.pipe(
@@ -482,7 +476,6 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
       row
         ? Effect.succeed({
             chatId,
-            ...("next" in settings && settings.draft ? { draft: settings.draft } : {}),
             slotId: "",
             versionId: "",
             depth: row.depth === null ? 0 : row.depth + 1,

@@ -215,30 +215,6 @@ const userDraftOf = (owner: Party) =>
   })
 
 const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
-  WriteForMe: {
-    probe: (actor, owner) =>
-      refused(
-        actor.api
-          .WriteForMe({
-            target: {
-              kind: "draft",
-              chatId: owner.chat.chatId,
-              forkId: owner.chat.forkId,
-              leafSlotId: owner.chat.replySlotId,
-              draftId: owner.composerId
-            }
-          })
-          .pipe(Stream.runDrain),
-        "NotFound"
-      )
-  },
-  GetLastDraftRollout: {
-    probe: (actor, owner) =>
-      refused(actor.api.GetLastDraftRollout({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), "NotFound")
-  },
-  GetDraftRunContext: {
-    probe: (actor, owner) => refused(actor.api.GetDraftRunContext({ rolloutId: owner.chat.rolloutId }), "NotFound")
-  },
   ListBuiltinParts: { createOnly: "read-only built-in catalog" },
   CopyBuiltin: {
     adminOnly: (actor) =>
@@ -2090,6 +2066,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         }),
         "NotFound"
       )
+  },
+  SetMessagesHidden: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.SetMessagesHidden({ forkId: owner.chat.forkId, slotIds: [owner.chat.slotId], hidden: true }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SetMessagesHidden({
+            forkId: actor.chat.forkId,
+            slotIds: [actor.chat.slotId, owner.chat.slotId],
+            hidden: true
+          }),
+          "NotFound"
+        )
+      })
   },
   InsertMessage: {
     probe: (actor, owner) =>
@@ -4887,6 +4880,11 @@ const storage: Record<
       yield* refused(commit(mine.importId, actor.chat.chatId), "NotFound")
       yield* writer.StImportStage({ userId: owner.user.id, lease: theirs.importId, path, seq: 0, batchJson: null })
       yield* writer.StImportStage({ userId: actor.user.id, lease: mine.importId, path, seq: 0, batchJson: null })
+    }),
+  StImportGlobalRegex: (_reader, actor, owner, writer) =>
+    Effect.gen(function* () {
+      const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+      yield* refused(writer.StImportGlobalRegex({ userId: actor.user.id, importId, scripts: [] }), "ImportLeaseLost")
     }),
   StImportSummarySettings: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {

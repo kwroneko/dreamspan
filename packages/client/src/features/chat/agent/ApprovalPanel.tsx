@@ -154,7 +154,11 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
           <Button
             pending={answering === "allow_chat"}
             disabled={busy}
-            hint={`Lets it do this kind of thing here without asking again (${approval.capabilityLabel}).`}
+            hint={
+              approval.grantTarget
+                ? "Lets it use this here without asking again, for as long as it stays exactly as shown."
+                : `Lets it do this kind of thing here without asking again (${approval.capabilityLabel}).`
+            }
             onClick={() => void answer("allow_chat")}
           >
             Allow in this workshop

@@ -146,12 +146,33 @@ const expectInlineNames = async (scope: Locator, full = false) => {
   expect.soft(geometry.bottom).toBeLessThanOrEqual(geometry.portraitBottom + 1)
   expect.soft(Math.abs(geometry.nameMid - geometry.versionMid)).toBeLessThanOrEqual(1)
   expect.soft(geometry.usageBottom).toBeLessThanOrEqual(geometry.headerBottom + 1)
+  if (full) {
+    // A visible heading box can still contain only the switcher's chevron. Keep
+    // the first two name characters and an ellipsis readable beside a long version.
+    const text = await scope.locator("[data-card-name] button > span").evaluate((element) => {
+      const metrics = document.createElement("canvas").getContext("2d")!
+      metrics.font = getComputedStyle(element).font
+      const name = element.textContent!
+      return {
+        name,
+        viewport: window.innerWidth,
+        width: element.getBoundingClientRect().width,
+        required: Math.min(metrics.measureText(name).width, metrics.measureText(`${name.slice(0, 2)}…`).width)
+      }
+    })
+    expect
+      .soft(text.width + 1, `${text.name} at ${text.viewport}: the card's display name remains readable`)
+      .toBeGreaterThanOrEqual(text.required)
+  }
   await expect(header.getByRole("button", { name: "Persona", exact: true })).toBeVisible()
 }
 
 const open = async (page: Page, name: string) => {
   await page.goto(`${server().url}/chats/${chat}?panel=card:${ids[name]}`)
-  const panel = page.getByRole("tabpanel", { name, exact: true })
+  // Character tabs pair the display name with its standard version (1c180216).
+  const version = CARDS.find((card) => card.name === name)?.data?.character_version
+  const label = typeof version === "string" && version.trim() ? `${name} · ${version.trim()}` : name
+  const panel = page.getByRole("tabpanel", { name: label, exact: true })
   await expect(panel.locator("[data-card-tokens]")).toBeVisible({ timeout: 30_000 })
   return panel
 }
@@ -239,7 +260,7 @@ test("the full editor's header is the same", async ({ page }) => {
       await page.emulateMedia({ colorScheme: scheme })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
-      for (const name of [NAMED, LONG]) {
+      for (const name of [PLAIN, NAMED, LONG]) {
         await page.goto(`${server().url}/library/${refs.find((ref) => ref.label === name)!.id}`)
         await expect(page.locator("[data-card-tokens]")).toBeVisible({ timeout: 30_000 })
         await page.mouse.move(0, 0)

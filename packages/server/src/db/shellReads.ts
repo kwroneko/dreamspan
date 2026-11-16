@@ -582,7 +582,9 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                   name: c.name,
                   avatarMediaId: c.avatarMediaId,
                   ...(c.avatarCrop ? { avatarCrop: c.avatarCrop } : {}),
-                  chats: m.persona ? new Set(used.map((f) => f.chat.id)).size : used.length,
+                  // One per chat, however many of its branches the card is in: the count the
+                  // card's header and the left panel give (`sectionRows` "card").
+                  chats: new Set(used.map((f) => f.chat.id)).size,
                   lastMessageAt: spoke[0]?.a.at ?? (m.persona ? recent : null),
                   latestChatId: (latest?.sourceChatId as ChatId) ?? null
                 },

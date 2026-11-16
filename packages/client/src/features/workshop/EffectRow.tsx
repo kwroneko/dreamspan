@@ -17,20 +17,30 @@ import {
   effectKey,
   effectState,
   openHint,
+  opensNow,
   openTarget,
   undoable,
   undoHint,
   type RolloutEffect
 } from "./effects.ts"
 
-export function EffectRow({ effect, when = false }: { effect: RolloutEffect; when?: boolean }) {
+export function EffectRow({
+  effect,
+  when = false,
+  inBin = false
+}: {
+  effect: RolloutEffect
+  when?: boolean
+  /** A later change of the assistant's put the item in the bin. */
+  inBin?: boolean
+}) {
   const action = useAction()
   const [shown, setShown] = useState(effect)
   // A newer read of the same change wins over what the last undo returned.
   const current = shown.undoneAt !== null && effect.undoneAt === null ? shown : effect
   const target = openTarget(current)
-  // A made item that's undone is in the bin: there's nothing to open.
-  const opens = target !== null && !(current.undoneAt !== null && current.kind !== "library.revise")
+  // A made item that's undone is in the bin, as a deleted one is until its undo: there's nothing to open.
+  const opens = target !== null && opensNow(current) && !(inBin && current.kind !== "library.delete")
   const state = effectState(current)
   const undo = async () => {
     const result = await action.run(

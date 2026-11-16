@@ -14,6 +14,7 @@ import { AppClient } from "../../rpc.ts"
 import type { PanelProps } from "../chat/panels.tsx"
 import { EffectRow } from "./EffectRow.tsx"
 import {
+  binnedTargets,
   EFFECTS_KEY,
   effectId,
   groupByReply,
@@ -82,7 +83,7 @@ export function ChangesPanel({ session, view, active }: Pick<PanelProps, "sessio
       ) : (
         <ol className="flex flex-col gap-3" aria-label="Changes">
           {groupByReply(rows).map((group) => (
-            <ReplyGroup key={group.rolloutId} chatId={session.id} group={group} />
+            <ReplyGroup key={group.rolloutId} chatId={session.id} group={group} binned={binnedTargets(rows)} />
           ))}
         </ol>
       )}
@@ -106,7 +107,7 @@ export function ChangesPanel({ session, view, active }: Pick<PanelProps, "sessio
 }
 
 /** One reply's changes: when, how many, Undo all, then each change with its own Undo and Open. */
-function ReplyGroup({ chatId, group }: { chatId: ChatId; group: ReplyChanges }) {
+function ReplyGroup({ chatId, group, binned }: { chatId: ChatId; group: ReplyChanges; binned: ReadonlySet<string> }) {
   const action = useAction()
   const [report, setReport] = useState<UndoAllReport | null>(null)
   const count = group.effects.length
@@ -151,7 +152,7 @@ function ReplyGroup({ chatId, group }: { chatId: ChatId; group: ReplyChanges }) 
       <ul className="flex flex-col gap-2" aria-label="Changes of this reply">
         {group.effects.map((effect) => (
           <li key={effectId(effect)} className="border-t border-border pt-2 first:border-t-0 first:pt-0">
-            <EffectRow effect={effect} />
+            <EffectRow effect={effect} inBin={binned.has(effect.targetId)} />
           </li>
         ))}
       </ul>

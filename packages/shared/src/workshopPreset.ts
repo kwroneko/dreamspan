@@ -9,8 +9,8 @@ const piece = (identifier: string, name: string, marker: boolean): PresetPrompt 
   name,
   role: "system",
   content: "",
-  // A marker the assembler doesn't fill yet sends nothing (`system_prompt` with an unknown
-  // identifier); the instructions are the user's own text, sent where the order puts them.
+  // A marker sends what the assembler fills it with (summaries, a run's skills), else nothing;
+  // the instructions are the user's own text, sent where the order puts them.
   system_prompt: marker,
   marker,
   injection_position: "relative",
@@ -38,11 +38,12 @@ export const workshopPieces = (): ReadonlyArray<WorkshopPiece> => [
   },
   {
     prompt: piece("skillsIndex", "Skills", true),
-    explanation: "The list of skills the assistant can use. Filled once skills exist."
+    explanation: "The installed skills the assistant can load, each with what it's for."
   },
   {
     prompt: piece("cardSkills", "Card skills", true),
-    explanation: "Skills and instructions the assistant's card carries. Filled once skills exist."
+    explanation:
+      "The names of the skills the assistant's card carries. Their instructions are sent only once you allow one."
   }
 ]
 

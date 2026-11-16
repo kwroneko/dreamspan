@@ -117,8 +117,15 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   const article = page.locator(`article[data-slot="${fixture.entry.slotId}"]`)
   await expect(article.getByRole("group", { name: "Versions", exact: true })).toBeVisible()
   await plugin(page, "surfaces")
-  for (const name of ["summary", "boundary", "rail", "overlay"])
+  for (const name of ["boundary", "rail", "overlay"])
     await expect(page.getByText(`Plugin ${name}`, { exact: true })).toBeVisible()
+  // The plugin's rows are taller than the defaults and the list stays at the end, so the summary
+  // row can sit above the rows the list keeps mounted: scroll up to it, as a reader would, then
+  // back to the end.
+  await page.getByText("Plugin boundary", { exact: true }).hover()
+  await page.mouse.wheel(0, -2000)
+  await expect(page.getByText("Plugin summary", { exact: true })).toBeVisible()
+  await page.mouse.wheel(0, 2000)
   await expect(page.getByText("Plugin branches", { exact: true })).toBeVisible()
   await expect(page.getByText("Plugin preview", { exact: true }).first()).toBeVisible()
   await article.getByRole("button", { name: "Plugin version", exact: true }).click()

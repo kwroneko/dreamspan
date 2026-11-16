@@ -44,7 +44,7 @@ import {
   toolWriter
 } from "../agent/tools.ts"
 import { makePermit, offeredByGrants } from "../agent/approvals.ts"
-import { loaderFor, loadingWireFor, planToolLoading } from "../agent/loadingPlan.ts"
+import { loaderFor, loadingWireFor, offerableTools, planToolLoading, skillMarkerInput } from "../agent/loadingPlan.ts"
 import { dispatcherDefinition } from "../agent/dispatcher.ts"
 import { frozenOffer, loadedSet, type Skill } from "../agent/toolLoading.ts"
 import { DecisionEngine } from "../decision/engine.ts"
@@ -336,6 +336,10 @@ export const layer = Layer.effect(
           // A capability turned off in the workshop isn't offered (spec/WORKSHOP.md §3.4).
           const { tools, off } = yield* offeredByGrants({ registries: execution, reader, userId, chatId }, candidates)
           let stepSummaries: Readonly<Record<string, string>> | undefined
+          // The run's skills for the preset's skill markers, from what the loading plan lists them by.
+          const markerSkills = agentic
+            ? skillMarkerInput(execution, chat.kind, yield* offerableTools({ reader, userId }, tools))
+            : undefined
           const assemblyNow = Date.now()
           const assembleWith = (admitted?: { readonly stamp: string; readonly lore: ReadonlyArray<LoreAdmission> }) =>
             reader
@@ -363,7 +367,8 @@ export const layer = Layer.effect(
                         speakerCardOnly: plan.assembly?.speakerCardOnly ?? false,
                         ...(plan.assembly?.workshop ? { workshop: true } : {}),
                         ...(plan.assembly?.response ? { response: plan.assembly.response } : {}),
-                        ...(stepSummaries ? { stepSummaries } : {})
+                        ...(stepSummaries ? { stepSummaries } : {}),
+                        ...(markerSkills ? { skills: markerSkills } : {})
                       }
                     }
                   : {})

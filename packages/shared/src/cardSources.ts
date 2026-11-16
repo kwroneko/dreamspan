@@ -59,7 +59,14 @@ export const SourceCapabilities = Schema.Struct({
   filters: Schema.Array(SourceFilter),
   sorts: Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String, reversible: Schema.Boolean })),
   /** Which filter is the content rating, and the source's own anonymous default for it (§5.3). */
-  ratings: Schema.optionalKey(Schema.Struct({ filterId: Schema.String, default: Schema.NullOr(Schema.String) })),
+  ratings: Schema.optionalKey(
+    Schema.Struct({
+      filterId: Schema.String,
+      default: Schema.NullOr(Schema.String),
+      /** Its choice that leaves out every rated card ("Safe"): the narrowest an assistant may choose. */
+      safe: Schema.optionalKey(Schema.String)
+    })
+  ),
   paging: Schema.Literals(["cursor", "page"]),
   /** Labels for the numbers in a summary's `stats`, by key; the first is the main one. */
   stats: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Schema.String, label: Schema.String }))),
@@ -289,6 +296,11 @@ export const RecentRemote = Schema.Struct({
   kind: Schema.optionalKey(Schema.Literals(["character", "lorebook"])),
   creator: Schema.optionalKey(Schema.String),
   thumb: Schema.optionalKey(Schema.String),
+  /** The version opened (`RemoteVersion.id`) and when it began: what an assistant's add is bound to. */
+  version: Schema.optionalKey(Schema.String),
+  versionAt: Schema.optionalKey(Schema.Number),
+  /** Its content rating, when it has one (`RemoteSummary.rating`). */
+  rating: Schema.optionalKey(Schema.String),
   at: Schema.Number
 })
 export type RecentRemote = typeof RecentRemote.Type

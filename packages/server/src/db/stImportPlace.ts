@@ -77,6 +77,8 @@ export interface RecordPayload {
   readonly stCurrent?: boolean
   /** Last resolved parent, retained when a later header loses main_chat. */
   readonly parentRecordId?: string
+  /** Where the file's first import's state applies from (`StChatRecord.stateAt`). */
+  readonly stateAt?: number
 }
 
 /** The record as `StImportClaim` leaves it for the run that claims it: what matching reads. */

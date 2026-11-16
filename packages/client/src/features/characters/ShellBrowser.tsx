@@ -7,6 +7,7 @@ import { useChatBrowse } from "./useChatBrowse.ts"
 import { sidebarChatBrowse } from "./ChatBrowseBar.tsx"
 import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
+import { branchMatches } from "@rp/shared/branchNaming.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useNavigate, useParams, useRouter, useSearch } from "@tanstack/react-router"
 import { OPEN_BESIDE_HINT, openBeside, useCanOpenBeside } from "../workbench/OpenBeside.tsx"
@@ -205,6 +206,14 @@ const shellBranchLabel = (fork: ShellFork) =>
     split: fork.split,
     createdAt: fork.createdAt
   })
+
+/** Branch lists longer than this get a filter field (the branch menu's too). */
+const BRANCH_FILTER_FROM = 6
+/** What a branch filter looks through: the row's name (a thread's, else the branch's) and its last message. */
+const shellBranchTexts = (fork: ShellFork) => [
+  fork.thread ? shellThreadLabel(fork.thread) : shellBranchLabel(fork),
+  fork.preview
+]
 
 /**
  * "⑂ 12" at a chat row's end (owner, 2026-11-01): replaces the panel's list with the chat's
@@ -810,6 +819,16 @@ export function OpenChatBranches() {
   const visible = params.chatId !== undefined && !grid && scope.chat !== displayedChat && rows.length > 0
   const { height, min, max, change, reset, collapsed, expanded, toggle } = useBranchHeight("branch")
   const open = expanded && !collapsed
+  // Every branch is read already (limit 5000 a section), so the filter asks the server nothing.
+  // Kept for one chat: another chat's branches start unfiltered.
+  const [typed, setTyped] = useState<{ chatId: ChatId | null | undefined; text: string }>({ chatId: null, text: "" })
+  const query = typed.chatId === displayedChat ? typed.text : ""
+  const setQuery = (text: string) => setTyped({ chatId: displayedChat, text })
+  const filterable = rows.length > BRANCH_FILTER_FROM
+  const shownRows = useMemo(
+    () => (filterable && query.trim() !== "" ? rows.filter((f) => branchMatches(query, shellBranchTexts(f))) : rows),
+    [rows, filterable, query]
+  )
   if (!visible) return null
   // Empty while its name waits for a fork's cast the first pass hasn't read (shellReads.ts).
   const chatLabel = rows[0]!.chatName || "this chat"
@@ -872,10 +891,25 @@ export function OpenChatBranches() {
           onClick={() => setScope({ entity: null, chat: displayedChat ?? null })}
         />
       </div>
+      {open && filterable && (
+        <div className="max-w-controls shrink-0 px-2">
+          <Tooltip label="Shows the branches whose name or last message has these words.">
+            <Input
+              type="search"
+              aria-label="Find a branch"
+              placeholder="Find a branch"
+              className="h-8 w-full min-w-0"
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+          </Tooltip>
+        </div>
+      )}
+      {open && shownRows.length === 0 && <p className="px-3 py-1 text-xs text-muted">No branch has those words.</p>}
       {open ? (
         <WindowedList
           data-foot-body
-          items={rows}
+          items={shownRows}
           itemKey={shellForkKey}
           initialOffset={() => scrollOffset.current}
           onScroll={(event) => {
@@ -884,9 +918,9 @@ export function OpenChatBranches() {
           className="min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]"
           renderItem={(f, i) => {
             // With threads listed, each group has its heading.
-            const grouped = rows[0]?.thread !== undefined
+            const grouped = shownRows[0]?.thread !== undefined
             const heading =
-              grouped && (i === 0 || (rows[i - 1]!.thread !== undefined) !== (f.thread !== undefined))
+              grouped && (i === 0 || (shownRows[i - 1]!.thread !== undefined) !== (f.thread !== undefined))
                 ? f.thread
                   ? "Threads"
                   : "Branches"
@@ -1074,8 +1108,16 @@ function Browser() {
   const [inMessages] = useMessageSearch()
   const messages = inMessages && !grid && kind === "all"
   const sections = SECTIONS[kind]
+  // A chat's branches have a filter of their own, kept for that chat: the words that found the
+  // chat by its name would match none of its branches.
+  const [branchTyped, setBranchTyped] = useState<{ chat: string | null; text: string }>({ chat: null, text: "" })
+  const branching = kind === "chat" && !grid
+  const branchText = branchTyped.chat === scope.chat ? branchTyped.text : ""
+  const fieldValue = branching ? branchText : search
+  const setField = branching ? (text: string) => setBranchTyped({ chat: scope.chat, text }) : setSearch
+  const listNeedle = branching ? branchText.trim().toLowerCase() : needle
   // Each list's length, by scope and search: another scope or search starts from its first page.
-  const listKey = `${scope.entity}/${scope.chat}/${needle}/${JSON.stringify(chatBrowse)}`
+  const listKey = `${scope.entity}/${scope.chat}/${listNeedle}/${JSON.stringify(chatBrowse)}`
   const [limits, setLimits] = useState<{ key: string; limits: Partial<Record<ShellSection, number>> }>({
     key: listKey,
     limits: {}
@@ -1089,11 +1131,17 @@ function Browser() {
   const forks = useShellForks({
     entity: scope.entity,
     chat: scope.chat as ChatId | null,
-    search: messages ? "" : needle,
+    search: messages ? "" : listNeedle,
     sort: "recent",
     ...(!grid && kind !== "chat" ? { browse: chatBrowse } : {}),
     sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
   })
+  // The chat by its name, which all its branches share; kept while a filter lists none of them.
+  const chatRows = scope.chat ? sections.flatMap(([id]) => forks.section(id).rows) : []
+  const chat = chatRows[0]
+  const [knownChat, setKnownChat] = useState<{ id: string; name: string } | null>(null)
+  if (chat && (knownChat?.id !== chat.chat.id || knownChat.name !== chat.chatName))
+    setKnownChat({ id: chat.chat.id, name: chat.chatName })
   // The lists show once their rows are read: a cold library's cards wait for every fork's
   // walk, which the rows don't (they fill in as it goes).
   useSplitReveal(listRef, forks.loading ? undefined : selected)
@@ -1105,10 +1153,14 @@ function Browser() {
         {() => null}
       </AsyncView>
     )
-  // The chat by its name, which all its branches share.
-  const chatRows = scope.chat ? sections.flatMap(([id]) => forks.section(id).rows) : []
-  const chat = chatRows[0]
-  const chatLabel = !chat ? (forks.loading ? "…" : "Chat not found") : chat.chatName || "…"
+  const filteredOut = branching && listNeedle !== ""
+  const chatLabel = chat
+    ? chat.chatName || "…"
+    : filteredOut && knownChat?.id === scope.chat
+      ? knownChat.name
+      : forks.loading
+        ? "…"
+        : "Chat not found"
   const section = (id: ShellSection, title: string) => {
     const { rows, total } = forks.section(id)
     return (
@@ -1159,11 +1211,21 @@ function Browser() {
           ) : (
             <div className="flex min-w-0 items-center gap-1">
               <Input
-                aria-label={grid ? "Find a character" : messages ? "Find in messages" : "Find a chat"}
-                placeholder={messages ? "Find in messages" : "Find by name"}
+                aria-label={
+                  grid
+                    ? "Find a character"
+                    : messages
+                      ? "Find in messages"
+                      : kind === "chat"
+                        ? "Find a branch"
+                        : "Find a chat"
+                }
+                placeholder={
+                  messages ? "Find in messages" : kind === "chat" && !grid ? "Find a branch" : "Find by name"
+                }
                 className="min-w-0 flex-1"
-                value={search}
-                onChange={(e) => setSearch(e.currentTarget.value)}
+                value={fieldValue}
+                onChange={(e) => setField(e.currentTarget.value)}
               />
               {kind === "all" && <SlotOutlet slot={sidebarSearchTools} props={{ grid }} />}
             </div>
@@ -1321,7 +1383,11 @@ function Browser() {
             )}
             {forks.loading && !forks.failure && <Loading label="Still loading your chats…" />}
             <ListFailure forks={forks} />
-            {none && <p className="p-2 text-sm text-muted">No chats here yet.</p>}
+            {none && (
+              <p className="p-2 text-sm text-muted">
+                {filteredOut ? "No branch has those words." : "No chats here yet."}
+              </p>
+            )}
           </div>
         )}
       </div>

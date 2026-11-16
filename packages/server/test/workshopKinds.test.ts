@@ -58,6 +58,7 @@ for (const workers of ["source", "bundle"] as const) {
             "chats.rewrite",
             "settings",
             "generate",
+            "network",
             "plugins.write",
             "plugins.apply"
           ]

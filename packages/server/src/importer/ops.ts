@@ -8,6 +8,7 @@ import { EntityKind } from "@rp/shared/library.ts"
 import { ExportFormat, ExportFormatInfo } from "@rp/shared/libraryImport.ts"
 import { LoreRole } from "@rp/shared/docs/lorebook.ts"
 import { Placement } from "@rp/shared/docs/note.ts"
+import { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
@@ -182,6 +183,8 @@ export class StSettings extends Schema.Class<StSettings>("StSettings")({
     Schema.Struct({ card: Schema.String, prompt: Schema.String, useChara: Schema.Boolean, position: Schema.Number })
   ),
   allowWIScan: Schema.Boolean,
+  /** ST's global regex scripts (`extension_settings.regex`), as data. */
+  globalRegex: Schema.optionalKey(Schema.Array(RegexScript)),
   summary: Schema.Struct({
     prompt: Schema.NullOr(Schema.String),
     promptWords: Schema.Int,

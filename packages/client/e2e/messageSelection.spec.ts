@@ -236,3 +236,69 @@ for (const width of [1440, 390])
       await page.getByRole("button", { name: "Undo", exact: true }).click()
       await expect(row).toBeVisible()
     })
+
+// Hide from the model and Show to the model on the bar (job selecthide1): one action, one Undo,
+// both offered when the selection mixes hidden and shown messages.
+for (const width of [1440, 390] as const)
+  for (const theme of ["light", "dark"] as const)
+    test(`hide a range from the model, show it again, Undo (${width}px, ${theme})`, async ({ browser }, info) => {
+      const context = await browser.newContext({
+        viewport: { width, height: width === 390 ? 844 : 900 },
+        colorScheme: theme,
+        ...(width === 390 ? { isMobile: true, hasTouch: true } : {})
+      })
+      const page = await context.newPage()
+      const chatId = await seed(`Harbor hide ${width} ${theme}`)
+      const hiddenNow = () =>
+        admin((api) => api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })).then((path) =>
+          path.entries.filter((e) => e.contextExcluded).map((e) => e.version.content)
+        )
+      // The rows marked hidden (the list keeps those near the view; these are the last few).
+      const hiddenRows = () => page.locator('article[data-hidden="true"]')
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${chatId}`)
+      await expect(message(page, COUNT)).toBeVisible()
+
+      await messageMenu(message(page, COUNT), "Select messages")
+      await bar(page).getByRole("button", { name: "Select range" }).click()
+      await tick(message(page, COUNT - 3)).click()
+      await expect(bar(page)).toContainText("4 messages selected")
+      // All shown: only Hide is offered.
+      await expect(bar(page).getByRole("button", { name: "Show to the model" })).toHaveCount(0)
+      await bar(page).getByRole("button", { name: "Hide from the model" }).click()
+      await expect(page.getByText("4 messages hidden from the model.")).toBeVisible()
+      await expect(bar(page)).toHaveCount(0)
+      await expect(hiddenRows()).toContainText([COUNT - 3, COUNT - 2, COUNT - 1, COUNT].map(line))
+      await expect(message(page, COUNT)).toHaveAttribute("data-hidden", "true")
+
+      // One Undo shows them all again.
+      await page.getByRole("button", { name: "Undo", exact: true }).click()
+      await expect(hiddenRows()).toHaveCount(0)
+      await expect(message(page, COUNT)).not.toHaveAttribute("data-hidden")
+
+      // A mix of hidden and shown offers both.
+      // The message's own action (the login limit leaves no room for more API calls here).
+      await messageMenu(message(page, COUNT - 1), "Hide from the model")
+      await expect(message(page, COUNT - 1)).toHaveAttribute("data-hidden", "true")
+      await page.getByTestId("messages").evaluate((list) => {
+        list.scrollTop = list.scrollHeight
+      })
+      await messageMenu(message(page, COUNT), "Select messages")
+      await tick(message(page, COUNT - 2)).click({ modifiers: ["Shift"] })
+      await expect(bar(page)).toContainText("3 messages selected")
+      await expect(bar(page).getByRole("button", { name: "Hide from the model" })).toBeVisible()
+      await expect(bar(page).getByRole("button", { name: "Show to the model" })).toBeVisible()
+      await page.getByTestId("messages").evaluate((list) => {
+        list.scrollTop = list.scrollHeight
+      })
+      await showLastAboveBar(message(page, COUNT), bar(page))
+      await expectLayout(page, info, `selection hide ${width} ${theme}`)
+      await shoot(page, `selection-hide-${width}-${theme}`)
+      await bar(page).getByRole("button", { name: "Show to the model" }).click()
+      await expect(page.getByText("1 message shown to the model again.")).toBeVisible()
+      await expect(hiddenRows()).toHaveCount(0)
+      await page.getByRole("button", { name: "Undo", exact: true }).click()
+      await expect(hiddenRows()).toContainText([line(COUNT - 1)])
+      expect(await hiddenNow()).toEqual([line(COUNT - 1)])
+      await context.close()
+    })

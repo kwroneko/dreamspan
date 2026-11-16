@@ -1,4 +1,5 @@
 // Pure shell projections. Both worker reads and the shared materialization use these.
+import { branchMatches } from "@rp/shared/branchNaming.ts"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import { CHAT_FILTERS, type ChatBrowse, type ChatFilterCounts } from "@rp/shared/chatBrowse.ts"
 import { ShellFork, type ShellCard, type ShellForksView, type ShellSection } from "@rp/shared/chatSetupApi.ts"
@@ -135,17 +136,23 @@ const sectionRows = (state: ShellState, view: ShellForksView, id: ShellSection):
   const forks = state.forks
   const needle = view.search.trim().toLowerCase()
   const chats = view.chats === undefined ? null : new Set<string>(view.chats)
+  // One chat's branches share its name and cast: there a search looks through each branch's
+  // own name and its last message, as the branch menu's filter does. A fork not read yet
+  // (`pending`) has no cast: its own name and its chat's, when known.
+  const matches = (f: Fork) =>
+    needle === "" ||
+    (view.chat !== null
+      ? branchMatches(needle, [f.named ? f.name : "", f.original ? "Original" : "", f.preview])
+      : (f.pending === true
+          ? [f.named ? f.name : "", f.chatName]
+          : [f.name, f.chatName, ...f.cast.flatMap((c) => [c.label, c.name])]
+        ).some((n) => n !== "" && n.toLowerCase().includes(needle)))
   const scoped = forks.filter(
     (f) =>
       (view.entity === null || f.joined.includes(view.entity)) &&
       (view.chat === null || f.chat.id === view.chat) &&
       (chats === null || chats.has(f.chat.id)) &&
-      (needle === "" ||
-        // A fork not read yet (`pending`) has no cast: its own name and its chat's, when known.
-        (f.pending === true
-          ? [f.named ? f.name : "", f.chatName]
-          : [f.name, f.chatName, ...f.cast.flatMap((c) => [c.label, c.name])]
-        ).some((n) => n !== "" && n.toLowerCase().includes(needle)))
+      matches(f)
   )
   // A chat's branches by their last message, newest first (owner, 2026-11-01).
   const byLast = (list: ReadonlyArray<Fork>) =>

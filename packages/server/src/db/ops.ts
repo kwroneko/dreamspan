@@ -1,4 +1,3 @@
-import { DraftGenerationTarget } from "@rp/shared/generationTarget.ts"
 import { PluginId, PluginPins, PluginData, PluginRejected } from "@rp/shared/plugins.ts"
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
 import {
@@ -538,7 +537,15 @@ const StChatRecord = Schema.Struct({
   /** The file went into another file's chat. */
   merged: Schema.Boolean,
   /** The first slot an unfinished import of the file added. */
-  firstAdded: Schema.NullOr(SlotId)
+  firstAdded: Schema.NullOr(SlotId),
+  /** The parent file's record, for a branch merged into its parent's chat. */
+  parentRecordId: Schema.optionalKey(Schema.String),
+  /**
+   * The depth of the slot from which the file's first import's state applies: 0 for the
+   * chat's start, else a branch's first message of its own. Absent on records finished
+   * before it was kept.
+   */
+  stateAt: Schema.optionalKey(Schema.Int)
 })
 
 /**
@@ -1873,6 +1880,17 @@ export class WriteOpsChat extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
   /**
+   * Hides several messages of fork `forkId` from the model, or shows them again, in one
+   * transaction: each as SetSlotHidden would (Select messages, job selecthide1). NotFound, and
+   * nothing written, if any isn't a live message of the fork's chat. `changed`: those that
+   * weren't so already, in the order given; the Undo sets those back. `chatId`: the fork's chat.
+   */
+  Rpc.make("SetSlotsHidden", {
+    payload: { userId: UserId, forkId: ForkId, slotIds: DeletedSlots, hidden: Schema.Boolean },
+    success: Schema.Struct({ chatId: ChatId, changed: Schema.Array(SlotId) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
    * Hides a live message of the user's from the model, or shows it again (ST's ghost
    * toggle): the slot's `context_excluded`, marked as the user's doing. Writes nothing
    * else but the history reduction a hide records (historyChanges.ts); summaries read
@@ -2756,6 +2774,15 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Boolean,
     error: Schema.Union([ImportLeaseLost, NotFound, StorageError])
   }),
+  /**
+   * ST's global regex scripts as the account's global list, only while that list is empty:
+   * a re-import never replaces scripts the user has (ARCHITECTURE §13). True when written.
+   */
+  Rpc.make("StImportGlobalRegex", {
+    payload: { userId: UserId, importId: Schema.String, scripts: GlobalScripts },
+    success: Schema.Boolean,
+    error: Schema.Union([ImportLeaseLost, StorageError])
+  }),
   /** Adopts ST's default persona only while the user has no stored default. */
   Rpc.make("StImportDefaultPersona", {
     payload: { userId: UserId, importId: Schema.String, entityId: EntityId },
@@ -2983,7 +3010,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Struct({
       notes: Schema.Record(Schema.String, EntityId),
       /** With `castWritten`: the chat's stamp after this write (stImportPlanStamp.ts). */
-      stamp: Schema.optionalKey(Schema.String)
+      stamp: Schema.optionalKey(Schema.String),
+      /** The record's `stateAt` (`StChatRecord`), when it has one. */
+      stateAt: Schema.optionalKey(Schema.Int)
     }),
     error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
   }),
@@ -3096,7 +3125,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
         differing: Schema.Int
       }),
       slots: Schema.Record(Schema.String, SlotId),
-      notes: Schema.Record(Schema.String, EntityId)
+      notes: Schema.Record(Schema.String, EntityId),
+      /** The record's `stateAt` (`StChatRecord`), when it has one. */
+      stateAt: Schema.optionalKey(Schema.Int)
     }),
     error: Schema.Union([NotFound, ImportLeaseLost, StImportPlanChanged, StorageError])
   }),
@@ -3346,7 +3377,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
       userId: UserId,
       cardRefId: RefId,
       title: Schema.String,
-      link: Schema.optionalKey(EntityId)
+      link: Schema.optionalKey(EntityId),
+      /** A workshop tool's call (`rollout:call`): the first revision is the assistant's. */
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
@@ -3360,7 +3393,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       title: Schema.String,
       link: Schema.optionalKey(EntityId),
       replaces: Schema.optionalKey(ReplaceTarget),
-      content: Schema.optionalKey(Schema.String)
+      content: Schema.optionalKey(Schema.String),
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, InvalidDocument, StorageError])
@@ -3375,7 +3409,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       title: Schema.String,
       content: Schema.String,
       fromNoteRefId: Schema.optionalKey(RefId),
-      chatNote: Schema.optionalKey(ChatNotePosition)
+      chatNote: Schema.optionalKey(ChatNotePosition),
+      agentOriginRef: Schema.optionalKey(Schema.String)
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
@@ -3400,19 +3435,6 @@ export class WriteOpsLibrary extends RpcGroup.make(
    * events of the version, and the values its template messages drew. The version must be the user's and still generating, and the
    * model one of the user's live connections'.
    */
-  Rpc.make("StartDraftRollout", {
-    payload: {
-      userId: UserId,
-      target: DraftGenerationTarget,
-      rolloutId: Schema.String,
-      connectionId: ConnectionId,
-      modelId: ModelId,
-      snapshot: Schema.String,
-      issues: Schema.Array(ContextIssue)
-    },
-    success: Schema.Void,
-    error: Schema.Union([NotFound, StaleWrite, StorageError])
-  }),
   Rpc.make("StartRollout", {
     payload: {
       userId: UserId,
@@ -4854,21 +4876,6 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The context views installed (`contextViews`), as This chat's Context setting offers them. */
   Rpc.make("ContextViews", { success: Schema.Array(RoleProjectionOption) }),
-  Rpc.make("AssembleDraftTurn", {
-    payload: { userId: UserId, target: DraftGenerationTarget, now: Schema.Number, timeZone: Schema.String },
-    success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
-    error: Schema.Union([NotFound, StaleWrite, AssemblyFailed, StorageError])
-  }),
-  Rpc.make("DraftRunContext", {
-    payload: { userId: UserId, rolloutId: Schema.String },
-    success: RunContext,
-    error: Schema.Union([NotFound, StorageError])
-  }),
-  Rpc.make("LastDraftRollout", {
-    payload: { userId: UserId, chatId: ChatId, forkId: ForkId },
-    success: Schema.NullOr(Schema.String),
-    error: Schema.Union([NotFound, StorageError])
-  }),
   Rpc.make("AssembleContext", {
     payload: {
       partialBatch: Schema.optionalKey(Schema.Boolean),
@@ -4890,7 +4897,23 @@ export class ReadOps extends RpcGroup.make(
           speakerCardOnly: Schema.Boolean,
           workshop: Schema.optionalKey(Schema.Boolean),
           stepSummaries: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-          response: Schema.optionalKey(Schema.Literals(["model"]))
+          response: Schema.optionalKey(Schema.Literals(["model"])),
+          /** The run's skills for the preset's skill markers (spec/WORKSHOP-CONTEXT.md §4.2). */
+          skills: Schema.optionalKey(
+            Schema.Struct({
+              kind: Schema.String,
+              registered: Schema.Array(
+                Schema.Struct({
+                  id: Schema.String,
+                  description: Schema.String,
+                  tools: Schema.Array(Schema.String),
+                  kinds: Schema.optionalKey(Schema.Array(Schema.String)),
+                  always: Schema.optionalKey(Schema.Boolean)
+                })
+              ),
+              loadable: Schema.Array(Schema.String)
+            })
+          )
         })
       ),
       /** What decision models decided (spec/AGENTIC.md §7): the lorebook entries they admitted. */
@@ -5170,7 +5193,13 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** A workshop's grants (workshopGrants.ts): capability → mode, expired ones left out. */
   Rpc.make("WorkshopGrants", {
-    payload: { userId: UserId, chatId: ChatId, now: Schema.Number },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      now: Schema.Number,
+      /** Absent: the capabilities' own standing. Set: what was allowed for that exact content. */
+      target: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Array(Schema.Struct({ capability: Schema.String, mode: CapabilityMode })),
     error: Schema.Union([NotFound, StorageError])
   }),

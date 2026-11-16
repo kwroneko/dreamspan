@@ -2096,6 +2096,14 @@ export class ChatSession {
     return this.call((client) => client("DeleteMessages", { forkId, slotIds }))
   }
 
+  /**
+   * Hides several messages of fork `forkId` from the model, or shows them again, as one change
+   * (selection/), each as setHidden would. `changed`: those that weren't so already.
+   */
+  setMessagesHidden(forkId: ForkId, slotIds: ReadonlyArray<SlotId>, hidden: boolean) {
+    return this.call((client) => client("SetMessagesHidden", { forkId, slotIds, hidden }))
+  }
+
   /** Deletes the swipe in the fork shown only. */
   deleteVersion(versionId: VersionId) {
     return this.call((client) => client("DeleteVersion", { versionId, forkId: this.view.forkId }))

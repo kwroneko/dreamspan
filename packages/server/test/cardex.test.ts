@@ -136,7 +136,8 @@ describe("v1 as card sources", () => {
         "Everything",
         "Mature only"
       ])
-      assert.deepStrictEqual(caps.ratings, { filterId: "nsfw", default: "include" })
+      // Safe is the narrowest choice: an assistant may narrow the user's rating to it (cardextools1).
+      assert.deepStrictEqual(caps.ratings, { filterId: "nsfw", default: "include", safe: "exclude" })
       assert.deepStrictEqual(
         caps.sorts.map((s) => [s.id, s.reversible]),
         [

@@ -50,6 +50,21 @@ export const forkLabel = (fork: BranchNaming, now = Date.now()) => {
   return fork.createdAt === undefined ? "Branch" : `Made ${formatMoment(fork.createdAt, now)}`
 }
 
+/**
+ * Whether a branch matches what was typed in a branch list's filter: every word of `query`,
+ * ignoring case, somewhere in its texts (its name or label, its last message's first words).
+ * An empty query matches every branch.
+ */
+export const branchMatches = (query: string, texts: ReadonlyArray<string>) => {
+  const words = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word !== "")
+  if (words.length === 0) return true
+  const haystack = texts.join("\n").toLowerCase()
+  return words.every((word) => haystack.includes(word))
+}
+
 /** Saved display naming data, rendered in the reader's locale like the branch menu. */
 export interface StoryScope {
   readonly branch: BranchNaming

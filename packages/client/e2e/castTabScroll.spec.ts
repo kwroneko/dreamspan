@@ -73,7 +73,7 @@ test("cast tabs open at the top of the panel", async ({ page }, info) => {
     expect(positions).toEqual(positions.map(() => 0))
   }
   // Explicit search navigation still opens and reveals the requested field's tab.
-  const panel = page.getByRole("tabpanel", { name: "Alice", exact: true })
+  const panel = page.getByRole("tabpanel", { name: "Alice · 1.0", exact: true })
   await panel.getByRole("button", { name: "Search and replace", exact: true }).click()
   const search = panel.getByRole("region", { name: "Search and replace", exact: true })
   await search.getByRole("textbox", { name: "Find", exact: true }).fill("navigation beacon")

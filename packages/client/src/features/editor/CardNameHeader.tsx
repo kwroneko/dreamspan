@@ -292,7 +292,8 @@ export function CardNameHeader({
               goTo={versionMatch}
               highlights={versionHighlights}
               allowEmpty
-              className="min-w-[var(--card-name-min)]! shrink text-xs text-muted data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]!"
+              // Leave the full editor's name switcher room for text beside its chevron.
+              className={`min-w-[var(--card-name-min)]! shrink text-xs text-muted data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]! ${centerTitle ? "max-w-[calc(40%_-_0.25rem)] data-[renaming]:max-w-none" : ""}`}
               onRename={async (next) => {
                 if (await clashes(name, next)) return false
                 write({ version: next })

@@ -1,30 +1,22 @@
 import { snapshotState, libraryView, cardsView, forksView } from "../db/shellViews.ts"
 import type { ShellForksView } from "@rp/shared/chatSetupApi.ts"
 import { OperationCall } from "../agent/operations.ts"
+import { chatNotesAt } from "../chat/chatNotesAt.ts"
 import { offeredGreetings, greetingPick } from "@rp/shared/greetings.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
-import type { RevisionId } from "@rp/shared/library.ts"
 // RPC handlers for chat setup, speakers and the send queue (@rp/shared/chatSetupApi.ts).
 // Every handler acts as the authenticated user; storage enforces ownership, so another
 // user's ids are NotFound. Changes are published to the chat's subscribers.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { CastCard, type ChatId, type EntityId, type ForkId, type SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
-import {
-  Cast,
-  CardForChat,
-  type CastChange,
-  ChatNote,
-  ShellCards,
-  ShellForks,
-  ShellLibrary
-} from "@rp/shared/chatSetupApi.ts"
+import { Cast, CardForChat, type CastChange, ShellCards, ShellForks, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { StartChatInput } from "@rp/shared/chatStart.ts"
 import { cardTextOfDoc } from "../db/cards.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { awayAt } from "@rp/shared/knowledge.ts"
-import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
+import { type ChatState, foldState, type StateEventData } from "@rp/shared/state.ts"
 import { Effect, Option, Queue, Schema, Semaphore, Stream } from "effect"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
@@ -844,55 +836,9 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
 
     // The notes the context assembler reads at this position: the chat's own and its characters'.
     ListChatNotes: ({ chatId, slotId, forkId }) =>
-      Effect.gen(function* () {
-        const id = yield* userId
-        const events = yield* reader.StateEventsAt({
-          userId: id,
-          chatId,
-          slotId,
-          forkId: forkId ?? null,
-          displayEnd: true
-        })
-        const state = foldState(events)
-        // Every card of the cast, the ones the user plays included: a persona note is a card's note.
-        const cards = [...state.participants, ...state.playedByMe.filter((e) => !state.participants.includes(e))]
-        const switches = noteSwitches(events)
-        const entries = yield* reader.ChatNoteEntries({
-          userId: id,
-          chatId,
-          forkId: forkId ?? null,
-          slotId,
-          cards: cards as Array<EntityId>
-        })
-        const notes = yield* Effect.forEach(entries, (entry) =>
-          Effect.gen(function* () {
-            const revisionId = state.noteRevisions[entry.ref.entityId] as RevisionId | undefined
-            const pinned =
-              entry.card !== null && revisionId
-                ? yield* reader.GetRevisionDoc({ userId: id, refId: entry.ref.id, revisionId })
-                : null
-            const resolved = pinned
-              ? {
-                  ref: { ...entry.ref, headRevisionId: revisionId! },
-                  // A linked slot keeps showing its shared note's text.
-                  doc: entry.linked ? { ...pinned, content: entry.doc["content"] } : pinned
-                }
-              : entry
-            const onByDefault = entry.card !== null && resolved.doc["on_by_default"] === true
-            return new ChatNote({
-              ...entry,
-              ...resolved,
-              onByDefault,
-              active: switches.get(entry.ref.entityId) ?? onByDefault
-            })
-          })
-        )
-        const grouped = noteSwitches(
-          events,
-          notes.map((note) => ({ entity: note.ref.entityId, doc: note.doc }))
-        )
-        return notes.map((note) => new ChatNote({ ...note, active: grouped.get(note.ref.entityId) ?? note.active }))
-      }).pipe(internal("ListChatNotes")),
+      Effect.flatMap(userId, (id) => chatNotesAt(reader, id, { chatId, slotId, forkId })).pipe(
+        internal("ListChatNotes")
+      ),
 
     CreateChatNote: ({ chatId, title, link, forkId, replaces, content }) =>
       Effect.flatMap(userId, (id) =>
@@ -905,7 +851,11 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           ...(forkId === undefined ? {} : { forkId }),
           ...(link === undefined ? {} : { link })
         })
-      ).pipe(internal("CreateChatNote")),
+      ).pipe(
+        // Listed in every branch: the chat's open tabs read their notes again.
+        Effect.tap(() => Effect.sync(() => hub.publish(chatId, { _tag: "State" }))),
+        internal("CreateChatNote")
+      ),
 
     GetGlobalRegex: () =>
       Effect.flatMap(userId, (id) => reader.GetGlobalRegex({ userId: id })).pipe(internal("GetGlobalRegex")),

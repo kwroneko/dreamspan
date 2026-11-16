@@ -115,7 +115,7 @@ for (const theme of ["light", "dark"] as const)
       ).toHaveCount(1)
       await expect(sidebar.getByRole("region", { name: "Branches of the open chat" })).toHaveCount(0)
       await capture("branch-scope", size)
-      await sidebar.getByLabel("Find a chat", { exact: true }).fill("South")
+      await sidebar.getByLabel("Find a branch", { exact: true }).fill("South")
       await expect(sidebar.locator("[data-chat-id]")).toHaveCount(1)
       await capture("branch-search", size)
     }

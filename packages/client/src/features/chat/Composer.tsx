@@ -1,4 +1,3 @@
-import { useTabShown } from "../workbench/tab.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { composerWorkspace } from "./composerWorkspace.ts"
 import {
@@ -248,15 +247,7 @@ export function Composer({
   // The text is a server draft per branch tip (composerDraft.ts). Text typed on the card's
   // page while this chat was being made comes along (composerCarry.ts).
   const [workspace] = useState(() => composerWorkspace(session, userId))
-  const { draft, writing, setBusy, setError, syncFork } = workspace
-  const composerShown = useTabShown(!phone)
-  useEffect(() => {
-    if (!composerShown) writing.stop()
-  }, [composerShown, writing])
-  useEffect(() => {
-    void writing.load()
-    return writing.stop
-  }, [writing, view.forkId])
+  const { draft, setBusy, setError, syncFork } = workspace
   const { busy, error } = useSyncExternalStore(workspace.subscribe, workspace.snapshot)
   const {
     text: draftText,
@@ -443,7 +434,6 @@ export function Composer({
    */
   const submit = async (run: (from: ComposerSource) => Promise<Sent>) => {
     if (busy || !ready) return
-    writing.submitted()
     setBusy(true)
     await draft.submit((from) => {
       if (from.fork !== session.snapshot().forkId) {
@@ -517,7 +507,6 @@ export function Composer({
   // With nothing typed, Send asks for the reply alone, as an empty send does in ST.
   const replyNow = async () => {
     if (busy || !ready || replier === null || choice.draftId === null) return
-    writing.stop()
     setBusy(true)
     const outcome = await session.generate(
       session.snapshot().leafSlotId,
@@ -541,7 +530,6 @@ export function Composer({
   const generate = async () => {
     if (editing !== null) return reviseGuidance()
     if (busy || !ready) return
-    writing.stop()
     let outcome: Outcome<unknown> | undefined
     if (guidance && text.trim() !== "") {
       await submit(async (from) => {
@@ -572,7 +560,6 @@ export function Composer({
   const reviseGuidance = async () => {
     const entry = editing === null ? undefined : view.entries.find((e) => e.slotId === editing.slotId)
     if (busy || !ready || entry === undefined) return
-    writing.stop()
     setBusy(true)
     report(await session.regenerate(entry))
     setBusy(false)
@@ -623,7 +610,6 @@ export function Composer({
   const shownError = error ?? saveError ?? viewPrefs.error
 
   const controls: ComposerControlContext = {
-    writing,
     draft: {
       append: (text) => {
         if (editing === null) draft.type(draft.snapshot().text + text)

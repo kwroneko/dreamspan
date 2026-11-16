@@ -193,9 +193,22 @@ export const RequestFigures = Schema.Struct({
   output: Schema.NullOr(Schema.Int),
   reasoning: Schema.NullOr(Schema.Int),
   /** `estimated`: the app counted the tokens; `none`: nobody did (the counts are null). */
-  usageSource: UsageSource
+  usageSource: UsageSource,
+  /** Input not read from the cache, read from it and written to it (`cacheWriteLong`: the long-lived part of the writes). */
+  inputUncached: Schema.NullOr(Schema.Int),
+  cacheRead: Schema.NullOr(Schema.Int),
+  cacheWrite: Schema.NullOr(Schema.Int),
+  cacheWriteLong: Schema.NullOr(Schema.Int),
+  /** The ledger's cost with its currency and the formula that priced it (`reported`, `builtin`, `user:…`). */
+  cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String, formula: Schema.String })),
+  /** What the provider said it charged, when it said (USD). */
+  reportedCost: Schema.NullOr(Schema.Number)
 })
 export type RequestFigures = typeof RequestFigures.Type
+
+/** An amount in one currency. */
+export const CostAmount = Schema.Struct({ amount: Schema.Number, currency: Schema.String })
+export type CostAmount = typeof CostAmount.Type
 
 /**
  * A version's generation time and tokens (parity finding 5): summed over every generation
@@ -219,6 +232,25 @@ export const VersionMetrics = Schema.Struct({
   outputUnknown: Schema.Int,
   /** Some count is the app's estimate, not the provider's. */
   estimated: Schema.Boolean,
+  /**
+   * The ended requests' costs, summed per currency in the order first seen: empty when none
+   * has one, more than one when they were priced in different currencies (never added up).
+   */
+  costs: Schema.Array(CostAmount),
+  /** Ended requests with no cost: `costs` leaves them out. */
+  costUnknown: Schema.Int,
+  /** The formulas that priced them, each once, in the order first seen. */
+  costSources: Schema.Array(Schema.String),
+  /** Some cost came from counts the app estimated (a provider-reported cost never does). */
+  costEstimated: Schema.Boolean,
+  /** The sum of what the provider said it charged, over `reportedRequests` requests; null when none said. */
+  reportedCost: Schema.NullOr(Schema.Number),
+  reportedRequests: Schema.Int,
+  /** Input token counts summed over the ended requests; null when none ended or any of them has none. */
+  inputUncached: Schema.NullOr(Schema.Int),
+  cacheRead: Schema.NullOr(Schema.Int),
+  cacheWrite: Schema.NullOr(Schema.Int),
+  cacheWriteLong: Schema.NullOr(Schema.Int),
   last: RequestFigures
 })
 export type VersionMetrics = typeof VersionMetrics.Type
@@ -241,7 +273,49 @@ export const versionMetricsOf = (versionId: VersionId, requests: ReadonlyArray<R
     reasoning: ended.some((r) => r.reasoning === null) ? null : sum(ended.map((r) => r.reasoning!)),
     outputUnknown: ended.length - counted.length,
     estimated: counted.some((r) => r.usageSource === "estimated"),
+    ...costsOf(ended),
+    inputUncached: total(ended, (r) => r.inputUncached),
+    cacheRead: total(ended, (r) => r.cacheRead),
+    cacheWrite: total(ended, (r) => r.cacheWrite),
+    cacheWriteLong: total(ended, (r) => r.cacheWriteLong),
     last
+  }
+}
+
+/** A count summed over requests; null when there are none or any lacks it (unknown is never zero). */
+const total = (requests: ReadonlyArray<RequestFigures>, of: (r: RequestFigures) => number | null) => {
+  if (requests.length === 0) return null
+  let sum = 0
+  for (const r of requests) {
+    const n = of(r)
+    if (n === null) return null
+    sum += n
+  }
+  return sum
+}
+
+const costsOf = (ended: ReadonlyArray<RequestFigures>) => {
+  const costs = new Map<string, number>()
+  const sources = new Set<string>()
+  let reported: number | null = null
+  let reportedRequests = 0
+  for (const r of ended) {
+    if (r.cost !== null) {
+      costs.set(r.cost.currency, (costs.get(r.cost.currency) ?? 0) + r.cost.amount)
+      sources.add(r.cost.formula)
+    }
+    if (r.reportedCost !== null) {
+      reported = (reported ?? 0) + r.reportedCost
+      reportedRequests++
+    }
+  }
+  return {
+    costs: [...costs].map(([currency, amount]) => ({ amount, currency })),
+    costUnknown: ended.filter((r) => r.cost === null).length,
+    costSources: [...sources],
+    costEstimated: ended.some((r) => r.cost !== null && r.cost.formula !== "reported" && r.usageSource === "estimated"),
+    reportedCost: reported,
+    reportedRequests
   }
 }
 
@@ -301,8 +375,8 @@ export class RunContext extends Schema.Class<RunContext>("RunContext")({
     })
   ),
   chatId: ChatId,
-  slotId: Schema.NullOr(SlotId),
-  versionId: Schema.NullOr(VersionId),
+  slotId: SlotId,
+  versionId: VersionId,
   builtAt: Schema.Number,
   /** The rollout's status: running, completed, stopped, failed, interrupted. */
   status: Schema.String,

@@ -305,7 +305,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 2.2 Personas, speakers and writers
 
-**Built 2026-11-14 (writeforme1):** The requested Write for me control drafts the user's next turn into the branch composer with append, Stop, exact Undo and a persistent request inspector. It reuses the existing editable user-turn preset instruction. This subset is obsolete as an implementation proposal; see ARCHITECTURE §15. Existing decision statuses are unchanged.
+- **[D]** (owner, 2026-11-16, on the Write for me composer draft writer) "THAT IS WHAT ST DOES AND IT SUCKS. YOU CANNOT SWIPE IT, YOU CAN ONLY DELETE THE TEXT AND REDO IT. WE ALREADY HAVE GENERATE AND GUIDANCE FOR THIS." The composer draft writer (writeforme1) is rejected and removed. The user's turn is written by Generate as the persona, which makes a real message with swipeable versions, steered by Guidance. The editable user-turn preset instruction ("When your card speaks") stays: Generate as a persona uses it.
 
 - **[P]** (coordinator brief, 2026-11-06; not the owner's words) “New persona” from persona lists and the persona switcher's list end: “A persona form like New card, with name, picture and description, using the existing card creation where the data model shares it.” Built by newflows; **superseded** by the [D] below.
 - **[D]** (owner, 2026-11-07, on the persona form newflows built) "No, quite literally every single thing about it is wrong. There's nothing correct here. This is not our card editor, which is what a persona is, for one. No way to select display name, version, nickname. No way to do all the other definitions. It doesn't use our avatar cutout UI that was developed. And most importantly the description field is a plain field and not our code editor. Every single thing here needs to go". A persona is a card; New persona is New card's flow and our card editor: the same form and fields as New card (one component, no persona fork of the form), only titled "New persona" and created in the persona folder, then opened in the card editor, where the portrait is set with the avatar cutout UI and the description and every other definition in the code editor. **Built** (personaform, ARCHITECTURE §14).
@@ -1348,6 +1348,8 @@ Tools that “change a card” during RP create notes replacing its fields, incl
 - **[P] (centerheader, 2026-11-04)**: Reuse the chat height token through one registered header frame; contribute title/actions from each view and navigate with shared same-kind selectors and existing draft guards.
 
 **Built (centerheader, 2026-11-04):** These decisions are implemented and obsolete as implementation requirements; see ARCHITECTURE §5 and §14.6.
+
+**Built follow-up (cardheader1, 2026-11-16):** The full card editor bounds its version within the existing identity row so the display-name switcher retains readable text on phones, including an empty version’s add prompt and long versions. Browser glyph-width checks and the center-identity layout audit cover 1440/390 in both themes; see ARCHITECTURE §14.6. This correction is obsolete as an implementation requirement; no Proposed/Open item changes status.
 
 - **[D] Owner, 2026-11-04 (snippettitle):** “After renaming a snippet, its History dialog/label must show the new title”. **Built; obsolete as an implementation requirement**, see ARCHITECTURE §14.6.
 

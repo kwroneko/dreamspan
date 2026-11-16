@@ -35,11 +35,17 @@ test.beforeAll(() => {
 test.afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 /** A character tile on the home grid, by its card's name. */
-const tile = (page: Page, name: string) => page.getByRole("button", { name: new RegExp(`^Open ${name}`) })
+const tile = (page: Page, name: string) => page.getByRole("link", { name: new RegExp(`^Open ${name}`) })
+
+/** Recent sorting virtualizes older cards out of the grid until the user filters to them. */
+const findCard = (page: Page, name: string) =>
+  page.getByRole("searchbox", { name: "Search characters and groups", exact: true }).fill(name, { timeout: 15_000 })
 
 /** Opens a card's page and expects its chats, never an endless "Loading the card…". */
 const openCardPage = async (page: Page, name: string) => {
   await page.goto(`${server().url}/`)
+  await findCard(page, name)
+  await expect(tile(page, name)).toBeVisible({ timeout: 15_000 })
   await tile(page, name).click()
   const id = new URL(page.url()).searchParams.get("character")
   expect(id).not.toBeNull()
@@ -71,13 +77,12 @@ test("an import at scale runs on the server while the user leaves, reloads and u
   const favourite = folder.names.find((name) => folder.used.has(name))!
   for (let round = 0; ; round++) {
     await page.goto(`${server().url}/import/st`)
-    const running = await page
-      .getByText("Running", { exact: true })
-      .first()
-      .isVisible()
-      .catch(() => false)
-    if (!running) break
+    const running = page.getByText("Running", { exact: true }).first()
+    const finished = page.getByText("Finished", { exact: true }).first()
+    await expect(running.or(finished).first()).toBeVisible({ timeout: 15_000 })
+    if (await finished.isVisible()) break
     await page.goto(`${server().url}/`)
+    await findCard(page, "Card 000")
     await expect(tile(page, "Card 000").first()).toBeVisible({ timeout: 15_000 })
     if (await tile(page, favourite).count()) {
       const took = await openCardPage(page, favourite)
@@ -99,6 +104,7 @@ test("an import at scale runs on the server while the user leaves, reloads and u
   page.on("response", (response) => {
     if (response.url().includes("/library/media")) media.push(Number(response.headers()["content-length"] ?? 0))
   })
+  await findCard(page, favourite)
   await expect(tile(page, favourite)).toContainText(/\d+ chats/, { timeout: 15_000 })
   await page.waitForTimeout(3000)
   expect(media.length).toBeGreaterThan(0)
@@ -112,6 +118,7 @@ test("an import at scale runs on the server while the user leaves, reloads and u
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await page.emulateMedia({ colorScheme: scheme })
     await page.goto(`${server().url}/`)
+    await findCard(page, favourite)
     await expect(tile(page, favourite)).toContainText(/\d+ chats/, { timeout: 15_000 })
     await page.screenshot({ path: info.outputPath(`home-after-${width}-${scheme}.png`) })
   }

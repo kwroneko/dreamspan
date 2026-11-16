@@ -1,4 +1,5 @@
 import { resolveSummaryModel } from "./summaryModel.ts"
+import { cardSkills as readCardSkills, cardSkillsText, offeredSkills, skillsIndexText } from "../agent/toolLoading.ts"
 import { prepareTextTokens } from "./textTokens.ts"
 import { mergeLayoutStage } from "./merges.ts"
 import { gapLinesStage } from "./gapLines.ts"
@@ -225,13 +226,10 @@ const castStage: AssemblerStage = {
         need(assembly, "state"),
         swappedCard(
           need(assembly, "events").map((e) => e.event),
-          target.draft ? (need(assembly, "state").playedByMe.at(-1) ?? null) : target.speaker
+          target.speaker
         ),
         target.ordinal
       )
-      if (target.draft) {
-        assembly.cast = { ...assembly.cast, speaker: assembly.cast.personas[0] ?? null, type: "impersonate" }
-      }
       if (assembly.request.summarizing) assembly.cast = { ...assembly.cast, type: "quiet" }
       // ST's Continue: its own generation type, which a preset prompt's trigger can name.
       else if (target.continues) assembly.cast = { ...assembly.cast, type: "continue" }
@@ -573,11 +571,7 @@ const macrosStage = sync("macros", (assembly) => {
     ...(assembly.request.summarizing
       ? {}
       : {
-          speaker: cast.speaker
-            ? modelName(cast.speaker.doc)
-            : need(assembly, "target").draft
-              ? namesFor(need(assembly, "state"), cast).user
-              : namesFor(need(assembly, "state"), cast).char,
+          speaker: cast.speaker ? modelName(cast.speaker.doc) : namesFor(need(assembly, "state"), cast).char,
           direction: need(assembly, "target").direction ?? ""
         })
   })
@@ -1969,6 +1963,39 @@ const composeStage = sync("compose", (assembly) => {
   place(collection, "quietPrompt", "system", null)
   place(collection, "bias", "assistant", null)
   if (markers.persona) place(collection, "personaDescription", "system", markers.persona)
+  // A workshop's Skills and Card skills markers (spec/WORKSHOP-CONTEXT.md §4.2): the skills the
+  // run's load_skill offers, listed by the same function the loading plan freezes them with.
+  // A card's own skills go by name only: their words reach the model once the user allows one.
+  const skillsInput = assembly.request.summarizing ? undefined : assembly.request.agent?.skills
+  const filledMarkers: Array<string> = []
+  if (skillsInput) {
+    const played = new Set<string>(need(assembly, "state").playedByMe)
+    const skills = offeredSkills(
+      skillsInput.registered.map((s) => ({ ...s, label: s.id, instructions: "" })),
+      skillsInput.kind,
+      cast.characters
+        .filter((c) => !played.has(c.entity))
+        .map((c) => readCardSkills(c.doc, { entity: c.entity, name: "" })),
+      skillsInput.loadable
+    )
+    for (const [identifier, what, text] of [
+      ["skillsIndex", "Skills", skillsIndexText(skills)],
+      ["cardSkills", "Card skills", cardSkillsText(skills)]
+    ] as const)
+      // Only where the preset has the marker (a marker, not a prompt of the user's that shares
+      // its identifier) and it's on: a preset without one sends nothing more.
+      if (
+        text &&
+        !disabled(identifier) &&
+        collection.some((p) => p.identifier === identifier && p.system_prompt === true)
+      ) {
+        place(collection, identifier, "system", {
+          text,
+          piece: env.verbatim(`workshop:${identifier}`, { kind: "assembler", what }, text)
+        })
+        filledMarkers.push(identifier)
+      }
+  }
   if (overrides && speaker) {
     assembly.cardOverrides = []
     override(assembly, collection, disabled, "main", overrides.main, speaker)
@@ -2283,6 +2310,7 @@ const composeStage = sync("compose", (assembly) => {
       layer: [...layer, ...markers],
       stableExamples: assembly.lcm !== undefined || doc.pin_examples === true,
       beside,
+      filled: filledMarkers,
       collection,
       disabled,
       chat: injectInChat(
@@ -2670,7 +2698,7 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
     const { speaker, personas } = need(assembly, "cast")
     const turn = continuesWithoutPrefill(assembly)
       ? CONTINUE_NUDGE
-      : need(assembly, "target").draft || (speaker !== null && personas.includes(speaker))
+      : speaker !== null && personas.includes(speaker)
         ? IMPERSONATION_PROMPT
         : GROUP_NUDGE
     const direction = need(assembly, "target").direction?.trim() ? [DIRECTION_PROMPT] : []

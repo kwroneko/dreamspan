@@ -1,4 +1,3 @@
-import { checkDraftTarget } from "./draftTarget.ts"
 import { hiddenParts } from "./rows.ts"
 import { sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
@@ -170,30 +169,6 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
     RoleProjections: () => assembler.projectionOptions,
     MergeLayouts: () => assembler.mergeLayoutOptions,
     ContextViews: () => assembler.contextViewOptions,
-    AssembleDraftTurn: ({ userId, target, now, timeZone }) =>
-      Effect.gen(function* () {
-        yield* checkDraftTarget(sql, userId, target)
-        const sources = sqlSources(sql, {
-          userId,
-          chatId: target.chatId,
-          next: true,
-          leafSlotId: target.leafSlotId,
-          draft: target
-        })
-        const built = yield* assembler
-          .assemble({ now, timeZone, frozen: {}, random: Math.random })
-          .pipe(Effect.provide(sources.layer))
-        const snapshot: ContextSnapshot = {
-          ...built,
-          sources: sources.pins(),
-          ...(built.inputs.model ? { wire: wireContext(built.request, built.inputs.model) } : {})
-        }
-        const inspection = yield* inspectionInputs(sql, userId, snapshot, assembler)
-        return {
-          snapshot: JSON.stringify(snapshot),
-          generation: JSON.stringify({ ...generationOf(snapshot), inspection })
-        }
-      }).pipe(readingOnce, inFork(sql, target.chatId, target.forkId, target.leafSlotId), query("AssembleDraftTurn")),
     AssembleContext: ({
       userId,
       chatId,

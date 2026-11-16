@@ -480,7 +480,7 @@ test("a panel dragged to 1700 px uses its width: fields and grids widen, groups 
   expect(await firstRow(grid)).toBeGreaterThanOrEqual(4)
 })
 
-const SWEEP = [...TABS.slice(0, 3), "Prompt preset", ...TABS.slice(3), "Search and replace", "Juniper"]
+const SWEEP = [...TABS.slice(0, 3), "Prompt preset", ...TABS.slice(3), "History edits", "Juniper"]
 const CARD_TABS = ["Greetings", "Metadata", "Lorebook", "Notes", "Extra"]
 
 // Screens for review (RP_SCREENS): every tab at 400, 800, 1200, 1700 and 2400 px with its
@@ -489,6 +489,8 @@ for (const theme of ["light", "dark"] as const)
   test(`screens of every tab at each width (${theme})`, async ({ page }) => {
     test.skip(!shots, "Screenshot capture requested through RP_SCREENS")
     test.setTimeout(1_800_000)
+    // The whole sweep is long; a missing control should fail within one action's budget.
+    page.setDefaultTimeout(30_000)
     const slug = (s: string) => s.toLowerCase().replace(/ /g, "-")
     await open(page, 3840, 1400, theme)
     // A lorebook in this chat, open below the list.

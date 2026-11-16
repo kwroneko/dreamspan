@@ -36,7 +36,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { validateDoc } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { unfinishedTitle } from "@rp/shared/stImportApi.ts"
-import { foldState, type StateEventData } from "@rp/shared/state.ts"
+import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { docHash, searchText } from "./documents.ts"
@@ -51,13 +51,21 @@ import {
   resolveStNote,
   stepWriteProgress,
   stFinishAt,
+  stImportedCast,
   type StStagedBatch,
   stStateHash
 } from "./stImportProgress.ts"
 import { newEvent, type PlaceEvent } from "./stImportPlace.ts"
 import { planTipRef, type StPlanTip, stepPlanTip } from "./stImportPlanOps.ts"
 import { StImportPlanChanged, ST_UNPLANNED_CHAT_MESSAGE } from "@rp/shared/stReimportPlan.ts"
-import { DEFAULT_PERSONA, DEFAULT_PRESET, newChatLcmSettings, ownedPersona, ownedPreset } from "./generationSettings.ts"
+import {
+  DEFAULT_PERSONA,
+  DEFAULT_PRESET,
+  GLOBAL_REGEX,
+  newChatLcmSettings,
+  ownedPersona,
+  ownedPreset
+} from "./generationSettings.ts"
 
 type Handlers = Parameters<typeof WriteOps.of>[0]
 type Payload<K extends keyof Handlers> = Parameters<Handlers[K]>[0]
@@ -612,7 +620,10 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       yield* ownedChat(userId, chatId)
       const payload = yield* leased(userId, input.recordId, chatId, input.lease)
       const fileFork = yield* recordFork(payload)
-      if (input.position !== null) yield* ownedSlot(chatId, input.position)
+      const at = input.position === null ? null : yield* ownedSlot(chatId, input.position)
+      // Where the file's first import's state applies from, which a branch of it forking
+      // earlier doesn't inherit (StImports.ts `inheritedState`).
+      const stateAt = payload.stateAt ?? (payload.state === undefined ? (at?.depth ?? 0) : undefined)
       const target = input.leaf === null ? null : yield* ownedSlot(chatId, input.leaf)
       if (input.end !== null) yield* ownedSlot(chatId, input.end)
       // Include dormant positional choices too: a later restore or swipe must retain
@@ -703,7 +714,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
       // ST records a file's cast separately from its versions. Pin that imported cast
       // once; a later re-import or a local cast change must not rewrite old participation.
-      const importedCast = foldState(input.events.map((data) => ({ scope: null, data }))).participants
+      const importedCast = stImportedCast(input.events)
       if (planned === null)
         yield* sql`${pathSegments(sql, chatId, input.end, null)}
           UPDATE version_records SET cast_json = ${JSON.stringify(importedCast)}
@@ -740,6 +751,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         ...(input.fork === null ? {} : { parentRecordId: input.fork.parentRecordId }),
         sha256: input.sha256,
         state: input.stateJson,
+        ...(stateAt === undefined ? {} : { stateAt }),
         notes,
         end: input.end,
         firstAdded: null,
@@ -754,7 +766,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
       yield* openOnStCurrent(userId, chatId, input.stCurrent === true ? fileFork.id : null)
       // The shell's summaries of the finished chat, last, at the stamps this write left.
       if (planned === null) yield* refreshChatSummaries(sql, userId, chatId)
-      return { notes }
+      return { notes, ...(stateAt === undefined ? {} : { stateAt }) }
     })
 
   /** Makes `lease` the run that may write a recorded file's chat (`StImportClaim`). */
@@ -794,7 +806,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         notes: (payload.notes ?? {}) as Record<string, EntityId>,
         end: (payload.end ?? null) as SlotId | null,
         merged: payload.merged ?? false,
-        firstAdded: (payload.firstAdded ?? null) as SlotId | null
+        firstAdded: (payload.firstAdded ?? null) as SlotId | null,
+        ...(parentId === undefined ? {} : { parentRecordId: parentId }),
+        ...(payload.stateAt === undefined ? {} : { stateAt: payload.stateAt })
       }
     })
 
@@ -834,7 +848,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         return yield* changed()
       const { position, applies, leaf } = stFinishAt({ ...finish, ...progress })
       const events = applies ? finish.events : []
-      const castJson = JSON.stringify(foldState(events.map((data) => ({ scope: null, data }))).participants)
+      const castJson = JSON.stringify(stImportedCast(events))
       // The rows, with the ids the plan gave them.
       const versionRows: Array<Record<string, unknown>> = []
       const selects: Array<{ slot: string; version: string; content: string }> = []
@@ -1031,6 +1045,15 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         yield* putUserSetting(sql, userId, DEFAULT_PRESET, refId)
         return true
       }).pipe(transaction(sql, "StImportDefaultPreset")),
+    StImportGlobalRegex: ({ userId, importId, scripts }) =>
+      Effect.gen(function* () {
+        yield* current(userId, importId, importId)
+        if (scripts.length === 0) return false
+        const previous = yield* readSetting(sql, "user", userId, GLOBAL_REGEX)
+        if (Array.isArray(previous.value) && previous.value.length > 0) return false
+        yield* putUserSetting(sql, userId, GLOBAL_REGEX, scripts)
+        return true
+      }).pipe(transaction(sql, "StImportGlobalRegex")),
     StImportSummarySettings: ({ userId, importId, prompt, settings }) =>
       Effect.gen(function* () {
         yield* current(userId, importId, importId)
@@ -1330,7 +1353,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             stamp: stamp!,
             progress: { ...progress },
             slots,
-            notes: finished.notes
+            notes: finished.notes,
+            ...(finished.stateAt === undefined ? {} : { stateAt: finished.stateAt })
           }
         }).pipe(transaction(sql, "StImportCommitChat"))
       }),

@@ -117,12 +117,24 @@ const select = (box: Locator, text: string) =>
     selection.addRange(range)
   }, text)
 
-const generateReply = async (page: Page) => {
+const generateReply = async (page: Page, chatId: ChatId, expected = PLAIN_REPLY) => {
+  const before = (await path(chatId)).entries.at(-1)?.version.id
   await page
     .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
     .last()
     .click()
-  await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
+  // An absent badge can precede the reply's start. Wait for the fixture's completed
+  // provider version before adding swipes, so they all target the reply's slot.
+  await expect
+    .poll(
+      async () => {
+        const version = (await path(chatId)).entries.at(-1)?.version
+        return version?.id !== before && version?.status === "complete" ? version.content : null
+      },
+      { timeout: 20_000 }
+    )
+    .toBe(expected)
+  await expect(reply(page)).toContainText(expected)
 }
 
 const shot = async (page: Page, name: string) => {
@@ -146,7 +158,7 @@ for (const [width, theme] of [
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const chatId = await chatWithSwipes(`Ferry ${width}`)
     await page.goto(`${server().url}/chats/${chatId}`)
-    await generateReply(page)
+    await generateReply(page, chatId)
     await addSwipes(chatId)
     await admin((api) =>
       api.CreateSnippet({ chatId, title: "Best line", content: "*The lamp swings, and her shadow with it.*" })
@@ -233,7 +245,7 @@ test("two views of one chat share the composition", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chatId = await chatWithSwipes("Ferry beside")
   await page.goto(`${server().url}/chats/${chatId}`)
-  await generateReply(page)
+  await generateReply(page, chatId)
   await addSwipes(chatId)
   await page.reload()
   // The same chat beside itself.
@@ -274,7 +286,7 @@ test("a selection inside italics keeps them", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chatId = await chatWithSwipes("Ferry italics")
   await page.goto(`${server().url}/chats/${chatId}`)
-  await generateReply(page)
+  await generateReply(page, chatId)
   await addSwipes(chatId)
   await page.reload()
   const message = reply(page)
@@ -298,7 +310,7 @@ test("an agent reply is composed from like any other", async ({ page }) => {
   const chatId = await chatWithSwipes("Ferry agent")
   await admin((api) => api.ChangeCast({ chatId, slotId: null, change: { _tag: "AgentEnabled", on: true } }))
   await page.goto(`${server().url}/chats/${chatId}`)
-  await generateReply(page)
+  await generateReply(page, chatId, AGENT_REPLY)
   const message = reply(page)
   await expect(message).toContainText(AGENT_REPLY)
   await expect(message.locator("[data-steps-badge]")).toBeVisible()
@@ -329,7 +341,7 @@ for (const width of [1440, 1024, 390])
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const chatId = await chatWithSwipes(`Ferry layout ${width} ${theme}`)
       await page.goto(`${server().url}/chats/${chatId}`)
-      await generateReply(page)
+      await generateReply(page, chatId)
       await addSwipes(chatId)
       await page.reload()
       const message = reply(page)

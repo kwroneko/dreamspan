@@ -129,7 +129,8 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
           const bo = cast.cards.find((c) => c.name === "Bo")!.entityId
           assert.deepStrictEqual(cast.playedByMe, [bo])
           assert.strictEqual(cast.macroNames.user, "Bo")
-          assert.include(cast.participants, ada)
+          // Ada is the user's too: she joined for her message and left, never a character.
+          assert.notInclude(cast.participants, ada)
           const path = yield* api.ReadPath({
             chatId: record.chatId,
             forkId: record.forkId,

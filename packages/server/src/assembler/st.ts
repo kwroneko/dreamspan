@@ -259,6 +259,8 @@ export const compose = (input: {
   /** Extension prompts (the summary, notes) put before or after the main prompt in turn (injectToMain). */
   readonly beside: ReadonlyArray<{ readonly message: StMessage; readonly at: "start" | "end" }>
   readonly layer?: ReadonlyArray<StMessage>
+  /** Markers the assembler filled itself (a workshop's skill markers), sent where the order has them. */
+  readonly filled?: ReadonlyArray<string>
   readonly stableExamples?: boolean
   readonly budget: number
   readonly countText?: (text: string) => number
@@ -298,6 +300,9 @@ export const compose = (input: {
     relative(id)
   }
   relative("personaDescription")
+  // A workshop's skill markers (spec/WORKSHOP-CONTEXT.md §4.2), only those the assembler filled:
+  // a preset prompt that merely has one of their identifiers is sent, or not, as it always was.
+  for (const id of input.filled ?? []) relative(id)
   const control = input.control ?? []
   spend(control.reduce((n, m) => n + countMessage(m), 0))
   const userRelative = collection

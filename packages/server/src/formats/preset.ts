@@ -814,7 +814,7 @@ export const readRegex = (
   raw: unknown,
   r: ReportBuilder,
   base: ReadonlyArray<string | number> = ["extensions", "regex_scripts"],
-  owner: "preset" | "card" = "preset"
+  owner: "preset" | "card" | "global" = "preset"
 ): Array<RegexScript> => {
   if (raw === undefined || raw === null) return []
   if (!Array.isArray(raw)) {
@@ -870,7 +870,9 @@ export const readRegex = (
       ...(Object.keys(unsupported).length > 0 ? { unsupported } : {})
     })
   }
-  if (scripts.size > 0)
+  // Global scripts are reported by the import once it knows whether they went in (an account
+  // with scripts of its own keeps them).
+  if (scripts.size > 0 && owner !== "global")
     r.add(
       "info",
       "preset.regex_imported",

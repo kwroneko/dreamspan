@@ -8,7 +8,7 @@ import type { Chat } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import type { Effect } from "effect"
-import { type FormEvent, useEffect } from "react"
+import { type FormEvent, type ReactNode, useEffect } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import type { AppClient } from "../../rpc.ts"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
@@ -44,7 +44,8 @@ export function StartChatForm({
   label,
   button,
   hint,
-  create
+  create,
+  extra
 }: {
   /** The user draft the title is kept under. */
   draft: string
@@ -53,6 +54,8 @@ export function StartChatForm({
   button: string
   hint: string
   create: (client: AppClient["Service"], title: string) => Effect.Effect<Chat, unknown>
+  /** Choices above the title, such as who a workshop starts with. */
+  extra?: ReactNode
 }) {
   const action = useAction()
   const navigate = useNavigate()
@@ -69,6 +72,7 @@ export function StartChatForm({
   return (
     <form onSubmit={submit} className="flex flex-col gap-2">
       <UserDraftStatus draft={durable} />
+      {extra}
       <div className="flex gap-2">
         <Input
           aria-label={label}

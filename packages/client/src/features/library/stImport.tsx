@@ -77,6 +77,9 @@ const KINDS = [
   ["persona", "Personas"]
 ] as const
 
+/** Kinds shown only when the import brought some. */
+const SOMETIMES = [["regex", "Global regex scripts"]] as const
+
 /** The preview's kinds, as the folder's files are found (`stPlan`). */
 const FOLDER_KINDS: ReadonlyArray<readonly [StSentKind, string]> = [
   ["card", "Cards"],
@@ -213,6 +216,7 @@ function Counts({ job, issues }: { job: StImportJob; issues: ReturnType<typeof r
   }
   const stats = [
     ...KINDS.map(([kind, label]) => [label, imported(kind) + (kind === "chat" ? imported("group_chat") : 0)] as const),
+    ...SOMETIMES.flatMap(([kind, label]) => (imported(kind) > 0 ? [[label, imported(kind)] as const] : [])),
     ["Warnings", issues.filter((issue) => issue.level === "warning").length] as const,
     ["Errors", issues.filter((issue) => issue.level === "error").length] as const
   ]

@@ -45,6 +45,8 @@ export const startProvider = async (
     /** Honour output ceilings in billing-bound tests. */
     respectOutputLimit?: boolean
     /** Streamed instead of REPLY. */ reply?: string
+    /** The charge the usage reports, as OpenRouter's `usage.cost` does; none by default. */
+    usageCost?: number
     models?: ReadonlyArray<{
       id: string
       name: string
@@ -78,7 +80,12 @@ export const startProvider = async (
       response.write(
         chunk({
           choices: [],
-          usage: { prompt_tokens: 120, completion_tokens: output, prompt_tokens_details: { cached_tokens: 100 } }
+          usage: {
+            prompt_tokens: 120,
+            completion_tokens: output,
+            prompt_tokens_details: { cached_tokens: 100 },
+            ...(options.usageCost === undefined ? {} : { cost: options.usageCost })
+          }
         })
       )
       response.end("data: [DONE]\n\n")

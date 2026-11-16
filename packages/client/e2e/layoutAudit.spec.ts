@@ -1672,6 +1672,7 @@ test.describe("synthetic library and every app surface", () => {
           await page.goto(`${server.url}/library/${cardRef}`)
           await expect(page.locator("[data-card-tokens]")).toBeVisible()
           await audit("card-editor-header", "[data-card-header]")
+          await audit("card-editor-identity", "main [data-center-header]")
           await go("card-page-header", `/cards/${cardId}`)
           await page.goto(`${server.url}/chats/${chatId}`)
           await openPanel(page, cardName)

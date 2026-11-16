@@ -343,46 +343,25 @@ const decisionsOffOf = (snapshot: unknown) => {
 export const makeInspectorReadHandlers = Effect.gen(function* () {
   const assembler = yield* WorkerAssembler
   const sql = yield* SqlClient.SqlClient
-  const readRun = (
-    userId: import("@rp/shared/domain.ts").UserId,
-    target: { kind: "version"; versionId: VersionId } | { kind: "draft"; rolloutId: string }
-  ) => {
-    const versionId = target.kind === "version" ? target.versionId : null
+  const readRun = (userId: import("@rp/shared/domain.ts").UserId, versionId: VersionId) => {
     return Effect.gen(function* () {
-      const [row] = yield* target.kind === "draft"
-        ? sql<{
-            chat_id: string
-            fork_id: string | null
-            slot_id: null
-            rollout_id: string
-            status: string
-            snapshot: string
-            sent_context_json: string | null
-            speaker_pick_json: null
-          }>`SELECT r.chat_id, r.fork_id, NULL AS slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot, p.sent_context_json, NULL AS speaker_pick_json
-          FROM rollouts r JOIN chats c ON c.id=r.chat_id JOIN rollout_payloads p ON p.rollout_id=r.id
-          WHERE r.id=${target.rolloutId} AND r.kind='draft' AND c.owner_user_id=${userId} AND c.deleted_at IS NULL`
-        : sql<{
-            chat_id: string
-            fork_id: string | null
-            slot_id: string
-            rollout_id: string
-            status: string
-            snapshot: string
-            sent_context_json: string | null
-            speaker_pick_json: string | null
-          }>`
+      const [row] = yield* sql<{
+        chat_id: string
+        fork_id: string | null
+        slot_id: string
+        rollout_id: string
+        status: string
+        snapshot: string
+        sent_context_json: string | null
+        speaker_pick_json: string | null
+      }>`
         SELECT s.chat_id, r.fork_id, v.slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot, p.sent_context_json,
           v.speaker_pick_json
         FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
         JOIN rollouts r ON r.id = v.rollout_id JOIN rollout_payloads p ON p.rollout_id = r.id
         WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND p.context_snapshot_json IS NOT NULL
           AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
-      if (!row)
-        return yield* new NotFound({
-          entity: "context",
-          id: versionId ?? (target.kind === "draft" ? target.rolloutId : "")
-        })
+      if (!row) return yield* new NotFound({ entity: "context", id: versionId })
       const snapshot = JSON.parse(row.snapshot) as ContinuousSnapshot
       const chatId = row.chat_id as ChatId
       const requests = yield* rolloutUsage(sql, userId, row.rollout_id)
@@ -425,7 +404,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             }
           : {}),
         chatId,
-        slotId: row.slot_id as SlotId | null,
+        slotId: row.slot_id as SlotId,
         versionId,
         builtAt: snapshot.inputs.now,
         status: row.status,
@@ -475,18 +454,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
     }).pipe(query("RunContext"))
   }
   const handlers = {
-    RunContext: ({ userId, versionId }) => readRun(userId, { kind: "version", versionId }),
-    DraftRunContext: ({ userId, rolloutId }) => readRun(userId, { kind: "draft", rolloutId }),
-    LastDraftRollout: ({ userId, chatId, forkId }) =>
-      Effect.gen(function* () {
-        const [owned] = yield* sql`SELECT 1 FROM chats c JOIN forks f ON f.chat_id=c.id
-        WHERE c.id=${chatId} AND f.id=${forkId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
-        if (!owned) return yield* new NotFound({ entity: "branch", id: forkId })
-        const [row] = yield* sql<{
-          id: string
-        }>`SELECT id FROM rollouts INDEXED BY rollouts_fork WHERE chat_id=${chatId} AND fork_id=${forkId} AND kind='draft' ORDER BY created_at DESC, id DESC LIMIT 1`
-        return row?.id ?? null
-      }).pipe(query("LastDraftRollout")),
+    RunContext: ({ userId, versionId }) => readRun(userId, versionId),
 
     // A version's generation requests and those of the versions it continued, followed through
     // `source_version_id`. UNION deduplicates identities, including any cycle. Only roots with requests count:
@@ -504,6 +472,14 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           output: number | null
           reasoning: number | null
           usage_source: RequestFigures["usageSource"]
+          input_uncached: number | null
+          cache_read: number | null
+          cache_write: number | null
+          cache_write_long: number | null
+          cost: number | null
+          cost_currency: string | null
+          cost_formula: string | null
+          reported_cost: number | null
         }>`
           WITH RECURSIVE chain(root, id) AS (
             SELECT v.id, v.id FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
@@ -514,7 +490,9 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             SELECT chain.root, v.source_version_id FROM chain JOIN versions v ON v.id = chain.id
             WHERE v.source_version_id IS NOT NULL
           )
-          SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source
+          SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source,
+            q.input_uncached, q.cache_read, q.cache_write, q.cache_write_long, q.cost, q.cost_currency, q.cost_formula,
+            q.reported_cost
           FROM chain JOIN llm_requests q INDEXED BY llm_requests_version ON q.version_id = chain.id
           WHERE q.purpose IN ('generation', 'workshop') AND q.owner_user_id = ${userId}
           ORDER BY chain.root, q.started_at, q.id`
@@ -528,7 +506,17 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             endedAt: row.ended_at,
             output: row.output,
             reasoning: row.reasoning,
-            usageSource: row.usage_source
+            usageSource: row.usage_source,
+            inputUncached: row.input_uncached,
+            cacheRead: row.cache_read,
+            cacheWrite: row.cache_write,
+            cacheWriteLong: row.cache_write_long,
+            // The schema keeps cost, currency and formula set together.
+            cost:
+              row.cost === null
+                ? null
+                : { amount: row.cost, currency: row.cost_currency ?? "", formula: row.cost_formula ?? "" },
+            reportedCost: row.reported_cost
           })
           byVersion.set(row.root, list)
         }

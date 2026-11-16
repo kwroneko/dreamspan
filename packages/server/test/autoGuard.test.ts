@@ -5,7 +5,7 @@
 import { assert, it } from "@effect/vitest"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Effect, Layer, Stream, type Scope } from "effect"
+import { Effect, Layer, type Scope } from "effect"
 import * as ProviderBuiltins from "../src/providers/builtins.ts"
 import { ProviderRegistry } from "../src/providers/registry.ts"
 import { Writer } from "../src/db/Database.ts"
@@ -581,38 +581,6 @@ live(
     )
     yield* refused(token, "settings")
     yield* refused(token, "settings")
-  })
-)
-
-// stack1115: draft ledger writes are bookkeeping, while changes to sent history/configuration
-// invalidate the handle even when another branch supplied that operation.
-live(
-  "Write for me is not an Auto turn, preserves its token, and cannot revive it after a foreign edit",
-  Effect.gen(function* () {
-    const { api, made, turn, refused, requests, tip } = yield* scene
-    const token = yield* turn(null)
-    const before = yield* api.GetChat({ chatId: made.chat.id })
-    const cast = yield* api.GetCast({ chatId: made.chat.id, slotId: null })
-    const draft = yield* api.OpenComposer({ chatId: made.chat.id, forkId: made.chat.currentForkId })
-    const target = {
-      kind: "draft" as const,
-      chatId: made.chat.id,
-      forkId: made.chat.currentForkId!,
-      leafSlotId: tip(),
-      draftId: draft.id
-    }
-    const count = requests().length
-    yield* api.WriteForMe({ target }).pipe(Stream.runDrain)
-    assert.strictEqual(requests().length, count + 1)
-    assert.include(requests().at(-1)!.raw!, "Tobin")
-    assert.deepStrictEqual(yield* api.GetChat({ chatId: made.chat.id }), before)
-    assert.deepStrictEqual(yield* api.GetCast({ chatId: made.chat.id, slotId: null }), cast)
-    const next = yield* turn(token)
-    yield* api.SetMessageHidden({ slotId: made.sent.slotId, hidden: true })
-    // A successful draft's FinishRollout cannot be mistaken for the Auto reply's own save.
-    yield* api.WriteForMe({ target: { ...target, leafSlotId: tip() } }).pipe(Stream.runDrain)
-    yield* refused(next, "changed")
-    yield* refused(token, "replayed")
   })
 )
 
