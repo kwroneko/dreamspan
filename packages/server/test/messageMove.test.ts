@@ -194,6 +194,15 @@ describe("moving messages", () => {
           yield* t.undo(t.main, moved.undo)
           assert.deepStrictEqual(yield* t.order(t.main), [a, b, c, d])
           assert.include(yield* failure(t.undo(t.main, moved.undo)), "StaleWrite")
+          // An Undo never leaves a message out (a move after itself), whatever the caller sends.
+          const again = yield* t.move(t.main, c, "up")
+          const forged = again.undo.map((step) =>
+            step.slotId === c ? { ...step, before: { anchor: c } } : step
+          ) as ReadonlyArray<MoveStep>
+          assert.include(yield* failure(t.undo(t.main, forged)), "StaleWrite")
+          assert.deepStrictEqual(yield* t.order(t.main), [a, c, b, d])
+          yield* t.undo(t.main, again.undo)
+          assert.deepStrictEqual(yield* t.order(t.main), [a, b, c, d])
           assert.deepStrictEqual(yield* t.order(after), [c, a, b, d])
           // Down past the tip: the last message shown is the moved one.
           yield* t.move(t.main, c, "down")

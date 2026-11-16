@@ -155,6 +155,15 @@ export const makeMoveWriteHandlers = (bin: Bin) =>
             const [slot] = yield* sql<{ row_version: number }>`
               SELECT row_version FROM slots WHERE id = ${step.slotId} AND chat_id = ${chatId}`
             if (!slot) return yield* new NotFound({ entity: "slot", id: step.slotId })
+            // A move never puts a slot after itself: that row leaves the slot out of the fork
+            // (forkOrder.ts), which only a new fork writes, never an Undo the caller sends.
+            if (step.before?.anchor === step.slotId || step.after?.anchor === step.slotId)
+              return yield* new StaleWrite({
+                entity: "slot",
+                id: step.slotId,
+                expected: slot.row_version,
+                actual: slot.row_version
+              })
             if (!samePlace(placeOf(moves, step.slotId), step.after))
               return yield* new StaleWrite({
                 entity: "slot",

@@ -2418,8 +2418,9 @@ export const baseline: ReadonlyArray<string> = [
     BEGIN ${raise("an insertion places an inserted slot of its chat below its parent")}; END`,
   // A move (owner, 2026-11-16: moving a message up or down changes the story order, in that
   // branch only): slot_id is the moved slot itself (target_id) at its depth; value_id is the
-  // slot it now follows on the branch's display path (null: above the first message), never
-  // itself; flag 1 shows it there, 0 at its own place; no bin item or changeset.
+  // slot it now follows on the branch's display path (null: above the first message), or itself
+  // to leave it out of the branch (a fork made above where its parent moved it down:
+  // forkOrder.ts); flag 1 shows it there, 0 at its own place; no bin item or changeset.
   `CREATE TRIGGER fork_overrides_move BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'move'
     AND (NEW.flag IS NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL
       OR NEW.slot_id IS NOT NEW.target_id
