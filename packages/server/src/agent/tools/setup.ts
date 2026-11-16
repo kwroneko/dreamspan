@@ -635,7 +635,7 @@ const editLibraryNote: RolloutTool<LibraryNoteEdit> = {
   effect: "library",
   capability: "library.write",
   description:
-    "Edits one saved note of the library by id or by its one name: a shared note's text, a card note's text, or whether a card's note is on by default in chats. Read it first. Its placement and conditions are kept. Unsaved drafts remain unsaved. A chat's own notes are changed in that chat.",
+    "Edits a shared note's or a card note's text, or whether a card's note is on by default in chats. Read it first; placement and conditions are kept. A chat's own notes are changed in that chat.",
   parameters: Type.Object(
     { note: name, content: Type.Optional(text), on_by_default: Type.Optional(Type.Boolean()) },
     strict

@@ -781,7 +781,11 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           ...(forkId === undefined ? {} : { forkId }),
           ...(link === undefined ? {} : { link })
         })
-      ).pipe(internal("CreateChatNote")),
+      ).pipe(
+        // Listed in every branch: the chat's open tabs read their notes again.
+        Effect.tap(() => Effect.sync(() => hub.publish(chatId, { _tag: "State" }))),
+        internal("CreateChatNote")
+      ),
 
     GetGlobalRegex: () =>
       Effect.flatMap(userId, (id) => reader.GetGlobalRegex({ userId: id })).pipe(internal("GetGlobalRegex")),

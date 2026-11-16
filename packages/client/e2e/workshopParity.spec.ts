@@ -128,6 +128,10 @@ test.describe("workshop notes tools", () => {
         await expect(rows).toHaveCount(2)
         const binned = changes.locator('[data-effect-kind="library.delete"]')
         await expect(binned.getByRole("link", { name: "Open", exact: true })).toHaveCount(0)
+        await expect(binned).toContainText(`Moved the note ${TITLE} to the bin`)
+        // The row that made it has nothing to open while it is in the bin either.
+        const created = changes.locator('[data-effect-kind="library.create"]')
+        await expect(created.getByRole("link", { name: "Open", exact: true })).toHaveCount(0)
         const undo = binned.getByRole("button", { name: "Undo", exact: true })
         await expect(undo).toHaveAccessibleDescription("Takes it back out of the bin.")
         await shot("changes")
@@ -137,6 +141,7 @@ test.describe("workshop notes tools", () => {
         await undo.click()
         await expect(binned).toContainText("Undone")
         await expect(binned.getByRole("link", { name: "Open", exact: true })).toBeVisible()
+        await expect(created.getByRole("link", { name: "Open", exact: true })).toBeVisible()
         const back = await notes()
         expect(back.map((n) => n.title)).toEqual([TITLE])
         await shot("undone")

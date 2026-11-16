@@ -903,7 +903,9 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
                       targetId: policy!.target(value as never, after as never),
                       title: storyPosition
                         ? `${policy!.label} · ${storyPosition.label} · from message ${storyPosition.upTo}`
-                        : policy!.label,
+                        : policy!.kind === "library.delete"
+                          ? `Moved the note ${(after as { label: string }).label} to the bin`
+                          : policy!.label,
                       undo: {
                         operation: input.operation,
                         ...(storyPosition

@@ -10,6 +10,7 @@ import { statusText } from "../src/features/chat/agent/steps.ts"
 import { guardReply, replyGuards, type ReplyGuardRequest } from "../src/features/chat/replyGuards.ts"
 import { chatKindLooks } from "../src/features/chat/kindLooks.ts"
 import {
+  binnedTargets,
   groupByReply,
   opensNow,
   openTarget,
@@ -96,6 +97,14 @@ describe("a workshop change", () => {
     const made = effect({ kind: "library.create" })
     expect([made, effect({ kind: "library.create", undoneAt: 5 })].map(opensNow)).toEqual([true, false])
     expect([effect({}), effect({ undoneAt: 5 })].map(opensNow)).toEqual([true, true])
+  })
+
+  it("knows which items a later change of the assistant's left in the bin", () => {
+    const made = effect({ kind: "library.create", targetId: "note1" })
+    const binned = effect({ kind: "library.delete", targetId: "note1", seq: 1 })
+    expect([...binnedTargets([made, binned])]).toEqual(["note1"])
+    // Taken back out: it opens again.
+    expect([...binnedTargets([made, { ...binned, undoneAt: 5 }])]).toEqual([])
   })
 })
 

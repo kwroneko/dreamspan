@@ -8,7 +8,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react"
 import type { StepActionProps } from "../chat/agent/stepActions.ts"
 import { kindShows } from "../chat/kindLooks.ts"
 import { EffectRow } from "./EffectRow.tsx"
-import { CHANGES, versionEffectsAtom } from "./effects.ts"
+import { binnedTargets, CHANGES, versionEffectsAtom } from "./effects.ts"
 
 /** The calls that can change things outside the chat. */
 const CHANGING = new Set(["library", "setup", "outside"])
@@ -25,6 +25,7 @@ function Effects({ step, version }: StepActionProps) {
   const result = useAtomValue(atom)
   const refresh = useAtomRefresh(atom)
   const mine = AsyncResult.isSuccess(result) ? result.value.filter((e) => e.toolCallId === step.id) : null
+  const binned = binnedTargets(AsyncResult.isSuccess(result) ? result.value : [])
   const asked = useRef(false)
   useEffect(() => {
     if (mine === null || mine.length > 0 || asked.current) return
@@ -42,7 +43,7 @@ function Effects({ step, version }: StepActionProps) {
   return (
     <div className="ml-5 flex flex-col gap-1" aria-label="What this step changed" role="group">
       {mine.map((effect) => (
-        <EffectRow key={`${effect.rolloutId}:${effect.seq}`} effect={effect} />
+        <EffectRow key={`${effect.rolloutId}:${effect.seq}`} effect={effect} inBin={binned.has(effect.targetId)} />
       ))}
     </div>
   )

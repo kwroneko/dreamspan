@@ -8,7 +8,7 @@ import { Reader, Writer } from "../src/db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../src/execution.ts"
 import type { ToolContext, ToolOutput } from "../src/agent/tools.ts"
 import { toolData } from "../src/agent/toolData.ts"
-import { paritySkillTools, parityTools } from "../src/agent/exposures/parity.ts"
+import { paritySkills, paritySkillTools, parityTools } from "../src/agent/exposures/parity.ts"
 import { builtinSkills } from "../src/agent/skills.ts"
 import { loadSkillDescription, orphansOf, skillsFor, toolSearchDescription } from "../src/agent/toolLoading.ts"
 import { client, serverLayer, testConfig, outcome } from "./support/config.ts"
@@ -571,14 +571,16 @@ describe("notes and files tools", () => {
   })
 })
 
-it.effect("the loading tools' definitions are what they were: every new tool sits in a skill", () =>
+it.effect("every new tool sits in a skill; the skill index only gains Notes", () =>
   Effect.gen(function* () {
     const registry = yield* ExecutionRegistry
     const plan = registry.orchestrationModes.get("workshop")!.plan({ kind: "workshop", state: {} as never })
     const immediate = new Set(registry.toolLoadingProfiles.get("workshop")!.immediate)
     for (const name of NEW_TOOLS) assert.isFalse(immediate.has(name), `${name} must be deferred`)
     assert.sameMembers(
-      [...parityTools, ...Object.values(paritySkillTools).flat()].filter((n) => !NEW_TOOLS.includes(n)),
+      [...parityTools, ...Object.values(paritySkillTools).flat(), ...paritySkills.flatMap((s) => s.tools)].filter(
+        (n) => !NEW_TOOLS.includes(n)
+      ),
       []
     )
     const deferred = plan.tools.filter((id) => !immediate.has(id))
@@ -589,10 +591,17 @@ it.effect("the loading tools' definitions are what they were: every new tool sit
       toolSearchDescription(orphansOf(deferred, registered)),
       toolSearchDescription(orphansOf(before, builtinSkills))
     )
+    // The other skills' lines are what they were; Notes is one more line.
     assert.strictEqual(
-      loadSkillDescription(skillsFor(registered, deferred)),
+      loadSkillDescription(
+        skillsFor(
+          registered.filter((skill) => skill.id !== "notes"),
+          deferred
+        )
+      ),
       loadSkillDescription(skillsFor(builtinSkills, before))
     )
+    assert.include(loadSkillDescription(skillsFor(registered, deferred)), "- notes:")
     for (const name of NEW_TOOLS)
       assert.isTrue(
         registered.some((skill) => skill.tools.includes(name)),

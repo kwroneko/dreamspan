@@ -80,6 +80,10 @@ export const opensNow = (effect: RolloutEffect) =>
     ? effect.undoneAt !== null
     : !(effect.undoneAt !== null && effect.kind !== "library.revise")
 
+/** The items a later change moved to the bin and no Undo has taken back out: none of them opens. */
+export const binnedTargets = (effects: ReadonlyArray<RolloutEffect>): ReadonlySet<string> =>
+  new Set(effects.filter((e) => e.kind === "library.delete" && e.undoneAt === null).map((e) => e.targetId))
+
 /** The changes one reply's run made, as the Changes tab groups them. */
 export interface ReplyChanges {
   readonly rolloutId: string

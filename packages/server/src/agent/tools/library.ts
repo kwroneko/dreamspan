@@ -139,7 +139,7 @@ const readNote: RolloutTool<{ readonly note: string }> = {
   effect: "read",
   capability: "library.read",
   description:
-    "Reads the saved head of a shared note or a card's note, by library id, entity id or its one name. Returns its revision and document. Unsaved drafts are not included. A chat's own notes are read with list_chat_notes.",
+    "Reads a shared note or a card's note, by id or name: its saved revision and document. A chat's own notes are read with list_chat_notes.",
   parameters: Type.Object({ note: Type.String({ description: "The note's name or id." }) }),
   summarize: ({ note }) => note,
   execute: (context, { note }) =>
