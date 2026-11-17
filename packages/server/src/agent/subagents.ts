@@ -391,6 +391,10 @@ export const agentTool: RolloutTool<AgentArgs> = {
   effect: "read",
   // Never a story reply's tool (§9: no story use until the owner accepts one).
   replyTool: false,
+  // Like tool_search and load_skill, it reads no story facts itself: its child reads them only
+  // through the reply's own offered tools, at the reply's position (`storyAt`), each under its
+  // own declaration.
+  storyRead: "conversation",
   titleField: "task",
   description: description(),
   parameters: Type.Object({
