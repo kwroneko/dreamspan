@@ -1,5 +1,5 @@
 import { canonicalJson } from "@rp/shared/editing.ts"
-import type { ForkNote, ForkNoteSelection } from "@rp/shared/chatApi.ts"
+import type { ForkNote, ForkNoteSelection, ForkPreview, ForkWorkshop } from "@rp/shared/chatApi.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import type { AppError } from "../../errors.ts"
@@ -40,6 +40,66 @@ const noteOptions = (note: ForkNote) =>
         }
       ] as const)
 
+/** A workshop beside the story (spec/WORKSHOP-BRANCHES.md §4): the new branch's workshop branch. */
+const workshopOptions = [
+  {
+    value: "then",
+    label: "As it was then",
+    description: "The workshop as it was when the story stood at this message. Later messages stay on this branch."
+  },
+  {
+    value: "now",
+    label: "As it is now",
+    description: "The whole workshop as it is now. Both branches go on from there."
+  }
+] as const
+
+function WorkshopRow({
+  workshop,
+  choice,
+  onChoice
+}: {
+  workshop: ForkWorkshop
+  choice: Choice
+  onChoice: (choice: Choice) => void
+}) {
+  const { count, first } = workshop.leftOut
+  return (
+    <div data-fork-workshop={workshop.workshop} className="min-w-0 rounded-md border border-border p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium break-words">{workshop.title}</p>
+          <p className="text-xs text-muted">
+            Workshop · {count} {count === 1 ? "message" : "messages"} after this point
+          </p>
+        </div>
+        <Segmented
+          label={`Inherit ${workshop.title}`}
+          options={workshopOptions}
+          value={choice}
+          onValueChange={onChoice}
+          wrap
+        />
+      </div>
+      <details>
+        <Tooltip label="Shows the workshop messages “As it was then” leaves out of the new branch.">
+          <summary className="cursor-pointer text-sm text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus">
+            Messages left out
+          </summary>
+        </Tooltip>
+        <ol data-left-out className="mt-2 flex flex-col gap-1 text-sm">
+          {first.map((message, i) => (
+            <li key={i} data-layout-name className="min-w-0 truncate">
+              <span className="font-medium">{message.speaker}:</span> <span className="text-muted">{message.line}</span>
+            </li>
+          ))}
+          {count > first.length && <li className="text-xs text-muted">and {count - first.length} more</li>}
+        </ol>
+      </details>
+    </div>
+  )
+}
+
 function NoteDiff({ note }: { note: ForkNote }) {
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -67,24 +127,44 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { panel?: string }
   const [source] = useState(() => session.snapshot().forkId)
-  const [notes, setNotes] = useState<ReadonlyArray<ForkNote> | null>(null)
+  const [preview, setPreview] = useState<ForkPreview | null>(null)
+  const notes = preview?.notes ?? null
+  const workshops = preview?.workshops ?? []
   const [choices, setChoices] = useState<Record<string, Choice>>({})
+  const [workshopChoices, setWorkshopChoices] = useState<Record<string, Choice>>({})
   const [buttons, setButtons] = useState(false)
   const [diff, setDiff] = useState<ForkNote | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const [pending, setPending] = useState(false)
-  const chooseAll = (choice: Choice) => setChoices(Object.fromEntries((notes ?? []).map((note) => [note.note, choice])))
-  const all = notes?.every((note) => (choices[note.note] ?? "then") === "then")
+  // The set-all switch covers the workshops too ("Set all" then).
+  const chooseAll = (choice: Choice) => {
+    setChoices(Object.fromEntries((notes ?? []).map((note) => [note.note, choice])))
+    setWorkshopChoices(Object.fromEntries(workshops.map((workshop) => [workshop.workshop, choice])))
+  }
+  const each = [
+    ...(notes ?? []).map((note) => choices[note.note] ?? "then"),
+    ...workshops.map((workshop) => workshopChoices[workshop.workshop] ?? "then")
+  ]
+  const all = each.every((choice) => choice === "then")
     ? "then"
-    : notes?.every((note) => choices[note.note] === "now")
+    : each.every((choice) => choice === "now")
       ? "now"
       : "mixed"
-  const branch = async (reviewed = notes) => {
+  const setAllLabel = workshops.length > 0 ? "Set all" : "Set all notes"
+  const branch = async (reviewed = preview) => {
     if (reviewed === null || pending) return
     setPending(true)
     const selection: ForkNoteSelection = {
       comparison: canonicalJson(reviewed),
-      choices: reviewed.map((note) => ({ note: note.note, choice: choices[note.note] ?? "then" }))
+      choices: reviewed.notes.map((note) => ({ note: note.note, choice: choices[note.note] ?? "then" })),
+      ...(reviewed.workshops.length === 0
+        ? {}
+        : {
+            workshops: reviewed.workshops.map((workshop) => ({
+              workshop: workshop.workshop,
+              choice: workshopChoices[workshop.workshop] ?? "then"
+            }))
+          })
     }
     // Unnamed: a branch is named by where it splits off until the user names it (`forkLabel`).
     const made = await session.branchFrom(entry.slotId, selection, source)
@@ -126,8 +206,8 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
       )
       .then((result) => {
         if (live && result.ok) {
-          setNotes(result.value)
-          if (result.value.length === 0) void branch(result.value)
+          setPreview(result.value)
+          if (result.value.notes.length === 0 && result.value.workshops.length === 0) void branch(result.value)
         }
       })
     return () => {
@@ -143,14 +223,17 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
           <p role="status" className="text-sm text-muted">
             Loading notes…
           </p>
-        ) : notes.length === 0 ? (
+        ) : notes.length === 0 && workshops.length === 0 ? (
           <p className="text-sm text-muted">No notes changed after this message.</p>
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-medium">Set all notes{all === "mixed" ? " · Mixed choices" : ""}</span>
+              <span className="text-sm font-medium">
+                {setAllLabel}
+                {all === "mixed" ? " · Mixed choices" : ""}
+              </span>
               <Segmented
-                label="Set all notes"
+                label={setAllLabel}
                 options={options}
                 value={all}
                 onValueChange={(choice) => {
@@ -203,6 +286,14 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
                     </details>
                   )}
                 </div>
+              ))}
+              {workshops.map((workshop) => (
+                <WorkshopRow
+                  key={workshop.workshop}
+                  workshop={workshop}
+                  choice={workshopChoices[workshop.workshop] ?? "then"}
+                  onChoice={(choice) => setWorkshopChoices((current) => ({ ...current, [workshop.workshop]: choice }))}
+                />
               ))}
             </div>
           </>

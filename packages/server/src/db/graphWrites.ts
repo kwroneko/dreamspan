@@ -29,6 +29,8 @@ import {
   type VersionRow
 } from "./rows.ts"
 import { checkStateReferences, withoutPurged } from "./stateRefs.ts"
+import { recordStoryAt } from "./workshopPairing.ts"
+import type { WorkshopChoice } from "./workshopForks.ts"
 
 export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"], creatingWorkshop = false) => {
   const { carryChatNoteDrafts } = makeDraftCarry(sql, drafts)
@@ -201,6 +203,14 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
         created_at: at,
         ...(inserted ? { inserted: 1 } : {})
       })}`
+      // A workshop beside a story records where the story stands (spec/WORKSHOP-BRANCHES.md §2.2).
+      yield* recordStoryAt(
+        sql,
+        chatId,
+        slotId,
+        rows.map((row) => row.id),
+        fork
+      )
       return { slotId, version: rows[0]!, selected: rows[selected]! }
     })
 
@@ -221,6 +231,10 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
       // story-reading grant onto a different story, or put a side chat on a story's state.
       if (data.key === "workshop.attached" && !creatingWorkshop)
         return yield* new NotFound({ entity: "workshop attachment", id: chatId })
+      // The same for a workshop branch's story branch and its messages' story positions
+      // (spec/WORKSHOP-BRANCHES.md §2): creation, the story-fork hook and the version insert own them.
+      if ((data.key === "workshop.paired" && !creatingWorkshop) || data.key === "workshop.story_at")
+        return yield* new NotFound({ entity: "workshop pairing", id: chatId })
       if (data.key === "lcm.settings" && (slotId !== null || versionId !== null || scope !== null))
         return yield* new NotFound({ entity: "chat-wide settings", id: chatId })
       if (data.key === "lcm.settings" && data.value.enabled) yield* requireSummaries(sql, chatId)
@@ -368,11 +382,26 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"],
    * `from` shows up to there: an inserted slot it would place after it gets a row of 0
    * (`hiddenAtFork`, spec/MESSAGE-INSERT.md §2.4).
    */
-  const createFork = (chatId: string, from: ForkRow, atSlotId: string | null, at: number, checked = false) =>
+  const createFork = (
+    chatId: string,
+    from: ForkRow,
+    atSlotId: string | null,
+    at: number,
+    checked = false,
+    /** "Branch from here"'s choice per workshop beside the story (spec/WORKSHOP-BRANCHES.md §4). */
+    workshops?: ReadonlyMap<string, WorkshopChoice>
+  ) =>
     Effect.gen(function* () {
       if (!checked && atSlotId !== null && !(yield* onForkPath(sql, chatId, from, atSlotId)))
         return yield* new NotFound({ entity: "slot", id: atSlotId })
-      const row = yield* insertFork(sql, { chatId, parent: from, baseSlotId: atSlotId, tipSlotId: atSlotId, at })
+      const row = yield* insertFork(sql, {
+        chatId,
+        parent: from,
+        baseSlotId: atSlotId,
+        tipSlotId: atSlotId,
+        at,
+        ...(workshops ? { workshops } : {})
+      })
       yield* placeAsShown(chatId, from, atSlotId, row)
       yield* sql`UPDATE chats SET current_fork_id = ${row.id}, row_version = row_version + 1 WHERE id = ${chatId}`
       return row

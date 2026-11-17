@@ -3,7 +3,7 @@ import { archiveCandidates } from "./cardArchive.ts"
 import { LibraryRef } from "@rp/shared/library.ts"
 import { makeForkMergeQueries } from "./forkMerge.ts"
 import { previousRevisionSql, revisionNumber, revisionOnLine, revisionUse } from "./revisionNumbers.ts"
-import { previewForkNotes } from "./forkNotes.ts"
+import { previewFork } from "./forkNotes.ts"
 import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { composerImages } from "./composerImages.ts"
 import { stateEventsThrough } from "./stateRead.ts"
@@ -558,7 +558,7 @@ export const makeReadHandlers = Effect.gen(function* () {
           JOIN entity_revisions v ON v.id = r.head_revision_id
           WHERE b.kind = 'entity' AND e.kind = 'card' AND e.id = b.target_id
           LIMIT 1) AS card_doc_json
-        FROM bin_items b WHERE user_id = ${userId}
+        FROM bin_items b WHERE user_id = ${userId} AND b.origin_json ->> '$.companionOf' IS NULL
           AND (${before?.id ?? null} IS NULL OR (deleted_at, id) < (${before?.deletedAt ?? null}, ${before?.id ?? null}))
         ORDER BY deleted_at DESC, id DESC LIMIT ${limit}`.pipe(
         Effect.map((rows) => rows.map(toBinItem)),
@@ -938,7 +938,7 @@ export const makeReadHandlers = Effect.gen(function* () {
       }).pipe(query("ReadPath")),
 
     // --- Branches (DESIGN §3.2) and forks
-    PreviewForkNotes: (payload) => previewForkNotes(sql, payload).pipe(query("PreviewForkNotes")),
+    PreviewForkNotes: (payload) => previewFork(sql, payload).pipe(query("PreviewForkNotes")),
 
     ListForks: ({ userId, chatId }) =>
       Effect.gen(function* () {

@@ -9,6 +9,8 @@ import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps, type WriteOps } from "./ops.ts"
 import { query, transaction } from "./tx.ts"
+import { displayEndOf } from "./displayPath.ts"
+import type { StoryAt } from "@rp/shared/chat.ts"
 import { toRolloutEffect } from "./workshopEffects.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import { callsFrom } from "../agent/steps.ts"
@@ -108,7 +110,7 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
         if (rows.length !== 1)
           return yield* new ApprovalRefused({ message: "This call already asked. Use a new call." })
       }).pipe(transaction(sql, "RequestToolApproval")),
-    AnswerToolApproval: ({ userId, rolloutId, toolCallId, digest, answer, note, storyAt }) =>
+    AnswerToolApproval: ({ userId, rolloutId, toolCallId, digest, answer, note }) =>
       Effect.gen(function* () {
         const { chat_id } = yield* ownedRollout(sql, userId, rolloutId)
         const [row] = yield* sql<{
@@ -119,14 +121,23 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
         }>`SELECT status, digest, capability, prompt_json
           FROM tool_approvals WHERE rollout_id = ${rolloutId} AND tool_call_id = ${toolCallId}`
         if (!row) return yield* new NotFound({ entity: "approval", id: toolCallId })
-        const asked = JSON.parse(row.prompt_json) as { storyAt?: unknown; grantTarget?: unknown }
+        const asked = JSON.parse(row.prompt_json) as { storyAt?: StoryAt; grantTarget?: unknown }
         const expectedAt = asked.storyAt
         // Server-written with the request: the client's answer can't name other content.
         const target = typeof asked.grantTarget === "string" ? asked.grantTarget : ""
-        if (answer !== "deny" && expectedAt && JSON.stringify(expectedAt) !== JSON.stringify(storyAt))
-          return yield* new ApprovalRefused({
-            message: "The story tab moved. Send the request again from its new position."
-          })
+        // A positioned call is allowed only while its story branch still ends where it did when
+        // asked (spec/WORKSHOP-BRANCHES.md §2.2: the server's position, not a tab's).
+        if (answer !== "deny" && expectedAt) {
+          const [fork] = yield* sql<{ id: string; tip_slot_id: string | null }>`SELECT f.id, f.tip_slot_id
+            FROM forks f JOIN chats s ON s.id = f.chat_id WHERE f.id = ${expectedAt.forkId}
+              AND s.id = ${expectedAt.chatId} AND s.owner_user_id = ${userId} AND s.deleted_at IS NULL
+              AND f.deleted_at IS NULL`
+          const leaf = fork ? yield* displayEndOf(sql, expectedAt.chatId, fork) : undefined
+          if (leaf !== expectedAt.leafSlotId)
+            return yield* new ApprovalRefused({
+              message: "The story moved on since this was asked. Send the request again."
+            })
+        }
         if (row.digest !== digest)
           return yield* new ApprovalRefused({ message: "This answer is for a different request. Look again." })
         const [run] = yield* sql<{ status: string }>`SELECT status FROM rollouts WHERE id = ${rolloutId}`

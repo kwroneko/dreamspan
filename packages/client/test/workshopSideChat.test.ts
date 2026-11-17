@@ -1,17 +1,17 @@
 // The workshop beside a story in the client (spec/WORKSHOP.md §4, W9): which workshop the URL
 // shows and how an unknown one falls back, where the Workshop tab and "Talk about this chat" are
-// offered, the URL keys a chat shown inside another's panel uses, and the story position each
-// side-chat request sends (workfix1). Synthetic chats only.
+// offered, the URL keys a chat shown inside another's panel uses, and which workshop branch goes
+// with the story branch shown (spec/WORKSHOP-BRANCHES.md §8). Synthetic chats only.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { Chat, ForkId, SlotId, PathEntry } from "@rp/shared/chat.ts"
+import type { Chat, ForkId } from "@rp/shared/chat.ts"
 import { chatPlaceKey } from "../src/features/chat/chatPlace.ts"
 import { availableCommands, type ChatCommandContext } from "../src/features/chat/commands.tsx"
 import { takesSideChat } from "../src/features/chat/kindLooks.ts"
 import { panelHere, panelTabs, type PanelProps } from "../src/features/chat/panels.tsx"
 import { registerPanels } from "../src/features/chat/registerPanels.tsx"
-import type { ChatSession, ChatView } from "../src/features/chat/session.ts"
+import type { ChatView } from "../src/features/chat/session.ts"
 import { register as registerWorkshop } from "../src/features/workshop/index.tsx"
 import {
   chooseSideChat,
@@ -20,7 +20,9 @@ import {
   SIDE_CHAT_SCOPE,
   SIDE_CHAT_TAB
 } from "../src/features/workshop/sideChat.ts"
-import { storyPosition, WorkshopSidePanel } from "../src/features/workshop/SidePanel.tsx"
+import { WorkshopSidePanel } from "../src/features/workshop/SidePanel.tsx"
+import { pairedWith, storyBranchName } from "../src/features/workshop/workshopBranches.tsx"
+import type { WorkshopBranch } from "@rp/shared/workshopApi.ts"
 
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
@@ -138,51 +140,33 @@ describe("URL keys of a chat inside another's panel", () => {
   })
 })
 
-describe("where the side chat reads the story", () => {
-  const storyIn = (view: () => Partial<ChatView>) =>
-    ({ id: "story", snapshot: () => view() as ChatView }) as unknown as ChatSession
+describe("which workshop branch the side panel shows", () => {
+  const branch = (forkId: string, story: string | null) =>
+    ({
+      forkId: forkId as ForkId,
+      story: story === null ? null : { chatId: "story", forkId: story, name: null, original: false, createdAt: 0 }
+    }) as unknown as WorkshopBranch
 
-  it("sends the branch and message this tab shows, read when asked", () => {
-    let view: Partial<ChatView> = {
-      chat: { currentForkId: "fork-last-written" } as unknown as Chat,
-      forkId: "fork-shown" as ForkId,
-      leafSlotId: "slot-7" as SlotId
-    }
-    const story = storyIn(() => view)
-    expect(storyPosition(story)).toEqual({ chatId: "story", forkId: "fork-shown", leafSlotId: "slot-7" })
-    // The tab moves to another branch: the next request names it.
-    view = { ...view, forkId: "fork-other" as ForkId, leafSlotId: "slot-3" as SlotId }
-    expect(storyPosition(story)).toEqual({ chatId: "story", forkId: "fork-other", leafSlotId: "slot-3" })
+  it("keeps only the workshop branches that go with the story branch shown, in the server's order", () => {
+    const branches = [branch("w-b2", "b"), branch("w-a", "a"), branch("w-b1", "b"), branch("w-gone", null)]
+    expect(pairedWith(branches, "b" as ForkId).map((b) => b.forkId)).toEqual(["w-b2", "w-b1"])
+    expect(pairedWith(branches, "a" as ForkId).map((b) => b.forkId)).toEqual(["w-a"])
+    expect(pairedWith(branches, "c" as ForkId)).toEqual([])
+    expect(pairedWith(branches, null)).toEqual([])
   })
 
-  it("bounds an older window at its newest loaded message, not the unseen path tip", () => {
-    const story = storyIn(() => ({
-      chat: { currentForkId: "root" } as unknown as Chat,
-      forkId: "root" as ForkId,
-      leafSlotId: "unseen-100" as SlotId,
-      newer: "shown-6" as SlotId,
-      entries: [{ slotId: "shown-5" }, { slotId: "shown-6" }] as Array<PathEntry>
-    }))
-    expect(storyPosition(story)?.leafSlotId).toBe("shown-6")
-  })
-
-  it("sends no position while the story is switching branches", () => {
-    const story = storyIn(() => ({
-      chat: { currentForkId: "root" } as unknown as Chat,
-      forkId: "new-branch" as ForkId,
-      leafSlotId: null,
-      loading: true
-    }))
-    expect(storyPosition(story)).toBeUndefined()
-  })
-
-  it("uses the story's branch before one is chosen, and sends none before the story opens", () => {
-    const fresh = storyIn(() => ({
-      chat: { currentForkId: "fork-root" } as unknown as Chat,
-      forkId: null,
-      leafSlotId: null
-    }))
-    expect(storyPosition(fresh)).toEqual({ chatId: "story", forkId: "fork-root", leafSlotId: null })
-    expect(storyPosition(storyIn(() => ({ chat: null, forkId: null, leafSlotId: null })))).toBeUndefined()
+  it("names a story branch as the story's own list does", () => {
+    expect(
+      storyBranchName({
+        chatId: "s" as never,
+        forkId: "f" as ForkId,
+        name: "Tavern fight",
+        original: false,
+        createdAt: 0
+      })
+    ).toBe("Tavern fight")
+    expect(
+      storyBranchName({ chatId: "s" as never, forkId: "f" as ForkId, name: null, original: true, createdAt: 0 })
+    ).toBe("Original")
   })
 })

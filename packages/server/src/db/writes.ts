@@ -2,7 +2,7 @@ import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { displayEndOf, pathPieces, positionOf } from "./displayPath.ts"
 import { presenceBefore } from "./participation.ts"
 import { canonicalJson } from "@rp/shared/editing.ts"
-import { previewForkNotes } from "./forkNotes.ts"
+import { previewFork } from "./forkNotes.ts"
 import { ForkNotesChanged } from "@rp/shared/chatApi.ts"
 import { composerImages } from "./composerImages.ts"
 import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
@@ -37,6 +37,7 @@ import {
 import { reachableSlot } from "./graphReachability.ts"
 import { type ChatRow, type ForkRow, rewriteColumns, toChat, toFork, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
+import { recordStoryAt } from "./workshopPairing.ts"
 
 /**
  * The columns a fork's copy of a version doesn't take from it: its identity, text and
@@ -343,6 +344,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
           const cast = yield* presenceBefore(sql, slot.chat_id, slotId, fork.id)
           const row = yield* insertVersion(slotId, next!.n, version, at, fork.id, undefined, cast)
+          yield* recordStoryAt(sql, slot.chat_id, slotId, [row.id], fork.id)
           if (select) {
             yield* recordHistoryReduction(sql, slotId, row.content, null, fork.id)
             yield* writeSelect(sql, { id: fork.id, chatId: slot.chat_id }, slotId, row.id)
@@ -470,6 +472,8 @@ export const makeWriteHandlers = (bin: Bin) =>
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
           const cast = yield* presenceBefore(sql, slot.chat_id, slotId, fork.id)
           const inserted = yield* insertVersion(slotId, next!.n, version, Date.now(), fork.id, undefined, cast)
+          // A workshop reply's version records where the story stands: its run reads there (§2.2).
+          yield* recordStoryAt(sql, slot.chat_id, slotId, [inserted.id], fork.id)
           // The model chosen for it shows from the start; its rollout records the same one.
           if (model)
             yield* sql`UPDATE versions SET connection_id = ${model.connection}, model_id = ${model.model}
@@ -813,20 +817,30 @@ export const makeWriteHandlers = (bin: Bin) =>
               "slot",
               atSlotId
             )
-          const comparison = notes
-            ? yield* previewForkNotes(sql, { userId, chatId, fromForkId: from.id as ForkId, atSlotId })
-            : []
+          const preview = notes
+            ? yield* previewFork(sql, { userId, chatId, fromForkId: from.id as ForkId, atSlotId })
+            : { notes: [], workshops: [] }
+          const comparison = preview.notes
+          const workshopChoices = notes?.workshops ?? []
           if (
             notes &&
-            (notes.comparison !== canonicalJson(comparison) ||
+            (notes.comparison !== canonicalJson(preview) ||
               notes.choices.some((choice) => !comparison.some((row) => row.note === choice.note)) ||
-              new Set(notes.choices.map((choice) => choice.note)).size !== notes.choices.length)
+              new Set(notes.choices.map((choice) => choice.note)).size !== notes.choices.length ||
+              workshopChoices.some((choice) => !preview.workshops.some((row) => row.workshop === choice.workshop)))
           )
             return yield* new ForkNotesChanged({
-              message: "Notes changed while this dialog was open. Close it and branch again to review them."
+              message: "The notes or a workshop changed while this was open. Review them again."
             })
           const at = Date.now()
-          const fork = yield* createFork(chatId, from, atSlotId, at)
+          const fork = yield* createFork(
+            chatId,
+            from,
+            atSlotId,
+            at,
+            false,
+            new Map(workshopChoices.map((choice) => [choice.workshop, choice.choice]))
+          )
           // Making it is the user's activity in it: the shell's Recent counts it (db/shellReads.ts).
           yield* sql`UPDATE forks SET last_chatted_at = ${at} WHERE id = ${fork.id}`
           // An automatic name, not the user's (`name_user` stays 0): a label of the slot's own

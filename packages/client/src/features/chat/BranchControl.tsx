@@ -67,6 +67,7 @@ function BranchRow({
   shown,
   only,
   link,
+  note,
   onSwitch,
   onRename,
   onPin,
@@ -76,6 +77,8 @@ function BranchRow({
   label: string
   shown: boolean
   only: boolean
+  /** The parts' lines under its name. */
+  note?: ReactNode
   /** Where the row's link goes: a middle or modified click opens the branch in a new tab. */
   link: { readonly chatId: string; readonly search: Readonly<Record<string, string>> }
   onSwitch: () => void
@@ -127,6 +130,7 @@ function BranchRow({
             </Tooltip>
           )}
         </div>
+        {note}
         <Tooltip label={`Opens this branch${shown ? ", shown now" : ""}.`}>
           <Link
             to="/chats/$chatId"
@@ -239,6 +243,7 @@ function BranchList({
   // A part may list some forks apart (another thread's, spec/THREADS.md §13.2): never as branches.
   const context: BranchControlContext = { session, view, forks, shown }
   const sections = parts.flatMap((part) => (part.Section ? [{ id: part.id, Section: part.Section }] : []))
+  const rowNotes = parts.flatMap((part) => (part.RowNote ? [{ id: part.id, RowNote: part.RowNote }] : []))
   const listed = orderBranches(
     forks.filter((fork) => fork.id === shown?.id || parts.every((part) => part.listed?.(fork, context) ?? true))
   )
@@ -343,6 +348,11 @@ function BranchList({
                 shown={fork.id === shown?.id}
                 only={live <= 1}
                 link={{ chatId: session.id, search: linkSearch(fork) }}
+                note={
+                  rowNotes.length === 0
+                    ? undefined
+                    : rowNotes.map(({ id, RowNote }) => <RowNote key={id} {...context} fork={fork} />)
+                }
                 onSwitch={() => open(fork)}
                 onRename={(name) => rename(fork, name)}
                 onPin={() => void pin(fork)}

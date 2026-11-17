@@ -687,10 +687,11 @@ export const historyTools: ReadonlyArray<RolloutTool<never>> = [
 
 // --- A side chat's story (spec/WORKSHOP.md §4). A workshop attached to a story reads it with these,
 // never through its own history: the story's messages reach the workshop's model only as tool
-// results, each wrapped as quoted story material. Each call reads the story where the request
-// says (`ToolContext.storyAt`): the branch and the newest message shown in the browser tab the
-// request was sent from, never past that message, never another chat or another user's. A
-// request without a position (the workshop used in its own tab) doesn't read the story.
+// results, each wrapped as quoted story material. Each call reads the story where the server
+// placed the request (`ToolContext.storyAt`, spec/WORKSHOP-BRANCHES.md §2.2): the workshop
+// branch's paired story branch, up to its newest message when the reply was started, never past
+// it, never another chat or another user's. Without one (the paired branch is gone) it doesn't
+// read the story.
 
 /** The tools a planner offers a side chat, by name. */
 export const STORY_TOOLS: ReadonlyArray<string> = [
@@ -702,8 +703,7 @@ export const STORY_TOOLS: ReadonlyArray<string> = [
 
 const NOT_BESIDE = "This workshop isn't beside a story."
 const STORY_GONE = "The story this workshop is beside isn't available any more."
-const NO_POSITION =
-  "This request wasn't sent from beside the story, so the story can't be read for it. The user can send it from the Workshop tab beside the story."
+const NO_POSITION = "The branch of the story this workshop branch goes with isn't there any more."
 const OTHER_STORY = "That position is in another chat, not the story this workshop is beside."
 const BRANCH_GONE = "The branch of the story this was sent from isn't there any more."
 

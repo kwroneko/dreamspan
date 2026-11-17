@@ -7,8 +7,7 @@ import { syncClientPlugins } from "../../../pluginLifecycle.ts"
 import { useCaller } from "../../editor/caller.ts"
 import { StoryScope } from "../../workshop/StoryScope.tsx"
 import type { ApprovalAnswer } from "@rp/shared/workshopApi.ts"
-import { ReplyExtrasContext } from "../replyExtras.ts"
-import { useContext, useState } from "react"
+import { useState } from "react"
 import { ErrorAlert, useAction } from "../../../actions.tsx"
 import { Button } from "../../../ui/Button.tsx"
 import { Field, Textarea } from "../../../ui/Field.tsx"
@@ -34,7 +33,6 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
   const approval = step.status === "waiting" ? step.approval : undefined
   const action = useAction()
   const call = useCaller()
-  const replyExtras = useContext(ReplyExtrasContext)
   const [answering, setAnswering] = useState<ApprovalAnswer | null>(null)
   const [noting, setNoting] = useState(false)
   const [note, setNote] = useState("")
@@ -49,7 +47,6 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
           toolCallId: approval.toolCallId,
           digest: approval.digest,
           answer: choice,
-          ...replyExtras(),
           ...(choice === "deny" && trimmed !== "" ? { note: trimmed } : {})
         }),
       // Allowing it in this workshop changes what the chip shows.

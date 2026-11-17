@@ -19,7 +19,6 @@ import {
   NewVersion,
   type QueuedMessage,
   type SlotId,
-  type StoryAt,
   type VersionId
 } from "@rp/shared/chat.ts"
 import { ThreadsRefused } from "@rp/shared/threads.ts"
@@ -319,8 +318,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           next: {
             slotId: next.slotId,
             versionId: next.version.id as VersionId,
-            forkId: next.forkId,
-            ...(first!.story_at_json === null ? {} : { storyAt: JSON.parse(first!.story_at_json) as StoryAt })
+            forkId: next.forkId
           }
         }
       })
@@ -471,7 +469,6 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
       rewrite,
       round,
       autoPick,
-      storyAt,
       immediate,
       auto,
       autoConfiguration
@@ -549,8 +546,6 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               no_reply: kind === "message" && noReply === true ? 1 : 0,
               direction: kind === "generate" && direction !== null && direction.trim() !== "" ? direction : null,
               auto_pick: autoPick === true && (kind === "generate" || noReply !== true) ? 1 : 0,
-              // A side chat's reply reads its story where the sending tab showed it (spec/WORKSHOP.md §4).
-              story_at_json: storyAt === undefined ? null : JSON.stringify(storyAt),
               created_at: at,
               updated_at: at
             })} RETURNING *`

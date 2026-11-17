@@ -6,7 +6,7 @@
 // `CreateWorkshop`, the message and its reply, then the new chat's path and cast seeded
 // (`seedChat`), so the workshop opens on them with nothing loading in between. What's typed is
 // kept as a pending chat's first message is (`useUserDraft`), under the story's pending copy.
-import type { Chat, ChatId } from "@rp/shared/chat.ts"
+import type { Chat, ChatId, ForkId } from "@rp/shared/chat.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { WorkshopPresetChoice } from "@rp/shared/workshopApi.ts"
 import { useAtomValue } from "@effect/atom-react"
@@ -25,7 +25,6 @@ import { ModelChip } from "../chat/GenerationControls.tsx"
 import { SendIcon } from "../chat/icons.tsx"
 import { kindRootProps, useChatKindLook } from "../chat/kindLooks.ts"
 import { ChipText, chipClass, LoadingChip, StripRow } from "../chat/nextReplyStrip.tsx"
-import type { ReplyExtrasSource } from "../chat/replyExtras.ts"
 import { planReply } from "../chat/replyPolicy.ts"
 import { type ChatSession, type ChatView, seedChat } from "../chat/session.ts"
 import { PresetPickerPopover } from "../pickers/PresetPicker.tsx"
@@ -132,14 +131,14 @@ function PendingPresetChip({ selection }: { selection: PresetSelection }) {
 
 export function PendingSideChat({
   story,
-  storyAt,
+  attachFork,
   header,
   onCreated
 }: {
   /** The story it's beside. */
   story: ChatSession
-  /** Where the story is read for the first reply, at the moment of the send (`storyPosition`). */
-  storyAt: ReplyExtrasSource
+  /** The story branch shown: the workshop's first branch goes with it (spec/WORKSHOP-BRANCHES.md §8.1). */
+  attachFork: ForkId | null
   header: ReactNode
   /** The workshop the first send made, its path and cast seeded for its session. */
   onCreated: (chat: Chat) => void
@@ -162,7 +161,6 @@ export function PendingSideChat({
   const send = async () => {
     const submitted = text
     if (busy || !ready || submitted.trim() === "") return
-    const extras = storyAt()
     const result = await action.run(
       (client) =>
         Effect.gen(function* () {
@@ -170,6 +168,7 @@ export function PendingSideChat({
             made.current ??
             (yield* client("CreateWorkshop", {
               attachTo: story.id,
+              ...(attachFork ? { attachFork } : {}),
               ...(presetChoice._tag === "Default" ? {} : { preset: presetChoice })
             }))
           made.current = chat
@@ -195,8 +194,7 @@ export function PendingSideChat({
             speakerEntityId: speaker,
             replySpeakerEntityId: plan.replier,
             ...(plan.reply ? {} : { reply: false }),
-            ...(plan.reply && plan.round.length > 0 ? { round: plan.round } : {}),
-            ...extras
+            ...(plan.reply && plan.round.length > 0 ? { round: plan.round } : {})
           })
           // Its reply, as after any send; a server without a generator still keeps the message.
           if (sent._tag === "Posted" && plan.reply)
@@ -207,8 +205,7 @@ export function PendingSideChat({
                 parentSlotId: sent.entry.slotId,
                 branch: false,
                 speakerEntityId: plan.replier,
-                ...(plan.round.length > 0 ? { round: plan.round } : {}),
-                ...extras
+                ...(plan.round.length > 0 ? { round: plan.round } : {})
               })
             )
           // What its session opens on, so the tab shows the workshop at once rather than loading it.

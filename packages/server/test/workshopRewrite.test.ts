@@ -427,10 +427,10 @@ describe("workshop chat rewrites", () => {
       assert.lengthOf((yield* f.path()).entries, 10)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
-  it.live("refuses approval from a moved tab and accepts the original declared position", () => {
+  it.live("accepts an approval while the story stands where it was asked", () => {
     const config = testConfig()
     return Effect.gen(function* () {
-      const f = yield* beside(config.dataDir)
+      const f = yield* beside(config.dataDir, true)
       yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "chats.rewrite", mode: "ask" })
       const ctx = { ...f.context, toolCallId: "approved" }
       const args = { chat: f.chat.id, title: "Approved tab", messages: [{ message: 1, text: "Approved sentinel" }] }
@@ -453,13 +453,7 @@ describe("workshop chat rewrites", () => {
       }).pipe(Effect.forkScoped)
       yield* eventually(() => waiting !== null)
       assert.include(JSON.stringify(waiting), "messages 1–1")
-      assert.strictEqual(
-        yield* outcome(
-          f.api.AnswerToolApproval({ ...waiting!, storyAt: { ...ctx.storyAt, forkId: f.sibling.id }, answer: "allow" })
-        ),
-        "ApprovalRefused"
-      )
-      yield* f.api.AnswerToolApproval({ ...waiting!, storyAt: ctx.storyAt, answer: "allow" })
+      yield* f.api.AnswerToolApproval({ ...waiting!, answer: "allow" })
       const permit = yield* Fiber.join(permission)
       assert.isTrue(permit.run)
       if (!permit.run) throw new Error("Not allowed")
@@ -1587,17 +1581,16 @@ describe("side-chat write positions under review", () => {
       { readOnly: true }
     ).pipe(Effect.map(([rows]) => Number((rows![0] as { n: number }).n)))
 
-  it.live("binds only story writes to the asking tab's position; library approvals survive a moved tab", () => {
+  it.live("binds only story writes to where the story stood when asked; library approvals survive it moving", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const f = yield* beside(config.dataDir)
       yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "library.write", mode: "ask" })
       yield* f.api.SetWorkshopGrant({ chatId: f.side.id, capability: "chats.setup", mode: "ask" })
-      const moved = { ...f.context.storyAt, forkId: f.sibling.id, leafSlotId: f.entries.at(-1)!.slotId }
       // A library item does not depend on where the story is shown.
       const library = yield* ask(f, "create_preset", { label: "Review preset" }, { ...f.context, toolCallId: "lib" })
       assert.isUndefined(library.prompt.storyAt)
-      yield* f.api.AnswerToolApproval({ ...library.prompt, storyAt: moved, answer: "allow" })
+      yield* f.api.AnswerToolApproval({ ...library.prompt, answer: "allow" })
       assert.isTrue((yield* Fiber.join(library.permission)).run)
       // A story change keeps the asking tab's position, and names it once, without a doubled word.
       const setup = yield* ask(
@@ -1609,13 +1602,9 @@ describe("side-chat write positions under review", () => {
       assert.deepStrictEqual(setup.prompt.storyAt, f.context.storyAt)
       assert.notInclude(JSON.stringify(setup.prompt.rows), "Branch Unnamed")
       assert.notInclude(JSON.stringify(setup.prompt.rows), "Branch Original")
+      // Asked at message 5 of a branch that now ends later: the story moved on since.
       assert.strictEqual(
-        yield* outcome(f.api.AnswerToolApproval({ ...setup.prompt, storyAt: moved, answer: "allow" })),
-        "ApprovalRefused"
-      )
-      const { storyAt: _asked, ...unpositioned } = setup.prompt
-      assert.strictEqual(
-        yield* outcome(f.api.AnswerToolApproval({ ...unpositioned, answer: "allow" })),
+        yield* outcome(f.api.AnswerToolApproval({ ...setup.prompt, answer: "allow" })),
         "ApprovalRefused"
       )
       yield* f.api.AnswerToolApproval({ ...setup.prompt, answer: "deny" })

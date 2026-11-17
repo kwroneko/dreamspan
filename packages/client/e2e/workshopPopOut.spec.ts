@@ -123,7 +123,15 @@ for (const width of [1440, 390])
       1
     )
     await audit(page, `workshop-list-${width}`)
-    await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteChat({ chatId: story.id }))
+    // Deleting a story takes its live workshops along; one already in the bin stays there, so
+    // restoring it afterwards leaves a workshop whose story is gone.
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const binned = yield* api.DeleteChat({ chatId: workshop.id })
+        yield* api.DeleteChat({ chatId: story.id })
+        yield* api.RestoreBinItem({ itemId: binned.id })
+      })
+    )
     await page.goto(`${server().url}/chats/${workshop.id}`)
     await expect(page.locator('[data-workshop-story="deleted"]')).toContainText("(deleted)")
     await expect(page.getByRole("link", { name: /About “Listed ledger/ })).toHaveCount(0)

@@ -12,6 +12,8 @@ import { chatKindLooks, kindShows, takesSideChat } from "../chat/kindLooks.ts"
 import { chatPanels, lazyPanel, type PanelProps } from "../chat/panels.tsx"
 import { chatHeaderAbout, chatRowAbout } from "../chat/presentation.tsx"
 import { WorkshopStoryLink, WorkshopStoryName } from "./storyLink.tsx"
+import { WorkshopBranchNote } from "./workshopBranches.tsx"
+import { branchControlParts } from "../chat/branchParts.ts"
 import { replyGuards } from "../chat/replyGuards.ts"
 import { appTools } from "../shell.tsx"
 import { CapabilityChip } from "./CapabilityChip.tsx"
@@ -50,6 +52,8 @@ export const register = () => [
   // The way back to the story an attached workshop is about, in its header and its list rows.
   chatHeaderAbout.register({ id: "workshop.story-link", order: 10, component: WorkshopStoryLink }),
   chatRowAbout.register({ id: "workshop.story-name", order: 10, component: WorkshopStoryName }),
+  // In its own pane or the center, each workshop branch names the story branch it goes with.
+  branchControlParts.register({ id: "workshop.story-branch", order: 20, RowNote: WorkshopBranchNote }),
   ...registerWorkshopPersona(),
   chatStartSections.register({ id: "workshop.start", order: 20, component: WorkshopStartCard }),
   // The skills a card carries for a workshop assistant (spec/TOOL-LOADING.md §6), in its Extra tab.

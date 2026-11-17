@@ -99,7 +99,7 @@ describe("0002_files", () => {
       const ledger = yield* sql<{ name: string }>`SELECT name FROM effect_sql_migrations ORDER BY migration_id`
       assert.deepStrictEqual(
         ledger.map((r) => r.name),
-        ["baseline", "files", "subagents"]
+        ["baseline", "files", "subagents", "workshop_branches"]
       )
       // The existing row is kept, an image by default.
       assert.deepStrictEqual(yield* sql`SELECT id, alt_text, kind, name FROM composer_images`, [
@@ -133,7 +133,56 @@ describe("0002_files", () => {
   )
 })
 
+describe("0004_workshop_branches", () => {
+  it.effect("pairs every branch of a workshop with its story's current branch and drops the queued position", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* SqliteMigrator.run({
+        loader: SqliteMigrator.fromRecord({
+          "0001_baseline": migrations["0001_baseline"],
+          "0002_files": migrations["0002_files"]
+        })
+      })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      // A chat's first fork is made with it, under the chat's id.
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at)
+        VALUES ('s', 'u', 'rp', 'active', 0), ('w', 'u', 'workshop', 'active', 0), ('lone', 'u', 'workshop', 'active', 0)`
+      yield* sql`INSERT INTO forks (id, chat_id, parent_fork_id, created_at) VALUES ('wf2', 'w', 'w', 1)`
+      yield* sql`INSERT INTO state_events (id, chat_id, seq, key, value_json, origin, created_at)
+        VALUES ('a', 'w', 0, 'workshop.attached', '{"chat":"s"}', 'user', 0)`
+      yield* Effect.scoped(Layer.build(Migrations))
+      assert.deepStrictEqual(
+        yield* sql`SELECT fork_id, json_extract(value_json, '$.fork') AS story FROM state_events
+          WHERE key = 'workshop.paired' ORDER BY fork_id`,
+        [
+          { fork_id: "w", story: "s" },
+          { fork_id: "wf2", story: "s" }
+        ]
+      )
+      assert.notInclude(
+        (yield* sql`PRAGMA table_info(queued_messages)`).map((r) => r.name),
+        "story_at_json"
+      )
+      assert.deepStrictEqual(
+        (yield* sql<{ state_seq: number }>`SELECT state_seq FROM chats WHERE id = 'w'`).map((r) => r.state_seq),
+        [2]
+      )
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
 describe("the migrator", () => {
+  it.effect("refuses a ledger that skipped a migration numbered below its newest", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`CREATE TABLE effect_sql_migrations (migration_id integer PRIMARY KEY NOT NULL, created_at datetime NOT NULL DEFAULT current_timestamp, name VARCHAR(255) NOT NULL)`
+      yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (1, 'baseline'), (4, 'workshop_branches')`
+      const exit = yield* Effect.exit(Effect.scoped(Layer.build(Migrations)))
+      assert.isTrue(Exit.isFailure(exit))
+      assert.include(String(exit), "0002_files")
+    }).pipe(Effect.provide(layer()))
+  )
+
   it.effect("refuses a database whose ledger holds ids this code doesn't know", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -176,7 +225,12 @@ it.effect("fresh defaults include composer guidance, branch additions and global
     assert.isTrue(
       (yield* sql`PRAGMA table_info(fork_summaries)`).some((r) => r.name === "added_json" && r.dflt_value === "'[]'")
     )
-    assert.deepStrictEqual(Object.keys(migrations), ["0001_baseline", "0002_files", "0003_subagents"])
+    assert.deepStrictEqual(Object.keys(migrations), [
+      "0001_baseline",
+      "0002_files",
+      "0003_subagents",
+      "0004_workshop_branches"
+    ])
   }).pipe(Effect.provide(layer()))
 )
 

@@ -1,7 +1,7 @@
 // The way back from a workshop to the story it's about (owner, 2026-11-17: "there's no way to go
 // from Workshop -> branch or chat it is connected to *at all*"): a link under the workshop's
 // header title, wherever it's shown as a chat, and the story's name beside its rows in the lists.
-import type { Chat, ChatId } from "@rp/shared/chat.ts"
+import type { Chat, ChatId, ForkId } from "@rp/shared/chat.ts"
 import type { WorkshopStory } from "@rp/shared/workshopApi.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { useNavigate } from "@tanstack/react-router"
@@ -13,6 +13,7 @@ import type { ChatView } from "../chat/session.ts"
 import { useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
 import { SIDE_CHATS_KEY } from "./sideChat.ts"
+import { storyBranchName, useWorkshopBranches } from "./workshopBranches.tsx"
 
 const storyOf = Atom.family((chatId: ChatId) =>
   AppClient.query("ListWorkshopStories", { chatIds: [chatId] }, { reactivityKeys: [SIDE_CHATS_KEY, "chats", chatId] })
@@ -48,13 +49,20 @@ export function useOpenBesideThis() {
 const plainClick = (event: MouseEvent) =>
   event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
 
-/** `chatHeaderAbout`: "About “Ledger”" under a workshop's title, opening the story. */
+/**
+ * `chatHeaderAbout`: "About “Ledger” · branch Tavern fight" under a workshop's title, opening the
+ * story at the branch the shown workshop branch goes with (spec/WORKSHOP-BRANCHES.md §8.2).
+ */
 export function WorkshopStoryLink({ view }: { view: ChatView }) {
-  return view.chat?.kind === "workshop" ? <StoryLink chatId={view.chat.id} /> : null
+  return view.chat?.kind === "workshop" ? (
+    <StoryLink chatId={view.chat.id} forkId={view.forkId ?? view.chat.currentForkId ?? null} />
+  ) : null
 }
 
-function StoryLink({ chatId }: { chatId: ChatId }) {
+function StoryLink({ chatId, forkId }: { chatId: ChatId; forkId: ForkId | null }) {
   const story = useWorkshopStory(chatId)
+  const branches = useWorkshopBranches(chatId, forkId)
+  const paired = branches?.find((branch) => branch.forkId === forkId)?.story ?? null
   const { open, wide } = useOpenBesideThis()
   if (!story) return null
   if (story.title === null)
@@ -63,14 +71,14 @@ function StoryLink({ chatId }: { chatId: ChatId }) {
         About a story that was deleted (deleted)
       </span>
     )
-  const href = `/chats/${story.storyId}`
+  const href = paired ? `/chats/${story.storyId}?fork=${paired.forkId}` : `/chats/${story.storyId}`
   return (
     <span className="flex min-w-0 shrink text-xs text-muted">
       <Tooltip
         label={
           wide
-            ? "Opens the story this workshop talks about, beside it, or shows it where it's open."
-            : "Opens the story this workshop talks about. Back returns here."
+            ? "Opens the story this workshop talks about, at the branch this workshop branch goes with, beside it."
+            : "Opens the story this workshop talks about, at the branch this workshop branch goes with. Back returns here."
         }
         side="bottom"
       >
@@ -84,7 +92,7 @@ function StoryLink({ chatId }: { chatId: ChatId }) {
             open(href)
           }}
         >
-          About “{story.title}”
+          About “{story.title}”{paired ? ` · branch ${storyBranchName(paired)}` : ""}
         </a>
       </Tooltip>
     </span>

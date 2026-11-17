@@ -11,6 +11,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
+import { serverStoryAt } from "../agent/continuity.ts"
 import type { QueueOutcome } from "../db/ops.ts"
 import { sectionsDisplay, type ReplySections } from "@rp/shared/replySections.ts"
 import { CacheWarmth } from "./CacheWarmth.ts"
@@ -306,8 +307,7 @@ export class Generations extends Context.Service<
               chatId: outcome.chatId,
               slotId: next.slotId,
               versionId: next.versionId,
-              ...(next.forkId === undefined ? {} : { forkId: next.forkId }),
-              ...(next.storyAt === undefined ? {} : { storyAt: next.storyAt })
+              ...(next.forkId === undefined ? {} : { forkId: next.forkId })
             })
           yield* publishPosted(userId, outcome.chatId, outcome.posted)
         })
@@ -615,9 +615,15 @@ export class Generations extends Context.Service<
         )
       }
 
-      const startGeneration = (request: GenerationRequest): Effect.Effect<void> =>
+      const startGeneration = (given: GenerationRequest): Effect.Effect<void> =>
         Effect.gen(function* () {
           if (Option.isNone(generator)) return yield* Effect.die(new Error("no generator: refuse before writing"))
+          // A workshop beside a story reads it where its version recorded the paired branch standing
+          // when it was written (spec/WORKSHOP-BRANCHES.md §2.2); every other chat has none.
+          const storyAt =
+            given.storyAt ??
+            (yield* serverStoryAt(reader, given.userId, given.chatId, given.forkId ?? null, given.versionId))
+          const request: GenerationRequest = storyAt ? { ...given, storyAt } : given
           const entry: Running = {
             request,
             several: false,

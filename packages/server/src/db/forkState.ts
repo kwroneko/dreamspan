@@ -13,6 +13,7 @@ import type { SqlClient, Statement } from "effect/sql"
 import { forkThrough } from "./forks.ts"
 import { endSql, pointSql } from "./forkLabels.ts"
 import { type ForkRow, versionExtras, type VersionRow } from "./rows.ts"
+import { branchWorkshops, type WorkshopChoice } from "./workshopForks.ts"
 
 /**
  * The fork a read without a fork of its own is in, provided once per operation (`atLeaf`,
@@ -366,6 +367,26 @@ export const writeSelect = (
  * state seq now and nothing the parent writes later. Copies nothing, whatever the history.
  */
 export const insertFork = (
+  sql: SqlClient.SqlClient,
+  fork: {
+    readonly chatId: string
+    readonly parent: ForkRow
+    readonly baseSlotId: string | null
+    readonly tipSlotId: string | null
+    readonly at: number
+    /** "Branch from here"'s choices per workshop (spec/WORKSHOP-BRANCHES.md §4); else "then". */
+    readonly workshops?: ReadonlyMap<string, WorkshopChoice>
+  }
+) =>
+  Effect.gen(function* () {
+    const row = yield* insertForkRow(sql, fork)
+    // Branching a story branches the workshops beside its parent fork (§3.1): one probe when none.
+    yield* branchWorkshops(sql, row, fork.parent, fork.at, fork.workshops)
+    return row
+  })
+
+/** `insertFork` without the workshop step: the hook's own forks, in the workshop chat. */
+export const insertForkRow = (
   sql: SqlClient.SqlClient,
   fork: {
     readonly chatId: string

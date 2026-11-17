@@ -162,6 +162,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ListAttachedWorkshops:
     "The story's Workshop tab lists its side chats; a workshop reads its own story with the story tools.",
   ListWorkshopStories: "The workshop's header links its story; a workshop reads its own story with the story tools.",
+  ListWorkshopBranches:
+    "The workshop's branch control lists its branches; a workshop reads its own story with the story tools.",
   ListBin: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListBranches: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListCardNotes: "Not in W6's first exposures; use the bounded workshop read tools.",

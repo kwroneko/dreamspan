@@ -47,6 +47,7 @@ import {
   UndoAllReport,
   WorkshopDefaults,
   WorkshopPresetChoice,
+  WorkshopBranch,
   WorkshopStory
 } from "@rp/shared/workshopApi.ts"
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
@@ -124,10 +125,10 @@ import {
   Version,
   VersionId
 } from "@rp/shared/chat.ts"
-import { ContextIssue, StoryAtField, ThinkingPart, VersionError, VersionStatus } from "@rp/shared/chat.ts"
+import { ContextIssue, StoryAt, StoryAtField, ThinkingPart, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import { RecentRemote, SourcePrefs } from "@rp/shared/cardSources.ts"
 import {
-  ForkNote,
+  ForkPreview,
   ForkNoteSelection,
   ForkNotesChanged,
   VersionAmendment,
@@ -479,9 +480,7 @@ export type SavedMediaDownload = typeof SavedMediaDownload.Type
 const QueuedReply = Schema.Struct({
   slotId: SlotId,
   versionId: VersionId,
-  forkId: Schema.optionalKey(ForkId),
-  /** A side chat's story position, as the queued entry was sent with it. */
-  storyAt: StoryAtField
+  forkId: Schema.optionalKey(ForkId)
 })
 
 /** What the send queue did behind a slot (chatSetupWrites.ts). */
@@ -2798,7 +2797,6 @@ export class WriteOpsLibrary extends RpcGroup.make(
    */
   Rpc.make("AnswerToolApproval", {
     payload: {
-      storyAt: StoryAtField,
       userId: UserId,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
@@ -2829,6 +2827,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       userId: UserId,
       title: Schema.optionalKey(Schema.String),
       attachTo: Schema.optionalKey(ChatId),
+      /** The story branch it starts beside (WORKSHOP-BRANCHES §2.1); absent: the story's current one. */
+      attachFork: Schema.optionalKey(ForkId),
       card: Schema.optionalKey(Schema.String),
       persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
       preset: Schema.optionalKey(WorkshopPresetChoice)
@@ -2927,8 +2927,6 @@ export class WriteOpsLibrary extends RpcGroup.make(
       round: Schema.optionalKey(Schema.Array(EntityId)),
       /** The reply's speaker and the round's are Auto's picks: the decision model may change each (DESIGN §2.3). */
       autoPick: Schema.optionalKey(Schema.Boolean),
-      /** A side chat's story position (spec/WORKSHOP.md §4): kept with a queued entry for its reply. */
-      storyAt: StoryAtField,
       /**
        * An Auto turn (db/autoGuard.ts): admitted in this transaction only while its run is
        * unbroken and `token` is the one its last turn handed back; null starts a run.
@@ -4238,7 +4236,7 @@ export class ReadOps extends RpcGroup.make(
   }),
   Rpc.make("PreviewForkNotes", {
     payload: { userId: UserId, chatId: ChatId, fromForkId: Schema.NullOr(ForkId), atSlotId: Schema.NullOr(SlotId) },
-    success: Schema.Array(ForkNote),
+    success: ForkPreview,
     error: Schema.Union([NotFound, StorageError])
   }),
   historyReadRpcs[3]
@@ -5535,9 +5533,31 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The live workshops attached to a story of the user's, newest first (db/workshopAttach.ts). */
   Rpc.make("AttachedWorkshops", {
-    payload: { userId: UserId, chatId: ChatId },
+    /** `forkId`: only those with a live branch going with that story branch (spec/WORKSHOP-BRANCHES.md §8). */
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.optionalKey(ForkId) },
     success: Schema.Array(Chat),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A workshop's live branches, each with the story branch it goes with (db/workshopAttach.ts). */
+  Rpc.make("WorkshopBranches", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Array(WorkshopBranch),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Where a workshop branch reads its story now (spec/WORKSHOP-BRANCHES.md §2.2): its paired branch
+   * to that branch's newest message; null beside no story or with that branch gone. With
+   * `versionId`, where that version recorded the story standing, if it did.
+   */
+  Rpc.make("WorkshopStoryPosition", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      versionId: Schema.optionalKey(VersionId)
+    },
+    success: Schema.NullOr(StoryAt),
+    error: StorageError
   }),
   /** The story each of these workshops is about (db/workshopAttach.ts); none for one without. */
   Rpc.make("WorkshopStories", {

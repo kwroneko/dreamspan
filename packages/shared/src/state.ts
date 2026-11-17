@@ -5,7 +5,7 @@ import { LcmSettings } from "./lcmSettings.ts"
 import { Data, Effect, Schema, type SchemaAST, Scope } from "effect"
 import { ChatId, EntityId } from "./chat.ts"
 import { REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
-import { ID_TABLE } from "./id.ts"
+import { ID_TABLE, idSchema } from "./id.ts"
 import { type EntityKind, RefId, RevisionId } from "./library.ts"
 import { McpConnectionId } from "./mcp.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
@@ -31,6 +31,11 @@ export const HtmlDepth = Schema.Struct({
 export type HtmlDepth = typeof HtmlDepth.Type
 /** Without an event: as written (owner, 2026-11-07), with 4 ready for the other choices. */
 export const DEFAULT_HTML_DEPTH: HtmlDepth = { mode: "as_written", n: 4 }
+
+/** A fork of the story a workshop is beside: the writer checks it against `workshop.attached`. */
+const StoryForkId = idSchema("ForkId", "storyFork")
+/** A message of the story a workshop is beside. */
+const StorySlotId = idSchema("SlotId", "storySlot")
 
 /**
  * The core's typed state-event keys (DATA-MODEL §5.3). Ids use the id schemas, never a
@@ -168,6 +173,17 @@ export const StateEventData = Schema.Union([
    */
   event("workshop.attached", Schema.Struct({ chat: ChatId })),
   /**
+   * The story branch this workshop branch goes with (spec/WORKSHOP-BRANCHES.md §2.1). Branch-owned,
+   * so the workshop's own branches made from it later inherit it. Only `CreateWorkshop` and the
+   * story-fork hook (db/workshopForks.ts) write it.
+   */
+  event("workshop.paired", Schema.Struct({ fork: StoryForkId })),
+  /**
+   * Where the story stood when this workshop message's version was written (§2.2): its paired
+   * branch's newest message then. Version-scoped; only the writer's version insert writes it.
+   */
+  event("workshop.story_at", Schema.Struct({ leaf: StorySlotId })),
+  /**
    * Where a workshop's commands start and its relative paths resolve, on this branch
    * (spec/FILES-AND-ENVIRONMENT.md §2.1): a path inside the sandbox (`/files/thesis`) and the
    * folder's inode when it was chosen, to find it again after a rename. Absent: the top of Files.
@@ -203,6 +219,10 @@ type IdField<F extends string> =
   | { readonly table: "model"; readonly connection: F }
   /** Another live chat of the acting user's (not in the bin), never the chat itself. */
   | { readonly table: "chat" }
+  /** A live fork of the story this workshop's `workshop.attached` names. */
+  | { readonly table: "storyFork" }
+  /** A message of the story this workshop's `workshop.attached` names. */
+  | { readonly table: "storySlot" }
 
 /** The fields of a value that can hold ids: strings and arrays of strings. */
 type IdFieldName<V> = {
@@ -286,6 +306,8 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "context.html_depth": { ids: {} },
   "var.set": { ids: {} },
   "workshop.attached": { ids: { chat: { table: "chat" } } },
+  "workshop.paired": { ids: { fork: { table: "storyFork" } } },
+  "workshop.story_at": { ids: { leaf: { table: "storySlot" } } },
   "workshop.folder": { ids: {} }
 }
 
@@ -527,6 +549,8 @@ export interface ChatState {
   readonly vars: Readonly<Record<string, unknown>>
   /** `workshop.attached`: the story a side chat talks about; absent in every other chat. */
   readonly workshopAttached?: string
+  /** `workshop.paired`: the story branch this workshop branch goes with. */
+  readonly workshopPaired?: string
   /** `workshop.folder`: the branch's working folder; absent is the top of Files. */
   readonly workshopFolder?: { readonly path: string; readonly inode: number | null }
   /** Plugin keys' values by key id (`<plugin>/<key>`); absent until a registered key has an event. */
@@ -758,6 +782,11 @@ const applyCore = (
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
     case "workshop.attached":
       return { ...state, workshopAttached: data.value.chat }
+    case "workshop.paired":
+      return { ...state, workshopPaired: data.value.fork }
+    // A record of where the story stood, read by the fork hook's cut: no state of its own.
+    case "workshop.story_at":
+      return state
     case "workshop.folder":
       return { ...state, workshopFolder: data.value }
   }
@@ -774,7 +803,7 @@ for (const member of StateEventData.members) {
         id,
         value: member.fields.value,
         ids: stateKeyIds[id] as StateKeyDeclaration,
-        scope: id === "card.swap" ? "branch" : "positional",
+        scope: id === "card.swap" || id === "workshop.paired" ? "branch" : "positional",
         apply: (state, value, scope) => applyCore(state, { data: { key: id, value } as StateEventData, scope })
       }),
       builtinScope

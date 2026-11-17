@@ -1,10 +1,11 @@
 // What a side chat's request is made of (spec/WORKSHOP.md §4, ARCHITECTURE §16 "What a side chat
 // sends"): its own Workshop preset and Assistant card, never the story's preset, cards, persona,
-// lorebooks or messages; the story only as wrapped tool results, read where the request says
-// (the branch and newest message of the tab it was sent from), and never past that message.
+// lorebooks or messages; the story only as wrapped tool results, read where the server places the
+// reply (the story branch its workshop branch goes with, up to that branch's newest message when the
+// reply started: spec/WORKSHOP-BRANCHES.md §2.2), and never past that message.
 // All against a mock provider: nothing reaches a real one.
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat, EntityId, StoryAt, VersionId } from "@rp/shared/chat.ts"
+import type { Chat, EntityId, ForkId, StoryAt, VersionId } from "@rp/shared/chat.ts"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Type } from "@earendil-works/pi-ai"
@@ -74,8 +75,8 @@ const provider = () =>
     )
   })
 
-/** One side-chat turn sent with `storyAt` (none: as from the workshop's own tab). */
-const turn = (api: Api, workshop: Chat, content: string, storyAt: StoryAt | null) =>
+/** One side-chat turn in the workshop's branch `forkId` (none: its current one). */
+const turn = (api: Api, workshop: Chat, content: string, forkId?: ForkId) =>
   Effect.gen(function* () {
     const events: Array<ChatEvent> = []
     yield* api.SubscribeChat({ chatId: workshop.id }).pipe(
@@ -83,17 +84,20 @@ const turn = (api: Api, workshop: Chat, content: string, storyAt: StoryAt | null
       Effect.forkScoped
     )
     yield* eventually(() => events.length > 0)
-    const chat = yield* api.GetChat({ chatId: workshop.id })
+    const onFork = forkId ? { forkId } : {}
+    const leaf =
+      (yield* api.ReadPath({
+        chatId: workshop.id,
+        ...onFork,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 1
+      })).entries.at(-1)?.slotId ?? null
     const sent = yield* posted(
-      api.SendMessage({ chatId: chat.id, parentSlotId: chat.activeLeafSlotId, branch: false, content })
+      api.SendMessage({ chatId: workshop.id, ...onFork, parentSlotId: leaf, branch: false, content })
     )
     const generated = yield* posted(
-      api.Generate({
-        chatId: chat.id,
-        parentSlotId: sent.entry.slotId,
-        branch: false,
-        ...(storyAt ? { storyAt } : {})
-      })
+      api.Generate({ chatId: workshop.id, ...onFork, parentSlotId: sent.entry.slotId, branch: false })
     )
     yield* eventually(() => finished(events, generated.entry.version.id as VersionId) !== undefined)
     return finished(events, generated.entry.version.id as VersionId)!
@@ -296,12 +300,7 @@ describe("side chat request", () => {
 
         const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })
         const before = mock.requests().length
-        const version = yield* turn(
-          api,
-          workshop,
-          "How is the story going?",
-          at(yield* api.GetChat({ chatId: story.chat.id }))
-        )
+        const version = yield* turn(api, workshop, "How is the story going?")
         assert.strictEqual(version.content, "Out of character: it went well.")
         const bodies = mock
           .requests()
@@ -336,7 +335,7 @@ describe("side chat request", () => {
     }
   )
 
-  it.live("refuses to replay a side-chat run at a different story position, including its own tab", () => {
+  it.live("refuses to replay a side-chat run once its story branch moved on", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
@@ -349,28 +348,22 @@ describe("side chat request", () => {
         model: { context: 65536 },
         preset: { openai_max_context: 65536 }
       })
-      const position = at(yield* api.GetChat({ chatId: story.chat.id }))
       const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })
-      const version = yield* turn(api, workshop, "Read the end.", position)
-      for (const storyAt of [undefined, { ...position, leafSlotId: story.chat.activeLeafSlotId }]) {
-        const before = mock.requests().length
-        assert.strictEqual(
-          yield* outcome(
-            api.ResumeFromStep({
-              versionId: version.id,
-              step: 0,
-              expectedRowVersion: version.rowVersion,
-              ...(storyAt ? { storyAt } : {})
-            })
-          ),
-          "NotResumable"
-        )
-        assert.strictEqual(mock.requests().length, before)
-      }
+      const version = yield* turn(api, workshop, "Read the end.")
+      const end = at(yield* api.GetChat({ chatId: story.chat.id }))
+      yield* posted(
+        api.SendMessage({ chatId: story.chat.id, parentSlotId: end.leafSlotId, branch: false, content: "Later on." })
+      )
+      const before = mock.requests().length
+      assert.strictEqual(
+        yield* outcome(api.ResumeFromStep({ versionId: version.id, step: 0, expectedRowVersion: version.rowVersion })),
+        "NotResumable"
+      )
+      assert.strictEqual(mock.requests().length, before)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("regenerates at the newly shown position without replaying the old story read", () => {
+  it.live("regenerates where the story stands now, without replaying the old story read", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
@@ -383,35 +376,35 @@ describe("side chat request", () => {
         model: { context: 65536 },
         preset: { openai_max_context: 65536 }
       })
-      const position = at(yield* api.GetChat({ chatId: story.chat.id }))
       const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })
-      const version = yield* turn(api, workshop, "Read this.", position)
+      const version = yield* turn(api, workshop, "Read this.")
       const events: Array<ChatEvent> = []
       yield* api.SubscribeChat({ chatId: workshop.id }).pipe(
         Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
         Effect.forkScoped
       )
       yield* eventually(() => events.length > 0)
+      const end = at(yield* api.GetChat({ chatId: story.chat.id }))
+      yield* posted(
+        api.SendMessage({
+          chatId: story.chat.id,
+          parentSlotId: end.leafSlotId,
+          branch: false,
+          content: "LATER_SENTINEL The bridge held."
+        })
+      )
       const before = mock.requests().length
-      const changed = { ...position, leafSlotId: story.chat.activeLeafSlotId }
-      const next = yield* api.Regenerate({
-        slotId: version.slotId,
-        expectedRowVersion: version.rowVersion,
-        storyAt: changed
-      })
+      const next = yield* api.Regenerate({ slotId: version.slotId, expectedRowVersion: version.rowVersion })
       yield* eventually(() => finished(events, next.version.id)?.status === "complete")
-      for (const request of mock.requests().slice(before)) {
-        const reads = messages(request.body as Body)
-          .filter((m) => m.role === "tool")
-          .map(textOf)
-          .join("\n")
-        assert.notInclude(reads, "The road flooded.")
-      }
-      assert.include(results(mock.requests().at(-1)!.body as Body)[0]!, 'up_to_message="1"')
+      // Every story read the new reply carries is a fresh one, made where the story stands now.
+      for (const request of mock.requests().slice(before))
+        for (const read of messages(request.body as Body).filter((m) => m.role === "tool"))
+          assert.include(textOf(read), "LATER_SENTINEL")
+      assert.include(results(mock.requests().at(-1)!.body as Body)[0]!, "LATER_SENTINEL")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("keeps a queued send's story position while the story and sending tab move", () => {
+  it.live("keeps a queued reply on its paired story branch while the story branches", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       let targetChat = ""
@@ -464,17 +457,14 @@ describe("side chat request", () => {
           content: "First"
         })
       )
-      yield* posted(
-        api.Generate({ chatId: workshop.id, parentSlotId: sent.entry.slotId, branch: false, storyAt: position })
-      )
+      yield* posted(api.Generate({ chatId: workshop.id, parentSlotId: sent.entry.slotId, branch: false }))
       yield* eventually(() => !!release)
       const current = yield* api.GetChat({ chatId: workshop.id })
       const queued = yield* api.SendMessage({
         chatId: workshop.id,
         parentSlotId: current.activeLeafSlotId,
         branch: false,
-        content: "Queued",
-        storyAt: { ...position, leafSlotId: story.chat.activeLeafSlotId }
+        content: "Queued"
       })
       assert.strictEqual(queued._tag, "Queued")
       yield* posted(
@@ -499,10 +489,8 @@ describe("side chat request", () => {
           .filter((m) => m.role === "tool")
           .map(textOf)
           .join("\n")
-        assert.notInclude(reads, "The road flooded.")
         assert.notInclude(reads, "STORY_LATER")
       }
-      assert.include(results(mock.requests().at(-1)!.body as Body)[0]!, 'up_to_message="1"')
       const read = (forkId: typeof position.forkId) =>
         api.ReadPath({ chatId: story.chat.id, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 })
       assert.strictEqual((yield* read(position.forkId)).entries[0]!.version.content, "QUEUED_WRITE_SENTINEL")
@@ -523,16 +511,15 @@ describe("side chat request", () => {
         model: { context: 65536 },
         preset: { openai_max_context: 65536 }
       })
-      const position = at(yield* api.GetChat({ chatId: story.chat.id }))
       const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })
-      yield* turn(api, workshop, "Read this.", position)
+      yield* turn(api, workshop, "Read this.")
       yield* api.AmendVersion({
         versionId: story.sent.version.id,
         expectedRowVersion: story.sent.version.rowVersion,
         content: "The road is dry."
       })
       const before = mock.requests().length
-      yield* turn(api, workshop, "Read it again.", position)
+      yield* turn(api, workshop, "Read it again.")
       for (const request of mock.requests().slice(before)) {
         const reads = messages(request.body as Body)
           .filter((m) => m.role === "tool")
@@ -544,7 +531,7 @@ describe("side chat request", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("reads the branch each request names, never past its message, and nothing without one", () => {
+  it.live("reads the story branch each workshop branch goes with, never another", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
@@ -558,7 +545,8 @@ describe("side chat request", () => {
         preset: { openai_max_context: 65536 }
       })
       const original = at(yield* api.GetChat({ chatId: story.chat.id }))
-      // A second branch from the greeting, written in last: the story's current branch now.
+      const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })
+      // A second story branch from the greeting: the workshop gets a branch going with it.
       yield* posted(
         api.SendMessage({
           chatId: story.chat.id,
@@ -569,46 +557,44 @@ describe("side chat request", () => {
       )
       const other = at(yield* api.GetChat({ chatId: story.chat.id }))
       assert.notStrictEqual(other.forkId, original.forkId)
-      const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })
+      const branches = yield* api.ListWorkshopBranches({ chatId: workshop.id })
+      assert.strictEqual(branches.find((b) => b.story?.forkId === original.forkId)?.forkId, workshop.currentForkId)
+      const onOther = branches.find((b) => b.story?.forkId === other.forkId)!.forkId
+      // Sending in a branch makes it the workshop's current one: name the first explicitly.
+      const onOriginal = workshop.currentForkId as ForkId
       const lastRead = () => results(mock.requests().at(-1)!.body as Body)[0]!
 
-      // Two tabs, one on each branch: each request reads its own tab's branch.
-      yield* turn(api, workshop, "From the first tab.", original)
+      yield* turn(api, workshop, "On the first branch.", onOriginal)
       assert.include(lastRead(), "The road flooded.")
       assert.include(lastRead(), "Story reply.")
       assert.notInclude(lastRead(), "Down the other road.")
       const beforeOther = mock.requests().length
-      yield* turn(api, workshop, "From the second tab.", other)
+      yield* turn(api, workshop, "On the second branch.", onOther)
       for (const request of mock.requests().slice(beforeOther)) {
         const toolText = messages(request.body as Body)
           .filter((m) => m.role === "tool")
           .map(textOf)
           .join("\n")
-        assert.notInclude(toolText, "The road flooded.", "a carried tool result must not cross story positions")
+        assert.notInclude(toolText, "The road flooded.", "a carried tool result must not cross story branches")
       }
       assert.include(lastRead(), "Down the other road.")
       assert.notInclude(lastRead(), "The road flooded.")
-      // The tab that is behind (an older message shown) sends where it is: nothing later is read.
+      // The second story branch goes on: its workshop branch reads to the new end; the first doesn't.
       yield* posted(
         api.SendMessage({
           chatId: story.chat.id,
+          forkId: other.forkId,
           parentSlotId: other.leafSlotId,
           branch: false,
           content: "A third road, later."
         })
       )
-      yield* turn(api, workshop, "Still from the second tab.", other)
+      yield* turn(api, workshop, "Again on the second branch.", onOther)
+      assert.include(lastRead(), "A third road, later.")
+      assert.match(lastRead(), /up_to_message="3"/)
+      yield* turn(api, workshop, "Back on the first.", onOriginal)
       assert.notInclude(lastRead(), "A third road, later.")
-      assert.match(lastRead(), /up_to_message="2"/)
-
-      // Sent without a position (the workshop in its own tab): the story isn't read.
-      yield* turn(api, workshop, "From its own tab.", null)
-      assert.include(lastRead(), "wasn&apos;t sent from beside the story")
-      assert.notInclude(lastRead(), "Late again")
-      // A position in another chat is refused.
-      const elsewhere = yield* api.CreateChat({ title: "Elsewhere" })
-      yield* turn(api, workshop, "Somewhere else.", { ...other, chatId: elsewhere.id })
-      assert.include(lastRead(), "another chat")
+      assert.notInclude(lastRead(), "Down the other road.")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 })
