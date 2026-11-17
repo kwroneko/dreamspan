@@ -163,6 +163,19 @@ Owner [D]: "the agent needs to be able to choose a different model for subagents
 - **Per chat**: the chat's override (state key `subagents.models { alias, on }`, branch-owned, written from the capability chip in a workshop and from This chat → Tools in a story) turns account rows off for that chat or on where the account has them off. A chat can't add a model that isn't an account row; it can only choose among them.
 - **The agent** sees the list in the `agent` tool's description: each alias with its note and the model's name ("fast: Claude Haiku 4.5. Cheaper and faster; for lookups and reading."). An alias not on the list is a tool error naming the allowed ones. The model can't name a connection or model id.
 
+### 5.1a The subagent model chip
+
+**[D]** (owner, 2026-11-17) "whenever subagents are in some way allowed/enabled in a chat, we want a second model selector next to the main one to be visible, where subagents can be picked. This would necessarily be a multiselect. Its behaviour, where its previous choices carry over, what the default value is and when it changes, are all things I haven't yet considered. But it's necessary for users to be able to change the subagent selection right there where the chat is, just like they can swap the model."
+
+So, wherever subagents are allowed or enabled in a chat, a **second model chip** is visible next to the main one: a multiselect of the models subagents may use, changed right there. Pending the owner's answer on its behaviour (carry-over, default, when it changes), proposed:
+- **[P]** It follows the main model chip's own scope and carry-over rules exactly.
+- **[P]** Its entries are "Same as this chat's model" (tracks the main chip) plus picked models.
+- **[P]** The default is just "Same as this chat's model".
+- **[P]** Picking a model is the consent for its connection (provider-send, §5.2).
+- **[P]** Placement goes beside the model chip, only after checking the real composer row layout.
+
+SA2 builds this chip in place of a settings-only list; the settings list (§5.1) stays the account-level source of the aliases.
+
 ### 5.2 Consent
 
 DESIGN §11 [D] and the owner's rule: nothing goes to a provider except the user's submit to the chat's chosen one; all else is opt-in per connection.
@@ -297,7 +310,7 @@ Each milestone gets its own review. Workshop first; nothing for stories before t
 | Unit | What | Depends on |
 |---|---|---|
 | **SA1** | Migration and operations (§11); the child runner (foreground, `task` context, `same` model, contract `final_text`, data envelope); `agent` tool with the `research` type; the `subagents` capability; the row with Stop and Inspect; ledger attribution and the rolled-up cost | — |
-| **SA2** | The model list (§5): settings section, aliases and notes, `fast` from the summary model, per-chat override, the tool description listing, consent copy and the provider-send twin | SA1 |
+| **SA2** | The model list (§5) and the subagent model chip beside the model chip (§5.1a, in place of a settings-only list): settings section, aliases and notes, `fast` from the summary model, per-chat override, the tool description listing, consent copy and the provider-send twin | SA1 |
 | **SA3** | Caps and concurrency (§6.2, §6.3): the two tiers, queueing, per-run and per-account counts, Settings → Assistant tools → Subagents limits | SA1 |
 | **SA4** | Nested Resume, receipts and effects (§8): resuming children with the parent, approvals nested and lifted, regenerate warnings, the resume-from-step drop | SA1 |
 | **SA5** | Background children and messages (§3.2, §4): `steer`/`followUp` delivery, "Waiting for N subagents", `message_agent` (running and finished), continuations, `report_progress`, causal handle lookup | SA4 |
