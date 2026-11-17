@@ -2,6 +2,7 @@ import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { baseline } from "./baseline.ts"
+import { filesMigration } from "./migrationFiles.ts"
 
 /** node:sqlite prepares one statement at a time, so DDL is kept as a list of statements. */
 const runAll = (statements: ReadonlyArray<string>) =>
@@ -11,9 +12,11 @@ const runAll = (statements: ReadonlyArray<string>) =>
   })
 
 // Migrations run in the writer worker, before any reader connection is opened.
-// Until the owner declares real use, edit baseline.ts and deploy an empty database.
+// The baseline is frozen: every schema change after it is an additive migration here.
 export const migrations = {
-  "0001_baseline": runAll(baseline)
+  "0001_baseline": runAll(baseline),
+  // spec/FILES-AND-ENVIRONMENT.md §10: file versions and shares, attachment names and paths.
+  "0002_files": runAll(filesMigration)
 }
 
 /**

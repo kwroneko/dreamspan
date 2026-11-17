@@ -219,6 +219,10 @@ describe("workshop setup effects", () => {
           "generate",
           // The card-source tools use the internet (cardextools1).
           "network",
+          // The account's files and commands (sandbox1).
+          "files",
+          "commands",
+          "commands.network",
           "plugins.write",
           "plugins.apply",
           "skills.card"
@@ -226,13 +230,32 @@ describe("workshop setup effects", () => {
       )
       assert.deepStrictEqual(
         capabilities.map((c) => c.mode),
-        ["allow", "ask", "allow", "allow", "allow", "allow", "ask", "ask", "allow", "ask", "ask"]
+        [
+          "allow",
+          "ask",
+          "allow",
+          "allow",
+          "allow",
+          "allow",
+          "ask",
+          "ask",
+          "allow",
+          "allow",
+          "allow",
+          "allow",
+          "ask",
+          "ask"
+        ]
       )
       assert.deepStrictEqual(
         capabilities.map((c) => c.modes),
         [
           ["allow"],
-          ...Array.from({ length: 8 }, () => ["off", "ask", "allow"] as const),
+          // chats.read to network, then files and commands.
+          ...Array.from({ length: 9 }, () => ["off", "ask", "allow"] as const),
+          // Internet from commands: Off or On.
+          ["off", "allow"],
+          ["off", "ask", "allow"],
           ["off", "ask"],
           // A card's skills always ask; allowing one covers that skill's exact words only.
           ["off", "ask"]

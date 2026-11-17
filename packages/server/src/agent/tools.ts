@@ -15,7 +15,7 @@ import type { Reader, Writer } from "../db/Database.ts"
  * version, so a swipe reverses them. `external`: the library, settings, plugins, which an RP
  * turn never offers (DESIGN §7.3).
  */
-type EffectClass = "read" | "chat_state" | "external" | "library" | "setup" | "outside" | "mcp"
+type EffectClass = "read" | "chat_state" | "external" | "library" | "setup" | "outside" | "mcp" | "files"
 
 export interface ToolContext {
   readonly userId: UserId

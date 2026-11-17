@@ -239,7 +239,20 @@ export const builtinToolLoadingProfiles: ReadonlyArray<ToolLoadingProfile> = [
   // callable from the start; only a side chat is offered them.
   {
     id: "workshop",
-    immediate: ["list_library", "search_story", "read_story", "open_story_summary", "search_story_summaries"]
+    immediate: [
+      "list_library",
+      "search_story",
+      "read_story",
+      "open_story_summary",
+      "search_story_summaries",
+      // A workshop works in a folder, as a coding agent does (spec/FILES-AND-ENVIRONMENT.md §2).
+      "read_file",
+      "list_files",
+      "search_files",
+      "write_file",
+      "edit_file",
+      "bash"
+    ]
   }
 ]
 

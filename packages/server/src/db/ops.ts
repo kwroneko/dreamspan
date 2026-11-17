@@ -2722,6 +2722,33 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: RolloutEffect,
     error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
   }),
+  // --- Files (fileVersions.ts; spec/FILES-AND-ENVIRONMENT.md §1.3): bytes already stored by the host.
+  Rpc.make("RecordFileVersions", {
+    payload: {
+      userId: UserId,
+      versions: Schema.Array(
+        Schema.Struct({
+          path: Schema.String.check(Schema.isMaxLength(4096)),
+          inode: Schema.NullOr(Schema.Number),
+          /** null: a recorded deletion or creation, with no content. */
+          sha256: Schema.NullOr(Sha256),
+          mime: Schema.String,
+          byteSize: Schema.Int,
+          origin: Schema.String,
+          rolloutId: Schema.optionalKey(Schema.String),
+          toolCallId: Schema.optionalKey(Schema.String)
+        })
+      )
+    },
+    success: Schema.Array(Schema.String),
+    error: StorageError
+  }),
+  /** A file put back by the host: this owner-scoped transaction marks the agent's change undone. */
+  Rpc.make("CompleteFileUndo", {
+    payload: { userId: UserId, ...EffectKey, result: Schema.Record(Schema.String, Schema.Unknown) },
+    success: RolloutEffect,
+    error: Schema.Union([NotFound, EffectUndoRefused, StorageError])
+  }),
   Rpc.make("UndoRolloutEffect", {
     payload: { userId: UserId, ...EffectKey },
     success: RolloutEffect,
@@ -5526,6 +5553,20 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("RolloutEffectsForRun", {
     payload: { userId: UserId, chatId: ChatId, rolloutId: Schema.String },
     success: Schema.Array(RolloutEffect),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** One of the user's file versions, with where its bytes are (fileVersions.ts). */
+  Rpc.make("FileVersion", {
+    payload: { userId: UserId, id: Schema.String },
+    success: Schema.Struct({
+      id: Schema.String,
+      path: Schema.String,
+      inode: Schema.NullOr(Schema.Number),
+      byteSize: Schema.Number,
+      origin: Schema.String,
+      sha256: Schema.NullOr(Schema.String),
+      mediaPath: Schema.NullOr(Schema.String)
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("RolloutEffectFor", {

@@ -27,6 +27,8 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   host: "127.0.0.1",
   port: 0,
   dataDir: tempDir("server"),
+  filesDir: "",
+  commandSandbox: "",
   dbReaders: 1,
   formatWorkers: 1,
   thumbnailWorkers: 1,

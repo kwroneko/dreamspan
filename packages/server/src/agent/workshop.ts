@@ -1,4 +1,5 @@
 import { PLUGIN_TOOLS } from "./tools/plugins.ts"
+import { FILE_TOOLS } from "./tools/files.ts"
 import type { OrchestrationMode } from "./modes.ts"
 import { STORY_TOOLS } from "./tools/history.ts"
 import { WORKSHOP_HISTORY_TOOLS } from "./tools/runs.ts"
@@ -34,6 +35,8 @@ export const workshopMode: OrchestrationMode = {
       // The conversation's own history (spec/WORKSHOP-CONTEXT.md §3.3).
       ...WORKSHOP_HISTORY_TOOLS,
       ...(state.workshopAttached === undefined ? PLUGIN_TOOLS : []),
+      // The account's files and commands (spec/FILES-AND-ENVIRONMENT.md §5), as far as registered.
+      ...(state.workshopAttached === undefined ? FILE_TOOLS : []),
       // A side chat reads its story (§4); nothing else offers these.
       ...(state.workshopAttached === undefined ? [] : STORY_TOOLS)
     ],

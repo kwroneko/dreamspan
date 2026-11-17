@@ -8,7 +8,9 @@ export const rolloutEffectClasses = makeRegistry([
   { id: "setup", outsideChat: true },
   { id: "outside", outsideChat: true },
   // A call to an MCP server the user enabled here (spec/MCP.md §8.1): what it does is the server's.
-  { id: "mcp", outsideChat: true }
+  { id: "mcp", outsideChat: true },
+  // A change to the account's files through a file tool (spec/FILES-AND-ENVIRONMENT.md §5.2), with Undo.
+  { id: "files", outsideChat: true }
 ])
 
 // Unknown classes are refused in stories too.

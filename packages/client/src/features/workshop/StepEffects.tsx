@@ -11,7 +11,7 @@ import { EffectRow } from "./EffectRow.tsx"
 import { binnedTargets, CHANGES, versionEffectsAtom } from "./effects.ts"
 
 /** The calls that can change things outside the chat. */
-const CHANGING = new Set(["library", "setup", "outside", "mcp"])
+const CHANGING = new Set(["library", "setup", "outside", "mcp", "files"])
 
 export function StepEffects(props: StepActionProps) {
   const { step, session } = props

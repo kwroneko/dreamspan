@@ -27,6 +27,14 @@ RUN npm ci --omit=dev
 # Only what runs is copied: no tests or scripts. The lockfile is part of the bundles' stamp.
 FROM node:24.22.1-trixie-slim
 WORKDIR /app
+# The workshop's command sandbox and its tools (spec/FILES-AND-ENVIRONMENT.md §3.4): bubblewrap
+# makes each command's sandbox; the rest is what commands find inside it. Debian packages,
+# pinned by the base image's release. Node is the image's own. See docker/README.md for the
+# seccomp and AppArmor settings the container needs for bubblewrap.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bubblewrap ca-certificates curl git python3 python3-pip python3-venv ripgrep procps xz-utils unzip less file \
+  && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8080 DATA_DIR=/data
 COPY --from=prod-deps /app/node_modules ./node_modules
 # sharp is external to the formats bundle. npm's production optional dependencies above
