@@ -296,6 +296,7 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
             cut &&
             el.closest(controls) &&
             !el.closest("[data-layout-name]") &&
+            (cut.textContent ?? "").trim() !== "" &&
             (cut.textContent ?? "").trim().length <= SHORT_LABEL
           )
             add("text", el, `short label “${cut.textContent!.trim()}” cut by an ellipsis at ${path(cut)}`, cut)

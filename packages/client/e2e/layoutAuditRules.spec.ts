@@ -35,6 +35,8 @@ test("a control's short label cut by an ellipsis is reported; a long name cut is
       <button style="width:48px;padding:0 8px"><span id="short" style="${cell}">Auto replies</span></button>
       <button style="width:120px;padding:0 8px"><span id="long" style="${cell}">Captain Alexandra Rhee of the Northern Expedition</span></button>
       <button style="padding:0 8px"><span id="whole" style="${cell}">Auto…</span></button>
+      <button style="width:48px;padding:0 8px"><span id="named" data-layout-name style="${cell}">Original</span></button>
+      <button style="width:24px;padding:0"><span id="icon" style="${cell}"><svg width="40" height="12"></svg></span></button>
     </main>`)
   const cut = (await layoutAudit(page)).filter((v) => v.kind === "text" && v.measurement.startsWith("short label"))
   expect(cut.map((v) => v.selector)).toEqual(["#short"])
