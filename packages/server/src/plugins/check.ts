@@ -7,6 +7,26 @@ import { type PluginReport, PluginManifest } from "@rp/shared/plugins.ts"
 import { runPluginChild } from "./process.ts"
 import { confined, pluginFolder } from "./repo.ts"
 
+/**
+ * Approved-build repo verifies done by this process, keyed by build folder. The value is a
+ * fingerprint of the attested report text plus the lstat identity (inode, mode, links, size,
+ * mtime and ctime in nanoseconds) of every entry under the plugin's `.git` and build folders.
+ * Any write, rename, link or rebuild changes ctime or inode, so the next read verifies again.
+ */
+const verifiedBuilds = new Map<string, string>()
+const stampTree = async (dir: string, hash: ReturnType<typeof createHash>): Promise<void> => {
+  const info = await lstat(dir, { bigint: true })
+  hash.update(`${dir}\0${info.ino}:${info.mode}:${info.nlink}:${info.size}:${info.mtimeNs}:${info.ctimeNs}\n`)
+  if (!info.isDirectory()) return
+  for (const name of (await readdir(dir)).sort()) await stampTree(join(dir, name), hash)
+}
+const buildStamp = async (dataDir: string, owner: string, id: string, folder: string, report: string) => {
+  const hash = createHash("sha256").update(report).update("\0")
+  await stampTree(await confined(dataDir, join(pluginFolder(dataDir, owner, id), ".git")), hash)
+  await stampTree(folder, hash)
+  return hash.digest("hex")
+}
+
 const root = fileURLToPath(new URL("../../../../", import.meta.url))
 /** Hash the installed source/API closure as well as dependencies and generated worker stamp. */
 export const pluginAppStamp = async (dataDir: string) => {
@@ -140,8 +160,14 @@ const readApprovedBuild = async (dataDir: string, owner: string, id: string, com
     throw new Error("Unattested plugin build")
   const report = JSON.parse(encoded) as PluginReport & { artifacts: Record<string, string> }
   if (!report.ok || report.commit !== commit) throw new Error("Unchecked entry")
-  const { repoTask } = await import("./repoTask.ts")
-  await repoTask(dataDir, { op: "verify", owner, id, commit, approved: true })
+  // Taken before the verify: a change during it gives a different stamp on the next read.
+  const stamp = await buildStamp(dataDir, owner, id, folder, encoded)
+  if (verifiedBuilds.get(folder) !== stamp) {
+    verifiedBuilds.delete(folder)
+    const { repoTask } = await import("./repoTask.ts")
+    await repoTask(dataDir, { op: "verify", owner, id, commit, approved: true })
+    verifiedBuilds.set(folder, stamp)
+  }
   const artifacts = new Map<string, Buffer>()
   for (const name of Object.keys(report.artifacts)) {
     if (!/^(?:server|worker|client|worker-bridge|test-[0-9]+)\.mjs$/.test(name)) throw new Error("Invalid artifact")

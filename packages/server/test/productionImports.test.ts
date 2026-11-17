@@ -310,9 +310,10 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
   },
   "packages/server/src/plugins/check.ts": {
     reason:
-      "Installed source/API closure and worker stamp hash, and confined checked-plugin artifacts in the data volume.",
+      "Installed source/API closure and worker stamp hash, confined checked-plugin artifacts in the data volume, and lstat-only fingerprints of confined plugin .git and build folders (symbolic links are never followed).",
     expressions: [
       "readdir(dir, { withFileTypes: true })",
+      "readdir(dir)",
       "readFile(file)",
       'readFile(join(root, "package-lock.json"))',
       'readFile(join(root, "packages/server/dist/workers/stamp.json"))',
@@ -325,9 +326,10 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
   },
   "packages/server/src/plugins/checkChild.ts": {
     reason:
-      "Installed source/API closure and worker stamp hash, and confined checked-plugin artifacts in the data volume.",
+      "Installed source/API closure and worker stamp hash, confined checked-plugin artifacts in the data volume, and lstat-only fingerprints of confined plugin .git and build folders (symbolic links are never followed).",
     expressions: [
       "readdir(dir, { withFileTypes: true })",
+      "readdir(dir)",
       'readFile(join(previous, "check.json"), "utf8")',
       "readFile(path)",
       "readdir(folder)",
@@ -343,6 +345,7 @@ const readReviews: Record<string, { reason: string; expressions: Array<string> }
       "Confined plugin repositories in the configured data volume; source/manifest size and symlink checks precede execution.",
     expressions: [
       "readdir(dir, { withFileTypes: true })",
+      "readdir(dir)",
       "readFile(join(dir, entry.name))",
       "readdir(folder)",
       'readFile(file, "utf8")'
