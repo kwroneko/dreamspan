@@ -174,6 +174,49 @@ test.describe("files", () => {
         await expect(page.getByText("Synthetic notes about lighthouses.")).toBeVisible()
         await check("page-text", "main")
       })
+
+  // The storage line on the Files page, and an upload that doesn't fit refused before it starts.
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const)
+      test(`storage usage and a refused upload at ${width} ${theme}`, async ({ page }, info) => {
+        const handle = `quota${width}${theme}`
+        const password = "quota-password-1"
+        const account = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+          api.CreateUser({ handle, displayName: "Quota", role: "user", password })
+        )
+        // 64 KB: a tiny quota, so a 100 KB file doesn't fit.
+        await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+          api.SetFilesQuota({ userId: account.id, quotaBytes: 64 * 1024 })
+        )
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+        await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+        await apiLogin(page.request, server(), handle, password)
+        const files = filesOf(page.request, server().url)
+        await files.put("/files/small.txt", "A synthetic note.")
+
+        await page.goto(`${server().url}/files`)
+        const browser = page.locator("[data-files-browser]")
+        const line = browser.locator("[data-files-usage]")
+        await expect(line).toHaveText(/^.+ of 64 KB used$/)
+        await expect(line).not.toHaveAttribute("data-warn")
+        if (audit) await expectLayout(page, info, `files-usage-${width}-${theme}`, { scope: "main" })
+
+        await browser.getByLabel("Files to upload").setInputFiles({
+          name: "big.bin",
+          mimeType: "application/octet-stream",
+          buffer: Buffer.alloc(100 * 1024)
+        })
+        await expect(browser.getByText(/^This file needs 100 KB; .+ is free\.$/)).toBeVisible()
+        expect(await files.has("/files/big.bin")).toBe(false)
+        if (shots) await page.screenshot({ path: resolve(shots, `files-quota-${width}-${theme}.png`) })
+        if (audit) await expectLayout(page, info, `files-quota-${width}-${theme}`, { scope: "main" })
+
+        // Near the quota the line turns to a warning, after the Refresh button.
+        await files.put("/files/most.bin", Buffer.alloc(60 * 1024))
+        await browser.getByRole("button", { name: "Refresh" }).click()
+        await expect(line).toHaveAttribute("data-warn", "")
+      })
 })
 
 /** Drops a file on the element as the browser would from outside the page. */
