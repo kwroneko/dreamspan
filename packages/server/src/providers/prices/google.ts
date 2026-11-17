@@ -9,7 +9,7 @@
 import type { Price } from "@rp/shared/providers.ts"
 import type { PriceEntry, PriceTable } from "./types.ts"
 
-const source = "https://ai.google.dev/gemini-api/docs/pricing"
+const source = "https://aistudio.google.com/docs/pricing"
 const checked = "2026-11-16"
 
 /** Input, output (thinking included), context caching. */

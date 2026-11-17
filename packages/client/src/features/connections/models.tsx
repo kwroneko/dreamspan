@@ -855,12 +855,62 @@ const priceNote = (source: PriceSource | null) =>
           hint: "The routing pins this provider, but OpenRouter gave no price for it. Costs use the model’s usual price, which may differ."
         }
 
-function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionProps["connection"]["compat"] }) {
+const fetchedFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
+
+/**
+ * The price a model row shows and where it came from (spec/PRICES.md §7), in the order costs use
+ * them: this server's price list when the user turned it on, a pinned provider's own price, the
+ * provider's model list, else the app's built-in prices.
+ */
+const shownPrice = (model: Model, resolved: ReturnType<typeof resolveModel>, priceEndpoint: boolean) => {
+  const feed = priceEndpoint ? model.upstream.priceFeed : undefined
+  if (feed?.price && feed.available !== false)
+    return {
+      price: feed.price,
+      source: "endpoint",
+      text: `from this server’s price list, fetched ${fetchedFormat.format(feed.fetchedAt)}`,
+      hint: "This server’s own price for the model, fetched when models were last refreshed."
+    }
+  if (!resolved.price) return null
+  if (resolved.priceSource?.state === "pinned")
+    return {
+      price: resolved.price,
+      source: "pinned",
+      text: `from ${resolved.priceSource.name}`,
+      hint: `${resolved.priceSource.name}’s own price, because the routing pins it.`
+    }
+  // A pinned provider without its own price: the model's usual price, marked so (see priceNote).
+  const fallback = resolved.priceSource?.state === "fallback"
+  return model.upstream.priceFrom === "list"
+    ? {
+        price: resolved.price,
+        source: fallback ? "fallback" : "list",
+        text: "from the provider’s model list",
+        hint: "The price the provider lists for the model. A price you set in Settings → Costs comes first."
+      }
+    : {
+        price: resolved.price,
+        source: fallback ? "fallback" : "builtin",
+        text: "built in",
+        hint: "The app’s own price for the model. A price you set in Settings → Costs comes first."
+      }
+}
+
+function ModelRow({
+  model,
+  compat,
+  priceEndpoint
+}: {
+  model: Model
+  compat: ConnectionSectionProps["connection"]["compat"]
+  priceEndpoint: boolean
+}) {
   const hide = useAction()
   const [selectedModel, setSelectedModel] = usePlaceParam("model", "")
   const editing = selectedModel === model.id
   const setEditing = (on: boolean) => setSelectedModel(on ? model.id : "")
   const resolved = resolveModel(model.key, model.upstream, model.overrides, compat)
+  const shown = shownPrice(model, resolved, priceEndpoint)
   useEndpointsFetch(model, pinnedRoute({ ...model.upstream.settings, ...model.overrides.settings }.routing) !== null)
   return (
     <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between">
@@ -881,17 +931,10 @@ function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionPr
           <span>
             Output <Value resolved={resolved.maxOutput} model={resolved} show={tokens} />
           </span>
-          {resolved.price && (
-            <Tooltip
-              label={
-                resolved.priceSource?.state === "pinned"
-                  ? `${resolved.priceSource.name}’s own price, because the routing pins it.`
-                  : "What the model costs per million tokens in and out."
-              }
-            >
-              <span className="text-muted" data-price-source={resolved.priceSource?.state ?? "general"}>
-                ${resolved.price.input} / ${resolved.price.output} per M tokens
-                {resolved.priceSource?.state === "pinned" ? ` (${resolved.priceSource.name})` : ""}
+          {shown && (
+            <Tooltip label={shown.hint}>
+              <span className="text-muted" data-price-source={shown.source}>
+                ${shown.price.input} / ${shown.price.output} per M tokens, {shown.text}
               </span>
             </Tooltip>
           )}
@@ -1012,7 +1055,12 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
                 {models
                   .filter((model) => includeHidden || !model.hidden || model.id === selectedModel)
                   .map((model) => (
-                    <ModelRow key={model.id} model={model} compat={connection.compat} />
+                    <ModelRow
+                      key={model.id}
+                      model={model}
+                      compat={connection.compat}
+                      priceEndpoint={connection.providerSettings?.priceEndpoint === true}
+                    />
                   ))}
               </ul>
             )

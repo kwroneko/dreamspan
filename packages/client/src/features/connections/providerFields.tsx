@@ -24,6 +24,7 @@ export interface ProviderDraft {
   readonly minTokens?: string
   readonly promptCacheKey?: boolean
   readonly idleTimeoutS?: string
+  readonly priceEndpoint?: boolean
 }
 
 /** A connection's stored changes as a draft. */
@@ -68,7 +69,8 @@ export const parseProviderDraft = (provider: ProviderInfo | undefined, draft: Pr
     ...(maxMarkers.value !== null ? { maxMarkers: maxMarkers.value } : {}),
     ...(minTokens.value !== null ? { minTokens: minTokens.value } : {}),
     ...(draft.promptCacheKey !== undefined ? { promptCacheKey: draft.promptCacheKey } : {}),
-    ...(idleTimeoutS.value !== null ? { idleTimeoutS: idleTimeoutS.value } : {})
+    ...(idleTimeoutS.value !== null ? { idleTimeoutS: idleTimeoutS.value } : {}),
+    ...(draft.priceEndpoint !== undefined ? { priceEndpoint: draft.priceEndpoint } : {})
   }
   return {
     settings,
@@ -434,6 +436,13 @@ export function ProviderAdvanced({
           className="sm:max-w-32"
         />
       </Field>
+      <Switch
+        checked={settings.priceEndpoint ?? false}
+        onCheckedChange={(priceEndpoint) => onChange({ ...draft, priceEndpoint })}
+        hint="Asks this server for its model prices each time you refresh models. Its prices then replace the app’s for this connection; your own prices for this connection still come first. Off: nothing is asked."
+      >
+        Fetch prices from this server
+      </Switch>
       {provider.accounting.length > 0 && <Facts title="How tokens are counted" items={provider.accounting} />}
       {provider.rules.length > 0 && <Facts title="Fixes for some models" items={provider.rules} />}
       {changed && (

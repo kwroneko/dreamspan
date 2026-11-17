@@ -20,6 +20,8 @@ export const chooseCustomServer = async (page: Page) => {
 export interface FakeProvider {
   readonly baseUrl: string
   readonly listings: number
+  /** Requests to `/v1/prices`. */
+  readonly priceRequests: number
   /** The model ids whose endpoint lists were asked for (`author/slug`), in order. */
   readonly endpointRequests: ReadonlyArray<string>
   /** The bearer tokens received, in order. */
@@ -55,11 +57,14 @@ export const startProvider = async (
     }>
     /** Served at `/models/{author}/{slug}/endpoints`, by `author/slug`; any other model's list is a 404. */
     endpoints?: Readonly<Record<string, unknown>>
+    /** Served at `/v1/prices` (spec/PRICES.md §4); any request there is counted. 404 when absent. */
+    prices?: unknown
   } = {}
 ): Promise<FakeProvider> => {
   const reply = options.reply ?? REPLY
   const keys: Array<string> = []
   let listings = 0
+  let priceRequests = 0
   const endpointRequests: Array<string> = []
   const completions: Array<FakeProvider["completions"][number]> = []
   const completionBytes: Array<string> = []
@@ -109,6 +114,12 @@ export const startProvider = async (
       )
       return
     }
+    if (request.url === "/v1/prices") {
+      priceRequests++
+      response.writeHead(options.prices === undefined ? 404 : 200, { "content-type": "application/json" })
+      response.end(JSON.stringify(options.prices ?? { error: { message: "no prices" } }))
+      return
+    }
     const endpointsOf = /^\/v1\/models\/([^/]+\/[^/]+)\/endpoints$/.exec(request.url ?? "")
     if (endpointsOf) {
       const id = decodeURIComponent(endpointsOf[1]!)
@@ -138,6 +149,9 @@ export const startProvider = async (
     baseUrl: `http://127.0.0.1:${port}/v1`,
     get listings() {
       return listings
+    },
+    get priceRequests() {
+      return priceRequests
     },
     endpointRequests,
     keys,
