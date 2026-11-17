@@ -3,7 +3,7 @@
 import { Schema } from "effect"
 import { StoryAtField } from "./chatPosition.ts"
 
-const EffectClass = Schema.Literals(["read", "chat_state", "external", "library", "setup", "outside"])
+const EffectClass = Schema.Literals(["read", "chat_state", "external", "library", "setup", "outside", "mcp"])
 
 /**
  * What a tool call waiting for the user will do, as the server describes it from the call's real
@@ -49,7 +49,23 @@ export const ApprovalPrompt = Schema.Struct({
     Schema.Array(Schema.Struct({ field: Schema.String, before: Schema.String, after: Schema.String }))
   ),
   /** The app stopped while it may have been running: it may already have happened. */
-  uncertain: Schema.Boolean
+  uncertain: Schema.Boolean,
+  /**
+   * An interrupted call to an MCP server (spec/MCP.md §8.3), asked as "Run it again" or "Don't
+   * run it", with what the app's ledger knows: when it last sent the call to the server, if it did.
+   */
+  rerun: Schema.optionalKey(
+    Schema.Struct({
+      connectionId: Schema.String,
+      /** The server's name, as the user gave it. */
+      connection: Schema.String,
+      host: Schema.String,
+      /** When the app last sent it; null: it was never sent. */
+      sentAt: Schema.NullOr(Schema.Number),
+      /** That request's ledger status: running, interrupted, cancelled, timeout or failed. */
+      status: Schema.NullOr(Schema.String)
+    })
+  )
 })
 export type ApprovalPrompt = typeof ApprovalPrompt.Type
 

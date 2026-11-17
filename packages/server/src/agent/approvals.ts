@@ -12,7 +12,9 @@ import type { ApprovalPrompt } from "@rp/shared/agent.ts"
 import type { ApprovalAnswer, CapabilityMode } from "@rp/shared/workshopApi.ts"
 import { Deferred, Effect } from "effect"
 import type { Reader, Writer } from "../db/Database.ts"
-import { type CapabilityRegistries, resolveMode } from "./capabilities.ts"
+import { mcpToolAllowed } from "@rp/shared/mcp.ts"
+import { type CapabilityRegistries, MCP_CAPABILITY, resolveMode } from "./capabilities.ts"
+import { mcpHostOf, mcpWorkshopMode } from "./tools/mcp.ts"
 import type { RolloutTool, ToolContext } from "./tools.ts"
 
 /** Classes whose calls never leave the reply: no capability, no asking (a swipe undoes them). */
@@ -36,6 +38,8 @@ export const argsDigest = (args: unknown) =>
     .digest("hex")
 
 const DECLINED = "The user declined this."
+/** "Don't run it" on an interrupted MCP call (spec/MCP.md §8.3). */
+const NOT_RERUN = "This was interrupted and may already have happened; it wasn't run again."
 const offText = (label: string) =>
   `“${label}” is turned off in this workshop, so this wasn't done. Don't try it again unless the user turns it on.`
 
@@ -43,7 +47,13 @@ const offText = (label: string) =>
 type Answer = { readonly answer: ApprovalAnswer; readonly note: string | null; readonly revoked?: boolean }
 const waiters = new Map<
   string,
-  { readonly chatId: string; readonly capability: string; readonly settle: (answer: Answer) => void }
+  {
+    readonly chatId: string
+    readonly capability: string
+    /** One target of the capability (an MCP server) the wait is for. */
+    readonly target?: string
+    readonly settle: (answer: Answer) => void
+  }
 >()
 const keyOf = (rolloutId: string, toolCallId: string) => `${rolloutId}:${toolCallId}`
 
@@ -57,9 +67,10 @@ export const deliverAnswer = (rolloutId: string, toolCallId: string, answer: App
 }
 
 /** Off also ends current waits, including one displayed in another tab. */
-export const cancelCapability = (chatId: string, capability: string) => {
+export const cancelCapability = (chatId: string, capability: string, target?: string) => {
   for (const [key, waiter] of waiters) {
     if (waiter.chatId !== chatId || waiter.capability !== capability) continue
+    if (target !== undefined && waiter.target !== target) continue
     waiters.delete(key)
     waiter.settle({ answer: "deny", note: null, revoked: true })
   }
@@ -143,20 +154,59 @@ export const makePermit =
       const capability = tool.capability ?? `effect:${tool.effect}`
       const capabilityLabel = registries.workshopCapabilities.get(tool.capability ?? "")?.label ?? tool.label
       if (mode === "off") return { run: false, text: unavailableText ?? offText(capabilityLabel) } as const
-      const invalid = validate?.()
+      // An MCP server's tool (spec/MCP.md §5.1, §8.3): the server's own On or Off here decides,
+      // checked at the call (it may have been turned off since the turn began). Enabling is the
+      // consent: a fresh call runs. A call the app may already have sent asks first, with what
+      // the ledger knows; one it never sent runs.
+      let rerun: ApprovalPrompt["rerun"] | undefined
+      if (tool.capability === MCP_CAPABILITY && tool.mcp) {
+        const ref = tool.mcp
+        const entry = (yield* reader.McpWorkshopConnections({
+          userId: userId as never,
+          chatId: deps.chatId as never
+        })).find((e) => e.connection.id === ref.connection)
+        if (!entry)
+          return { run: false, text: unavailableText ?? `${ref.connectionName} isn't available here now.` } as const
+        if (mcpWorkshopMode(entry) === "off")
+          return { run: false, text: unavailableText ?? offText(entry.connection.name) } as const
+        const listed = entry.connection.tools.find((t) => t.name === ref.tool)
+        if (!listed || !mcpToolAllowed(listed, entry.connection.use))
+          return {
+            run: false,
+            text:
+              unavailableText ??
+              `${entry.connection.name}'s tool “${ref.tool}” isn't allowed now, so this wasn't done. Don't try it again unless the user allows it.`
+          } as const
+        const invalidCall = validate?.()
+        if (invalidCall) return { run: false, text: invalidCall } as const
+        if (!dangling) return { run: true } as const
+        const sent = yield* reader.McpCallsFor({ userId: userId as never, rolloutId, toolCallId: context.toolCallId })
+        const last = sent.at(-1)
+        if (!last) return { run: true } as const
+        rerun = {
+          connectionId: entry.connection.id,
+          connection: entry.connection.name,
+          host: mcpHostOf(entry.connection),
+          sentAt: last.startedAt,
+          status: last.status
+        }
+      }
+      const invalid = rerun ? undefined : validate?.()
       if (invalid) return { run: false, text: invalid } as const
       // The content's digest is part of what an answer names: an answer can't move to other content.
       const digest = argsDigest({ tool: tool.id, capability, args, ...(grantTarget ? { target: grantTarget } : {}) })
       const toolCallId = context.toolCallId
-      let uncertain = false
-      if (dangling && !IN_REPLY.has(tool.effect)) {
+      let uncertain = rerun !== undefined
+      if (rerun) {
+        // Asked below, whatever an earlier answer said: the ledger is what decides.
+      } else if (dangling && !IN_REPLY.has(tool.effect)) {
         const prior = yield* reader.ToolApprovalFor({ userId: userId as never, rolloutId, toolCallId, digest })
         // Only waiting before: it never ran. Otherwise it may have.
         uncertain = prior?.status !== "pending" && prior?.status !== "cancelled"
       } else if (mode === "allow") return { run: true } as const
       if (mode === "allow" && !uncertain) return { run: true } as const
       // This exact content was allowed in this workshop before (and the capability isn't Off).
-      if (grantTarget && !uncertain) {
+      if (grantTarget && !uncertain && !rerun) {
         const remembered = yield* reader.WorkshopGrants({
           userId: userId as never,
           chatId: deps.chatId as never,
@@ -167,16 +217,21 @@ export const makePermit =
       }
 
       // A missing target cannot become a different target after the user approves.
-      const described = tool.describe
-        ? yield* Effect.suspend(() => tool.describe!(context, args as never)).pipe(
-            Effect.catch((error) =>
-              Effect.succeed(error instanceof ToolInputRefused ? { refused: error.message } : undefined)
-            ),
-            Effect.catchCause(() => Effect.succeed(undefined))
-          )
-        : undefined
+      const described = rerun
+        ? ({ title: `Run “${tool.label}” again`, rows: argumentRows(args) } as Pick<
+            ApprovalPrompt,
+            "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin" | "presentation"
+          >)
+        : tool.describe
+          ? yield* Effect.suspend(() => tool.describe!(context, args as never)).pipe(
+              Effect.catch((error) =>
+                Effect.succeed(error instanceof ToolInputRefused ? { refused: error.message } : undefined)
+              ),
+              Effect.catchCause(() => Effect.succeed(undefined))
+            )
+          : undefined
       if (described && "refused" in described) return { run: false, text: described.refused } as const
-      if (tool.describe && !described)
+      if (tool.describe && !described && !rerun)
         return {
           run: false,
           text: "This change couldn't be described safely. Read the item again before trying."
@@ -197,7 +252,8 @@ export const makePermit =
         title: described?.title ?? `${capabilityLabel}: ${tool.id}`,
         rows: described?.rows ?? argumentRows(args),
         ...(described?.changes ? { changes: described.changes } : {}),
-        uncertain
+        uncertain,
+        ...(rerun ? { rerun } : {})
       }
       const key = keyOf(rolloutId, toolCallId)
       if (waiters.has(key)) return { run: false, text: "This call is already waiting. Use a new call." } as const
@@ -206,6 +262,7 @@ export const makePermit =
       waiters.set(key, {
         chatId: deps.chatId,
         capability,
+        ...(rerun ? { target: rerun.connectionId } : {}),
         settle: (answer) => Deferred.doneUnsafe(deferred, Effect.succeed(answer))
       })
       const answered = yield* writer
@@ -221,8 +278,10 @@ export const makePermit =
           Effect.ensuring(Effect.sync(() => (waiters.delete(key), onWaiting(null))))
         )
       if (answered.revoked) return { run: false, text: unavailableText ?? offText(capabilityLabel) } as const
-      if (answered.answer === "deny")
-        return { run: false, text: answered.note ? `${DECLINED} Their note: ${answered.note}` : DECLINED } as const
+      if (answered.answer === "deny") {
+        const declined = rerun ? NOT_RERUN : DECLINED
+        return { run: false, text: answered.note ? `${declined} Their note: ${answered.note}` : declined } as const
+      }
       const grantsNow = new Map<string, CapabilityMode>(
         (yield* reader.WorkshopGrants({ userId: userId as never, chatId: deps.chatId as never, now: Date.now() })).map(
           (g) => [g.capability, g.mode]

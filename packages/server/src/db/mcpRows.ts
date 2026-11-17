@@ -157,5 +157,11 @@ export const makeMcpQueries = (sql: SqlClient.SqlClient) => {
           row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "mcp_connection", id: connectionId }))
         )
       )
-  return { list, owned }
+  /** The live remote connections a user can use, with their catalogs, in creation order. */
+  const catalogs = (userId: UserId) =>
+    sql.unsafe<McpConnectionRow>(
+      `SELECT ${columns}, m.tools_json FROM ${from} AND m.transport <> 'stdio' ORDER BY m.created_at, m.id`,
+      [userId, userId]
+    )
+  return { list, owned, catalogs }
 }

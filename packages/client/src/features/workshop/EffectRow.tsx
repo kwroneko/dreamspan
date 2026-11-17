@@ -79,6 +79,13 @@ export function EffectRow({
         {state && <Badge>{state}</Badge>}
         {when && <span className="text-muted">{new Date(current.createdAt).toLocaleString()}</span>}
         <span className="ml-auto flex shrink-0 flex-wrap gap-1">
+          {current.kind === "mcp.call" && (
+            <Tooltip label="The server made this change; undo it there if you need to.">
+              <span className="text-muted" tabIndex={0} data-effect-permanent>
+                Can’t be undone from the app
+              </span>
+            </Tooltip>
+          )}
           {undoable(current) && (
             <Button
               variant="ghost"

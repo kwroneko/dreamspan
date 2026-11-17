@@ -35,6 +35,11 @@ export interface FakeMcpState {
   redirect: string | null
   /** The instructions `initialize` answers with. */
   instructions: string | null
+  /**
+   * What `tools/call` answers; absent: the tool's name and arguments as text. `signal` aborts
+   * when the client cancels the call.
+   */
+  call: ((name: string, args: Record<string, unknown>, signal: AbortSignal) => Promise<Record<string, unknown>>) | null
 }
 
 export interface FakeMcpServer {
@@ -75,6 +80,7 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
     failStatus: null,
     redirect: null,
     instructions: null,
+    call: null,
     ...initial
   }
   const recorded: Array<FakeMcpRequest> = []
@@ -95,9 +101,15 @@ export const startFakeMcpServer = async (initial: Partial<FakeMcpState> = {}): P
       const next = start + size < state.tools.length ? String(start + size) : undefined
       return { tools: page, ...(next === undefined ? {} : { nextCursor: next }) } as never
     })
-    server.setRequestHandler(CallToolRequestSchema, async (request) => ({
-      content: [{ type: "text", text: `${request.params.name} ${JSON.stringify(request.params.arguments ?? {})}` }]
-    }))
+    server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
+      state.call
+        ? ((await state.call(request.params.name, request.params.arguments ?? {}, extra.signal)) as never)
+        : {
+            content: [
+              { type: "text", text: `${request.params.name} ${JSON.stringify(request.params.arguments ?? {})}` }
+            ]
+          }
+    )
     return server
   }
 

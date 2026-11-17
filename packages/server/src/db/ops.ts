@@ -923,6 +923,24 @@ const McpReadOps = RpcGroup.make(
     },
     success: Schema.Array(McpCall),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The servers a workshop may use (spec/MCP.md §5.1), in creation order, each with its catalog,
+   * the user's use of it and the workshop's own choice for it (null: the account default).
+   */
+  Rpc.make("McpWorkshopConnections", {
+    payload: { userId: UserId, chatId: ChatId },
+    success: Schema.Array(Schema.Struct({ connection: McpConnection, grant: Schema.NullOr(CapabilityMode) })),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The `tools/call` requests the app sent for one tool call, in this run and the runs it was
+   * resumed from (spec/MCP.md §8.3), oldest first.
+   */
+  Rpc.make("McpCallsFor", {
+    payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String },
+    success: Schema.Array(McpCall),
+    error: StorageError
   })
 )
 
@@ -2695,7 +2713,14 @@ export class WriteOpsLibrary extends RpcGroup.make(
   // by a tool: the session gives tools a writer without these (agent/tools.ts).
   /** The owner's choice for a capability in a workshop; null removes it (the default holds). */
   Rpc.make("SetWorkshopGrant", {
-    payload: { userId: UserId, chatId: ChatId, capability: Schema.String, mode: Schema.NullOr(CapabilityMode) },
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      capability: Schema.String,
+      mode: Schema.NullOr(CapabilityMode),
+      /** One target of the capability (an MCP server); absent: the capability's own standing. */
+      target: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),

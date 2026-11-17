@@ -587,6 +587,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           cardSkills: run.cardSkills ?? []
         },
         reader: run.reader,
+        vision: (generation.model as { readonly vision?: boolean } | null)?.vision === true,
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)
       })
@@ -793,7 +794,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             }
             resultTokens += await textTokens(sentText)
           }
-          const content = [{ type: "text" as const, text: fullText }]
+          const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
+            { type: "text" as const, text: fullText },
+            // A server's images, for a model that takes them (spec/MCP.md §9).
+            ...(result.images ?? []).map((image) => ({ type: "image" as const, ...image }))
+          ]
           deliveredContent.add(content)
           return {
             content,

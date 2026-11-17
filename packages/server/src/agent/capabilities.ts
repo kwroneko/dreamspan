@@ -19,6 +19,9 @@ export interface CapabilityEntry {
 
 const ALL_MODES: ReadonlyArray<CapabilityMode> = ["off", "ask", "allow"]
 
+/** The capability of every MCP server's tools; a workshop's choice names the server as its target. */
+export const MCP_CAPABILITY = "mcp"
+
 /** Owner question: should opening a side chat allow reading its story, or ask first? */
 export const SIDE_STORY_READ_MODE: CapabilityMode = "allow"
 
@@ -107,6 +110,15 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     example: "A card's “proofreading” skill tells the assistant how to check a card's spelling.",
     // No standing Allowed: a card's words are shown before they're used, each skill as written.
     modes: ["off", "ask"]
+  },
+  {
+    // spec/MCP.md §5.1: one row per server (`target`), On or Off; enabling is the consent, so
+    // there's no Ask first. Its standing comes from the server's Workshops switch, not this table.
+    id: MCP_CAPABILITY,
+    order: 100,
+    label: "MCP servers",
+    explanation: "Uses the tools of your MCP servers. Each call sends what the assistant writes in it to the server.",
+    modes: ["off", "allow"]
   }
 ])
 
@@ -126,7 +138,9 @@ export const capabilityDefaults = makeRegistry<{ readonly id: string; readonly m
   { id: "generate", mode: "ask" },
   { id: "network", mode: "ask" },
   { id: "plugins.apply", mode: "ask" },
-  { id: "skills.card", mode: "ask" }
+  { id: "skills.card", mode: "ask" },
+  // Each server's own row decides (its Workshops switch, or the workshop's On or Off).
+  { id: MCP_CAPABILITY, mode: "allow" }
 ])
 
 export interface CapabilityRegistries {

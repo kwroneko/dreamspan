@@ -23,12 +23,26 @@ export const modeDescription: Record<CapabilityMode, string> = {
   allow: "The assistant does this without asking. Each change can be undone from its step or Changes."
 }
 
+/**
+ * An MCP server's row (spec/MCP.md §13.3) says On rather than Allowed: there's no asking, and
+ * what it allows is the server's allowed tools.
+ */
+export const modeLabelOf = (capability: WorkshopCapability, mode: CapabilityMode) =>
+  capability.target !== undefined && mode === "allow" ? "On" : modeLabel[mode]
+
+export const modeDescriptionOf = (capability: WorkshopCapability, mode: CapabilityMode) =>
+  capability.target === undefined
+    ? modeDescription[mode]
+    : mode === "allow"
+      ? "The assistant may use its allowed tools here without asking."
+      : "The assistant can't use it here."
+
 /** The choices in the order the row shows them: Off, Ask first, Allowed. */
 const modeOrder: ReadonlyArray<CapabilityMode> = ["off", "ask", "allow"]
 export const choicesOf = (capability: WorkshopCapability) => modeOrder.filter((m) => capability.modes.includes(m))
 
 export const modeText = (capability: WorkshopCapability) =>
-  capability.always ? "Always allowed" : modeLabel[capability.mode]
+  capability.always ? "Always allowed" : modeLabelOf(capability, capability.mode)
 
 /** The chip's text: "Can: 6 · Asks: 2 · Off: 1", leaving out a count of none. */
 export const chipText = (capabilities: ReadonlyArray<WorkshopCapability>) => {

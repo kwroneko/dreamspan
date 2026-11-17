@@ -24,7 +24,12 @@ export const WorkshopCapability = Schema.Struct({
   /** This workshop chose `mode` (it isn't the default). */
   chosen: Schema.Boolean,
   /** Only one choice: it can't be changed. */
-  always: Schema.optionalKey(Schema.Boolean)
+  always: Schema.optionalKey(Schema.Boolean),
+  /**
+   * What the row is for within its capability: an MCP server's connection id (spec/MCP.md §5.1).
+   * Absent: the capability as a whole.
+   */
+  target: Schema.optionalKey(Schema.String)
 })
 export type WorkshopCapability = typeof WorkshopCapability.Type
 
@@ -151,7 +156,13 @@ export class WorkshopApi extends RpcGroup.make(
   }),
   /** Sets what the assistant may do with a capability in this workshop; null goes back to the default. */
   Rpc.make("SetWorkshopGrant", {
-    payload: { chatId: Chat.fields.id, capability: Schema.String, mode: Schema.NullOr(CapabilityMode) },
+    payload: {
+      chatId: Chat.fields.id,
+      capability: Schema.String,
+      mode: Schema.NullOr(CapabilityMode),
+      /** The row's `target` (an MCP server), when it has one. */
+      target: Schema.optionalKey(Schema.String)
+    },
     success: Schema.Array(WorkshopCapability),
     error: Schema.Union([NotFound, GrantRefused, ServerError])
   }),

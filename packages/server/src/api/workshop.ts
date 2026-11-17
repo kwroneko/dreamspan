@@ -3,11 +3,19 @@ import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
 import { CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { type CapabilityMode, GrantRefused, type RolloutEffect, type WorkshopApi } from "@rp/shared/workshopApi.ts"
+import {
+  type CapabilityMode,
+  GrantRefused,
+  type RolloutEffect,
+  type WorkshopApi,
+  type WorkshopCapability
+} from "@rp/shared/workshopApi.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
+import { MCP_CAPABILITY } from "../agent/capabilities.ts"
+import { mcpHostOf } from "../agent/tools/mcp.ts"
 import { foldState } from "@rp/shared/state.ts"
 import { capabilityView } from "../agent/capabilities.ts"
 import { cancelCapability, deliverAnswer } from "../agent/approvals.ts"
@@ -116,9 +124,32 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
                 chatId: state.workshopAttached as ChatId
               })
               .pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
-      return execution.workshopCapabilities
+      // One row per MCP server the user can use (spec/MCP.md §13.3), after the built-ins, in
+      // creation order: On or Off here, else the server's Workshops switch.
+      const mcpEntry = execution.workshopCapabilities.get(MCP_CAPABILITY)
+      const servers = mcpEntry
+        ? (yield* reader.McpWorkshopConnections({ userId, chatId })).map(
+            ({ connection, grant }, index): WorkshopCapability => {
+              const host = mcpHostOf(connection)
+              const defaultMode = connection.use.workshops ? "allow" : "off"
+              const chosen = grant === "allow" || grant === "off"
+              return {
+                id: MCP_CAPABILITY,
+                target: connection.id,
+                order: mcpEntry.order + index,
+                label: connection.name,
+                explanation: `Uses ${connection.name}'s tools. Each call sends what the assistant writes in it to ${host}.`,
+                mode: chosen ? grant : defaultMode,
+                defaultMode,
+                modes: ["off", "allow"],
+                chosen
+              }
+            }
+          )
+        : []
+      const builtins = execution.workshopCapabilities
         .list()
-        .filter((capability) => offered.has(capability.id))
+        .filter((capability) => offered.has(capability.id) && capability.id !== MCP_CAPABILITY)
         .sort((a, b) => a.order - b.order)
         .map((capability) =>
           capabilityView(
@@ -134,6 +165,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
               : capability
           )
         )
+      return [...builtins, ...servers]
     })
   return {
     ListWorkshopCapabilities: ({ chatId }) =>
@@ -142,15 +174,17 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         return yield* capabilitiesOf(userId, chatId)
       }).pipe(internal("ListWorkshopCapabilities")),
     // Only the user's own request reaches this: no tool is given these operations.
-    SetWorkshopGrant: ({ chatId, capability, mode }) =>
+    SetWorkshopGrant: ({ chatId, capability, mode, target }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
-        const offered = (yield* capabilitiesOf(userId, chatId)).find((c) => c.id === capability)
+        const offered = (yield* capabilitiesOf(userId, chatId)).find(
+          (c) => c.id === capability && (c.target ?? "") === (target ?? "")
+        )
         if (!offered) return yield* new GrantRefused({ message: "This workshop doesn't offer that." })
         if (mode !== null && !offered.modes.includes(mode))
           return yield* new GrantRefused({ message: `“${offered.label}” can't be set that way.` })
-        yield* writer.SetWorkshopGrant({ userId, chatId, capability, mode })
-        if (mode === "off") cancelCapability(chatId, capability)
+        yield* writer.SetWorkshopGrant({ userId, chatId, capability, mode, ...(target ? { target } : {}) })
+        if (mode === "off") cancelCapability(chatId, capability, target)
         return yield* capabilitiesOf(userId, chatId)
       }).pipe(internal("SetWorkshopGrant")),
     AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note, storyAt }) =>

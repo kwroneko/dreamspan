@@ -9,7 +9,8 @@ import {
   RouteSection,
   ServerSection,
   SignInSection,
-  ToolsSection
+  ToolsSection,
+  UsesSection
 } from "./detail.tsx"
 import { McpServersPage, NewMcpServerPage } from "./list.tsx"
 
@@ -31,6 +32,7 @@ export const register = () => {
   })
   mcpSections.register({ id: "server", order: 10, component: ServerSection })
   mcpSections.register({ id: "sign-in", order: 20, component: SignInSection })
+  mcpSections.register({ id: "uses", order: 25, component: UsesSection })
   mcpSections.register({ id: "tools", order: 30, component: ToolsSection })
   mcpSections.register({ id: "route", order: 40, component: RouteSection })
   mcpSections.register({ id: "calls", order: 50, component: CallsSection })

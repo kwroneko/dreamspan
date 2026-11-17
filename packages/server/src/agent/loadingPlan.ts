@@ -16,6 +16,7 @@ import {
   offeredSkills,
   orphansOf,
   type Skill,
+  skillsFor,
   splitOffer,
   TOOL_SEARCH,
   LOAD_SKILL,
@@ -93,6 +94,8 @@ export const planToolLoading = (
     readonly tools: ReadonlyArray<Tool>
     readonly model: ModelInput | null
     readonly cards: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
+    /** Skills of this run beyond the registered ones: an MCP server's (spec/MCP.md §4.4). */
+    readonly skills?: ReadonlyArray<Skill>
   }
 ): Effect.Effect<{ readonly offer: ToolOffer<Tool>; readonly cardSkills: ReadonlyArray<Skill> }> =>
   Effect.gen(function* () {
@@ -122,12 +125,21 @@ export const planToolLoading = (
               Effect.orElseSucceed(() => null)
             )
     )
-    const listed = offeredSkills(
-      execution.skills.list(),
-      input.kind,
-      cards.flatMap((c) => (c ? [c] : [])),
-      loadable
-    )
+    const registered = execution.skills.list()
+    const taken = new Set(registered.map((s) => s.id))
+    const listed = [
+      ...offeredSkills(
+        registered,
+        input.kind,
+        cards.flatMap((c) => (c ? [c] : [])),
+        loadable
+      ),
+      // After the registered and card skills, never under a name one of them has.
+      ...skillsFor(
+        (input.skills ?? []).filter((s) => !taken.has(s.id)),
+        loadable
+      )
+    ]
     const load = execution.toolLoaders.get(LOAD_SKILL)
     const deferring = wire !== undefined && wire.supports(input.model)
     const loader = load && listed.length ? { ...load, description: loadSkillDescription(listed, deferring) } : undefined

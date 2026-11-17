@@ -6,7 +6,9 @@ export const rolloutEffectClasses = makeRegistry([
   { id: "external", outsideChat: true },
   { id: "library", outsideChat: true },
   { id: "setup", outsideChat: true },
-  { id: "outside", outsideChat: true }
+  { id: "outside", outsideChat: true },
+  // A call to an MCP server the user enabled here (spec/MCP.md §8.1): what it does is the server's.
+  { id: "mcp", outsideChat: true }
 ])
 
 // Unknown classes are refused in stories too.

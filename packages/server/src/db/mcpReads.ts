@@ -8,7 +8,7 @@ import { query } from "./tx.ts"
 
 export const makeMcpReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  const { list, owned } = makeMcpQueries(sql)
+  const { list, owned, catalogs } = makeMcpQueries(sql)
   const handlers = {
     ListMcpConnections: ({ userId }) =>
       list(userId).pipe(
@@ -57,7 +57,35 @@ export const makeMcpReadHandlers = Effect.gen(function* () {
             AND (started_at < ${at} OR (started_at = ${at} AND id < ${before?.id ?? ""}))
           ORDER BY started_at DESC, id DESC LIMIT ${limit}`
         return rows.map(toMcpCall)
-      }).pipe(query("ListMcpCalls"))
+      }).pipe(query("ListMcpCalls")),
+    McpWorkshopConnections: ({ userId, chatId }) =>
+      Effect.gen(function* () {
+        const [chat] =
+          yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        const rows = yield* catalogs(userId)
+        const grants = yield* sql<{ target: string; mode: "off" | "ask" | "allow" }>`SELECT target, mode
+          FROM workshop_grants WHERE chat_id = ${chatId} AND owner_user_id = ${userId} AND capability = 'mcp'
+            AND target <> '' AND (expires_at IS NULL OR expires_at > ${Date.now()})`
+        const chosen = new Map(grants.map((g) => [g.target, g.mode]))
+        return rows.map((row) => ({ connection: toMcpConnection(row), grant: chosen.get(row.id) ?? null }))
+      }).pipe(query("McpWorkshopConnections")),
+    McpCallsFor: ({ userId, rolloutId, toolCallId }) =>
+      // A resumed run's version names the one it carries on (origin `resumed`, as approvals find
+      // theirs, db/workshopGrants.ts): the call may have been sent by any run of that line.
+      sql<McpCallRow>`WITH RECURSIVE line(id, depth) AS (
+          SELECT ${rolloutId}, 0
+          UNION SELECT src.rollout_id, line.depth + 1 FROM line
+            JOIN versions v ON v.rollout_id = line.id AND v.origin = 'resumed' AND v.source_version_id IS NOT NULL
+            JOIN versions src ON src.id = v.source_version_id
+            WHERE src.rollout_id IS NOT NULL AND line.depth < 64
+        )
+        SELECT DISTINCT c.* FROM mcp_calls c JOIN line ON c.rollout_id = line.id
+        WHERE c.owner_user_id = ${userId} AND c.tool_call_id = ${toolCallId} AND c.method = 'tools/call'
+        ORDER BY c.started_at, c.id`.pipe(
+        Effect.map((rows) => rows.map(toMcpCall)),
+        query("McpCallsFor")
+      )
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers
 })

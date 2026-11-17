@@ -12,6 +12,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import type { Transport, TransportSendOptions } from "@modelcontextprotocol/sdk/shared/transport.js"
 import {
+  CallToolResultSchema,
   ErrorCode,
   type JSONRPCMessage,
   McpError,
@@ -134,6 +135,19 @@ export interface McpConnectionsShape {
     attribution: McpAttribution,
     transport?: RemoteMcpTransport
   ) => Effect.Effect<McpSession, McpRequestFailed | NotFound | StorageFailure, Scope.Scope>
+  /**
+   * One `tools/call` (spec/MCP.md §7): a client opened for it (its `initialize` in the ledger),
+   * the call recorded before it's sent, and closed after. Stop (interrupting the effect) and the
+   * connection's timeout send `notifications/cancelled`; progress resets the timeout, up to 30
+   * minutes in all. Says whether the call itself was sent, so a failure before it changes nothing.
+   */
+  readonly call: (input: {
+    readonly userId: UserId
+    readonly connectionId: McpConnectionId
+    readonly tool: string
+    readonly args: unknown
+    readonly attribution: McpAttribution
+  }) => Effect.Effect<McpCallOutcome, StorageFailure>
   /** One request on an open client, recorded in the ledger. */
   readonly request: <A>(
     userId: UserId,
@@ -147,6 +161,19 @@ export interface McpConnectionsShape {
     }
   ) => Effect.Effect<A, McpRequestFailed | NotFound | StorageFailure>
 }
+
+/** How one `tools/call` went. `sent`: the request left the app, so it may have happened. */
+export type McpCallOutcome =
+  | { readonly _tag: "Result"; readonly result: unknown; readonly scrub: (text: string) => string }
+  | {
+      readonly _tag: "Failed"
+      readonly sent: boolean
+      readonly status: McpRequestFailed["status"] | "refused"
+      readonly message: string
+    }
+
+/** A call may report progress for this long in all (spec/MCP.md §7.3). */
+const MCP_CALL_MAX_MS = 30 * 60 * 1000
 
 export class McpConnections extends Context.Service<McpConnections, McpConnectionsShape>()("rp/McpConnections") {}
 
@@ -190,9 +217,17 @@ class CountingTransport implements Transport {
   start() {
     return this.inner.start()
   }
+  private readonly pending = new Set<Promise<void>>()
   send(message: JSONRPCMessage, options?: TransportSendOptions) {
     this.counts.sent += Buffer.byteLength(JSON.stringify(message))
-    return this.inner.send(message, options)
+    const sending = this.inner.send(message, options)
+    const tracked = sending.catch(() => undefined).finally(() => this.pending.delete(tracked))
+    this.pending.add(tracked)
+    return sending
+  }
+  /** What is still being sent (a cancellation, say) has gone, or failed. */
+  drain() {
+    return Promise.all([...this.pending]).then(() => undefined)
   }
   close() {
     return this.inner.close()
@@ -349,7 +384,9 @@ export const layer = Layer.effect(
       counts: { sent: number; received: number },
       row: { readonly method: "initialize" | "tools/list" | "tools/call"; readonly tool: string | null },
       attribution: McpAttribution,
-      send: (signal: AbortSignal, timeoutMs: number) => Promise<A>
+      send: (signal: AbortSignal, timeoutMs: number) => Promise<A>,
+      /** The longest the request may take in all (a call reporting progress); else the timeout. */
+      totalMs?: number
     ) =>
       Effect.gen(function* () {
         const connection = prepared.connection
@@ -394,7 +431,7 @@ export const layer = Layer.effect(
         }).pipe(
           // The SSE transport's start has no timeout of its own.
           Effect.timeoutOrElse({
-            duration: timeoutMs + 1000,
+            duration: (totalMs ?? timeoutMs) + 1000,
             orElse: () =>
               Effect.fail(
                 new McpRequestFailed(
@@ -451,9 +488,14 @@ export const layer = Layer.effect(
           recorded(userId, prepared, counts, { method: "initialize", tool: null }, attribution, (signal, timeout) =>
             client.connect(transport, { signal, timeout })
           ),
-          // Closing aborts the client's streams; a server that never lets go doesn't hold the caller.
+          // A cancellation being sent goes first. Closing aborts the client's streams; a server that
+          // never lets go doesn't hold the caller.
           () =>
-            Effect.promise(() => client.close().catch(() => undefined)).pipe(Effect.timeout("5 seconds"), Effect.ignore)
+            Effect.promise(() =>
+              Promise.race([transport.drain(), new Promise((resolve) => setTimeout(resolve, 2000))]).then(() =>
+                client.close().catch(() => undefined)
+              )
+            ).pipe(Effect.timeout("5 seconds"), Effect.ignore)
         )
         return {
           client,
@@ -465,6 +507,71 @@ export const layer = Layer.effect(
 
     const request: McpConnectionsShape["request"] = (userId, prepared, session, { method, tool, attribution, send }) =>
       recorded(userId, prepared, session.counts, { method, tool }, attribution, send)
+
+    const call: McpConnectionsShape["call"] = ({ userId, connectionId, tool, args, attribution }) =>
+      Effect.gen(function* () {
+        const prepared = yield* Effect.result(prepare(userId, connectionId))
+        if (prepared._tag === "Failure") {
+          const failure = prepared.failure
+          if (failure._tag === "McpRefused")
+            return { _tag: "Failed", sent: false, status: "refused", message: failure.message } as const
+          if (failure._tag === "NotFound")
+            return {
+              _tag: "Failed",
+              sent: false,
+              status: "refused",
+              message: "This server isn't available now."
+            } as const
+          if (failure._tag === "StaleWrite")
+            return {
+              _tag: "Failed",
+              sent: false,
+              status: "refused",
+              message: "This server changed. Try again."
+            } as const
+          return yield* Effect.fail(failure)
+        }
+        const ready = prepared.success
+        let sent = false
+        // `initialize` is the connection's, not the call's: only `tools/call` names the call.
+        const opening = { ...attribution, rolloutId: null, toolCallId: null }
+        const outcome = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const session = yield* open(userId, ready, opening)
+            sent = true
+            return yield* recorded(
+              userId,
+              ready,
+              session.counts,
+              { method: "tools/call", tool },
+              attribution,
+              (signal, timeout) =>
+                session.client.request(
+                  {
+                    method: "tools/call",
+                    params: { name: tool, arguments: (args ?? {}) as Record<string, unknown> }
+                  },
+                  CallToolResultSchema,
+                  {
+                    signal,
+                    timeout,
+                    resetTimeoutOnProgress: true,
+                    maxTotalTimeout: MCP_CALL_MAX_MS,
+                    onprogress: () => undefined
+                  }
+                ),
+              MCP_CALL_MAX_MS
+            )
+          })
+        ).pipe(Effect.result)
+        if (outcome._tag === "Success") return { _tag: "Result", result: outcome.success, scrub: ready.scrub } as const
+        const failure = outcome.failure
+        if (failure instanceof McpRequestFailed)
+          return { _tag: "Failed", sent, status: failure.status, message: failure.message } as const
+        if (failure._tag === "NotFound")
+          return { _tag: "Failed", sent, status: "refused", message: "This server isn't available now." } as const
+        return yield* Effect.fail(failure)
+      })
 
     /** `initialize` and every page of `tools/list`, up to the listing's bounds. */
     const list = (userId: UserId, prepared: McpPrepared, transport: RemoteMcpTransport) =>
@@ -671,7 +778,7 @@ export const layer = Layer.effect(
         })
       })
 
-    return McpConnections.of({ create, update, setKey, setHeaders, setProxy, check, prepare, open, request })
+    return McpConnections.of({ create, update, setKey, setHeaders, setProxy, check, prepare, open, request, call })
   })
 )
 

@@ -21,8 +21,8 @@ import {
   chipLabel,
   chipText,
   choicesOf,
-  modeDescription,
-  modeLabel,
+  modeDescriptionOf,
+  modeLabelOf,
   modeText,
   type WorkshopCapability
 } from "./capabilities.ts"
@@ -32,7 +32,13 @@ function CapabilityRow({ chatId, capability }: { chatId: ChatId; capability: Wor
   const choices = choicesOf(capability)
   const set = (mode: CapabilityMode | null) =>
     void action.run(
-      (client) => client("SetWorkshopGrant", { chatId, capability: capability.id, mode }),
+      (client) =>
+        client("SetWorkshopGrant", {
+          chatId,
+          capability: capability.id,
+          mode,
+          ...(capability.target ? { target: capability.target } : {})
+        }),
       [CAPABILITIES_KEY]
     )
   const about = capability.example
@@ -41,6 +47,7 @@ function CapabilityRow({ chatId, capability }: { chatId: ChatId; capability: Wor
   return (
     <li
       data-capability={capability.id}
+      {...(capability.target ? { "data-capability-target": capability.target } : {})}
       data-mode={capability.mode}
       className="flex flex-col gap-1 rounded-md px-2 py-1.5 text-sm"
     >
@@ -57,8 +64,8 @@ function CapabilityRow({ chatId, capability }: { chatId: ChatId; capability: Wor
             value={capability.mode}
             options={choices.map((mode) => ({
               value: mode,
-              label: modeLabel[mode],
-              description: `${modeDescription[mode]}${mode === capability.defaultMode ? " (The default.)" : ""}`
+              label: modeLabelOf(capability, mode),
+              description: `${modeDescriptionOf(capability, mode)}${mode === capability.defaultMode ? " (The default.)" : ""}`
             }))}
             onValueChange={(mode) => mode !== capability.mode && set(mode)}
           />
@@ -72,7 +79,7 @@ function CapabilityRow({ chatId, capability }: { chatId: ChatId; capability: Wor
           variant="ghost"
           className="h-7 self-start px-2 text-xs"
           pending={action.pending}
-          hint={`Goes back to the default here: ${modeLabel[capability.defaultMode]}.`}
+          hint={`Goes back to the default here: ${modeLabelOf(capability, capability.defaultMode)}.`}
           onClick={() => set(null)}
         >
           Use the default
@@ -105,7 +112,11 @@ export function CapabilityChip({ session }: ComposerControlContext) {
         data-layout-audit-ignore="inset: Unbordered list of full-width rows, inset by the popover's padding"
       >
         {capabilities.map((capability) => (
-          <CapabilityRow key={capability.id} chatId={session.chatId} capability={capability} />
+          <CapabilityRow
+            key={`${capability.id}:${capability.target ?? ""}`}
+            chatId={session.chatId}
+            capability={capability}
+          />
         ))}
       </ul>
       <p className="shrink-0 border-t border-border px-2 pt-2 text-xs text-muted">These hold for this workshop only.</p>

@@ -15,7 +15,7 @@ import type { Reader, Writer } from "../db/Database.ts"
  * version, so a swipe reverses them. `external`: the library, settings, plugins, which an RP
  * turn never offers (DESIGN §7.3).
  */
-type EffectClass = "read" | "chat_state" | "external" | "library" | "setup" | "outside"
+type EffectClass = "read" | "chat_state" | "external" | "library" | "setup" | "outside" | "mcp"
 
 export interface ToolContext {
   readonly userId: UserId
@@ -38,6 +38,8 @@ export interface ToolContext {
   /** Own-turn notes follow the speaker even in shared history. */
   readonly speaker?: string | null
   readonly reader: Reader["Service"]
+  /** The run's model accepts images. */
+  readonly vision?: boolean
   /** The writer, without what only the user may do: grants and approvals (`toolWriter`). */
   readonly writer: ToolWriter
   /** Values a tool works out once per rollout (the path, the summaries), by key. */
@@ -83,6 +85,8 @@ export interface ToolOutput {
   readonly isError?: boolean
   /** Deferred tools this call loaded (spec/TOOL-LOADING.md): stored as the result's `details.loaded`. */
   readonly loaded?: ReadonlyArray<string>
+  /** Images for a model that accepts them, after the text (an MCP server's, spec/MCP.md §9). */
+  readonly images?: ReadonlyArray<{ readonly data: string; readonly mimeType: string }>
 }
 
 export type WorkshopStoryRead = "positioned" | "conversation" | "library" | "account" | "refused"
@@ -118,6 +122,8 @@ export interface RolloutTool<A = never> {
   /** Mandatory consent, or a separately validated reversible rollback. Off still refuses. */
   readonly approval?: "always" | "rollback"
   readonly adminOnly?: true
+  /** A tool of an MCP server (spec/MCP.md §4.2): which, frozen with the offer. */
+  readonly mcp?: McpToolRef
   /** False: never one of a story's reply tools (This chat's Tools list leaves it out), only a planner's. */
   readonly replyTool?: false
   /** Model-facing, with its usage guidance: when to call it and when not to. */
@@ -145,7 +151,7 @@ export interface RolloutTool<A = never> {
     context: ToolContext,
     args: A
   ) => Effect.Effect<
-    Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin" | "presentation">,
+    Pick<ApprovalPrompt, "title" | "rows" | "changes" | "storyAt" | "storyScope" | "plugin" | "presentation" | "rerun">,
     unknown
   >
   readonly execute: (context: ToolContext, args: A) => Effect.Effect<ToolOutput>
@@ -207,6 +213,21 @@ export interface FrozenTool {
   readonly label: string
   /** Declared but not loaded from the start: a loading tool makes it callable (spec/TOOL-LOADING.md). */
   readonly deferred?: true
+  /** An MCP server's tool: app metadata, never part of the definition the model is sent. */
+  readonly mcp?: McpToolRef
+}
+
+/** Which server and tool an offered MCP tool is (spec/MCP.md §4.2). */
+export interface McpToolRef {
+  readonly connection: string
+  /** The server's name for the connection, when the run was planned. */
+  readonly connectionName: string
+  readonly host: string
+  /** The key its tools are offered under: `mcp_<key>_<tool>`. */
+  readonly key: string
+  readonly catalogRevision: number
+  /** The server's own name for the tool, sent in `tools/call`. */
+  readonly tool: string
 }
 
 export const frozenTool = (tool: RolloutTool<never>): FrozenTool => ({
@@ -216,7 +237,8 @@ export const frozenTool = (tool: RolloutTool<never>): FrozenTool => ({
   effect: tool.effect,
   ...(tool.capability ? { capability: tool.capability } : {}),
   ...(tool.titleField ? { titleField: tool.titleField } : {}),
-  label: tool.label
+  label: tool.label,
+  ...(tool.mcp ? { mcp: tool.mcp } : {})
 })
 
 /** The output contract is part of the offered toolset and its frozen snapshot too. */

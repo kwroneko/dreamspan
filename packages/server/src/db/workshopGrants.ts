@@ -66,9 +66,20 @@ export const writeGrant = (
 export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    SetWorkshopGrant: ({ userId, chatId, capability, mode }) =>
+    SetWorkshopGrant: ({ userId, chatId, capability, mode, target }) =>
       Effect.gen(function* () {
         yield* ownedWorkshop(sql, userId, chatId)
+        if (target !== undefined && target !== "") {
+          // One target of a capability (an MCP server, spec/MCP.md §5.1): only its own row, and
+          // Off ends that server's waiting "Run it again" questions in this workshop.
+          yield* writeGrant(sql, userId, chatId, capability, mode, target)
+          if (mode === "off")
+            yield* sql`UPDATE tool_approvals SET status = CASE WHEN status = 'allowed' THEN 'used' ELSE 'cancelled' END
+              WHERE capability = ${capability} AND status IN ('pending', 'allowed')
+                AND json_extract(prompt_json, '$.rerun.connectionId') = ${target}
+                AND rollout_id IN (SELECT id FROM rollouts WHERE chat_id = ${chatId})`
+          return
+        }
         yield* writeGrant(sql, userId, chatId, capability, mode)
         // Choosing a capability's standing anew also forgets what was allowed for exact content
         // under it (a card skill "allowed in this workshop"): the chip is where that is undone.
@@ -135,6 +146,9 @@ export const makeWorkshopGrantWriteHandlers = Effect.gen(function* () {
           return yield* new ApprovalRefused({
             message: "This capability is turned off. Look again before allowing it."
           })
+        // Running an interrupted MCP call again is one answer for one call (spec/MCP.md §8.3).
+        if (answer === "allow_chat" && row.capability === "mcp")
+          return yield* new ApprovalRefused({ message: "This can only be answered for this call." })
         if (
           answer === "allow_chat" &&
           target === "" &&

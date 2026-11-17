@@ -20,7 +20,7 @@ import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
-import { Checkbox, RadioGroup } from "../../ui/Choice.tsx"
+import { Checkbox, RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Fieldset, focusFirstInvalid, formText, Input, SecretInput, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
@@ -709,6 +709,50 @@ export function ToolsSection({ connection }: McpSectionProps) {
             ))}
           </ul>
         )}
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Use it in (spec/MCP.md §13.1): the account's defaults for story chats and workshops. A chat or
+ * workshop can still turn the server on or off for itself.
+ */
+export function UsesSection({ connection }: McpSectionProps) {
+  const action = useAction()
+  const host = mcpHost(connection)
+  const set = (change: { readonly stories?: boolean; readonly workshops?: boolean }) =>
+    void action.run(
+      (client) => client("SetMcpUse", { connectionId: connection.id, ...change }),
+      ["mcp", "workshop-capabilities"]
+    )
+  return (
+    <Card>
+      <CardHeader
+        title="Use it in"
+        about="Where the model may use this server's allowed tools by default. A chat or workshop can still turn it on or off for itself."
+      />
+      <div className="flex flex-col gap-3" data-mcp-uses>
+        <Switch
+          checked={connection.use.stories}
+          disabled={action.pending}
+          onCheckedChange={(stories) => set({ stories })}
+          hint={`Lets story replies with tools use its allowed tools, unless a chat turns it off. Each call sends what the model writes in it to ${host}.`}
+        >
+          Stories
+        </Switch>
+        <Switch
+          checked={connection.use.workshops}
+          disabled={action.pending}
+          onCheckedChange={(workshops) => set({ workshops })}
+          hint={`Lets workshops use its allowed tools, unless a workshop turns it off. Each call sends what the assistant writes in it to ${host}.`}
+        >
+          Workshops
+        </Switch>
+        <p className="text-xs text-muted">
+          Changes a server makes outside the app aren’t undone by a swipe, a branch or a new version.
+        </p>
+        <ErrorAlert error={action.error} title="Not changed" />
       </div>
     </Card>
   )

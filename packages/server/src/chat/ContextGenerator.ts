@@ -48,6 +48,8 @@ import { loaderFor, loadingWireFor, offerableTools, planToolLoading, skillMarker
 import { dispatcherDefinition } from "../agent/dispatcher.ts"
 import { frozenOffer, loadedSet, type Skill } from "../agent/toolLoading.ts"
 import { DecisionEngine } from "../decision/engine.ts"
+import { McpConnections } from "../mcp/McpConnections.ts"
+import { enabledServers, mcpOfferTools, mcpSkillOf, mcpToolFromFrozen } from "../agent/tools/mcp.ts"
 import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
@@ -70,6 +72,8 @@ export const layer = Layer.effect(
     const hub = yield* ChatHub
     // Optional, as decision models are (DESIGN §7.6): without the engine the keywords decide.
     const decisions = yield* Effect.serviceOption(DecisionEngine)
+    // MCP servers' tools (spec/MCP.md M2), where the server runs the MCP client.
+    const mcp = Option.getOrUndefined(yield* Effect.serviceOption(McpConnections))
 
     // Rollouts a previous process left running ended with it; their versions were
     // interrupted the same way (Generations).
@@ -184,7 +188,7 @@ export const layer = Layer.effect(
         if (!profile)
           return yield* new GenerationFailed({ class: "unavailable", message: "This chat kind is unavailable." })
         const tools = frozen.tools.flatMap((t) => {
-          const tool = toolForKind(execution, chat.kind, t.name) ?? loaderFor(execution, t)
+          const tool = toolForKind(execution, chat.kind, t.name) ?? loaderFor(execution, t) ?? mcpToolFromFrozen(mcp, t)
           return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
         })
         const reply = strategy.run({
@@ -328,11 +332,30 @@ export const layer = Layer.effect(
                 "Replies that say who's in the scene need Separate contexts. Choose Separate contexts, or set Who's in the scene to Replies don't say."
             })
           const agentic = plan.strategy !== "reply"
-          const candidates = plan.tools.flatMap((id) => {
-            const tool = toolForKind(execution, chat.kind, id)
-            // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
-            return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
-          })
+          // The MCP servers on in this workshop (spec/MCP.md §5.1), read from storage: planning
+          // never reaches a server. Stories get theirs in M3.
+          const mcpServers =
+            agentic && mcp && profile.allowsOutside
+              ? enabledServers(
+                  yield* reader
+                    .McpWorkshopConnections({ userId, chatId })
+                    .pipe(
+                      Effect.catchTag(
+                        ["StorageError", "RpcClientError", "NotFound"],
+                        serverFailure("McpWorkshopConnections")
+                      )
+                    )
+                )
+              : []
+          const candidates = [
+            ...plan.tools.flatMap((id) => {
+              const tool = toolForKind(execution, chat.kind, id)
+              // Tools with effects outside the chat are never offered in an RP turn (DESIGN §7.3).
+              return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
+            }),
+            // After the built-in tools: servers in creation order, each one's tools by name (§4.3).
+            ...(mcp && mcpServers.length ? mcpOfferTools(mcp, mcpServers) : [])
+          ]
           // A capability turned off in the workshop isn't offered (spec/WORKSHOP.md §3.4).
           const { tools, off } = yield* offeredByGrants({ registries: execution, reader, userId, chatId }, candidates)
           let stepSummaries: Readonly<Record<string, string>> | undefined
@@ -450,6 +473,8 @@ export const layer = Layer.effect(
                   kind: chat.kind,
                   tools,
                   model: generation.model,
+                  // Each server is a skill: its index line is the user's own "What it's for".
+                  skills: mcpServers.map((entry) => mcpSkillOf(entry.connection)),
                   cards: snapshot.inputs.cards.filter((c) => !state.playedByMe.includes(c.entity as never))
                 }
               )

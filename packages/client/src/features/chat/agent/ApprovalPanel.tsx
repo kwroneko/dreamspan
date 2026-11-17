@@ -21,6 +21,15 @@ import type { StepActionProps } from "./stepActions.ts"
 const UNCERTAIN_TEXT =
   "The app stopped while this was running. It may already have happened: check before allowing it again."
 
+/** An interrupted call to an MCP server (spec/MCP.md §8.3): what the app's record of it says. */
+const rerunFacts = (rerun: NonNullable<NonNullable<StepActionProps["step"]["approval"]>["rerun"]>) => {
+  if (rerun.sentAt === null) return "It was never sent."
+  const at = new Date(rerun.sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  return rerun.status === "complete"
+    ? `The app had sent it to ${rerun.connection} at ${at} and got an answer, but stopped before keeping it.`
+    : `The app had sent it to ${rerun.connection} at ${at} and got no answer.`
+}
+
 export function ApprovalPanel({ step, version }: StepActionProps) {
   const approval = step.status === "waiting" ? step.approval : undefined
   const action = useAction()
@@ -71,6 +80,7 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
     }
   }
   const busy = answering !== null
+  const rerun = approval.rerun
   return (
     <div
       data-approval={approval.toolCallId}
@@ -80,16 +90,31 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
     >
       <div className="flex flex-col gap-0.5">
         <p className="font-medium [overflow-wrap:anywhere]">{approval.title}</p>
-        <p className="text-xs text-muted [overflow-wrap:anywhere]">Asks first: {approval.capabilityLabel}</p>
+        <p className="text-xs text-muted [overflow-wrap:anywhere]">
+          {rerun
+            ? `Interrupted call to ${rerun.connection} (${rerun.host})`
+            : `Asks first: ${approval.capabilityLabel}`}
+        </p>
       </div>
-      {approval.uncertain && <Alert tone="warning">{UNCERTAIN_TEXT}</Alert>}
+      {rerun ? (
+        <Alert tone="warning">
+          <p>The app stopped while this was running. It may already have happened: check before running it again.</p>
+          <p>{rerunFacts(rerun)}</p>
+          <p>Changes it makes outside the app aren’t undone by a swipe or a branch.</p>
+        </Alert>
+      ) : (
+        approval.uncertain && <Alert tone="warning">{UNCERTAIN_TEXT}</Alert>
+      )}
       {approval.storyScope && (
         <p className="text-xs font-medium [overflow-wrap:anywhere]">
           <StoryScope scope={approval.storyScope} at={approval.storyAt} />
         </p>
       )}
       {approval.rows.length > 0 && (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs" aria-label="What it will write">
+        <dl
+          className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs"
+          aria-label={rerun ? "What it sends to the server" : "What it will write"}
+        >
           {approval.rows
             .filter((row) => !approval.storyScope || !["Scope", "Story position"].includes(row.label))
             .map((row) => (
@@ -133,7 +158,10 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
         </div>
       ))}
       {noting && (
-        <Field label="Note for the assistant" description="Sent with Decline, so it knows why. Optional.">
+        <Field
+          label="Note for the assistant"
+          description={`Sent with ${rerun ? "Don't run it" : "Decline"}, so it knows why. Optional.`}
+        >
           <Textarea value={note} maxLength={2000} rows={2} onChange={(event) => setNote(event.target.value)} />
         </Field>
       )}
@@ -144,13 +172,17 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
           pending={answering === "allow"}
           disabled={busy}
           hint={
-            approval.plugin ? "Checks and runs this exact version from now on." : "Lets the assistant do this once."
+            rerun
+              ? `Sends this call to ${rerun.connection} again, with the arguments shown.`
+              : approval.plugin
+                ? "Checks and runs this exact version from now on."
+                : "Lets the assistant do this once."
           }
           onClick={() => void answer("allow")}
         >
-          {approval.plugin ? "Turn on" : "Allow"}
+          {rerun ? "Run it again" : approval.plugin ? "Turn on" : "Allow"}
         </Button>
-        {!approval.plugin && approval.capability !== "plugins.apply" && (
+        {!rerun && !approval.plugin && approval.capability !== "plugins.apply" && (
           <Button
             pending={answering === "allow_chat"}
             disabled={busy}
@@ -167,16 +199,22 @@ export function ApprovalPanel({ step, version }: StepActionProps) {
         <Button
           pending={answering === "deny"}
           disabled={busy}
-          hint={approval.plugin ? "Leaves this plugin as it is." : "Tells the assistant not to. Nothing is changed."}
+          hint={
+            rerun
+              ? "Tells the assistant it wasn't run again. Nothing is sent."
+              : approval.plugin
+                ? "Leaves this plugin as it is."
+                : "Tells the assistant not to. Nothing is changed."
+          }
           onClick={() => void answer("deny")}
         >
-          {approval.plugin ? "Not now" : "Decline"}
+          {rerun ? "Don't run it" : approval.plugin ? "Not now" : "Decline"}
         </Button>
         {!noting && (
           <Button
             variant="ghost"
             disabled={busy}
-            hint="Adds a note the assistant gets with Decline, saying why or what to do instead."
+            hint={`Adds a note the assistant gets with ${rerun ? "Don't run it" : "Decline"}, saying why or what to do instead.`}
             onClick={() => setNoting(true)}
           >
             Add a note
