@@ -2,7 +2,7 @@
 // name after it, tools this chat lacks kept in place, and a fit that reserves the open tool's
 // room before counting, so the row can't flip between two layouts at a boundary width.
 import { describe, expect, it } from "vitest"
-import { fitTools, inOrder, moved, placedBefore, storedOrder, TOOL_GAP } from "../src/ui/tabOrder.ts"
+import { fitTools, inOrder, MAX_STORED, moved, placedBefore, storedOrder, TOOL_GAP } from "../src/ui/tabOrder.ts"
 
 const tabs = (...values: Array<string>) => values.map((value) => ({ value }))
 const names = (list: ReadonlyArray<{ value: string }>) => list.map((tab) => tab.value)
@@ -26,6 +26,16 @@ describe("storedOrder", () => {
       "notes"
     ])
     expect(storedOrder(["summaries", "chat"], ["chat"])).toEqual(["summaries", "chat"])
+  })
+  it("drops duplicates in a corrupt stored order instead of growing it", () => {
+    expect(storedOrder(["gone", "a", "gone", "b", "a"], ["b", "a"])).toEqual(["gone", "b", "a"])
+    expect(storedOrder(["x", "x"], ["a", "a"])).toEqual(["x", "a"])
+  })
+  it("stays within the stored limit as removed plugins pile up", () => {
+    const gone = Array.from({ length: 250 }, (_, index) => `plugin${index}`)
+    const next = storedOrder(["a", ...gone, "b"], ["b", "a"])
+    expect(next.length).toBe(MAX_STORED)
+    expect(next.filter((value) => value === "a" || value === "b")).toEqual(["b", "a"])
   })
 })
 

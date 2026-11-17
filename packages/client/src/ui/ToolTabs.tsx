@@ -395,7 +395,18 @@ export function ToolTabs({
       if (state.armed || state.started) touchEvent.preventDefault()
     }
     const escape = (keyEvent: KeyboardEvent) => {
-      if (keyEvent.key === "Escape" && state.started) finish()
+      if (keyEvent.key !== "Escape" || !state.started) return
+      // The drag ends here, but the release still makes a click on the (captured) tab: swallow
+      // it then, so a cancelled drag doesn't open the tab either.
+      finish()
+      const release = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== state.pointerId) return
+        window.removeEventListener("pointerup", release)
+        window.removeEventListener("pointercancel", release)
+        if (upEvent.type === "pointerup") swallowClick()
+      }
+      window.addEventListener("pointerup", release)
+      window.addEventListener("pointercancel", release)
     }
     const finish = () => {
       clearTimeout(state.timer)

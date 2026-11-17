@@ -19,18 +19,28 @@ export const inOrder = <Tab extends { readonly value: string }>(
  * followed, so arranging one chat's tabs never moves another's.
  */
 export const storedOrder = (previous: ReadonlyArray<string>, shown: ReadonlyArray<string>) => {
-  const next = [...shown]
-  const present = new Set(shown)
+  const next = [...new Set(shown)]
+  const present = new Set(next)
+  // A corrupt stored order with a value twice keeps its first place only, so it can't grow.
+  const seen = new Set<string>()
   previous.forEach((value, index) => {
-    if (present.has(value)) return
+    if (present.has(value) || seen.has(value)) return
+    seen.add(value)
     const before = previous
       .slice(0, index)
       .reverse()
       .find((earlier) => next.includes(earlier))
     next.splice(before === undefined ? 0 : next.indexOf(before) + 1, 0, value)
   })
+  // The setting holds at most MAX_STORED values: past that, absent tools (plugins long gone)
+  // go, from the end, so the write never fails the setting's check.
+  for (let at = next.length - 1; next.length > MAX_STORED && at >= 0; at--)
+    if (!present.has(next[at]!)) next.splice(at, 1)
   return next
 }
+
+/** The most values the stored order holds (panelTabOrder's limit in chatApi.ts). */
+export const MAX_STORED = 200
 
 /** `values` with the one at `from` placed so that it ends at index `to`. */
 export const moved = (values: ReadonlyArray<string>, from: number, to: number) => {
