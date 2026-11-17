@@ -1,3 +1,16 @@
+import {
+  McpCall,
+  McpCallMethod,
+  McpCallPurpose,
+  McpCallStatus,
+  McpConnection,
+  McpConnectionId,
+  McpConnectionSettings,
+  McpConnectionSummary,
+  McpServerInfo,
+  McpTool,
+  McpToolChoices
+} from "@rp/shared/mcp.ts"
 import { PluginId, PluginPins, PluginData, PluginRejected } from "@rp/shared/plugins.ts"
 import { ExternalMediaPrefs, ExternalMediaTarget } from "@rp/shared/externalMedia.ts"
 import {
@@ -714,6 +727,203 @@ const SavedMediaWriteOps = RpcGroup.make(
   }),
   /** Addresses no revision names any more, and files nothing else uses; the sweep removes their bytes. */
   Rpc.make("PruneSavedMedia", { success: Schema.Int, error: StorageError })
+)
+
+/**
+ * MCP servers' storage (spec/MCP.md §12; db/mcpWrites.ts, db/mcpReads.ts), merged into
+ * WriteOpsChat and ReadOps. Secrets arrive encrypted; no network inside any of them: the main
+ * thread's MCP client talks to servers between them.
+ */
+const McpWriteOps = RpcGroup.make(
+  /** The caller picks the id, since secrets are encrypted bound to it; the key is chosen here. */
+  Rpc.make("CreateMcpConnection", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      settings: McpConnectionSettings,
+      credential: Schema.Union([
+        Schema.Struct({ existing: Schema.NullOr(CredentialId) }),
+        Schema.Struct({ typed: NewCredential })
+      ]),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A change to where or how calls are sent advances `cache_revision`. */
+  Rpc.make("UpdateMcpConnection", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      settings: McpConnectionSettings,
+      expectedRowVersion: Schema.Int,
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /** A key typed for the connection, or none; its previous own key goes when nothing else uses it. */
+  Rpc.make("SetMcpKey", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      expectedRowVersion: Schema.Int,
+      credential: Schema.NullOr(NewCredential),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  Rpc.make("SetMcpCredential", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      credentialId: Schema.NullOr(CredentialId),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SetMcpHeaders", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      expectedRowVersion: Schema.Int,
+      headers: Schema.NullOr(EncryptedHeaders),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  Rpc.make("SetMcpProxy", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      mode: ProxyMode,
+      urlEnc: Schema.NullOr(Schema.Uint8Array),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * What a Check found: the server's info and its tools (the catalog revision advances only when
+   * they differ), or why it failed. Refused as stale when the connection changed where calls go
+   * (`cache_revision`) or another listing was stored meanwhile (`catalog_revision`).
+   */
+  Rpc.make("SaveMcpCatalog", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      expectedCacheRevision: Schema.Int,
+      expectedCatalogRevision: Schema.Int,
+      outcome: Schema.Union([
+        Schema.Struct({ server: McpServerInfo, tools: Schema.Array(McpTool) }),
+        Schema.Struct({ error: Schema.String })
+      ]),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /** The user's own switches and allow list; fields left out stay. */
+  Rpc.make("SetMcpUse", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      stories: Schema.optionalKey(Schema.Boolean),
+      workshops: Schema.optionalKey(Schema.Boolean),
+      tools: Schema.optionalKey(Schema.Struct({ choices: McpToolChoices, reviewedRevision: Schema.Int })),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("DeleteMcpConnection", {
+    payload: { userId: UserId, connectionId: McpConnectionId },
+    success: BinItem,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A request about to be sent: its ledger row, `running`, before anything goes out. */
+  Rpc.make("OpenMcpCall", {
+    payload: {
+      userId: UserId,
+      call: Schema.Struct({
+        id: Schema.String,
+        connectionId: McpConnectionId,
+        connectionRevision: Schema.Int,
+        method: McpCallMethod,
+        tool: Schema.NullOr(Schema.String),
+        purpose: McpCallPurpose,
+        chatId: Schema.NullOr(Schema.String),
+        rolloutId: Schema.NullOr(Schema.String),
+        toolCallId: Schema.NullOr(Schema.String),
+        attempt: Schema.Int,
+        startedAt: Schema.Number
+      })
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Closes a running ledger row once; a closed one is a record and stays as it is. */
+  Rpc.make("CloseMcpCall", {
+    payload: {
+      userId: UserId,
+      callId: Schema.String,
+      status: McpCallStatus,
+      endedAt: Schema.Number,
+      sentBytes: Schema.NullOr(Schema.Int),
+      receivedBytes: Schema.NullOr(Schema.Int),
+      error: Schema.NullOr(Schema.String)
+    },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
+  /** At startup: requests a previous process left running are marked interrupted. */
+  Rpc.make("InterruptRunningMcpCalls", {
+    success: Schema.Struct({ interrupted: Schema.Int }),
+    error: StorageError
+  })
+)
+
+/** What the MCP client needs to reach a server, secrets still encrypted. Never sent to a browser. */
+export const McpResolved = Schema.Struct({
+  connection: McpConnection,
+  credential: Schema.NullOr(
+    Schema.Struct({ id: CredentialId, keyEnc: Schema.Uint8Array, origins: Schema.Array(Schema.String) })
+  ),
+  headersEnc: Schema.NullOr(Schema.Uint8Array),
+  proxyUrlEnc: Schema.NullOr(Schema.Uint8Array),
+  ownerRole: Schema.Literals(["admin", "user"])
+})
+
+const McpReadOps = RpcGroup.make(
+  Rpc.make("ListMcpConnections", {
+    payload: { userId: UserId },
+    success: Schema.Array(McpConnectionSummary),
+    error: StorageError
+  }),
+  Rpc.make("GetMcpConnection", {
+    payload: { userId: UserId, connectionId: McpConnectionId },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** For the main thread's MCP client only. */
+  Rpc.make("ResolveMcpConnection", {
+    payload: { userId: UserId, connectionId: McpConnectionId },
+    success: McpResolved,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ListMcpCalls", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      before: Schema.NullOr(Schema.Struct({ startedAt: Schema.Number, id: Schema.String })),
+      limit: Schema.Int
+    },
+    success: Schema.Array(McpCall),
+    error: Schema.Union([NotFound, StorageError])
+  })
 )
 
 export class WriteOpsChat extends RpcGroup.make(
@@ -1963,7 +2173,7 @@ export class WriteOpsChat extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   })
-) {}
+).merge(McpWriteOps) {}
 
 export class WriteOpsLibrary extends RpcGroup.make(
   Rpc.make("SetPluginPins", {
@@ -5667,4 +5877,4 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(ThreadSet),
     error: Schema.Union([NotFound, StorageError])
   })
-) {}
+).merge(McpReadOps) {}

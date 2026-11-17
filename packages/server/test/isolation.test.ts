@@ -18,6 +18,7 @@ import type { ConnectionSettings, ConnectionId, CredentialId, ModelId } from "@r
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { textField, valueField } from "@rp/shared/editing.ts"
 import type { LlmRequestId } from "@rp/shared/usage.ts"
+import type { McpConnectionId } from "@rp/shared/mcp.ts"
 import { Context, Effect, Fiber, Layer, Option, Stream } from "effect"
 import type { Rpc } from "effect/rpc"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -63,6 +64,8 @@ interface Party {
   readonly user: User
   readonly connectionId: ConnectionId
   readonly credentialId: CredentialId
+  /** An MCP server, at a port nothing listens on, with a key typed into it. */
+  readonly mcpConnectionId: McpConnectionId
   readonly modelId: ModelId
   readonly refId: RefId
   readonly loreRefId: RefId
@@ -974,6 +977,100 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   },
   DeleteCredential: {
     probe: (actor, owner) => refused(actor.api.DeleteCredential({ credentialId: owner.credentialId }), "NotFound")
+  },
+  // MCP servers (spec/MCP.md §12): a user's own, like provider connections.
+  ListMcpConnections: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        assert.include(
+          (yield* owner.api.ListMcpConnections()).map((c) => c.id),
+          owner.mcpConnectionId
+        )
+        assert.notInclude(
+          (yield* actor.api.ListMcpConnections()).map((c) => c.id),
+          owner.mcpConnectionId
+        )
+      })
+  },
+  GetMcpConnection: {
+    probe: (actor, owner) => refused(actor.api.GetMcpConnection({ connectionId: owner.mcpConnectionId }), "NotFound")
+  },
+  CreateMcpConnection: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.CreateMcpConnection({
+          settings: { name: "x", about: "", transport: "streamable-http", url: "http://127.0.0.1:9/mcp", timeoutS: 5 },
+          credentialId: owner.credentialId
+        }),
+        "NotFound"
+      )
+  },
+  UpdateMcpConnection: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.UpdateMcpConnection({
+          connectionId: owner.mcpConnectionId,
+          settings: { name: "x", about: "", transport: "sse", url: "http://evil.example/mcp", timeoutS: 5 },
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
+  SetMcpKey: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetMcpKey({
+          connectionId: owner.mcpConnectionId,
+          apiKey: "sk-planted-key-0000",
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
+  SetMcpCredential: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.SetMcpCredential({ connectionId: owner.mcpConnectionId, credentialId: actor.credentialId }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SetMcpCredential({ connectionId: actor.mcpConnectionId, credentialId: owner.credentialId }),
+          "NotFound"
+        )
+      })
+  },
+  SetMcpHeaders: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetMcpHeaders({
+          connectionId: owner.mcpConnectionId,
+          headers: { "X-Planted": "x" },
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
+  SetMcpProxy: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetMcpProxy({ connectionId: owner.mcpConnectionId, mode: "custom", url: "http://evil.example:8080" }),
+        "NotFound"
+      )
+  },
+  CheckMcpConnection: {
+    probe: (actor, owner) => refused(actor.api.CheckMcpConnection({ connectionId: owner.mcpConnectionId }), "NotFound")
+  },
+  SetMcpUse: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetMcpUse({ connectionId: owner.mcpConnectionId, workshops: true }), "NotFound")
+  },
+  DeleteMcpConnection: {
+    probe: (actor, owner) => refused(actor.api.DeleteMcpConnection({ connectionId: owner.mcpConnectionId }), "NotFound")
+  },
+  ListMcpCalls: {
+    probe: (actor, owner) =>
+      refused(actor.api.ListMcpCalls({ connectionId: owner.mcpConnectionId, before: null }), "NotFound")
   },
   SetConnectionHeaders: {
     probe: (actor, owner) =>
@@ -4182,6 +4279,16 @@ const seed = Effect.gen(function* () {
         apiKey: `sk-${user.handle}-connection-key`
       })
       const model = yield* api.AddUserModel({ connectionId: connection.id, key: "m", overrides: { cacheTtlS: 300 } })
+      const mcp = yield* api.CreateMcpConnection({
+        settings: {
+          name: `${user.handle} tools`,
+          about: "",
+          transport: "streamable-http",
+          url: "http://127.0.0.1:9/mcp",
+          timeoutS: 5
+        },
+        apiKey: `sk-${user.handle}-mcp-key-0000`
+      })
       yield* api.SetGenerationDefaults({
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
       })
@@ -4475,6 +4582,7 @@ const seed = Effect.gen(function* () {
         pictureSplit: { chatId: pictureChat.id, forkId: pictureFork.fork.id },
         connectionId: connection.id,
         credentialId: credential.id,
+        mcpConnectionId: mcp.connection.id,
         modelId: model.id,
         refId: ref.id,
         loreRefId: lore.ref.id,

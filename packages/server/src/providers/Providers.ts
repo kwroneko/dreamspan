@@ -268,7 +268,7 @@ export const makeScrub = (secrets: ReadonlyArray<string | null | undefined>) => 
 }
 
 /** One request-local inventory, populated as secrets resolve, before any payload is captured. */
-const requestSecrets = () => {
+export const requestSecrets = () => {
   const values = new Set<string>()
   let cached: ((text: string) => string) | undefined
   const add = (value: string) => {
@@ -330,7 +330,7 @@ const requestSecrets = () => {
 }
 
 const binding = (connectionId: string, field: "headers" | "proxy_url") => `connection:${connectionId}:${field}`
-const credentialBinding = (credentialId: string) => `credential:${credentialId}:key`
+export const credentialBinding = (credentialId: string) => `credential:${credentialId}:key`
 
 /** Compares two keys without leaking where they differ through timing. */
 const sameKey = (a: string, b: string) =>

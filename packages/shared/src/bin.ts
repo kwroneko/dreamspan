@@ -63,7 +63,8 @@ const BinItemKind = Schema.Literals([
   "version",
   "entity",
   "connection",
-  "card_asset"
+  "card_asset",
+  "mcp_connection"
 ])
 
 /** Something explicitly deleted: a chat, a message, a swipe, a branch, threads started together (their Undo), a library entity, a connection. */

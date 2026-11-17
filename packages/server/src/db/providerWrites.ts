@@ -186,7 +186,8 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         const updated = yield* setSecrets(userId, connectionId, { credential_id: credential?.credentialId ?? null })
         if (row.credential_id !== null) {
           yield* sql`DELETE FROM credentials WHERE id = ${row.credential_id} AND connection_owned = 1
-            AND NOT EXISTS (SELECT 1 FROM connections WHERE credential_id = ${row.credential_id})`
+            AND NOT EXISTS (SELECT 1 FROM connections WHERE credential_id = ${row.credential_id})
+            AND NOT EXISTS (SELECT 1 FROM mcp_connections WHERE credential_id = ${row.credential_id})`
         }
         return updated
       }).pipe(transaction(sql, "SetConnectionKey")),

@@ -46,6 +46,8 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
       DeleteEntity: ({ userId, entityId }) => deleting("DeleteEntity", userId, bin.deleteEntity(userId, entityId)),
       DeleteConnection: ({ userId, connectionId }) =>
         deleting("DeleteConnection", userId, bin.deleteConnection(userId, connectionId)),
+      DeleteMcpConnection: ({ userId, connectionId }) =>
+        deleting("DeleteMcpConnection", userId, bin.deleteMcpConnection(userId, connectionId)),
       RestoreBinItem: ({ userId, itemId }) => bin.restore(userId, itemId).pipe(transaction(sql, "RestoreBinItem")),
       RestoreBinItems: ({ userId, itemIds }) =>
         bin.restoreMany(userId, itemIds).pipe(transaction(sql, "RestoreBinItems")),

@@ -1,5 +1,18 @@
 // Each unexposed RPC is an explicit decision. New operations must be classified here or exposed.
 export const operationExclusions: Readonly<Record<string, string>> = {
+  // MCP servers (spec/MCP.md §2): only the user connects, checks and allows them.
+  CheckMcpConnection: "User-only security, consent, account, credential or network configuration.",
+  CreateMcpConnection: "User-only security, consent, account, credential or network configuration.",
+  DeleteMcpConnection: "User-only security, consent, account, credential or network configuration.",
+  GetMcpConnection: "User-only security, consent, account, credential or network configuration.",
+  ListMcpCalls: "User-only security, consent, account, credential or network configuration.",
+  ListMcpConnections: "User-only security, consent, account, credential or network configuration.",
+  SetMcpCredential: "User-only security, consent, account, credential or network configuration.",
+  SetMcpHeaders: "User-only security, consent, account, credential or network configuration.",
+  SetMcpKey: "User-only security, consent, account, credential or network configuration.",
+  SetMcpProxy: "User-only security, consent, account, credential or network configuration.",
+  SetMcpUse: "User-only security, consent, account, credential or network configuration.",
+  UpdateMcpConnection: "User-only security, consent, account, credential or network configuration.",
   GoBackPlugin: "Plugin management stays user-only until P4 supplies its approval workflow.",
   ListBuiltinParts: "Dedicated plugin authoring tools retain source and permission boundaries.",
   CopyBuiltin: "Dedicated plugin authoring tools retain inertness, receipts and exact-version consent.",

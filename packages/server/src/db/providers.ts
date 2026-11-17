@@ -105,9 +105,14 @@ export interface CredentialRow {
   readonly used_by: number
 }
 
-/** Credential columns with the count of live connections using it; alias the table `cr`. */
+/**
+ * Credential columns with the count of live connections using it, provider and MCP connections
+ * alike; alias the table `cr`.
+ */
 export const credentialColumns = `cr.*, (SELECT count(*) FROM connections c
-  WHERE c.credential_id = cr.id AND c.deleted_at IS NULL AND c.purged_at IS NULL) AS used_by`
+  WHERE c.credential_id = cr.id AND c.deleted_at IS NULL AND c.purged_at IS NULL)
+  + (SELECT count(*) FROM mcp_connections m
+  WHERE m.credential_id = cr.id AND m.deleted_at IS NULL AND m.purged_at IS NULL) AS used_by`
 
 export const toCredential = (row: CredentialRow) =>
   new Credential({

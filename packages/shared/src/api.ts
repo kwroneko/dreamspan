@@ -23,6 +23,7 @@ import { AgentApi } from "./agentApi.ts"
 import { DecisionApi } from "./decisionApi.ts"
 import { ThinkingApi } from "./thinkingApi.ts"
 import { ProviderListApi } from "./providerApi.ts"
+import { McpApi } from "./mcpApi.ts"
 import { ChatSetupApi, ShellUpdatesApi } from "./chatSetupApi.ts"
 import { StImportApi, StImportPlanApi } from "./stImportApi.ts"
 import { BinApi } from "./binApi.ts"
@@ -473,6 +474,9 @@ export class AuthenticatedDraftPreviewApi extends DraftPreviewApi.middleware(Aut
 /** The providers a new connection starts from (providerApi.ts). */
 export class AuthenticatedProviderListApi extends ProviderListApi.middleware(Authentication) {}
 
+/** MCP servers (mcpApi.ts). */
+export class AuthenticatedMcpApi extends McpApi.middleware(Authentication) {}
+
 export const AuthenticatedMessageVersionApi = MessageVersionApi.middleware(Authentication)
 
 /** Moving messages up and down (messagesApi.ts). */
@@ -508,6 +512,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedChatThreadsApi)
   .merge(AuthenticatedShellUpdatesApi)
   .merge(AuthenticatedProviderListApi)
+  .merge(AuthenticatedMcpApi)
   .merge(AuthenticatedTextSearchApi)
   .merge(AuthenticatedDraftPreviewApi)
   .merge(AuthenticatedStImportPlanApi) {}
