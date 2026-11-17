@@ -158,8 +158,12 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   // The originals replace the summary. The timeline mounts only the rows in view and two
   // beyond, so the first is read at the top, and the list goes back to the reply after.
   const list = page.getByTestId("messages")
-  await list.evaluate((list) => list.scrollTo({ top: 0 }))
-  await expect(page.getByText("Original 1", { exact: true })).toBeVisible()
+  // The originals mount after "hide" returns, and the list keeps its place as they grow above it,
+  // so scroll to the top again until the first is in view.
+  await expect(async () => {
+    await list.evaluate((list) => list.scrollTo({ top: 0 }))
+    await expect(page.getByText("Original 1", { exact: true })).toBeVisible({ timeout: 1_000 })
+  }).toPass()
   await list.evaluate((list) => list.scrollTo({ top: list.scrollHeight }))
   await expect(article).toBeVisible()
   await expect(page.getByRole("group", { name: "Versions", exact: true })).toHaveCount(0)
