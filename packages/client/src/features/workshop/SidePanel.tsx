@@ -20,7 +20,6 @@ import {
   useState,
   useSyncExternalStore
 } from "react"
-import { useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { ChangesPanel } from "./ChangesPanel.tsx"
@@ -44,7 +43,15 @@ import { ReplyExtrasContext, type ReplyExtrasSource } from "../chat/replyExtras.
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
 import { useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { chooseSideChat, sideChatSearch, SIDE_CHAT_PARAM, SIDE_CHAT_SCOPE, SIDE_CHATS_KEY } from "./sideChat.ts"
+import { PendingSideChat } from "./PendingSideChat.tsx"
+import {
+  chooseSideChat,
+  NEW_SIDE_CHAT,
+  sideChatSearch,
+  SIDE_CHAT_PARAM,
+  SIDE_CHAT_SCOPE,
+  SIDE_CHATS_KEY
+} from "./sideChat.ts"
 
 const attachedTo = Atom.family((chatId: ChatId) =>
   AppClient.query("ListAttachedWorkshops", { chatId }, { reactivityKeys: [SIDE_CHATS_KEY, chatId] })
@@ -52,9 +59,6 @@ const attachedTo = Atom.family((chatId: ChatId) =>
 
 /** The page's own: the portrait column and the editor tabs' workspace stay the story's. */
 const PAGE_PROVIDERS: ReadonlySet<string> = new Set(["chat.portraits", "chat.preset-workspace"])
-
-const ABOUT =
-  "Talk about this story with an assistant, out of character. It reads the branch shown here, up to its newest message; nothing said here reaches the story."
 
 /** An older window can end before the branch's tip; don't read the unseen tail. */
 const shownStoryLeaf = (view: ChatView) =>
@@ -119,9 +123,21 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
     },
     [navigate]
   )
-  const action = useAction()
-  const list = AsyncResult.isSuccess(result) ? result.value : null
-  const choice = list === null ? null : chooseSideChat(list, wanted || null)
+  // The workshop the composer's first send just made: shown at once, before the list read again
+  // has it and while the URL moves to it, so nothing else shows in between.
+  const [created, setCreated] = useState<{ readonly chat: Chat; readonly moving: boolean } | null>(null)
+  const read = AsyncResult.isSuccess(result) ? result.value : null
+  const list = useMemo(
+    () =>
+      read === null || created === null || read.some((chat) => chat.id === created.chat.id)
+        ? read
+        : [created.chat, ...read],
+    [read, created]
+  )
+  const choice = list === null ? null : chooseSideChat(list, created?.moving ? created.chat.id : wanted || null)
+  // Once the URL names it, and then once the list has it, it's shown as any other.
+  if (created?.moving && wanted === created.chat.id) setCreated({ chat: created.chat, moving: false })
+  else if (created && !created.moving && read?.some((chat) => chat.id === created.chat.id)) setCreated(null)
   const waiting = result.waiting
   // A workshop the list doesn't have is read for once more (one just made from the ⋯ menu, or in
   // another browser tab) before it's taken as gone, and the newest shown instead.
@@ -138,14 +154,28 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
     showToast({ title: "That workshop isn't beside this chat any more." })
     setWanted("", true)
   }, [confirmed, setWanted])
-  const start = async () => {
-    const made = await action.run((client) => client("CreateWorkshop", { attachTo: session.id }), [SIDE_CHATS_KEY])
-    if (made.ok) setWanted(made.value.id)
-  }
   const gone = useCallback(() => {
     setWanted("", true)
     refresh()
   }, [setWanted, refresh])
+  // Where the story is read for a reply, at the moment of each request.
+  const extras = useMemo<ReplyExtrasSource>(
+    () => () => {
+      const storyAt = storyPosition(session)
+      return storyAt ? { storyAt } : {}
+    },
+    [session]
+  )
+  // The workshop the first send made: its composer is ready to go on, as the one typed in was.
+  const [focusMade, setFocusMade] = useState<ChatId | null>(null)
+  const onCreated = useCallback(
+    (chat: Chat) => {
+      setCreated({ chat, moving: true })
+      setFocusMade(chat.id)
+      setWanted(chat.id, true)
+    },
+    [setWanted]
+  )
 
   if (AsyncResult.isFailure(result) && list === null)
     return (
@@ -154,124 +184,127 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
       </div>
     )
   if (choice === null || missing) return <p className="px-4 py-4 text-sm text-muted">Loading the workshop…</p>
-  const startButton = (
-    <Button
-      variant={choice.shown === null ? "primary" : "secondary"}
-      className="self-start"
-      pending={action.pending}
-      hint="Starts a new workshop beside this chat, to talk about it out of character."
-      onClick={() => void start()}
-    >
-      Start a workshop
-    </Button>
+  const header = (
+    <>
+      <SideChatHeader
+        shown={choice.shown}
+        all={list ?? []}
+        onPick={(id) => {
+          setFocusMade(null)
+          setWanted(id)
+        }}
+        onNew={() => {
+          setFocusMade(null)
+          setWanted(NEW_SIDE_CHAT)
+        }}
+      />
+      <ReadingLine story={session} view={storyView} />
+    </>
   )
+  // None yet, or a new one: its composer, ready; the first send makes it.
   if (choice.shown === null)
-    return (
-      <div className="flex flex-col gap-3 px-4 py-4" data-side-chat-empty="">
-        <p className="text-sm text-muted">{ABOUT}</p>
-        {startButton}
-        {action.error && <Alert tone="danger">The workshop couldn’t be started: {action.error.message}</Alert>}
-      </div>
-    )
+    return <PendingSideChat key="new" story={session} storyAt={extras} header={header} onCreated={onCreated} />
   return (
     <SideChat
       key={choice.shown.id}
       chat={choice.shown}
-      story={session}
-      header={
-        <>
-          <SideChatHeader
-            shown={choice.shown}
-            all={list ?? []}
-            starting={action.pending}
-            onPick={(id) => setWanted(id)}
-            onStart={() => void start()}
-          />
-          <ReadingLine story={session} view={storyView} />
-        </>
-      }
-      error={action.error ? `The workshop couldn’t be started: ${action.error.message}` : null}
+      extras={extras}
+      focusComposer={focusMade === choice.shown.id}
+      header={header}
       onGone={gone}
     />
   )
 }
 
+/** The header: the workshop shown (`null`: one not made yet), the others beside this chat, a new one. */
 function SideChatHeader({
   shown,
   all,
-  starting,
   onPick,
-  onStart
+  onNew
 }: {
-  shown: Chat
+  shown: Chat | null
   all: ReadonlyArray<Chat>
-  starting: boolean
   onPick: (id: ChatId) => void
-  onStart: () => void
+  onNew: () => void
 }) {
   const open = useOpenOwn()
-  const href = `/chats/${shown.id}`
+  const href = shown === null ? null : `/chats/${shown.id}`
+  const title = shown?.title ?? "New workshop"
   const [panel, setPanel] = usePlaceParam(chatPlaceKey(SIDE_CHAT_SCOPE, "panel"), "")
   return (
     <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-2">
-      <KindBadge kind={shown.kind} />
-      <Menu
-        label="Workshops beside this chat"
-        align="start"
-        hint="Switches to another workshop beside this chat, or starts a new one."
-        trigger={
-          <button
-            type="button"
-            aria-label={`Workshop: ${shown.title}`}
-            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 text-left text-sm font-medium hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus outline-none"
-          >
-            <span data-layout-name className="min-w-0 truncate">
-              {shown.title}
-            </span>
-            <Icon name="down" className="shrink-0 text-muted" />
-          </button>
-        }
-      >
-        {all.map((chat) => (
-          <MenuItem
-            key={chat.id}
-            {...(chat.id === shown.id ? { icon: "check" as const } : {})}
-            description={chat.id === shown.id ? "Shown now." : "Shows this workshop here instead."}
-            onClick={() => onPick(chat.id)}
-          >
-            {chat.title}
-          </MenuItem>
-        ))}
-        <MenuSeparator />
-        <MenuItem
-          icon="plus"
-          disabled={starting}
-          description="Starts a new workshop beside this chat, to talk about it out of character."
-          onClick={onStart}
+      <KindBadge kind="workshop" />
+      {all.length === 0 ? (
+        <span data-layout-name className="min-w-0 flex-1 truncate px-1.5 py-1 text-sm font-medium">
+          {title}
+        </span>
+      ) : (
+        <Menu
+          label="Workshops beside this chat"
+          align="start"
+          hint="Switches to another workshop beside this chat, or starts a new one."
+          trigger={
+            <button
+              type="button"
+              aria-label={`Workshop: ${title}`}
+              className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 text-left text-sm font-medium hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus outline-none"
+            >
+              <span data-layout-name className="min-w-0 truncate">
+                {title}
+              </span>
+              <Icon name="down" className="shrink-0 text-muted" />
+            </button>
+          }
         >
-          New workshop
-        </MenuItem>
-      </Menu>
-      <Button
-        variant="ghost"
-        className="shrink-0 px-2 text-xs"
-        aria-pressed={panel === "workshop.changes"}
-        hint={
-          panel === "workshop.changes"
-            ? "Returns to this workshop’s conversation."
-            : "Shows what this workshop changed, with Undo."
-        }
-        onClick={() => setPanel(panel === "workshop.changes" ? "" : "workshop.changes")}
-      >
-        Changes
-      </Button>
-      <IconLink
-        label="Open in its own tab"
-        hint="Opens this workshop in a tab of its own, with its settings and panels."
-        icon="external"
-        href={href}
-        onOpen={() => open(href)}
-      />
+          {all.map((chat) => (
+            <MenuItem
+              key={chat.id}
+              {...(chat.id === shown?.id ? { icon: "check" as const } : {})}
+              description={chat.id === shown?.id ? "Shown now." : "Shows this workshop here instead."}
+              onClick={() => onPick(chat.id)}
+            >
+              {chat.title}
+            </MenuItem>
+          ))}
+          <MenuSeparator />
+          <MenuItem
+            icon={shown === null ? "check" : "plus"}
+            description={
+              shown === null
+                ? "Shown now: your first message starts it."
+                : "Opens a new workshop beside this chat; your first message starts it."
+            }
+            onClick={onNew}
+          >
+            New workshop
+          </MenuItem>
+        </Menu>
+      )}
+      {shown !== null && href !== null && (
+        <>
+          <Button
+            variant="ghost"
+            className="shrink-0 px-2 text-xs"
+            aria-pressed={panel === "workshop.changes"}
+            hint={
+              panel === "workshop.changes"
+                ? "Returns to this workshop’s conversation."
+                : "Shows what this workshop changed, with Undo."
+            }
+            onClick={() => setPanel(panel === "workshop.changes" ? "" : "workshop.changes")}
+          >
+            Changes
+          </Button>
+          <IconLink
+            label="Open in its own tab"
+            hint="Opens this workshop in a tab of its own, with its settings and panels."
+            icon="external"
+            href={href}
+            onOpen={() => open(href)}
+          />
+        </>
+      )}
     </div>
   )
 }
@@ -279,16 +312,17 @@ function SideChatHeader({
 /** One workshop beside the story: its own session, at the panel's width. */
 function SideChat({
   chat,
-  story,
+  extras,
+  focusComposer,
   header,
-  error,
   onGone
 }: {
   chat: Chat
-  /** The story beside it, as this tab shows it: each reply request reads it there. */
-  story: ChatSession
+  /** Where the story beside it is read for each reply request (`storyPosition`). */
+  extras: ReplyExtrasSource
+  /** Just made by the composer's first send: its composer takes the focus the first one had. */
+  focusComposer: boolean
   header: ReactNode
-  error: string | null
   onGone: () => void
 }) {
   const registry = useContext(RegistryContext)
@@ -300,13 +334,6 @@ function SideChat({
   // than starting another.
   const [opening] = useState(fork)
   const [session, setSession] = useState<ChatSession | null>(null)
-  const extras = useMemo<ReplyExtrasSource>(
-    () => () => {
-      const storyAt = storyPosition(story)
-      return storyAt ? { storyAt } : {}
-    },
-    [story]
-  )
   useLayoutEffect(() => {
     const next = new ChatSession(chat.id, opening, registry, userId, (title) => showToast({ title }))
     next.setReplyExtras(extras)
@@ -339,7 +366,7 @@ function SideChat({
         fork={fork}
         onFork={setUrlFork}
         header={header}
-        error={error}
+        focusComposer={focusComposer}
         onGone={onGone}
       />
     </ReplyExtrasContext>
@@ -351,14 +378,14 @@ function SideChatSurface({
   fork,
   onFork,
   header,
-  error,
+  focusComposer,
   onGone
 }: {
   session: ChatSession
   fork: ForkId | null
   onFork: (fork: string) => void
   header: ReactNode
-  error: string | null
+  focusComposer: boolean
   onGone: () => void
 }) {
   const view: ChatView = useSyncExternalStore(session.subscribe, session.snapshot)
@@ -400,7 +427,12 @@ function SideChatSurface({
   )
   const [sidePanel] = usePlaceParam(chatPlaceKey(SIDE_CHAT_SCOPE, "panel"), "")
   const changes = sidePanel === "workshop.changes"
-  const problem = error ?? view.error ?? branchError
+  const problem = view.error ?? branchError
+  const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (focusComposer)
+      root.current?.querySelector<HTMLElement>('[data-testid="composer"]')?.focus({ preventScroll: true })
+  }, [focusComposer])
   return (
     <ChatPlaceScope value={SIDE_CHAT_SCOPE}>
       <ChatSurfaceProviders
@@ -414,6 +446,7 @@ function SideChatSurface({
         <CastContext value={cast}>
           <div
             {...kindRoot}
+            ref={root}
             data-side-chat={session.id}
             // A container, so its messages' headers wrap at the panel's width as on a phone.
             className="@container/chat flex min-h-0 flex-1 flex-col"

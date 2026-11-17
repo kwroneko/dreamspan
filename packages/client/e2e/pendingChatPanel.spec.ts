@@ -90,15 +90,11 @@ test("a pending chat's side panel resizes and has the saved chat's tabs", async 
   expect(saved.savedOnly).toEqual(["Workshop"])
   expect(pendingTabs.tabs).not.toContain("Workshop")
   expect(saved.tabs.filter((name) => !saved.savedOnly.includes(name))).toEqual(pendingTabs.tabs)
-  // With no workshop beside it yet, the tab explains itself and offers to start one.
+  // With no workshop beside it yet, the tab is its chat already: the intro and the composer.
   await openPanel(page, "Workshop")
-  const start = page
-    .getByRole("tabpanel", { name: "Workshop" })
-    .getByRole("button", { name: "Start a workshop", exact: true })
-  await expect(start).toBeVisible()
-  await expect(start).toHaveAccessibleDescription(
-    "Starts a new workshop beside this chat, to talk about it out of character."
-  )
+  const workshop = page.getByRole("tabpanel", { name: "Workshop" })
+  await expect(workshop.locator("[data-side-chat-intro]")).toContainText("out of character")
+  await expect(workshop.getByLabel("Message", { exact: true })).toBeVisible()
 })
 
 test("the first send opens the saved chat with no loading skeleton or placeholder title", async ({ page }) => {
@@ -222,5 +218,5 @@ for (const width of [1440, 390])
       expect((await tabNames(page)).savedOnly).toEqual(["Workshop"])
       await openPanel(page, "Workshop")
       await expect(page).toHaveURL(/panel=workshop/)
-      await expect(page.getByRole("button", { name: "Start a workshop", exact: true })).toBeVisible()
+      await expect(page.getByRole("tabpanel", { name: "Workshop" }).locator("[data-side-chat-intro]")).toBeVisible()
     })

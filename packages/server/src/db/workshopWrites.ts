@@ -44,7 +44,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
       return hit !== undefined
     })
   return {
-    CreateWorkshop: ({ userId, title, attachTo, card: chosenCard, persona: chosenPersona }) =>
+    CreateWorkshop: ({ userId, title, attachTo, card: chosenCard, persona: chosenPersona, preset: chosenPreset }) =>
       Effect.gen(function* () {
         // A side chat's story: the user's, live, of a kind that takes one (spec/WORKSHOP.md §4).
         const [story] =
@@ -121,6 +121,16 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           return yield* new NotFound({ entity: "card", id: chosenCard })
         if (chosenPersona != null && !(yield* ownedPersona(sql, userId, chosenPersona)))
           return yield* new NotFound({ entity: "persona", id: chosenPersona })
+        // A preset chosen before the first message: one of the user's live presets.
+        const presetRef = chosenPreset?._tag === "Lock" ? chosenPreset.ref : null
+        if (presetRef !== null) {
+          const [owned] = yield* sql<{
+            id: string
+          }>`SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+            WHERE r.id = ${presetRef} AND e.owner_user_id = ${userId} AND e.kind = 'preset'
+              AND e.deleted_at IS NULL AND e.purged_at IS NULL`
+          if (!owned) return yield* new NotFound({ entity: "preset", id: presetRef })
+        }
         const card =
           chosenCard === undefined
             ? defaultCard
@@ -179,10 +189,18 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
             key: "played_by_me.set",
             value: { entities: [played as EntityId] }
           })
-        yield* graph.insertStateEvent(userId, chatId, null, null, null, {
-          key: "preset.binding",
-          value: { ref: prompt.id as RefId }
-        })
+        // Kept for this workshop (the default, or the one chosen; none: the built-in one), unless
+        // it was chosen to follow the account's preset.
+        if (chosenPreset?._tag !== "Account")
+          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
+            key: "preset.binding",
+            value:
+              chosenPreset === undefined
+                ? { ref: prompt.id as RefId }
+                : presetRef === null
+                  ? {}
+                  : { ref: presetRef as RefId }
+          })
         const doc = yield* steps.lib.loadDoc((yield* steps.reload(card.id)).head_revision_id)
         const greeting = typeof doc.first_mes === "string" ? doc.first_mes : ""
         const { slotId } = yield* graph.insertSlot(

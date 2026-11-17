@@ -22,6 +22,7 @@ import { client, login, outcome, posted, serverLayer, testConfig } from "./suppo
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
+import { presetDoc } from "./support/docs.ts"
 
 type Body = Record<string, unknown>
 type Message = { readonly role: string; readonly content: unknown }
@@ -448,6 +449,49 @@ describe("side chat", () => {
         const next = yield* api.SetWorkshopGrant({ chatId: workshop.id, capability: "chats.read", mode })
         assert.strictEqual(next.find((c) => c.id === "chats.read")!.mode, mode ?? "ask")
       }
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("keeps the preset chosen before the first message, or follows the account's", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const userId = (yield* api.Whoami()).id as UserId
+      const story = yield* api.CreateChat({ title: "Preset story" })
+      const preset = yield* writer.CreateEntity({
+        userId,
+        kind: "preset",
+        label: "Chosen preset",
+        subtitle: "",
+        doc: presetDoc(),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      const castOf = (chat: Chat) => api.GetCast({ chatId: chat.id, slotId: chat.activeLeafSlotId })
+      const byDefault = yield* castOf(yield* api.CreateWorkshop({ attachTo: story.id }))
+      const workshopPreset = (yield* api.GetWorkshopDefaults({})).preset
+      assert.isTrue(byDefault.presetLocked)
+      assert.strictEqual(byDefault.preset, workshopPreset)
+      const chosen = yield* castOf(
+        yield* api.CreateWorkshop({ attachTo: story.id, preset: { _tag: "Lock", ref: preset.ref.id } })
+      )
+      assert.isTrue(chosen.presetLocked)
+      assert.strictEqual(chosen.preset, preset.ref.id)
+      const builtin = yield* castOf(
+        yield* api.CreateWorkshop({ attachTo: story.id, preset: { _tag: "Lock", ref: null } })
+      )
+      assert.isTrue(builtin.presetLocked)
+      assert.isNull(builtin.preset)
+      const account = yield* castOf(yield* api.CreateWorkshop({ attachTo: story.id, preset: { _tag: "Account" } }))
+      assert.isFalse(account.presetLocked)
+      // The choice is the new workshop's only: the workshop default stays.
+      assert.strictEqual((yield* api.GetWorkshopDefaults({})).preset, workshopPreset)
+      assert.strictEqual(
+        yield* outcome(api.CreateWorkshop({ attachTo: story.id, preset: { _tag: "Lock", ref: "missing" } })),
+        "NotFound"
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

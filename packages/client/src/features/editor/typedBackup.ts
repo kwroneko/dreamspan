@@ -4,7 +4,10 @@ import { pendingOf, type Copy } from "./backup.ts"
 
 const key = (userId: string, targetId: string) => `rp.pendingTyped:${userId}:${targetId}`
 const hasTypedBackup = (targetId: string, field: string) =>
-  field === "First message" && (targetId.startsWith("pending-chat:") || targetId.startsWith("pending-group-chat:"))
+  field === "First message" &&
+  (targetId.startsWith("pending-chat:") ||
+    targetId.startsWith("pending-group-chat:") ||
+    targetId.startsWith("pending-workshop:"))
 
 export const readTypedBackup = (userId: string, targetId: string): Copy | null => {
   try {
