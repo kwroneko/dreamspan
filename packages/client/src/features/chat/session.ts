@@ -2042,7 +2042,7 @@ export class ChatSession {
    * Moves a message one shown message up or down in the fork shown (owner, 2026-11-16). The
    * fork's tabs reload its order; the moved message is highlighted where it went.
    */
-  async moveMessage(entry: PathEntry, direction: "up" | "down"): Promise<Outcome<MovedMessage>> {
+  async moveMessage(entry: PathEntry, direction: "up" | "down", neighbourId?: SlotId): Promise<Outcome<MovedMessage>> {
     const forkId = this.view.forkId ?? this.view.chat?.currentForkId ?? null
     if (forkId === null)
       return { ok: false, error: { tag: "NotFound", message: "The chat isn't open yet.", problems: [], reason: null } }
@@ -2052,7 +2052,8 @@ export class ChatSession {
         forkId,
         slotId: entry.slotId,
         direction,
-        expectedRowVersion: entry.rowVersion
+        expectedRowVersion: entry.rowVersion,
+        ...(neighbourId !== undefined ? { expectedNeighbourId: neighbourId } : {})
       })
     )
     if (result.ok) {

@@ -2080,7 +2080,9 @@ export class WriteOpsChat extends RpcGroup.make(
       forkId: ForkId,
       slotId: SlotId,
       direction: Schema.Literals(["up", "down"]),
-      expectedRowVersion: Schema.Int
+      expectedRowVersion: Schema.Int,
+      /** The neighbour the caller saw; another one shown there now is `StaleWrite`. */
+      expectedNeighbourId: Schema.optionalKey(SlotId)
     },
     success: Schema.Struct({ position: Schema.Int, undo: Schema.Array(MoveStep), chat: Chat }),
     error: Schema.Union([NotFound, StaleWrite, MoveRefused, StorageError])

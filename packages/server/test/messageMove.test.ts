@@ -222,6 +222,39 @@ describe("moving messages", () => {
   )
 
   it.live(
+    "a move from a tab that missed another tab's move is refused, not taken one step further",
+    () =>
+      run((dataDir) =>
+        Effect.gen(function* () {
+          const t = yield* setup(dataDir)
+          const a = yield* t.append(t.main, null, "a")
+          const b = yield* t.append(t.main, a, "b")
+          const c = yield* t.append(t.main, b, "c")
+          const moveSeen = (slotId: SlotId, direction: "up" | "down", expectedNeighbourId: SlotId) =>
+            t.writer.MoveMessage({
+              userId: t.userId,
+              chatId: t.chatId,
+              forkId: t.main,
+              slotId,
+              direction,
+              expectedRowVersion: 0,
+              expectedNeighbourId
+            })
+          // Both tabs show [a, b, c]. The first moves c up; the second, still showing c below b,
+          // asks the same: c's neighbour above is a now, so it's refused and nothing changes.
+          yield* moveSeen(c, "up", b)
+          assert.deepStrictEqual(yield* t.order(t.main), [a, c, b])
+          assert.include(yield* failure(moveSeen(c, "up", b)), "StaleWrite")
+          assert.deepStrictEqual(yield* t.order(t.main), [a, c, b])
+          // After reloading, it sees a above c and the move goes through.
+          yield* moveSeen(c, "up", a)
+          assert.deepStrictEqual(yield* t.order(t.main), [c, a, b])
+        })
+      ),
+    60_000
+  )
+
+  it.live(
     "skips deleted neighbours, and what was moved after the message stays in place",
     () =>
       run((dataDir) =>

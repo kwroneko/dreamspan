@@ -81,7 +81,7 @@ export const makeMoveWriteHandlers = (bin: Bin) =>
       )
 
     return {
-      MoveMessage: ({ userId, chatId, forkId, slotId, direction, expectedRowVersion }) =>
+      MoveMessage: ({ userId, chatId, forkId, slotId, direction, expectedRowVersion, expectedNeighbourId }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
           const fork = yield* graph.ownedFork(userId, chatId, forkId)
@@ -92,7 +92,7 @@ export const makeMoveWriteHandlers = (bin: Bin) =>
           const place = (yield* slotPlace(sql, chatId, slotId))!
           const before = yield* display(chatId, fork.id, fork.tip_slot_id)
           const position = positionOf(before.pieces, place)
-          if (position === null || (yield* deletedIn(fork.id, slotId))) {
+          const stale = Effect.gen(function* () {
             const selection = yield* selectionIn(sql, fork.id, slotId)
             return yield* new StaleWrite({
               entity: "slot",
@@ -100,8 +100,11 @@ export const makeMoveWriteHandlers = (bin: Bin) =>
               expected: expectedRowVersion,
               actual: row.row_version + (selection?.seq ?? 0)
             })
-          }
+          })
+          if (position === null || (yield* deletedIn(fork.id, slotId))) return yield* stale
           const next = yield* neighbour(before.pieces, fork.id, position, direction === "up" ? -1 : 1)
+          // A tab that missed another tab's move would move it one step past what it showed.
+          if (expectedNeighbourId !== undefined && next?.id !== expectedNeighbourId) return yield* stale
           if (next === null)
             return yield* new MoveRefused({
               message: direction === "up" ? "This is already the first message." : "This is already the last message."

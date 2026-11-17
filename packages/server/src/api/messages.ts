@@ -100,7 +100,7 @@ export const makeMoveHandlers = Effect.gen(function* () {
     hub.publish(chatId, { _tag: "Chat", chat })
     hub.publish(chatId, { _tag: "Lcm" })
   }
-  const move = ({ chatId, forkId, slotId, direction, expectedRowVersion }: MoveMessageInput) =>
+  const move = ({ chatId, forkId, slotId, direction, expectedRowVersion, expectedNeighbourId }: MoveMessageInput) =>
     Effect.gen(function* () {
       const user = yield* CurrentUser
       const result = yield* writer.MoveMessage({
@@ -109,7 +109,8 @@ export const makeMoveHandlers = Effect.gen(function* () {
         forkId,
         slotId,
         direction,
-        expectedRowVersion
+        expectedRowVersion,
+        ...(expectedNeighbourId !== undefined ? { expectedNeighbourId } : {})
       })
       moved(chatId, result.chat)
       return new MovedMessage({ slotId, forkId, ...result })
