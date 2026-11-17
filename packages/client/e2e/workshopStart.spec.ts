@@ -54,8 +54,23 @@ test.describe("a workshop made by its first message", () => {
         await expect(send).toBeVisible()
         await expect(panel.getByRole("button", { name: /^Model: / })).toBeVisible()
         await expect(panel.getByRole("button", { name: /^Prompt preset: / })).toBeVisible()
+        // The saved workshop's composer before the first send (workshopstart2): the speaker
+        // chip, Guidance and Generate, and the capability chip, changeable already.
+        await expect(panel.getByRole("switch", { name: "Guidance" })).toBeVisible()
+        await expect(panel.getByRole("button", { name: /^Generate/ })).toBeVisible()
+        const chip = panel.getByRole("button", { name: /^What the assistant may do: / })
+        await expect(chip).toBeVisible()
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
         await expectLayout(page, info, `workshop-start-pending-${width}-${theme}`, { scope: panelScope })
+        await chip.click()
+        const grantRow = page
+          .getByRole("dialog", { name: "What the assistant may do" })
+          .locator('[data-capability="library.write"]')
+        await grantRow.getByRole("button", { name: "Ask first", exact: true }).click()
+        await expect(grantRow).toHaveAttribute("data-mode", "ask")
+        await page.keyboard.press("Escape")
+        await expect(chip).toHaveAccessibleName(/asking first/)
+        await box.focus()
         expect(
           await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListAttachedWorkshops({ chatId: story.id }))
         ).toEqual([])
@@ -75,6 +90,11 @@ test.describe("a workshop made by its first message", () => {
           api.ListAttachedWorkshops({ chatId: story.id })
         )
         expect(attached.map((chat) => chat.id)).toEqual([workshopId])
+        // The grant chosen before the send is the workshop's.
+        const granted = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+          api.ListWorkshopCapabilities({ chatId: workshopId as never })
+        )
+        expect(granted.find((c) => c.id === "library.write")?.mode).toBe("ask")
         await shot("sent")
         await expectLayout(page, info, `workshop-start-sent-${width}-${theme}`, { scope: panelScope })
 

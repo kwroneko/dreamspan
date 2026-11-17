@@ -1,7 +1,10 @@
 // The workshop's card on the Chats page (spec/WORKSHOP.md §2.2): where a workshop of its own is
-// made. One beside a story is made from that story (SidePanel.tsx), never by slipping into one.
+// started. One beside a story is made from that story (SidePanel.tsx), never by slipping into one.
 // The assistant's card and the user's persona start as the workshop defaults; choosing others
 // here changes only the new workshop (spec/WORKSHOP-CONTEXT.md §4.3). The choice is in the URL.
+// New workshop makes nothing (owner, 2026-11-17: "The chat is created when the first message is
+// sent"): it opens the workshop not made yet (`/new/workshop`, StartWorkshopPage.tsx) with these
+// choices and the title, where they can still change, and its first message makes it.
 import { useAtomValue } from "@effect/atom-react"
 import type { RefId } from "@rp/shared/library.ts"
 import { AsyncResult } from "effect/reactivity"
@@ -14,11 +17,11 @@ import { StartChatForm } from "../chat/ChatsPage.tsx"
 import { cardPickers } from "../pickers/DocumentPickers.tsx"
 import { PickerFooterButton, PickerPopover } from "../pickers/PickerParts.tsx"
 import { workshopDefaultsAtom } from "./workshopPersona.tsx"
+import { NEW_WORKSHOP_TITLE, NO_PERSONA, WORKSHOP_CARD_KEY, WORKSHOP_PERSONA_KEY } from "./workshopStart.ts"
 
-/** URL keys: an entity id each; the persona's "none" for no persona. Absent: the default. */
-const CARD_KEY = "workshopCard"
-const PERSONA_KEY = "workshopPersona"
-const NONE = "none"
+const CARD_KEY = WORKSHOP_CARD_KEY
+const PERSONA_KEY = WORKSHOP_PERSONA_KEY
+const NONE = NO_PERSONA
 
 function Choice({
   label,
@@ -57,7 +60,8 @@ function Choice({
   )
 }
 
-function StartChoices({
+/** Who the new workshop starts with: the assistant's card and the user's persona. */
+export function StartChoices({
   card,
   setCard,
   persona,
@@ -155,9 +159,15 @@ function StartChoices({
   )
 }
 
-export function WorkshopStartCard() {
+/** The workshop choices in the URL, as this card and the page of the workshop not made yet read them. */
+export const useWorkshopStart = () => {
   const [card, setCard] = usePlaceParam(CARD_KEY, "")
   const [persona, setPersona] = usePlaceParam(PERSONA_KEY, "")
+  return { card, setCard, persona, setPersona }
+}
+
+export function WorkshopStartCard() {
+  const { card, setCard, persona, setPersona } = useWorkshopStart()
   return (
     <Card>
       <CardHeader
@@ -165,18 +175,16 @@ export function WorkshopStartCard() {
         about="Ask an assistant about your cards, presets and lorebooks, outside any story."
       />
       <StartChatForm
-        draft="workshop:new"
+        draft={NEW_WORKSHOP_TITLE}
         label="Title of the new workshop"
         button="New workshop"
-        hint="Opens a workshop. The assistant can read and change your library and set up chats."
+        hint="Opens a new workshop. It's saved when you send its first message. The assistant can read and change your library and set up chats."
         extra={<StartChoices card={card} setCard={setCard} persona={persona} setPersona={setPersona} />}
-        create={(client, title) =>
-          client("CreateWorkshop", {
-            ...(title.trim() === "" ? {} : { title }),
-            ...(card === "" ? {} : { card }),
-            ...(persona === "" ? {} : { persona: persona === NONE ? null : persona })
-          })
-        }
+        to="/new/workshop"
+        search={{
+          ...(card === "" ? {} : { [CARD_KEY]: card }),
+          ...(persona === "" ? {} : { [PERSONA_KEY]: persona })
+        }}
       />
     </Card>
   )

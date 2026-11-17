@@ -168,6 +168,10 @@ test("start choices live in the URL: Back restores, a second tab is independent,
   await expect(page).not.toHaveURL(/workshopCard=|workshopPersona=/)
   await expect(page.getByRole("button", { name: /^Assistant: / })).toHaveAccessibleName("Assistant: Assistant")
   await page.getByRole("button", { name: "New workshop", exact: true }).click()
+  // It opens the workshop not made yet, with these choices; its first message makes it.
+  await expect(page).toHaveURL(/\/new\/workshop/)
+  await page.getByLabel("Message", { exact: true }).fill("Hello.")
+  await page.getByRole("button", { name: /^Send/ }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+/)
   const chatId = new URL(page.url()).pathname.split("/").at(-1)!
   const cast = await admin((api) => api.GetCast({ chatId: chatId as never, slotId: null }))

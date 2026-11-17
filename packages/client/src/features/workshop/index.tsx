@@ -28,6 +28,10 @@ import { editorActions } from "../editor/editorSlots.ts"
 import { panelEditorActions } from "../editor/panelActions.tsx"
 import type { EditorStore } from "../editor/store.ts"
 import { cardEditorSections } from "../editor/cardSections.ts"
+import { routes } from "../../routes.tsx"
+import { Loading, reloadPage } from "../../ui/Spinner.tsx"
+import { sidebarSearch } from "../characters/sidebarSearch.ts"
+import { tabKinds } from "../workbench/kinds.ts"
 
 const CardSkills = lazy(() => import("./CardSkills.tsx").then((m) => ({ default: m.CardSkills })))
 function CardSkillsSection({ store }: { store: EditorStore }) {
@@ -45,6 +49,15 @@ const convert = (compact: boolean) =>
 
 const RegenerateWarning = lazy(() => import("./RegenerateWarning.tsx"))
 
+const StartWorkshopPage = lazy(() => import("./StartWorkshopPage.tsx").then((m) => ({ default: m.StartWorkshopPage })))
+function LazyStartWorkshopPage() {
+  return (
+    <Suspense fallback={<Loading label="Loading…" onRetry={reloadPage} />}>
+      <StartWorkshopPage />
+    </Suspense>
+  )
+}
+
 export const register = () => [
   chatKindLooks.register(workshopLook),
   // The way back to the story an attached workshop is about, in its header and its list rows.
@@ -52,6 +65,23 @@ export const register = () => [
   chatRowAbout.register({ id: "workshop.story-name", order: 10, component: WorkshopStoryName }),
   ...registerWorkshopPersona(),
   chatStartSections.register({ id: "workshop.start", order: 20, component: WorkshopStartCard }),
+  // A workshop of its own before it exists, which the card's New workshop opens: made by its first send.
+  routes.register({
+    id: "workshop.start",
+    parent: "app",
+    path: "/new/workshop",
+    component: LazyStartWorkshopPage,
+    fill: true,
+    retainSearch: sidebarSearch
+  }),
+  tabKinds.register({
+    id: "workshop.start",
+    order: 100,
+    match: (url) => (url.pathname === "/new/workshop" ? url.pathname : null),
+    title: () => "New workshop",
+    icon: "tool",
+    document: true
+  }),
   // The skills a card carries for a workshop assistant (spec/TOOL-LOADING.md §6), in its Extra tab.
   cardEditorSections.register({ id: "card.skills", order: 112, component: CardSkillsSection }),
   // A story preset made into a workshop one (spec/WORKSHOP-CONTEXT.md §4.4), in the large and side-panel editors.

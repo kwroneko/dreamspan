@@ -57,3 +57,16 @@ export const withCookie = async <A>(
   if (Exit.isFailure(exit)) throw new Error(`RPC setup failed: ${String(exit.cause)}`)
   return exit.value
 }
+
+/**
+ * Runs `use` as the user the page's browser context is logged in as, with that session's
+ * cookies: no second login, which counts against the login rate limit.
+ */
+export const asPage = async <A>(
+  page: { context: () => { cookies: (url: string) => Promise<ReadonlyArray<{ name: string; value: string }>> } },
+  server: TestServer,
+  use: (client: Client) => Effect.Effect<A, unknown>
+): Promise<A> => {
+  const cookies = await page.context().cookies(server.url)
+  return withCookie(server, cookies.map((c) => `${c.name}=${c.value}`).join("; "), use)
+}

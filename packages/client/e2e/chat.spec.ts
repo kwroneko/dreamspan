@@ -9,7 +9,7 @@ import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
 import { expectFlashedThenUnmarked, recordFlashes } from "./support/flashes.ts"
 import { REPLY, startProvider } from "./support/provider.ts"
-import { asUser } from "./support/rpc.ts"
+import { asPage, asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, startServer, withAdmin } from "./support/server.ts"
 
 // About two seconds a reply: long enough to stop one, short enough to wait for.
@@ -32,11 +32,11 @@ const repliesDone = async (page: Page, count: number) => {
   expect(reply!.y + reply!.height).toBeLessThanOrEqual(list!.y + list!.height + 1)
 }
 
+/** A saved chat with nobody in it, open (the Chats page's New chat makes nothing until the first send). */
 const newChat = async (page: Page, title: string, host = server()) => {
   await apiLogin(page.request, host, ADMIN.handle, ADMIN.password)
-  await page.goto(`${host.url}/chats`)
-  await page.getByLabel("Title of the new chat").fill(title)
-  await page.getByRole("button", { name: "New chat" }).click()
+  const chat = await asPage(page, host, (api) => api.CreateChat({ title }))
+  await page.goto(`${host.url}/chats/${chat.id}`)
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
 }
 

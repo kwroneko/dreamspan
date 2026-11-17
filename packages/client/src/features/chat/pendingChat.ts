@@ -191,51 +191,59 @@ export class PendingChat {
     if (this.cached?.state === state) return this.cached.view
     const playing = this.playing(state)
     const characters = state.greeters.map((item) => item.card).filter((card) => card.entityId !== state.persona)
-    const cards = [...characters, ...(playing ? [playing] : [])]
-    const view: ChatView = {
-      chat: null,
-      forkId: null,
-      leafSlotId: null,
-      entries: [],
-      branchNames: new Map(),
-      older: null,
-      newer: null,
-      follow: true,
-      opened: 0,
-      pathRevision: 0,
-      loading: false,
-      error: null,
-      deleted: false,
-      cast: {
-        participants: cards.map((card) => card.entityId),
-        playedByMe: playing ? [playing.entityId] : [],
-        cards,
-        slotId: null,
-        absent: [],
-        model: null,
-        preset: null,
-        lorebooks: [],
-        cardLorebooksOff: [],
-        listedLorebooks: [],
-        loreBelowHistory: true,
-        macroBindings: {},
-        macroNames: {
-          user: playing?.modelName ?? playing?.name ?? "User",
-          char: characters.map((card) => card.modelName ?? card.name).join(", ")
-        },
-        rolesProjection: null,
-        roleProjections: []
-      },
-      queue: [],
-      cache: null,
-      history: null,
-      lcm: null,
-      lcmVersion: 0,
-      lcmViewer: null,
-      highlight: null
-    }
+    const view = pendingView(characters, playing)
     this.cached = { state, view }
     return view
+  }
+}
+
+/**
+ * A chat not made yet as the saved chat's parts read it: its cast (`characters`, and the card the
+ * user plays), and nothing else yet. A workshop not made yet reads the same (features/workshop).
+ */
+export const pendingView = (characters: ReadonlyArray<CastCard>, playing: CastCard | null): ChatView => {
+  const cards = [...characters, ...(playing ? [playing] : [])]
+  return {
+    chat: null,
+    forkId: null,
+    leafSlotId: null,
+    entries: [],
+    branchNames: new Map(),
+    older: null,
+    newer: null,
+    follow: true,
+    opened: 0,
+    pathRevision: 0,
+    loading: false,
+    error: null,
+    deleted: false,
+    cast: {
+      participants: cards.map((card) => card.entityId),
+      playedByMe: playing ? [playing.entityId] : [],
+      cards,
+      slotId: null,
+      absent: [],
+      model: null,
+      preset: null,
+      lorebooks: [],
+      cardLorebooksOff: [],
+      listedLorebooks: [],
+      loreBelowHistory: true,
+      macroBindings: {},
+      macroNames: {
+        user: playing?.modelName ?? playing?.name ?? "User",
+        char: characters.map((card) => card.modelName ?? card.name).join(", ")
+      },
+      rolesProjection: null,
+      roleProjections: []
+    },
+    queue: [],
+    cache: null,
+    history: null,
+    lcm: null,
+    lcmVersion: 0,
+    lcmViewer: null,
+    highlight: null
   }
 }
 

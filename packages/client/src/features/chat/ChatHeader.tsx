@@ -378,7 +378,7 @@ export function PendingChatHeader({
 }
 
 /** The header's row, the same for a saved chat and one not made yet. */
-function ChatHeaderFrame({
+export function ChatHeaderFrame({
   characters,
   picture = null,
   loading,

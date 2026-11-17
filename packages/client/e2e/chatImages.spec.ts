@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { asUser } from "./support/rpc.ts"
+import { asPage, asUser } from "./support/rpc.ts"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { apiLogin, ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
@@ -38,9 +38,9 @@ const closeViewer = async (page: Page, width: number, name: string) => {
 }
 const openChat = async (page: Page, title: string) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/chats`)
-  await page.getByLabel("Title of the new chat").fill(title)
-  await page.getByRole("button", { name: "New chat" }).click()
+  // Made before its first message (New chat makes nothing until then): attaching needs a saved chat.
+  const chat = await asPage(page, server(), (api) => api.CreateChat({ title }))
+  await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
   await expect(page.getByRole("button", { name: "Attach images", exact: true })).toBeEnabled()
 }

@@ -104,6 +104,36 @@ describe("naming", () => {
     }).pipe(Effect.scoped, Effect.provide(layer))
   )
 
+  // The Chats page's New chat (workshopstart2): made by its first message, with nobody in it.
+  it.live("a chat with no characters starts from its first message, under the title typed or its date", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const sam = yield* card(api, "Sam", { name: "Sam" }, true)
+      const titled = yield* api.StartChat({
+        cards: [],
+        persona: sam,
+        greeting: null,
+        title: "Notebook",
+        first: { _tag: "Send", content: "A note.", speakerEntityId: sam }
+      })
+      assert.strictEqual(titled.chat.title, "Notebook")
+      const entries = yield* path(api, titled.chat.id)
+      assert.deepStrictEqual(
+        entries.map((entry) => entry.version.content),
+        ["A note."]
+      )
+      const cast = yield* api.GetCast({ chatId: titled.chat.id, slotId: null })
+      assert.deepStrictEqual(cast.playedByMe, [sam])
+      const untitled = yield* api.StartChat({
+        cards: [],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "Another.", speakerEntityId: null }
+      })
+      assert.match(untitled.chat.title ?? "", /^Chat, /)
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  )
+
   it.live("a group's new chat starts with each member's greeting in turn, each with its alternates", () =>
     Effect.gen(function* () {
       const api = yield* client()

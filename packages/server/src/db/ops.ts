@@ -46,6 +46,7 @@ import {
   ReplyEffects,
   UndoAllReport,
   WorkshopDefaults,
+  WorkshopGrantChoice,
   WorkshopPresetChoice,
   WorkshopStory
 } from "@rp/shared/workshopApi.ts"
@@ -2831,7 +2832,9 @@ export class WriteOpsLibrary extends RpcGroup.make(
       attachTo: Schema.optionalKey(ChatId),
       card: Schema.optionalKey(Schema.String),
       persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      preset: Schema.optionalKey(WorkshopPresetChoice)
+      preset: Schema.optionalKey(WorkshopPresetChoice),
+      /** Grants chosen before its first message, checked by the API against what it offers. */
+      grants: Schema.optionalKey(Schema.Array(WorkshopGrantChoice))
     },
     success: Chat,
     error: Schema.Union([NotFound, StorageError])

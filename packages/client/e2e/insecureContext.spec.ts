@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
 import { apiLogin, ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
+import { asPage } from "./support/rpc.ts"
 
 // Over plain HTTP on a LAN address the page isn't a secure context, so `crypto.randomUUID`
 // is missing. Tests run on localhost, which is secure, so the init script removes it.
@@ -13,10 +14,10 @@ const insecure = async (page: Page) => {
 
 test("attaching an image works without crypto.randomUUID", async ({ page }) => {
   await insecure(page)
-  await page.goto(`${server().url}/chats`)
+  // Made before its first message (New chat makes nothing until then): attaching needs a saved chat.
+  const chat = await asPage(page, server(), (api) => api.CreateChat({ title: "Insecure context" }))
+  await page.goto(`${server().url}/chats/${chat.id}`)
   expect(await page.evaluate(() => typeof crypto.randomUUID)).toBe("undefined")
-  await page.getByLabel("Title of the new chat").fill("Insecure context")
-  await page.getByRole("button", { name: "New chat" }).click()
   await expect(page.getByRole("button", { name: "Attach images", exact: true })).toBeEnabled()
   const png = Buffer.from(
     await page.evaluate(() => {
