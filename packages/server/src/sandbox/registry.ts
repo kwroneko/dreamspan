@@ -22,6 +22,17 @@ export interface RunLimits {
   /** The largest file a command can write. */
   readonly fileBytes: number
   readonly openFiles: number
+  /**
+   * The private /tmp's size (memory-backed: a process limit doesn't count it, and the kernel
+   * can't reclaim it by killing a process). Default 1 GiB; /dev/shm gets at most 256 MiB.
+   */
+  readonly tmpBytes?: number
+  /**
+   * Free space and inodes kept on the filesystems of the writable mounts: a command doesn't
+   * start below them and is stopped when it goes below, so one account can't fill the disk the
+   * app's database shares. Absent: not watched.
+   */
+  readonly reserve?: { readonly bytes: number; readonly inodes: number }
 }
 
 export interface RunSpec {
@@ -42,6 +53,8 @@ export interface RunResult {
   readonly timedOut: boolean
   /** Stopped for writing more output than the sandbox reads (`OUTPUT_MAX_BYTES`). */
   readonly outputCapped: boolean
+  /** Not started, or stopped, because a writable mount's filesystem went below the reserve. */
+  readonly diskLow?: boolean
   /** Combined output: the start and the end when it was longer than what's kept. */
   readonly head: string
   readonly tail: string

@@ -3,14 +3,16 @@
 // Files, and commands that try to reach it, write outside, reach private addresses, exhaust
 // processes, memory and time, and leave processes behind. Skipped, saying why, where bubblewrap
 // or unprivileged user namespaces aren't available.
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
 import { mkdirSync, readdirSync, readFileSync, existsSync, symlinkSync, writeFileSync } from "node:fs"
+import { rm, statfs } from "node:fs/promises"
 import { createServer, type Server } from "node:http"
+import { connect } from "node:net"
 import { randomBytes } from "node:crypto"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
-import { reachableAddresses, sandboxMayReach } from "../src/sandbox/network.ts"
+import { PROXY_MAX_CONNECTIONS, reachableAddresses, sandboxMayReach, sandboxNetworks } from "../src/sandbox/network.ts"
 import type { RunSpec } from "../src/sandbox/registry.ts"
 import { FilePathRefused, listFolder, readRegularFile, writeRegularFile } from "../src/files/safePath.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -302,4 +304,197 @@ sandboxed("the Linux sandbox", () => {
     await new Promise((done) => setTimeout(done, 300))
     expect(hostProcesses(marker)).toEqual([])
   })
+})
+
+// Review (review-sandbox1): further ways out that were tried, one test each.
+sandboxed("the Linux sandbox, further attempts", () => {
+  const small = { timeoutMs: 20_000, processes: 64, memoryBytes: 2 ** 30, fileBytes: 2 ** 30, openFiles: 256 }
+
+  it("has no capabilities and no new privileges, and setuid programs don't change that", async () => {
+    const result = await run(
+      [
+        "grep -E '^(CapEff|CapPrm|CapBnd|NoNewPrivs)' /proc/self/status",
+        "sudo -n id -u 2>&1 | tail -1",
+        "su -c 'id -u' root </dev/null 2>&1 | tail -1",
+        "mkdir -p /tmp/m && mount -t tmpfs none /tmp/m 2>&1 && echo mounted",
+        "id -u"
+      ].join("; ")
+    )
+    const text = output(result)
+    expect(text).toMatch(/^CapEff:\s+0+$/m)
+    expect(text).toMatch(/^CapPrm:\s+0+$/m)
+    expect(text).toMatch(/^CapBnd:\s+0+$/m)
+    expect(text).toMatch(/^NoNewPrivs:\s+1$/m)
+    expect(text).not.toMatch(/^0$/m)
+    expect(text).not.toContain("mounted")
+  })
+
+  it.skipIf(process.arch !== "x64")(
+    "refuses the kernel calls commands don't need (io_uring, keyrings, userfaultfd, bpf, mount)",
+    async () => {
+      const probe = [
+        "import ctypes, sys",
+        "libc = ctypes.CDLL(None, use_errno=True)",
+        "for name, nr in (('io_uring_setup', 425), ('keyctl', 250), ('userfaultfd', 323), ('bpf', 321), ('perf_event_open', 298), ('fsopen', 430), ('unshare', 272)):",
+        "    r = libc.syscall(nr, 0, 0, 0, 0, 0)",
+        "    print(name, r, ctypes.get_errno())"
+      ].join("\n")
+      const result = await run(
+        `grep '^Seccomp:' /proc/self/status; python3 -c '${probe.replace(/'/g, `'\\''`)}'; node -e 'console.log("node-ok")'`
+      )
+      const text = output(result)
+      expect(text).toMatch(/^Seccomp:\s+2$/m)
+      for (const name of ["io_uring_setup", "keyctl", "userfaultfd", "bpf", "perf_event_open", "fsopen", "unshare"])
+        expect(text).toMatch(new RegExp(`^${name} -1 1$`, "m"))
+      // Programs that try io_uring first fall back.
+      expect(text).toContain("node-ok")
+    }
+  )
+
+  it("sees no /sys, /var or Docker socket, only its own runtime folder, and inherits no descriptors", async () => {
+    const result = await run(
+      [
+        "ls /sys 2>&1 | head -1",
+        "ls /var/run/docker.sock /run/docker.sock /var 2>&1",
+        "ls /run",
+        "ls /proc/self/fd | wc -l",
+        "cat /dev/tty 2>&1 | head -1"
+      ].join("; ")
+    )
+    const text = output(result)
+    const lines = text.split("\n").map((line) => line.trim())
+    expect(text).toContain("cannot access '/sys'")
+    expect(text).toContain("cannot access '/var/run/docker.sock'")
+    expect(text).toContain("cannot access '/var'")
+    expect(lines).toContain("rp")
+    // 0, 1, 2 and the one ls opens to list them.
+    expect(lines).toContain("4")
+    // No controlling terminal to push input into (TIOCSTI): a new session without one.
+    expect(text).toMatch(/No such device or address/)
+  })
+
+  it("can't hard-link a file from outside its writable folders into them", async () => {
+    const result = await run("ln /etc/ld.so.cache /files/hl 2>&1; ln /run/rp/bridge.mjs /files/hl2 2>&1; true")
+    expect(output(result)).toMatch(/Invalid cross-device link/)
+    expect(existsSync(join(files, "hl"))).toBe(false)
+    expect(existsSync(join(files, "hl2"))).toBe(false)
+  })
+
+  it("sizes the memory-backed folders, keeps /dev read-only and offers itself to the OOM killer first", async () => {
+    const result = await run(
+      [
+        "{ head -c 3000000 /dev/zero > /tmp/fill; } 2>&1; ls -l /tmp/fill | awk '{print \"tmp=\" $5}'",
+        "{ head -c 3000000 /dev/zero > /dev/shm/fill; } 2>&1; ls -l /dev/shm/fill | awk '{print \"shm=\" $5}'",
+        "touch /dev/planted 2>/dev/null || echo dev-ro",
+        "cat /proc/self/oom_score_adj"
+      ].join("; "),
+      { limits: { ...small, tmpBytes: 2 ** 21 } }
+    )
+    const text = output(result)
+    const size = (name: string) => Number(new RegExp(`^${name}=(\\d+)$`, "m").exec(text)?.[1] ?? Number.NaN)
+    expect(size("tmp")).toBeLessThanOrEqual(2 ** 21)
+    expect(size("shm")).toBeLessThanOrEqual(2 ** 21)
+    expect(text).toContain("No space left on device")
+    expect(text).toContain("dev-ro")
+    expect(text).toMatch(/^1000$/m)
+  })
+
+  it("doesn't start, or is stopped, when the disk the app shares goes below the reserve", async () => {
+    const marker = `reserve-${randomBytes(4).toString("hex")}`
+    const refused = await run(`echo x > ${marker}`, {
+      limits: { ...small, reserve: { bytes: Number.MAX_SAFE_INTEGER, inodes: 0 } }
+    })
+    expect(refused.diskLow).toBe(true)
+    expect(refused.exitCode).toBeNull()
+    expect(existsSync(join(files, marker))).toBe(false)
+    // Going below it mid-run: stopped during the sleep, so it never says it finished.
+    const fs = await statfs(files)
+    const free = fs.bavail * fs.bsize
+    const stopped = await run(`head -c 157286400 /dev/urandom > ${marker}; sync; sleep 15; echo never`, {
+      limits: { ...small, timeoutMs: 40_000, reserve: { bytes: free - 50 * 2 ** 20, inodes: 0 } }
+    })
+    await rm(join(files, marker), { force: true })
+    expect(stopped.diskLow).toBe(true)
+    expect(stopped.timedOut).toBe(false)
+    expect(output(stopped)).not.toContain("never")
+  }, 60_000)
+
+  it("refuses numeric, mapped and zero forms of loopback, and tunnels to ports other than HTTP and HTTPS", async () => {
+    const proxied = await run(
+      [
+        `curl -sS -m 5 http://2130706433:${port}/ 2>&1; echo`,
+        `curl -sS -m 5 http://0x7f.1:${port}/ 2>&1; echo`,
+        `curl -sS -m 5 http://0177.0.0.1:${port}/ 2>&1; echo`,
+        `curl -sS -m 5 http://0:${port}/ 2>&1; echo`,
+        `curl -sS -m 5 'http://[::ffff:127.0.0.1]:${port}/' 2>&1; echo`,
+        `curl -sS -m 5 'http://[64:ff9b::7f00:1]:${port}/' 2>&1; echo`,
+        `curl -sS -m 5 http://localhost.:${port}/ 2>&1; echo`,
+        `curl -sS -m 5 -p http://127.0.0.1:${port}/ 2>&1; echo`,
+        // A Host header naming loopback changes nothing: the proxy dials the checked address.
+        `curl -sS -m 5 -H 'Host: 127.0.0.1:${port}' http://127.0.0.1:${port}/ 2>&1; echo`,
+        // SSH or SMTP through a tunnel to a public address: refused before dialling.
+        "curl -sS -m 5 -p telnet://93.184.215.14:25 </dev/null 2>&1 | head -2; echo",
+        "curl -sS -m 5 -p http://93.184.215.14:22/ 2>&1 | head -2; echo"
+      ].join("; "),
+      { network: "public" }
+    )
+    const text = output(proxied)
+    expect(text).not.toContain(SECRET)
+    expect(text).toContain("Only public internet addresses can be reached from commands.")
+    expect(text.match(/CONNECT tunnel failed, response 403/g)?.length).toBe(3)
+  })
+})
+
+describe("the commands proxy", () => {
+  it("holds at most its connection cap open at once", async () => {
+    const socketPath = join(tempDir("proxy"), "p.sock")
+    const proxy = await sandboxNetworks.get("public")!.open(socketPath)
+    try {
+      const sockets = Array.from({ length: PROXY_MAX_CONNECTIONS + 20 }, () => connect(socketPath))
+      let closed = 0
+      for (const socket of sockets) {
+        socket.on("error", () => undefined)
+        socket.on("close", () => closed++)
+      }
+      await new Promise((done) => setTimeout(done, 1000))
+      expect(closed).toBeGreaterThanOrEqual(20)
+      for (const socket of sockets) socket.destroy()
+    } finally {
+      await proxy.close()
+    }
+  })
+})
+
+sandboxed("the Linux sandbox when the server dies", () => {
+  it("leaves no command behind when the server is killed outright", async () => {
+    const marker = `rp-orphan-${randomBytes(4).toString("hex")}`
+    const dir = tempDir("orphan")
+    const script = join(dir, "server.ts")
+    const command = `(exec -a ${marker} sleep 300) & setsid bash -c 'exec -a ${marker} sleep 300' & wait`
+    writeFileSync(
+      script,
+      [
+        `import { linuxBwrap } from ${JSON.stringify(join(import.meta.dirname, "../src/sandbox/linuxBwrap.ts"))}`,
+        `void linuxBwrap.run(${JSON.stringify(spec(command, { limits: { ...spec("").limits, timeoutMs: 120_000 } }))}, new AbortController().signal)`,
+        "setInterval(() => undefined, 1000)"
+      ].join("\n")
+    )
+    // Its runtime folder is left behind by the kill, so it goes in this test's folder.
+    const server = spawn(process.execPath, [script], {
+      stdio: "ignore",
+      cwd: import.meta.dirname,
+      env: { ...process.env, RP_SANDBOX_RUNTIME: dir }
+    })
+    try {
+      const deadline = Date.now() + 15_000
+      while (hostProcesses(marker).length < 2 && Date.now() < deadline)
+        await new Promise((done) => setTimeout(done, 100))
+      expect(hostProcesses(marker).length).toBeGreaterThanOrEqual(2)
+    } finally {
+      server.kill("SIGKILL")
+    }
+    const deadline = Date.now() + 5000
+    while (hostProcesses(marker).length > 0 && Date.now() < deadline) await new Promise((done) => setTimeout(done, 100))
+    expect(hostProcesses(marker)).toEqual([])
+  }, 30_000)
 })

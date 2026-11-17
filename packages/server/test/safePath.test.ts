@@ -1,7 +1,7 @@
 // The no-follow walk the app uses on account files (spec/FILES-AND-ENVIRONMENT.md §1.1): links,
 // FIFOs, `..` and links swapped in for folders are refused; writes replace a link, never its target.
-import { execFileSync } from "node:child_process"
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync, lstatSync, renameSync } from "node:fs"
+import { execFileSync, spawn } from "node:child_process"
+import { mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync, lstatSync, renameSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
@@ -110,6 +110,60 @@ describe("safePath", () => {
     expect(changes.changed).toEqual(["a/b/note.txt"])
     expect([...changes.created].sort()).toEqual(["a/made.txt", "escape"])
     expect([...after.entries.keys()].some((p) => p.startsWith("escape/"))).toBe(false)
+  })
+
+  // Review (review-sandbox1): a command in the same folder swaps a folder for a link to the
+  // outside, as fast as it can, while the app reads and writes through it.
+  it("never reads or writes through a folder swapped for a link mid-walk", async () => {
+    const { base, root } = setup()
+    mkdirSync(join(base, "outside", "b"), { recursive: true })
+    writeFileSync(join(base, "outside", "b", "note.txt"), "SECRET")
+    symlinkSync(join(base, "outside"), join(root, "link"))
+    const swapper = spawn(
+      "/bin/bash",
+      ["-c", "while :; do mv -T a a.real; mv -T link a; mv -T a link; mv -T a.real a; done"],
+      { cwd: root, stdio: "ignore" }
+    )
+    const seen = new Set<string>()
+    try {
+      const until = Date.now() + 2000
+      let i = 0
+      while (Date.now() < until) {
+        i++
+        await readRegularFile(root, ["a", "b", "note.txt"], 100)
+          .then((read) => seen.add(read.bytes.toString()))
+          .catch((error) => seen.add(error instanceof FilePathRefused ? "refused" : String(error.code)))
+        await writeRegularFile(root, ["a", "b", `w${i % 4}.txt`], Buffer.from("written")).catch(() => undefined)
+      }
+    } finally {
+      swapper.kill("SIGKILL")
+    }
+    expect(seen.has("SECRET")).toBe(false)
+    expect(seen.has("hello")).toBe(true)
+    expect(readFileSync(join(base, "outside", "b", "note.txt"), "utf8")).toBe("SECRET")
+    expect(readdirSync(join(base, "outside", "b"))).toEqual(["note.txt"])
+  })
+
+  it("handles long, unicode and case-different names as distinct plain names", async () => {
+    const { root } = setup()
+    expect(() => segmentsOf("x".repeat(256))).toThrow(FilePathRefused)
+    expect(() => segmentsOf(`${"é".repeat(128)}`)).toThrow(FilePathRefused)
+    expect(() => segmentsOf(`a/${"x".repeat(4100)}`)).toThrow(FilePathRefused)
+    expect(() => segmentsOf("a/\0/b")).toThrow(FilePathRefused)
+    expect(() => resolveFilesPath("/files/a/\0b", "/files")).toThrow(FilePathRefused)
+    // NFC and NFD spellings, and case, are different names on Linux; each stays below the root.
+    const nfc = "café.txt"
+    const nfd = "café.txt"
+    await writeRegularFile(root, [nfc], Buffer.from("nfc"))
+    await writeRegularFile(root, [nfd], Buffer.from("nfd"))
+    await writeRegularFile(root, ["Case.txt"], Buffer.from("upper"))
+    await writeRegularFile(root, ["case.txt"], Buffer.from("lower"))
+    expect((await readRegularFile(root, [nfc], 10)).bytes.toString()).toBe("nfc")
+    expect((await readRegularFile(root, [nfd], 10)).bytes.toString()).toBe("nfd")
+    expect((await readRegularFile(root, ["Case.txt"], 10)).bytes.toString()).toBe("upper")
+    // A name that is only dots and spaces, or looks like a path, is still one name or refused.
+    expect(segmentsOf("a/ ../b")).toEqual(["a", " ..", "b"])
+    expect(resolveFilesPath("/files/%2e%2e/x", "/files").full).toBe("/files/%2e%2e/x")
   })
 
   it("matches globs", () => {

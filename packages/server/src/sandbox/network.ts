@@ -53,6 +53,18 @@ export interface SandboxNetwork {
 }
 
 const REFUSED = "Only public internet addresses can be reached from commands.\n"
+const PORT_REFUSED = "Commands can open HTTPS (port 443) and HTTP (port 80) tunnels only.\n"
+
+/**
+ * The ports a CONNECT tunnel may reach: HTTPS and HTTP. Any other port would be raw TCP from the
+ * server's address (SSH, SMTP, scanning), which the tool's description says commands don't have.
+ */
+export const CONNECT_PORTS: ReadonlySet<number> = new Set([443, 80])
+/**
+ * Connections one command may hold open through its proxy at once. Each costs the server's
+ * process two descriptors; unbounded, a command could exhaust them for every account.
+ */
+export const PROXY_MAX_CONNECTIONS = 256
 
 /** A public-only proxy (HTTP CONNECT and plain HTTP with absolute URLs) on a Unix socket. */
 const openPublicProxy = async (socketPath: string, resolve: Resolve = defaultResolve): Promise<SandboxProxy> => {
@@ -62,6 +74,7 @@ const openPublicProxy = async (socketPath: string, resolve: Resolve = defaultRes
     socket.once("close", () => sockets.delete(socket))
   }
   const server = createServer()
+  server.maxConnections = PROXY_MAX_CONNECTIONS
   server.on("connection", track)
   server.on("connect", (req: IncomingMessage, client: Socket, head: Buffer) => {
     client.on("error", () => client.destroy())
@@ -69,6 +82,10 @@ const openPublicProxy = async (socketPath: string, resolve: Resolve = defaultRes
     const port = Number(target?.[2])
     if (!target || port < 1 || port > 65535) {
       client.end("HTTP/1.1 400 Bad Request\r\n\r\n")
+      return
+    }
+    if (!CONNECT_PORTS.has(port)) {
+      client.end(`HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\n${PORT_REFUSED}`)
       return
     }
     void reachableAddresses(target[1]!, resolve).then((addresses) => {
@@ -122,7 +139,9 @@ const openPublicProxy = async (socketPath: string, resolve: Resolve = defaultRes
           method: req.method,
           path: url.pathname + url.search,
           headers,
-          setHost: false
+          setHost: false,
+          // No shared pool: a command's sockets close with its requests, not later.
+          agent: false
         },
         (answer) => {
           res.writeHead(answer.statusCode ?? 502, answer.headers)
