@@ -36,20 +36,22 @@ const setup = async (page: Page) => {
 const tabNames = async (page: Page) => {
   const tools = page.getByRole("tablist", { name: "Chat panel" })
   await expect(tools).toBeVisible()
-  const names = await tools.getByRole("tab").allInnerTexts()
-  const savedOnly = await tools.locator("[data-saved-only]").allInnerTexts()
+  // The open tool shown as a guest is also under More: counted there, once.
+  const names = await tools.locator('[role="tab"]:not([data-tab-guest])').allInnerTexts()
+  const savedOnly = await tools.locator("[data-saved-only]:not([data-tab-guest])").allInnerTexts()
   const more = page.getByRole("button", { name: "More tools", exact: true })
   if (await more.isVisible()) {
     await more.click()
     const menu = page.getByRole("menu", { name: "More tools", exact: true })
-    await expect(menu.getByRole("menuitem").last()).toBeVisible()
-    names.push(...(await menu.getByRole("menuitem").allInnerTexts()))
+    await expect(menu.locator('[role="menuitem"][data-tab-value]').last()).toBeVisible()
+    // The tools, not Arrange tabs….
+    names.push(...(await menu.locator('[role="menuitem"][data-tab-value]').allInnerTexts()))
     savedOnly.push(...(await menu.locator("[data-saved-only]").allInnerTexts()))
     await page.keyboard.press("Escape")
     await expect(menu).toHaveCount(0)
   }
   const cast = await page.getByRole("tablist", { name: "Characters", exact: true }).getByRole("tab").allInnerTexts()
-  const trim = (list: Array<string>) => list.map((name) => name.trim())
+  const trim = (list: Array<string>) => list.map((name) => name.replace(/\s*Shown above$/, "").trim())
   return {
     tabs: [...trim(names).sort(), "|", ...trim(cast)],
     savedOnly: trim(savedOnly).sort()

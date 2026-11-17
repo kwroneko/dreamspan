@@ -13,7 +13,10 @@ import { Away } from "../../ui/away.ts"
 import { useTabShown } from "../workbench/tab.tsx"
 import { useWorkspaceChanges } from "../editor/PresetWorkspace.tsx"
 import { UnsavedScope, useUnsavedTabs } from "../../ui/UnsavedChanges.tsx"
-import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
+import { SubjectTabs } from "../../ui/PanelTabs.tsx"
+import { inOrder, storedOrder } from "../../ui/tabOrder.ts"
+import { ToolTabs } from "../../ui/ToolTabs.tsx"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 import {
@@ -241,7 +244,12 @@ export function ChatSidePanel({
   }, [])
   if (!visited.has(tab)) setVisited(new Set([...visited, tab]))
   const all = usePanelTabs(content.view, tab)
-  const tools = all.filter((t) => (t.descriptor.placement ?? "tools") === "tools")
+  // The tools in the user's order (an account display choice); new and plugin tools follow it.
+  const viewPrefs = useViewPrefs()
+  const tabOrder = viewPrefs.prefs.panelTabOrder
+  const usualTools = all.filter((t) => (t.descriptor.placement ?? "tools") === "tools")
+  const tools = inOrder(usualTools, tabOrder)
+  const reordered = tools.some((t, index) => t.value !== usualTools[index]!.value)
   const cast = all.filter((t) => t.descriptor.placement === "cast")
   const nav = (
     <div ref={navRef} data-chat-panel-tabs className="flex shrink-0 flex-col">
@@ -264,6 +272,9 @@ export function ChatSidePanel({
           label="Chat panel"
           focusOnMount={restoreFocus && tools.some((tab) => tab.value === focusTab)}
           moreLabel="More tools"
+          onReorder={(values) => viewPrefs.change({ panelTabOrder: storedOrder(tabOrder, values) })}
+          onResetOrder={() => viewPrefs.change({ panelTabOrder: [] })}
+          reordered={reordered}
         />
       </div>
       <div className="border-b border-border px-2 pt-1">

@@ -1,26 +1,13 @@
-// A side panel's navigation, as two rows that never wrap. Tools: icon and label, in order, as
-// many as fit, the rest under More (the one open always shows). Subjects (a chat's characters):
+// A side panel's navigation, as two rows that never wrap. Tools (ToolTabs.tsx): icon and label,
+// in the user's order, as many as fit, the rest under More. Subjects (a chat's characters):
 // a strip of their own, each with its portrait, scrolling sideways when there are many. Each row
 // is its own tab list over the same panels, so a character named "Model" is never one of the tools.
 import { Tabs as BaseTabs } from "@base-ui/react/tabs"
-import { type ReactNode, useLayoutEffect, useRef, useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import type { AvatarCrop } from "@rp/shared/media.ts"
 import { Avatar } from "./Avatar.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
-import { Menu, MenuItem } from "./Menu.tsx"
 import { UnsavedDot } from "./UnsavedChanges.tsx"
-import { Tooltip } from "./Tooltip.tsx"
-
-interface ToolTab {
-  readonly dirty?: boolean | undefined
-  readonly value: string
-  readonly label: string
-  readonly icon: IconName
-  /** What the tab holds, beside it on hover and focus, and under it in More. */
-  readonly description?: string | undefined
-  /** Offered only once its chat is saved; marked `data-saved-only` so the tab strip says which. */
-  readonly savedOnly?: boolean | undefined
-}
 
 interface SubjectTab {
   readonly keepLabel?: boolean | undefined
@@ -44,31 +31,10 @@ interface SubjectTab {
 // The icon over its label, small, as a phone's tab bar: about six fit in the panel's default width.
 export const panelToolClass =
   "relative flex shrink-0 flex-col items-center gap-0.5 rounded-md border-b-2 border-transparent px-1.5 pt-1 pb-0.5 text-xs whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-const GAP = 2
 /** The subjects' strip's gap (gap-1). */
 const GAP_SUBJECT = 4
-const MORE = "More"
-
-/** Which tools show: a prefix that fits beside More, with the open one swapped in when it doesn't. */
-const fitting = (widths: ReadonlyArray<number>, more: number, room: number, active: number) => {
-  const total = widths.reduce((sum, width) => sum + width + GAP, 0)
-  if (total <= room) return widths.map((_, index) => index)
-  const shown: Array<number> = []
-  let used = more + GAP
-  for (const [index, width] of widths.entries()) {
-    if (used + width + GAP > room) break
-    shown.push(index)
-    used += width + GAP
-  }
-  if (active >= 0 && !shown.includes(active)) {
-    while (shown.length > 0 && used + widths[active]! + GAP > room) used -= widths[shown.pop()!]! + GAP
-    shown.push(active)
-  }
-  return shown
-}
-
 /** Wait for measurement so focusing a tab never targets the invisible sizing pass. */
-function useInitialTabFocus(list: { readonly current: HTMLDivElement | null }, ready: boolean, wanted: boolean) {
+export function useInitialTabFocus(list: { readonly current: HTMLDivElement | null }, ready: boolean, wanted: boolean) {
   const restored = useRef(false)
   useLayoutEffect(() => {
     if (!ready || !wanted || restored.current) return
@@ -78,135 +44,6 @@ function useInitialTabFocus(list: { readonly current: HTMLDivElement | null }, r
       restored.current = true
     }
   }, [list, ready, wanted])
-}
-
-export function ToolTabs({
-  tabs,
-  value,
-  onValueChange,
-  label,
-  moreLabel = MORE,
-  end,
-  focusOnMount = false
-}: {
-  tabs: ReadonlyArray<ToolTab>
-  /** The open tab; one that isn't a tool leaves none selected. */
-  value: string
-  onValueChange: (value: string) => void
-  label: string
-  /** The More button's accessible name, its text in it: "More tools". */
-  moreLabel?: string
-  /** After the row: a close button, say. */
-  end?: ReactNode
-  /** Restore the selected tab after a pending chat becomes a saved chat. */
-  focusOnMount?: boolean
-}) {
-  const row = useRef<HTMLDivElement>(null)
-  const ruler = useRef<HTMLDivElement>(null)
-  const [room, setRoom] = useState<number | null>(null)
-  const [widths, setWidths] = useState<ReadonlyArray<number>>([])
-  const key = tabs.map((tab) => `${tab.value}\u0000${tab.label}`).join("\u0001")
-  useLayoutEffect(() => {
-    const element = row.current
-    const measure = ruler.current
-    if (!element || !measure) return
-    const read = () => {
-      setRoom(element.clientWidth)
-      setWidths([...measure.children].map((child) => (child as HTMLElement).offsetWidth))
-    }
-    const observer = new ResizeObserver(read)
-    observer.observe(element)
-    read()
-    return () => observer.disconnect()
-  }, [key])
-  const active = tabs.findIndex((tab) => tab.value === value)
-  const ready = room !== null && widths.length === tabs.length + 1
-  useInitialTabFocus(row, ready, focusOnMount)
-  const shown = ready ? fitting(widths.slice(0, -1), widths.at(-1)!, room, active) : tabs.map((_, index) => index)
-  const visible = tabs.filter((_, index) => shown.includes(index))
-  const hidden = tabs.filter((_, index) => !shown.includes(index))
-  return (
-    <div className="flex min-w-0 items-center gap-1">
-      <div ref={row} className="relative min-w-0 flex-1 overflow-hidden">
-        {/* Every tool at its natural width, measured, never seen. */}
-        <div ref={ruler} aria-hidden="true" className="pointer-events-none invisible absolute flex">
-          {tabs.map((tab) => (
-            <span key={tab.value} className={panelToolClass}>
-              <Icon name={tab.icon} />
-              {tab.label}
-            </span>
-          ))}
-          <span className={panelToolClass}>
-            <Icon name="more" />
-            {MORE}
-          </span>
-        </div>
-        <div className="flex items-center gap-0.5">
-          <BaseTabs.Root value={value} onValueChange={(next) => onValueChange(next as string)}>
-            <BaseTabs.List aria-label={label} className={`flex items-center gap-0.5 ${ready ? "" : "invisible"}`}>
-              {visible.map((tab) => {
-                const button = (
-                  <BaseTabs.Tab
-                    data-layout-audit-ignore="inset: Tabs form the panel navigation strip"
-                    key={tab.value}
-                    value={tab.value}
-                    data-unsaved={tab.dirty || undefined}
-                    data-saved-only={tab.savedOnly || undefined}
-                    aria-description={tab.dirty ? "Unsaved changes" : undefined}
-                    className={`group ${panelToolClass} data-active:border-accent data-active:text-text`}
-                  >
-                    <Icon name={tab.icon} className="group-data-active:text-accent" />
-                    {tab.label}
-                    {tab.dirty && <UnsavedDot />}
-                  </BaseTabs.Tab>
-                )
-                return tab.description ? (
-                  <Tooltip key={tab.value} label={tab.description} side="bottom">
-                    {button}
-                  </Tooltip>
-                ) : (
-                  button
-                )
-              })}
-            </BaseTabs.List>
-          </BaseTabs.Root>
-          {hidden.length > 0 && (
-            <Menu
-              hint={`Shows more ${label.toLowerCase()} tabs.`}
-              label={`More of the ${label.toLowerCase()}`}
-              trigger={
-                <button
-                  data-layout-audit-ignore="inset: More tools continues the tab strip"
-                  type="button"
-                  aria-label={moreLabel}
-                  className={panelToolClass}
-                >
-                  <Icon name="more" />
-                  {MORE}
-                  {hidden.some((tab) => tab.dirty) && <UnsavedDot />}
-                </button>
-              }
-            >
-              {hidden.map((tab) => (
-                <MenuItem
-                  key={tab.value}
-                  icon={tab.icon}
-                  description={tab.description}
-                  onClick={() => onValueChange(tab.value)}
-                >
-                  <span className="relative pr-3" data-saved-only={tab.savedOnly || undefined}>
-                    {tab.label}
-                    {tab.dirty && <UnsavedDot />}
-                  </span>
-                </MenuItem>
-              ))}
-            </Menu>
-          )}
-        </div>
-      </div>
-      {end}
-    </div>
-  )
 }
 
 /**
