@@ -39,6 +39,7 @@ import * as status from "./status.tsx"
 import * as workbench from "./workbench/index.tsx"
 import * as threads from "./threads/index.tsx"
 import * as workshop from "./workshop/index.tsx"
+import * as files from "./files/index.tsx"
 
 export const registerFeatures = () => {
   cardForks.register()
@@ -60,6 +61,7 @@ export const registerFeatures = () => {
   editor.register()
   chat.register()
   workshop.register()
+  files.register()
   noteOverrides.register()
   ownTurnNotes.register()
   pickers.register()

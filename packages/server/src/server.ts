@@ -122,6 +122,8 @@ import * as Database from "./db/Database.ts"
 import { EventLoopMonitor } from "./eventLoop.ts"
 import * as Formats from "./importer/Formats.ts"
 import * as ImportRoutes from "./importer/routes.ts"
+import { filesRoutes } from "./files/routes.ts"
+import { FILES_ROUTES } from "@rp/shared/files.ts"
 import { MediaHolds } from "./importer/MediaHolds.ts"
 import { StImportJobs } from "./importer/StImportJobs.ts"
 import { StImportPlans } from "./importer/StImportPlans.ts"
@@ -476,7 +478,11 @@ const RequestGuard = HttpRouter.middleware(
               })
           : (response: HttpServerResponse.HttpServerResponse) =>
               // The frame page sets its own, with its nonce.
-              (path === FRAME_PANEL || path === "/media/external" || path.startsWith("/media/saved/")) &&
+              // A file's bytes (files/routes.ts) keep their sandboxed policy too.
+              (path === FRAME_PANEL ||
+                path === "/media/external" ||
+                path.startsWith("/media/saved/") ||
+                path === FILES_ROUTES.raw) &&
               response.headers["content-security-policy"] !== undefined
                 ? response
                 : HttpServerResponse.setHeader(response, "content-security-policy", policy)
@@ -732,6 +738,8 @@ export const serverWith = <E>(
       FramePanelRoute,
       AuthRoutes,
       ImportRoutes.layer,
+      // The file manager (spec/FILES-AND-ENVIRONMENT.md §8.1).
+      filesRoutes,
       SourceImageRoute,
       externalMediaRoute,
       savedMediaRoute,
