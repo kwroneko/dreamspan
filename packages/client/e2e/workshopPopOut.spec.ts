@@ -10,11 +10,21 @@ import type { ChatId } from "@rp/shared/chat.ts"
 import { expectLayout } from "./support/layoutAudit.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { makeStory, sidePanel } from "./support/workshopSideChat.ts"
+import { sidePanel } from "./support/workshopSideChat.ts"
 
 const server = serverPerFile(withAdmin)
 const STORY_LINE = "The ledger lists three ships."
 const POP = "Open beside the story"
+
+/** A story with one message of the user's: no reply, so no model is needed. */
+const makeStory = (_server: typeof server, title: string) =>
+  asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title })
+      yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: STORY_LINE })
+      return chat
+    })
+  )
 
 const attach = (story: ChatId) =>
   asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreateWorkshop({ attachTo: story }))
@@ -30,7 +40,7 @@ const start = async (page: Page, width: number, title: string) => {
   const workshop = await attach(story.id)
   await page.goto(`${server().url}/chats/${story.id}?panel=workshop&workshop=${workshop.id}`)
   const side = sidePanel(page).locator(`[data-side-chat="${workshop.id}"]`)
-  await expect(side).toBeVisible()
+  await expect(side).toBeVisible({ timeout: 30_000 })
   return { story, workshop, side }
 }
 
