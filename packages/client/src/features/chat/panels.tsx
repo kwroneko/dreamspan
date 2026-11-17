@@ -9,6 +9,7 @@ import { kindHides } from "./kindLooks.ts"
 import { Button } from "../../ui/Button.tsx"
 import type { IconName } from "../../ui/Icon.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
+import { isChunkLoadError, reportChunkFailure, StalePart, useStaleBuild } from "../../staleBuild.tsx"
 import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
@@ -199,6 +200,25 @@ export const preloadPanel = (component: ComponentType<PanelProps>) =>
  * fallback on screen for at least 300 ms, so every first visit of a tab took half a second
  * however fast the code and its data came (night/tabperf).
  */
+/**
+ * A tab whose code failed to load. After a rebuild the old build's chunks are gone and Try
+ * again can't work, so once the server's build is known to differ it asks for a reload.
+ */
+function PanelFailure({ label, chunk, retry }: { label: string; chunk: boolean; retry: () => void }) {
+  const stale = useStaleBuild()
+  if (stale) return <StalePart />
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <p role="alert" className="text-sm text-danger">
+        {chunk ? `The ${label} couldn't be loaded: the server can't be reached.` : `The ${label} couldn't be shown.`}
+      </p>
+      <Button hint="Retries loading this view." onClick={retry}>
+        Try again
+      </Button>
+    </div>
+  )
+}
+
 export const lazyPanel = (load: () => Promise<{ default: ComponentType<PanelProps> }>, label: string) => {
   let loaded: ComponentType<PanelProps> | null = null
   let pending: Promise<{ default: ComponentType<PanelProps> }> | null = null
@@ -219,24 +239,21 @@ export const lazyPanel = (load: () => Promise<{ default: ComponentType<PanelProp
       void start().catch(() => undefined)
     }
     // Fixed for the mount, so the tree under it never changes shape (and its state stays).
-    override state = { failed: false, Content: loaded ?? lazy(start) }
-    static getDerivedStateFromError() {
-      return { failed: true }
+    override state = { failed: false, chunk: false, Content: loaded ?? lazy(start) }
+    static getDerivedStateFromError(error: unknown) {
+      return { failed: true, chunk: isChunkLoadError(error) }
+    }
+    override componentDidCatch(error: unknown) {
+      void reportChunkFailure(error)
     }
     override render() {
       if (this.state.failed)
         return (
-          <div className="flex flex-col items-start gap-2">
-            <p role="alert" className="text-sm text-danger">
-              The {label} couldn't be loaded: the server can't be reached.
-            </p>
-            <Button
-              hint="Retries loading this view."
-              onClick={() => this.setState({ failed: false, Content: loaded ?? lazy(start) })}
-            >
-              Try again
-            </Button>
-          </div>
+          <PanelFailure
+            label={label}
+            chunk={this.state.chunk}
+            retry={() => this.setState({ failed: false, chunk: false, Content: loaded ?? lazy(start) })}
+          />
         )
       return (
         // Marked, so the performance harness can tell a tab that waited for its code.

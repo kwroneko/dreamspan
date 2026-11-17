@@ -2,6 +2,7 @@
 // Plugins can replace its id, wrap the current component, or add a higher-priority renderer.
 import { Component, Suspense, useSyncExternalStore, type ComponentType, type ReactNode } from "react"
 import { makeRegistry } from "../registry.ts"
+import { reportChunkFailure } from "../staleBuild.tsx"
 
 export interface MessageTextProps {
   text: string
@@ -30,6 +31,9 @@ class MessageRenderBoundary extends Component<{
   }
   static getDerivedStateFromError() {
     return { failed: true }
+  }
+  override componentDidCatch(error: unknown) {
+    void reportChunkFailure(error)
   }
   static getDerivedStateFromProps(props: MessageRenderBoundary["props"], state: MessageRenderBoundary["state"]) {
     if (props.text !== state.text || props.sourceText !== state.sourceText || props.renderer !== state.renderer)

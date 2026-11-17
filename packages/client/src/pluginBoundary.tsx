@@ -1,4 +1,5 @@
 import { Component, Suspense, createContext, useContext, useEffect, type ReactNode, type ComponentType } from "react"
+import { reportChunkFailure } from "./staleBuild.tsx"
 
 const FailureContext = createContext<() => void>(() => undefined)
 /** UI handlers can report asynchronous errors to their entry's boundary as well. */
@@ -20,7 +21,8 @@ class EntryBoundary extends Component<
   static getDerivedStateFromError() {
     return { failed: true }
   }
-  override componentDidCatch() {
+  override componentDidCatch(error: unknown) {
+    void reportChunkFailure(error)
     this.props.fail()
   }
   private fail = () => {
