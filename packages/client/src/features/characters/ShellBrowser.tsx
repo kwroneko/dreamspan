@@ -1286,7 +1286,7 @@ function Browser() {
           )}
         </nav>
       )}
-      {!grid && needle !== "" && forks.progress && (
+      {!grid && listNeedle !== "" && forks.progress && (
         <p role="note" className="text-xs text-muted">
           Until every {kind === "chat" ? "branch" : "chat"} has loaded, the ones still loading are found by name only.
         </p>
