@@ -238,7 +238,9 @@ export const layer = Layer.effect(
               userId: request.userId,
               chatId: request.chatId,
               rolloutId,
-              ...(profile.allowsOutside ? {} : { story: { mcpChoices: frozen.mcpChoices ?? {} } })
+              ...(profile.allowsOutside
+                ? {}
+                : { story: { mcpChoices: frozen.mcpChoices ?? {}, choicesNow: branchMcpNow(request) } })
             }),
             onChanged: (target) => {
               hub.publish(target, { _tag: "Reload" })
@@ -261,6 +263,20 @@ export const layer = Layer.effect(
         })
         return parsed(request, generation, reply)
       })
+
+    /**
+     * A story branch's MCP choices now, at the reply's own slot (spec/MCP.md §5.1): a server the
+     * user turned off there after the run began is off for its calls, a Resume's included.
+     */
+    const branchMcpNow = (request: GenerationRequest) =>
+      reader
+        .StateEventsAt({
+          userId: request.userId,
+          chatId: request.chatId,
+          slotId: request.slotId,
+          forkId: request.forkId ?? null
+        })
+        .pipe(Effect.map((events) => foldState(events).agentMcp ?? {}))
 
     const generate = (request: GenerationRequest) =>
       request.resume ? Stream.unwrap(resumed(request, request.resume)) : fresh(request)
@@ -808,7 +824,7 @@ export const layer = Layer.effect(
                       userId,
                       chatId,
                       rolloutId,
-                      ...(profile.allowsOutside ? {} : { story: { mcpChoices } })
+                      ...(profile.allowsOutside ? {} : { story: { mcpChoices, choicesNow: branchMcpNow(request) } })
                     }),
                     onChanged: (target) => {
                       hub.publish(target, { _tag: "Reload" })

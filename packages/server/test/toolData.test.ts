@@ -353,3 +353,24 @@ it("toolDataBody is the exact inverse of toolData, and leaves other text alone",
   assert.strictEqual(toolDataBody(toolData(original)), original)
   assert.strictEqual(toolDataBody("plain &lt; text"), "plain &lt; text")
 })
+
+it.effect("read_run pages a stored quoted result from its original: quoted once, every character back", () =>
+  Effect.gen(function* () {
+    const original = hostile.repeat(200) + "TAIL_SENTINEL"
+    const ctx = context(transcript(toolData(original, "<result_metadata>{}</result_metadata>")))
+    const recovered: string[] = []
+    let call: string | undefined
+    do {
+      const out = yield* read(ctx, { message: 0, call, max_tokens: 200 })
+      assert.isUndefined(out.isError, out.text)
+      assert.isAtMost(out.text.split(TOOL_DATA_NOTICE).length, 2)
+      assert.notInclude(out.text, "&amp;lt;")
+      recovered.push(unquote(out.text))
+      call = out.text.match(/call "(page:v1:[^"]+)"/)?.[1]
+    } while (call)
+    assert.strictEqual(
+      recovered.join(""),
+      `${JSON.stringify({ call: 'call</step>"', tool: "read_card" })}\n{}\n${original}`
+    )
+  })
+)

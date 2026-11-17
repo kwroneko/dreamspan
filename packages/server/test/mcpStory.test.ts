@@ -390,4 +390,41 @@ describe("MCP servers in story chats", () => {
       ])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
+  for (const how of ["turned off on the branch", "its Stories switch turned off", "deleted"] as const)
+    it.live(`a server ${how} after the run began isn't called on Resume, and the model is told`, () =>
+      Effect.gen(function* () {
+        const script = scripted([{ name: "mcp_slow_send", args: { text: "hello" }, id: "h1" }])
+        const { api, chat, events, main, leaf, mock } = yield* story(script.handler)
+        const slow = yield* fakeServer([fakeTool("send")])
+        slow.state.call = (_name, _args, signal) =>
+          new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("cancelled"))))
+        const connection = yield* addServer(api, slow, "Slow")
+        // On by the account switch (the branch makes no choice), unless it is the branch's.
+        if (how === "turned off on the branch") yield* choose(api, chat, main, leaf, connection.id, true)
+        else yield* api.SetMcpUse({ connectionId: connection.id, stories: true })
+        const { versionId, slotId } = yield* say(api, chat, main, leaf, "send it")
+        yield* eventually(() => calls(slow).length === 1)
+        yield* api.StopGeneration({ versionId: versionId as VersionId })
+        yield* eventually(() => finished(events, versionId as VersionId) !== undefined)
+        if (how === "turned off on the branch") yield* choose(api, chat, main, slotId, connection.id, false)
+        else if (how === "deleted") yield* api.DeleteMcpConnection({ connectionId: connection.id })
+        else yield* api.SetMcpUse({ connectionId: connection.id, stories: false })
+        const me = yield* api.Whoami()
+        const slot = yield* (yield* Reader).GetSlot({ userId: me.id, slotId })
+        const resumed = yield* api.ResumeVersion({
+          versionId: versionId as VersionId,
+          expectedRowVersion: slot.entry.rowVersion
+        })
+        yield* eventually(() => finished(events, resumed.version.id) !== undefined)
+        assert.isUndefined(waitingFor(events, resumed.version.id, "h1"))
+        assert.lengthOf(calls(slow), 1)
+        const last = toolMessages(mock.requests())
+          .filter((m) => m.tool_call_id === "h1")
+          .at(-1)!
+        assert.include(
+          String(last.content),
+          how === "deleted" ? "isn&apos;t available here now" : "is turned off for this chat"
+        )
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+    )
 })
