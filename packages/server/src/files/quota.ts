@@ -54,6 +54,9 @@ export interface Usage {
   readonly partial: boolean
 }
 
+const PARTIAL_TEXT = (what: string) =>
+  `Your files are too many to count. Delete files you don't need to ${what} again.`
+
 export class QuotaExceeded extends Error {
   override readonly name = "QuotaExceeded"
 }
@@ -93,6 +96,8 @@ export interface QuotaDeps {
   /** The account's Files and home folder on the host. */
   readonly folders: (userId: string) => { readonly filesRoot: string; readonly home: string }
   readonly defaultBytes: number
+  /** A walk's entry limit; the default outside tests. */
+  readonly walkMaxEntries?: number
 }
 
 export const makeFilesQuota = (deps: QuotaDeps) => {
@@ -115,7 +120,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     Effect.gen(function* () {
       const started = Date.now()
       const { filesRoot, home } = deps.folders(userId)
-      const [files, homeUse] = yield* Effect.promise(() => Promise.all([measureTree(filesRoot), measureTree(home)]))
+      const [files, homeUse] = yield* Effect.promise(() => Promise.all([measureTree(filesRoot, deps.walkMaxEntries), measureTree(home, deps.walkMaxEntries)]))
       const versionsBytes = yield* deps.reader
         .FileVersionBytes({ userId: userId as never })
         .pipe(Effect.orElseSucceed(() => 0))
@@ -180,9 +185,12 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const check = (userId: string, adding: number, what: string): Effect.Effect<Usage, QuotaExceeded> =>
     Effect.gen(function* () {
       let now = yield* usage(userId)
-      if (now.usedBytes + adding <= now.quotaBytes) return now
+      // A walk that stopped at its limits counted only part of the files: what it didn't reach
+      // could hold any amount (millions of empty files first, large ones after), so it isn't room.
+      if (!now.partial && now.usedBytes + adding <= now.quotaBytes) return now
       const trimmed = yield* prune(userId, Date.now() - PRESSURE_DAYS * DAY).pipe(Effect.orElseSucceed(() => 0))
-      if (trimmed > 0 || Date.now() - now.measuredAt > 60_000) now = yield* measure(userId)
+      if (trimmed > 0 || now.partial || Date.now() - now.measuredAt > 60_000) now = yield* measure(userId)
+      if (now.partial) return yield* Effect.fail(new QuotaExceeded(PARTIAL_TEXT(what)))
       if (now.usedBytes + adding <= now.quotaBytes) return now
       return yield* Effect.fail(new QuotaExceeded(overText(now.usedBytes + adding, now.quotaBytes, what)))
     })
@@ -221,7 +229,9 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const afterCommand = (userId: string) =>
     measure(userId).pipe(
       Effect.map((now) =>
-        now.usedBytes > now.quotaBytes ? overText(now.usedBytes, now.quotaBytes, "write files or run commands") : null
+        now.partial
+          ? PARTIAL_TEXT("write files or run commands")
+          : now.usedBytes > now.quotaBytes ? overText(now.usedBytes, now.quotaBytes, "write files or run commands") : null
       )
     )
 

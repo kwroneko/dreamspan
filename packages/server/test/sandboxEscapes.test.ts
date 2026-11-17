@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { deniedCalls, linuxBwrap, seccompFilter, sweepRunFolders } from "../src/sandbox/linuxBwrap.ts"
 import { selectLimiter } from "../src/sandbox/cgroupLimits.ts"
 import {
+  ownAddresses,
   PROXY_MAX_CONNECTIONS,
   reachableAddresses,
   sandboxMayReach,
@@ -223,6 +224,14 @@ sandboxed("the Linux sandbox", () => {
       expect(sandboxMayReach(address, new Set())).toBe(false)
     expect(sandboxMayReach("93.184.215.14", new Set())).toBe(true)
     expect(sandboxMayReach("93.184.215.14", new Set(["93.184.215.14"]))).toBe(false)
+    // The host's own IPv6 address is refused however the literal is spelled.
+    const own = ownAddresses({
+      synthetic: [
+        { address: "2606:4700:4700::1111", family: "IPv6", netmask: "", mac: "", internal: false, cidr: null, scopeid: 0 }
+      ]
+    })
+    for (const spelling of ["2606:4700:4700::1111", "2606:4700:4700:0:0:0:0:1111", "2606:4700:4700:0000::1111", "2606:4700:4700::1111".toUpperCase()])
+      expect(sandboxMayReach(spelling, own)).toBe(false)
     // A public name pointed at loopback (DNS rebinding) is refused; a mixed answer keeps the public one.
     expect(await reachableAddresses("rebind.example", async () => ["127.0.0.1"])).toEqual([])
     expect(await reachableAddresses("mixed.example", async () => ["10.0.0.1", "93.184.215.14"])).toEqual([

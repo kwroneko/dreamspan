@@ -10,7 +10,8 @@
 # 2. In it: /run/rp-cgroup is that view; this process moves to rp/server, the memory and pids
 #    controllers are handed down to rp, and rp is given to node. Commands' groups are made
 #    under rp, beside the server's.
-# 3. setpriv drops to node with no capabilities, and the server starts with
+# 3. setpriv drops to node with no capabilities and no_new_privs (a setuid binary can't
+#    become root of the namespace, which owns the cgroup view's top), and the server starts with
 #    COMMAND_CGROUP=/run/rp-cgroup/rp.
 #
 # Any step failing: the server runs as node without it, and the "Run commands" row says the
@@ -21,7 +22,7 @@ NODE_UID=1000
 NODE_GID=1000
 
 as_node() {
-  exec setpriv --reuid="$NODE_UID" --regid="$NODE_GID" --clear-groups --inh-caps=-all --bounding-set=-all -- "$@"
+  exec setpriv --reuid="$NODE_UID" --regid="$NODE_GID" --clear-groups --no-new-privs --inh-caps=-all --bounding-set=-all -- "$@"
 }
 
 if [ "$(id -u)" != 0 ]; then
