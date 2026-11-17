@@ -167,12 +167,12 @@ Owner [D]: "the agent needs to be able to choose a different model for subagents
 
 **[D]** (owner, 2026-11-17) "whenever subagents are in some way allowed/enabled in a chat, we want a second model selector next to the main one to be visible, where subagents can be picked. This would necessarily be a multiselect. Its behaviour, where its previous choices carry over, what the default value is and when it changes, are all things I haven't yet considered. But it's necessary for users to be able to change the subagent selection right there where the chat is, just like they can swap the model."
 
-So, wherever subagents are allowed or enabled in a chat, a **second model chip** is visible next to the main one: a multiselect of the models subagents may use, changed right there. Pending the owner's answer on its behaviour (carry-over, default, when it changes), proposed:
-- **[P]** It follows the main model chip's own scope and carry-over rules exactly.
-- **[P]** Its entries are "Same as this chat's model" (tracks the main chip) plus picked models.
-- **[P]** The default is just "Same as this chat's model".
-- **[P]** Picking a model is the consent for its connection (provider-send, §5.2).
-- **[P]** Placement goes beside the model chip, only after checking the real composer row layout.
+So, wherever subagents are allowed or enabled in a chat, a **second model chip** is visible next to the main one: a multiselect of the models subagents may use, changed right there. **[D]** (owner, 2026-11-17, "okay" to the coordinator's proposal) Its behaviour:
+- It follows the main model chip's own scope and carry-over rules exactly.
+- Its entries are "Same as this chat's model" (tracks the main chip) plus picked models.
+- The default is "Same as this chat's model"; picks change only when the user changes them.
+- Picking a model is the consent for its connection (provider-send, §5.2).
+- It sits beside the model chip. Its exact placement is still checked against the real composer row layout when it is built.
 
 SA2 builds this chip in place of a settings-only list; the settings list (§5.1) stays the account-level source of the aliases.
 
