@@ -4,7 +4,7 @@ import { useAtomValue } from "@effect/atom-react"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { CardFamily, FamilyMember, RefId } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
-import { AsyncResult } from "effect/reactivity"
+import { AsyncResult, Atom } from "effect/reactivity"
 import { useEffect, useMemo, useState } from "react"
 import { allOf, AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
@@ -162,8 +162,12 @@ function ChatLink({ chatId }: { chatId: NonNullable<FamilyMember["forkedInChatId
 /**
  * Which cards have a fork family, for every badge at once: a grid of hundreds of cards made
  * one CardFamily read per tile (1,257 on one home load at 420 cards). The tree is read when opened.
+ * Kept while the app runs: badges mount and unmount as grids filter and scroll, and when the last
+ * one left, the query was dropped and its read cancelled, then sent again by the next badge.
  */
-const familyIndexAtom = AppClient.query("CardFamilyIndex", undefined, { reactivityKeys: ["library"] })
+export const familyIndexAtom = Atom.keepAlive(
+  AppClient.query("CardFamilyIndex", undefined, { reactivityKeys: ["library"] })
+)
 
 export function ForkBadge({ entityId, label }: CardSurfaceContext) {
   const index = useAtomValue(familyIndexAtom)
