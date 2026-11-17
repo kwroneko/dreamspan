@@ -29,7 +29,7 @@ const scrubLiteral = (text: string): string =>
       "[redacted authorization]"
     )
     .replace(
-      /((?:["']?)(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|password)(?:["']?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,}\n]+)/gi,
+      /((?:\\*(?:["']|&quot;|&apos;|&#39;))?(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|password)(?:\\*(?:["']|&quot;|&apos;|&#39;))?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s,}\n]+)/gi,
       "$1[redacted]"
     )
     .replace(/\bsk-[A-Za-z0-9_-]{12,}/g, "[redacted key]")

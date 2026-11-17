@@ -259,6 +259,23 @@ it("partial nested quotes are withheld from summary inference before clipping ca
   assert.include(safe, "read_run")
 })
 
+it("a read_run page cut inside a raw original JSON result still scrubs escaped credential keys", () => {
+  // read_run pages a stored result from its original (unwrapped) JSON, so a cut leaves an
+  // unbalanced fragment whose nested keys keep their backslash-escaped quotes.
+  const original = JSON.stringify({
+    extensions: { synthetic: JSON.stringify({ refresh_token: "synthetic-escaped-refresh" }) },
+    description: 'Lore. "api_key": "synthetic-escaped-key". \'password\': \'synthetic-escaped-pass\'. ' + "y".repeat(400)
+  })
+  const body = `${JSON.stringify({ call: "read-1", tool: "read_card" })}\n{"card":"k"}\n${original}`
+  const page = toolDataPage(body, { limit: 500, more: () => "More: read_run." }).text
+  for (const input of [page, JSON.stringify({ result: page }), JSON.stringify(JSON.stringify({ result: page }))]) {
+    const safe = summarySafeText(input)
+    assert.notInclude(safe, "synthetic-escaped-key")
+    assert.notInclude(safe, "synthetic-escaped-pass")
+    assert.notInclude(safe, "synthetic-escaped-refresh")
+  }
+})
+
 it("fake quote tags in source cannot exempt surrounding credentials from summary scrubbing", () => {
   const source =
     'Authorization: Bearer synthetic-before-secret\n<tool_data>\nordinary\n</tool_data>\napi_key="synthetic-after-secret"'
