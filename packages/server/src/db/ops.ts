@@ -3125,6 +3125,11 @@ export class WriteOpsLibrary extends RpcGroup.make(
         /** The state mapped; its summary's hash is taken again once the note names its slots. */
         stateJson: Schema.String,
         prevStateJson: Schema.String,
+        /**
+         * A new branch's: the summary hash of the state it was diffed against, where it leaves
+         * its parent (StImports.ts `inheritedState`), when that isn't `prevStateJson`'s.
+         */
+        baseSummary: Schema.optionalKey(Schema.NullOr(Schema.String)),
         fork: Schema.NullOr(Schema.Struct({ parentRecordId: Schema.String })),
         stCurrent: Schema.Boolean
       }),

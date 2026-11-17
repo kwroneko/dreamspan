@@ -915,7 +915,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
         const { modifiedAt: _dated, ...mapped } = resolved
         const summary = stStateHash(mapped)
         if (state !== null) state.summary = summary
-        if (summary !== prevState?.summary) notes.push(resolved)
+        if (summary !== (finish.baseSummary === undefined ? prevState?.summary : finish.baseSummary))
+          notes.push(resolved)
       }
       const stateJson = applies ? JSON.stringify(state) : finish.prevStateJson
       return yield* Effect.gen(function* () {
@@ -1020,7 +1021,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
           stamp: stamp!,
           progress: { ...progress },
           slots,
-          notes: finished.notes
+          notes: finished.notes,
+          // As the unplanned path's: the run's later branches of this file walk up through it.
+          ...(finished.stateAt === undefined ? {} : { stateAt: finished.stateAt })
         }
       }).pipe(transaction(sql, "StImportCommitChat"))
     })
@@ -1320,7 +1323,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* (prefix: St
             const { modifiedAt: _dated, ...mapped } = resolved
             const summary = stStateHash(mapped)
             if (state !== null) state.summary = summary
-            if (summary !== prevState?.summary) notes.push(resolved)
+            if (summary !== (finish.baseSummary === undefined ? prevState?.summary : finish.baseSummary))
+              notes.push(resolved)
           }
           const finished = yield* finishChat({
             userId,
