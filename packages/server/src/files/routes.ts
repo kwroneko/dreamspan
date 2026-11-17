@@ -6,7 +6,7 @@
 // never opened. Main-thread async file I/O; SQLite only through the writer (file versions).
 import { createHash, randomBytes } from "node:crypto"
 import { constants } from "node:fs"
-import { lstat, mkdir, open, rename, rm, unlink, type FileHandle } from "node:fs/promises"
+import { lstat, mkdir, open, rename, unlink, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
 import { Transform } from "node:stream"
 import { pipeline } from "node:stream/promises"
@@ -31,7 +31,7 @@ import { Writer } from "../db/Database.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { storeMedia } from "../importer/mediaFiles.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
-import { FilePathRefused, listFolder, openFolder, readRegularFile, statPath } from "./safePath.ts"
+import { FilePathRefused, listFolder, openFolder, readRegularFile, removeTreeAt, statPath } from "./safePath.ts"
 
 const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW, O_NONBLOCK } = constants
 
@@ -406,9 +406,10 @@ export const filesRoutes = Layer.unwrap(
       if (!info) return refuse(404, "Not found. It may have been moved or deleted.")
       if (info.isFile()) yield* keepVersion(userId, root, segments, full, "delete")
       const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
-      // A link or special file is removed itself, never what it points at; `rm` doesn't follow links.
+      // A link or special file is removed itself, never what it points at. A folder is walked by
+      // descriptor (removeTreeAt), so a link swapped in for a subfolder mid-delete isn't followed.
       yield* Effect.tryPromise(() =>
-        info.isDirectory() ? rm(at(dir, segments.at(-1)!), { recursive: true }) : unlink(at(dir, segments.at(-1)!))
+        info.isDirectory() ? removeTreeAt(dir, segments.at(-1)!) : unlink(at(dir, segments.at(-1)!))
       ).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
       return HttpServerResponse.jsonUnsafe({ binItemId: null })
     })

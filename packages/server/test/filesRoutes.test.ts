@@ -2,7 +2,7 @@
 // the real boundary: upload with the batch's conflict answers, listing, Range reads, folders,
 // renames, deletion, and links planted in the tree listed but never followed. Synthetic files only.
 import { assert, describe, it } from "@effect/vitest"
-import { readdirSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { FolderListing } from "@rp/shared/files.ts"
 import { Effect } from "effect"
@@ -138,6 +138,68 @@ describe("file routes", () => {
       assert.strictEqual((yield* call("/files/raw?path=%2Ffiles%2Fleak.txt")).status, 400)
       assert.strictEqual((yield* call("/files/list?path=%2Ffiles%2Fdata")).status, 400)
       assert.strictEqual((yield* upload("/files/data/x.txt", "x")).status, 400)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+  it.live("refuses paths, links and origins that would leave the account's tree", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      yield* upload("/files/a.txt", "Synthetic.")
+      const filesDir = join(config.dataDir, "files")
+      const account = join(filesDir, readdirSync(filesDir)[0]!)
+      // Traversal in every spelling: decoded once, resolved, refused or kept as a literal name inside.
+      for (const path of ["/files/../..", "/files/%2e%2e/%2e%2e", "/etc/passwd", "/files/a\0b", "../files", "~/x"]) {
+        const response = yield* call(`/files/raw?${new URLSearchParams({ path })}`)
+        assert.include([400, 404], response.status, path)
+      }
+      assert.strictEqual((yield* call("/files/raw?path=%2Ffiles%2F%00x")).status, 400)
+      assert.strictEqual((yield* call("/files/raw?path=%2Ffiles%2F%252e%252e%2Fa.txt")).status, 404)
+      assert.strictEqual((yield* upload("/files/../../escape.txt", "x")).status, 400)
+      assert.strictEqual((yield* upload("/files/sub/../../../escape.txt", "x")).status, 400)
+      assert.isFalse(existsSync(join(config.dataDir, "escape.txt")))
+      assert.strictEqual((yield* json("/files/move", { from: "/files/a.txt", to: "/files/../../moved.txt" })).status, 400)
+      assert.strictEqual((yield* json("/files/move", { from: "/files/../../x", to: "/files/b.txt" })).status, 400)
+      assert.strictEqual((yield* json("/files/move", { from: "/files/a.txt", to: "/files" })).status, 400)
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/.." })).status, 400)
+      assert.strictEqual((yield* json("/files/delete", { path: "/" })).status, 400)
+
+      // Moving into, or uploading through, a linked folder is refused.
+      const outside = join(config.dataDir, "outside")
+      mkdirSync(outside)
+      writeFileSync(join(outside, "keep.txt"), "Outside the tree.")
+      symlinkSync(outside, join(account, "out"))
+      assert.strictEqual((yield* json("/files/move", { from: "/files/a.txt", to: "/files/out/a.txt" })).status, 400)
+      assert.strictEqual((yield* upload("/files/out/x.txt", "x")).status, 400)
+
+      // A recursive delete removes a link inside the folder, never what it points at.
+      yield* upload("/files/doomed/inner/f.txt", "x")
+      symlinkSync(outside, join(account, "doomed", "inner", "link"))
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/doomed" })).status, 200)
+      assert.isTrue(existsSync(join(outside, "keep.txt")))
+      assert.isFalse(existsSync(join(account, "doomed")))
+
+      // SVG and XML are attachments, never the app's own content.
+      for (const name of ["x.svg", "x.xml", "x.xhtml", "x.htm"]) {
+        yield* upload(`/files/${name}`, "<svg xmlns='http://www.w3.org/2000/svg'><script>1</script></svg>")
+        const response = yield* call(`/files/raw?${new URLSearchParams({ path: `/files/${name}` })}`)
+        assert.match(response.headers.get("content-disposition") ?? "", /^attachment/, name)
+        assert.strictEqual(response.headers.get("content-type"), "application/octet-stream", name)
+        assert.match(response.headers.get("content-security-policy") ?? "", /^sandbox/, name)
+      }
+
+      // Ranges past the end are refused; a suffix reads the tail.
+      const tail = yield* call("/files/raw?path=%2Ffiles%2Fa.txt", { headers: { range: "bytes=-4" } })
+      assert.strictEqual(yield* body(tail), "tic.")
+      const past = yield* call("/files/raw?path=%2Ffiles%2Fa.txt", { headers: { range: "bytes=99-" } })
+      assert.strictEqual(past.status, 416)
+
+      // A cross-site page can't change files.
+      const cross = yield* call("/files/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://evil.example" },
+        body: JSON.stringify({ path: "/files/a.txt" })
+      })
+      assert.strictEqual(cross.status, 403)
+      assert.strictEqual((yield* list("/files")).entries.some((e) => e.name === "a.txt"), true)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 })
