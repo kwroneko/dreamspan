@@ -17,12 +17,12 @@ import type { Tool } from "@earendil-works/pi-ai"
 // that made no message, from the usage ledger.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import type { ActivityCursor, ActivityRow, CutSpan, TranscriptEntry, TurnPart } from "@rp/shared/agent.ts"
+import type { ActivityCursor, ActivityRow, CutSpan } from "@rp/shared/agent.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { type PlacedStep, placedSteps, stepsOf } from "../agent/steps.ts"
+import { placedSteps, stepsOf } from "../agent/steps.ts"
 import type { FrozenTool } from "../agent/tools.ts"
 import { loadPoints } from "../agent/toolLoading.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
@@ -35,6 +35,8 @@ import { pathSegments } from "./pathSegments.ts"
 import { makeLibraryQueries } from "./library.ts"
 import { REPLACEABLE_CARD_FIELDS } from "@rp/shared/docs/note.ts"
 import { query } from "./tx.ts"
+import { transcriptEntries } from "./transcriptEntries.ts"
+import { withSubagents } from "./subagents.ts"
 import { workshopDefaultsOf } from "./workshopDefaults.ts"
 import { knowsSql, readKnowers } from "./knowers.ts"
 import { threadStretches } from "./threadStretches.ts"
@@ -48,83 +50,6 @@ import { withAssemblyModules } from "../assembler/modules.ts"
 
 /** At most this many full-text matches in the chat, SearchChat starts from them. */
 const FEW = 2000
-const textOf = (content: unknown) =>
-  typeof content === "string"
-    ? content
-    : Array.isArray(content)
-      ? content
-          .flatMap((p: { type?: string; text?: string }) => (p.type === "text" && p.text !== undefined ? [p.text] : []))
-          .join("")
-      : ""
-
-/**
- * What the loop added after the frozen request, as the model saw it; the request's own marker left
- * out. `steps`: each step's place (`placedSteps`), so a part or result says which step it is
- * (none for a cut span, whose steps aren't the version's). `requests`: the requests before these.
- */
-const transcriptEntries = (
-  messages: ReadonlyArray<AgentMessage>,
-  tools: number,
-  turnCap: number,
-  steps: ReadonlyArray<PlacedStep> = [],
-  requests = 0
-): Array<TranscriptEntry> => {
-  let request = requests
-  const stepAt = new Map(steps.map((s, i) => [`${s.message}:${s.part}`, i]))
-  const callStep = new Map(
-    steps.flatMap((s, i) => (s.step.kind === "tool" ? [[`${s.message}:${s.step.id}`, i] as const] : []))
-  )
-  let assistantAt = -1
-  const index = (step: number | undefined) => (step === undefined ? {} : { step })
-  return messages.flatMap((m, at): Array<TranscriptEntry> => {
-    if (m.role === "assistant") {
-      assistantAt = at
-      return [
-        {
-          role: "assistant",
-          parts: m.content.flatMap((p, part): Array<TurnPart> => {
-            const step = index(stepAt.get(`${at}:${part}`))
-            return p.type === "thinking"
-              ? [{ type: "thinking", text: p.thinking, ...step }]
-              : p.type === "text"
-                ? [{ type: "text", text: p.text, ...step }]
-                : p.type === "toolCall"
-                  ? [{ type: "toolCall", id: p.id, name: p.name, args: p.arguments, ...step }]
-                  : []
-          }),
-          stopReason: m.stopReason,
-          toolsOffered: ++request < turnCap && tools > 0,
-          ...(m.errorMessage ? { error: m.errorMessage } : {})
-        }
-      ]
-    }
-    if (m.role === "toolResult")
-      return [
-        {
-          role: "toolResult",
-          toolCallId: m.toolCallId,
-          tool: m.toolName,
-          text: textOf(m.content),
-          isError: m.isError,
-          ...index(callStep.get(`${assistantAt}:${m.toolCallId}`))
-        }
-      ]
-    if (m.role === "rpCompaction")
-      return [
-        {
-          role: "app",
-          text: `Summarized transcript ${m.from}–${m.through - 1}${m.model ? ` with ${m.model}` : " (model not recorded)"}. Original steps remain available.\n${m.content}`
-        }
-      ]
-    if (m.role === "rpUser") {
-      request = 0
-      return [{ role: "app", text: m.message.content + (m.message.images?.length ? " [image]" : "") }]
-    }
-    const other = m as { readonly role: string; readonly content?: unknown }
-    if (other.role === "rpHarness" || other.role === "user") return [{ role: "app", text: textOf(other.content) }]
-    return []
-  })
-}
 
 /**
  * The spans resuming dropped (`rollout_branches`), each placed where the kept transcript ends
@@ -309,9 +234,10 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
           readonly transcript: string | null
           readonly tools: string | null
           readonly running: number
+          readonly rollout_id: string
         }>`
           SELECT p.transcript_json AS transcript, json_extract(p.context_snapshot_json, '$.agent.tools') AS tools,
-            r.status IN ('pending', 'running') AS running
+            r.status IN ('pending', 'running') AS running, r.id AS rollout_id
           FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
           JOIN rollouts r ON r.id = v.rollout_id LEFT JOIN rollout_payloads p ON p.rollout_id = r.id
           WHERE v.id = ${versionId} AND c.owner_user_id = ${userId}
@@ -319,7 +245,12 @@ export const makeAgentReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "version", id: versionId })
         if (!row.transcript) return []
         const tools = row.tools ? (JSON.parse(row.tools) as ReadonlyArray<FrozenTool>) : []
-        return stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0, versionId)
+        // An `agent` call's step carries the subagent it started (spec/SUBAGENTS.md §7).
+        return yield* withSubagents(
+          sql,
+          row.rollout_id,
+          stepsOf(JSON.parse(row.transcript) as ReadonlyArray<AgentMessage>, tools, row.running === 0, versionId)
+        )
       }).pipe(query("RolloutSteps")),
 
     HistoryProjectionNeeded: ({ userId, chatId, forkId, leafSlotId, viewers }) =>

@@ -2643,6 +2643,22 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         })
       })
   },
+  // A subagent is read and stopped only through its owner's reply (spec/SUBAGENTS.md §7, §8).
+  GetSubagentRun: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const versionId = owner.chat.generatingId
+        yield* refused(actor.api.GetSubagentRun({ versionId, rolloutId: owner.chat.rolloutId }), "NotFound")
+        yield* refused(owner.api.GetSubagentRun({ versionId, rolloutId: owner.chat.rolloutId }), "NotFound")
+      })
+  },
+  StopSubagent: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const versionId = owner.chat.generatingId
+        yield* refused(actor.api.StopSubagent({ versionId, rolloutId: owner.chat.rolloutId }), "NotFound")
+      })
+  },
   // The registered modes and tools: the same for everyone, nobody's data.
   ListReplyTools: {
     probe: (actor) =>
@@ -5345,6 +5361,44 @@ const storage: Record<
         rolloutId: owner.chat.rolloutId,
         toolCallId: "call_1",
         status: "used"
+      }),
+      "NotFound"
+    ),
+  // Subagents (spec/SUBAGENTS.md §11): another user's run starts none and shows none.
+  StartSubagent: (_reader, actor, owner, writer) =>
+    refused(
+      writer.StartSubagent({
+        userId: actor.user.id,
+        parentRolloutId: owner.chat.rolloutId,
+        callId: "call_1",
+        rolloutId: "foreign-subagent",
+        type: "research",
+        connectionId: "none" as never,
+        modelId: "none" as never,
+        snapshot: "{}"
+      }),
+      "NotFound"
+    ),
+  FindSubagent: (reader, actor, owner) =>
+    refused(
+      reader.FindSubagent({ userId: actor.user.id, rolloutId: owner.chat.rolloutId, toolCallId: "call_1" }),
+      "NotFound"
+    ),
+  SubagentRun: (reader, actor, owner) =>
+    refused(
+      reader.SubagentRun({
+        userId: actor.user.id,
+        versionId: owner.chat.generatingId,
+        rolloutId: owner.chat.rolloutId
+      }),
+      "NotFound"
+    ),
+  SubagentStatus: (reader, actor, owner) =>
+    refused(
+      reader.SubagentStatus({
+        userId: actor.user.id,
+        versionId: owner.chat.generatingId,
+        rolloutId: owner.chat.rolloutId
       }),
       "NotFound"
     ),

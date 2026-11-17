@@ -1,5 +1,5 @@
 import type { RolloutEffectRecord } from "@rp/shared/workshopApi.ts"
-import type { ApprovalPrompt } from "@rp/shared/agent.ts"
+import type { ApprovalPrompt, SubagentRow } from "@rp/shared/agent.ts"
 // The tools a rollout may offer (spec/AGENTIC.md §4.1): a registered catalog, each tool with
 // its effect class (DESIGN §7.3). Tools run on the main thread and reach storage only through
 // the reader and writer operations, owner-scoped and causal: nothing at or after the slot
@@ -67,6 +67,18 @@ export interface ToolContext {
     /** The offered skills, registered or card-carried, frozen with the run. */
     readonly cardSkills: ReadonlyArray<import("./toolLoading.ts").Skill>
   }
+  /** The run a subagent would be a child of (spec/SUBAGENTS.md); absent in a subagent's own run. */
+  readonly subagentHost?: SubagentHost
+}
+
+/** What the `agent` tool needs of the run whose call starts a subagent (agent/subagents.ts). */
+interface SubagentHost {
+  readonly input: import("./session.ts").AgentStrategyInput
+  readonly run: import("./session.ts").AgentRun
+  /** The definitions the run was offered, as frozen: a child never gets more. */
+  readonly offered: ReadonlyArray<FrozenTool>
+  /** Shows the child in the call's step as it runs; null takes it out. */
+  readonly show: (row: SubagentRow | null) => void
 }
 
 /** What a tool returns to the model: text, or a failure the model can correct. */
@@ -87,6 +99,8 @@ export interface ToolOutput {
   readonly loaded?: ReadonlyArray<string>
   /** Images for a model that accepts them, after the text (an MCP server's, spec/MCP.md §9). */
   readonly images?: ReadonlyArray<{ readonly data: string; readonly mimeType: string }>
+  /** The subagent an `agent` call started: kept with the result as `details.subagent`, never sent. */
+  readonly subagent?: SubagentRow
 }
 
 export type WorkshopStoryRead = "positioned" | "conversation" | "library" | "account" | "refused"

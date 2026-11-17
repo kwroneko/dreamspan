@@ -69,32 +69,73 @@ export const ApprovalPrompt = Schema.Struct({
 })
 export type ApprovalPrompt = typeof ApprovalPrompt.Type
 
+const ThoughtStep = Schema.Struct({ kind: Schema.Literals(["thinking", "text"]), text: Schema.String })
+
+const ToolStepFields = {
+  kind: Schema.Literal("tool"),
+  /** The call's id in the transcript. */
+  id: Schema.String,
+  tool: Schema.String,
+  /** Short and user-facing: "Searched the chat". */
+  label: Schema.String,
+  /** What it was called with, in a line: “lighthouse”. */
+  title: Schema.String,
+  subtitle: Schema.optionalKey(Schema.String),
+  args: Schema.Unknown,
+  /** `waiting`: the call asks the user first (`approval` says what it will do). */
+  status: Schema.Literals(["running", "waiting", "done", "error"]),
+  result: Schema.optionalKey(Schema.String),
+  approval: Schema.optionalKey(ApprovalPrompt),
+  /** Existing steps render these three display classes. */
+  effect: Schema.Literals(["read", "chat_state", "external"]),
+  /** The refined execution class, when it differs from the display class. */
+  effectClass: Schema.optionalKey(EffectClass)
+}
+
+/** A subagent's own step, one level deep: never a subagent of its own (spec/SUBAGENTS.md §6.1). */
+export const ChildStep = Schema.Union([ThoughtStep, Schema.Struct(ToolStepFields)])
+export type ChildStep = typeof ChildStep.Type
+
+/** How a subagent stands: `waiting` while one of its calls asks the user first. */
+export const SubagentStatus = Schema.Literals(["running", "waiting", "done", "stopped", "failed"])
+export type SubagentStatus = typeof SubagentStatus.Type
+
+/**
+ * A subagent an `agent` call started (spec/SUBAGENTS.md §2, §7): the child run, what it was asked,
+ * the model it ran on and how far it got. Shown as one collapsed row under the call's step.
+ */
+export const SubagentRow = Schema.Struct({
+  rolloutId: Schema.String,
+  /** The handle the parent names it by: "research-2". */
+  handle: Schema.String,
+  type: Schema.String,
+  /** The type's own label: "Look things up". */
+  typeLabel: Schema.String,
+  /** The short label the parent gave it, if any. */
+  name: Schema.optionalKey(Schema.String),
+  task: Schema.String,
+  /** The allowed-list alias it ran on (`same` until the model list exists), and that model's name. */
+  alias: Schema.String,
+  model: Schema.String,
+  status: SubagentStatus,
+  /** Its steps, as its own transcript holds them (absent where they weren't read). */
+  steps: Schema.optionalKey(Schema.Array(ChildStep)),
+  /** Its tool calls, and how long it ran (null while it runs). */
+  count: Schema.Int,
+  ms: Schema.NullOr(Schema.Int),
+  /** What its requests cost, as the ledger priced them; null when unknown or still running. */
+  cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String }))
+})
+export type SubagentRow = typeof SubagentRow.Type
+
 /**
  * A step: thinking or intermediate text from a turn that went on to call a tool, or one tool
- * call with its result. The final turn's reasoning and text are the version's own.
+ * call with its result. The final turn's reasoning and text are the version's own. An `agent`
+ * call carries the subagent it started (spec/SUBAGENTS.md §7).
  */
 export const RolloutStep = Schema.Union([
-  Schema.Struct({ kind: Schema.Literals(["thinking", "text"]), text: Schema.String }),
-  Schema.Struct({
-    kind: Schema.Literal("tool"),
-    /** The call's id in the transcript. */
-    id: Schema.String,
-    tool: Schema.String,
-    /** Short and user-facing: "Searched the chat". */
-    label: Schema.String,
-    /** What it was called with, in a line: “lighthouse”. */
-    title: Schema.String,
-    subtitle: Schema.optionalKey(Schema.String),
-    args: Schema.Unknown,
-    /** `waiting`: the call asks the user first (`approval` says what it will do). */
-    status: Schema.Literals(["running", "waiting", "done", "error"]),
-    result: Schema.optionalKey(Schema.String),
-    approval: Schema.optionalKey(ApprovalPrompt),
-    /** Existing steps render these three display classes. */
-    effect: Schema.Literals(["read", "chat_state", "external"]),
-    /** The refined execution class, when it differs from the display class. */
-    effectClass: Schema.optionalKey(EffectClass)
-  })
+  ThoughtStep,
+  Schema.Struct({ ...ToolStepFields, subagent: Schema.optionalKey(SubagentRow) })
 ])
 
 /** A version's steps at a glance, for its header badge: tool calls and how long the run took. */

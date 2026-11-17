@@ -241,6 +241,7 @@ export const builtinToolLoadingProfiles: ReadonlyArray<ToolLoadingProfile> = [
     id: "workshop",
     immediate: [
       "list_library",
+      "agent",
       "search_story",
       "read_story",
       "open_story_summary",

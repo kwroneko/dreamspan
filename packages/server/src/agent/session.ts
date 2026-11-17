@@ -33,7 +33,7 @@ import { ProviderRegistry } from "../providers/registry.ts"
 import type { AgentPlan } from "./modes.ts"
 import { countSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
 import { danglingCalls } from "./resume.ts"
-import type { ApprovalPrompt } from "@rp/shared/agent.ts"
+import type { ApprovalPrompt, SubagentRow } from "@rp/shared/agent.ts"
 import type { PermitInput, PermitResult } from "./approvals.ts"
 import {
   budgetResult,
@@ -95,6 +95,11 @@ export interface AgentRun {
    * where it says so. Absent: every offered call runs.
    */
   readonly permit?: (input: PermitInput) => Effect.Effect<PermitResult>
+  /**
+   * This run is a subagent (spec/SUBAGENTS.md): its tools get no host to start one of their own,
+   * its last request says `writeNow`, and it isn't summarized as it goes (that's SA7's).
+   */
+  readonly subagent?: { readonly writeNow: string }
 }
 
 export interface AgentStrategyInput {
@@ -594,6 +599,21 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           cardSkills: run.cardSkills ?? []
         },
         reader: run.reader,
+        // A subagent's tools start none of their own (spec/SUBAGENTS.md §6.1).
+        ...(run.subagent
+          ? {}
+          : {
+              subagentHost: {
+                input,
+                run,
+                offered: frozen,
+                show: (row: SubagentRow | null) => {
+                  if (row) children.set(toolCallId, row)
+                  else children.delete(toolCallId)
+                  showSteps(false)
+                }
+              }
+            }),
         vision: (generation.model as { readonly vision?: boolean } | null)?.vision === true,
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)
@@ -608,6 +628,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         })
       /** Calls waiting for the user, with what each will do: shown in their steps. */
       const waiting = new Map<string, ApprovalPrompt>()
+      /** The subagents `agent` calls started, as they run: shown in their calls' steps. */
+      const children = new Map<string, SubagentRow>()
       const waitingChanged = (toolCallId: string, prompt: ApprovalPrompt | null) => {
         if (prompt) waiting.set(toolCallId, prompt)
         else waiting.delete(toolCallId)
@@ -822,11 +844,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             content,
             // What a loading call loaded is part of the transcript: replay derives the loaded set from it.
             details:
-              sentText !== fullText || result.loaded?.length || result.presentation
+              sentText !== fullText || result.loaded?.length || result.presentation || result.subagent
                 ? {
                     ...(sentText !== fullText ? { sentText } : {}),
                     ...(result.loaded?.length && !result.isError ? { loaded: [...result.loaded] } : {}),
-                    ...(result.presentation ? { presentation: result.presentation } : {})
+                    ...(result.presentation ? { presentation: result.presentation } : {}),
+                    // The subagent this call started, kept with its result (never sent to a model).
+                    ...(result.subagent ? { subagent: result.subagent } : {})
                   }
                 : null,
             ...(result.isError ? { isError: true } : {})
@@ -892,11 +916,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             ? seed.slice()
             : [
                 { role: "rpRequest", timestamp: Date.now() },
-                ...(cap <= 1 ? [{ role: "rpHarness" as const, content: WRITE_NOW, timestamp: Date.now() }] : [])
+                ...(cap <= 1 ? [{ role: "rpHarness" as const, content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }] : [])
               ]
         },
         prepareRequest: async ({ context }, signal) => {
-          if (!execution.chatKinds.get(run.kind ?? "")?.summaryTranscript) return
+          if (!execution.chatKinds.get(run.kind ?? "")?.summaryTranscript || run.subagent) return
           const compactor = execution.runCompactors.get("workshop")
           if (!compactor) throw new Error("Workshop summaries are unavailable.")
           try {
@@ -1005,7 +1029,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         // The last request is made without tools, after the app's "write now".
         prepareNextTurnWithContext: () =>
           requests === cap - 1
-            ? { messages: [{ role: "rpHarness", content: WRITE_NOW, timestamp: Date.now() }] }
+            ? { messages: [{ role: "rpHarness", content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }] }
             : nudged && !nudgeSent
               ? ((nudgeSent = true), { messages: [{ role: "rpHarness", content: SEND_NUDGE, timestamp: Date.now() }] })
               : undefined
@@ -1078,9 +1102,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           // A call waiting for the user shows as waiting, with what it asks.
           const steps = stepsOf(agent.state.messages, frozen, final, several ? id : undefined).map((step) => {
             const approval = step.kind === "tool" ? waiting.get(step.id) : undefined
-            return approval && step.kind === "tool"
-              ? { ...step, ...approval.presentation, status: "waiting" as const, approval }
-              : step
+            const child = step.kind === "tool" ? children.get(step.id) : undefined
+            const shown = child && step.kind === "tool" ? { ...step, subagent: child } : step
+            return approval && shown.kind === "tool"
+              ? { ...shown, ...approval.presentation, status: "waiting" as const, approval }
+              : shown
           })
           const json = JSON.stringify(steps)
           if (json === shown.get(id)) continue

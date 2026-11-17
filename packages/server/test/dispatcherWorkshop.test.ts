@@ -139,6 +139,7 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
       bodies[0]!.tools!.map((t) => t.function.name),
       [
         "list_library",
+        "agent",
         "read_file",
         "list_files",
         "search_files",

@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { baseline } from "./baseline.ts"
 import { filesMigration } from "./migrationFiles.ts"
+import { subagentSchema } from "./subagentSchema.ts"
 
 /** node:sqlite prepares one statement at a time, so DDL is kept as a list of statements. */
 const runAll = (statements: ReadonlyArray<string>) =>
@@ -16,7 +17,9 @@ const runAll = (statements: ReadonlyArray<string>) =>
 export const migrations = {
   "0001_baseline": runAll(baseline),
   // spec/FILES-AND-ENVIRONMENT.md §10: file versions and shares, attachment names and paths.
-  "0002_files": runAll(filesMigration)
+  "0002_files": runAll(filesMigration),
+  // spec/SUBAGENTS.md §11. Numbered after 0002_files, and independent of it.
+  "0003_subagents": runAll(subagentSchema)
 }
 
 /**

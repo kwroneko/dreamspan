@@ -2,7 +2,7 @@ import type {} from "./messages.ts"
 // A transcript as the steps a version shows (spec/AGENTIC.md §5.1): the same projection live,
 // as the loop runs, and afterwards from the stored transcript.
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { ApprovalPrompt, RolloutStep } from "@rp/shared/agent.ts"
+import type { ApprovalPrompt, RolloutStep, SubagentRow } from "@rp/shared/agent.ts"
 import type { FrozenTool } from "./tools.ts"
 
 type Presentation = NonNullable<ApprovalPrompt["presentation"]>
@@ -73,6 +73,7 @@ export const placedSteps = (
         readonly isError: boolean
         readonly index: number
         readonly presentation?: Presentation
+        readonly subagent?: SubagentRow
       }
     >
   >()
@@ -90,6 +91,10 @@ export const placedSteps = (
           ? {
               presentation: (m.details as { presentation: Presentation }).presentation
             }
+          : {}),
+        // The subagent an `agent` call started, as it ended (spec/SUBAGENTS.md §7).
+        ...((m.details as { subagent?: SubagentRow } | null)?.subagent
+          ? { subagent: (m.details as { subagent: SubagentRow }).subagent }
           : {})
       })
   })
@@ -143,7 +148,8 @@ export const placedSteps = (
           status: result ? (result.isError ? "error" : "done") : final ? "error" : "running",
           ...(result ? { result: result.text } : {}),
           effect: displayEffect,
-          ...(effect === displayEffect ? {} : { effectClass: effect })
+          ...(effect === displayEffect ? {} : { effectClass: effect }),
+          ...(result?.subagent ? { subagent: result.subagent } : {})
         })
       }
     })

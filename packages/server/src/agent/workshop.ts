@@ -32,6 +32,8 @@ export const workshopMode: OrchestrationMode = {
       "edit_lorebook",
       "clone_card",
       "start_chat",
+      // A subagent inside the reply (spec/SUBAGENTS.md §2.1), under the `subagents` capability.
+      "agent",
       // The conversation's own history (spec/WORKSHOP-CONTEXT.md §3.3).
       ...WORKSHOP_HISTORY_TOOLS,
       ...(state.workshopAttached === undefined ? PLUGIN_TOOLS : []),

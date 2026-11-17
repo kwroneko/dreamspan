@@ -21,7 +21,8 @@ import type {
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { type Reuse, ReuseLine, reuseByMessage } from "../editor/promptLines.tsx"
-import { createContext, Fragment, type ReactNode, useContext, useMemo, useRef, useState } from "react"
+import { createContext, Fragment, lazy, type ReactNode, Suspense, useContext, useMemo, useRef, useState } from "react"
+import { Loading } from "../../ui/Spinner.tsx"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -817,9 +818,32 @@ export function DraftRequestView({ request }: { request: DraftRequest }) {
 }
 
 /** /chats/$chatId/context/$versionId */
+const SubagentRunView = lazy(() =>
+  import("./agent/SubagentRunView.tsx").then((module) => ({ default: module.SubagentRunView }))
+)
+
 export function ContextPage() {
   const { chatId, versionId } = useParams({ strict: false }) as { chatId: ChatId; versionId: VersionId }
-  const search = useSearch({ strict: false }) as { fork?: unknown }
+  const search = useSearch({ strict: false }) as { fork?: unknown; subagent?: unknown }
+  // A subagent's own run, opened from its row's Inspect (spec/SUBAGENTS.md §7).
+  if (typeof search.subagent === "string" && search.subagent !== "")
+    return (
+      <Suspense fallback={<Loading label="Loading the subagent…" />}>
+        <SubagentRunView chatId={chatId} versionId={versionId} rolloutId={search.subagent} usage={Usage} />
+      </Suspense>
+    )
+  return <ReplyContext chatId={chatId} versionId={versionId} search={search} />
+}
+
+function ReplyContext({
+  chatId,
+  versionId,
+  search
+}: {
+  chatId: ChatId
+  versionId: VersionId
+  search: { fork?: unknown }
+}) {
   const viewed = useMemo(
     () => (typeof search.fork === "string" && search.fork !== "" ? { fork: search.fork as ForkId } : {}),
     [search.fork]

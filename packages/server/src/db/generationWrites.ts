@@ -261,14 +261,31 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
           usage_cache_read_tokens = ${usage!.cache_read}, usage_cache_write_tokens = ${usage!.cache_write},
           usage_cost = ${usage!.cost}, completed_at = ${now}, updated_at = ${now}
           WHERE id = ${rolloutId} AND status = 'running'`
+        if (versionId === null) return
+        // The version's usage rolls up the subagents its run started (spec/SUBAGENTS.md §2.2):
+        // they end before their parent does, which waits for them.
+        const [total] = yield* sql<{
+          requests: number
+          input: number | null
+          output: number | null
+          cache_read: number | null
+          cache_write: number | null
+          cost: number | null
+          currency: string | null
+        }>`
+          SELECT count(*) AS requests, sum(input_uncached) AS input, sum(output) AS output,
+            sum(cache_read) AS cache_read, sum(cache_write) AS cache_write, sum(cost) AS cost,
+            min(cost_currency) AS currency
+          FROM llm_requests WHERE rollout_id = ${rolloutId} OR rollout_id IN
+            (SELECT id FROM rollouts WHERE spawned_by_rollout_id = ${rolloutId})`
         yield* sql`UPDATE version_records SET usage_json = ${JSON.stringify({
-          requests: usage!.requests,
-          inputUncached: usage!.input,
-          output: usage!.output,
-          cacheRead: usage!.cache_read,
-          cacheWrite: usage!.cache_write,
-          cost: usage!.cost,
-          currency: usage!.currency
+          requests: total!.requests,
+          inputUncached: total!.input,
+          output: total!.output,
+          cacheRead: total!.cache_read,
+          cacheWrite: total!.cache_write,
+          cost: total!.cost,
+          currency: total!.currency
         })} WHERE id = ${versionId} AND rollout_id = ${rolloutId}`
       }).pipe(transaction(sql, "FinishRollout")),
 

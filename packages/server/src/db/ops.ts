@@ -211,6 +211,8 @@ import {
 import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
 import { DraftChatPreview, NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
 import { ActivityCursor, ActivityPage, NotResumable, RolloutStep, RunTranscript } from "@rp/shared/agent.ts"
+import { SubagentRun } from "@rp/shared/agentApi.ts"
+import { SubagentRow } from "@rp/shared/agent.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import { ConnectionDecisions, DecisionPointSetting } from "@rp/shared/decisions.ts"
@@ -3887,6 +3889,32 @@ export class WriteOpsLibrary extends RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * A subagent's rollout (spec/SUBAGENTS.md §2.2, §11), in one transaction: a child of the running
+   * rollout `parentRolloutId`, started by its call `callId`, in the same chat, kind and position
+   * (fork and leaf), with no slot and the role `subagent`, and its frozen snapshot. Its handle is
+   * `<type>-<n>`, numbered across the parent's run chain. Refused (NotFound) when the parent isn't
+   * the user's; `refused` when it isn't running, is a subagent itself, or has started
+   * `SUBAGENTS_PER_RUN` already. A second start for the same call returns the first (`existing`) and writes nothing.
+   */
+  Rpc.make("StartSubagent", {
+    payload: {
+      userId: UserId,
+      parentRolloutId: Schema.String,
+      callId: Schema.String,
+      rolloutId: Schema.String,
+      type: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_]{0,40}$/)),
+      connectionId: ConnectionId,
+      modelId: ModelId,
+      snapshot: Schema.String
+    },
+    success: Schema.Union([
+      Schema.Struct({ rolloutId: Schema.String, handle: Schema.String, existing: Schema.Boolean }),
+      /** `limit`: the run has started as many as it may; `not_running`: it has ended. */
+      Schema.Struct({ refused: Schema.Literals(["limit", "not_running", "nested"]) })
+    ]),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("SaveRolloutTranscript", {
     payload: { userId: UserId, rolloutId: Schema.String, transcript: Schema.String, steps: Schema.Int },
     success: Schema.Void,
@@ -5656,6 +5684,42 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("RolloutTranscript", {
     payload: { userId: UserId, versionId: VersionId },
     success: RunTranscript,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The subagent a run's call started (subagentReads.ts): among the children of `rolloutId` and of
+   * the runs it carried on (its `parent_rollout_id` chain), the one started by `toolCallId`; null
+   * when none was. Owner-scoped. Resume reads it so a call that already started one never starts
+   * another (spec/SUBAGENTS.md §8).
+   */
+  Rpc.make("FindSubagent", {
+    payload: { userId: UserId, rolloutId: Schema.String, toolCallId: Schema.String },
+    success: Schema.NullOr(
+      Schema.Struct({
+        rolloutId: Schema.String,
+        handle: Schema.String,
+        status: Schema.String,
+        /** The last text it wrote, if any: what it had of its report. */
+        partial: Schema.NullOr(Schema.String),
+        /** Its row as the steps show it, with what its requests cost. */
+        row: SubagentRow
+      })
+    ),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A subagent's own run (subagentReads.ts), for the inspector: only one started by the run of
+   * `versionId` or a run it carried on, in the user's own chat.
+   */
+  Rpc.make("SubagentRun", {
+    payload: { userId: UserId, versionId: VersionId, rolloutId: Schema.String },
+    success: SubagentRun,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A subagent of the reply `versionId`'s run: its rollout status, for its Stop (subagentReads.ts). */
+  Rpc.make("SubagentStatus", {
+    payload: { userId: UserId, versionId: VersionId, rolloutId: Schema.String },
+    success: Schema.String,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A chat's model work that made no message, from the ledger, newest first (agentReads.ts). */
