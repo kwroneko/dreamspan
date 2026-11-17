@@ -318,7 +318,7 @@ for (const scale of [1, 2])
     await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
     const { chatId } = await study(`Study icons ${scale}x`)
     await settled(chatId)
-    // A third card, so the strip has Next and ▶ Reply now.
+    // A third card, so the strip has Next.
     await rpc((api) =>
       Effect.gen(function* () {
         const mira = (yield* api.CreateCard({ label: `Mira ${scale}`, name: "Mira" })).entityId
@@ -329,9 +329,7 @@ for (const scale of [1, 2])
     try {
       const page = await context.newPage()
       await open(page, 1440, 900, "light", chatId)
-      const strip = nextReply(page)
       const chips = [
-        strip.getByRole("button", { name: /replies now$/ }),
         page.getByRole("button", { name: "Earlier text of this message", exact: true }),
         page.getByRole("button", { name: "Attach images", exact: true }),
         page.getByRole("switch", { name: "Guidance", exact: true }),
@@ -360,25 +358,15 @@ for (const scale of [1, 2])
           }
         })
         for (const d of offset.box) expect(Math.abs(d), `${offset.name}: icon box off centre`).toBeLessThanOrEqual(0.5)
-        // ▶ is drawn as a play glyph is, a little right of the box's middle so it looks centred.
-        if (!offset.name?.endsWith("replies now"))
-          for (const d of offset.ink) expect(Math.abs(d), `${offset.name}: ink off centre`).toBeLessThanOrEqual(0.5)
+        for (const d of offset.ink) expect(Math.abs(d), `${offset.name}: ink off centre`).toBeLessThanOrEqual(0.5)
       }
-      // Zoomed: the strip's end and the box's control row.
+      // Zoomed: the box's control row.
       if (shots && scale === 2) {
         mkdirSync(shots, { recursive: true })
         const zoom = await browser.newContext({ deviceScaleFactor: 4, viewport: { width: 1440, height: 900 } })
         try {
           const big = await zoom.newPage()
           await open(big, 1440, 900, "light", chatId)
-          const now = await bounds(nextReply(big).getByRole("button", { name: /replies now$/ }))
-          const around = (at: { x: number; y: number; width: number; height: number }, left: number) => ({
-            x: at.x - left,
-            y: at.y - 8,
-            width: at.width + left + 16,
-            height: at.height + 16
-          })
-          await big.screenshot({ path: join(shots, "reply-now-chip-zoom-4x.png"), clip: around(now, 120) })
           const row = await bounds(big.getByTestId("composer-controls"))
           await big.screenshot({ path: join(shots, "composer-controls-zoom-4x.png"), clip: row })
         } finally {

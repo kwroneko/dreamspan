@@ -129,7 +129,7 @@ interface ChatKindLook {               // client: features/workshop/kinds.ts
   readonly id: string
   readonly badge?: string               // "Workshop"
   readonly accent?: string              // a token: "--accent-workshop" (the name CLIENT-FRAMEWORK §5 gave it)
-  readonly hides: ReadonlyArray<string> // composer controls it doesn't use: "composer.next", "composer.reply-now"
+  readonly hides: ReadonlyArray<string> // composer controls it doesn't use: "composer.next"
 }
 ```
 
@@ -181,7 +181,7 @@ All on existing surfaces, checked in the client code:
 |---|---|---|
 | Accent | The chat page root (`ChatPage.tsx`) | `data-chat-kind="workshop"` on the root; `styles.css` sets `--accent: var(--accent-workshop)` under it, with light and dark values (semantic tokens only) |
 | Badge | `ChatBadges` (`ChatsPage.tsx`, used by the chat header's title and by the Chats list) | "Workshop" (`Badge`, neutral), hover "A workshop: the assistant works on your app, not in a story". `ChatBadges` takes the chat's `kind` (`Chat.kind` is in the shared type already) and reads `ChatKindLook.badge` |
-| Capability chip | The composer's next-reply strip (`composerControls`, placement `strip`; `nextReplyStrip.tsx`'s `chipClass` and popover) | `workshop.capabilities`, available only in workshop chats: "Can: 6 · Asks: 2", opening a popover of full-width rows, one per capability (§3.4), each with its Off / Ask first / Allowed choice (`ui/Segmented`) and a one-line explanation. The kind's `hides` makes `composer.next` and `composer.reply-now` unavailable there |
+| Capability chip | The composer's next-reply strip (`composerControls`, placement `strip`; `nextReplyStrip.tsx`'s `chipClass` and popover) | `workshop.capabilities`, available only in workshop chats: "Can: 6 · Asks: 2", opening a popover of full-width rows, one per capability (§3.4), each with its Off / Ask first / Allowed choice (`ui/Segmented`) and a one-line explanation. The kind's `hides` makes `composer.next` unavailable there |
 | Changes | A chat panel tab (`chatPanels`, registered by the workshop, shown in workshop chats) | §3.6 |
 
 Every control gets its hover explanation, nothing is reachable only by key, and the panel tab is in the URL as panel tabs already are.

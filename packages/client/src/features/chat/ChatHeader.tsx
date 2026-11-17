@@ -176,7 +176,9 @@ function ChatTitle({
               onClick={() => void begin()}
               className="group/title flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-focus"
             >
-              <span className="truncate">{shown}</span>
+              <span data-layout-name className="truncate">
+                {shown}
+              </span>
               {/* A narrow header (a phone, or a narrow chat column) has ⋯ Rename instead: the name needs the room. */}
               <Icon
                 name="edit"

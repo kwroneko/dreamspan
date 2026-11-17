@@ -73,7 +73,7 @@ export function RoundControls({ view, session, report }: ComposerControlContext)
     <Tooltip
       label={
         held
-          ? "Drop the rest of this round. Your next message, or Reply now, starts a new one."
+          ? "Drop the rest of this round. Your next message, or Send with nothing typed, starts a new one."
           : "Let the reply being written finish, and no one after it in this round."
       }
     >

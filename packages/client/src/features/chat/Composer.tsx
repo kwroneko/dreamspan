@@ -575,7 +575,7 @@ export function Composer({
     : decides
       ? "Get a reply"
       : replierName
-        ? `${replierName} ${replies}`
+        ? `${roundNames ?? replierName} ${replies}`
         : "Send"
   const sendHint = hasText
     ? `${sendLabel}${routeHint}${
@@ -644,6 +644,7 @@ export function Composer({
     })),
     onRecent: setPicked,
     guidance,
+    editingGuidance: editing !== null,
     // While a reply's guidance is edited, the box is guidance whatever the toggle says.
     prefsReady: viewPrefs.ready && textReady && editing === null,
     changeGuidance: (next) => {

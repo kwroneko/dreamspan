@@ -26,6 +26,8 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
   return page.evaluate(
     ({ inset, scope }) => {
       const tolerance = 1
+      // A label this short is a control's word or two, never a name to cut (below).
+      const SHORT_LABEL = 16
       const controls =
         "button, input:not([type=hidden]), textarea, select, a[href], [role=button], [role=switch], [role=checkbox], [role=radio], [role=combobox], [role=menuitem], [role=menuitemcheckbox], [role=menuitemradio], [role=option], [role=tab], [contenteditable=true]"
       const nodes: HTMLElement[] = []
@@ -284,6 +286,19 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           const intended = [...ancestors(el)].some(
             (p) => css(p).textOverflow === "ellipsis" || num(css(p).webkitLineClamp) > 0
           )
+          // Ellipsis is for long names. A control's short label (a word or two) is never cut:
+          // "Auto" shown as "Au…" reads as a broken control (owner, 2026-11-17). A user-given
+          // name (a chat's title, a branch's) is marked `data-layout-name`: any name may be cut.
+          const cut = [...ancestors(el)].find(
+            (p) => css(p).textOverflow === "ellipsis" && p.clientWidth && p.scrollWidth > p.clientWidth + tolerance
+          )
+          if (
+            cut &&
+            el.closest(controls) &&
+            !el.closest("[data-layout-name]") &&
+            (cut.textContent ?? "").trim().length <= SHORT_LABEL
+          )
+            add("text", el, `short label “${cut.textContent!.trim()}” cut by an ellipsis at ${path(cut)}`, cut)
           if (!intended) {
             if (
               el.clientHeight &&

@@ -6,6 +6,7 @@ import { chatKinds } from "@rp/shared/chatKinds.ts"
 import { Effect } from "effect"
 import {
   availableComposerControls,
+  composerControls,
   invokeComposerControl,
   type ComposerControlContext
 } from "../src/features/chat/composerControls.tsx"
@@ -33,6 +34,7 @@ import {
   type WorkshopCapability
 } from "../src/features/workshop/capabilities.ts"
 import { register as registerWorkshop } from "../src/features/workshop/index.tsx"
+import { workshopLook } from "../src/features/workshop/kinds.ts"
 
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
@@ -67,32 +69,43 @@ describe("chat kind looks", () => {
   })
 
   it("gives a workshop the capability chip in place of who replies; a story chat's strip is unchanged", () => {
-    expect(strip("rp")).toEqual([
-      "composer.model",
-      "composer.preset",
-      "composer.cache",
-      "composer.next",
-      "composer.reply-now"
-    ])
+    expect(strip("rp")).toEqual(["composer.model", "composer.preset", "composer.cache", "composer.next"])
     expect(strip("workshop")).toEqual(["composer.model", "composer.preset", "composer.cache", "workshop.capabilities"])
   })
 
   it("enforces hidden controls on invocation and keeps story and workshop Send working", async () => {
-    for (const source of ["button", "keyboard"] as const) {
-      const replyNow = vi.fn()
-      const send = vi.fn()
-      for (const kind of ["rp", "workshop"]) {
-        const context = {
-          ...contextOf(kind, 2),
-          hasText: true,
-          send,
-          replyNow
+    // A control the workshop's look hides: registered here, as a plugin's would be.
+    const hidden = vi.fn()
+    const closeControl = composerControls.register({
+      id: "synthetic.story-only",
+      order: 99,
+      placement: "strip",
+      run: hidden,
+      component: () => null
+    })
+    const closeLook = chatKindLooks.register({
+      ...workshopLook,
+      hides: [...workshopLook.hides, "synthetic.story-only"]
+    })
+    try {
+      for (const source of ["button", "keyboard"] as const) {
+        hidden.mockClear()
+        const send = vi.fn()
+        for (const kind of ["rp", "workshop"]) {
+          const context = {
+            ...contextOf(kind, 2),
+            hasText: true,
+            send
+          }
+          await invokeComposerControl("composer.send", context, source)
+          await invokeComposerControl("synthetic.story-only", context, source)
         }
-        await invokeComposerControl("composer.send", context, source)
-        await invokeComposerControl("composer.reply-now", context, source)
+        expect(send).toHaveBeenCalledTimes(2)
+        expect(hidden).toHaveBeenCalledTimes(1)
       }
-      expect(send).toHaveBeenCalledTimes(2)
-      expect(replyNow).toHaveBeenCalledTimes(1)
+    } finally {
+      closeLook()
+      closeControl()
     }
   })
 
@@ -186,8 +199,7 @@ describe("chat kind looks", () => {
               "composer.model",
               "composer.preset",
               "workshop.capabilities",
-              "composer.next",
-              "composer.reply-now"
+              "composer.next"
             ])
             expect(kindHides("synthetic/assistant", "composer.cache")).toBe(true)
             expect(kindTitle("Harbor", "synthetic/assistant")).toBe("Assistant · Harbor")
