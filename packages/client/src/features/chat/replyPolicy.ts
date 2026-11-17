@@ -168,7 +168,7 @@ const pooled = (
   return id === null ? null : { id, after: lastCharacter(cast, entries) }
 }
 
-/** ST's manual order: no one replies to what you send unless you pick them; Reply now picks one at random. */
+/** ST's manual order: no one replies to what you send unless you pick them; Send with nothing typed picks one at random. */
 const manual = (
   cast: Cast | null,
   entries: ReadonlyArray<PathEntry>,
@@ -239,8 +239,8 @@ replyPolicies.register({
   id: "manual",
   label: "Manual",
   description:
-    "No one replies to what you send unless you pick them under Next or use Speak now; Reply now picks someone at random.",
-  autoDetail: "No one replies to what you send; Reply now picks at random",
+    "No one replies to what you send unless you pick them under Next or use Speak now; Send with nothing typed picks someone at random.",
+  autoDetail: "No one replies to what you send; an empty Send picks at random",
   next: manual,
   unnamedReply: noCharacters
 })
@@ -267,7 +267,7 @@ export const nextInTurn = (
  * sent, so the preview follows the box as Send does). A null speaker
  * is a valid unnamed reply, so disabling automatic replies needs an explicit flag.
  * `noReplies`: Next is No one (DESIGN §2.3). A message sent gets no reply unless a pick names
- * one; asking with nothing typed (Reply now, an empty Send) gets Auto's pick, one reply. */
+ * one; asking with nothing typed (an empty Send) gets Auto's pick, one reply. */
 export const planReply = (
   cast: Cast | null,
   entries: ReadonlyArray<PathEntry> | null,

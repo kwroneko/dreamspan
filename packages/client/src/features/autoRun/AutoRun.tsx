@@ -1,5 +1,5 @@
-// Auto replies in the composer (run.ts): the strip's chip opens a dialog that asks how many
-// replies and says what will be sent; while a run is on, a row above the box counts them, with
+// Auto replies (run.ts): Auto replies in the Cast tab opens a dialog that asks how many replies
+// and says what will be sent; while a run is on, a row above the composer's box counts them, with
 // Stop. The row is also the run's driver: it is the only thing that starts a reply, and it only
 // does while it is on screen in the tab that started the run.
 import { useAtomValue } from "@effect/atom-react"
@@ -11,11 +11,9 @@ import { useChatPlaceKey } from "../chat/chatPlace.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
-import { Icon } from "../../ui/Icon.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { ComposerControlContext } from "../chat/composerControls.tsx"
-import { chipClass } from "../chat/nextReplyStrip.tsx"
 import { type ChatSession, liveSteps } from "../chat/session.ts"
 import {
   type AutoRun,
@@ -116,33 +114,65 @@ const readUsage = async (session: ChatSession, versionId: VersionId) => {
   return null
 }
 
-/** The strip's chip, after ▶: opens the dialog. */
-export function AutoRunChip(context: ComposerControlContext) {
-  const [run] = useRun(context.session)
+/**
+ * The chat's composer as it is now, published by its row (`AutoRunRow`): what the Cast tab's
+ * dialog checks Start against (who can reply, what's typed, the tip). Null while none is shown.
+ */
+const composers = new WeakMap<object, ReturnType<typeof makeComposerStore>>()
+const makeComposerStore = () => {
+  let value: ComposerControlContext | null = null
+  const listeners = new Set<() => void>()
+  return {
+    get: () => value,
+    set: (next: ComposerControlContext | null) => {
+      if (next === value) return
+      value = next
+      for (const listener of listeners) listener()
+    },
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    }
+  }
+}
+const composerOf = (session: object) => {
+  let store = composers.get(session)
+  if (!store) composers.set(session, (store = makeComposerStore()))
+  return store
+}
+
+/**
+ * The Cast tab's way in (owner, 2026-11-17: out of the composer), beside One reply at a time, and
+ * the dialog it opens. Only where two or more characters could take turns, or while a run is shown.
+ */
+export function AutoRunEntry({ session }: { session: ChatSession }) {
+  const [run] = useRun(session)
+  const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
+  const composer = composerOf(session)
+  const context = useSyncExternalStore(composer.subscribe, composer.get, composer.get)
   const [place, setPlace] = usePlaceParam(useChatPlaceKey("autoReplies"), "")
   const running = run !== null && run.stop === null
+  const characters = cast === null ? 0 : cast.participants.filter((id) => !cast.playedByMe.includes(id)).length
+  if (characters < 2 && run === null) return null
   return (
-    <>
-      <Tooltip
-        label={
+    <div className="flex min-h-9 shrink-0 items-center">
+      <Button
+        variant="ghost"
+        type="button"
+        focusableWhenDisabled
+        disabled={running || context === null}
+        onClick={() => setPlace("5:")}
+        hint={
           running
             ? "Auto replies are running. Stop them above the message box."
-            : "Let the characters reply to each other for a set number of replies, with nothing sent from you. You choose how many before anything is sent."
+            : context === null
+              ? "Open the chat's messages to start auto replies."
+              : "Let the characters reply to each other for a set number of replies, with nothing sent from you. You choose how many before anything is sent."
         }
       >
-        <Button
-          variant="ghost"
-          type="button"
-          focusableWhenDisabled
-          disabled={running}
-          onClick={() => setPlace("5:")}
-          className={chipClass()}
-        >
-          <Icon name="play" size={12} />
-          Auto…
-        </Button>
-      </Tooltip>
-      {place !== "" && (
+        Auto replies
+      </Button>
+      {place !== "" && context !== null && (
         <AutoRunDialog
           context={context}
           value={place}
@@ -150,7 +180,7 @@ export function AutoRunChip(context: ComposerControlContext) {
           onClose={() => setPlace("", true)}
         />
       )}
-    </>
+    </div>
   )
 }
 
@@ -223,8 +253,8 @@ function AutoRunDialog({
         </Field>
         <p data-auto-sends className="text-sm">
           {bounds.turns === null
-            ? "Each reply is sent to this chat's model, one at a time, like Reply now."
-            : `Sends up to ${bounds.turns} ${bounds.turns === 1 ? "reply" : "replies"} to this chat's model, one at a time, each like Reply now.`}
+            ? "Each reply is sent to this chat's model, one at a time, as Send asks for one with nothing typed."
+            : `Sends up to ${bounds.turns} ${bounds.turns === 1 ? "reply" : "replies"} to this chat's model, one at a time, each as Send asks for one with nothing typed.`}
           {tools ? " With tools on, one reply can make up to 12 requests." : ""} Decisions and summaries you turned on
           run as usual.
         </p>
@@ -258,6 +288,9 @@ const count = (value: number) => value.toLocaleString("en-US")
 export function AutoRunRow(context: ComposerControlContext) {
   const { session, report } = context
   const [run, store] = useRun(session)
+  // What the Cast tab's dialog checks Start against: this composer, as it is now.
+  useEffect(() => composerOf(session).set(context))
+  useEffect(() => () => composerOf(session).set(null), [session])
   const steps = useAtomValue(liveSteps(run?.waiting?.versionId ?? NO_VERSION))
   const approval =
     run?.waiting != null && (steps ?? []).some((step) => step.kind === "tool" && step.status === "waiting")
@@ -346,7 +379,7 @@ export function AutoRunRow(context: ComposerControlContext) {
     }
     pendingEvents.current = []
     store.update(now.id, starting)
-    // Exactly ▶ Reply now's request for one reply: Auto's pick, no round after it.
+    // Exactly an empty Send's request for one reply: Auto's pick, no round after it.
     void session
       .generate(
         session.snapshot().leafSlotId,

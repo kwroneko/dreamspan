@@ -205,9 +205,6 @@ export function workshopChatTests() {
           }
           const chip = nextReply(page).getByRole("button", { name: /^What the assistant may do: / })
           await expect(chip).toHaveText(/Can: 6 · Asks: 5/)
-          await expect(
-            nextReply(page).getByRole("button", { name: /replies now$|^Reply now$|^No one to reply$/ })
-          ).toHaveCount(0)
           await expect(nextReply(page).getByRole("button", { name: /^Next: / })).toHaveCount(0)
           await chip.click()
           const popover = page.getByRole("dialog", { name: "What the assistant may do" })
@@ -460,7 +457,7 @@ export function workshopChatTests() {
           await shot("list")
           await expectLayout(page, info, `workshop-list-${width}-${theme}`, { scope: '[aria-label="Chats"]' })
 
-          // A story chat is as it was: no kind, its own accent, Reply now and Tools in place.
+          // A story chat is as it was: no kind, its own accent, Next and Tools in place.
           await page.goto(`${server().url}/chats/${story.id}`)
           await expect(page.getByTestId("composer")).toBeVisible()
           await expect(page.locator("[data-chat-kind]")).toHaveCount(0)
@@ -468,9 +465,7 @@ export function workshopChatTests() {
           expect(await accentOf(page)).not.toBe(workshopAccent)
           await shot("story")
           await expect(nextReply(page).getByRole("button", { name: /^What the assistant may do/ })).toHaveCount(0)
-          await expect(
-            nextReply(page).getByRole("button", { name: /replies now$|^Reply now$|^No one to reply$/ })
-          ).toHaveCount(1)
+          await expect(nextReply(page).getByRole("button", { name: /^Next: / })).toHaveCount(1)
           const storySettings = await openPanel(page, "This chat")
           await expect(storySettings.getByRole("switch", { name: "Tools", exact: true })).toBeVisible()
           await expect(storySettings.getByRole("region", { name: "Summaries" })).toBeVisible()

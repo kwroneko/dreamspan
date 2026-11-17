@@ -205,7 +205,7 @@ it("follows the chat's reply order: list, pooled and manual, as ST's group strat
     const all = [...user, turn("v2", mira), turn("v3", tobin), turn(`v4-${i}`, wren)]
     assert.notStrictEqual(planReply(pooled, all, ana, null, null).replier, wren)
   }
-  // Manual: nobody replies to what you send unless picked; Reply now picks one of them.
+  // Manual: nobody replies to what you send unless picked; an empty Send picks one of them.
   const manual = order("manual")
   assert.deepStrictEqual(planReply(manual, user, ana, null, "Hello?"), {
     next: null,
@@ -309,7 +309,7 @@ it("No one under Next: no reply to what you send, Auto's one reply when asked, a
       assert.deepStrictEqual(sent.round, [], replyOrder)
       assert.isFalse(sent.reply, replyOrder)
     }
-    // Reply now or an empty Send asks: Auto's pick, one reply.
+    // An empty Send asks: Auto's pick, one reply.
     const asked = planReply(cast, user, ana, null, null, false, true)
     assert.strictEqual(asked.replier, planReply(cast, user, ana, null, null).replier, replyOrder)
     assert.deepStrictEqual(asked.round, [], replyOrder)

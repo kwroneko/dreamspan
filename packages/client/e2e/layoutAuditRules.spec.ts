@@ -27,3 +27,16 @@ test("an absent growing toolbar does not hide genuinely uneven gaps", async ({ p
   expect(gaps).toHaveLength(1)
   expect(gaps[0]!.measurement).toContain("spread 16.00px")
 })
+
+test("a control's short label cut by an ellipsis is reported; a long name cut is intended", async ({ page }) => {
+  const cell = "display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+  await page.setContent(`
+    <main style="padding:16px;display:flex;flex-direction:column;align-items:start;gap:16px">
+      <button style="width:48px;padding:0 8px"><span id="short" style="${cell}">Auto replies</span></button>
+      <button style="width:120px;padding:0 8px"><span id="long" style="${cell}">Captain Alexandra Rhee of the Northern Expedition</span></button>
+      <button style="padding:0 8px"><span id="whole" style="${cell}">Auto…</span></button>
+    </main>`)
+  const cut = (await layoutAudit(page)).filter((v) => v.kind === "text" && v.measurement.startsWith("short label"))
+  expect(cut.map((v) => v.selector)).toEqual(["#short"])
+  expect(cut[0]!.measurement).toContain("“Auto replies”")
+})

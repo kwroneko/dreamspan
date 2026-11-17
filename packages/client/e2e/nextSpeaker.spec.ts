@@ -343,7 +343,6 @@ for (const width of [1440, 390])
       await expect(nextChip(page)).toHaveAccessibleName("Next: chosen when you send. Choose who replies next")
       await expect(nextChip(page)).toContainText("Next: chosen when you send")
       await expect(nextChip(page)).not.toContainText(PLANNED)
-      await expect(nextReply(page).getByRole("button", { name: "Reply now", exact: true })).toBeVisible()
       await expect(page.getByRole("button", { name: "Get a reply", exact: true })).toBeVisible()
       await nextChip(page).hover()
       await expect(tooltip(page)).toContainText(

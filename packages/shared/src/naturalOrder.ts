@@ -137,7 +137,7 @@ export const pooledOrder = <Id>(
 
 /**
  * ST's manual order: nobody replies to a message you send (you pick who does); asked for a reply
- * with nothing sent (ST's empty send, here Reply now or an empty Send), one member at random.
+ * with nothing sent (ST's empty send, here an empty Send), one member at random.
  */
 export const manualOrder = <Id>(members: ReadonlyArray<Id>, typed: boolean, random: () => number): Id | null =>
   typed || members.length === 0 ? null : members[Math.floor(random() * members.length)]!

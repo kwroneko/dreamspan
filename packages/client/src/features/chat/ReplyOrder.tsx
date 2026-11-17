@@ -43,6 +43,8 @@ export function ReplyOrderSection({ session }: { session: ChatSession }) {
           <Select items={items} value={current} onValueChange={(order) => void choose(order)} />
         </Field>
         <SlotOutlet slot={castSections} only="cast.one-reply" props={{ session }} />
+        {/* Auto replies (features/autoRun/), out of the way beside it. */}
+        <SlotOutlet slot={castSections} only="cast.auto-replies" props={{ session }} />
       </div>
       {error && (
         <p role="alert" className="text-sm text-danger">
@@ -55,7 +57,7 @@ export function ReplyOrderSection({ session }: { session: ChatSession }) {
 
 // One reply per user action (owner, 2026-11-02), the Cast tab's `cast.one-reply` section, beside
 // Who replies and apart from it: off (the default, and ST's), everyone the reply order picks
-// replies in turn after a send or Reply now (a round); on, only the first does. A `reply.single`
+// replies in turn after a send or an empty Send (a round); on, only the first does. A `reply.single`
 // state event at the leaf shown.
 export function OneReplySection({ session }: { session: ChatSession }) {
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
@@ -78,7 +80,7 @@ export function OneReplySection({ session }: { session: ChatSession }) {
         checked={on}
         disabled={pending !== null}
         onCheckedChange={(next) => void change(next)}
-        about="Each message you send, or Reply now, gets one reply, so you can read or edit it before the next. Off: everyone Who replies picks answers, one after another."
+        about="Each message you send, or Send with nothing typed, gets one reply, so you can read or edit it before the next. Off: everyone Who replies picks answers, one after another."
       >
         One reply at a time
       </Switch>

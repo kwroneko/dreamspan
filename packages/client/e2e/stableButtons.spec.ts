@@ -146,6 +146,11 @@ for (const width of [1440, 390]) {
     await guidance.click()
     await expect(send).toBeDisabled()
     expect(await boxes(composer)).toEqual(before)
+    // Empty, Send would ask for a reply (none here: no one can reply); typed, guidance goes with Generate.
+    await hint(page, send, "Type a message to send")
+    await page.getByTestId("composer").fill("Synthetic guidance.")
+    await expect(send).toBeDisabled()
+    expect(await boxes(composer)).toEqual(before)
     await hint(page, send, "Guidance is sent with Generate")
     await audit(page, `composer-${width}`)
     await guidance.click()
@@ -215,6 +220,8 @@ for (const width of [1440, 390]) {
     await expect(next).toBeDisabled()
     await expect(strip.getByRole("button", { name: /^Prompt preset: / })).toBeVisible()
     await expect(strip.getByRole("button", { name: /^(Choose a model$|Model: )/ })).toBeVisible()
+    // The chips have their values, not the "…" they show while loading.
+    await expect(strip.getByRole("button", { name: /: loading$/ })).toHaveCount(0)
     const before = (await boxes(strip)).slice(0, 2)
     await admin((api) =>
       Effect.gen(function* () {
@@ -226,13 +233,14 @@ for (const width of [1440, 390]) {
     )
     await expect(next).toBeEnabled()
     expect((await boxes(strip)).slice(0, 2)).toEqual(before)
-    await expect(strip.locator("button")).toHaveCount(6)
-    await expect(strip.getByRole("button", { name: "Auto…", exact: true })).toBeVisible()
+    // Model, preset, cache and Next: Reply now is the empty Send, and Auto replies are in the Cast tab.
+    await expect(strip.locator("button")).toHaveCount(4)
     const controls = page.getByTestId("composer-controls")
     const emptySend = controls.getByRole("button", { name: / repl(?:y|ies)$/ })
     await expect(emptySend).toBeVisible()
+    // With nothing typed there's no guidance to lose: Send still asks for the reply alone.
     await controls.getByRole("switch", { name: "Guidance", exact: true }).click()
-    await expect(emptySend).toBeDisabled()
+    await expect(emptySend).toBeEnabled()
     await audit(page, `next-reply-${width}`)
   })
 

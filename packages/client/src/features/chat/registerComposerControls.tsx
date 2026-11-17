@@ -7,13 +7,11 @@ import { Icon } from "../../ui/Icon.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { CacheChip } from "./CacheIndicator.tsx"
 import { DraftContextChip } from "./draftRequest.tsx"
-import { nameOf, useCast } from "./cast.ts"
 import { ModelChip, PresetChip } from "./GenerationControls.tsx"
 import { GenerateIcon, SendIcon } from "./icons.tsx"
-import { chipClass } from "./nextReplyStrip.tsx"
-import { hasReplyChoice, NextReplyChip } from "./ReplyFrom.tsx"
+import { NextReplyChip } from "./ReplyFrom.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
-import { composerControls, type ComposerControlContext } from "./composerControls.tsx"
+import { composerControls } from "./composerControls.tsx"
 
 /** Guidance as an icon toggle in the box (DESIGN §2.2: a visible control), its name and use in the tooltip. */
 function GuidanceToggle({
@@ -39,42 +37,6 @@ function GuidanceToggle({
         className={`w-9 px-0! ${guidance ? "bg-guidance-surface text-guidance! ring-1 ring-guidance/60" : ""}`}
       >
         <Icon name="guidance" size={18} />
-      </Button>
-    </Tooltip>
-  )
-}
-
-/** ▶ beside "Next": who's next replies at once, with nothing sent from you (ST's force talk). */
-function ReplyNow({ reply, replier, busy, ready, invoke }: ComposerControlContext & { readonly invoke: () => void }) {
-  const view = useCast()
-  // With the decision model choosing (DESIGN §2.3), Auto's pick is only its fallback: not named.
-  const chooses = reply.decides === true && reply.picked === null && replier !== null
-  const name = chooses ? null : nameOf(view, replier)
-  const label = chooses ? "Reply now" : name ? `${name} replies now` : "No one to reply"
-  return (
-    <Tooltip
-      label={
-        !hasReplyChoice(reply)
-          ? "Choose between characters when at least two can reply."
-          : busy
-            ? "Wait for the current reply."
-            : chooses
-              ? "A reply now, with nothing sent from you; the decision model chooses who."
-              : name
-                ? `${label}, with nothing sent from you`
-                : label
-      }
-    >
-      <Button
-        variant="ghost"
-        focusableWhenDisabled
-        type="button"
-        aria-label={label}
-        disabled={!hasReplyChoice(reply) || busy || !ready || replier === null}
-        onClick={invoke}
-        className={`${chipClass()} w-9 justify-center px-0! text-accent! data-disabled:text-muted!`}
-      >
-        <Icon name="play" size={12} />
       </Button>
     </Tooltip>
   )
@@ -222,15 +184,6 @@ export const registerComposerControls = () => [
     component: ({ reply }) => <NextReplyChip {...reply} />
   }),
   composerControls.register({
-    id: "composer.reply-now",
-    order: 50,
-    placement: "strip",
-    run: async ({ reply, replyNow }) => {
-      if (hasReplyChoice(reply)) await replyNow()
-    },
-    component: ReplyNow
-  }),
-  composerControls.register({
     id: "composer.history",
     order: 90,
     // In the box's control row, after the speaker, at every width: the text has a row of its own.
@@ -308,16 +261,24 @@ export const registerComposerControls = () => [
     id: "composer.send",
     order: 40,
     placement: "actions",
-    run: ({ guidance, hasText, send, replyNow }) => {
-      if (!guidance) return hasText ? send() : replyNow()
+    // With nothing typed it asks for the reply alone, guidance on or off (there's no guidance to
+    // lose); with text and guidance on, Generate sends it, never Send.
+    run: ({ guidance, editingGuidance, hasText, send, replyNow }) => {
+      if (editingGuidance) return
+      if (!hasText) return replyNow()
+      if (!guidance) return send()
     },
-    component: ({ guidance, sendLabel, sendHint, busy, ready, hasText, replier, invoke }) => (
+    component: ({ guidance, editingGuidance, sendLabel, sendHint, busy, ready, hasText, replier, invoke }) => (
       <SquareIconButton
         label={sendLabel}
-        hint={guidance ? "Guidance is sent with Generate, as instructions for the reply." : sendHint}
+        hint={
+          editingGuidance || (guidance && hasText)
+            ? "Guidance is sent with Generate, as instructions for the reply."
+            : sendHint
+        }
         variant="primary"
         pending={busy}
-        disabled={guidance || !ready || (!hasText && replier === null)}
+        disabled={editingGuidance || (guidance && hasText) || !ready || (!hasText && replier === null)}
         className="data-disabled:bg-surface-raised! data-disabled:text-muted!"
         focusableWhenDisabled
         onClick={invoke}

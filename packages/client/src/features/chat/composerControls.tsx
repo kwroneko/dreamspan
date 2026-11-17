@@ -35,6 +35,8 @@ export interface ComposerControlContext {
   readonly recent: ReadonlyArray<{ id: EntityId; name: string; mediaId: string | null; crop?: AvatarCrop | undefined }>
   readonly onRecent: (id: EntityId) => void
   readonly guidance: boolean
+  /** A reply's guidance is being edited: every submit is a new version of that reply. */
+  readonly editingGuidance: boolean
   readonly prefsReady: boolean
   readonly changeGuidance: (next: boolean) => void
   readonly hint: string
@@ -46,7 +48,7 @@ export interface ComposerControlContext {
   readonly ready: boolean
   readonly hasText: boolean
   readonly replier: EntityId | null
-  /** Who replies after `replier`, in turn, in the round a send or Reply now starts (DESIGN §2.3). */
+  /** Who replies after `replier`, in turn, in the round a send (or an empty Send) starts (DESIGN §2.3). */
   readonly round: ReadonlyArray<EntityId>
   /** Generate's accessible name, "Generate Sam" (or "New version" while a reply's guidance is edited). */
   readonly generateText: string

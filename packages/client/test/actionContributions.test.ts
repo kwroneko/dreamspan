@@ -136,6 +136,24 @@ describe("composer contributions", () => {
     expect(send).toHaveBeenCalledTimes(2)
   })
 
+  it("the empty Send asks for a reply with guidance on too, never sends guidance, nor acts while guidance is edited", async () => {
+    const send = vi.fn(async () => {})
+    const replyNow = vi.fn(async () => {})
+    const context = {
+      guidance: true,
+      editingGuidance: false,
+      hasText: false,
+      send,
+      replyNow
+    } as unknown as ComposerControlContext
+    await invokeComposerControl("composer.send", context, "button")
+    expect(replyNow).toHaveBeenCalledTimes(1)
+    await invokeComposerControl("composer.send", { ...context, hasText: true }, "button")
+    await invokeComposerControl("composer.send", { ...context, editingGuidance: true }, "button")
+    expect(send).not.toHaveBeenCalled()
+    expect(replyNow).toHaveBeenCalledTimes(1)
+  })
+
   it("pending Enter follows guidance through overridable registered actions", async () => {
     const start = vi.fn(async () => {})
     const context = { guidance: false, start } as unknown as PendingComposerContext

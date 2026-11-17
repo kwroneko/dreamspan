@@ -464,7 +464,9 @@ export function BranchControl(props: BranchControlProps) {
           className="inline-flex h-8 max-w-32 min-w-7 shrink! items-center gap-1 rounded-md px-1.5 text-sm text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
         >
           <Icon name={icon} size={16} />
-          <span className="truncate">{label}</span>
+          <span data-layout-name className="truncate">
+            {label}
+          </span>
         </Button>
         <Sheet open={open} onOpenChange={setOpen} title={title}>
           <div className="flex min-h-0 flex-1 flex-col px-3 py-3">{body}</div>
@@ -480,7 +482,7 @@ export function BranchControl(props: BranchControlProps) {
           <Icon name={icon} size={14} className="shrink-0" />
           {/* A narrow header (a split frame) keeps the icon, the name moving to the explanation:
               never a name cut to a letter or two. */}
-          <span className="min-w-16 truncate @max-[32rem]/header:hidden">
+          <span data-layout-name className="min-w-16 truncate @max-[32rem]/header:hidden">
             {ready && <span className="text-muted @max-[40rem]/header:hidden">{kind}: </span>}
             {label}
             {off && <span className="text-xs text-muted"> · not where it opens</span>}

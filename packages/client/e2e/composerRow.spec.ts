@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, test } from "@playwright/test"
 import { Effect } from "effect"
+import { expectLayout } from "./support/layoutAudit.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -173,23 +174,41 @@ for (const width of [1440, 1024, 390])
       await expect(generate).toBeEnabled()
       if (shots)
         writeFileSync(join(shots, `${width}-${theme}-measurements.json`), JSON.stringify(measurements, null, 2))
-      if (width === 1440 && theme === "light") {
-        // Adding another possible replier exposes Next and its icon-only Reply now control.
+      {
+        // A second possible replier: the strip is the group's, Next with whole labels and nothing
+        // beside it (owner 2026-11-17: no ▶ Reply now, the empty Send is it; Auto replies are in
+        // the Cast tab).
         await withCookie(server(), cookie, (api) =>
           Effect.gen(function* () {
-            const entityId = (yield* api.CreateCard({ label: "Wren spacing fixture", name: "Wren" })).entityId
+            const entityId = (yield* api.CreateCard({ label: `Wren ${width} ${theme}`, name: "Wren", version: "1" }))
+              .entityId
             yield* api.ChangeCast({ chatId, slotId: null, change: { _tag: "Join", entityId } })
           })
         )
-        const replyNow = strip.getByRole("button", { name: /replies now$/ })
-        await expect(replyNow).toBeVisible()
+        await page.getByTestId("composer").fill("")
+        const next = strip.getByRole("button", { name: /^Next: / })
+        await expect(next).toBeEnabled()
+        await expect(strip.getByRole("button", { name: /replies now$|^Reply now$|^Auto/ })).toHaveCount(0)
+        await expect(page.getByRole("button", { name: /^(Mira|Wren)\b.* repl(?:y|ies)$/ })).toBeEnabled()
         const full = await measure(strip)
         for (const gap of full.gaps) expect(Math.abs(gap - 6)).toBeLessThanOrEqual(1)
         for (const control of full.controls) {
           expect(Math.abs(control.height - 36)).toBeLessThanOrEqual(1)
           expect(Math.abs(control.centre - full.controls[0]!.centre)).toBeLessThanOrEqual(1)
         }
-        expect((await replyNow.boundingBox())!.width).toBe(36)
+        // Each chip shows its whole label here: none is cut to an ellipsis.
+        for (const chip of await strip.getByRole("button").all())
+          expect(
+            await chip.evaluate((node) =>
+              [...node.querySelectorAll("span")].every((s) => s.scrollWidth <= s.clientWidth)
+            ),
+            `${await chip.getAttribute("aria-label")}: whole label`
+          ).toBe(true)
+        if (shots) await strip.screenshot({ path: join(shots, `${width}-${theme}-strip.png`), animations: "disabled" })
+        if (process.env.LAYOUT_AUDIT)
+          await expectLayout(page, test.info(), `composer-strip-${width}-${theme}`, {
+            scope: '[aria-label="Next reply"]'
+          })
       }
       if (width === 1440) {
         // The lone portrait is a real recent-speaker control: its explanation and action agree.
