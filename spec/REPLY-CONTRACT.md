@@ -146,6 +146,8 @@ Under `send_message`, a turn's text never streams into the body (today it stream
 
 The version fails visibly: **"The model didn't send a reply: it wrote text 4 times without calling send_message."** (class `contract`), with Resume and Regenerate. Its steps keep the stray text, so the user can read it. Taking it as the reply would be a separate action the user chooses (Open: whether to offer one); never automatic. No silent posting, unlike our current single-nudge rule. This differs from reference-harness on purpose: there a silent no-reply is "not actionable"; here the user asked for a reply and is waiting for one, and Resume is actionable.
 
+**[D]** (owner, 2026-11-17, on whether failure after the nudges should be visible or silent) "It has to fail visibly. Not sure what staying silent would even mean here." The design above already does this; the question is answered.
+
 **Resume after exhaustion:** `planResume` cuts the last plain turn and resamples the answer to the last nudge, with the budget counted from the kept transcript: one more attempt. A contract redo (fork back to the reply's start, same model, fresh budget) is reference-harness's opt-in alternative; propose it as Regenerate's job, which already discards the run.
 
 ### 3.5 The request cap
@@ -155,6 +157,7 @@ The last request at the cap has no tools and asks "Write the reply now." Its pla
 ### 3.6 Checks and records (later milestones)
 
 - **Mechanical records:** a pure `contractAttempts(transcript, cuts)` over the stored transcript and `rollout_branches`, with reference-harness's failure types where they apply to us: `invalid_tool_call` (a send refused, e.g. by send presence), `textual_tool_call` (markup patterns), `context_mimicry` (our own context's tags: the history's speaker labels and `<Name>` card blocks, from one constant the assembler also uses, with a test keeping them in step), `text_only`, `empty`. Shown in the inspector's run view and summed per model in Settings → Models later. No backfill needed: nothing real is stored yet.
+- **Rejected [D]: no redo on another model** (owner, 2026-11-17, on the checks gate redoing a turn on a different model): "This is not an autonomous agent. The user can switch a model and swipe themselves. Moreover, we don't have the affordance for choosing a secondary model" The output gate's model-switching redo (§1.5, §1.6: a judged refusal redoing the turn on a rule's model) is not part of the delta design, and is rejected, not deferred. A failed ending stays visible (§3.4) and the user switches the model and swipes. Any ending check is observe-only.
 - **Ending checks:** our refusal judge already judges finished replies. Extending it to an exhausted ending ("was the stray text a reply?") is the only ending check we'd need, since we have no `no_reply`. Opt-in, like every decision send.
 - **Revise at a send:** reference-harness's `revise` remedy for style or duplicate checks. Not proposed now.
 
