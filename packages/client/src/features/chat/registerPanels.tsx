@@ -75,9 +75,17 @@ export const registerPanels = () => [
         })),
       "preset"
     ),
+    // Before the first send too: the account's preset, chosen and edited the same way.
     pending: lazyPending(
       () =>
-        import("../pickers/PanelPickers.tsx").then((p) => ({ default: () => <p.PresetTabPicker session={null} /> })),
+        Promise.all([import("./PresetTab.tsx"), import("../pickers/PanelPickers.tsx")]).then(([m, p]) => ({
+          default: () => (
+            <>
+              <p.PresetTabPicker session={null} />
+              <m.PendingPresetTab />
+            </>
+          )
+        })),
       "preset"
     )
   }),
