@@ -288,7 +288,7 @@ describe("MCP servers in story chats", () => {
       ])
       const { api, chat, events, main, leaf, mock } = yield* story(script.handler)
       const big = yield* fakeServer([fakeTool("dump")])
-      const whole = Array.from({ length: 6000 }, (_, i) => `line ${i} of the archive`).join("\n")
+      const whole = Array.from({ length: 6000 }, (_, i) => `line ${i} of the archive <a&b>`).join("\n")
       big.state.call = async () => ({ content: [{ type: "text", text: whole }] })
       const connection = yield* addServer(api, big, "Big")
       yield* api.SetMcpUse({ connectionId: connection.id, stories: true })
@@ -298,10 +298,20 @@ describe("MCP servers in story chats", () => {
       assert.isAtMost(first.length, 16_000)
       assert.include(first, 'read_result with call "b1"')
       assert.notInclude(first, "line 5999 of the archive")
+      // Quoted once: the page is of the original, not of the envelope it's stored in.
+      assert.include(first, "line 0 of the archive &lt;a&amp;b&gt;")
+      assert.notInclude(first, "&amp;lt;")
+      assert.notInclude(first.slice(first.indexOf("<tool_data>") + 11), TOOL_DATA_NOTICE)
       const page = String(sent.find((m) => m.tool_call_id === "p1")!.content)
       assert.include(page, TOOL_DATA_NOTICE)
       assert.include(page, "&quot;offset&quot;:15000")
       assert.notInclude(page, "line 0 of the archive")
+      assert.notInclude(page, "&amp;lt;")
+      // Offsets are the original's: 15000 is where this page starts in it.
+      assert.include(
+        page,
+        `<tool_data>\n${whole.slice(15000, 15020).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")}`
+      )
       const other = String(sent.find((m) => m.tool_call_id === "p2")!.content)
       assert.include(other, "No result of a server")
       const stored = JSON.stringify(yield* api.GetRunTranscript({ versionId: versionId as VersionId }))

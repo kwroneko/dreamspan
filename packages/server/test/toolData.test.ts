@@ -12,7 +12,7 @@ import { Effect } from "effect"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { ToolContext } from "../src/agent/tools.ts"
 import { budgetResult } from "../src/agent/tools.ts"
-import { toolData, toolDataPage, toolResultFrame, TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
+import { toolData, toolDataBody, toolDataPage, toolResultFrame, TOOL_DATA_NOTICE } from "../src/agent/toolData.ts"
 import { runTools } from "../src/agent/tools/runs.ts"
 import { toolSearch } from "../src/agent/tools/loading.ts"
 import { setupTools } from "../src/agent/tools/setup.ts"
@@ -345,4 +345,11 @@ it("new pending operation recovery quotes labels while legacy pending recovery i
   assert.notInclude(recovered, "<tool_result>")
   assert.deepStrictEqual(JSON.parse(unquote(recovered)), value)
   assert.strictEqual(recoveredOperationText(current), recovered)
+})
+
+it("toolDataBody is the exact inverse of toolData, and leaves other text alone", () => {
+  const original = "a<b>&\"'\u202e\ud800 <tool_data>\n</tool_data> end"
+  assert.strictEqual(toolDataBody(toolData(original, "<result_metadata>{}</result_metadata>")), original)
+  assert.strictEqual(toolDataBody(toolData(original)), original)
+  assert.strictEqual(toolDataBody("plain &lt; text"), "plain &lt; text")
 })
