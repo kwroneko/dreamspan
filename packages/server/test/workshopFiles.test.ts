@@ -2,7 +2,7 @@
 // (spec/FILES-AND-ENVIRONMENT.md §5, §7): a scripted model writes, reads, edits and runs a
 // command; the files land in the account's Files, each change records its effect, Undo puts a
 // file back, and the capability rows include the per-workshop switches. Synthetic data only.
-import { readFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rename, symlink, unlink, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { assert, it } from "@effect/vitest"
@@ -153,6 +153,29 @@ it.live(
         const effect = effects.find((e) => e.kind === kind)!
         return api.UndoRolloutEffect({ rolloutId: effect.rolloutId, toolCallId: effect.toolCallId, seq: effect.seq })
       }
+      // Undo never writes through a link swapped in after the change: not for the file, and not
+      // for a folder on its path, even when the link's target holds the same content.
+      const outside = join(config.dataDir, "outside")
+      yield* Effect.promise(async () => {
+        await mkdir(outside, { recursive: true })
+        await writeFile(join(outside, "plan.md"), "unread overwrite")
+        await rename(join(root, "notes/plan.md"), join(root, "notes/plan.real"))
+        await symlink(join(outside, "plan.md"), join(root, "notes/plan.md"))
+      })
+      assert.isTrue((yield* Effect.exit(undo("file.write")))._tag === "Failure")
+      yield* Effect.promise(async () => {
+        await unlink(join(root, "notes/plan.md"))
+        await rename(join(root, "notes/plan.real"), join(root, "notes/plan.md"))
+        await rename(join(root, "notes"), join(root, "notes.real"))
+        await symlink(outside, join(root, "notes"))
+      })
+      assert.isTrue((yield* Effect.exit(undo("file.write")))._tag === "Failure")
+      yield* Effect.promise(async () => {
+        await unlink(join(root, "notes"))
+        await rename(join(root, "notes.real"), join(root, "notes"))
+      })
+      assert.strictEqual(yield* Effect.promise(() => readFile(join(outside, "plan.md"), "utf8")), "unread overwrite")
+      assert.deepStrictEqual(yield* Effect.promise(() => readdir(outside)), ["plan.md"])
       // The edit can't be undone before the overwrite that came after it: the file changed since.
       const early = yield* Effect.exit(undo("file.edit"))
       assert.isTrue(early._tag === "Failure")

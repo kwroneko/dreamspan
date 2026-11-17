@@ -13,7 +13,7 @@
 import { spawn, spawnSync } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { existsSync, lstatSync, readdirSync, readlinkSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, open, rm, statfs, writeFile, type FileHandle } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { BRIDGE_SOURCE, sandboxNetworks, type SandboxProxy } from "./network.ts"
@@ -32,6 +32,11 @@ const RUNTIME = "/run/rp"
 const PROXY_PORT = 3128
 /** Unix socket paths are limited to 108 bytes. */
 const SOCKET_PATH_MAX = 100
+/** The private /tmp's default size, and /dev/shm's largest. */
+const TMP_BYTES = 2 ** 30
+const SHM_BYTES = 256 * 2 ** 20
+/** How often the reserve on the writable mounts' filesystems is checked while a command runs. */
+const RESERVE_CHECK_MS = 500
 
 const findOnPath = (name: string) =>
   (process.env.PATH ?? "/usr/bin:/bin")
@@ -115,6 +120,9 @@ const prelude = (spec: RunSpec, marker: string) => {
   const limit = (flag: string, value: number) =>
     `ulimit ${flag} ${value} || { echo "The sandbox couldn't set its limits." >&2; exit 125; }`
   return [
+    // Out of memory, the kernel picks a command before the server (a command can lower it back
+    // to the server's own value, never below).
+    "echo 1000 > /proc/self/oom_score_adj 2>/dev/null",
     limit("-u", spec.limits.processes),
     limit("-d", kib(spec.limits.memoryBytes)),
     limit("-f", kib(spec.limits.fileBytes)),
@@ -142,6 +150,111 @@ const proxyEnv = (network: RunSpec["network"]): Record<string, string> => {
     NO_PROXY: "",
     no_proxy: ""
   }
+}
+
+const tmpBytes = (spec: RunSpec) => Math.max(2 ** 20, Math.floor(spec.limits.tmpBytes ?? TMP_BYTES))
+
+/** Whether a filesystem has gone below the reserve; an unreadable one counts as below. */
+const belowReserve = async (path: string, reserve: NonNullable<RunSpec["limits"]["reserve"]>) => {
+  try {
+    const fs = await statfs(path)
+    // Filesystems without an inode table report 0 files.
+    return fs.bavail * fs.bsize < reserve.bytes || (fs.files > 0 && fs.ffree < reserve.inodes)
+  } catch {
+    return true
+  }
+}
+
+const anyBelowReserve = async (spec: RunSpec) => {
+  const reserve = spec.limits.reserve
+  if (!reserve) return false
+  const checks = await Promise.all(spec.mounts.filter((m) => m.writable).map((m) => belowReserve(m.source, reserve)))
+  return checks.some(Boolean)
+}
+
+/**
+ * Kernel calls a command never needs and that are the usual way into the kernel from an
+ * unprivileged process: io_uring, keyrings, userfaultfd, BPF, perf events, file handles, and
+ * mounting, namespaces and module or system calls (most need a capability the command doesn't
+ * have; they are refused before the kernel looks). Docker's default filter refuses these too,
+ * but a server outside Docker (a development server) has none. x86_64 numbers; on other
+ * architectures no filter is added. Refused with EPERM, as Docker does.
+ */
+const DENIED_X86_64: Readonly<Record<string, number>> = {
+  io_uring_setup: 425,
+  io_uring_enter: 426,
+  io_uring_register: 427,
+  add_key: 248,
+  request_key: 249,
+  keyctl: 250,
+  userfaultfd: 323,
+  bpf: 321,
+  perf_event_open: 298,
+  fanotify_init: 300,
+  name_to_handle_at: 303,
+  open_by_handle_at: 304,
+  mount: 165,
+  umount2: 166,
+  pivot_root: 155,
+  chroot: 161,
+  open_tree: 428,
+  move_mount: 429,
+  fsopen: 430,
+  fsmount: 432,
+  fspick: 433,
+  mount_setattr: 442,
+  open_tree_attr: 467,
+  unshare: 272,
+  setns: 308,
+  kexec_load: 246,
+  kexec_file_load: 320,
+  init_module: 175,
+  delete_module: 176,
+  finit_module: 313,
+  acct: 163,
+  swapon: 167,
+  swapoff: 168,
+  reboot: 169,
+  quotactl: 179,
+  lookup_dcookie: 212,
+  syslog: 103,
+  uselib: 134
+}
+
+/** A classic BPF seccomp program refusing `DENIED_X86_64`; null on other architectures. */
+export const seccompFilter = (): Buffer | null => {
+  if (process.arch !== "x64") return null
+  const insn = (code: number, jt: number, jf: number, k: number) => {
+    const b = Buffer.alloc(8)
+    b.writeUInt16LE(code, 0)
+    b.writeUInt8(jt, 2)
+    b.writeUInt8(jf, 3)
+    b.writeUInt32LE(k >>> 0, 4)
+    return b
+  }
+  const LD_ABS = 0x20
+  const JEQ = 0x15
+  const JGE = 0x35
+  const RET = 0x06
+  const ALLOW = 0x7fff0000
+  const EPERM = 0x00050000 | 1
+  const KILL_PROCESS = 0x80000000
+  const AUDIT_ARCH_X86_64 = 0xc000003e
+  const X32_BIT = 0x40000000
+  const program: Array<Buffer> = [
+    insn(LD_ABS, 0, 0, 4), // arch
+    insn(JEQ, 1, 0, AUDIT_ARCH_X86_64),
+    insn(RET, 0, 0, KILL_PROCESS),
+    insn(LD_ABS, 0, 0, 0) // nr
+  ]
+  // The x32 ABI's numbers are refused outright; then each denied number jumps to the refusal.
+  const denied = Object.values(DENIED_X86_64)
+  const denyAt = program.length + 1 + denied.length + 1
+  program.push(insn(JGE, denyAt - program.length - 1, 0, X32_BIT))
+  for (const nr of denied) program.push(insn(JEQ, denyAt - program.length - 1, 0, nr))
+  program.push(insn(RET, 0, 0, ALLOW))
+  program.push(insn(RET, 0, 0, EPERM))
+  return Buffer.concat(program)
 }
 
 /** The arguments to bubblewrap for one command, given its runtime folder. */
@@ -173,8 +286,18 @@ const bwrapArgs = (spec: RunSpec, runDir: string) => {
     "/etc/hosts",
     "--proc",
     "/proc",
+    // Memory-backed folders are sized: their pages aren't counted by any process limit, and
+    // killing a process doesn't free them. /dev itself is made read-only after.
     "--dev",
     "/dev",
+    "--size",
+    String(Math.min(tmpBytes(spec), SHM_BYTES)),
+    "--tmpfs",
+    "/dev/shm",
+    "--remount-ro",
+    "/dev",
+    "--size",
+    String(tmpBytes(spec)),
     "--tmpfs",
     "/tmp",
     "--ro-bind",
@@ -240,9 +363,21 @@ const runtimeRoot = () => process.env.RP_SANDBOX_RUNTIME ?? tmpdir()
 const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> => {
   const bwrap = findOnPath("bwrap")
   if (!bwrap) throw new Error("bubblewrap isn't installed")
+  const started = Date.now()
+  if (await anyBelowReserve(spec))
+    return {
+      exitCode: null,
+      timedOut: false,
+      outputCapped: false,
+      diskLow: true,
+      head: "",
+      tail: "",
+      outputBytes: 0,
+      cwd: null,
+      durationMs: 0
+    }
   const runDir = await mkdtemp(join(runtimeRoot(), "rp-sbx-"))
   let proxy: SandboxProxy | null = null
-  const started = Date.now()
   try {
     await mkdir(join(runDir, "rp"), { mode: 0o700 })
     const uid = process.getuid?.() ?? 1000
@@ -261,15 +396,36 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       await chmod(socketPath, 0o600)
     }
     const marker = `__rp_cwd_${randomBytes(12).toString("hex")}__`
-    const child = spawn(
-      bwrap,
-      [...bwrapArgs(spec, runDir), "/bin/bash", "-c", prelude(spec, marker), "rp-sandbox", spec.command],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-        env: {}
+    // The filter goes to bubblewrap as descriptor 3, which it reads and closes before the command.
+    const filter = seccompFilter()
+    let filterFile: FileHandle | null = null
+    if (filter) {
+      await writeFile(join(runDir, "seccomp.bpf"), filter)
+      filterFile = await open(join(runDir, "seccomp.bpf"), "r")
+    }
+    const child = (() => {
+      try {
+        return spawn(
+          bwrap,
+          [
+            ...(filterFile ? ["--seccomp", "3"] : []),
+            ...bwrapArgs(spec, runDir),
+            "/bin/bash",
+            "-c",
+            prelude(spec, marker),
+            "rp-sandbox",
+            spec.command
+          ],
+          {
+            stdio: ["ignore", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : [])],
+            detached: true,
+            env: {}
+          }
+        )
+      } finally {
+        void filterFile?.close()
       }
-    )
+    })()
     // The head fills once; the tail is a list of chunks trimmed from the front, so each chunk
     // is copied once however long the output runs.
     const headChunks: Array<Buffer> = []
@@ -298,8 +454,8 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
         kill()
       }
     }
-    child.stdout.on("data", take)
-    child.stderr.on("data", take)
+    child.stdout!.on("data", take)
+    child.stderr!.on("data", take)
     let timedOut = false
     const kill = () => {
       if (child.pid === undefined || child.exitCode !== null) return
@@ -315,6 +471,21 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       timedOut = true
       kill()
     }, spec.limits.timeoutMs)
+    let diskLow = false
+    let checking = false
+    const watch = spec.limits.reserve
+      ? setInterval(() => {
+          if (checking) return
+          checking = true
+          void anyBelowReserve(spec).then((low) => {
+            checking = false
+            if (low && !diskLow) {
+              diskLow = true
+              kill()
+            }
+          })
+        }, RESERVE_CHECK_MS)
+      : null
     const onAbort = () => kill()
     signal.addEventListener("abort", onAbort, { once: true })
     if (signal.aborted) kill()
@@ -323,6 +494,7 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       child.once("close", (code) => done(code))
     })
     clearTimeout(timer)
+    if (watch) clearInterval(watch)
     signal.removeEventListener("abort", onAbort)
     const head = Buffer.concat(headChunks)
     const joined = Buffer.concat(tailChunks)
@@ -339,9 +511,10 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
     }
     const fromHead = tail.length === 0
     return {
-      exitCode: timedOut || outputCapped || signal.aborted ? null : exitCode,
+      exitCode: timedOut || outputCapped || diskLow || signal.aborted ? null : exitCode,
       timedOut,
       outputCapped,
+      ...(diskLow ? { diskLow } : {}),
       head: fromHead ? text : head.toString("utf8"),
       tail: fromHead ? "" : text,
       outputBytes: Math.max(0, total),

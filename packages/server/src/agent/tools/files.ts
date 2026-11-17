@@ -6,7 +6,7 @@
 // `shell.run` effect listing the files it changed, with no Undo. A call cut off without its
 // receipt is never run again silently: the permit asks (agent/approvals.ts).
 import { createHash } from "node:crypto"
-import { readFile } from "node:fs/promises"
+import { readFile, statfs } from "node:fs/promises"
 import { join, posix } from "node:path"
 import { Type } from "@earendil-works/pi-ai"
 import { Effect, Semaphore } from "effect"
@@ -58,7 +58,15 @@ const defaultFileToolLimits: FileToolLimits = {
   maxTimeoutMs: 600_000,
   perAccount: 4,
   perInstance: 16,
-  run: { processes: 512, memoryBytes: 4 * 2 ** 30, fileBytes: 4 * 2 ** 30, openFiles: 4096 }
+  run: {
+    processes: 512,
+    memoryBytes: 4 * 2 ** 30,
+    fileBytes: 4 * 2 ** 30,
+    openFiles: 4096,
+    tmpBytes: 2 ** 30,
+    // Until per-account quotas (§1.2): the disk the database shares is never filled by commands.
+    reserve: { bytes: 2 * 2 ** 30, inodes: 100_000 }
+  }
 }
 
 export interface FileToolDeps {
@@ -690,7 +698,15 @@ export const makeFileTools = (deps: FileToolDeps) => {
     deleted: ReadonlyArray<string>
   ) =>
     Effect.gen(function* () {
-      let budget = VERSIONS_PER_COMMAND
+      // Versions go to the media store on the data folder's disk: none past its reserve either.
+      const reserve = limits.run.reserve
+      const free = reserve
+        ? yield* attempt(() => statfs(deps.dataDir)).pipe(
+            Effect.map((fs) => fs.bavail * fs.bsize - reserve.bytes),
+            Effect.orElseSucceed(() => 0)
+          )
+        : Infinity
+      let budget = Math.min(VERSIONS_PER_COMMAND, Math.max(0, free))
       for (const path of paths) {
         const segments = path.split("/")
         const read = yield* attempt(() => readRegularFile(env.filesRoot, segments, VERSION_MAX_BYTES + 1)).pipe(
@@ -795,11 +811,13 @@ export const makeFileTools = (deps: FileToolDeps) => {
           ...changes.created.map((p) => `created ${FILES_MOUNT}/${p}`),
           ...changes.deleted.map((p) => `deleted ${FILES_MOUNT}/${p}`)
         ]
-        const status = result.timedOut
-          ? `stopped after ${timeoutMs} ms (timeout)`
-          : result.outputCapped
-            ? "stopped: the command wrote more than 256 MiB of output (redirect it to a file instead)"
-            : `exit: ${result.exitCode === null ? "killed" : result.exitCode}`
+        const status = result.diskLow
+          ? "stopped: the server's disk is almost full, so commands can't write more now. Delete files you don't need, or ask the server's admin."
+          : result.timedOut
+            ? `stopped after ${timeoutMs} ms (timeout)`
+            : result.outputCapped
+              ? "stopped: the command wrote more than 256 MiB of output (redirect it to a file instead)"
+              : `exit: ${result.exitCode === null ? "killed" : result.exitCode}`
         const text =
           `${status}\nDirectory after: ${result.cwd ?? cwd}\n` +
           (listed.length
@@ -810,7 +828,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const short = String(args.command).split("\n")[0]!.slice(0, 80)
         return {
           text,
-          isError: result.timedOut || result.outputCapped || result.exitCode !== 0,
+          isError: result.timedOut || result.outputCapped || result.diskLow === true || result.exitCode !== 0,
           effects: [
             {
               kind: "shell.run",
