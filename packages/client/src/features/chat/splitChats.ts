@@ -21,7 +21,24 @@ export function useChatPicture(view: {
   return useSplitChats(view.chat?.id ?? null, view.forkId)?.group.picture ?? null
 }
 
+const keyOf = (chatId: ChatId | null, forkId: string | null | undefined) =>
+  chatId === null ? "" : JSON.stringify({ chatId, forkId: forkId ?? null })
+
+/**
+ * Answers read before the page that shows them opens (a new chat's first send reads its
+ * own), used until the shared read answers so the header never waits on it.
+ */
+const seeds = new Map<string, SplitChats>()
+export const seedSplitChats = (chatId: ChatId, forkId: ForkId | null, value: SplitChats) => {
+  seeds.set(keyOf(chatId, forkId), value)
+}
+
 export function useSplitChats(chatId: ChatId | null, forkId: string | null | undefined) {
-  const result = useAtomValue(reads(chatId === null ? "" : JSON.stringify({ chatId, forkId: forkId ?? null })))
-  return AsyncResult.isSuccess(result) ? result.value : null
+  const key = keyOf(chatId, forkId)
+  const result = useAtomValue(reads(key))
+  if (AsyncResult.isSuccess(result)) {
+    seeds.delete(key)
+    return result.value
+  }
+  return seeds.get(key) ?? null
 }
