@@ -195,7 +195,7 @@ export function Disclosure({
       >
         {summary}
       </Tooltip>
-      <div className="flex flex-col gap-4 pt-3 pb-1 pl-5">{!lazy || opened ? children : null}</div>
+      <div className="flex flex-col gap-4 pt-3 pb-2 pl-5">{!lazy || opened ? children : null}</div>
     </details>
   )
 }
