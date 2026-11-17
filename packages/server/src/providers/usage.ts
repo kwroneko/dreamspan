@@ -299,7 +299,12 @@ const tableFormula = (
       const priced = found === null ? null : pricedCost(input.counts, found.price)
       return priced === null
         ? null
-        : { amount: priced.amount, currency: found!.price.currency ?? "USD", formula: found!.formula, rates: priced.rates }
+        : {
+            amount: priced.amount,
+            currency: found!.price.currency ?? "USD",
+            formula: found!.formula,
+            rates: priced.rates
+          }
     }
   }
 }

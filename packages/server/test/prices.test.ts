@@ -309,7 +309,8 @@ describe("precedence (PRICES §5.1)", () => {
     assert.deepStrictEqual(winner(sources(true, true, true), [general, own], 2), {
       amount: 1,
       currency: "USD",
-      formula: "user:own:7"
+      formula: "user:own:7",
+      rates: { input: 1, read: 0, write: 0, writeLong: 0, output: 0 }
     })
   })
 
@@ -325,7 +326,12 @@ describe("precedence (PRICES §5.1)", () => {
   it("then the account-wide or per-type price, over the built-in table", () => {
     assert.strictEqual(winner(sources(false, false, true), [general])!.formula, "user:general:7")
     assert.strictEqual(winner(sources(false, false, true), [typeWide])!.formula, "user:type:7")
-    assert.deepStrictEqual(winner(sources(false, false, true)), { amount: 6, currency: "USD", formula: "builtin:v1" })
+    assert.deepStrictEqual(winner(sources(false, false, true)), {
+      amount: 6,
+      currency: "USD",
+      formula: "builtin:v1",
+      rates: { input: 6, read: 0, write: 0, writeLong: 12, output: 0 }
+    })
   })
 
   it("names another connection's price as not this one's", () => {
@@ -351,7 +357,12 @@ describe("precedence (PRICES §5.1)", () => {
       capture: emptyCapture(),
       price: { input: 2, output: 0 }
     })
-    assert.deepStrictEqual(cost, { amount: 2, currency: "USD", formula: "builtin" })
+    assert.deepStrictEqual(cost, {
+      amount: 2,
+      currency: "USD",
+      formula: "builtin",
+      rates: { input: 2, read: 0, write: 0, writeLong: 4, output: 0 }
+    })
   })
 })
 

@@ -93,6 +93,8 @@ describe("version cost metrics", () => {
       ))[0]!.map((row) => row["id"] as string)
       assert.strictEqual(ids.length, 2)
       yield* fixtureSql(config.dataDir, [
+        // Reported charges are never recomputed in the app; this test stands in for a recompute job.
+        { sql: "DROP TRIGGER llm_requests_recompute_priced", params: [] },
         {
           sql: "UPDATE llm_requests SET cost = NULL, cost_currency = NULL, cost_formula = NULL WHERE id = ?",
           params: [ids[0]!]
