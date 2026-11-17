@@ -418,6 +418,32 @@ test("the detector catches geometry defects and respects documented intent", asy
   expect((await layoutAudit(page)).filter((v) => v.kind === "overlay")).toEqual([])
 })
 
+test("a chat column that stops short of its frame, or a composer short of the column, is reported", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 800, height: 600 })
+  const frame = (fill: boolean, tail: string) => `<style>body{margin:0}</style>
+    <main style="display:flex;flex-direction:column;height:600px">
+      <div style="display:flex;flex-direction:column;${fill ? "flex:1;min-height:0" : ""}">
+        <div data-chat-main style="display:flex;flex-direction:column;${fill ? "flex:1;min-height:0" : ""}">
+          <div style="${fill ? "flex:1;min-height:0" : ""}"><p>One message.</p></div>
+          <div id="composer" style="height:80px">Composer</div>${tail}
+        </div>
+      </div>
+    </main>`
+  await page.setContent(frame(true, ""))
+  expect((await layoutAudit(page)).filter((v) => v.kind === "fill")).toEqual([])
+  await page.setContent(frame(false, ""))
+  const short = (await layoutAudit(page)).filter((v) => v.kind === "fill").map((v) => v.measurement)
+  expect(short.some((m) => /^ends \d+\.\dpx above the bottom of its frame/.test(m))).toBe(true)
+  // An overlay positioned in the column doesn't count as its last block.
+  await page.setContent(frame(true, '<div style="position:absolute;top:0;height:10px">Overlay</div>'))
+  expect((await layoutAudit(page)).filter((v) => v.kind === "fill")).toEqual([])
+  await page.setContent(frame(true, '<div style="height:40px;margin-bottom:40px">Chips</div>'))
+  const gap = (await layoutAudit(page)).filter((v) => v.kind === "fill").map((v) => v.measurement)
+  expect(gap).toEqual(["ends 40.0px above the bottom of the chat column"])
+})
+
 test("picture overlays exclude page positioners and portalled popups, but audit their contents", async ({ page }) => {
   await page.setContent(`<style>
     body { margin: 20px; }

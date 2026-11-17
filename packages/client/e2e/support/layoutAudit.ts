@@ -12,7 +12,7 @@ interface Box {
   height: number
 }
 interface Violation {
-  kind: "inset" | "text" | "gap" | "alignment" | "overlap" | "overlay" | "exception"
+  kind: "inset" | "text" | "gap" | "alignment" | "overlap" | "overlay" | "fill" | "exception"
   selector: string
   related?: string
   name: string
@@ -195,7 +195,7 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
       for (const el of shown) {
         if (el.hasAttribute("data-layout-audit-ignore")) {
           for (const entry of el.dataset.layoutAuditIgnore!.split(";"))
-            if (!/^(inset|text|gap|alignment|overlap|overlay):\s*\S.+/.test(entry.trim()))
+            if (!/^(inset|text|gap|alignment|overlap|overlay|fill):\s*\S.+/.test(entry.trim()))
               add("exception", el, `Invalid exception (rule and reason required): ${entry}`)
         }
         // An icon's paths are drawing primitives, not independent layout boxes.
@@ -483,6 +483,26 @@ export async function layoutAudit(page: Page, options: { inset?: number; scope?:
           const overlap = intersection(a, b)
           if (overlap) add("overlap", a, `content intersection ${overlap}`, b)
         }
+      // A chat's column fills its frame (the page's main, or a workbench pane's body) to the
+      // bottom, and its last block (the composer) ends at the column's bottom: a short chat's
+      // composer stays anchored, not under its last message (composerbottom1).
+      for (const column of shown) {
+        if (!column.hasAttribute("data-chat-main")) continue
+        const host = [...ancestors(parent(column))].find((p) => p.matches("main, [data-frame-body]"))
+        const bottom = rect(column).bottom
+        if (host) {
+          const short = inner(host).bottom - bottom
+          if (short > tolerance)
+            add("fill", column, `ends ${short.toFixed(1)}px above the bottom of its frame (${path(host)})`, host)
+        }
+        const last = boxChildren(column)
+          .filter((n) => visible(n) && !["absolute", "fixed"].includes(css(n).position))
+          .at(-1)
+        if (last) {
+          const gap = bottom - rect(last).bottom
+          if (gap > tolerance) add("fill", last, `ends ${gap.toFixed(1)}px above the bottom of the chat column`, column)
+        }
+      }
       // Controls laid over a picture (a tile's star, its archive, a group's pin), as they rest
       // and as hovered: the overlay checks above skip them, since they overlap the picture on
       // purpose. Each carries one backing of its own (a wrapper's backing doubles or mismatches

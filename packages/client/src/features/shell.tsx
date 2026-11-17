@@ -23,7 +23,7 @@ export const centerColumn = defineSlot<Record<string, never>>("shell.center")
 // The app shell: it lets nobody past without a session (the server decides; this only
 // routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { Link, Outlet, useLocation, useNavigate, useSearch } from "@tanstack/react-router"
+import { Link, Outlet, useLocation, useMatches, useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../actions.tsx"
@@ -411,7 +411,9 @@ function AppShell() {
  */
 export function CenterPage() {
   const pathname = useLocation({ select: (location) => location.pathname })
-  const fill = /^\/(?:chats\/[^/]+|cards\/[^/]+\/chat|groups\/[^/]+\/new|picture)$/.test(pathname)
+  // The screen shown says so itself (RouteEntry.fill). A path list here missed the chat with a
+  // card source's card (composerbottom1): its composer sat under the greeting, mid-screen.
+  const fill = useMatches({ select: (matches) => matches.at(-1)?.staticData.fill === true })
   // An editor opened from a chat scrolls itself, as the chat's large editors did (BoundScroll).
   const bound = useSearch({ strict: false, select: (search) => typeof search.chat === "string" && search.chat !== "" })
   if (fill) return <Outlet />
