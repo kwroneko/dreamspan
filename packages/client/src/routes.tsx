@@ -7,14 +7,17 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  ErrorComponent,
   Link,
+  type ErrorComponentProps,
   Outlet,
   retainSearchParams,
   type AnyRoute,
   type RouterHistory
 } from "@tanstack/react-router"
 import type { IconName } from "./ui/Icon.tsx"
-import type { ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
+import { isChunkLoadError, reportChunkFailure, StalePart, useStaleBuild } from "./staleBuild.tsx"
 import { makeRegistry } from "./registry.ts"
 
 export interface RouteEntry {
@@ -90,6 +93,22 @@ function NotFound() {
   )
 }
 
+/** A screen that failed: a page whose code is gone after a rebuild asks for a reload. */
+function RouteError({ error }: ErrorComponentProps) {
+  const stale = useStaleBuild()
+  useEffect(() => {
+    void reportChunkFailure(error)
+  }, [error])
+  if (stale || isChunkLoadError(error))
+    return (
+      <main className="mx-auto flex max-w-xl flex-col gap-2 p-6">
+        <SlotOutlet slot={appBanners} props={{}} />
+        {stale ? <StalePart /> : <ErrorComponent error={error} />}
+      </main>
+    )
+  return <ErrorComponent error={error} />
+}
+
 /**
  * A router over the routes registered so far. A workbench tab (features/workbench) has its
  * own, over its own history, with the shell's layout entries swapped for its page frame.
@@ -120,6 +139,7 @@ export const buildRouter = (
         return nested.length > 0 ? route.addChildren(nested) : route
       })
   return createRouter({
+    defaultErrorComponent: RouteError,
     routeTree: rootRoute.addChildren(children("root", rootRoute)),
     ...(options.history ? { history: options.history } : {})
   })

@@ -2406,7 +2406,7 @@ for (const width of [390, 1440])
           await route.fulfill({ response, headers: { ...response.headers(), "x-client-build": "next-deployment" } })
         })
         await page.goto(`${server.url}/settings/status`)
-        const notice = page.getByRole("status", { name: "New version" })
+        const notice = page.getByRole("status", { name: "App updated" })
         await expect(notice).toBeVisible()
         await page.mouse.move(0, 0)
         const findings = (await layoutAudit(page)).filter(
