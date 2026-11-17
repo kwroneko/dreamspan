@@ -61,6 +61,7 @@ import {
   type Target
 } from "../assembler/types.ts"
 import { forbidCardOverrides, importStPreset } from "../formats/preset.ts"
+import { agentInstructionsPrompt } from "@rp/shared/presetOrder.ts"
 import {
   connectionColumns,
   connectionFrom,
@@ -116,10 +117,20 @@ const decodeLorebook = Schema.decodeUnknownExit(LorebookDoc)
 const decodeNote = Schema.decodeUnknownExit(NoteDoc)
 const decodePreset = Schema.decodeUnknownExit(PresetDoc)
 
-/** The built-in preset uses our end-of-request defaults; ST imports retain their own wording. */
-export const builtinPreset = forbidCardOverrides(
+const stDefaults = forbidCardOverrides(
   importStPreset(JSON.stringify({ frequency_penalty: 0, group_nudge_prompt: "", impersonation_prompt: "" })).document!
 )
+
+/**
+ * The built-in preset uses our end-of-request defaults; ST imports retain their own wording. Its
+ * Agent instructions come last in the order, empty: the app's default with the end of the
+ * request, as a preset without them sends it.
+ */
+export const builtinPreset = {
+  ...stDefaults,
+  prompts: [...stDefaults.prompts, agentInstructionsPrompt],
+  order: [...stDefaults.order, { identifier: agentInstructionsPrompt.identifier, enabled: true }]
+}
 
 const invalid = (what: string) =>
   new AssemblyFailed({

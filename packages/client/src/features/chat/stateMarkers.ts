@@ -14,7 +14,7 @@
 // its own keys, or replaces or disables one of these; the Interface settings list a switch per kind.
 import type { ForkId, SlotId } from "@rp/shared/chat.ts"
 import type { StateMarkEvent, StateMarks } from "@rp/shared/contextsApi.ts"
-import { type ChatState, foldState } from "@rp/shared/state.ts"
+import { type ChatState, DEFAULT_REQUEST_CAP, foldState } from "@rp/shared/state.ts"
 import { makeRegistry } from "../../registry.ts"
 import type { ChatSession } from "./session.ts"
 
@@ -487,6 +487,12 @@ const SETTINGS: ReadonlyArray<{
     explanation: `${NEXT}, replies say who is in the scene either optionally, always, or not at all.`
   },
   {
+    id: "request-cap",
+    label: "Model requests per reply",
+    value: (state) => `at most ${state.requestCap ?? DEFAULT_REQUEST_CAP}`,
+    explanation: `${NEXT}, a reply that uses tools makes at most this many model requests.`
+  },
+  {
     id: "roles",
     label: "Message roles",
     value: (state) => word(state.rolesProjection ?? "by_writer"),
@@ -535,6 +541,7 @@ const settingsKind = folded({
     "cards.rotation",
     "agent.enabled",
     "agent.send_presence",
+    "agent.request_cap",
     "decision.points",
     "roles.projection",
     "merge.layout",

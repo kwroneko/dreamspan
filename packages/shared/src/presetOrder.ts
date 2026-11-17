@@ -109,3 +109,42 @@ export function presetOrder(prompts: ReadonlyArray<PresetPrompt>, order: Readonl
   for (const identifier of outside) next.push({ identifier, enabled: false })
   return next
 }
+
+/**
+ * The "Agent instructions" prompt (owner, 2026-11-17): what an agent reply is told about its
+ * tools and how to give its reply, held, edited and placed like any prompt. Sent only when the
+ * reply uses tools, never in a workshop (its own text is `workshopTurn`). Empty text sends the
+ * app's default, which follows the chat's tools and reply setting. Last among the order's
+ * prompts that are on, it goes with the end-of-request message, where a preset without it sends
+ * the default (the fallback); anywhere else it's its own message there.
+ */
+export const agentInstructionsPrompt: PresetPrompt = {
+  identifier: "agentInstructions",
+  name: "Agent instructions",
+  role: "system",
+  content: "",
+  system_prompt: true,
+  marker: false,
+  injection_position: "relative",
+  injection_depth: 4,
+  injection_order: 100,
+  injection_trigger: [],
+  forbid_overrides: true
+}
+
+/**
+ * Where a preset sends the agent instructions: `end` with the end-of-request message (also a
+ * preset without the prompt), `order` at its place in the order, `off` not at all. `prompt`:
+ * the preset's own, or null when it has none.
+ */
+export function agentInstructionsPlace(
+  prompts: ReadonlyArray<PresetPrompt>,
+  order: ReadonlyArray<PromptOrderEntry>
+): { readonly place: "end" | "order" | "off"; readonly prompt: PresetPrompt | null } {
+  const prompt = prompts.find((p) => p.identifier === agentInstructionsPrompt.identifier) ?? null
+  if (prompt === null) return { place: "end", prompt: null }
+  const ordered = presetOrder(prompts, order)
+  const at = ordered.findIndex((e) => e.identifier === agentInstructionsPrompt.identifier)
+  if (at < 0 || !ordered[at]!.enabled) return { place: "off", prompt }
+  return { place: ordered.slice(at + 1).some((e) => e.enabled) ? "order" : "end", prompt }
+}

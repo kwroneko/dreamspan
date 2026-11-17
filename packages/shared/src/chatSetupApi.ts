@@ -5,7 +5,7 @@ import { ChatBrowse, ChatFilterCounts } from "./chatBrowse.ts"
 // anything else is NotFound.
 import { Schema } from "effect"
 import { AvatarCrop } from "./media.ts"
-import { HtmlDepth } from "./state.ts"
+import { HtmlDepth, MAX_REQUEST_CAP } from "./state.ts"
 import { REPLACEABLE_CARD_FIELDS, ReplaceTarget } from "./docs/note.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import {
@@ -394,6 +394,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   agentTools: Schema.optionalKey(Schema.Array(Schema.String)),
   /** Whether a reply's send tool says who is present (`agent.send_presence`); absent: it doesn't. */
   sendPresence: Schema.optionalKey(Schema.Literals(["optional", "required"])),
+  /** The most model requests an agent reply makes (`agent.request_cap`); absent: the default, 12. */
+  requestCap: Schema.optionalKey(Schema.Number),
   /** The decision points this chat turns off (`decision.points`), by id; absent: none. */
   decisionsOff: Schema.optionalKey(Schema.Array(Schema.String)),
   /** MCP servers this branch turns on or off (`agent.mcp`), by connection id; absent: none chosen. */
@@ -462,6 +464,10 @@ export const CastChange = Schema.Union([
   }),
   /** Whether a reply's send tool says who is present, from here on (`agent.send_presence`). */
   Schema.TaggedStruct("SendPresence", { mode: Schema.Literals(["off", "optional", "required"]) }),
+  /** The most model requests an agent reply makes, from here on (`agent.request_cap`); null: the default. */
+  Schema.TaggedStruct("RequestCap", {
+    cap: Schema.NullOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_REQUEST_CAP })))
+  }),
   /** The decision points off in this chat from here on (`decision.points`), by id: the whole list. */
   Schema.TaggedStruct("DecisionPoints", {
     off: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(100))

@@ -11,6 +11,11 @@ import { McpConnectionId } from "./mcp.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 import { makeRegistry, type Registry } from "./registry.ts"
 
+/** An agent story reply's request cap without a chat setting (`agent.request_cap`). */
+export const DEFAULT_REQUEST_CAP = 12
+/** The highest request cap a chat can set. */
+export const MAX_REQUEST_CAP = 100
+
 const event = <K extends string, V extends Schema.Top>(key: K, value: V) =>
   Schema.Struct({ key: Schema.Literal(key), value })
 
@@ -105,6 +110,17 @@ export const StateEventData = Schema.Union([
    * event): the tool is as it was, with only `message`.
    */
   event("agent.send_presence", Schema.Struct({ mode: Schema.Literals(["off", "optional", "required"]) })),
+  /**
+   * The most model requests one agent reply makes (owner, 2026-11-17: "a single agentic rollout
+   * with 12 requests, or 12 steps, not 12 turns. This should be configurable"): 1 to 100; null
+   * (or no event) is the default, `DEFAULT_REQUEST_CAP`. Story replies only: a workshop has none.
+   */
+  event(
+    "agent.request_cap",
+    Schema.Struct({
+      cap: Schema.NullOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_REQUEST_CAP })))
+    })
+  ),
   /**
    * Decision points this chat turns off (spec/AGENTIC.md §7, §9), by id, over what a decision
    * connection has on: the whole list, replaced by each event. A point listed here asks nothing
@@ -254,6 +270,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "cards.rotation": { ids: {} },
   "agent.tools": { ids: {} },
   "agent.send_presence": { ids: {} },
+  "agent.request_cap": { ids: {} },
   "decision.points": { ids: {} },
   "agent.permission": {
     ids: { note: { table: "entity", kind: "note", chatOwned: true }, card: { table: "entity", kind: "card" } }
@@ -487,6 +504,8 @@ export interface ChatState {
   readonly agentTools: ReadonlyArray<string> | null
   /** `agent.send_presence`: `send_message` says who is present; absent (no event, or off): it doesn't. */
   readonly sendPresence?: "optional" | "required"
+  /** `agent.request_cap`: the most model requests an agent reply makes; absent: `DEFAULT_REQUEST_CAP`. */
+  readonly requestCap?: number
   /** `decision.points`: the decision points turned off here; absent (no event) or empty: none. */
   readonly decisionsOff?: ReadonlyArray<string>
   /** `agent.permission`s by `permissionKey`: on or off, over the note's or card's own. */
@@ -691,6 +710,10 @@ const applyCore = (
     case "agent.send_presence": {
       const { sendPresence: _was, ...rest } = state
       return data.value.mode === "off" ? rest : { ...rest, sendPresence: data.value.mode }
+    }
+    case "agent.request_cap": {
+      const { requestCap: _was, ...rest } = state
+      return data.value.cap === null ? rest : { ...rest, requestCap: data.value.cap }
     }
     case "decision.points": {
       const { decisionsOff: _was, ...rest } = state

@@ -42,7 +42,8 @@ export const workshopMode: OrchestrationMode = {
     ],
     contract: state.outputContract ?? "several",
     continuity: state.rolloutContinuity ?? "resume_previous",
-    turnCap: 40,
+    // No request cap (owner, 2026-11-17): the run goes on until the model ends it or the user
+    // stops it; the long-run compaction and elision keep its context in bounds.
     assembly: {
       instructions: (offered, _contract, context) =>
         workshopInstructions(context?.off ?? []) +

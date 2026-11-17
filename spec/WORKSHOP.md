@@ -136,7 +136,7 @@ interface ChatKindLook {               // client: features/workshop/kinds.ts
 ```
 
 - `ContextGenerator` reads the chat's kind with the chat (it reads the chat row already) and asks the profile for its planner. `OrchestrationMode.plan` gains `kind` beside `state`. RP keeps `default`, byte for byte.
-- The **`workshop` planner** (`agent/workshop.ts`): strategy `agent`, contract `several` (the chat's `output.contract` overrides it), a turn cap of 40, continuity from `rollout.continuity` (default `resume_previous`), tools = the workshop toolset of the capabilities not turned off (§3.4), and an assembly with the `workshop-instructions` piece (§2.2).
+- The **`workshop` planner** (`agent/workshop.ts`): strategy `agent`, contract `several` (the chat's `output.contract` overrides it), no request cap (owner, 2026-11-17: "It cannot be limited, much like how claude code wouldn't be"; it was 40), continuity from `rollout.continuity` (default `resume_previous`), tools = the workshop toolset of the capabilities not turned off (§3.4), and an assembly with the `workshop-instructions` piece (§2.2).
 - `allowsOutside` replaces the hard filter at `ContextGenerator.ts:147,259`. An RP chat still never offers an outside-class tool, and `beforeToolCall` still blocks one that slips through (AGENTIC §4.1).
 
 ### 2.2 Making one, and what the model sees

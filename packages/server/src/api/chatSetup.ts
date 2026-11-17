@@ -98,6 +98,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "agent.tools", value: { tools: change.tools } }
     case "SendPresence":
       return { key: "agent.send_presence", value: { mode: change.mode } }
+    case "RequestCap":
+      return { key: "agent.request_cap", value: { cap: change.cap } }
     case "DecisionPoints":
       return { key: "decision.points", value: { off: [...new Set(change.off)] } }
     case "AgentPermission":
@@ -532,6 +534,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       ...(state.htmlDepth === null ? {} : { htmlDepth: state.htmlDepth }),
       ...(state.agentTools ? { agentTools: state.agentTools } : {}),
       ...(state.sendPresence ? { sendPresence: state.sendPresence } : {}),
+      ...(state.requestCap === undefined ? {} : { requestCap: state.requestCap }),
       ...(state.decisionsOff?.length ? { decisionsOff: state.decisionsOff } : {}),
       ...(state.agentMcp ? { agentMcp: state.agentMcp } : {}),
       roleProjections,

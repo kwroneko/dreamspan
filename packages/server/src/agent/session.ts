@@ -214,6 +214,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       const prefix = run.checkpoints?.length
         ? { ...basePrefix, breakpoints: [...new Set([...basePrefix.breakpoints, ...run.checkpoints])] }
         : basePrefix
+      /** The most requests this reply makes (`AgentPlan.turnCap`); a workshop has no cap. */
+      const cap = plan.turnCap ?? Number.POSITIVE_INFINITY
       const sends = plan.contract !== "final_text"
       const several = plan.contract === "several"
       let working = { slotId: request.slotId, versionId: request.versionId }
@@ -341,7 +343,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         requests++
         const carried = continuation
         continuation = undefined
-        const last = requests >= plan.turnCap || carried !== undefined
+        const last = requests >= cap || carried !== undefined
         // Measured with thinking enabled: keeping declarations and forbidding calls preserves
         // Anthropic's signed prefix and cache. Other wires retain their existing cap shape.
         const finalRequest = Option.isSome(registry)
@@ -349,7 +351,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               .list()
               .find((b) => b.appliesTo({ kind: model.kind, api: model.api, model: model.key }))?.finalRequest
           : undefined
-        const cappedWithTools = requests >= plan.turnCap && finalRequest !== undefined
+        const cappedWithTools = requests >= cap && finalRequest !== undefined
         const offerTools = !last || cappedWithTools
         // Another model's thinking isn't sent to this one (a resume on another model, §12.3).
         const suffix = forTarget(liveSuffix(transcript.messages), target)
@@ -890,9 +892,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             ? seed.slice()
             : [
                 { role: "rpRequest", timestamp: Date.now() },
-                ...(plan.turnCap <= 1
-                  ? [{ role: "rpHarness" as const, content: WRITE_NOW, timestamp: Date.now() }]
-                  : [])
+                ...(cap <= 1 ? [{ role: "rpHarness" as const, content: WRITE_NOW, timestamp: Date.now() }] : [])
               ]
         },
         prepareRequest: async ({ context }, signal) => {
@@ -981,7 +981,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           const tool = tools.find((entry) => entry.id === toolCall.name)
           if (tool && !admits(tool.effect))
             return { block: true, reason: "This chat does not allow tools with outside effects." }
-          if (requests >= plan.turnCap) return { block: true, reason: "The final turn cannot use tools." }
+          if (requests >= cap) return { block: true, reason: "The last model request of this reply can't use tools." }
           if (!several && sent !== undefined) return { block: true, reason: "The reply has already been sent." }
           // A process kill after an effect commits must leave its call ID durable,
           // so recovery can replay the receipt instead of sampling a duplicate call.
@@ -992,10 +992,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         // alone, a reply written as plain text is asked once to be sent; then it's taken as it is.
         finishTurn: ({ message }, signal) => {
           // The cap's request is the last, whatever it asked for; a stop ends the loop here.
-          if (sent !== undefined || requests >= plan.turnCap || signal?.aborted) return { action: "end" }
+          if (sent !== undefined || requests >= cap || signal?.aborted) return { action: "end" }
           const plain = !message.content.some((p) => p.type === "toolCall")
           const failed = message.stopReason === "error" || message.stopReason === "aborted"
-          if (plain && !failed && plan.contract === "send_message" && !nudged && requests < plan.turnCap) {
+          if (plain && !failed && plan.contract === "send_message" && !nudged && requests < cap) {
             nudged = true
             if (body.text) emit({ restart: true })
             return { action: "continue" }
@@ -1004,7 +1004,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         },
         // The last request is made without tools, after the app's "write now".
         prepareNextTurnWithContext: () =>
-          requests === plan.turnCap - 1
+          requests === cap - 1
             ? { messages: [{ role: "rpHarness", content: WRITE_NOW, timestamp: Date.now() }] }
             : nudged && !nudgeSent
               ? ((nudgeSent = true), { messages: [{ role: "rpHarness", content: SEND_NUDGE, timestamp: Date.now() }] })

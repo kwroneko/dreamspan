@@ -172,6 +172,44 @@ describe("workshop", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("a workshop run has no request cap: fifteen tool rounds, then the answer", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const rounds = 15
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const messages = request.body?.messages as Array<{ role: string }>
+            const done = messages.filter((m) => m.role === "tool").length
+            sse(
+              res,
+              done >= rounds
+                ? completionChunks(["Read it fifteen times."], {})
+                : call("read_card", { card: "Assistant" }, `call_${done}`)
+            )
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      yield* generateReply(api, { connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` }, model: {} })
+      const chat = yield* api.CreateWorkshop({})
+      const events = yield* watch(api, chat)
+      const before = mock.requests().length
+      const version = yield* answer(api, chat, events)
+      assert.strictEqual(version.status, "complete")
+      assert.strictEqual(version.content, "Read it fifteen times.")
+      const bodies = mock
+        .requests()
+        .slice(before)
+        .filter((r) => r.path === "/v1/chat/completions")
+        .map((r) => r.body!)
+      assert.lengthOf(bodies, rounds + 1)
+      // Every request offered the tools: none was the last-request-without-tools of a cap.
+      assert.isTrue(bodies.every((b) => (b.tools as Array<unknown> | undefined)?.length))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live(
     "reads a library card through a scripted provider, freezes ordered pieces and tools, and keeps turns out of Activity",
     () => {
@@ -266,7 +304,7 @@ describe("workshop", () => {
         const me = yield* api.Whoami()
         const material = yield* reader.RolloutMaterial({ userId: me.id, versionId: version.id })
         const snapshot = JSON.parse(material.snapshot) as ContextSnapshot & {
-          agent: { contract: string; turnCap: number; tools: Array<{ name: string }> }
+          agent: { contract: string; turnCap?: number; tools: Array<{ name: string }> }
         }
         assert.strictEqual(material.mode, "workshop")
         const [rows] = yield* fixtureSql(
@@ -281,7 +319,8 @@ describe("workshop", () => {
           setup.model.id
         )
         assert.strictEqual(snapshot.agent.contract, "several")
-        assert.strictEqual(snapshot.agent.turnCap, 40)
+        // A workshop has no request cap (owner, 2026-11-17).
+        assert.notProperty(snapshot.agent, "turnCap")
         assert.deepStrictEqual(
           snapshot.agent.tools.map((t) => t.name),
           names

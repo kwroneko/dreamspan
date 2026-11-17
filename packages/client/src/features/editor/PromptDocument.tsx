@@ -21,7 +21,16 @@ import type { RefId } from "@rp/shared/library.ts"
 import { addPresetPrompt, writePresetOrder } from "./presetDraft.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
-import { charDefinitions, newestMessage, ownTurnNotes, perFieldMarkers, presetOrder } from "@rp/shared/presetOrder.ts"
+import {
+  agentInstructionsPrompt,
+  charDefinitions,
+  newestMessage,
+  ownTurnNotes,
+  perFieldMarkers,
+  presetOrder
+} from "@rp/shared/presetOrder.ts"
+import { WORKSHOP_PIECE_IDS } from "@rp/shared/workshopPreset.ts"
+import { agentInstructions } from "@rp/shared/agentInstructions.ts"
 import { CONDITION_LABELS, conditionOf, presetWarnings, TRIGGERS } from "@rp/shared/presetConditions.ts"
 import { DIRECTION_PROMPT } from "@rp/shared/endOfRequest.ts"
 import { type FieldPath, textField } from "@rp/shared/editing.ts"
@@ -84,6 +93,11 @@ const conditionBadges = {
 } as const
 
 const NEW_PROMPT_HINT = "Adds a new prompt at the end of the list."
+/** Under an empty Agent instructions prompt: what's sent instead. */
+const AGENT_DEFAULT = `Empty: the app's default is sent, which follows the chat's tools and how replies are given, such as “${agentInstructions(["tool"], "both")}”`
+/** A preset without Agent instructions: what it sends, and the way to edit them. */
+const AGENT_MISSING =
+  "This preset has no Agent instructions, so replies that use tools get the app's default text at the very end of the request."
 const DEFINITIONS_LABEL = "Card definitions block"
 const DEFINITIONS_BUTTON = "Add definitions block"
 const DEFINITIONS_HINT = "Adds a definitions block: it places every cast card's definitions there."
@@ -681,6 +695,9 @@ function PromptBlock({
             labelHidden
             autoFocus={autoFocus}
             rows={Math.min(8, Math.max(2, content.split("\n").length))}
+            {...(entry.identifier === agentInstructionsPrompt.identifier && content.trim() === ""
+              ? { description: AGENT_DEFAULT }
+              : {})}
           />
         </BlockBody>
       )}
@@ -1160,6 +1177,30 @@ export function PromptDocument({
       </SortableList>
       {history >= 0 && afterHistory >= order.length && tailStarts}
       {!newestAfterTail && slot("Notes at the very end", (p) => p.mode === "section" && p.section === "tail_end")}
+      {!order.some((e) => e.identifier === agentInstructionsPrompt.identifier) &&
+        !prompts.some((p) => WORKSHOP_PIECE_IDS.has(p.identifier)) && (
+          <Block
+            data-agent-instructions-missing
+            data-prompt-type="placeholder"
+            className="prompt-placeholder my-1 flex min-h-10 flex-wrap items-center gap-2 px-3 py-2 text-sm"
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center text-muted" aria-hidden="true">
+              <Icon name="insert" />
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col items-start gap-1 break-words">
+              <span className="prompt-kind-tag rounded px-1.5 py-0.5 font-medium">Agent instructions</span>
+              <span className="text-xs text-muted">{AGENT_MISSING}</span>
+            </span>
+            <Button
+              className="h-8! shrink-0 px-2!"
+              hint="Adds the Agent instructions to this preset at the end of the list, empty so the default is still sent, ready to edit and move."
+              onClick={() => addAt(order.length, agentInstructionsPrompt)}
+            >
+              <Icon name="plus" />
+              <span>Add to preset</span>
+            </Button>
+          </Block>
+        )}
       <PresetLorebooks store={store} column={column} onOpen={onOpenLorebook} />
     </div>
   )
