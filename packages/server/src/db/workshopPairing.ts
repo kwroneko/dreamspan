@@ -33,7 +33,7 @@ export const pairedStoryFork = (sql: SqlClient.SqlClient, forkId: string) =>
 /**
  * Every fork of workshop `workshopId` with the story fork it goes with, its own branches
  * included (`story` null: a fork with no pairing, from before attachments had one). Costs the
- * workshop's own fork count.
+ * workshop's own fork count, once (one grouped pass, joined by fork).
  */
 export const workshopForkPairs = (sql: SqlClient.SqlClient, workshopId: string) =>
   sql<ForkRow & { story_fork_id: string | null }>`WITH RECURSIVE w(id, story) AS (
@@ -41,8 +41,9 @@ export const workshopForkPairs = (sql: SqlClient.SqlClient, workshopId: string) 
         WHERE e.chat_id = ${workshopId} AND e.slot_id IS NULL AND e.key = 'workshop.paired'
       UNION ALL SELECT c.id, w.story FROM w JOIN forks c ON c.parent_fork_id = w.id
         WHERE NOT ${sql.literal(writesPairing("c"))})
-    SELECT f.*, (SELECT w.story FROM w WHERE w.id = f.id LIMIT 1) AS story_fork_id
-    FROM forks f WHERE f.chat_id = ${workshopId}`
+    , one(id, story) AS MATERIALIZED (SELECT id, min(story) FROM w GROUP BY id)
+    SELECT f.*, one.story AS story_fork_id
+    FROM forks f LEFT JOIN one ON one.id = f.id WHERE f.chat_id = ${workshopId}`
 
 /**
  * The live forks of the live workshops beside story `storyId` that go with its fork `forkId`,

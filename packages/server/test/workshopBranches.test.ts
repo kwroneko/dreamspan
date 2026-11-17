@@ -140,6 +140,32 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
       const [onNow] = yield* h.pairedIn(h.workshop, now.fork)
       assert.lengthOf(yield* h.texts(h.workshop.id, onThen!), 1)
       assert.lengthOf(yield* h.texts(h.workshop.id, onNow!), 3)
+      // A message copied with "As it is now" recorded the original branch past the fork point: a
+      // run continuing it on the new branch reads the new branch's end, not a message it doesn't show.
+      const copied = yield* h.reader.GetPath({
+        userId: h.userId,
+        chatId: h.workshop.id,
+        forkId: onNow!,
+        leafSlotId: null,
+        limit: 50
+      })
+      const last = copied.entries.at(-1)!
+      const atNow = yield* h.reader.WorkshopStoryPosition({
+        userId: h.userId,
+        chatId: h.workshop.id,
+        forkId: onNow!,
+        versionId: last.version.id
+      })
+      assert.strictEqual(atNow?.forkId, now.fork)
+      assert.strictEqual(atNow?.leafSlotId, h.s1.slotId)
+      // On A the same message keeps the position it recorded.
+      const atA = yield* h.reader.WorkshopStoryPosition({
+        userId: h.userId,
+        chatId: h.workshop.id,
+        forkId: h.w,
+        versionId: last.version.id
+      })
+      assert.strictEqual(atA?.leafSlotId, h.s3.slotId)
       // At the story's end nothing is left out: no row.
       const atEnd = yield* h.reader.PreviewForkNotes({
         userId: h.userId,
