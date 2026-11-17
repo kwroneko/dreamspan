@@ -33,6 +33,7 @@ import { makeBinWriteHandlers } from "./binWrites.ts"
 import { makeChatSetupWriteHandlers } from "./chatSetupWrites.ts"
 import { makeGenerationWriteHandlers } from "./generationWrites.ts"
 import { makeRolloutWriteHandlers } from "./rolloutWrites.ts"
+import { makeSubagentWriteHandlers } from "./subagents.ts"
 import { makeDecisionWriteHandlers } from "./decisions.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeAdoptWriteHandlers } from "./cardOrigins.ts"
@@ -128,6 +129,8 @@ const handlers = Layer.unwrap(
               ...(yield* makeLcmUiWriteHandlers),
               ...(yield* makeLcmEnableWriteHandlers(bin)),
               ...(yield* makeRolloutWriteHandlers(graph.AddSelectedVersion)),
+              // --- Subagents (spec/SUBAGENTS.md §11)
+              ...(yield* makeSubagentWriteHandlers),
               ...adoption,
               ...(yield* makeDecisionWriteHandlers(bin))
             },

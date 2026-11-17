@@ -60,7 +60,8 @@ for (const workers of ["source", "bundle"] as const) {
             "generate",
             "network",
             "plugins.write",
-            "plugins.apply"
+            "plugins.apply",
+            "subagents"
           ]
         )
         assert.lengthOf(effects, 1)

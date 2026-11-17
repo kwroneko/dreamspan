@@ -19,6 +19,7 @@ import { editCard } from "./agent/tools/cardEdit.ts"
 import { editNote, listNotes, switchNote, writeNote } from "./agent/tools/notes.ts"
 import { lookupLore } from "./agent/tools/lore.ts"
 import { setPresence } from "./agent/tools/presence.ts"
+import { agentTool } from "./agent/subagents.ts"
 import { defaultMode, type OrchestrationMode } from "./agent/modes.ts"
 import type { RolloutTool } from "./agent/tools.ts"
 import {
@@ -151,6 +152,8 @@ export class ExecutionRegistry extends Context.Service<
         editNote,
         switchNote,
         setPresence,
+        // spec/SUBAGENTS.md SA1: a workshop's child runs; never a story reply's tool.
+        agentTool,
         { ...editCard, kindOverrides: ["workshop"] }
       ] as ReadonlyArray<RolloutTool<never>>)
         yield* rolloutTools.register(tool)

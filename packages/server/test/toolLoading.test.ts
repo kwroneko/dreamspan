@@ -145,11 +145,13 @@ describe("the split", () => {
       const { registry, tools } = yield* workshopTools
       const offer = split(registry, tools, "workshop", claude)
       assert.deepStrictEqual(
-        offer.tools.slice(0, 3).map((t) => t.id),
-        ["list_library", "tool_search", "load_skill"]
+        offer.tools.slice(0, 4).map((t) => t.id),
+        ["list_library", "agent", "tool_search", "load_skill"]
       )
-      assert.strictEqual(offer.deferred.size, tools.length - 1)
+      // Subagents are offered at once (spec/SUBAGENTS.md §2.1).
+      assert.strictEqual(offer.deferred.size, tools.length - 2)
       assert.isFalse(offer.deferred.has("list_library"))
+      assert.isFalse(offer.deferred.has("agent"))
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
@@ -594,7 +596,7 @@ describe("the wire", () => {
       assert.strictEqual(JSON.stringify(second.tools), JSON.stringify(first.tools))
       assert.deepStrictEqual(
         (first.tools as Array<{ name: string }>).map((t) => t.name),
-        ["list_library", "tool_search", "load_skill"]
+        ["list_library", "agent", "tool_search", "load_skill"]
       )
       type Item = {
         type?: string

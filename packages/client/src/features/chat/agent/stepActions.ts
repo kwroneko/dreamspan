@@ -31,6 +31,11 @@ export const useStepActions = () => {
   return [...snapshot.entries].sort((a, b) => a.order - b.order)
 }
 
-/** Whether any of these steps waits for the user's answer. */
+/** Whether any of these steps, or a subagent one started, waits for the user's answer. */
 export const waitsForUser = (steps: ReadonlyArray<RolloutStep> | null | undefined) =>
-  steps?.some((step) => step.kind === "tool" && step.status === "waiting") ?? false
+  steps?.some(
+    (step) =>
+      step.kind === "tool" &&
+      (step.status === "waiting" ||
+        step.subagent?.steps?.some((child) => child.kind === "tool" && child.status === "waiting") === true)
+  ) ?? false

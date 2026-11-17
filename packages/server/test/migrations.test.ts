@@ -124,6 +124,63 @@ it.effect("fresh defaults include composer guidance, branch additions and global
     assert.isTrue(
       (yield* sql`PRAGMA table_info(fork_summaries)`).some((r) => r.name === "added_json" && r.dflt_value === "'[]'")
     )
-    assert.deepStrictEqual(Object.keys(migrations), ["0001_baseline"])
+    assert.deepStrictEqual(Object.keys(migrations), ["0001_baseline", "0003_subagents"])
   }).pipe(Effect.provide(layer()))
 )
+
+describe("0003_subagents", () => {
+  const seed = (sql: SqlClient.SqlClient) =>
+    Effect.gen(function* () {
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      for (const chat of ["c", "d"])
+        yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES (${chat}, 'u', 'workshop', 'active', 0)`
+      yield* sql`INSERT INTO rollouts (id, chat_id, kind, status, role, request_class, created_at, updated_at)
+        VALUES ('parent', 'c', 'workshop', 'running', 'reply', 'interactive', 0, 0), ('elsewhere', 'd', 'workshop', 'running', 'reply', 'interactive', 0, 0)`
+    })
+  const child = (
+    sql: SqlClient.SqlClient,
+    id: string,
+    parent: string | null,
+    call: string | null,
+    handle: string | null,
+    chat = "c"
+  ) =>
+    sql`INSERT INTO rollouts (id, chat_id, kind, status, role, request_class, created_at, updated_at, spawned_by_rollout_id, spawned_by_call_id, agent_handle)
+      VALUES (${id}, ${chat}, 'workshop', 'running', 'subagent', 'interactive', 0, 0, ${parent}, ${call}, ${handle})`
+
+  it.effect("adds the link to a database at the baseline, keeps its rows, and guards the link", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      // A database made before this migration, with a synthetic run in it.
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord({ "0001_baseline": migrations["0001_baseline"] }) })
+      yield* seed(sql)
+      yield* Effect.scoped(Layer.build(Migrations))
+      assert.deepStrictEqual(
+        yield* sql`SELECT id, spawned_by_rollout_id, spawned_by_call_id, agent_handle FROM rollouts ORDER BY id`,
+        [
+          { id: "elsewhere", spawned_by_rollout_id: null, spawned_by_call_id: null, agent_handle: null },
+          { id: "parent", spawned_by_rollout_id: null, spawned_by_call_id: null, agent_handle: null }
+        ]
+      )
+      yield* child(sql, "kid", "parent", "call_1", "research-1")
+      const refused = (effect: Effect.Effect<unknown, unknown>, message: string) =>
+        Effect.gen(function* () {
+          const exit = yield* Effect.exit(effect)
+          assert.isTrue(Exit.isFailure(exit))
+          assert.include(String(exit), message)
+        })
+      yield* refused(child(sql, "half", "parent", null, "research-2"), "names its parent, call and handle together")
+      yield* refused(child(sql, "nohandle", "parent", "call_2", null), "names its parent, call and handle together")
+      yield* refused(child(sql, "far", "parent", "call_3", "research-3", "d"), "same chat")
+      yield* refused(child(sql, "grandkid", "kid", "call_4", "research-1"), "cannot start subagents")
+      yield* refused(sql`UPDATE rollouts SET agent_handle = 'other-1' WHERE id = 'kid'`, "keeps its parent")
+      yield* refused(sql`UPDATE rollouts SET spawned_by_rollout_id = NULL WHERE id = 'kid'`, "keeps its parent")
+      yield* refused(child(sql, "long", "parent", "call_5", "x".repeat(65)), "CHECK")
+      // Other updates of a child still work (its status, as it finishes).
+      yield* sql`UPDATE rollouts SET status = 'completed' WHERE id = 'kid'`
+      const plan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+        SELECT id FROM rollouts WHERE spawned_by_rollout_id = 'parent' AND spawned_by_call_id = 'call_1'`
+      assert.isTrue(plan.some((row) => row.detail.includes("rollouts_spawned")))
+    }).pipe(Effect.provide(layer()))
+  )
+})

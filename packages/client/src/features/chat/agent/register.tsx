@@ -12,6 +12,7 @@ import { invokeMessageAction, messageActions, viewOf } from "../messageActions.t
 import { resumeOffer } from "./resume.ts"
 import { stepActions } from "./stepActions.ts"
 import { ApprovalPanel } from "./ApprovalPanel.tsx"
+import { SubagentPanel } from "./SubagentPanel.tsx"
 
 const RunSteps = lazy(() => import("./RunSteps.tsx").then((m) => ({ default: m.RunSteps })))
 const ToolsSection = lazy(() => import("./ToolsSection.tsx").then((m) => ({ default: m.ToolsSection })))
@@ -44,6 +45,8 @@ export const registerAgent = () => [
   messageHeaderDetails.register({ id: "message.steps-badge", order: 15, component: StepsBadge }),
   // A call that asks the user first: what it will do, and Allow, Allow in this workshop, Decline.
   stepActions.register({ id: "agent.approval", order: 10, component: ApprovalPanel }),
+  // The subagent an `agent` call started (spec/SUBAGENTS.md §7): its row, with Stop and Inspect.
+  stepActions.register({ id: "agent.subagent", order: 20, component: SubagentPanel }),
   runInspectorSections.register({
     id: "inspector.run-steps",
     order: 10,

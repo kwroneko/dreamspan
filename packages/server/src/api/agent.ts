@@ -40,6 +40,7 @@ import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { internal } from "./internal.ts"
+import { stopSubagent } from "../agent/subagents.ts"
 
 /** What a resume needs of the stopped run's frozen snapshot. */
 interface Frozen {
@@ -446,6 +447,18 @@ export const makeAgentHandlers = Effect.gen(function* () {
       Effect.flatMap(CurrentUser, (user) => reader.RolloutTranscript({ userId: user.id, versionId })).pipe(
         internal("GetRunTranscript")
       ),
+    // A subagent's own run, through the reply it belongs to (spec/SUBAGENTS.md §7).
+    GetSubagentRun: ({ versionId, rolloutId }) =>
+      Effect.flatMap(CurrentUser, (user) => reader.SubagentRun({ userId: user.id, versionId, rolloutId })).pipe(
+        internal("GetSubagentRun")
+      ),
+    // Its row's Stop: only a subagent of this reply's run, and only that one (spec/SUBAGENTS.md §8).
+    StopSubagent: ({ versionId, rolloutId }) =>
+      Effect.gen(function* () {
+        const userId = (yield* CurrentUser).id
+        yield* reader.SubagentStatus({ userId, versionId, rolloutId })
+        return { stopped: stopSubagent(userId, rolloutId) }
+      }).pipe(internal("StopSubagent")),
     // The rule the note and card tools apply (agent/tools/notes.ts, cardEdit.ts): the chat's
     // `agent.permission`, else the note's `agent_editable` or the card's `agent_editable_fields`.
     GetAgentPermissions: ({ chatId, slotId, forkId }) =>

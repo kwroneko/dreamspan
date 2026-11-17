@@ -228,6 +228,8 @@ describe("workshop context", () => {
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "plugins.apply", mode: "off" })
         // The card-source tools (cardextools1) use the internet: Off leaves their definitions out too.
         yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "network", mode: "off" })
+        // So does the subagent tool (spec/SUBAGENTS.md), whose description this budget doesn't count.
+        yield* api.SetWorkshopGrant({ chatId: chat.id, capability: "subagents", mode: "off" })
         // Legacy elision remains available when the user explicitly turns LCM off.
         yield* api.ChangeLcmSettings({ chatId: chat.id, change: { enabled: false } })
         const events = yield* watch(api, chat)

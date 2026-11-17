@@ -1,0 +1,122 @@
+// Subagents in the browser (spec/SUBAGENTS.md SA1): a workshop reply's `agent` call starts a
+// research subagent, whose collapsed row shows under the call's step while it works; it opens to
+// its task and steps; Inspect opens its own run; Stop ends it alone, and the reply carries on with
+// what it had. Layout audit on the row and the inspector at 1440 and 390. Synthetic data and a
+// scripted loopback provider only.
+import { mkdirSync } from "node:fs"
+import { resolve } from "node:path"
+import { expect, test } from "@playwright/test"
+import { Effect } from "effect"
+import { expectLayout } from "./support/layoutAudit.ts"
+import { asUser, type Client } from "./support/rpc.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { PARENT_ANSWER, startSubagentProvider, SUBAGENT_NAME, SUBAGENT_TASK } from "./support/subagentProvider.ts"
+
+const server = serverPerFile(withAdmin)
+const shots = process.env.SCREENSHOT_DIR
+let provider: Awaited<ReturnType<typeof startSubagentProvider>>
+const admin = <A>(use: (client: Client) => Effect.Effect<A, unknown>) =>
+  asUser(server(), ADMIN.handle, ADMIN.password, use)
+
+test.beforeAll(async () => {
+  provider = await startSubagentProvider()
+  await admin((api) =>
+    Effect.gen(function* () {
+      yield* api.SetDisplayPrefs({ prefs: { steps: "expanded" } })
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Synthetic subagents",
+          baseUrl: provider.baseUrl,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        }
+      })
+      const model = yield* api.AddUserModel({ connectionId: connection.id, key: "workshop-small", overrides: {} })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
+    })
+  )
+})
+test.afterAll(async () => {
+  await provider.stop()
+})
+
+for (const width of [1440, 390])
+  test(`a research subagent's row, Inspect and Stop at ${width}`, async ({ page }, info) => {
+    test.setTimeout(180_000)
+    const workshop = await admin((api) => api.CreateWorkshop({ title: `Subagents ${width}` }))
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const shot = async (name: string) => {
+      if (shots) {
+        mkdirSync(shots, { recursive: true })
+        await page.waitForTimeout(200)
+        await page.screenshot({ path: resolve(shots, `subagents-${name}-${width}.png`), animations: "disabled" })
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    }
+
+    await page.goto(`${server().url}/chats/${workshop.id}`)
+    await expect(page.getByTestId("composer")).toBeVisible()
+    const held = provider.heldCount()
+    await page.getByLabel("Message", { exact: true }).fill("Find my lighthouse keeper.")
+    await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+
+    // The row shows under the agent call's step while the subagent works.
+    const reply = page.getByRole("article").last()
+    const row = reply.locator("[data-subagent]")
+    await expect(row).toBeVisible({ timeout: 30_000 })
+    await expect(row).toHaveAttribute("data-subagent", "research-1")
+    await expect(row).toContainText("Subagent")
+    await expect(row).toContainText("Look things up")
+    await expect(row).toContainText(SUBAGENT_NAME)
+    await expect(row).toContainText("Same model · workshop-small")
+    await expect.poll(() => provider.heldCount(), { timeout: 30_000 }).toBe(held + 1)
+    await expect(row).toHaveAttribute("data-subagent-status", "running")
+    await expect(row.getByRole("button", { name: "Stop", exact: true })).toHaveAccessibleDescription(
+      "Stops this subagent. The assistant gets what it has so far and carries on."
+    )
+
+    // Expands to its task and its own steps.
+    await row.getByRole("button", { name: /Subagent/ }).click()
+    await expect(row).toContainText(SUBAGENT_TASK)
+    await expect(row.locator('[data-step="tool"]')).toHaveCount(1)
+    await expect(row.locator('[data-step="tool"]').first()).toContainText(/library/i)
+    await shot("running")
+    await expectLayout(page, info, `subagents-row-${width}`, { scope: "article:last-of-type" })
+
+    // Stop: it ends stopped, alone; the reply carries on with what it had and finishes.
+    await row.getByRole("button", { name: "Stop", exact: true }).click()
+    await expect(page.getByRole("article").filter({ hasText: PARENT_ANSWER })).toHaveCount(1, { timeout: 30_000 })
+    expect(provider.lastResults().at(-1)).toContain("Stopped by the user")
+    const done = page.getByRole("article").filter({ hasText: PARENT_ANSWER })
+    const badge = done.locator("[data-steps-badge]")
+    const stopped = done.locator("[data-subagent]")
+    // A finished reply's steps fold; its header badge opens them (once the fold has settled).
+    await expect(async () => {
+      if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+      await expect(stopped).toBeVisible({ timeout: 1_000 })
+    }).toPass({ timeout: 15_000 })
+    await expect(stopped).toHaveAttribute("data-subagent-status", "stopped")
+    await expect(stopped).toContainText("Stopped")
+    await expect(stopped.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
+    await shot("stopped")
+    await expectLayout(page, info, `subagents-stopped-${width}`, { scope: "article:last-of-type" })
+
+    // Inspect opens its own run: instructions, task, tools, steps and usage.
+    await stopped.getByRole("link", { name: "Inspect", exact: true }).click()
+    const run = page.locator("[data-subagent-run]")
+    await expect(run).toBeVisible({ timeout: 30_000 })
+    await expect(run).toContainText("Subagent instructions")
+    await expect(run).toContainText("You are a subagent")
+    await expect(run).toContainText(SUBAGENT_TASK)
+    await expect(run).toContainText("list_library")
+    await expect(run.getByRole("heading", { name: "Usage" })).toBeVisible()
+    await shot("inspect")
+    await expectLayout(page, info, `subagents-inspect-${width}`)
+  })

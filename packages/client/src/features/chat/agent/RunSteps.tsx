@@ -124,7 +124,13 @@ function ToolGroup({
  * then those the assistant loaded as it went (and the tool that loaded them), then those it
  * never needed. A run that loads nothing shows one list, as before.
  */
-function Tools({ tools, entries }: { tools: ReadonlyArray<OfferedTool>; entries: ReadonlyArray<TranscriptEntry> }) {
+export function Tools({
+  tools,
+  entries
+}: {
+  tools: ReadonlyArray<OfferedTool>
+  entries: ReadonlyArray<TranscriptEntry>
+}) {
   const loaderOf = new Map(entries.flatMap((e) => (e.role === "toolResult" ? [[e.toolCallId, e.tool] as const] : [])))
   const size = (tool: OfferedTool) => (tool.tokens === undefined ? "" : ` · ${tokens(tool.tokens)}`)
   const immediate = tools.filter((t) => !t.deferred)
@@ -387,21 +393,24 @@ function Cut({ span }: { span: CutSpan }) {
   )
 }
 
-function Steps({
-  run,
+export function Steps({
+  requests,
   entries,
   cut,
-  editing
+  editing,
+  first = "Every request of this run after the first is the context above, then everything listed before it here."
 }: {
-  run: RunContext
+  requests: ReadonlyArray<InspectorUsage>
   entries: ReadonlyArray<TranscriptEntry>
   cut: ReadonlyArray<CutSpan>
-  editing: StepEditing
+  /** Null: shown without Edit or Resume from here (a subagent's own run). */
+  editing: StepEditing | null
+  first?: string
 }) {
   const turns = turnsOf(entries)
   // Each request's ledger row, when they line up one for one (a retry adds a row of its own).
   const answered = turns.filter((t) => t.answer !== null).length
-  const usage = run.requests.length === answered ? run.requests : null
+  const usage = requests.length === answered ? requests : null
   // A cut span shows just before the entry it was cut at, or after the last.
   const cutsAt = (at: number) => cut.filter((span) => Math.min(span.at, entries.length) === at)
   const cuts = (at: number) => cutsAt(at).map((span, i) => <Cut key={`cut-${at}-${i}`} span={span} />)
@@ -413,9 +422,7 @@ function Steps({
   return (
     <section aria-label="Steps" id="run-steps" className="flex flex-col gap-3">
       <h2 className="text-base font-semibold">Steps</h2>
-      <p className="text-sm text-muted">
-        Every request of this run after the first is the context above, then everything listed before it here.
-      </p>
+      <p className="text-sm text-muted">{first}</p>
       {turns.map((turn, i) => {
         const first = starts[i]!
         const answerAt = first + turn.added.length
@@ -574,7 +581,9 @@ function Transcript({
           {editing.error}
         </p>
       )}
-      {(entries.length > 0 || cut.length > 0) && <Steps run={run} entries={entries} cut={cut} editing={editing} />}
+      {(entries.length > 0 || cut.length > 0) && (
+        <Steps requests={run.requests} entries={entries} cut={cut} editing={editing} />
+      )}
     </>
   )
 }

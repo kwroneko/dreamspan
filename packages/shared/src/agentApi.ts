@@ -9,8 +9,10 @@ import {
   ReplyTools,
   RolloutStep,
   RunTranscript,
-  StepEdit
+  StepEdit,
+  SubagentRow
 } from "./agent.ts"
+import { InspectorUsage } from "./inspectorApi.ts"
 import { ChatId, EntityId, ForkId, PathEntry, SlotId, StoryAtField, VersionId } from "./chat.ts"
 import { GenerationUnavailable } from "./chatApi.ts"
 import { REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
@@ -47,6 +49,24 @@ export const AgentPermissions = Schema.Struct({
 export type AgentPermissions = typeof AgentPermissions.Type
 
 const ResumeErrors = [NotFound, StaleWrite, ServerError, GenerationUnavailable, NotResumable] as const
+
+/**
+ * A subagent's own run, as its Inspect link opens it (spec/SUBAGENTS.md §7): what it was asked
+ * and with which instructions, the tools it was offered, every turn after its request, and its
+ * requests from the ledger. `startedBy`: the reply whose `agent` call started it.
+ */
+export const SubagentRun = Schema.Struct({
+  row: SubagentRow,
+  startedBy: Schema.Struct({ versionId: VersionId, toolCallId: Schema.String }),
+  /** The type's instructions, as the subagent's first message held them. */
+  instructions: Schema.String,
+  tools: RunTranscript.fields.tools,
+  entries: RunTranscript.fields.entries,
+  requests: Schema.Array(InspectorUsage),
+  /** The run's error, when it failed. */
+  error: Schema.NullOr(Schema.String)
+})
+export type SubagentRun = typeof SubagentRun.Type
 
 /**
  * The agent RPCs, in a group (and handler layer) of their own: AppCoreApi is at TypeScript's
@@ -104,6 +124,25 @@ export class AgentApi extends RpcGroup.make(
   Rpc.make("GetRunTranscript", {
     payload: { versionId: VersionId },
     success: RunTranscript,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * A subagent's own run (spec/SUBAGENTS.md §7): `rolloutId` must be a subagent started by the run
+   * of `versionId` (or a run it carried on), so it's read only through the reply it belongs to.
+   */
+  Rpc.make("GetSubagentRun", {
+    payload: { versionId: VersionId, rolloutId: Schema.String },
+    success: SubagentRun,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * Stops one running subagent of the reply `versionId` (spec/SUBAGENTS.md §8): it ends stopped,
+   * and the assistant gets what it wrote so far and carries on. Nothing else stops. `stopped`:
+   * whether it was still running here.
+   */
+  Rpc.make("StopSubagent", {
+    payload: { versionId: VersionId, rolloutId: Schema.String },
+    success: Schema.Struct({ stopped: Schema.Boolean }),
     error: Schema.Union([NotFound, ServerError])
   }),
   /** What agent replies may change in the chat at the position the chat's settings show (`slotId`). */

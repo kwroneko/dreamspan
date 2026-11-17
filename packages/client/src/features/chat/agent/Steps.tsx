@@ -61,7 +61,7 @@ function useStoredSteps(session: ChatSession, version: Version, wanted: boolean)
   return stored?.id === id ? stored : null
 }
 
-function StepRow({
+export function StepRow({
   step,
   index,
   version,

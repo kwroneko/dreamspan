@@ -101,6 +101,15 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     modes: ["off", "ask"]
   },
   {
+    // spec/SUBAGENTS.md §5.4: a child run inside the reply, never with more than the reply's tools.
+    id: "subagents",
+    order: 92,
+    label: "Start subagents",
+    explanation:
+      "Hands part of a task to a helper that works on its own and reports back. It can only use what the assistant may use here, asks you first where the assistant would, and its cost counts toward the reply.",
+    example: "Starts a helper to look through your cards for every lighthouse keeper and sum them up."
+  },
+  {
     // spec/TOOL-LOADING.md §6: a card's skills are its author's words, so they're shown first.
     id: "skills.card",
     order: 95,
@@ -134,6 +143,8 @@ export const capabilityDefaults = makeRegistry<{ readonly id: string; readonly m
   { id: "chats.rewrite", mode: "allow" },
   { id: "settings", mode: "allow" },
   { id: "plugins.write", mode: "allow" },
+  // spec/SUBAGENTS.md §13: decided as a recommendation, not asked.
+  { id: "subagents", mode: "allow" },
   { id: "chats.read", mode: "ask" },
   { id: "generate", mode: "ask" },
   { id: "network", mode: "ask" },
