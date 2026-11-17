@@ -38,6 +38,7 @@ import {
   type AccountEnv
 } from "../../files/environment.ts"
 import { selectSandbox, type CommandSandbox, type RunLimits } from "../../sandbox/registry.ts"
+import { QuotaExceeded, type FilesQuota } from "../../files/quota.ts"
 import { sandboxPath } from "../../sandbox/linuxBwrap.ts"
 import { COMMANDS_NETWORK, resolveMode, type CapabilityRegistries } from "../capabilities.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
@@ -82,6 +83,8 @@ export interface FileToolDeps {
   }
   /** The instance's choice of sandbox (COMMAND_SANDBOX); absent: the first available. */
   readonly sandboxId?: string
+  /** The account's Files quota (files/quota.ts); absent: none is enforced. */
+  readonly quota?: FilesQuota
   /** Bytes held from the media sweep until their rows commit. */
   readonly holding: <A, E, R>(hashes: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly limits?: FileToolLimits
@@ -148,7 +151,7 @@ export const globToRegExp = (glob: string) => {
 }
 
 const refusedText = (error: unknown) =>
-  error instanceof FilePathRefused || error instanceof ToolInputRefused
+  error instanceof FilePathRefused || error instanceof ToolInputRefused || error instanceof QuotaExceeded
     ? error.message
     : (error as NodeJS.ErrnoException)?.code === "ENOENT"
       ? "There's no such file or folder."
@@ -561,10 +564,14 @@ export const makeFileTools = (deps: FileToolDeps) => {
           before = { bytes: read.bytes, inode: read.info.ino }
         } else if (kind === "edit") throw new FilePathRefused(`${full} doesn't exist. Create it with write_file.`)
         const content = next(before?.bytes ?? null)
+        // The new content and the kept version both count against the quota.
+        const adding = content.byteLength + (before?.bytes.byteLength ?? 0)
+        if (deps.quota) yield* deps.quota.check(env.userId, adding, "write files")
         const versionId = before ? yield* keepVersion(ctx, env.userId, full, before, "agent") : null
         const written = yield* attempt(() =>
           writeRegularFile(env.filesRoot, segments, content, { createFolders: true })
         )
+        deps.quota?.wrote(env.userId, adding)
         const after = sha256(content)
         ctx.cache.set(readKey(full), after)
         const effectKind = before ? (kind === "edit" ? "file.edit" : "file.write") : "file.create"
@@ -777,6 +784,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
         const cwd =
           typeof args.cwd === "string" && args.cwd.trim() !== "" ? posix.resolve(start, args.cwd.trim()) : start
         const timeoutMs = Math.min(Number(args.timeout_ms ?? limits.defaultTimeoutMs), limits.maxTimeoutMs)
+        if (deps.quota) yield* deps.quota.check(env.userId, 0, "run commands")
         const run = Effect.gen(function* () {
           const before = yield* attempt(() => scanTree(env.filesRoot))
           const result = yield* attempt((signal) =>
@@ -800,6 +808,10 @@ export const makeFileTools = (deps: FileToolDeps) => {
         )
         if (result.cwd) ctx.cache.set(CWD_KEY, result.cwd)
         yield* keepCommandVersions(ctx, env, [...changes.changed, ...changes.created], changes.deleted)
+        // Commands can't be stopped mid-write by a quota: measured after, and the next refused.
+        const overQuota = deps.quota
+          ? yield* deps.quota.afterCommand(env.userId).pipe(Effect.orElseSucceed(() => null))
+          : null
         const output = result.tail === "" ? result.head : `${result.head}\n…\n${result.tail}`
         const counts = [
           changes.changed.length ? `${changes.changed.length} changed` : "",
@@ -813,22 +825,30 @@ export const makeFileTools = (deps: FileToolDeps) => {
         ]
         const status = result.diskLow
           ? "stopped: the server's disk is almost full, so commands can't write more now. Delete files you don't need, or ask the server's admin."
-          : result.timedOut
-            ? `stopped after ${timeoutMs} ms (timeout)`
-            : result.outputCapped
-              ? "stopped: the command wrote more than 256 MiB of output (redirect it to a file instead)"
-              : `exit: ${result.exitCode === null ? "killed" : result.exitCode}`
+          : result.memoryCapped
+            ? `stopped: the command used more than ${limits.run.memoryBytes / 2 ** 30} GiB of memory`
+            : result.timedOut
+              ? `stopped after ${timeoutMs} ms (timeout)`
+              : result.outputCapped
+                ? "stopped: the command wrote more than 256 MiB of output (redirect it to a file instead)"
+                : `exit: ${result.exitCode === null ? "killed" : result.exitCode}`
         const text =
           `${status}\nDirectory after: ${result.cwd ?? cwd}\n` +
           (listed.length
             ? `Files changed: ${counts.join(", ")}${changes.partial ? " (many files changed; not all are listed)" : ""}\n${listed.slice(0, 50).join("\n")}${listed.length > 50 ? `\n… ${listed.length - 50} more` : ""}\n`
             : "") +
           (network === "none" ? "Internet from commands is off in this workshop.\n" : "") +
+          (overQuota ? `${overQuota}\n` : "") +
           `Output (${result.outputBytes.toLocaleString("en-US")} bytes):\n${headTail(output)}`
         const short = String(args.command).split("\n")[0]!.slice(0, 80)
         return {
           text,
-          isError: result.timedOut || result.outputCapped || result.diskLow === true || result.exitCode !== 0,
+          isError:
+            result.timedOut ||
+            result.outputCapped ||
+            result.diskLow === true ||
+            result.memoryCapped === true ||
+            result.exitCode !== 0,
           effects: [
             {
               kind: "shell.run",
@@ -867,7 +887,14 @@ export const makeFileTools = (deps: FileToolDeps) => {
             "restore"
           )
           if (typeof recipe.before === "string") {
-            const version = yield* deps.reader.FileVersion({ userId: actor.id, id: recipe.before })
+            // A version past retention (30 days) is gone with its content.
+            const version = yield* deps.reader
+              .FileVersion({ userId: actor.id, id: recipe.before })
+              .pipe(
+                Effect.catchTag("NotFound", () =>
+                  Effect.fail(new EffectUndoRefused({ message: "Its earlier content is gone." }))
+                )
+              )
             if (!version.mediaPath || !isMediaPath(version.mediaPath))
               return yield* new EffectUndoRefused({ message: "Its earlier content is gone." })
             const bytes = yield* attempt(() => readFile(join(deps.dataDir, version.mediaPath!)))
@@ -891,11 +918,21 @@ export const makeFileTools = (deps: FileToolDeps) => {
       Effect.orElseSucceed(() => "Commands can't run on this system yet.")
     )
 
+  /** What the capability row adds where commands run with weaker limits; null: nothing. */
+  const commandsNote = () =>
+    sandboxFor().pipe(
+      Effect.flatMap((selected) =>
+        typeof selected === "string" || !selected.note ? Effect.succeed(null) : attempt(() => selected.note!())
+      ),
+      Effect.orElseSucceed(() => null)
+    )
+
   return {
     tools: [readTool, listTool, searchTool, writeTool, editTool, bashTool] as unknown as ReadonlyArray<
       RolloutTool<never>
     >,
     undoEffect,
-    commandsUnavailable
+    commandsUnavailable,
+    commandsNote
   }
 }

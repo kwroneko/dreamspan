@@ -2748,6 +2748,20 @@ export class WriteOpsLibrary extends RpcGroup.make(
     success: Schema.Array(Schema.String),
     error: StorageError
   }),
+  /**
+   * Retention (§1.3): file versions made before `before` (one account's, or every account's),
+   * at most `limit` rows per call, oldest first; and the media rows nothing names any more. The
+   * bytes are removed later, outside any transaction, by the media sweep.
+   */
+  Rpc.make("PruneFileVersions", {
+    payload: {
+      userId: Schema.optionalKey(UserId),
+      before: Schema.Int,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10_000 }))
+    },
+    success: Schema.Struct({ versions: Schema.Int, media: Schema.Int }),
+    error: StorageError
+  }),
   /** A file put back by the host: this owner-scoped transaction marks the agent's change undone. */
   Rpc.make("CompleteFileUndo", {
     payload: { userId: UserId, ...EffectKey, result: Schema.Record(Schema.String, Schema.Unknown) },
@@ -5608,6 +5622,12 @@ export class ReadOps extends RpcGroup.make(
       mediaPath: Schema.NullOr(Schema.String)
     }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Bytes an account's file versions hold: each stored content once (fileVersions.ts). */
+  Rpc.make("FileVersionBytes", {
+    payload: { userId: UserId },
+    success: Schema.Int,
+    error: StorageError
   }),
   Rpc.make("RolloutEffectFor", {
     payload: { userId: UserId, ...EffectKey },

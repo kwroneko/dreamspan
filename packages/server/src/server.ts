@@ -11,9 +11,11 @@ import { makeSavedMediaHandlers, SavedMedia, savedMediaRoute } from "./api/saved
 import { operationWriter, installOperationRuntime } from "./agent/operations.ts"
 import { installLibraryImport } from "./agent/libraryImport.ts"
 import { makeWorkshopHandlers } from "./api/workshop.ts"
+import { makeFilesQuotaHandlers } from "./api/filesQuota.ts"
 import {
   AuthenticatedAgentApi,
   AuthenticatedWorkshopApi,
+  AuthenticatedFilesQuotaApi,
   AuthenticatedChatEventsApi,
   AuthenticatedMessageVersionApi,
   AuthenticatedMoveApi,
@@ -219,6 +221,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedChatEventsApi.toLayer(makeChatEventHandlers),
   AuthenticatedAgentApi.toLayer(makeAgentHandlers),
   AuthenticatedWorkshopApi.toLayer(makeWorkshopHandlers),
+  AuthenticatedFilesQuotaApi.toLayer(makeFilesQuotaHandlers),
   AuthenticatedPluginApi.toLayer(makePluginHandlers),
   AuthenticatedDecisionApi.toLayer(makeDecisionHandlers),
   AuthenticatedThinkingApi.toLayer(makeThinkingHandlers),

@@ -13,9 +13,10 @@
 import { spawn, spawnSync } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { existsSync, lstatSync, readdirSync, readlinkSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, open, rm, statfs, writeFile, type FileHandle } from "node:fs/promises"
+import { chmod, lstat, mkdir, mkdtemp, open, readdir, rm, statfs, writeFile, type FileHandle } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
+import { bwrapLimiters, selectLimiter, WEAKER_LIMITS, type CommandCgroup } from "./cgroupLimits.ts"
 import { BRIDGE_SOURCE, sandboxNetworks, type SandboxProxy } from "./network.ts"
 import type { Availability, CommandSandbox, RunResult, RunSpec } from "./registry.ts"
 
@@ -113,9 +114,12 @@ const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
 
 /**
  * The sandbox's first shell: limits that can't be raised again, then the bridge to the proxy,
- * then the command, with the directory it ended in after a random marker.
+ * then the command, with the directory it ended in after a random marker. The marker comes in
+ * the environment (`RP_END`, set through bubblewrap's argument descriptor), not on a command
+ * line, so /proc/1/cmdline doesn't show it. The command shares this shell and could still read
+ * it (`trap -p`), which only lets it choose its own next directory, inside the sandbox.
  */
-const prelude = (spec: RunSpec, marker: string) => {
+const prelude = (spec: RunSpec) => {
   const kib = (bytes: number) => Math.max(1, Math.floor(bytes / 1024))
   const limit = (flag: string, value: number) =>
     `ulimit ${flag} ${value} || { echo "The sandbox couldn't set its limits." >&2; exit 125; }`
@@ -131,7 +135,8 @@ const prelude = (spec: RunSpec, marker: string) => {
     spec.network === "public"
       ? `exec 3< <(${shellQuote(process.execPath)} ${RUNTIME}/bridge.mjs ${RUNTIME}/proxy.sock ${PROXY_PORT} 2>/dev/null); read -r -t 10 __rp_ready <&3; exec 3<&-; unset __rp_ready`
       : ":",
-    `trap 'printf "\\n%s %s\\n" ${shellQuote(marker)} "$PWD"' EXIT`,
+    `trap "printf '\\n%s %s\\n' $RP_END \\"\\$PWD\\"" EXIT`,
+    "unset RP_END",
     `cd -- ${shellQuote(spec.cwd)} || exit 1`,
     'eval "$1"'
   ].join("\n")
@@ -177,8 +182,9 @@ const anyBelowReserve = async (spec: RunSpec) => {
  * unprivileged process: io_uring, keyrings, userfaultfd, BPF, perf events, file handles, and
  * mounting, namespaces and module or system calls (most need a capability the command doesn't
  * have; they are refused before the kernel looks). Docker's default filter refuses these too,
- * but a server outside Docker (a development server) has none. x86_64 numbers; on other
- * architectures no filter is added. Refused with EPERM, as Docker does.
+ * but a server outside Docker (a development server) has none. Refused with EPERM, as Docker does.
+ * Numbers for x86_64 and for aarch64 (the generic table, which has no `uselib`); other
+ * architectures get no filter.
  */
 const DENIED_X86_64: Readonly<Record<string, number>> = {
   io_uring_setup: 425,
@@ -221,9 +227,54 @@ const DENIED_X86_64: Readonly<Record<string, number>> = {
   uselib: 134
 }
 
-/** A classic BPF seccomp program refusing `DENIED_X86_64`; null on other architectures. */
-export const seccompFilter = (): Buffer | null => {
-  if (process.arch !== "x64") return null
+/** include/uapi/asm-generic/unistd.h (aarch64), checked against a Linux host's headers. */
+const DENIED_AARCH64: Readonly<Record<string, number>> = {
+  io_uring_setup: 425,
+  io_uring_enter: 426,
+  io_uring_register: 427,
+  add_key: 217,
+  request_key: 218,
+  keyctl: 219,
+  userfaultfd: 282,
+  bpf: 280,
+  perf_event_open: 241,
+  fanotify_init: 262,
+  name_to_handle_at: 264,
+  open_by_handle_at: 265,
+  mount: 40,
+  umount2: 39,
+  pivot_root: 41,
+  chroot: 51,
+  open_tree: 428,
+  move_mount: 429,
+  fsopen: 430,
+  fsmount: 432,
+  fspick: 433,
+  mount_setattr: 442,
+  open_tree_attr: 467,
+  unshare: 97,
+  setns: 268,
+  kexec_load: 104,
+  kexec_file_load: 294,
+  init_module: 105,
+  delete_module: 106,
+  finit_module: 273,
+  acct: 89,
+  swapon: 224,
+  swapoff: 225,
+  reboot: 142,
+  quotactl: 60,
+  lookup_dcookie: 18,
+  syslog: 116
+}
+
+/** The kernel calls refused on an architecture; empty where no filter is made. */
+export const deniedCalls = (arch: NodeJS.Architecture = process.arch): Readonly<Record<string, number>> =>
+  arch === "x64" ? DENIED_X86_64 : arch === "arm64" ? DENIED_AARCH64 : {}
+
+/** A classic BPF seccomp program refusing `deniedCalls`; null on other architectures. */
+export const seccompFilter = (arch: NodeJS.Architecture = process.arch): Buffer | null => {
+  if (arch !== "x64" && arch !== "arm64") return null
   const insn = (code: number, jt: number, jf: number, k: number) => {
     const b = Buffer.alloc(8)
     b.writeUInt16LE(code, 0)
@@ -239,18 +290,20 @@ export const seccompFilter = (): Buffer | null => {
   const ALLOW = 0x7fff0000
   const EPERM = 0x00050000 | 1
   const KILL_PROCESS = 0x80000000
-  const AUDIT_ARCH_X86_64 = 0xc000003e
+  const AUDIT_ARCH = arch === "x64" ? 0xc000003e : 0xc00000b7
   const X32_BIT = 0x40000000
   const program: Array<Buffer> = [
     insn(LD_ABS, 0, 0, 4), // arch
-    insn(JEQ, 1, 0, AUDIT_ARCH_X86_64),
+    insn(JEQ, 1, 0, AUDIT_ARCH),
     insn(RET, 0, 0, KILL_PROCESS),
     insn(LD_ABS, 0, 0, 0) // nr
   ]
-  // The x32 ABI's numbers are refused outright; then each denied number jumps to the refusal.
-  const denied = Object.values(DENIED_X86_64)
-  const denyAt = program.length + 1 + denied.length + 1
-  program.push(insn(JGE, denyAt - program.length - 1, 0, X32_BIT))
+  // On x86_64 the x32 ABI's numbers are refused outright; then each denied number jumps to the
+  // refusal.
+  const denied = Object.values(deniedCalls(arch))
+  const x32 = arch === "x64" ? 1 : 0
+  const denyAt = program.length + x32 + denied.length + 1
+  if (x32) program.push(insn(JGE, denyAt - program.length - 1, 0, X32_BIT))
   for (const nr of denied) program.push(insn(JEQ, denyAt - program.length - 1, 0, nr))
   program.push(insn(RET, 0, 0, ALLOW))
   program.push(insn(RET, 0, 0, EPERM))
@@ -360,6 +413,55 @@ const checkAvailable = async (): Promise<Availability> => {
 /** Where each command's runtime folder goes: short, for the socket path limit. */
 const runtimeRoot = () => process.env.RP_SANDBOX_RUNTIME ?? tmpdir()
 
+/** A run folder's name carries the server's process id, so a later start knows whose it was. */
+const RUN_PREFIX = "rp-sbx-"
+const RUN_FOLDER = /^rp-sbx-(?:(\d+)-)?[A-Za-z0-9]{6}$/
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+/**
+ * Removes run folders a server left when it was killed outright (its bridge and proxy socket).
+ * Only folders of a process that is gone: a test run or a second server sharing the temporary
+ * folder keeps its own. Folders named before the process id was added go after a day.
+ */
+export const sweepRunFolders = async (root: string = runtimeRoot()) => {
+  let removed = 0
+  const names = await readdir(root).catch(() => [] as Array<string>)
+  for (const name of names) {
+    const found = RUN_FOLDER.exec(name)
+    if (!found) continue
+    const path = join(root, name)
+    const info = await lstat(path).catch(() => null)
+    if (!info?.isDirectory() || info.uid !== (process.getuid?.() ?? info.uid)) continue
+    const pid = found[1] === undefined ? null : Number(found[1])
+    const stale = pid === null ? Date.now() - info.mtimeMs > 86_400_000 : pid !== process.pid && !alive(pid)
+    if (!stale) continue
+    await rm(path, { recursive: true, force: true }).then(
+      () => removed++,
+      () => undefined
+    )
+  }
+  return removed
+}
+
+/**
+ * Writes bubblewrap's arguments as one NUL-separated file it reads from a descriptor (`--args`),
+ * so the sandbox's /proc/1/cmdline shows `bwrap --args N`, not the host's folders or the end
+ * marker.
+ */
+const argsFile = async (runDir: string, args: ReadonlyArray<string>) => {
+  const path = join(runDir, "args")
+  await writeFile(path, args.map((arg) => `${arg}\0`).join(""), { mode: 0o600 })
+  return open(path, "r")
+}
+
 const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> => {
   const bwrap = findOnPath("bwrap")
   if (!bwrap) throw new Error("bubblewrap isn't installed")
@@ -376,8 +478,9 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       cwd: null,
       durationMs: 0
     }
-  const runDir = await mkdtemp(join(runtimeRoot(), "rp-sbx-"))
+  const runDir = await mkdtemp(join(runtimeRoot(), `${RUN_PREFIX}${process.pid}-`))
   let proxy: SandboxProxy | null = null
+  let group: CommandCgroup | null = null
   try {
     await mkdir(join(runDir, "rp"), { mode: 0o700 })
     const uid = process.getuid?.() ?? 1000
@@ -396,34 +499,39 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       await chmod(socketPath, 0o600)
     }
     const marker = `__rp_cwd_${randomBytes(12).toString("hex")}__`
-    // The filter goes to bubblewrap as descriptor 3, which it reads and closes before the command.
+    // The filter goes to bubblewrap as descriptor 3 and its arguments as the next one; it reads
+    // and closes both before the command.
     const filter = seccompFilter()
     let filterFile: FileHandle | null = null
     if (filter) {
       await writeFile(join(runDir, "seccomp.bpf"), filter)
       filterFile = await open(join(runDir, "seccomp.bpf"), "r")
     }
+    const argsFd = filterFile ? 4 : 3
+    // Options only: bubblewrap takes the command itself from its command line.
+    const args = await argsFile(runDir, [
+      ...(filterFile ? ["--seccomp", "3"] : []),
+      ...bwrapArgs(spec, runDir),
+      "--setenv",
+      "RP_END",
+      marker
+    ])
+    const argv = ["--args", String(argsFd), "/bin/bash", "-c", prelude(spec), "rp-sandbox", spec.command]
+    // The command's own cgroup, where one can be made: a real memory cap for all its processes.
+    const limiter = await selectLimiter(bwrapLimiters)
+    if (!("none" in limiter))
+      group = await limiter.open({ memoryBytes: spec.limits.memoryBytes, processes: spec.limits.processes })
+    const start = group ? group.wrap(bwrap, argv) : { file: bwrap, args: argv }
     const child = (() => {
       try {
-        return spawn(
-          bwrap,
-          [
-            ...(filterFile ? ["--seccomp", "3"] : []),
-            ...bwrapArgs(spec, runDir),
-            "/bin/bash",
-            "-c",
-            prelude(spec, marker),
-            "rp-sandbox",
-            spec.command
-          ],
-          {
-            stdio: ["ignore", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : [])],
-            detached: true,
-            env: {}
-          }
-        )
+        return spawn(start.file, start.args, {
+          stdio: ["ignore", "pipe", "pipe", ...(filterFile ? [filterFile.fd] : []), args.fd],
+          detached: true,
+          env: { ...group?.env }
+        })
       } finally {
         void filterFile?.close()
+        void args.close()
       }
     })()
     // The head fills once; the tail is a list of chunks trimmed from the front, so each chunk
@@ -510,11 +618,15 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       total -= Buffer.byteLength(`\n${marker} ${cwd}\n`)
     }
     const fromHead = tail.length === 0
+    const ended = group ? await group.finish().catch(() => ({ memoryCapped: false })) : { memoryCapped: false }
+    group = null
+    const memoryCapped = ended.memoryCapped && !timedOut && !outputCapped && !diskLow && !signal.aborted
     return {
-      exitCode: timedOut || outputCapped || diskLow || signal.aborted ? null : exitCode,
+      exitCode: timedOut || outputCapped || diskLow || memoryCapped || signal.aborted ? null : exitCode,
       timedOut,
       outputCapped,
       ...(diskLow ? { diskLow } : {}),
+      ...(memoryCapped ? { memoryCapped } : {}),
       head: fromHead ? text : head.toString("utf8"),
       tail: fromHead ? "" : text,
       outputBytes: Math.max(0, total),
@@ -522,9 +634,16 @@ const runOnce = async (spec: RunSpec, signal: AbortSignal): Promise<RunResult> =
       durationMs: Date.now() - started
     }
   } finally {
+    await group?.finish().catch(() => undefined)
     await proxy?.close().catch(() => undefined)
     await rm(runDir, { recursive: true, force: true }).catch(() => undefined)
   }
+}
+
+/** Where commands have no cgroup of their own: the row says the limits are weaker. */
+const limitsNote = async () => {
+  const limiter = await selectLimiter(bwrapLimiters)
+  return "none" in limiter ? WEAKER_LIMITS : null
 }
 
 export const linuxBwrap: CommandSandbox = {
@@ -533,5 +652,16 @@ export const linuxBwrap: CommandSandbox = {
   explanation: "Commands run in a sandbox: they see only your files and the internet.",
   platforms: ["linux"],
   available: checkAvailable,
-  run: runOnce
+  run: runOnce,
+  note: limitsNote,
+  start: async () => {
+    const removed = await sweepRunFolders()
+    const limiter = await selectLimiter(bwrapLimiters)
+    return [
+      ...(removed ? [`removed ${removed} run folders left by a stopped server`] : []),
+      "none" in limiter
+        ? `commands have no cgroup of their own, so only per-process limits apply: ${limiter.none}`
+        : `commands get a cgroup each (${limiter.id})`
+    ]
+  }
 }

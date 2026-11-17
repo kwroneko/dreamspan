@@ -12,15 +12,24 @@ says why commands are unavailable.
 services:
   rp:
     image: rp-harness
+    user: "0:0"                                 # the entrypoint drops to node (uid 1000); see below
+    cgroup: private                             # the container's own cgroup namespace (Docker's default on cgroup v2)
+    mem_limit: 8g                               # the container's cap: the server and every command together
     security_opt:
       - seccomp=./docker/seccomp-userns.json   # Docker's default profile plus namespace calls
       - systempaths=unconfined                  # lets the sandbox mount its own /proc
-      # Hosts with AppArmor (Ubuntu, Debian with AppArmor on) also need:
-      # - apparmor=unconfined
+      # Hosts with AppArmor (Ubuntu, Debian with AppArmor on), after loading the profile:
+      # - apparmor=rp-harness
+    environment:
+      # The server's public addresses behind NAT, which commands may not reach (see below).
+      # PUBLIC_ADDRESSES: "203.0.113.7"
+      # Each account's Files quota by default (files, versions and home folder together).
+      # FILES_QUOTA: "10G"
 ```
 
-With `docker run`: `--security-opt seccomp=docker/seccomp-userns.json --security-opt systempaths=unconfined`
-(plus `--security-opt apparmor=unconfined` on AppArmor hosts).
+With `docker run`: `--user 0:0 --cgroupns private --security-opt seccomp=docker/seccomp-userns.json
+--security-opt systempaths=unconfined` (plus `--security-opt apparmor=rp-harness` on AppArmor
+hosts).
 
 - **seccomp-userns.json** is Docker's default profile (moby/profiles, `seccomp/default.json`)
   with one rule added at the end: it allows `clone`, `unshare`, `mount`, `umount2`,
@@ -39,38 +48,114 @@ With `docker run`: `--security-opt seccomp=docker/seccomp-userns.json --security
   without it. The sandbox's commands never see the container's `/proc`. The server runs as
   uid 1000, not root, so the unmasked files it could now reach are the ones the kernel already
   refuses to unprivileged users (`/proc/kcore`, `/proc/sysrq-trigger`, `/proc/timer_list`);
-  what it gains is listings such as `/proc/acpi` and `/sys/firmware`. Never combine it with
-  running the container as root.
-- **AppArmor:** Docker's `docker-default` profile denies `mount`. Hosts without AppArmor (the test host
-  has it off) don't need the setting; `docker info` lists `apparmor` among the security
-  options where it is on. Ubuntu 23.10 and later also restrict
-  unprivileged user namespaces on the host (`kernel.apparmor_restrict_unprivileged_userns=1`);
-  such hosts need that sysctl set to 0 or an AppArmor profile that allows `userns`.
-  `apparmor=unconfined` removes AppArmor from the whole server process, not only from
-  bubblewrap. The narrower choice is a profile copied from `docker-default` that adds
-  `mount`, `umount`, `pivot_root` and `userns`, loaded on the host and named with
-  `apparmor=<profile>` (not shipped yet).
+  what it gains is listings such as `/proc/acpi` and `/sys/firmware`. Never run the server
+  itself as root with it; `user: "0:0"` starts only the entrypoint as root, which drops to
+  uid 1000 before the server starts.
 
 Do not use `--privileged` or `--cap-add SYS_ADMIN` instead: either gives the server process
 itself powers it doesn't need.
 
+## A memory cap per command
+
+Each command gets a cgroup v2 of its own with `memory.max` (the command's memory, 4 GiB by
+default, all its processes, shared mappings, memfds and `/tmp` together), `memory.swap.max`
+= 0 and `pids.max` (`packages/server/src/sandbox/cgroupLimits.ts`). A per-process limit
+(`ulimit -d`) doesn't count shared memory: a 1.5 GiB shared mapping passed a 1 GiB `ulimit`.
+Running out, the whole command is killed (`memory.oom.group`) and its result says it used too
+much memory.
+
+Docker mounts the container's `/sys/fs/cgroup` read-only, and the server runs as uid 1000, so
+the image's entrypoint (`docker/entrypoint.sh`) makes a writable subtree when the container
+starts as root (`user: "0:0"`):
+
+1. It enters a new user namespace that maps root and node (uid 1000) to themselves, with new
+   mount and cgroup namespaces. Root there holds no capability on the host, but may mount a
+   cgroup2 view of the container's own cgroup, read-write, at `/run/rp-cgroup`.
+2. It moves itself to `rp/server`, hands the memory and pids controllers down to `rp`, and gives
+   `rp` to node. Commands' groups are made under `rp`, beside the server's.
+3. `setpriv` drops to node with no capabilities, and the server starts with
+   `COMMAND_CGROUP=/run/rp-cgroup/rp`.
+
+At startup the server checks that it can make and limit a group there, and logs which limiter
+commands use. `docker exec` (and the health check) still work: Docker puts them in the
+server's group.
+
+Without `user: "0:0"`, or where a step fails (no `cgroup: private`, a seccomp or AppArmor
+profile that refuses the mounts), the server runs as node without it: commands keep the
+per-process limits and the container's `mem_limit`, and the "Run commands" row says "Commands
+run with weaker limits here." Set `mem_limit` in any case: it is the cap on the server and all
+commands together.
+
+Outside Docker (a development server, a systemd user service), commands get a transient scope
+from `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0 -p TasksMax=…`, which needs
+nothing set up. The server checks once a minute that the user manager really applies those
+limits (some don't delegate the memory controller).
+
+## AppArmor
+
+Docker's `docker-default` profile denies `mount`, which bubblewrap needs.
+`docker/apparmor-rp-harness` is `docker-default` (as Docker 29 generates it) with `deny mount`
+replaced by `mount`, `remount`, `pivot_root` and `userns`; every other rule is the same (the
+`/proc` and `/sys` write denials, no `/sys/firmware`, `/sys/kernel/security`, `kcore` or
+`sysrq-trigger`). The kernel still checks each mount against the namespace's own capabilities,
+so the server, without `CAP_SYS_ADMIN`, can mount only inside a user namespace of its own.
+It replaces `apparmor=unconfined`, which removed AppArmor from the whole server process.
+
+```sh
+sudo apparmor_parser -r -W docker/apparmor-rp-harness   # load (and on each boot, e.g. from /etc/apparmor.d)
+docker info | grep -i apparmor                           # AppArmor hosts list it among the security options
+```
+
+Then `security_opt: apparmor=rp-harness`. `userns,` is an AppArmor 4 rule (Ubuntu 23.10 and
+later restrict unprivileged user namespaces to profiles that allow them); AppArmor 3 parsers
+(Debian 12) don't know it: delete that line there. Hosts without AppArmor need nothing.
+
+**Untested at runtime:** the test host has AppArmor off, so the profile was only compiled (AppArmor
+parser 4.1.7, `apparmor_parser -Q -K`), never enforced. Check it on the AppArmor host before
+relying on it: with it loaded, a command should run, and the workshop's "Run commands" row
+should not say commands are unavailable.
+
+## Commands may not reach the server itself
+
+Commands reach the internet through a proxy that refuses private, loopback and link-local
+addresses and the server's own interface addresses. Behind NAT (a router's port forward,
+Docker's published ports) the server's public address is on no interface, and a command
+reaching it would reach the router's forwards and the app itself as an anonymous internet
+user. So the proxy also refuses:
+
+- the addresses in `PUBLIC_ADDRESSES` (IPs, CIDR ranges or host names, comma-separated);
+- the addresses the hosts of `PUBLIC_ORIGINS` resolve to (the app's own URL), kept resolved.
+
+Set `PUBLIC_ADDRESSES` to the router's public address when the app's URL doesn't resolve to it
+(a VPN, a tunnel, split DNS). The proxy also reaches ports 80 and 443 only, for tunnels and
+plain HTTP alike.
+
+**DNS:** with Internet on, the proxy resolves every name a command asks for, refused ones
+included, through the host's resolver. A command can therefore leak data in the names it
+looks up (DNS exfiltration). That comes with having internet at all, and isn't prevented; with
+Internet from commands Off there is no proxy and no lookup.
+
 ## Host requirements
 
 The kernel must allow unprivileged user namespaces (`/proc/sys/user/max_user_namespaces` > 0;
-on Debian before 11, `kernel.unprivileged_userns_clone=1`). Checked on the test host (Linux 6.12, Docker
-29.7.2): with the two settings above, a command in the image runs as the sandbox's own user,
-sees only its files, runs git, python3, rg and node, reaches a public site, and is refused
-127.0.0.1; with only the seccomp file it fails with "Can't mount proc on /proc", and with
-neither with "No permissions to create a new namespace".
+on Debian before 11, `kernel.unprivileged_userns_clone=1`), and use cgroup v2 for the memory cap.
+Checked on the test host (Linux 6.12, Docker 29.7.2): with the seccomp and system-path settings, a command
+in the image runs as the sandbox's own user, sees only its files, runs git, python3, rg and
+node, reaches a public site, and is refused 127.0.0.1; with only the seccomp file it fails with
+"Can't mount proc on /proc", and with neither with "No permissions to create a new namespace".
 
 ## What the image adds
 
 The final stage installs `bubblewrap` and the tools commands find inside the sandbox: git,
 python3 (with pip and venv), ripgrep, curl, procps, xz-utils, unzip, less and file. Node is the
 image's own. This adds about 170 MB (measured on the test host: 403 MB against 230 MB for the base image).
+The entrypoint (`/usr/local/bin/rp-entrypoint`) uses util-linux's `unshare` and `setpriv`, already
+in the base image.
 
 ## Outside Docker
 
 a development server (a systemd user service) needs nothing extra: bubblewrap from the host's
-packages and the kernel's unprivileged user namespaces. `COMMAND_SANDBOX` names the sandbox
-to use (`linux-bwrap` is the only one); empty picks the first available.
+packages, the kernel's unprivileged user namespaces, and the user manager for the per-command
+scopes. `COMMAND_SANDBOX` names the sandbox to use (`linux-bwrap` is the only one); empty picks
+the first available. `COMMAND_CGROUP` names a delegated cgroup subtree the server may write,
+for hosts that make one themselves.

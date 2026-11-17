@@ -8,7 +8,7 @@ import { createHash, randomBytes } from "node:crypto"
 import { constants } from "node:fs"
 import { lstat, mkdir, open, rename, unlink, type FileHandle } from "node:fs/promises"
 import { join } from "node:path"
-import { Transform } from "node:stream"
+import { Transform, Writable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { CurrentUser } from "@rp/shared/api.ts"
 import { formatByteSize } from "@rp/shared/byteSize.ts"
@@ -30,6 +30,7 @@ import { AppConfig } from "../config.ts"
 import { Writer } from "../db/Database.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { storeMedia } from "../importer/mediaFiles.ts"
+import { WorkshopFiles } from "./WorkshopFiles.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
 import { FilePathRefused, listFolder, openFolder, readRegularFile, removeTreeAt, statPath } from "./safePath.ts"
 
@@ -39,6 +40,12 @@ const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW, O_NONBLOCK } = constant
 const MAX_FILE_UPLOAD_BYTES = 4 * 1024 ** 3
 /** The longest pause in an upload's body before it's dropped. */
 const UPLOAD_IDLE_MS = 30_000
+/**
+ * Bytes of a refused upload's body still read (and dropped) before answering, so the browser
+ * gets the answer rather than a reset connection. Past it the connection is dropped; the upload
+ * screen checks the quota first (GetFilesUsage).
+ */
+const REFUSED_DRAIN_BYTES = 32 * 1024 * 1024
 /** Entries a listing returns at most. */
 const LIST_LIMIT = 5_000
 /** Earlier content kept as a version when an upload replaces it or a delete removes it (§1.3, as for commands). */
@@ -80,6 +87,27 @@ const extension = (name: string) => {
 }
 
 const at = (dir: FileHandle, name: string) => `/proc/self/fd/${dir.fd}/${name}`
+
+/** Reads and drops what's left of a refused body, up to REFUSED_DRAIN_BYTES and the idle limit. */
+const drain = (message: NodeJS.ReadableStream) =>
+  new Promise<void>((done) => {
+    let dropped = 0
+    let idle = setTimeout(() => sink.destroy(), UPLOAD_IDLE_MS)
+    const sink = new Writable({
+      write(chunk: Buffer, _encoding, next) {
+        dropped += chunk.length
+        clearTimeout(idle)
+        idle = setTimeout(() => sink.destroy(), UPLOAD_IDLE_MS)
+        next(dropped > REFUSED_DRAIN_BYTES ? new Error("too much to drop") : null)
+      }
+    })
+    pipeline(message, sink)
+      .catch(() => undefined)
+      .finally(() => {
+        clearTimeout(idle)
+        done()
+      })
+  })
 
 /** The answer for a refusal: the user reads `message`. */
 const refuse = (status: number, message: string) =>
@@ -132,6 +160,8 @@ export const filesRoutes = Layer.unwrap(
     const config = yield* AppConfig
     const writer = yield* Writer
     const holds = yield* MediaHolds
+    // The account's Files quota (files/quota.ts): checked before an upload and as it streams.
+    const { quota } = yield* WorkshopFiles
     const dirs = {
       filesDir: config.filesDir || join(config.dataDir, "files"),
       homesDir: join(config.dataDir, "env-home")
@@ -309,6 +339,7 @@ export const filesRoutes = Layer.unwrap(
         let name = segments.at(-1)!
         const existing = yield* Effect.tryPromise(() => lstat(at(dir, name)).catch(() => null))
         let outcome: UploadOutcome["outcome"] = "written"
+        let replacedBytes = 0
         if (existing) {
           if (conflict.value === "ask") return HttpServerResponse.jsonUnsafe({ taken: true }, { status: 409 })
           if (conflict.value === "skip")
@@ -316,7 +347,7 @@ export const filesRoutes = Layer.unwrap(
           if (conflict.value === "replace") {
             if (existing.isDirectory()) return refuse(409, `“${name}” is a folder here. Choose Keep both or Skip.`)
             outcome = "replaced"
-            yield* keepVersion(userId, root, segments, `${parentPath}/${name}`, "upload")
+            replacedBytes = existing.isFile() ? existing.size : 0
           } else {
             const taken = new Set(
               (yield* Effect.tryPromise(() => listFolder(root, parent, LIST_LIMIT))).entries.map((e) => e.name)
@@ -324,19 +355,50 @@ export const filesRoutes = Layer.unwrap(
             name = keepBothName(name, taken)
           }
         }
+        // Over the quota, or past it with what the request says it sends, it's refused before
+        // a byte is written; as it streams, each chunk takes room (uploads at once share it).
+        // A replaced file's bytes are free again once it lands.
+        const room = yield* quota.check(userId, Math.max(0, declared - replacedBytes), "upload files").pipe(
+          Effect.catch((error) =>
+            Effect.andThen(
+              Effect.promise(() => drain(message)),
+              Effect.fail(new Answer(507, error.message))
+            )
+          )
+        )
+        if (outcome === "replaced") yield* keepVersion(userId, root, segments, `${parentPath}/${name}`, "upload")
+        let taken = 0
+        const take = (bytes: number) => {
+          const more = Math.max(0, taken + bytes - replacedBytes) - Math.max(0, taken - replacedBytes)
+          taken += bytes
+          return more === 0 || quota.reserve(userId, more, room.quotaBytes)
+        }
         const temporary = `.${name.slice(0, 200)}.${randomBytes(6).toString("hex")}.rp-tmp`
         yield* Effect.tryPromise(async () => {
           const handle = await open(at(dir, temporary), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
           let received = 0
           let idle: NodeJS.Timeout | undefined
+          // Out of room, the rest of the body is read and dropped (up to REFUSED_DRAIN_BYTES), so
+          // the answer reaches the browser; then the file is removed and the refusal answered.
+          let refused: Answer | null = null
+          let dropped = 0
           const counter = new Transform({
             transform(chunk: Buffer, _encoding, done) {
               received += chunk.length
               clearTimeout(idle)
               idle = setTimeout(() => counter.destroy(new Answer(408, "The file stopped arriving.")), UPLOAD_IDLE_MS)
-              if (received > MAX_FILE_UPLOAD_BYTES)
+              if (refused) {
+                dropped += chunk.length
+                done(dropped > REFUSED_DRAIN_BYTES ? refused : null)
+              } else if (received > MAX_FILE_UPLOAD_BYTES)
                 done(new Answer(413, `A file can be at most ${formatByteSize(MAX_FILE_UPLOAD_BYTES)}.`))
-              else done(null, chunk)
+              else if (!take(chunk.length)) {
+                refused = new Answer(
+                  507,
+                  quota.overMessage(room.usedBytes + received - replacedBytes, room.quotaBytes, "upload files")
+                )
+                done()
+              } else done(null, chunk)
             }
           })
           idle = setTimeout(() => counter.destroy(new Answer(408, "The file stopped arriving.")), UPLOAD_IDLE_MS)
@@ -344,9 +406,11 @@ export const filesRoutes = Layer.unwrap(
             // The write stream owns the handle: it syncs (`flush`) and closes it when done. With
             // `autoClose: false` the pipeline would wait for a close that never comes.
             await pipeline(message, counter, handle.createWriteStream({ flush: true }))
+            if (refused) throw refused
           } catch (error) {
             await handle.close().catch(() => undefined)
             await unlink(at(dir, temporary)).catch(() => undefined)
+            quota.release(userId, Math.max(0, taken - replacedBytes))
             throw error
           } finally {
             clearTimeout(idle)
@@ -355,6 +419,7 @@ export const filesRoutes = Layer.unwrap(
             await rename(at(dir, temporary), at(dir, name))
           } catch (error) {
             await unlink(at(dir, temporary)).catch(() => undefined)
+            quota.release(userId, Math.max(0, taken - replacedBytes))
             throw error
           }
         })

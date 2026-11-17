@@ -17,7 +17,11 @@ export interface RunLimits {
   readonly timeoutMs: number
   /** Processes and threads inside the sandbox at once (a fork bomb stops here). */
   readonly processes: number
-  /** Each process's writable data (heap and private mappings). */
+  /**
+   * The command's memory. With a cgroup (sandbox/cgroupLimits.ts): all its processes together,
+   * shared mappings, memfds and /tmp included. Without one, only each process's writable data
+   * (heap and private mappings) is capped, at this size.
+   */
   readonly memoryBytes: number
   /** The largest file a command can write. */
   readonly fileBytes: number
@@ -55,6 +59,8 @@ export interface RunResult {
   readonly outputCapped: boolean
   /** Not started, or stopped, because a writable mount's filesystem went below the reserve. */
   readonly diskLow?: boolean
+  /** Stopped because its processes together used more memory than `limits.memoryBytes`. */
+  readonly memoryCapped?: boolean
   /** Combined output: the start and the end when it was longer than what's kept. */
   readonly head: string
   readonly tail: string
@@ -76,6 +82,10 @@ export interface CommandSandbox {
   readonly available: () => Promise<Availability>
   /** Runs one command; aborting `signal` kills its whole process tree. */
   readonly run: (spec: RunSpec, signal: AbortSignal) => Promise<RunResult>
+  /** User-facing, for the "Run commands" row when it is available but limited; null: nothing to say. */
+  readonly note?: () => Promise<string | null>
+  /** At server start: cleanup and what it found, for the log. */
+  readonly start?: () => Promise<ReadonlyArray<string>>
 }
 
 export const commandSandboxes = makeRegistry<CommandSandbox>([linuxBwrap])

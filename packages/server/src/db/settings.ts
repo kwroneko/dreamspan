@@ -65,6 +65,12 @@ const definitions: ReadonlyArray<SettingDefinition> = [
   { id: "bin.limits", scope: "user", schema: BinLimits },
   { id: "sources", scope: "user", schema: SourcePrefs },
   { id: "sources.admin", scope: "app", schema: SourceAdminSettings },
+  // Admins' Files quotas per account, in bytes (files/quota.ts); absent: FILES_QUOTA.
+  {
+    id: "files.quotas",
+    scope: "app",
+    schema: Schema.Record(Schema.String, Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+  },
   {
     id: "cards.favourites",
     scope: "user",
