@@ -135,6 +135,8 @@ interface UndoContext {
   readonly ops: Operations
   readonly bin: Bin
 }
+/** The refusal that sends an Undo to the files host (api/workshop.ts). */
+export const FILE_UNDO_ON_HOST = "File undo must run through the host."
 const refuse = (message = "Changed since; open its history before undoing this change.") =>
   new EffectUndoRefused({ message })
 /** Operations whose whole effect is new library entries, with the capability each needs: Undo bins them. */
@@ -478,6 +480,8 @@ export const makeWorkshopEffectHandlers = (ops: Operations, bin: Bin) =>
     const undoRow = (userId: UserId, row: EffectRow) =>
       Effect.gen(function* () {
         if (row.kind.startsWith("plugin.")) return yield* refuse("Plugin file undo must run through the host.")
+        // Files are on disk, outside SQLite: the files host puts them back (agent/tools/files.ts).
+        if (row.kind.startsWith("file.")) return yield* refuse(FILE_UNDO_ON_HOST)
         if (row.undone_at !== null) return toRolloutEffect(row)
         const undoer = rolloutUndoers.get(row.kind)
         if (!undoer || row.undo_json === null)

@@ -81,6 +81,58 @@ describe("0001_baseline", () => {
   )
 })
 
+describe("0002_files", () => {
+  it.effect("upgrades a baseline database, keeping its rows, and guards the new tables", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord({ "0001_baseline": migrations["0001_baseline"] }) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at)
+        VALUES ('u', 'u', 'Owner', 'user', 0), ('v', 'v', 'Other', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
+      yield* sql`INSERT INTO drafts (id, user_id, target_kind, target_id, content, updated_at)
+        VALUES ('d', 'u', 'composer', 'c', 'Synthetic draft', 0)`
+      yield* sql`INSERT INTO media_assets (id, sha256, mime, byte_size, path, created_at)
+        VALUES ('m', 'aa', 'image/png', 3, 'aa.png', 0)`
+      yield* sql`INSERT INTO composer_images (id, draft_id, media_id, alt_text, status)
+        VALUES ('i', 'd', 'm', 'A lighthouse', 'active')`
+      yield* Effect.scoped(Layer.build(Migrations))
+      const ledger = yield* sql<{ name: string }>`SELECT name FROM effect_sql_migrations ORDER BY migration_id`
+      assert.deepStrictEqual(
+        ledger.map((r) => r.name),
+        ["baseline", "files"]
+      )
+      // The existing row is kept, an image by default.
+      assert.deepStrictEqual(yield* sql`SELECT id, alt_text, kind, name FROM composer_images`, [
+        { id: "i", alt_text: "A lighthouse", kind: "image", name: null }
+      ])
+      assert.includeMembers(
+        (yield* sql`PRAGMA table_info(version_attachments)`).map((r) => r.name),
+        ["name", "path"]
+      )
+      yield* sql`INSERT INTO file_versions (id, owner_user_id, path, media_id, byte_size, origin, created_at)
+        VALUES ('f', 'u', 'notes/plan.md', 'm', 3, 'agent', 0)`
+      // Versions never change; a call is named whole or not at all; nothing is shared with its owner.
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(sql`UPDATE file_versions SET path = 'x' WHERE id = 'f'`)))
+      assert.isTrue(
+        Exit.isFailure(
+          yield* Effect.exit(sql`INSERT INTO file_versions (id, owner_user_id, path, byte_size, origin, rollout_id, created_at)
+            VALUES ('g', 'u', 'a', 0, 'agent', 'r', 0)`)
+        )
+      )
+      assert.isTrue(
+        Exit.isFailure(
+          yield* Effect.exit(sql`INSERT INTO file_shares (id, owner_user_id, path, grantee_user_id, mode, created_at)
+            VALUES ('s', 'u', 'notes', 'u', 'view', 0)`)
+        )
+      )
+      yield* sql`INSERT INTO file_shares (id, owner_user_id, path, grantee_user_id, mode, created_at)
+        VALUES ('s', 'u', 'notes', 'v', 'view', 0)`
+      const shares = yield* sql<{ n: number }>`SELECT count(*) AS n FROM file_shares`
+      assert.strictEqual(shares[0]!.n, 1)
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
 describe("the migrator", () => {
   it.effect("refuses a database whose ledger holds ids this code doesn't know", () =>
     Effect.gen(function* () {
@@ -124,6 +176,6 @@ it.effect("fresh defaults include composer guidance, branch additions and global
     assert.isTrue(
       (yield* sql`PRAGMA table_info(fork_summaries)`).some((r) => r.name === "added_json" && r.dflt_value === "'[]'")
     )
-    assert.deepStrictEqual(Object.keys(migrations), ["0001_baseline"])
+    assert.deepStrictEqual(Object.keys(migrations), ["0001_baseline", "0002_files"])
   }).pipe(Effect.provide(layer()))
 )

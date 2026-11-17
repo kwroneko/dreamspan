@@ -137,7 +137,19 @@ it.live("dispatches through canonical approvals, receipts, step edits, capabilit
     for (const body of bodies) assert.strictEqual(JSON.stringify(body.tools), tools)
     assert.deepStrictEqual(
       bodies[0]!.tools!.map((t) => t.function.name),
-      ["list_library", "tool_search", "load_skill", "send_message", "call_tool"]
+      [
+        "list_library",
+        "read_file",
+        "list_files",
+        "search_files",
+        "write_file",
+        "edit_file",
+        "bash",
+        "tool_search",
+        "load_skill",
+        "send_message",
+        "call_tool"
+      ]
     )
     assert.include(bodies[1]!.messages.at(-1)!.content, "Tool read_card not found")
     assert.include(bodies[2]!.messages.at(-1)!.content, DISPATCH_DEFINITIONS)

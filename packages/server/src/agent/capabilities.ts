@@ -15,9 +15,17 @@ export interface CapabilityEntry {
   readonly example?: string
   /** The choices it offers; absent: Off, Ask first and Allowed. */
   readonly modes?: ReadonlyArray<CapabilityMode>
+  /**
+   * Shown wherever this other capability is offered, though no tool names it: a setting of
+   * that capability's tools (`commands.network` beside `commands`).
+   */
+  readonly alongside?: string
 }
 
 const ALL_MODES: ReadonlyArray<CapabilityMode> = ["off", "ask", "allow"]
+
+/** Whether commands reach the internet (spec/FILES-AND-ENVIRONMENT.md §3.5): a setting of `commands`. */
+export const COMMANDS_NETWORK = "commands.network"
 
 /** The capability of every MCP server's tools; a workshop's choice names the server as its target. */
 export const MCP_CAPABILITY = "mcp"
@@ -85,6 +93,32 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     explanation: "Searches and opens cards on the card sources you've turned on.",
     example: "Searches cardex for fantasy cards and opens one to read it."
   },
+  // spec/FILES-AND-ENVIRONMENT.md §5.2: the agent's files and commands. Reading is part of
+  // `files`, since the assistant is useless in a folder it can't read.
+  {
+    id: "files",
+    order: 72,
+    label: "Change your files",
+    explanation: "Reads, creates and edits files in your Files. Each change can be undone.",
+    example: "Writes outline.md in the working folder."
+  },
+  {
+    id: "commands",
+    order: 74,
+    label: "Run commands",
+    explanation:
+      "Runs commands in a sandbox that sees only your files and its own home folder. What a command changes is listed, but it can't be undone.",
+    example: "Runs python3 to count the words in a draft."
+  },
+  {
+    id: COMMANDS_NETWORK,
+    order: 76,
+    label: "Internet from commands",
+    explanation: "Commands can use the internet. They can't reach this server, your other devices or other accounts.",
+    example: "Downloads a public Git repository with git clone.",
+    modes: ["off", "allow"],
+    alongside: "commands"
+  },
   {
     id: "plugins.write",
     order: 80,
@@ -134,6 +168,10 @@ export const capabilityDefaults = makeRegistry<{ readonly id: string; readonly m
   { id: "chats.rewrite", mode: "allow" },
   { id: "settings", mode: "allow" },
   { id: "plugins.write", mode: "allow" },
+  // Owner [D] (spec/FILES-AND-ENVIRONMENT.md §5.1, §3.5): tools available without setup, network on.
+  { id: "files", mode: "allow" },
+  { id: "commands", mode: "allow" },
+  { id: COMMANDS_NETWORK, mode: "allow" },
   { id: "chats.read", mode: "ask" },
   { id: "generate", mode: "ask" },
   { id: "network", mode: "ask" },

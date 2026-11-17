@@ -3,7 +3,7 @@
 import { Schema } from "effect"
 import { StoryAtField } from "./chatPosition.ts"
 
-const EffectClass = Schema.Literals(["read", "chat_state", "external", "library", "setup", "outside", "mcp"])
+const EffectClass = Schema.Literals(["read", "chat_state", "external", "library", "setup", "outside", "mcp", "files"])
 
 /**
  * What a tool call waiting for the user will do, as the server describes it from the call's real

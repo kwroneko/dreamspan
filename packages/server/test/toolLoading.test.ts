@@ -145,11 +145,22 @@ describe("the split", () => {
       const { registry, tools } = yield* workshopTools
       const offer = split(registry, tools, "workshop", claude)
       assert.deepStrictEqual(
-        offer.tools.slice(0, 3).map((t) => t.id),
-        ["list_library", "tool_search", "load_skill"]
+        offer.tools.slice(0, 9).map((t) => t.id),
+        // The file tools are callable from the start (spec/FILES-AND-ENVIRONMENT.md §2).
+        [
+          "list_library",
+          "read_file",
+          "list_files",
+          "search_files",
+          "write_file",
+          "edit_file",
+          "bash",
+          "tool_search",
+          "load_skill"
+        ]
       )
-      assert.strictEqual(offer.deferred.size, tools.length - 1)
-      assert.isFalse(offer.deferred.has("list_library"))
+      assert.strictEqual(offer.deferred.size, tools.length - 7)
+      for (const name of ["list_library", "read_file", "bash"]) assert.isFalse(offer.deferred.has(name))
     }).pipe(Effect.provide(ExecutionRegistry.layer))
   )
 
@@ -594,7 +605,17 @@ describe("the wire", () => {
       assert.strictEqual(JSON.stringify(second.tools), JSON.stringify(first.tools))
       assert.deepStrictEqual(
         (first.tools as Array<{ name: string }>).map((t) => t.name),
-        ["list_library", "tool_search", "load_skill"]
+        [
+          "list_library",
+          "read_file",
+          "list_files",
+          "search_files",
+          "write_file",
+          "edit_file",
+          "bash",
+          "tool_search",
+          "load_skill"
+        ]
       )
       type Item = {
         type?: string

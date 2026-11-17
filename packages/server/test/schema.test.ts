@@ -3,6 +3,7 @@
 import { DatabaseSync } from "node:sqlite"
 import { beforeEach, describe, expect, it } from "vitest"
 import { baseline } from "../src/db/baseline.ts"
+import { filesMigration } from "../src/db/migrationFiles.ts"
 import { presenceCandidatesFrom } from "../src/db/presenceCorrection.ts"
 
 let db: DatabaseSync
@@ -401,7 +402,7 @@ const addVersion = (
 beforeEach(() => {
   db = new DatabaseSync(":memory:")
   db.exec("PRAGMA foreign_keys = ON")
-  for (const statement of baseline) db.exec(statement)
+  for (const statement of [...baseline, ...filesMigration]) db.exec(statement)
 })
 
 describe("card forks", () => {

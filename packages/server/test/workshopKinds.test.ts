@@ -59,6 +59,9 @@ for (const workers of ["source", "bundle"] as const) {
             "settings",
             "generate",
             "network",
+            "files",
+            "commands",
+            "commands.network",
             "plugins.write",
             "plugins.apply"
           ]

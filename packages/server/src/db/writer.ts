@@ -1,4 +1,5 @@
 import { makePluginWriteHandlers } from "./pluginData.ts"
+import { makeFileVersionWriteHandlers } from "./fileVersions.ts"
 import { makeWorkshopEffectHandlers } from "./workshopEffects.ts"
 import { makeWorkshopGrantWriteHandlers } from "./workshopGrants.ts"
 import { installStorageKindValidation } from "./storageKinds.ts"
@@ -120,6 +121,7 @@ const handlers = Layer.unwrap(
               )),
               ...(yield* makeWorkshopGrantWriteHandlers),
               ...(yield* makePluginWriteHandlers),
+              ...(yield* makeFileVersionWriteHandlers),
               ...stImport,
               ...(yield* makeStImportJobWriteHandlers),
               ...generation,

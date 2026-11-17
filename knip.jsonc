@@ -4,7 +4,7 @@
   // exports public API. Only our own packages import it, so an export nobody uses is dead.
   "includeEntryExports": true,
   // Host diagnostics for the opt-in paired performance benchmark; supplied by the OS.
-  "ignoreBinaries": ["uptime"],
+  "ignoreBinaries": ["uptime", "mkfifo"],
   // The panel frames' vendored libraries (spec/HTML-MESSAGES.md §3.3): copied from node_modules into
   // the build by vite.config.ts `frameLibraries`, never imported.
   "ignoreDependencies": [

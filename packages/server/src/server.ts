@@ -2,6 +2,7 @@ import { TransportApi, type TransportRpcs } from "@rp/shared/transportApi.ts"
 import { installCardSourceCommands } from "./agent/cardSourceCommands.ts"
 import { pluginRoutes } from "./plugins/serve.ts"
 import { PluginHost } from "./plugins/Host.ts"
+import { WorkshopFiles } from "./files/WorkshopFiles.ts"
 import { makePluginHandlers } from "./api/plugins.ts"
 import { AuthenticatedPluginApi } from "@rp/shared/api.ts"
 import { ExternalMedia, externalMediaRoute, makeExternalMediaHandlers } from "./api/externalMedia.ts"
@@ -765,6 +766,8 @@ export const serverWith = <E>(
     ),
     Layer.provideMerge(
       PluginHost.layer.pipe(
+        // The workshop's file tools and commands (spec/FILES-AND-ENVIRONMENT.md §5).
+        Layer.provideMerge(WorkshopFiles.layer),
         Layer.provideMerge(ExecutionRegistry.layer),
         Layer.provideMerge(Commands.layer),
         Layer.provideMerge(Notices.layer),

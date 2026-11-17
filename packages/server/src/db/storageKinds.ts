@@ -28,9 +28,16 @@ export const storageKinds = makeRegistry<StorageKind>([
       "plugin.enable",
       "reply.generate",
       // A call to an MCP server in a workshop (spec/MCP.md §8.2): target kind `mcp_connection`.
-      "mcp.call"
+      "mcp.call",
+      // The workshop's file tools and commands (spec/FILES-AND-ENVIRONMENT.md §7): target kind `file`.
+      "file.write",
+      "file.edit",
+      "file.create",
+      "shell.run"
     ]
   },
+  // Who or what made a file's earlier content (spec/FILES-AND-ENVIRONMENT.md §1.3).
+  { id: "file_versions.origin", values: ["upload", "editor", "agent", "command", "restore", "delete"] },
   { id: "changeset_groups.origin", values: ["user", "agent"] },
   {
     id: "bin_items.kind",

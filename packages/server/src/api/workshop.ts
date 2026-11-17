@@ -1,4 +1,6 @@
 import { PluginHost } from "../plugins/Host.ts"
+import { WorkshopFiles } from "../files/WorkshopFiles.ts"
+import { FILE_UNDO_ON_HOST } from "../db/workshopEffects.ts"
 import { EffectUndoRefused } from "@rp/shared/workshopApi.ts"
 import { CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
@@ -29,6 +31,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const execution = yield* ExecutionRegistry
   const plugins = yield* PluginHost
+  const files = yield* WorkshopFiles
   const hub = yield* ChatHub
   const warmth = yield* CacheWarmth
   // Undo runs the recorded worker operation, bypassing the original UI handler's
@@ -76,6 +79,20 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
   ) =>
     writer.UndoRolloutEffect({ ...input, userId: actor.id }).pipe(
       Effect.catchTag("EffectUndoRefused", (error) => {
+        // A file the agent wrote is on disk: the files host puts it back and records the undo.
+        if (error.message === FILE_UNDO_ON_HOST)
+          return Effect.gen(function* () {
+            const effect = yield* reader.RolloutEffectFor({ ...input, userId: actor.id })
+            return yield* files
+              .undoEffect(actor, effect)
+              .pipe(
+                Effect.mapError((cause) =>
+                  cause instanceof EffectUndoRefused
+                    ? cause
+                    : new EffectUndoRefused({ message: "The file couldn't be put back. Open its versions." })
+                )
+              )
+          })
         if (error.message !== "Plugin file undo must run through the host.") return Effect.fail(error)
         return Effect.gen(function* () {
           const effect = yield* reader.RolloutEffectFor({ ...input, userId: actor.id })
@@ -109,6 +126,9 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         })
       )
       // A kind that loads some of its tools as it goes may load a card's skills (spec/TOOL-LOADING.md §6).
+      // A setting shown with the capability it belongs to (Internet from commands, with Run commands).
+      for (const entry of execution.workshopCapabilities.list())
+        if (entry.alongside && offered.has(entry.alongside)) offered.add(entry.id)
       const loading = execution.toolLoadingProfiles.get(chat.kind)
       const planned = plan?.tools ?? []
       if (loading && matchPatterns(planned, loading.immediate).length < planned.length) offered.add(CARD_SKILLS)
@@ -147,6 +167,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
             }
           )
         : []
+      // Commands without a sandbox here: the row says why and how to fix it (spec §3.3).
+      const noCommands = offered.has("commands") ? yield* files.commandsUnavailable() : null
       const builtins = execution.workshopCapabilities
         .list()
         .filter((capability) => offered.has(capability.id) && capability.id !== MCP_CAPABILITY)
@@ -162,7 +184,9 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
                   explanation: `Reads only “${story?.title?.trim() || "Unavailable story"}” in this workshop. Its messages go to this workshop's model.`,
                   example: "Reads the story's last ten messages to sum it up."
                 }
-              : capability
+              : capability.id === "commands" && noCommands
+                ? { ...capability, explanation: `${capability.explanation} Not available here: ${noCommands}` }
+                : capability
           )
         )
       return [...builtins, ...servers]

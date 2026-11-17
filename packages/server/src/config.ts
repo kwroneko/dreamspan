@@ -15,6 +15,13 @@ const AppConfigFromEnv = Config.all({
     Config.withDefault(8080)
   ),
   dataDir: Config.String(serverEnvironment.DATA_DIR).pipe(Config.withDefault("./data")),
+  /** Every account's Files (spec/FILES-AND-ENVIRONMENT.md §1.1); empty: DATA_DIR/files. */
+  filesDir: Config.String(serverEnvironment.FILES_DIR).pipe(Config.withDefault("")),
+  /**
+   * The command sandbox to use (sandbox/registry.ts), e.g. `linux-bwrap`; empty: the first
+   * available for this platform. A security setting, so configurable only here.
+   */
+  commandSandbox: Config.String(serverEnvironment.COMMAND_SANDBOX).pipe(Config.withDefault("")),
   dbReaders: Config.schema(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)), serverEnvironment.DB_READERS).pipe(
     Config.withDefault(2)
   ),

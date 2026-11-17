@@ -72,7 +72,11 @@ export const undoHint = (effect: RolloutEffect) =>
                 ? "Puts the item back as it was before, as a new revision."
                 : effect.kind === "library.delete"
                   ? "Takes it back out of the bin."
-                  : "Undoes this change."
+                  : effect.kind === "file.create"
+                    ? "Removes the file it made. Its content is kept as an earlier version."
+                    : effect.kind === "file.write" || effect.kind === "file.edit"
+                      ? "Puts the file back as it was before. The current text is kept as an earlier version."
+                      : "Undoes this change."
 
 /** Open is offered while the item is there to open: one in the bin (made and undone, or deleted) isn't. */
 export const opensNow = (effect: RolloutEffect) =>

@@ -150,7 +150,19 @@ export const StateEventData = Schema.Union([
    * A workshop beside a story (spec/WORKSHOP.md §4): chat-wide in the workshop, naming the story
    * it talks about. Only `CreateWorkshop { attachTo }` writes it; nothing is written in the story.
    */
-  event("workshop.attached", Schema.Struct({ chat: ChatId }))
+  event("workshop.attached", Schema.Struct({ chat: ChatId })),
+  /**
+   * Where a workshop's commands start and its relative paths resolve, on this branch
+   * (spec/FILES-AND-ENVIRONMENT.md §2.1): a path inside the sandbox (`/files/thesis`) and the
+   * folder's inode when it was chosen, to find it again after a rename. Absent: the top of Files.
+   */
+  event(
+    "workshop.folder",
+    Schema.Struct({
+      path: Schema.String.check(Schema.isMaxLength(4096)),
+      inode: Schema.NullOr(Schema.Number)
+    })
+  )
 ])
 export type StateEventData = typeof StateEventData.Type
 
@@ -256,7 +268,8 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.below_history": { ids: {} },
   "context.html_depth": { ids: {} },
   "var.set": { ids: {} },
-  "workshop.attached": { ids: { chat: { table: "chat" } } }
+  "workshop.attached": { ids: { chat: { table: "chat" } } },
+  "workshop.folder": { ids: {} }
 }
 
 /**
@@ -495,6 +508,8 @@ export interface ChatState {
   readonly vars: Readonly<Record<string, unknown>>
   /** `workshop.attached`: the story a side chat talks about; absent in every other chat. */
   readonly workshopAttached?: string
+  /** `workshop.folder`: the branch's working folder; absent is the top of Files. */
+  readonly workshopFolder?: { readonly path: string; readonly inode: number | null }
   /** Plugin keys' values by key id (`<plugin>/<key>`); absent until a registered key has an event. */
   readonly plugin?: Readonly<Record<string, unknown>>
 }
@@ -720,6 +735,8 @@ const applyCore = (
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
     case "workshop.attached":
       return { ...state, workshopAttached: data.value.chat }
+    case "workshop.folder":
+      return { ...state, workshopFolder: data.value }
   }
 }
 
