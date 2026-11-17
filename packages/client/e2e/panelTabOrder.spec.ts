@@ -50,6 +50,9 @@ const rowValues = (page: Page) =>
     .evaluateAll((tabs) => tabs.map((tab) => (tab as HTMLElement).dataset.tabValue!))
 /** More's tools in order, with More opened and left open. */
 const moreValues = async (page: Page) => {
+  // A menu still in its closing transition (an entry was just picked) is visible but going:
+  // let it go before deciding whether More needs opening.
+  await expect(page.locator('[role="menu"][data-ending-style]')).toHaveCount(0)
   if (!(await moreMenu(page).isVisible())) await more(page).click()
   await expect(moreMenu(page)).toBeVisible()
   return moreMenu(page)
