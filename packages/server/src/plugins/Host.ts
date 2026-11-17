@@ -506,9 +506,22 @@ export class PluginHost extends Context.Service<
             Effect.gen(function* () {
               const authorize = Semaphore.withPermit(lock)(
                 Effect.gen(function* () {
-                  const enabled = (yield* clients(actor)).some(
-                    (p) => p.scope === target.scope && p.id === target.id && p.commit === target.commit
-                  )
+                  // The membership test of clients(), for the requested plugin only.
+                  const owner = target.scope === "instance" ? "" : actor.id
+                  const pin = config.plugins
+                    ? (yield* reader.GetPluginPins({ userId: actor.id, owner })).value[target.id]
+                    : undefined
+                  let enabled =
+                    pin !== undefined &&
+                    !pin.suspended &&
+                    pin.commit === target.commit &&
+                    active.has(keyOf(owner, target.id))
+                  if (enabled) {
+                    const build = yield* attempt(() => readBuild(config.dataDir, owner, target.id, target.commit)).pipe(
+                      Effect.option
+                    )
+                    enabled = build._tag === "Some" && !!build.value.manifest.client
+                  }
                   if (!enabled) return yield* new PluginRejected({ message: "Plugin is off" })
                 })
               )
