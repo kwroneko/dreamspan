@@ -1644,6 +1644,11 @@ Implementation: fork independence unit 8 (ARCHITECTURE §3.13) builds message/sw
 - **[P]** Effect 4 across the server and the client data layer: [EFFECT.md](EFFECT.md). The owner asked for it to be strongly considered. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §1–§6).
 - **[D]** Client framework: **React** (owner, 2026-10-10). This is one of the main stack decisions, because UI quality for real users matters most; reference-harness's console stack is not the default. Evaluation, and the proposed stack around React: [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md).
 
+### 10.5 Desktop app and updates
+- **[D]** A desktop app for Linux, Windows and macOS, beside the server: "We will package this as a linux/windows/macos desktop app too with something like electron, and it has to 'just work', not just a linux server app" (owner, 2026-11-17, §7.9). Bundled Linux VMs are rejected (§7.9). The server (Docker) version stays.
+- **[D]** Updating is a first-class part of the design: "Actually, how to update it is important" (owner, 2026-11-17).
+- **[P]** (desktopspec) The design is [DESKTOP.md](DESKTOP.md): an Electron shell that runs the unchanged server on the official Node binary it ships (measured: the server crashes on Electron 45's own Node); a `desktop` auth mode, loopback only, with windows signed in by a one-time launch token; LAN use opt-in from the shell's own settings, with a password; updates through electron-updater (stable and beta, signed, differential), and for the server an admin notice with the operator's command; a backup before every database upgrade, one transaction per upgrade, and a `min_app_version` marker so older versions open data that additive migrations changed; plugins checked against the new version and suspended with a notice when they fail; desktop and server differences as registered parts. Not built.
+
 ---
 
 ## 11. Security
