@@ -5,7 +5,7 @@
 // (no rebinding between the check and the connection). Nothing about requests is logged.
 import { lookup } from "node:dns/promises"
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http"
-import { connect, isIP, type Socket } from "node:net"
+import { BlockList, connect, isIP, type Socket } from "node:net"
 import { networkInterfaces } from "node:os"
 import { rm } from "node:fs/promises"
 import { makeRegistry } from "@rp/shared/registry.ts"
@@ -33,14 +33,21 @@ export const setPublicAddresses = (check: (address: string) => boolean) => {
 }
 
 /** This host's own addresses: a public one would reach the app itself. */
-const ownAddresses = () => {
-  const interfaces = new Set(
-    Object.values(networkInterfaces())
-      .flatMap((list) => list ?? [])
-      .map((entry) => entry.address.toLowerCase())
-  )
+export const ownAddresses = (interfaceList: ReturnType<typeof networkInterfaces> = networkInterfaces()) => {
+  // A BlockList, not a set of strings: an address literal has many spellings
+  // (`2001:db8:0:0::1`, `2001:DB8::1`), and a string match would miss all but one.
+  const interfaces = new BlockList()
+  for (const entry of Object.values(interfaceList).flatMap((list) => list ?? [])) {
+    const family = isIP(entry.address)
+    if (family) interfaces.addAddress(entry.address, family === 4 ? "ipv4" : "ipv6")
+  }
   const configured = publicAddresses
-  return { has: (address: string) => interfaces.has(address) || configured(address) }
+  return {
+    has: (address: string) => {
+      const family = isIP(address)
+      return (family !== 0 && interfaces.check(address, family === 4 ? "ipv4" : "ipv6")) || configured(address)
+    }
+  }
 }
 
 const bare = (host: string) => (host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host)

@@ -9,7 +9,7 @@ import { Effect, Stream } from "effect"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
-import { measureTree, parseByteSize } from "../src/files/quota.ts"
+import { makeFilesQuota, measureTree, parseByteSize } from "../src/files/quota.ts"
 import { WorkshopFiles } from "../src/files/WorkshopFiles.ts"
 import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
@@ -43,6 +43,31 @@ const call = (name: string, args: unknown, id: string) => [
     choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
   }
 ]
+
+describe("a walk that stops at its limits", () => {
+  it.live("isn't room: writes and commands are refused, not let past an uncounted rest", () =>
+    Effect.gen(function* () {
+      const root = tempDir("quota-partial")
+      yield* Effect.promise(async () => {
+        await mkdir(join(root, "files"), { recursive: true })
+        for (let i = 0; i < 20; i++) await writeFile(join(root, "files", `f${i}`), "")
+      })
+      const quota = makeFilesQuota({
+        reader: {
+          GetAppSetting: () => Effect.succeed(null),
+          FileVersionBytes: () => Effect.succeed(0)
+        } as never,
+        writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, media: 0 }) } as never,
+        folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
+        defaultBytes: 10 * 2 ** 30,
+        walkMaxEntries: 5
+      })
+      const refused = yield* Effect.exit(quota.check("u", 1, "write files"))
+      assert.strictEqual(refused._tag, "Failure")
+      assert.match(String(yield* quota.afterCommand("u")), /too many to count/)
+    })
+  )
+})
 
 describe("measuring", () => {
   it("reads sizes with binary units", () => {
