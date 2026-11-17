@@ -775,9 +775,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             /^[A-Za-z0-9_.:-]{1,128}$/.test(toolCallId)
               ? `[Result shortened. read_result with call "${toolCallId}" and offset=${end} continues it.]`
               : `[Result shortened. read_result with this call's id and offset=${end} continues it.]`
+          // Page the original, not the envelope this wrapped it in: paging the envelope quoted it twice.
+          const pageSource = result !== raw ? raw.text : fullText
           let sentText =
             quote && fullText.length > TOOL_RESULT_CHARS
-              ? toolDataPage(fullText, { frame: raw.frame, more: workshopData ? () => recovery : storyMore }).text ||
+              ? toolDataPage(pageSource, { frame: raw.frame, more: workshopData ? () => recovery : storyMore }).text ||
                 (workshopData ? recovery : storyMore(0))
               : fullText
           if (execution.chatKinds.get(run.kind ?? "")?.summaryTranscript && !raw.replayed) {
@@ -793,7 +795,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               if ((await textTokens(marker)) > remaining) marker = ""
               const page = (limit: number) =>
                 quote
-                  ? toolDataPage(fullText, { limit, frame: raw.frame, more: () => recovery }).text
+                  ? toolDataPage(pageSource, { limit, frame: raw.frame, more: () => recovery }).text
                   : fullText.slice(0, limit) + marker
               let lo = 0,
                 hi = Math.min(TOOL_RESULT_CHARS, sentText.length)

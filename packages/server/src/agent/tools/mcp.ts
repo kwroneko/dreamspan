@@ -18,7 +18,7 @@ import type { CapabilityMode } from "@rp/shared/workshopApi.ts"
 import { Effect } from "effect"
 import type { McpConnectionsShape } from "../../mcp/McpConnections.ts"
 import { MCP_CAPABILITY } from "../capabilities.ts"
-import { escapeToolData, toolDataPage } from "../toolData.ts"
+import { escapeToolData, toolDataBody, toolDataPage } from "../toolData.ts"
 import type { Skill } from "../toolLoading.ts"
 import type { FrozenTool, McpToolRef, RolloutTool, ToolOutput } from "../tools.ts"
 
@@ -354,7 +354,8 @@ export const readResultTool: RolloutTool<{ readonly call: string; readonly offse
         { readonly toolName: string; readonly content: ReadonlyArray<{ type: string; text?: string }> } | undefined
       if (!result || !offered.find((t) => t.name === result.toolName)?.mcp)
         return { text: "No result of a server's tool in this reply has that call id.", isError: true }
-      const text = result.content.flatMap((p) => (p.type === "text" && p.text ? [p.text] : [])).join("")
+      // The transcript keeps the result's envelope; pages quote its original once, by its offsets.
+      const text = toolDataBody(result.content.flatMap((p) => (p.type === "text" && p.text ? [p.text] : [])).join(""))
       if (offset >= text.length)
         return { text: `That result has ${text.length} characters; start before that.`, isError: true }
       const frame = `<result_metadata>${escapeToolData(JSON.stringify({ offset, total_characters: text.length }))}</result_metadata>`
