@@ -5,6 +5,11 @@ export interface ChatKindProfile {
   readonly id: string
   readonly planner: string
   readonly allowsOutside: boolean
+  /**
+   * Effect classes outside the chat this kind admits though it doesn't allow outside effects in
+   * general: a story admits `mcp`, a call to a server the user enabled there (spec/MCP.md §8.1).
+   */
+  readonly outsideClasses?: ReadonlyArray<string>
   readonly rolloutKind: "generation" | "workshop"
   readonly purpose: "generation" | "workshop"
   readonly allowsSummaries: boolean
@@ -22,6 +27,7 @@ export const chatKinds = makeRegistry<ChatKindProfile>([
     id: "rp",
     planner: "default",
     allowsOutside: false,
+    outsideClasses: ["mcp"],
     rolloutKind: "generation",
     purpose: "generation",
     allowsSummaries: true,

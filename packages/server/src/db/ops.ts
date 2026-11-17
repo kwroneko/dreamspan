@@ -7,6 +7,7 @@ import {
   McpConnectionId,
   McpConnectionSettings,
   McpConnectionSummary,
+  McpLoading,
   McpServerInfo,
   McpTool,
   McpToolChoices
@@ -839,6 +840,18 @@ const McpWriteOps = RpcGroup.make(
     success: McpConnection,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** How a connection's tools reach the model (spec/MCP.md §4.4); fields left out stay as they are. */
+  Rpc.make("SetMcpLoading", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      loading: Schema.optionalKey(McpLoading),
+      useInstructions: Schema.optionalKey(Schema.Boolean),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("DeleteMcpConnection", {
     payload: { userId: UserId, connectionId: McpConnectionId },
     success: BinItem,
@@ -928,6 +941,15 @@ const McpReadOps = RpcGroup.make(
    * The servers a workshop may use (spec/MCP.md §5.1), in creation order, each with its catalog,
    * the user's use of it and the workshop's own choice for it (null: the account default).
    */
+  /**
+   * The user's live remote servers with their catalogs, in creation order (spec/MCP.md §4.3):
+   * what a story reply may be offered, before the branch's own choices (`agent.mcp`).
+   */
+  Rpc.make("McpStoryConnections", {
+    payload: { userId: UserId },
+    success: Schema.Array(McpConnection),
+    error: StorageError
+  }),
   Rpc.make("McpWorkshopConnections", {
     payload: { userId: UserId, chatId: ChatId },
     success: Schema.Array(Schema.Struct({ connection: McpConnection, grant: Schema.NullOr(CapabilityMode) })),

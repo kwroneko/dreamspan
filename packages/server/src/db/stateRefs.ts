@@ -36,6 +36,7 @@ type Reference =
       readonly ref: string | undefined
     }
   | { readonly table: "connection"; readonly id: string }
+  | { readonly table: "mcp_connection"; readonly id: string }
   | { readonly table: "model"; readonly id: string; readonly connection: string | undefined }
   | { readonly table: "chat"; readonly id: string }
 
@@ -82,6 +83,8 @@ const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference>
           }
         case "connection":
           return { table: "connection", id }
+        case "mcp_connection":
+          return { table: "mcp_connection", id }
         case "model":
           return { table: "model", id, connection: field(declaration.connection) }
         case "chat":
@@ -144,6 +147,12 @@ export const checkStateReferences = (
           case "connection":
             return sql<{ n: number }>`SELECT count(*) AS n FROM connections WHERE id = ${reference.id}
               AND owner_user_id = ${userId} AND deleted_at IS NULL AND purged_at IS NULL`
+          case "mcp_connection":
+            // A server the user can use (their own until sharing, spec/MCP.md §3), not in the bin.
+            return sql<{ n: number }>`SELECT count(*) AS n FROM mcp_connections m
+              JOIN mcp_uses u ON u.connection_id = m.id AND u.user_id = ${userId}
+              WHERE m.id = ${reference.id} AND m.owner_user_id = ${userId}
+                AND (${live} = 0 OR m.deleted_at IS NULL) AND m.purged_at IS NULL`
           case "model":
             return sql<{ n: number }>`SELECT count(*) AS n FROM models m JOIN connections c ON c.id = m.connection_id
               WHERE m.id = ${reference.id} AND m.connection_id = ${reference.connection ?? null} AND c.owner_user_id = ${userId}`

@@ -14,7 +14,7 @@ import { Deferred, Effect } from "effect"
 import type { Reader, Writer } from "../db/Database.ts"
 import { mcpToolAllowed } from "@rp/shared/mcp.ts"
 import { type CapabilityRegistries, MCP_CAPABILITY, resolveMode } from "./capabilities.ts"
-import { mcpHostOf, mcpWorkshopMode } from "./tools/mcp.ts"
+import { mcpHostOf, mcpStoryOn, mcpWorkshopMode } from "./tools/mcp.ts"
 import type { RolloutTool, ToolContext } from "./tools.ts"
 
 /** Classes whose calls never leave the reply: no capability, no asking (a swipe undoes them). */
@@ -40,6 +40,8 @@ export const argsDigest = (args: unknown) =>
 const DECLINED = "The user declined this."
 /** "Don't run it" on an interrupted MCP call (spec/MCP.md §8.3). */
 const NOT_RERUN = "This was interrupted and may already have happened; it wasn't run again."
+const storyOffText = (label: string) =>
+  `“${label}” is turned off for this chat, so this wasn't done. Don't try it again unless the user turns it on.`
 const offText = (label: string) =>
   `“${label}” is turned off in this workshop, so this wasn't done. Don't try it again unless the user turns it on.`
 
@@ -113,6 +115,11 @@ export interface PermitDeps {
   readonly userId: string
   readonly chatId: string
   readonly rolloutId: string
+  /**
+   * A story reply (spec/MCP.md §5.1): the branch's own server choices at the reply's parent
+   * (`agent.mcp`), frozen with the run, decide over the account's Stories switch. Absent: a workshop.
+   */
+  readonly story?: { readonly mcpChoices: Readonly<Record<string, boolean>> }
 }
 
 /**
@@ -161,14 +168,25 @@ export const makePermit =
       let rerun: ApprovalPrompt["rerun"] | undefined
       if (tool.capability === MCP_CAPABILITY && tool.mcp) {
         const ref = tool.mcp
-        const entry = (yield* reader.McpWorkshopConnections({
-          userId: userId as never,
-          chatId: deps.chatId as never
-        })).find((e) => e.connection.id === ref.connection)
+        const story = deps.story
+        const entry = story
+          ? (yield* reader.McpStoryConnections({ userId: userId as never }))
+              .filter((c) => c.id === ref.connection)
+              .map((connection) => ({
+                connection,
+                grant: mcpStoryOn(connection, story.mcpChoices) ? ("allow" as const) : ("off" as const)
+              }))[0]
+          : (yield* reader.McpWorkshopConnections({
+              userId: userId as never,
+              chatId: deps.chatId as never
+            })).find((e) => e.connection.id === ref.connection)
         if (!entry)
           return { run: false, text: unavailableText ?? `${ref.connectionName} isn't available here now.` } as const
         if (mcpWorkshopMode(entry) === "off")
-          return { run: false, text: unavailableText ?? offText(entry.connection.name) } as const
+          return {
+            run: false,
+            text: unavailableText ?? (story ? storyOffText(entry.connection.name) : offText(entry.connection.name))
+          } as const
         const listed = entry.connection.tools.find((t) => t.name === ref.tool)
         if (!listed || !mcpToolAllowed(listed, entry.connection.use))
           return {

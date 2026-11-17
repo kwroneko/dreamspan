@@ -11,6 +11,7 @@ import type { ExecutionRegistry } from "../execution.ts"
 import {
   cardSkills as readCardSkills,
   loadableTools,
+  type LoadingOverrides,
   loadSkillDescription,
   LOADERS,
   offeredSkills,
@@ -96,6 +97,8 @@ export const planToolLoading = (
     readonly cards: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
     /** Skills of this run beyond the registered ones: an MCP server's (spec/MCP.md §4.4). */
     readonly skills?: ReadonlyArray<Skill>
+    /** Tools whose own setting decides whether they're sent from the start (an MCP server's). */
+    readonly loading?: LoadingOverrides
   }
 ): Effect.Effect<{ readonly offer: ToolOffer<Tool>; readonly cardSkills: ReadonlyArray<Skill> }> =>
   Effect.gen(function* () {
@@ -108,7 +111,8 @@ export const planToolLoading = (
     // every mode (spec/TOOL-LOADING.md §5). RP and kinds without a profile keep their exact offer.
     const loadable = loadableTools(
       tools.map((t) => t.id),
-      profile
+      profile,
+      input.loading
     )
     if (!profile || !input.model || loadable.length === 0) return unsplit
     // The cards the assistant speaks as, at the revisions this request was assembled with.
@@ -155,6 +159,7 @@ export const planToolLoading = (
       profile,
       wire,
       target: input.model,
+      ...(input.loading ? { overrides: input.loading } : {}),
       loaders: (deferred) => {
         const names = deferred.map((t) => t.id)
         offered = listed

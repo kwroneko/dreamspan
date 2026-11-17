@@ -992,6 +992,23 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  ListStoryMcpServers: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        assert.include(
+          (yield* owner.api.ListStoryMcpServers()).map((c) => c.connectionId),
+          owner.mcpConnectionId
+        )
+        assert.notInclude(
+          (yield* actor.api.ListStoryMcpServers()).map((c) => c.connectionId),
+          owner.mcpConnectionId
+        )
+      })
+  },
+  SetMcpLoading: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetMcpLoading({ connectionId: owner.mcpConnectionId, loading: "deferred" }), "NotFound")
+  },
   GetMcpConnection: {
     probe: (actor, owner) => refused(actor.api.GetMcpConnection({ connectionId: owner.mcpConnectionId }), "NotFound")
   },

@@ -14,7 +14,9 @@ const McpTransport = Schema.Literals(["streamable-http", "sse", "stdio"])
 export const RemoteMcpTransport = Schema.Literals(["streamable-http", "sse"])
 export type RemoteMcpTransport = typeof RemoteMcpTransport.Type
 
-const McpLoading = Schema.Literals(["auto", "immediate", "deferred"])
+/** "Send its tools" (spec/MCP.md §4.4): Automatically, From the start, When the model asks. */
+export const McpLoading = Schema.Literals(["auto", "immediate", "deferred"])
+export type McpLoading = typeof McpLoading.Type
 
 /** The shortest and longest timeout a connection may set, in seconds (spec/MCP.md §7.3). */
 export const MCP_TIMEOUT_MIN_S = 5

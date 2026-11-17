@@ -8,6 +8,7 @@ import {
   type McpCheck,
   type McpConnection,
   type McpConnectionId,
+  type McpLoading,
   mcpAnnotationNotes,
   mcpToolAllowed,
   mcpToolIsNew,
@@ -751,6 +752,71 @@ export function UsesSection({ connection }: McpSectionProps) {
         </Switch>
         <p className="text-xs text-muted">
           Changes a server makes outside the app aren’t undone by a swipe, a branch or a new version.
+        </p>
+        <ErrorAlert error={action.error} title="Not changed" />
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Sending its tools (spec/MCP.md §4.4): whether the model gets the server's tools with every
+ * request or loads them when it needs them, and whether loading them brings the server's own
+ * instructions. Only models that can load tools later wait; others get every tool at once.
+ */
+export function LoadingSection({ connection }: McpSectionProps) {
+  const action = useAction()
+  const legend = useId()
+  const set = (change: { readonly loading?: McpLoading; readonly useInstructions?: boolean }) =>
+    void action.run((client) => client("SetMcpLoading", { connectionId: connection.id, ...change }), ["mcp"])
+  const instructions = connection.server?.instructions?.trim() ?? ""
+  return (
+    <Card>
+      <CardHeader
+        title="Sending its tools"
+        about="Whether each request carries this server's tools, or the model loads them when it needs them. Waiting keeps requests smaller; models that can't load tools later always get them all."
+      />
+      <div className="flex flex-col gap-4" data-mcp-loading>
+        <div className="flex flex-col gap-2">
+          <p id={legend} className="text-sm font-medium">
+            Send its tools
+          </p>
+          <RadioGroup<McpLoading>
+            aria-labelledby={legend}
+            value={connection.loading}
+            disabled={action.pending}
+            onValueChange={(loading) => set({ loading })}
+            options={[
+              {
+                value: "auto",
+                label: "Automatically",
+                description: "From the start with up to 5 allowed tools; with more, when the model asks."
+              },
+              { value: "immediate", label: "From the start", description: "Every request carries them." },
+              {
+                value: "deferred",
+                label: "When the model asks",
+                description: "The model sees what the server is for and loads its tools when it needs them."
+              }
+            ]}
+          />
+        </div>
+        <Switch
+          checked={connection.useInstructions}
+          disabled={action.pending}
+          onCheckedChange={(useInstructions) => set({ useInstructions })}
+          hint={
+            connection.useInstructions
+              ? "Click to stop sending the server's own instructions when the model loads its tools."
+              : "Click to send the server's own instructions to the model when it loads its tools."
+          }
+        >
+          Use the server’s instructions
+        </Switch>
+        <p className="text-xs text-muted [overflow-wrap:anywhere]">
+          {instructions
+            ? "Sent only when the model loads its tools, not when they’re sent from the start."
+            : "The server gave no instructions when it was last checked."}
         </p>
         <ErrorAlert error={action.error} title="Not changed" />
       </div>

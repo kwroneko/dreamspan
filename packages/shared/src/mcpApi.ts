@@ -12,14 +12,30 @@ import {
   McpConnectionId,
   McpConnectionSettings,
   McpConnectionSummary,
+  McpLoading,
   McpRefused,
   McpToolChoices
 } from "./mcp.ts"
 import { CredentialId, ProxyMode } from "./providers.ts"
 
+/**
+ * One server as a story chat's Tools offers it (spec/MCP.md §13.2): its name and host, how many of
+ * its tools the user allowed, and the account's Stories switch, which a branch may override.
+ */
+export const StoryMcpServer = Schema.Struct({
+  connectionId: McpConnectionId,
+  name: Schema.String,
+  host: Schema.String,
+  allowedTools: Schema.Int,
+  stories: Schema.Boolean
+})
+export type StoryMcpServer = typeof StoryMcpServer.Type
+
 export class McpApi extends RpcGroup.make(
   /** The user's connections, oldest first (the order their tools are offered in). */
   Rpc.make("ListMcpConnections", { success: Schema.Array(McpConnectionSummary), error: ServerError }),
+  /** The user's remote servers as a story chat's Tools lists them, oldest first. */
+  Rpc.make("ListStoryMcpServers", { success: Schema.Array(StoryMcpServer), error: ServerError }),
   /** One connection with its tool catalog. */
   Rpc.make("GetMcpConnection", {
     payload: { connectionId: McpConnectionId },
@@ -93,6 +109,19 @@ export class McpApi extends RpcGroup.make(
       stories: Schema.optionalKey(Schema.Boolean),
       workshops: Schema.optionalKey(Schema.Boolean),
       tools: Schema.optionalKey(Schema.Struct({ choices: McpToolChoices, reviewedRevision: Schema.Int }))
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * How the connection's tools reach the model: "Send its tools" and "Use the server's
+   * instructions" (spec/MCP.md §4.4). Fields left out stay as they are. Nothing is sent to it.
+   */
+  Rpc.make("SetMcpLoading", {
+    payload: {
+      connectionId: McpConnectionId,
+      loading: Schema.optionalKey(McpLoading),
+      useInstructions: Schema.optionalKey(Schema.Boolean)
     },
     success: McpConnection,
     error: Schema.Union([NotFound, ServerError])

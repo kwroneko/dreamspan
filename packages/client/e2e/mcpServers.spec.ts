@@ -68,6 +68,24 @@ for (const width of [1440, 390])
     await tools.getByRole("checkbox", { name: /write_note/ }).click()
     await expect(tools.getByRole("checkbox", { name: /write_note/ })).not.toBeChecked()
 
+    // Sending its tools: Automatically to start; a choice is kept, and nothing is sent for it.
+    const loading = page.locator("[data-mcp-loading]")
+    const before = mcp.requests().length
+    await expect(loading.getByRole("radio", { name: /Automatically/ })).toBeChecked()
+    await loading.getByRole("radio", { name: /When the model asks/ }).click()
+    await expect(loading.getByRole("radio", { name: /When the model asks/ })).toBeChecked()
+    const instructions = loading.getByRole("switch", { name: "Use the server’s instructions" })
+    await expect(instructions).toBeChecked()
+    await expect(instructions).toHaveAccessibleDescription(
+      "Click to stop sending the server's own instructions when the model loads its tools."
+    )
+    await instructions.click()
+    await expect(instructions).not.toBeChecked()
+    await page.reload()
+    await expect(loading.getByRole("radio", { name: /When the model asks/ })).toBeChecked()
+    await expect(loading.getByRole("switch", { name: "Use the server’s instructions" })).not.toBeChecked()
+    expect(mcp.requests()).toHaveLength(before)
+
     // Check again: one request each, all recorded.
     await page.getByRole("button", { name: "Check now" }).click()
     await expect(page.getByText("It works")).toBeVisible()

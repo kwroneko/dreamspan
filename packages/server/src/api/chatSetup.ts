@@ -102,6 +102,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "decision.points", value: { off: [...new Set(change.off)] } }
     case "AgentPermission":
       return { key: "agent.permission", value: { ...change.target, on: change.on } }
+    case "McpConnection":
+      return { key: "agent.mcp", value: { connection: change.connection, on: change.on } }
   }
 }
 
@@ -531,6 +533,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       ...(state.agentTools ? { agentTools: state.agentTools } : {}),
       ...(state.sendPresence ? { sendPresence: state.sendPresence } : {}),
       ...(state.decisionsOff?.length ? { decisionsOff: state.decisionsOff } : {}),
+      ...(state.agentMcp ? { agentMcp: state.agentMcp } : {}),
       roleProjections,
       ...(state.mergeLayout === null ? {} : { mergeLayout: state.mergeLayout }),
       ...(mergeLayouts.length ? { mergeLayouts } : {}),

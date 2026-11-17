@@ -6,6 +6,7 @@ import type { McpApi } from "@rp/shared/mcpApi.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { McpConnections } from "../mcp/McpConnections.ts"
+import { allowedToolCount, mcpHostOf } from "../agent/tools/mcp.ts"
 import { internal } from "./internal.ts"
 
 export const makeMcpHandlers = Effect.gen(function* () {
@@ -16,6 +17,19 @@ export const makeMcpHandlers = Effect.gen(function* () {
   return {
     ListMcpConnections: () =>
       Effect.flatMap(userId, (id) => reader.ListMcpConnections({ userId: id })).pipe(internal("ListMcpConnections")),
+    ListStoryMcpServers: () =>
+      Effect.flatMap(userId, (id) => reader.McpStoryConnections({ userId: id })).pipe(
+        Effect.map((connections) =>
+          connections.map((connection) => ({
+            connectionId: connection.id,
+            name: connection.name,
+            host: mcpHostOf(connection),
+            allowedTools: allowedToolCount(connection),
+            stories: connection.use.stories
+          }))
+        ),
+        internal("ListStoryMcpServers")
+      ),
     GetMcpConnection: ({ connectionId }) =>
       Effect.flatMap(userId, (id) => reader.GetMcpConnection({ userId: id, connectionId })).pipe(
         internal("GetMcpConnection")
@@ -55,6 +69,16 @@ export const makeMcpHandlers = Effect.gen(function* () {
           at: Date.now()
         })
       ).pipe(internal("SetMcpUse")),
+    SetMcpLoading: ({ connectionId, loading, useInstructions }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.SetMcpLoading({
+          userId: id,
+          connectionId,
+          ...(loading === undefined ? {} : { loading }),
+          ...(useInstructions === undefined ? {} : { useInstructions }),
+          at: Date.now()
+        })
+      ).pipe(internal("SetMcpLoading")),
     DeleteMcpConnection: ({ connectionId }) =>
       Effect.flatMap(userId, (id) => writer.DeleteMcpConnection({ userId: id, connectionId })).pipe(
         internal("DeleteMcpConnection")

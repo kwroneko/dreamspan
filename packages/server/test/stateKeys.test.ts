@@ -10,6 +10,7 @@ import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { EntityKind, RefId, RevisionId } from "@rp/shared/library.ts"
+import type { McpConnectionId } from "@rp/shared/mcp.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import { type FoldableEvent, type StateEventData, stateKeyIds } from "@rp/shared/state.ts"
 import { Context, Effect, Layer } from "effect"
@@ -28,6 +29,8 @@ interface Item {
 type Things = { readonly [K in EntityKind]: Item } & {
   readonly connection: ConnectionId
   readonly model: ModelId
+  /** An MCP server of the user's (spec/MCP.md §5.1). */
+  readonly mcp: McpConnectionId
   /** A story chat other than the one the events go to (a workshop's attachment names one). */
   readonly chat: ChatId
 }
@@ -67,6 +70,7 @@ const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
   "lorebook.detach": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
   "lorebook.remove": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
   "lorebook.embedded": { value: (t) => ({ entity: t.card.entity, on: false }) },
+  "agent.mcp": { value: (t) => ({ connection: t.mcp, on: true }) },
   "agent.permission": { value: (t) => ({ note: t.note.entity, card: t.card.entity, field: "description", on: true }) },
   "workshop.attached": { value: (t) => ({ chat: t.chat }), creationOnly: true }
 }
@@ -126,6 +130,19 @@ const fixture = Layer.effect(
           credential: { existing: null }
         })
         const model = yield* writer.AddUserModel({ userId, connectionId: connection.id, key: "m", overrides: {} })
+        const mcp = yield* writer.CreateMcpConnection({
+          userId,
+          connectionId: uuidv7() as McpConnectionId,
+          settings: {
+            name: "Tools",
+            about: "",
+            transport: "streamable-http",
+            url: "http://127.0.0.1:9/mcp",
+            timeoutS: 60
+          },
+          credential: { existing: null },
+          at: Date.now()
+        })
         const story = yield* writer.CreateChat({
           userId,
           kind: "rp",
@@ -134,7 +151,13 @@ const fixture = Layer.effect(
           participants: [],
           greeting: null
         })
-        return { ...Object.fromEntries(items), connection: connection.id, model: model.id, chat: story.id } as Things
+        return {
+          ...Object.fromEntries(items),
+          connection: connection.id,
+          model: model.id,
+          mcp: mcp.id,
+          chat: story.id
+        } as Things
       })
     const bob = (yield* writer.EnsureUser({ handle: "bob", displayName: "Bob" })).id
     const ana = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id
@@ -149,6 +172,7 @@ const fixture = Layer.effect(
     const deleted = yield* things(bob, chat.id)
     for (const kind of kinds) yield* writer.DeleteEntity({ userId: bob, entityId: deleted[kind].entity })
     yield* writer.DeleteConnection({ userId: bob, connectionId: deleted.connection })
+    yield* writer.DeleteMcpConnection({ userId: bob, connectionId: deleted.mcp })
     yield* writer.DeleteChat({ userId: bob, chatId: deleted.chat })
     const otherChat = yield* writer.CreateChat({
       userId: bob,
@@ -296,6 +320,7 @@ function placeholder(prefix: string): Things {
     preset_overlay: item("preset_overlay"),
     connection: `${prefix}-c` as ConnectionId,
     model: `${prefix}-m` as ModelId,
+    mcp: `${prefix}-mcp` as McpConnectionId,
     chat: `${prefix}-chat` as ChatId
   }
 }

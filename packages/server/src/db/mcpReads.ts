@@ -58,6 +58,11 @@ export const makeMcpReadHandlers = Effect.gen(function* () {
           ORDER BY started_at DESC, id DESC LIMIT ${limit}`
         return rows.map(toMcpCall)
       }).pipe(query("ListMcpCalls")),
+    McpStoryConnections: ({ userId }) =>
+      catalogs(userId).pipe(
+        Effect.map((rows) => rows.map(toMcpConnection)),
+        query("McpStoryConnections")
+      ),
     McpWorkshopConnections: ({ userId, chatId }) =>
       Effect.gen(function* () {
         const [chat] =

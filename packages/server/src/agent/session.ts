@@ -1,5 +1,5 @@
 import { toolData, toolDataPage, TOOL_RESULT_CHARS } from "./toolData.ts"
-import { outsideEffect, UNCERTAIN_EFFECT } from "./effects.ts"
+import { admitsEffect, outsideEffect, UNCERTAIN_EFFECT } from "./effects.ts"
 // The agent reply strategy (spec/AGENTIC.md §3): a pi-agent-core loop over the frozen request.
 // The assembler built the context once; each provider request is that prefix plus the
 // rollout's own transcript (wire.ts), sent through the provider layer so its ledger, retries,
@@ -534,6 +534,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       }
 
       const workshopData = execution.chatKinds.get(run.kind ?? "")?.allowsOutside === true
+      // What this chat kind admits: in a story, outside effects only of the classes it names
+      // (an MCP server the user enabled there, spec/MCP.md §8.1).
+      const outsideClasses = execution.chatKinds.get(run.kind ?? "")?.outsideClasses ?? []
+      const admits = (effect: string) =>
+        admitsEffect({ allowsOutside: run.allowsOutside === true, outsideClasses }, effect)
       const cache = new Map<string, unknown>()
       const deliveredContent = new WeakSet<object>()
       // The engine itself produces unknown-tool, schema and thrown-execution errors,
@@ -631,7 +636,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               }
           }
           // Dangling calls on resume execute directly, without pi-agent's beforeToolCall hook.
-          if (outsideEffect(tool.effect) && run.allowsOutside !== true)
+          if (!admits(tool.effect))
             return {
               content: [{ type: "text", text: "This chat does not allow tools with outside effects." }],
               details: null,
@@ -733,8 +738,10 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           const raw = exit.value
           // Skills are the intentionally approved instruction channel; loading returns app-owned
           // frozen definitions. Every other fresh workshop result crosses the same data boundary.
+          // An MCP server's result is quoted data in a story too (spec/MCP.md §9).
+          const serverData = workshopData || tool.mcp !== undefined
           const quote =
-            workshopData &&
+            serverData &&
             !(["tool_search", "load_skill"].includes(tool.id) && !raw.isError && !raw.dataOnly) &&
             !raw.replayed &&
             ![BAD_ARGS, missingTool(tool.id)].includes(raw.text)
@@ -742,7 +749,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             quote && !raw.dataOnly && cache.get(`tool-data:${toolCallId}`) !== raw.text
               ? { ...raw, text: toolData(raw.text, raw.frame), dataOnly: true as const }
               : raw
-          if (tool.effect !== "read" && run.allowsOutside === true) {
+          // A story's MCP call keeps its receipt too, so Resume answers from it (spec/MCP.md §8.2).
+          if (tool.effect !== "read" && (run.allowsOutside === true || tool.mcp !== undefined)) {
             await runPromise(
               writer.RecordRolloutEffects({
                 userId: request.userId,
@@ -756,15 +764,21 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           }
           if (tool.effect === "chat_state" && !result.isError) run.onState?.()
           // Keep the complete original in the transcript. Only its model projection is bounded.
-          const fullText = workshopData ? result.text : budgetResult(result.text)
+          const fullText = serverData ? result.text : budgetResult(result.text)
           const stepNumber =
             stepsOf(agent.state.messages, frozen, false)
               .filter((step) => step.kind === "tool")
               .findLastIndex((step) => step.id === toolCallId) + 1
           const recovery = `[Result shortened. read_run with message 0 and from_step=${Math.max(1, stepNumber)} recovers it; follow its page cursors for the rest.]`
+          // A story has no read_run: its server results are paged by read_result, this run's only.
+          const storyMore = (end: number) =>
+            /^[A-Za-z0-9_.:-]{1,128}$/.test(toolCallId)
+              ? `[Result shortened. read_result with call "${toolCallId}" and offset=${end} continues it.]`
+              : `[Result shortened. read_result with this call's id and offset=${end} continues it.]`
           let sentText =
             quote && fullText.length > TOOL_RESULT_CHARS
-              ? toolDataPage(fullText, { frame: raw.frame, more: () => recovery }).text || recovery
+              ? toolDataPage(fullText, { frame: raw.frame, more: workshopData ? () => recovery : storyMore }).text ||
+                (workshopData ? recovery : storyMore(0))
               : fullText
           if (execution.chatKinds.get(run.kind ?? "")?.summaryTranscript && !raw.replayed) {
             const turn = agent.state.messages.findLastIndex((m) => m.role === "assistant")
@@ -963,7 +977,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           if (refusal && (!dispatch || refusal !== BAD_ARGS || toolCall.name === SEND_MESSAGE))
             return { block: true, reason: refusal }
           const tool = tools.find((entry) => entry.id === toolCall.name)
-          if (tool && outsideEffect(tool.effect) && run.allowsOutside !== true)
+          if (tool && !admits(tool.effect))
             return { block: true, reason: "This chat does not allow tools with outside effects." }
           if (requests >= plan.turnCap) return { block: true, reason: "The final turn cannot use tools." }
           if (!several && sent !== undefined) return { block: true, reason: "The reply has already been sent." }
