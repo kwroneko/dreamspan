@@ -156,7 +156,10 @@ describe("file routes", () => {
       assert.strictEqual((yield* upload("/files/../../escape.txt", "x")).status, 400)
       assert.strictEqual((yield* upload("/files/sub/../../../escape.txt", "x")).status, 400)
       assert.isFalse(existsSync(join(config.dataDir, "escape.txt")))
-      assert.strictEqual((yield* json("/files/move", { from: "/files/a.txt", to: "/files/../../moved.txt" })).status, 400)
+      assert.strictEqual(
+        (yield* json("/files/move", { from: "/files/a.txt", to: "/files/../../moved.txt" })).status,
+        400
+      )
       assert.strictEqual((yield* json("/files/move", { from: "/files/../../x", to: "/files/b.txt" })).status, 400)
       assert.strictEqual((yield* json("/files/move", { from: "/files/a.txt", to: "/files" })).status, 400)
       assert.strictEqual((yield* json("/files/delete", { path: "/files/.." })).status, 400)
@@ -199,7 +202,63 @@ describe("file routes", () => {
         body: JSON.stringify({ path: "/files/a.txt" })
       })
       assert.strictEqual(cross.status, 403)
-      assert.strictEqual((yield* list("/files")).entries.some((e) => e.name === "a.txt"), true)
+      assert.strictEqual(
+        (yield* list("/files")).entries.some((e) => e.name === "a.txt"),
+        true
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("uploads count against the account's Files quota, declared or streamed", () => {
+    const config = testConfig({ filesQuota: "1M" })
+    const bytes = (size: number) => "x".repeat(size)
+    // A body of unknown length, in chunks: only the streaming check can stop it.
+    const streamed = (path: string, size: number) =>
+      Effect.gen(function* () {
+        const port = yield* serverPort
+        return yield* Effect.promise(async () => {
+          const chunk = new Uint8Array(64 * 1024).fill(120)
+          let sent = 0
+          const body = new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (sent >= size) return controller.close()
+              sent += chunk.byteLength
+              controller.enqueue(chunk)
+            }
+          })
+          const response = await fetch(`http://127.0.0.1:${port}/files/upload?${new URLSearchParams({ path })}`, {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body,
+            duplex: "half"
+          } as RequestInit)
+          return { status: response.status, text: await response.text() }
+        })
+      })
+    return Effect.gen(function* () {
+      assert.strictEqual((yield* upload("/files/a.bin", bytes(600_000))).status, 200)
+      // Declared past the quota: refused before a byte is written.
+      const declared = yield* upload("/files/b.bin", bytes(600_000))
+      assert.strictEqual(declared.status, 507)
+      assert.match(
+        yield* body(declared),
+        /Your files use .* of .*\. Delete files you don't need to upload files again\./
+      )
+      // Streamed with no length: stopped once it runs out of room, answered (the rest of the
+      // body is read and dropped, not a reset connection), and nothing is left behind.
+      const stream = yield* streamed("/files/c.bin", 900_000)
+      assert.strictEqual(stream.status, 507)
+      assert.match(stream.text, /upload files again/)
+      const names = (yield* list("/files")).entries.map((e) => e.name)
+      assert.deepStrictEqual(names, ["a.bin"])
+      const raw = readdirSync(join(config.dataDir, "files"), { recursive: true }).map(String)
+      assert.isFalse(
+        raw.some((name) => name.endsWith(".rp-tmp")),
+        raw.join(", ")
+      )
+      // Replacing a file counts only what it adds.
+      const replaced = yield* upload("/files/a.bin", bytes(700_000), "replace")
+      assert.strictEqual(replaced.status, 200, yield* body(replaced))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 })

@@ -177,15 +177,37 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
    * bytes. Over it, versions older than 7 days are trimmed and usage measured again first.
    * `what` ends the message: "write files", "run commands", "upload".
    */
-  const check = (userId: string, adding: number, what: string): Effect.Effect<void, QuotaExceeded> =>
+  const check = (userId: string, adding: number, what: string): Effect.Effect<Usage, QuotaExceeded> =>
     Effect.gen(function* () {
       let now = yield* usage(userId)
-      if (now.usedBytes + adding <= now.quotaBytes) return
+      if (now.usedBytes + adding <= now.quotaBytes) return now
       const trimmed = yield* prune(userId, Date.now() - PRESSURE_DAYS * DAY).pipe(Effect.orElseSucceed(() => 0))
       if (trimmed > 0 || Date.now() - now.measuredAt > 60_000) now = yield* measure(userId)
-      if (now.usedBytes + adding <= now.quotaBytes) return
+      if (now.usedBytes + adding <= now.quotaBytes) return now
       return yield* Effect.fail(new QuotaExceeded(overText(now.usedBytes + adding, now.quotaBytes, what)))
     })
+
+  /**
+   * For a write that streams (an upload): takes `bytes` more of the room as they arrive, so
+   * uploads running at once share it. False, taking nothing, when they'd go past `quotaBytes`.
+   * What was taken counts until the next measurement, which sees the file itself.
+   */
+  const reserve = (userId: string, bytes: number, quotaBytes: number) => {
+    const known = usages.get(userId)?.usedBytes ?? 0
+    const extra = added.get(userId) ?? 0
+    if (known + extra + bytes > quotaBytes) return false
+    added.set(userId, extra + bytes)
+    return true
+  }
+
+  /** Gives back what `reserve` took for a write that didn't land. */
+  const release = (userId: string, bytes: number) => {
+    const extra = added.get(userId)
+    if (extra !== undefined) added.set(userId, Math.max(0, extra - bytes))
+  }
+
+  /** The refusal for a streaming write that ran out of room. */
+  const overMessage = (used: number, quotaBytes: number, what: string) => overText(used, quotaBytes, what)
 
   /** An app-side write landed: its bytes count until the next measurement. */
   const wrote = (userId: string, bytes: number) => {
@@ -231,6 +253,9 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     measure,
     check,
     wrote,
+    reserve,
+    release,
+    overMessage,
     afterCommand,
     setQuota,
     sweepVersions,
