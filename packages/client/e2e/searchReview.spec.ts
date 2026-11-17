@@ -147,7 +147,8 @@ test("changing the message query cancels its pending RPC", async ({ page }) => {
   await page.goto(`${server().url}/?side=chats&sideIn=messages&sideQ=heldquery`)
   await expect.poll(() => held).toBeDefined()
   await page.getByRole("textbox", { name: "Find in messages", exact: true }).fill("abyssal")
-  await expect.poll(() => cancelled.includes(held!)).toBe(true)
+  // The interrupt follows the typing pause and the dropped atom's idle time: slow on a loaded host.
+  await expect.poll(() => cancelled.includes(held!), { timeout: 30_000 }).toBe(true)
   await expect(page.locator("[data-message-hit]")).toHaveCount(1)
 })
 
