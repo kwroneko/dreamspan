@@ -168,7 +168,8 @@ for (const theme of ["light", "dark"] as const)
           }
         }
         const links = navigation.locator("a").filter({ has: page.locator("svg") })
-        await expect(links).toHaveCount(5)
+        // Home, Library, Files, Import, Settings, Bin (Files joined in filesui1).
+        await expect(links).toHaveCount(6)
         for (const link of await links.all()) await expect(link).toBeInViewport()
         await expect
           .poll(async () => {
@@ -177,7 +178,8 @@ for (const theme of ["light", "dark"] as const)
             for (const box of boxes) counts.set(box.y, (counts.get(box.y) ?? 0) + 1)
             return [...counts.values()].sort().join(",")
           })
-          .toBe(size === "minimum" ? "2,3" : "5")
+          // Six tiles fit one row only in the widest sidebar; elsewhere two balanced rows.
+          .toBe(size === "maximum" ? "6" : "3,3")
         await expectLayout(page, info, `navtiles-${size}-${theme}`, { scope: 'nav[aria-label="Main"]' })
         const box = await navigation.boundingBox()
         const widths = await links.evaluateAll((elements) => elements.map((el) => el.getBoundingClientRect().width))
@@ -196,6 +198,7 @@ for (const theme of ["light", "dark"] as const)
       await hideAppNavigation(page)
       for (const [label, explanation] of [
         ["Library", "Browse characters, personas, lorebooks and presets."],
+        ["Files", "Your files, and what the assistant made."],
         ["Import", "Import characters, chats and library items."],
         ["Settings", "Change your account and app preferences."],
         ["Bin", "Browse deleted items."],
@@ -2807,6 +2810,10 @@ for (const { width, height } of [
         if (name === "hills") {
           // A source-only chat: one row under its caption, and no space below it.
           const source = splits.getByRole("group", { name: "This chat was split from", exact: true })
+          // Under two rows of navigation tiles the column is short for both foot lists, so
+          // Related chats starts folded; its header shows it, as a user would.
+          const toggle = splits.getByRole("button", { name: /^Related chats \(/ })
+          if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click()
           await expect(source.locator("[data-fork-row]")).toHaveCount(1)
           await expect(splits.getByRole("group", { name: "Split off from this chat", exact: true })).toHaveCount(0)
           const body = splits.locator("[data-foot-body]")

@@ -17,7 +17,8 @@ for (const width of [1440, 390])
     test(`split chats navigate between groups at ${width} ${theme}`, async ({ page }) => {
       // This navigation scenario needs expanded foot lists beside its global pin;
       // short-column automatic collapse is covered by the layout audit.
-      await page.setViewportSize({ width, height: 1200 })
+      // At 390 the sheet's navigation tiles take two rows, so it needs a taller column.
+      await page.setViewportSize({ width, height: width === 390 ? 1400 : 1200 })
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.SetChatPin({ chatId: seed.groupId, leaf: null, pinned: true })
