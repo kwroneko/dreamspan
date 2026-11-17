@@ -13,6 +13,9 @@ class FilesError extends Error {}
 /** The name is taken and the upload asked what to do (`conflict: "ask"`). */
 export class NameTaken extends FilesError {}
 
+/** There's no room left for it in the account's Files quota (507). */
+export class NoRoom extends FilesError {}
+
 export interface FilesSource {
   readonly id: string
   readonly order: number
@@ -50,6 +53,7 @@ const failure = async (response: Response) => {
   } catch {
     // Plain text, or nothing.
   }
+  if (response.status === 507) return new NoRoom(message || "There's no room left for files.")
   if (response.status === 404 && message === "") message = "Not found. It may have been moved or deleted."
   return new FilesError(message || `The server answered ${response.status}.`)
 }

@@ -2,7 +2,7 @@
 // pickers or a drop, keeping subfolders. When a name is taken the user answers once for the
 // batch: Keep both, Replace or Skip.
 import { joinPath, type UploadConflict, type UploadOutcome } from "@rp/shared/files.ts"
-import { NameTaken, type FilesSource } from "./source.ts"
+import { NameTaken, NoRoom, type FilesSource } from "./source.ts"
 
 /** One thing to upload: a file at a path relative to the folder it goes into, or an empty folder. */
 export type UploadItem =
@@ -67,7 +67,16 @@ export interface UploadReport {
   readonly failed: ReadonlyArray<{ readonly relative: string; readonly message: string }>
   /** The top-level names the batch made, for Undo. */
   readonly made: ReadonlyArray<string>
+  /** The server refused for lack of room: the batch stopped there, with this much and these many files left. */
+  readonly noRoom: { readonly bytes: number; readonly files: number } | null
 }
+
+/** The bytes and file count of a batch, for the room check before it starts. */
+export const batchSize = (items: ReadonlyArray<UploadItem>) =>
+  items.reduce(
+    (sum, item) => (item.kind === "file" ? { bytes: sum.bytes + item.file.size, files: sum.files + 1 } : sum),
+    { bytes: 0, files: 0 }
+  )
 
 /**
  * Uploads the items into `folder`, one at a time. The first taken name asks `choose` (once for
@@ -85,9 +94,10 @@ export const uploadAll = async (
   const made = new Set<string>()
   const failed: Array<{ relative: string; message: string }> = []
   let skipped = 0
+  let noRoom: UploadReport["noRoom"] = null
   const total = items.reduce((sum, item) => sum + (item.kind === "file" ? item.file.size : 0), 0)
   let done = 0
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     const path = joinPath(folder, item.relative)
     try {
       if (item.kind === "folder") {
@@ -113,12 +123,16 @@ export const uploadAll = async (
         if (outcome.outcome === "written") made.add(topOf(folder, outcome.path))
       }
     } catch (error) {
+      if (error instanceof NoRoom) {
+        noRoom = batchSize(items.slice(index))
+        break
+      }
       failed.push({ relative: item.relative, message: error instanceof Error ? error.message : String(error) })
     }
     if (item.kind === "file") done += item.file.size
     onProgress?.(done, total)
   }
-  return { written, skipped, failed, made: [...made] }
+  return { written, skipped, failed, made: [...made], noRoom }
 }
 
 /** The batch's top-level path that holds `path`: the file itself, or the dropped folder. */

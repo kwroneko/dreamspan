@@ -21,6 +21,8 @@ import {
   type FolderListing
 } from "@rp/shared/files.ts"
 import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from "react"
+import type { FilesUsage } from "@rp/shared/filesQuotaApi.ts"
+import { useAction } from "../../actions.tsx"
 import { copyText } from "../../copyText.ts"
 import { isAppDrag } from "../../ui/appDrags.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -35,6 +37,7 @@ import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { FolderTree } from "./FolderTree.tsx"
 import type { FilesSource } from "./source.ts"
 import {
+  batchSize,
   carriesFiles,
   itemsFromDrop,
   itemsFromInput,
@@ -42,6 +45,7 @@ import {
   type ConflictAnswer,
   type UploadItem
 } from "./upload.ts"
+import { freeBytes, noRoomMessage, roomProblem, usageLine } from "./usage.ts"
 import { NoViewer, viewerFor } from "./viewers.tsx"
 
 /** The chat's working folder on its branch (§2.1), and how to change it where that's offered. */
@@ -111,6 +115,18 @@ export function FileBrowser(props: FileBrowserProps) {
   const filesInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
 
+  const [usage, setUsage] = useState<FilesUsage | null>(null)
+  const usageAction = useAction()
+  // Its registry and state setters are stable, so the first render's run serves throughout.
+  const usageRun = useRef(usageAction.run)
+  /** Measures the account's Files again; null when the server couldn't say. */
+  const readUsage = useCallback(async () => {
+    const result = await usageRun.current((client) => client("GetFilesUsage", { fresh: true }))
+    if (!result.ok) return null
+    setUsage(result.value)
+    return result.value
+  }, [])
+
   const reload = useCallback(() => {
     setVersion((v) => v + 1)
     setTreeVersion((v) => v + 1)
@@ -126,6 +142,10 @@ export function FileBrowser(props: FileBrowserProps) {
       live = false
     }
   }, [source, folder, version])
+
+  useEffect(() => {
+    void readUsage()
+  }, [readUsage, version])
 
   const current = loaded?.for === folder ? loaded : null
   const listing = current && "listing" in current ? current.listing : null
@@ -222,8 +242,12 @@ export function FileBrowser(props: FileBrowserProps) {
   const upload = async (items: ReadonlyArray<UploadItem>) => {
     if (items.length === 0 || readOnly) return
     const before = new Set(names)
-    setProgress({ done: 0, total: 1 })
     setFailure(null)
+    const size = batchSize(items)
+    const now = await readUsage()
+    const problem = now && roomProblem(size.bytes, size.files, now)
+    if (problem) return setFailure(problem)
+    setProgress({ done: 0, total: 1 })
     const report = await uploadAll(
       source,
       folder,
@@ -233,6 +257,14 @@ export function FileBrowser(props: FileBrowserProps) {
     )
     setProgress(null)
     reload()
+    if (report.noRoom) {
+      const after = await readUsage()
+      setFailure(
+        after
+          ? noRoomMessage(report.noRoom.bytes, freeBytes(after), report.noRoom.files)
+          : "There's no room left for these files."
+      )
+    }
     const added = report.made.filter((path) => !before.has(nameOf(path)))
     const count = report.written.length
     if (report.failed.length > 0)
@@ -401,6 +433,7 @@ export function FileBrowser(props: FileBrowserProps) {
               }}
             />
           </div>
+          {usage && <UsageLine usage={usage} />}
           {readOnly && (
             <p className="text-sm text-muted">Shared with you to view: you can open and download, not change.</p>
           )}
@@ -895,5 +928,28 @@ function ConflictDialog({ open, onAnswer }: { open: boolean; onAnswer: (answer: 
         </Button>
       </DialogActions>
     </Dialog>
+  )
+}
+
+/** "1.2 GB of 10 GB used", warning-styled when near or over the quota. */
+function UsageLine({ usage }: { usage: FilesUsage }) {
+  const line = usageLine(usage)
+  return (
+    <Tooltip
+      label={
+        usage.over
+          ? "Your files are over their storage limit. Delete files you don't need to upload or change files again."
+          : "How much of your storage your files use, with their earlier versions and the assistant's home folder."
+      }
+    >
+      <p
+        tabIndex={0}
+        data-files-usage=""
+        data-warn={line.warn ? "" : undefined}
+        className={`w-fit rounded-md text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus ${line.warn ? "text-warning" : "text-muted"}`}
+      >
+        {line.text}
+      </p>
+    </Tooltip>
   )
 }
