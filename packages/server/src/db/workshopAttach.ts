@@ -10,6 +10,7 @@ import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { attachedStory, pairedWorkshopForks, storyPositionOf, workshopForkPairs } from "./workshopPairing.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
+import { onDisplayPath, pathPieces } from "./displayPath.ts"
 
 export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -101,7 +102,17 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
                 AND (e.version_id = v.id OR e.version_id = v.source_version_id)
               ORDER BY e.version_id = v.id DESC LIMIT 1`
         const now = yield* storyPositionOf(sql, userId, chatId, forkId ?? recorded?.fork_id ?? null)
-        return now !== null && recorded ? { ...now, leafSlotId: recorded.leaf as SlotId } : now
+        if (now === null || !recorded) return now
+        // A position the paired branch doesn't show (a message copied with "As it is now", recorded
+        // on the original branch past the fork point) falls back to the branch's end now.
+        const [fork] = yield* sql<{ tip_slot_id: string | null }>`SELECT tip_slot_id FROM forks WHERE id = ${now.forkId}`
+        const [place] = yield* sql<{ chain_id: string; depth: number }>`SELECT chain_id, depth FROM slots
+          WHERE id = ${recorded.leaf} AND chat_id = ${now.chatId}`
+        if (!fork || !place) return now
+        const pieces = yield* pathPieces(sql, now.chatId, now.forkId, fork.tip_slot_id)
+        return onDisplayPath(pieces, { id: recorded.leaf, chainId: place.chain_id, depth: place.depth })
+          ? { ...now, leafSlotId: recorded.leaf as SlotId }
+          : now
       }).pipe(query("WorkshopStoryPosition")),
     WorkshopStories: ({ userId, chatIds }) =>
       Effect.gen(function* () {

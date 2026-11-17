@@ -23,13 +23,11 @@ const LISTED = 20
 
 interface PathMessage {
   readonly id: string
+  readonly version_id: string
   readonly leaf: string | null
-  readonly speaker: string | null
-  readonly human: number
-  readonly content: string
 }
 
-/** Workshop fork `fork`'s live messages, in display order, with each shown version's story position. */
+/** Workshop fork `fork`'s live messages, in display order, with each shown version's story position: ids only. */
 const workshopPath = (sql: SqlClient.SqlClient, workshopId: string, fork: ForkRow) =>
   Effect.gen(function* () {
     const pieces = yield* pathPieces(sql, workshopId, fork.id, fork.tip_slot_id)
@@ -40,8 +38,7 @@ const workshopPath = (sql: SqlClient.SqlClient, workshopId: string, fork: ForkRo
       , shown(id, version_id, position) AS (
         SELECT s.id, ${shownIn(sql, fork.id, "s")}, d.position FROM display_slots d JOIN slots s ON s.id = d.id
         WHERE NOT ${slotDeletedIn(sql, fork.id, "s")})
-      SELECT sh.id, wv.content, wv.writer = 'human' AS human,
-        (SELECT r.label FROM entity_refs r WHERE r.entity_id = wv.speaker_entity_id ORDER BY r.id LIMIT 1) AS speaker,
+      SELECT sh.id, sh.version_id,
         coalesce(
           (SELECT json_extract(e.value_json, '$.leaf') FROM state_events e
             WHERE e.key = 'workshop.story_at' AND e.version_id = wv.id LIMIT 1),
@@ -138,23 +135,34 @@ const firstLine = (content: string) => {
  * changes when a message is sent there) and the messages left out.
  */
 export const previewForkWorkshops = (sql: SqlClient.SqlClient, storyId: string, story: ForkRow, at: string | null) =>
-  Effect.map(workshopCuts(sql, storyId, story, at), (cuts) =>
-    cuts
-      .filter((cut) => cut.leftOut.length > 0)
-      .map((cut): ForkWorkshop => ({
+  Effect.gen(function* () {
+    const rows: Array<ForkWorkshop> = []
+    for (const cut of yield* workshopCuts(sql, storyId, story, at)) {
+      if (cut.leftOut.length === 0) continue
+      // Content and speakers only for the messages the dialog lists.
+      const listed = cut.leftOut.slice(0, LISTED)
+      const texts = new Map(
+        (yield* sql<{ id: string; content: string; human: number; speaker: string | null }>`
+          SELECT wv.id, wv.content, wv.writer = 'human' AS human,
+            (SELECT r.label FROM entity_refs r WHERE r.entity_id = wv.speaker_entity_id ORDER BY r.id LIMIT 1) AS speaker
+          FROM version_records wv WHERE wv.id IN ${sql.in(listed.map((m) => m.version_id))}`).map((t) => [t.id, t])
+      )
+      rows.push({
         workshop: cut.workshopId as ChatId,
         title: cut.title,
         sourceForkId: cut.source.id as ForkId,
         tipSlotId: cut.tip as SlotId | null,
         leftOut: {
           count: cut.leftOut.length,
-          first: cut.leftOut.slice(0, LISTED).map((m) => ({
-            speaker: m.speaker ?? (m.human ? "You" : "Assistant"),
-            line: firstLine(m.content)
-          }))
+          first: listed.map((m) => {
+            const t = texts.get(m.version_id)
+            return { speaker: t?.speaker ?? (t?.human ? "You" : "Assistant"), line: firstLine(t?.content ?? "") }
+          })
         }
-      }))
-  )
+      })
+    }
+    return rows
+  })
 
 /**
  * The hook (§3.1): story fork `made` was just made from `parent` (its fork point `made.base_slot_id`).
