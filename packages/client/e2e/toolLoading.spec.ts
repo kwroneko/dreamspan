@@ -52,6 +52,12 @@ const text = (value: string) => [
 ]
 
 let provider: { url: string; close: () => Promise<void> }
+// The tools the run's first request sent in full (Anthropic sends deferred ones flagged
+// defer_loading; the dispatcher leaves them out), so the inspector's count follows the registry.
+let sentFromStart: ReadonlyArray<string> = []
+type WireTool = { name?: string; defer_loading?: boolean; function?: { name?: string } }
+const sentIn = (tools: ReadonlyArray<WireTool> | undefined) =>
+  (tools ?? []).filter((t) => t.defer_loading !== true).map((t) => t.function?.name ?? t.name ?? "")
 test.beforeAll(async () => {
   const http = createServer((req, res) => {
     const chunks: Array<Buffer> = []
@@ -61,6 +67,7 @@ test.beforeAll(async () => {
         const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
           reasoning_effort?: string
           messages: Array<{ role: string; tool_call_id?: string }>
+          tools?: ReadonlyArray<WireTool>
         }
         if (body.reasoning_effort && body.reasoning_effort !== "none") {
           res.writeHead(400, { "content-type": "application/json" })
@@ -74,6 +81,7 @@ test.beforeAll(async () => {
           )
         }
         const answered = body.messages.filter((m) => m.role === "tool").at(-1)?.tool_call_id
+        if (!answered) sentFromStart = sentIn(body.tools)
         const name = !answered ? "load_skill" : "call_tool"
         const args = !answered ? { name: "cards" } : { name: "read_card", arguments: { card: "Assistant" } }
         const delta =
@@ -102,9 +110,11 @@ test.beforeAll(async () => {
       if (!req.url?.startsWith("/v1/messages")) return res.writeHead(404).end()
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as {
         messages?: Array<{ content: string | Array<{ type: string; tool_use_id?: string }> }>
+        tools?: ReadonlyArray<WireTool>
       }
       const last = body.messages?.at(-1)?.content
       const answered = Array.isArray(last) ? last.find((b) => b.type === "tool_result")?.tool_use_id : undefined
+      if (answered === undefined) sentFromStart = sentIn(body.tools)
       sse(
         res,
         answered === undefined
@@ -203,8 +213,10 @@ for (const transport of ["native", "dispatcher"] as const)
         const never = tools.getByRole("region", { name: "Never loaded" })
         await expect(sentFirst).toBeVisible({ timeout: 30_000 })
         await expect(sentFirst.getByRole("heading")).toHaveText(
-          new RegExp(`^Sent from the start · ${transport === "native" ? 4 : 5} tools, [\\d,]+ tokens$`)
+          new RegExp(`^Sent from the start · ${sentFromStart.length} tools, [\\d,]+ tokens$`)
         )
+        expect(sentFromStart).toContain("list_library")
+        for (const name of sentFromStart) await expect(sentFirst.getByRole("region", { name })).toBeVisible()
         await expect(sentFirst.getByRole("region", { name: "list_library" })).toBeVisible()
         await expect(sentFirst.getByRole("region", { name: "load_skill" })).toBeVisible()
         // The Cards skill's seven tools, with ownturn1's move_card_text and edit_card_note, and

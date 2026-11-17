@@ -121,7 +121,7 @@ export function workshopChatTests() {
           await expect(card).toBeVisible()
           await expect(page.getByText("Workshop", { exact: true }).first()).toBeVisible()
           await expect(page.getByRole("button", { name: "New workshop", exact: true })).toHaveAccessibleDescription(
-            "Opens a workshop. The assistant can read and change your library and set up chats."
+            "Opens a new workshop. It's saved when you send its first message. The assistant can read and change your library and set up chats."
           )
           await card.scrollIntoViewIfNeeded()
           await shot("chats-page")
@@ -154,58 +154,15 @@ export function workshopChatTests() {
           }, originalHeadings)
           await page.getByLabel("Title of the new workshop").fill(title)
           await page.getByRole("button", { name: "New workshop", exact: true }).click()
-          await expect(page).toHaveURL(/\/chats\/[^/?]+/)
-          const url = new URL(page.url())
-          const workshopId = url.pathname.split("/")[2]! as ChatId
-
-          // The workshop: its badge, its accent, its greeting, the chip in place of who replies.
-          const main = page.locator("[data-chat-main]")
-          await expect(page.locator('[data-chat-kind="workshop"]').first()).toBeVisible()
-          await expect(page).toHaveTitle(`Workshop · ${title} · rp-harness`)
-          await expect(main.locator('[data-kind-badge="workshop"]').first()).toBeVisible()
+          // Nothing is made until the first send (DESIGN 7.7): the pending workshop's own page.
+          await expect(page).toHaveURL(/\/new\/workshop$/)
+          await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
           await expect(page.getByTestId("composer")).toBeVisible()
-          const workshopAccent = await accentOf(page)
-          expect(workshopAccent).toBe(
-            await page.evaluate(() =>
-              getComputedStyle(document.documentElement).getPropertyValue("--accent-workshop").trim()
-            )
-          )
-          const contrast = await main.evaluate((element) => {
-            const style = getComputedStyle(element)
-            const canvas = document.createElement("canvas")
-            const context = canvas.getContext("2d")!
-            const luminance = (token: string) => {
-              context.fillStyle = style.getPropertyValue(token).trim()
-              context.fillRect(0, 0, 1, 1)
-              const [r, g, b] = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).map((value) => {
-                const c = value / 255
-                return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
-              })
-              return r! * 0.2126 + g! * 0.7152 + b! * 0.0722
-            }
-            const ratio = (a: string, b: string) => {
-              const x = luminance(a),
-                y = luminance(b)
-              return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
-            }
-            return {
-              onAccent: ratio("--accent-contrast", "--color-accent"),
-              text: ["--canvas", "--surface", "--surface-raised"].map((bg) => ratio("--color-accent", bg)),
-              focus: ["--canvas", "--surface", "--surface-raised"].map((bg) => ratio("--color-focus", bg))
-            }
-          })
-          expect(contrast.onAccent).toBeGreaterThanOrEqual(4.5)
-          for (const ratio of contrast.text) expect(ratio).toBeGreaterThanOrEqual(4.5)
-          for (const ratio of contrast.focus) expect(ratio).toBeGreaterThanOrEqual(3)
-          await info.attach("workshop-contrast", { body: JSON.stringify(contrast), contentType: "application/json" })
-          if (theme === "dark") {
-            await page.evaluate(() => document.documentElement.removeAttribute("data-theme"))
-            expect(await accentOf(page)).toBe(workshopAccent)
-            await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"))
-          }
+
           const chip = nextReply(page).getByRole("button", { name: /^What the assistant may do: / })
-          // Counted from the registered capabilities, so a new one doesn't break this spec.
-          const capabilities = await admin((api) => api.ListWorkshopCapabilities({ chatId: workshopId }))
+          // Counted from the registered capabilities, so a new one doesn't break this spec. Before
+          // the first send the chip offers what a new workshop would (DESIGN 7.7).
+          const capabilities = await admin((api) => api.ListNewWorkshopCapabilities({}))
           await expect(chip).toHaveText(capabilityChip(capabilityCounts(capabilities)))
           await expect(nextReply(page).getByRole("button", { name: /^Next: / })).toHaveCount(0)
           await chip.click()
@@ -253,6 +210,58 @@ export function workshopChatTests() {
           const offeredAt = provider.bodies.length
           await page.getByLabel("Message", { exact: true }).fill("What cards do I have?")
           await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          // The first send makes the workshop and opens it in place.
+          await expect(page).toHaveURL(/\/chats\/[^/?]+/, { timeout: 30_000 })
+          const workshopId = new URL(page.url()).pathname.split("/")[2]! as ChatId
+
+          // The workshop: its badge, its accent, its greeting, the chip in place of who replies.
+          const main = page.locator("[data-chat-main]")
+          await expect(page.locator('[data-chat-kind="workshop"]').first()).toBeVisible()
+          await expect(page).toHaveTitle(`Workshop · ${title} · rp-harness`)
+          await expect(main.locator('[data-kind-badge="workshop"]').first()).toBeVisible()
+          await expect(page.getByTestId("composer")).toBeVisible()
+          const workshopAccent = await accentOf(page)
+          expect(workshopAccent).toBe(
+            await page.evaluate(() =>
+              getComputedStyle(document.documentElement).getPropertyValue("--accent-workshop").trim()
+            )
+          )
+          const contrast = await main.evaluate((element) => {
+            const style = getComputedStyle(element)
+            const canvas = document.createElement("canvas")
+            const context = canvas.getContext("2d")!
+            const luminance = (token: string) => {
+              context.fillStyle = style.getPropertyValue(token).trim()
+              context.fillRect(0, 0, 1, 1)
+              const [r, g, b] = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).map((value) => {
+                const c = value / 255
+                return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+              })
+              return r! * 0.2126 + g! * 0.7152 + b! * 0.0722
+            }
+            const ratio = (a: string, b: string) => {
+              const x = luminance(a),
+                y = luminance(b)
+              return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
+            }
+            return {
+              onAccent: ratio("--accent-contrast", "--color-accent"),
+              text: ["--canvas", "--surface", "--surface-raised"].map((bg) => ratio("--color-accent", bg)),
+              focus: ["--canvas", "--surface", "--surface-raised"].map((bg) => ratio("--color-focus", bg))
+            }
+          })
+          expect(contrast.onAccent).toBeGreaterThanOrEqual(4.5)
+          for (const ratio of contrast.text) expect(ratio).toBeGreaterThanOrEqual(4.5)
+          for (const ratio of contrast.focus) expect(ratio).toBeGreaterThanOrEqual(3)
+          await info.attach("workshop-contrast", { body: JSON.stringify(contrast), contentType: "application/json" })
+          if (theme === "dark") {
+            await page.evaluate(() => document.documentElement.removeAttribute("data-theme"))
+            expect(await accentOf(page)).toBe(workshopAccent)
+            await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"))
+          }
+          const saved = await admin((api) => api.ListWorkshopCapabilities({ chatId: workshopId }))
+          expect(saved.length).toBe(capabilities.length)
+          await expect(chip).toHaveText(capabilityChip(capabilityCounts(saved)))
           const stopped = page.getByRole("article").last()
           await expect(stopped.locator('[data-step-status="done"]')).toHaveCount(1)
           await expect.poll(() => provider.heldCount()).toBeGreaterThan(0)
