@@ -187,7 +187,12 @@ const displayFields = {
    * Which kinds of change show as markers in the chat (who joined, notes switched, the model
    * changed), by the kind's id (stateMarkers.ts): false hides one. Merged by id, as the details are.
    */
-  stateMarkers: choicesById
+  stateMarkers: choicesById,
+  /**
+   * The chat panel's tools in the user's order, by tab value (owner, 2026-11-17, DESIGN §10.1
+   * "Tab order"); empty is the usual order, and a tool it doesn't name follows those it does.
+   */
+  panelTabOrder: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(Schema.isMaxLength(200))
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
@@ -226,7 +231,9 @@ export const DisplayPrefsChange = Schema.Struct({
   /** Merged by id with what's stored, as the message toolbar's are. */
   dismissedInfo: Schema.optionalKey(displayFields.dismissedInfo),
   messageDetails: Schema.optionalKey(displayFields.messageDetails),
-  stateMarkers: Schema.optionalKey(displayFields.stateMarkers)
+  stateMarkers: Schema.optionalKey(displayFields.stateMarkers),
+  /** The whole order, replacing what's stored. */
+  panelTabOrder: Schema.optionalKey(displayFields.panelTabOrder)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
@@ -262,7 +269,8 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   messageToolbar: {},
   dismissedInfo: {},
   messageDetails: {},
-  stateMarkers: {}
+  stateMarkers: {},
+  panelTabOrder: []
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
 

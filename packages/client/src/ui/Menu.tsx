@@ -254,6 +254,53 @@ export function ContextMenu({
   )
 }
 
+/**
+ * A context menu at a point, for an item that can't be a context menu's trigger itself: an
+ * entry of another open menu (More's tools), which must stay that menu's item. The owner opens
+ * it from the item's `onContextMenu` (or its own long press) at the pointer; null closes it.
+ */
+export function PointMenu({
+  at,
+  onClose,
+  label,
+  children
+}: {
+  at: { readonly x: number; readonly y: number } | null
+  onClose: () => void
+  label: string
+  children: ReactNode
+}) {
+  const [popup, setPopup] = useState<HTMLElement | null>(null)
+  const x = at?.x ?? 0
+  const y = at?.y ?? 0
+  const anchor = { getBoundingClientRect: () => DOMRect.fromRect({ x, y, width: 0, height: 0 }) }
+  return (
+    <BaseMenu.Root modal={false} open={at !== null} onOpenChange={(open) => !open && onClose()}>
+      <BaseMenu.Portal>
+        <BaseMenu.Positioner
+          data-layout-overlay="Context menu floats above the page"
+          className="z-50 outline-none"
+          positionMethod="fixed"
+          anchor={anchor}
+          side="bottom"
+          align="start"
+          sideOffset={4}
+          collisionPadding={8}
+        >
+          <BaseMenu.Popup
+            ref={setPopup}
+            aria-label={label}
+            className="max-h-[var(--available-height)] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none [&:not(:has(.menu-mark))_.menu-slot]:hidden"
+          >
+            <MenuActionsContext value>{children}</MenuActionsContext>
+          </BaseMenu.Popup>
+          <HighlightExplanation popup={popup} />
+        </BaseMenu.Positioner>
+      </BaseMenu.Portal>
+    </BaseMenu.Root>
+  )
+}
+
 /** A single choice in a menu, with the current choice checked. */
 export function MenuRadioGroup<Value extends string>({
   value,
@@ -308,6 +355,7 @@ export function MenuItem({
   icon,
   tone = "default",
   description,
+  className = "",
   children,
   ...props
 }: {
@@ -315,11 +363,13 @@ export function MenuItem({
   tone?: "default" | "danger"
   /** What it does, when the label alone doesn't say: shown beside it while it's highlighted. */
   description?: string | undefined
+  /** Added to the item's look: where a dragged item would land, say. */
+  className?: string | undefined
   children: ReactNode
 } & Omit<ComponentProps<typeof BaseMenu.Item>, "children" | "className">) {
   const explanation = useItemExplanation(description)
   return (
-    <BaseMenu.Item className={itemClass(tone)} {...explanation.describedBy} {...props}>
+    <BaseMenu.Item className={`${itemClass(tone)} ${className}`} {...explanation.describedBy} {...props}>
       {icon ? <Icon name={icon} className="menu-mark text-muted" /> : <span className="menu-slot w-4 shrink-0" />}
       <ItemText parts={explanation.parts}>{children}</ItemText>
     </BaseMenu.Item>
