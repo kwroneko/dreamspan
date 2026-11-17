@@ -3,7 +3,7 @@ import { useSplitChats } from "./splitChats.ts"
 import { kindTitle } from "./kindLooks.ts"
 import { CenterHeader } from "../../ui/CenterHeader.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { chatBranchControls, chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
+import { chatBranchControls, chatHeaderAbout, chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
 // The open chat's header, one row: whose chat it is (the cast's faces, the chat's readable
 // name, never ST's file name, which a click renames in place, and the cast's names under it),
 // then the branch control and the chat's buttons (the pin, ⋯, the side panel), which are
@@ -316,6 +316,7 @@ export function ChatHeader({
         <>
           <ChatTitle session={session} view={view} name={name} request={renameRequest} />
           {view.chat && <ChatBadges chat={view.chat} />}
+          {view.chat && <SlotOutlet slot={chatHeaderAbout} props={{ view }} />}
         </>
       }
       about={aboutLine(characters, name?.name, name?.started ?? null)}

@@ -48,6 +48,7 @@ import { Loading, LoadingProgress, PlaceholderBar } from "../../ui/Spinner.tsx"
 import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { WindowedList } from "../../ui/WindowedList.tsx"
 import { listNames } from "../chat/cast.ts"
+import { chatRowAbout } from "../chat/presentation.tsx"
 import { KindBadge } from "../chat/KindBadge.tsx"
 import { kindRowProps, useChatKindLook } from "../chat/kindLooks.ts"
 import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
@@ -386,6 +387,7 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
             </span>
           )}
           {!renaming && <KindBadge kind={fork.chat.kind} />}
+          {!renaming && <SlotOutlet slot={chatRowAbout} props={{ chat: fork.chat }} />}
           {/* While renaming, the field takes the whole title line (owner, 2026-11-05). */}
           {fork.current && fork.branches > 1 && !renaming && (
             <span data-opens-here className="flex shrink-0">

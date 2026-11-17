@@ -467,6 +467,32 @@ export class WorkbenchStore {
     }
   }
   /**
+   * Opens an item beside a frame, never in it (a workshop popped out of a story's side panel):
+   * focuses the item's tab if one is open anywhere; else opens it as a kept tab in a neighbouring
+   * frame (the right one first), splitting the frame when it's alone. The frame's tabs stay.
+   */
+  openBesideOf(frameId: string | undefined, href: string) {
+    const key = itemKey(href)
+    const existing = allTabs(this.layout).find((t) => itemKey(t.href) === key)
+    if (existing) {
+      this.focusTab(existing.id)
+      return existing.id
+    }
+    const from = (frameId && this.frames().find((f) => f.id === frameId)?.id) || focusedFrame(this.layout).id
+    const near = neighbours(this.layout, from)
+    let frame = near.right ?? near.left ?? near.down ?? near.up ?? this.frames().find((f) => f.id !== from)?.id
+    if (!frame) {
+      frame = newId("f")
+      this.layout = splitFrame(this.layout, from, "row", { newFrameId: frame, empty: true })
+    }
+    // Beside what that frame shows, never in place of its preview tab (as `dropOpen`).
+    const preview = this.frames()
+      .find((f) => f.id === frame)
+      ?.tabs.find((t) => t.preview)
+    if (preview) this.layout = pinTab(this.layout, preview.id)
+    return this.open(href, { frame, preview: false })
+  }
+  /**
    * Moves a tab into a new frame beside a frame (its own by default): `before` puts it on the
    * left or above, as a tab dropped on that edge does.
    */

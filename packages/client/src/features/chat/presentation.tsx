@@ -165,6 +165,12 @@ export const chatComposer = defineSlot<ComponentProps<typeof import("./Composer.
 export const chatBranchControls = defineSlot<import("./BranchControl.tsx").BranchControlProps>("chat.branch-controls")
 /** The header's buttons at the end of its row, after the branch control: the pin, the panel, ⋯. */
 export const chatHeaderActions = defineSlot<import("./ChatHeader.tsx").ChatHeaderActionProps>("chat.header-actions")
+/** What a chat is about, under its header's title (a workshop's story: features/workshop/storyLink.tsx). */
+export const chatHeaderAbout = defineSlot<{ readonly view: import("./session.ts").ChatView }>("chat.header-about")
+/** The same beside a chat's name in the sidebar's rows and the chat lists. */
+export const chatRowAbout = defineSlot<{
+  readonly chat: Pick<import("@rp/shared/chat.ts").Chat, "id" | "kind">
+}>("chat.row-about")
 /** The same buttons in a chat not made yet (before the first send): the panel. */
 export const pendingChatHeaderActions =
   defineSlot<import("./ChatHeader.tsx").PendingHeaderActionProps>("chat.pending-header-actions")

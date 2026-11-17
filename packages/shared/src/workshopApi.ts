@@ -109,6 +109,14 @@ export const WorkshopPresetChoice = Schema.Union([
 ])
 export type WorkshopPresetChoice = typeof WorkshopPresetChoice.Type
 
+/** What an attached workshop is about: the story's title, or that it was deleted (no title then). */
+export const WorkshopStory = Schema.Struct({
+  workshopId: Chat.fields.id,
+  storyId: Chat.fields.id,
+  title: Schema.NullOr(Schema.String)
+})
+export type WorkshopStory = typeof WorkshopStory.Type
+
 export class WorkshopApi extends RpcGroup.make(
   Rpc.make("ListWorkshopCapabilities", {
     payload: { chatId: Chat.fields.id },
@@ -138,6 +146,12 @@ export class WorkshopApi extends RpcGroup.make(
     payload: { chatId: Chat.fields.id },
     success: Schema.Array(Chat),
     error: Schema.Union([NotFound, ServerError])
+  }),
+  /** The story each of these workshops is about (its title, or deleted); none for one without. */
+  Rpc.make("ListWorkshopStories", {
+    payload: { chatIds: Schema.Array(Chat.fields.id) },
+    success: Schema.Array(WorkshopStory),
+    error: Schema.Union([ServerError])
   }),
   /** The workshop defaults: the assistant card, the preset and the persona new workshops start with. */
   Rpc.make("GetWorkshopDefaults", {

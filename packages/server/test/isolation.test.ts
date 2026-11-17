@@ -1482,6 +1482,13 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   ListAttachedWorkshops: {
     probe: (actor, owner) => refused(actor.api.ListAttachedWorkshops({ chatId: owner.chat.chatId }), "NotFound")
   },
+  ListWorkshopStories: {
+    // Another user's chat ids name nothing (the owner's side: e2e/workshopPopOut.spec.ts).
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        assert.lengthOf(yield* actor.api.ListWorkshopStories({ chatIds: [owner.chat.chatId] }), 0)
+      })
+  },
   GetWorkshopDefaults: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

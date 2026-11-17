@@ -269,6 +269,10 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       Effect.flatMap(CurrentUser, (user) => reader.AttachedWorkshops({ userId: user.id, chatId })).pipe(
         internal("ListAttachedWorkshops")
       ),
+    ListWorkshopStories: ({ chatIds }) =>
+      Effect.flatMap(CurrentUser, (user) => reader.WorkshopStories({ userId: user.id, chatIds })).pipe(
+        internal("ListWorkshopStories")
+      ),
     GetWorkshopDefaults: () =>
       Effect.flatMap(CurrentUser, (user) => reader.WorkshopDefaults({ userId: user.id })).pipe(
         internal("GetWorkshopDefaults")

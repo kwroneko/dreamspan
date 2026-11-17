@@ -23,6 +23,8 @@ import { useUnseen } from "../notices.tsx"
 import { type ShellFork, useShellForks } from "../characters/shellData.tsx"
 import { PinButton } from "../characters/ShellBrowser.tsx"
 import { chatName, formatDay, formatWhen } from "./chatTitle.ts"
+import { chatRowAbout } from "./presentation.tsx"
+import { SlotOutlet } from "../../slots.tsx"
 import { KindBadge } from "./KindBadge.tsx"
 import { kindRowProps, useChatKindLook } from "./kindLooks.ts"
 
@@ -125,6 +127,7 @@ function Row({
                 {name.name}
               </span>
               <KindBadge kind={chat.kind} inLink />
+              <SlotOutlet slot={chatRowAbout} props={{ chat }} />
               <span className="ml-auto shrink-0 text-xs text-muted">
                 {formatWhen(chat.lastMessageAt ?? chat.createdAt)}
               </span>
