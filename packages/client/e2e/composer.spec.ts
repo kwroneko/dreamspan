@@ -23,15 +23,17 @@ const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => {
 
 const box = (page: Page) => page.getByLabel("Message", { exact: true })
 
-/** A new chat, open, and its id. */
+/**
+ * A new chat, open, and its id. Made before its first message, as the saved composer is what's
+ * tested here (the Chats page's New chat makes nothing until the first send).
+ */
 const newChat = async (page: Page, title: string) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/chats`)
-  await page.getByLabel("Title of the new chat").fill(title)
-  await page.getByRole("button", { name: "New chat" }).click()
+  const chat = await admin((api) => api.CreateChat({ title }))
+  await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
   await expect(box(page)).toBeEditable()
-  return page.url().split("/chats/")[1]!.split("?")[0]! as ChatId
+  return chat.id as ChatId
 }
 
 /** The composer's text on the server, of a fork (null: the current one). */

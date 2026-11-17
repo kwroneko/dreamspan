@@ -117,9 +117,31 @@ export const WorkshopStory = Schema.Struct({
 })
 export type WorkshopStory = typeof WorkshopStory.Type
 
+/**
+ * A capability's standing chosen before a workshop's first message (owner, 2026-11-17: the
+ * composer before the first send is the saved one): as `SetWorkshopGrant` takes it, null for the
+ * default. The server takes only what a new workshop offers, as the strip lists it.
+ */
+export const WorkshopGrantChoice = Schema.Struct({
+  capability: Schema.String,
+  mode: Schema.NullOr(CapabilityMode),
+  /** One target of the capability (an MCP server's connection id); absent: the capability's own standing. */
+  target: Schema.optionalKey(Schema.String)
+})
+export type WorkshopGrantChoice = typeof WorkshopGrantChoice.Type
+
 export class WorkshopApi extends RpcGroup.make(
   Rpc.make("ListWorkshopCapabilities", {
     payload: { chatId: Chat.fields.id },
+    success: Schema.Array(WorkshopCapability),
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * What a workshop not made yet would offer, at its defaults: one of its own, or (`attachTo`)
+   * one beside that story. Its composer's chip lists these before the first send.
+   */
+  Rpc.make("ListNewWorkshopCapabilities", {
+    payload: { attachTo: Schema.optionalKey(Chat.fields.id) },
     success: Schema.Array(WorkshopCapability),
     error: Schema.Union([NotFound, ServerError])
   }),
@@ -129,6 +151,8 @@ export class WorkshopApi extends RpcGroup.make(
    * the story one; null for none). `attachTo`: a side chat beside that story, reading it through
    * its tools (spec/WORKSHOP.md §4); it never plays the story's persona or one of its cards.
    * `preset`: its prompt preset (`WorkshopPresetChoice`; default the workshop default preset).
+   * `grants`: what the assistant may do there, chosen before its first message; each must be one
+   * a new workshop offers (`ListNewWorkshopCapabilities`), else `GrantRefused` and nothing is made.
    */
   Rpc.make("CreateWorkshop", {
     payload: {
@@ -136,10 +160,11 @@ export class WorkshopApi extends RpcGroup.make(
       attachTo: Schema.optionalKey(Chat.fields.id),
       card: Schema.optionalKey(Schema.String),
       persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      preset: Schema.optionalKey(WorkshopPresetChoice)
+      preset: Schema.optionalKey(WorkshopPresetChoice),
+      grants: Schema.optionalKey(Schema.Array(WorkshopGrantChoice).check(Schema.isMaxLength(256)))
     },
     success: Chat,
-    error: Schema.Union([NotFound, ServerError])
+    error: Schema.Union([NotFound, GrantRefused, ServerError])
   }),
   /** The workshops beside a story, newest first. */
   Rpc.make("ListAttachedWorkshops", {

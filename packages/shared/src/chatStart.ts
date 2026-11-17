@@ -18,7 +18,8 @@ export type FirstTurn = typeof FirstTurn.Type
 /** What `StartChat` takes. */
 export const StartChatInput = {
   guidance: Schema.optionalKey(Schema.Boolean),
-  cards: Schema.Array(EntityId).check(Schema.isMinLength(1)),
+  /** The chat's characters; none for a chat with nobody in it yet (the Chats page's New chat). */
+  cards: Schema.Array(EntityId),
   persona: Schema.NullOr(EntityId),
   greeting: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   first: FirstTurn,

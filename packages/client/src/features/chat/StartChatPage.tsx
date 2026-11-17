@@ -1,7 +1,8 @@
 import type { Draft } from "@rp/shared/drafts.ts"
 import { useSidePanelPlace } from "../workbench/tab.tsx"
 import { greetingPick } from "@rp/shared/greetings.ts"
-import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
+import { useUserDraft, UserDraftNotices, UserDraftStatus, UserDraftUndo } from "../editor/userDraft.tsx"
+import { Input } from "../../ui/Field.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
 import {
   PendingComposerControls,
@@ -64,6 +65,7 @@ import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { expandForDisplay } from "./macros.ts"
 import { useIsPanelTab } from "./panels.tsx"
 import { firstId, PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
+import { EMPTY_CHAT_TITLE } from "./ChatsPage.tsx"
 import { chatColumns } from "./presentation.tsx"
 import { seedChat } from "./session.ts"
 import { seedSplitChats } from "./splitChats.ts"
@@ -151,16 +153,28 @@ function Greeting({
   )
 }
 
+/** A chat with nobody in it yet (the Chats page's New chat): its title, typed here, and what it says first. */
+interface EmptyStart {
+  /** The title typed ("" the server's default, after its characters or the date). */
+  readonly title: string
+  /** Where its messages will be, until characters join or the first send. */
+  readonly intro: ReactNode
+  /** The title was used: its draft ends. */
+  readonly sent: () => Promise<unknown>
+}
+
 function Pending({
   pending,
   card,
-  groupMembers
+  groupMembers,
+  empty = null
 }: {
   pending: PendingChat
-  /** The card that greets first: the chat's card, or the group's first character. */
-  card: CardForChat
+  /** The card that greets first: the chat's card, or the group's first character; none for an empty chat. */
+  card: CardForChat | null
   /** A group's characters as the group names them: its pending copy's key. */
   groupMembers: ReadonlyArray<string> | null
+  empty?: EmptyStart | null
 }) {
   const composerId = useId()
   const action = useAction()
@@ -191,7 +205,8 @@ function Pending({
     })
   // This browser's copy of the text, and the text on its way in the first send.
   const userId = useSession().user.id
-  const entityId = card.card.entityId
+  // An empty chat's copy is the one new chat without characters, whoever joins before the send.
+  const entityId = card?.card.entityId ?? EMPTY_CHAT
   const copyKey = group === null ? pendingChatCopy(entityId) : pendingGroupChatCopy(group.name, groupMembers ?? [])
   const durable = useUserDraft(copyKey, "First message", "")
   // The saved chat's page, ready before the first send opens it.
@@ -217,7 +232,7 @@ function Pending({
       userId,
       destination.current.chatId,
       entityId,
-      group?.name ?? card.card.name,
+      group?.name ?? card?.card.name ?? (empty?.title.trim() || "New chat"),
       content,
       previous,
       destination.current.composer
@@ -231,7 +246,9 @@ function Pending({
   const guidance = state.guidance
   const setGuidance = (guidance: boolean) => pending.change((state) => ({ ...state, guidance }))
   const repliers = greeters.filter((item) => item.card.entityId !== persona)
-  const replyId = (repliers.find((item) => item.card.entityId === state.replier) ?? repliers[0] ?? card).card.entityId
+  // Who answers the first message: in a chat without characters, an unnamed reply, as its composer asks for.
+  const replyId =
+    (repliers.find((item) => item.card.entityId === state.replier) ?? repliers[0] ?? card)?.card.entityId ?? null
   const castCards = view.cast?.cards ?? []
   const swapped = state.swapped
   const picked = selectedSpeaker === null ? null : (swapped[selectedSpeaker] ?? selectedSpeaker)
@@ -282,7 +299,7 @@ function Pending({
   const urlPanel = useIsPanelTab(askedPanel) ? askedPanel! : null
   const { panel, show, wide } = usePanel(urlPanel, view)
   const place = useSidePanelPlace(wide)
-  const title = pendingTitle(pending, state)
+  const title = empty?.title.trim() || pendingTitle(pending, state)
   const prefs = viewPrefs.prefs
   // Cards from a card source, added by the first turn (spec/CARD-SOURCES.md §4.5).
   const adding = greeters.filter((greeter) => remoteOf(greeter.card.entityId) !== null).map((greeter) => greeter.card)
@@ -354,7 +371,7 @@ function Pending({
             cards: greeters.map((greeter) => greeter.card.entityId),
             persona: personaId,
             greeting: null,
-            ...(group === null ? {} : { title: group.name }),
+            ...(group !== null ? { title: group.name } : empty !== null ? { title: empty.title } : {}),
             greeters: greeterChoices(),
             first:
               first === "send"
@@ -370,7 +387,7 @@ function Pending({
                 chatId: started.chat.id,
                 parentSlotId: started.entry.slotId,
                 branch: false,
-                speakerEntityId: added(replyId)
+                speakerEntityId: replyId === null ? null : added(replyId)
               })
             )
           }
@@ -427,6 +444,7 @@ function Pending({
     destination.current = { chatId: result.value.chat.id, composer: result.value.composer }
     await keep(typed.current)
     await durable.commit(durable.text, async () => true)
+    await empty?.sent()
     // Restore tab-strip focus only if it is still there as this route is replaced; typing
     // in the composer or clicking Send keeps the normal destination focus behaviour.
     const panelFocused = Boolean(document.activeElement?.closest("[data-chat-panel-tabs]"))
@@ -498,10 +516,14 @@ function Pending({
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               {/* The message list's column, its padding and its gap between rows. */}
               <div className="chat-column flex flex-col gap-1.5 py-4">
-                {options.every((list) => list.length === 0) && (
+                {/* A chat without characters: what it is, and its title, until someone joins. */}
+                {empty !== null && greeters.length === 0 && empty.intro}
+                {options.every((list) => list.length === 0) && greeters.length > 0 && (
                   <p className="px-3 text-sm text-muted">
-                    {members === null ? `${card.card.name} has no greeting.` : "None of them has a greeting."} Your
-                    first message starts the chat.
+                    {members === null
+                      ? `${card?.card.name ?? "They"} has no greeting.`
+                      : "None of them has a greeting."}{" "}
+                    Your first message starts the chat.
                   </p>
                 )}
                 {greeters.map((greeter, at) =>
@@ -618,15 +640,20 @@ function RetryButton({ onRetry }: { onRetry: () => void }) {
   )
 }
 
+/** The pending copy of a chat without characters (`pendingChatCopy`): there's one at a time. */
+const EMPTY_CHAT = "new"
+
 /** Holds the pending chat for as long as the page shows this card or group. */
 function PendingFor({
   card,
   cards,
   greeters,
   group,
-  defaultPersona
+  defaultPersona,
+  empty = null
 }: {
-  card: CardForChat
+  card: CardForChat | null
+  empty?: EmptyStart | null
   defaultPersona: EntityId | null
   cards: ReadonlyArray<CastCard>
   greeters: ReadonlyArray<CardForChat>
@@ -645,7 +672,7 @@ function PendingFor({
         search.guidance === "on"
       )
   )
-  return <Pending pending={pending} card={card} groupMembers={group?.members ?? null} />
+  return <Pending pending={pending} card={card} groupMembers={group?.members ?? null} empty={empty} />
 }
 
 /** /cards/$entityId/chat: a new chat with a card, made on its first send. */
@@ -770,6 +797,76 @@ export function RemoteStartChatPage() {
       ) : (
         <div className="chat-column pt-4">
           <Loading label="Loading the card…" onRetry={retry} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * /new/chat: a chat with nobody in it yet (the Chats page's New chat), made on its first send
+ * (owner, 2026-11-17: "The chat is created when the first message is sent"). It's the pending
+ * chat as for a card, with no characters: its title is typed where its greeting would be, and
+ * characters can join from the Cast tab before the send, greeting as they would.
+ */
+export function StartEmptyChatPage() {
+  const action = useAction()
+  const titleDraft = useUserDraft(EMPTY_CHAT_TITLE, "Title", "")
+  const [loaded, setLoaded] = useState<{ defaultPersona: EntityId | null; cards: ReadonlyArray<CastCard> } | null>(null)
+  useTitle("New chat")
+  const [attempt, setAttempt] = useState(0)
+  const retry = () => {
+    action.clearError()
+    setAttempt((n) => n + 1)
+  }
+  useEffect(() => {
+    void action
+      .run((client) =>
+        Effect.all({ cards: client("ListCards", undefined), defaults: client("GetGenerationDefaults", undefined) })
+      )
+      .then((result) => {
+        if (result.ok) setLoaded({ cards: result.value.cards, defaultPersona: result.value.defaults.persona ?? null })
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per attempt
+  }, [attempt])
+  const empty: EmptyStart = {
+    title: titleDraft.text,
+    sent: () => titleDraft.commit(titleDraft.text, async () => true),
+    intro: (
+      <div data-empty-chat-intro="" className="mx-3 flex flex-col gap-2 rounded-lg bg-surface-raised px-3 py-2">
+        <p className="text-sm text-muted">
+          A chat with no characters yet: for notes, or trying a model. Characters can join from the Cast tab. Your first
+          message starts the chat.
+        </p>
+        <UserDraftStatus draft={titleDraft} />
+        <Input
+          aria-label="Title of the new chat"
+          placeholder="Title (optional)"
+          value={titleDraft.text}
+          disabled={!titleDraft.ready}
+          onChange={(event) => titleDraft.setText(event.currentTarget.value)}
+        />
+      </div>
+    )
+  }
+  return (
+    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {loaded ? (
+        <PendingFor
+          card={null}
+          cards={loaded.cards}
+          greeters={[]}
+          group={null}
+          defaultPersona={loaded.defaultPersona}
+          empty={empty}
+        />
+      ) : action.error ? (
+        <div className="chat-column pt-4">
+          <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
+        </div>
+      ) : (
+        <div className="chat-column pt-4">
+          <Loading label="Loading…" onRetry={retry} />
         </div>
       )}
     </div>

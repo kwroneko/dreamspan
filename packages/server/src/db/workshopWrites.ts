@@ -44,7 +44,15 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
       return hit !== undefined
     })
   return {
-    CreateWorkshop: ({ userId, title, attachTo, card: chosenCard, persona: chosenPersona, preset: chosenPreset }) =>
+    CreateWorkshop: ({
+      userId,
+      title,
+      attachTo,
+      card: chosenCard,
+      persona: chosenPersona,
+      preset: chosenPreset,
+      grants
+    }) =>
       Effect.gen(function* () {
         // A side chat's story: the user's, live, of a kind that takes one (spec/WORKSHOP.md §4).
         const [story] =
@@ -150,6 +158,10 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           // §4: reading the story it's beside is allowed in this workshop; the strip can change it.
           yield* writeGrant(sql, userId, chatId, "chats.read", SIDE_STORY_READ_MODE)
         }
+        // What the assistant may do, chosen before the first message (the API checked each is
+        // offered): written as the strip's choices are, after the side chat's own.
+        for (const grant of grants ?? [])
+          yield* writeGrant(sql, userId, chatId, grant.capability, grant.mode, grant.target ?? "")
         yield* graph.insertStateEvent(userId, chatId, null, null, null, {
           key: "lcm.settings",
           // As a new story chat: the user's default (spec/WORKSHOP-CONTEXT.md §2.4).

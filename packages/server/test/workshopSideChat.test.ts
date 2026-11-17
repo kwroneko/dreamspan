@@ -495,6 +495,67 @@ describe("side chat", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("lists a new workshop's capabilities and keeps the grants chosen before the first message", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const story = yield* api.CreateChat({ title: "Grant story" })
+      // What a new one offers: beside a story, reading it allowed; of its own, no story tools.
+      const beside = yield* api.ListNewWorkshopCapabilities({ attachTo: story.id })
+      const read = beside.find((c) => c.id === "chats.read")!
+      assert.strictEqual(read.label, "Read this story")
+      assert.strictEqual(read.mode, "allow")
+      assert.isTrue(read.chosen)
+      const own = yield* api.ListNewWorkshopCapabilities({})
+      assert.notStrictEqual(own.find((c) => c.id === "chats.read")?.label, "Read this story")
+      // The same list a workshop made without choices shows.
+      const plain = yield* api.CreateWorkshop({ attachTo: story.id })
+      assert.deepStrictEqual(yield* api.ListWorkshopCapabilities({ chatId: plain.id }), beside)
+      // Grants chosen before the first message are the new workshop's, as the strip sets them.
+      const other = beside.find((c) => c.id !== "chats.read" && c.modes.includes("off") && !c.always)!
+      const made = yield* api.CreateWorkshop({
+        attachTo: story.id,
+        grants: [
+          { capability: "chats.read", mode: null },
+          { capability: other.id, mode: "off" }
+        ]
+      })
+      const after = yield* api.ListWorkshopCapabilities({ chatId: made.id })
+      const readAfter = after.find((c) => c.id === "chats.read")!
+      assert.isFalse(readAfter.chosen)
+      assert.strictEqual(readAfter.mode, readAfter.defaultMode)
+      assert.strictEqual(after.find((c) => c.id === other.id)!.mode, "off")
+      // One of its own takes them too.
+      const mine = yield* api.CreateWorkshop({ grants: [{ capability: other.id, mode: "off" }] })
+      assert.strictEqual(
+        (yield* api.ListWorkshopCapabilities({ chatId: mine.id })).find((c) => c.id === other.id)!.mode,
+        "off"
+      )
+      // Nothing a new workshop doesn't offer, nor a choice it can't take; nothing is made then.
+      const before = (yield* api.ListAttachedWorkshops({ chatId: story.id })).length
+      assert.strictEqual(
+        yield* outcome(api.CreateWorkshop({ attachTo: story.id, grants: [{ capability: "no.such", mode: "allow" }] })),
+        "GrantRefused"
+      )
+      assert.strictEqual(
+        yield* outcome(
+          api.CreateWorkshop({ attachTo: story.id, grants: [{ capability: "mcp", mode: "allow", target: "missing" }] })
+        ),
+        "GrantRefused"
+      )
+      const fixed = own.find((c) => c.always)
+      if (fixed)
+        assert.strictEqual(
+          yield* outcome(
+            api.CreateWorkshop({ grants: [{ capability: fixed.id, mode: fixed.modes[0] === "off" ? "allow" : "off" }] })
+          ),
+          "GrantRefused"
+        )
+      assert.strictEqual((yield* api.ListAttachedWorkshops({ chatId: story.id })).length, before)
+      assert.strictEqual(yield* outcome(api.ListNewWorkshopCapabilities({ attachTo: "missing" as never })), "NotFound")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("refuses archived stories, and preserves separate lifetimes through restore and purge", () => {
     const config = testConfig()
     return Effect.gen(function* () {

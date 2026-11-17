@@ -2,8 +2,10 @@
 // how much the assistant may do, opening a popover of full-width rows, one per capability, each
 // with what it allows and its Off / Ask first / Allowed choice. A choice is this workshop's
 // (`SetWorkshopGrant`), and Default puts it back to the app's default. One with a single choice
-// says so instead.
-import { useState } from "react"
+// says so instead. Before a workshop's first message (owner, 2026-11-17: its composer is the
+// saved one from the start), the same chip lists what a new one offers and holds the choices
+// made there, which its first send makes with it (`PendingCapabilityChip`).
+import { type ReactNode, useState } from "react"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import type { ChatId } from "@rp/shared/chat.ts"
@@ -21,26 +23,29 @@ import {
   chipLabel,
   chipText,
   choicesOf,
+  choosePending,
   modeDescriptionOf,
   modeLabelOf,
   modeText,
-  type WorkshopCapability
+  newCapabilitiesAtom,
+  type PendingGrants,
+  type WorkshopCapability,
+  withPendingGrants
 } from "./capabilities.ts"
 
-function CapabilityRow({ chatId, capability }: { chatId: ChatId; capability: WorkshopCapability }) {
-  const action = useAction()
+function CapabilityRow({
+  capability,
+  choose,
+  pending = false,
+  error = null
+}: {
+  capability: WorkshopCapability
+  /** A choice of mode; null goes back to the default. */
+  choose: (mode: CapabilityMode | null) => void
+  pending?: boolean
+  error?: ReactNode
+}) {
   const choices = choicesOf(capability)
-  const set = (mode: CapabilityMode | null) =>
-    void action.run(
-      (client) =>
-        client("SetWorkshopGrant", {
-          chatId,
-          capability: capability.id,
-          mode,
-          ...(capability.target ? { target: capability.target } : {})
-        }),
-      [CAPABILITIES_KEY]
-    )
   const about = capability.example
     ? `${capability.explanation} For example: ${capability.example}`
     : capability.explanation
@@ -67,7 +72,7 @@ function CapabilityRow({ chatId, capability }: { chatId: ChatId; capability: Wor
               label: modeLabelOf(capability, mode),
               description: `${modeDescriptionOf(capability, mode)}${mode === capability.defaultMode ? " (The default.)" : ""}`
             }))}
-            onValueChange={(mode) => mode !== capability.mode && set(mode)}
+            onValueChange={(mode) => mode !== capability.mode && choose(mode)}
           />
         ) : (
           <span className="text-right text-xs text-muted">{modeText(capability)}</span>
@@ -78,23 +83,51 @@ function CapabilityRow({ chatId, capability }: { chatId: ChatId; capability: Wor
         <Button
           variant="ghost"
           className="h-7 self-start px-2 text-xs"
-          pending={action.pending}
+          pending={pending}
           hint={`Goes back to the default here: ${modeLabelOf(capability, capability.defaultMode)}.`}
-          onClick={() => set(null)}
+          onClick={() => choose(null)}
         >
           Use the default
         </Button>
       )}
-      <ErrorAlert error={action.error} title="Not changed" />
+      {error}
     </li>
   )
 }
 
-export function CapabilityChip({ session }: ComposerControlContext) {
+/** A saved workshop's row: each choice is its grant at once. */
+function SavedCapabilityRow({ chatId, capability }: { chatId: ChatId; capability: WorkshopCapability }) {
+  const action = useAction()
+  const choose = (mode: CapabilityMode | null) =>
+    void action.run(
+      (client) =>
+        client("SetWorkshopGrant", {
+          chatId,
+          capability: capability.id,
+          mode,
+          ...(capability.target ? { target: capability.target } : {})
+        }),
+      [CAPABILITIES_KEY]
+    )
+  return (
+    <CapabilityRow
+      capability={capability}
+      choose={choose}
+      pending={action.pending}
+      error={<ErrorAlert error={action.error} title="Not changed" />}
+    />
+  )
+}
+
+/** The chip and its popover of rows. */
+function CapabilityPopover({
+  capabilities,
+  row
+}: {
+  capabilities: ReadonlyArray<WorkshopCapability>
+  row: (capability: WorkshopCapability) => ReactNode
+}) {
   const [open, setOpen] = useState(false)
-  const result = useAtomValue(capabilitiesAtom(session.chatId))
-  if (!AsyncResult.isSuccess(result)) return <LoadingChip label="What the assistant may do" />
-  const capabilities = result.value
   return (
     <Popover
       open={open}
@@ -111,15 +144,55 @@ export function CapabilityChip({ session }: ComposerControlContext) {
         className="flex min-h-0 flex-col overflow-y-auto"
         data-layout-audit-ignore="inset: Unbordered list of full-width rows, inset by the popover's padding"
       >
-        {capabilities.map((capability) => (
-          <CapabilityRow
-            key={`${capability.id}:${capability.target ?? ""}`}
-            chatId={session.chatId}
-            capability={capability}
-          />
-        ))}
+        {capabilities.map(row)}
       </ul>
       <p className="shrink-0 border-t border-border px-2 pt-2 text-xs text-muted">These hold for this workshop only.</p>
     </Popover>
+  )
+}
+
+export function CapabilityChip({ session }: ComposerControlContext) {
+  const result = useAtomValue(capabilitiesAtom(session.chatId))
+  if (!AsyncResult.isSuccess(result)) return <LoadingChip label="What the assistant may do" />
+  return (
+    <CapabilityPopover
+      capabilities={result.value}
+      row={(capability) => (
+        <SavedCapabilityRow
+          key={`${capability.id}:${capability.target ?? ""}`}
+          chatId={session.chatId}
+          capability={capability}
+        />
+      )}
+    />
+  )
+}
+
+/**
+ * The chip of a workshop not made yet: what a new one offers (beside the story `attachTo`, or of
+ * its own), with the choices made here, which its first send makes with it.
+ */
+export function PendingCapabilityChip({
+  attachTo,
+  grants,
+  onGrants
+}: {
+  attachTo: ChatId | null
+  grants: PendingGrants
+  onGrants: (next: PendingGrants) => void
+}) {
+  const result = useAtomValue(newCapabilitiesAtom(attachTo ?? ""))
+  if (!AsyncResult.isSuccess(result)) return <LoadingChip label="What the assistant may do" />
+  return (
+    <CapabilityPopover
+      capabilities={withPendingGrants(result.value, grants)}
+      row={(capability) => (
+        <CapabilityRow
+          key={`${capability.id}:${capability.target ?? ""}`}
+          capability={capability}
+          choose={(mode) => onGrants(choosePending(grants, capability, mode))}
+        />
+      )}
+    />
   )
 }

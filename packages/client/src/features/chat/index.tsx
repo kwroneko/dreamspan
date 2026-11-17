@@ -36,6 +36,9 @@ const StartChatPage = lazy(() => import("./StartChatPage.tsx").then((module) => 
 const RemoteStartChatPage = lazy(() =>
   import("./StartChatPage.tsx").then((module) => ({ default: module.RemoteStartChatPage }))
 )
+const StartEmptyChatPage = lazy(() =>
+  import("./StartChatPage.tsx").then((module) => ({ default: module.StartEmptyChatPage }))
+)
 const StartGroupChatPage = lazy(() =>
   import("./StartChatPage.tsx").then((module) => ({ default: module.StartGroupChatPage }))
 )
@@ -59,6 +62,14 @@ function LazyStartGroupChatPage() {
   return (
     <Suspense fallback={<Loading label="Loading the group…" onRetry={reloadPage} />}>
       <StartGroupChatPage />
+    </Suspense>
+  )
+}
+
+function LazyStartEmptyChatPage() {
+  return (
+    <Suspense fallback={<Loading label="Loading…" onRetry={reloadPage} />}>
+      <StartEmptyChatPage />
     </Suspense>
   )
 }
@@ -123,8 +134,9 @@ export const register = () => {
     id: "chat.start",
     order: 100,
     match: (url) =>
-      /^\/(?:cards\/[^/]+\/chat|groups\/[^/]+\/new|sources\/[^/]+\/cards\/[^/]+\/chat)$/.exec(url.pathname)?.[0] ??
-      null,
+      /^\/(?:cards\/[^/]+\/chat|groups\/[^/]+\/new|sources\/[^/]+\/cards\/[^/]+\/chat|new\/chat)$/.exec(
+        url.pathname
+      )?.[0] ?? null,
     title: () => "New chat",
     icon: "chat",
     document: true
@@ -192,6 +204,15 @@ export const register = () => {
     parent: "app",
     path: "/sources/$sourceId/cards/$remoteId/chat",
     component: LazyRemoteStartChatPage,
+    fill: true,
+    retainSearch: sidebarSearch
+  })
+  // A chat with nobody in it yet (the Chats page's New chat), the same way: made by its first send.
+  routes.register({
+    id: "chat.startEmpty",
+    parent: "app",
+    path: "/new/chat",
+    component: LazyStartEmptyChatPage,
     fill: true,
     retainSearch: sidebarSearch
   })

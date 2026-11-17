@@ -7,10 +7,7 @@ import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import type { Chat } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
-import type { Effect } from "effect"
 import { type FormEvent, type ReactNode, useEffect } from "react"
-import { ErrorAlert, useAction } from "../../actions.tsx"
-import type { AppClient } from "../../rpc.ts"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
@@ -35,39 +32,41 @@ export function ChatBadges({ chat }: { chat: Pick<Chat, "title" | "kind"> }) {
  */
 export const chatStartSections = defineSlot<object>("chats.start-sections")
 
+/** Where an empty chat's title is kept until it's made: the start card and the page share it. */
+export const EMPTY_CHAT_TITLE = "chat:new"
+
 /**
- * A start card's form: an optional title and its button, the title kept as a draft until the
- * chat is made, which then opens.
+ * A start card's form: an optional title and its button, which opens the chat not made yet
+ * (`to`, with `search`); it's made by its first message there (owner, 2026-11-17: "The chat is
+ * created when the first message is sent"), and the title, kept as a draft, can change there too.
  */
 export function StartChatForm({
   draft,
   label,
   button,
   hint,
-  create,
+  to,
+  search = {},
   extra
 }: {
-  /** The user draft the title is kept under. */
+  /** The user draft the title is kept under, which the page opened reads. */
   draft: string
   /** The title field's accessible name. */
   label: string
   button: string
   hint: string
-  create: (client: AppClient["Service"], title: string) => Effect.Effect<Chat, unknown>
+  /** The page of the chat not made yet. */
+  to: "/new/chat" | "/new/workshop"
+  search?: Record<string, string>
   /** Choices above the title, such as who a workshop starts with. */
   extra?: ReactNode
 }) {
-  const action = useAction()
   const navigate = useNavigate()
   const durable = useUserDraft(draft, "Title", "")
   const { text: title, setText: setTitle } = durable
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    await durable.commit(title, async () => {
-      const result = await action.run((client) => create(client, title), ["chats"])
-      if (result.ok) void navigate({ to: "/chats/$chatId", params: { chatId: result.value.id } })
-      return result.ok
-    })
+    void navigate({ to, search })
   }
   return (
     <form onSubmit={submit} className="flex flex-col gap-2">
@@ -80,11 +79,10 @@ export function StartChatForm({
           value={title}
           onChange={(event) => setTitle(event.currentTarget.value)}
         />
-        <Button hint={hint} type="submit" pending={action.pending}>
+        <Button hint={hint} type="submit">
           {button}
         </Button>
       </div>
-      <ErrorAlert error={action.error} />
     </form>
   )
 }
@@ -93,13 +91,13 @@ export function StartChatForm({
 export function EmptyChatCard() {
   return (
     <Card>
-      <CardHeader title="A chat without characters" about="Characters can join later, from the composer." />
+      <CardHeader title="A chat without characters" about="Characters can join later, from the Cast tab." />
       <StartChatForm
-        draft="chat:new"
+        draft={EMPTY_CHAT_TITLE}
         label="Title of the new chat"
         button="New chat"
-        hint="Opens a new chat."
-        create={(client, title) => client("CreateChat", { title })}
+        hint="Opens a new chat. It's saved when you send its first message."
+        to="/new/chat"
       />
     </Card>
   )

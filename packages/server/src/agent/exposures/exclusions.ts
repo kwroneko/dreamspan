@@ -182,6 +182,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ListMediaApproval: "User-only security, consent, account, credential or network configuration.",
   ListModelUse: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListModels: "Not in W6's first exposures; use the bounded workshop read tools.",
+  ListNewWorkshopCapabilities: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListProviderKinds: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListProviders: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListQueued: "Not in W6's first exposures; use the bounded workshop read tools.",

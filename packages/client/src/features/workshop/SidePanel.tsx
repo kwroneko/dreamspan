@@ -44,7 +44,7 @@ import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
 import { useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { useOpenBesideThis } from "./storyLink.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { PendingSideChat } from "./PendingSideChat.tsx"
+import { PendingSideChat } from "./PendingWorkshop.tsx"
 import {
   chooseSideChat,
   NEW_SIDE_CHAT,

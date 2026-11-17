@@ -18,13 +18,19 @@ import { internal } from "./internal.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
 import { MCP_CAPABILITY } from "../agent/capabilities.ts"
 import { mcpHostOf } from "../agent/tools/mcp.ts"
-import { foldState } from "@rp/shared/state.ts"
-import { capabilityView } from "../agent/capabilities.ts"
+import { type ChatState, foldState } from "@rp/shared/state.ts"
+import { capabilityView, SIDE_STORY_READ_MODE } from "../agent/capabilities.ts"
+import { chatKinds } from "@rp/shared/chatKinds.ts"
+import { NotFound } from "@rp/shared/errors.ts"
+import type { McpConnection } from "@rp/shared/mcp.ts"
 import { cancelCapability, deliverAnswer } from "../agent/approvals.ts"
 import { CARD_SKILLS } from "../agent/tools/loading.ts"
 import { matchPatterns } from "../agent/toolLoading.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
+
+/** The kind a workshop is made as (db/workshopWrites.ts). */
+const WORKSHOP_KIND = "workshop"
 
 export const makeWorkshopHandlers = Effect.gen(function* () {
   const writer = yield* Writer
@@ -109,63 +115,54 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       }),
       Effect.tap((effect) => notifyUndo(actor.id, [effect]))
     )
-  /** The capabilities of the tools this chat's kind offers, as they stand in it. */
-  const capabilitiesOf = (userId: UserId, chatId: ChatId) =>
+  /**
+   * The capabilities of the tools a chat of `kind` offers with `state`, as `grants` and the MCP
+   * servers' rows stand; `story`, the story a side chat is beside.
+   */
+  const capabilitiesFrom = (
+    kind: string,
+    state: ChatState,
+    grants: ReadonlyMap<string, CapabilityMode>,
+    story: { readonly title: string | null } | null,
+    connections: ReadonlyArray<{ readonly connection: McpConnection; readonly grant: CapabilityMode | null }>
+  ) =>
     Effect.gen(function* () {
-      const chat = yield* reader.GetChat({ userId, chatId })
-      const profile = execution.chatKinds.get(chat.kind)
-      if (!profile?.allowsOutside) return []
-      const state = foldState(
-        yield* reader.StateEventsAt({ userId, chatId, slotId: chat.activeLeafSlotId, forkId: chat.currentForkId })
-      )
-      const plan = execution.orchestrationModes.get(profile.planner)?.plan({ state, kind: chat.kind })
+      const profile = execution.chatKinds.get(kind)
+      if (!profile?.allowsOutside) return [] as Array<WorkshopCapability>
+      const plan = execution.orchestrationModes.get(profile.planner)?.plan({ state, kind })
       const offered = new Set(
         (plan?.tools ?? []).flatMap((name) => {
-          const capability = toolForKind(execution, chat.kind, name)?.capability
+          const capability = toolForKind(execution, kind, name)?.capability
           return capability ? [capability] : []
         })
       )
-      // A kind that loads some of its tools as it goes may load a card's skills (spec/TOOL-LOADING.md §6).
       // A setting shown with the capability it belongs to (Internet from commands, with Run commands).
       for (const entry of execution.workshopCapabilities.list())
         if (entry.alongside && offered.has(entry.alongside)) offered.add(entry.id)
-      const loading = execution.toolLoadingProfiles.get(chat.kind)
+      // A kind that loads some of its tools as it goes may load a card's skills (spec/TOOL-LOADING.md §6).
+      const loading = execution.toolLoadingProfiles.get(kind)
       const planned = plan?.tools ?? []
       if (loading && matchPatterns(planned, loading.immediate).length < planned.length) offered.add(CARD_SKILLS)
-      const grants = new Map<string, CapabilityMode>(
-        (yield* reader.WorkshopGrants({ userId, chatId, now: Date.now() })).map((g) => [g.capability, g.mode])
-      )
-      const story =
-        state.workshopAttached === undefined
-          ? null
-          : yield* reader
-              .GetChat({
-                userId,
-                chatId: state.workshopAttached as ChatId
-              })
-              .pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
       // One row per MCP server the user can use (spec/MCP.md §13.3), after the built-ins, in
       // creation order: On or Off here, else the server's Workshops switch.
       const mcpEntry = execution.workshopCapabilities.get(MCP_CAPABILITY)
       const servers = mcpEntry
-        ? (yield* reader.McpWorkshopConnections({ userId, chatId })).map(
-            ({ connection, grant }, index): WorkshopCapability => {
-              const host = mcpHostOf(connection)
-              const defaultMode = connection.use.workshops ? "allow" : "off"
-              const chosen = grant === "allow" || grant === "off"
-              return {
-                id: MCP_CAPABILITY,
-                target: connection.id,
-                order: mcpEntry.order + index,
-                label: connection.name,
-                explanation: `Uses ${connection.name}'s tools. Each call sends what the assistant writes in it to ${host}.`,
-                mode: chosen ? grant : defaultMode,
-                defaultMode,
-                modes: ["off", "allow"],
-                chosen
-              }
+        ? connections.map(({ connection, grant }, index): WorkshopCapability => {
+            const host = mcpHostOf(connection)
+            const defaultMode = connection.use.workshops ? "allow" : "off"
+            const chosen = grant === "allow" || grant === "off"
+            return {
+              id: MCP_CAPABILITY,
+              target: connection.id,
+              order: mcpEntry.order + index,
+              label: connection.name,
+              explanation: `Uses ${connection.name}'s tools. Each call sends what the assistant writes in it to ${host}.`,
+              mode: chosen ? grant : defaultMode,
+              defaultMode,
+              modes: ["off", "allow"],
+              chosen
             }
-          )
+          })
         : []
       // Commands without a sandbox here: the row says why and how to fix it (spec §3.3).
       const noCommands = offered.has("commands") ? yield* files.commandsUnavailable() : null
@@ -191,12 +188,61 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         )
       return [...builtins, ...servers]
     })
+  /** The capabilities of the tools this chat's kind offers, as they stand in it. */
+  const capabilitiesOf = (userId: UserId, chatId: ChatId) =>
+    Effect.gen(function* () {
+      const chat = yield* reader.GetChat({ userId, chatId })
+      if (!execution.chatKinds.get(chat.kind)?.allowsOutside) return []
+      const state = foldState(
+        yield* reader.StateEventsAt({ userId, chatId, slotId: chat.activeLeafSlotId, forkId: chat.currentForkId })
+      )
+      const grants = new Map<string, CapabilityMode>(
+        (yield* reader.WorkshopGrants({ userId, chatId, now: Date.now() })).map((g) => [g.capability, g.mode])
+      )
+      const story =
+        state.workshopAttached === undefined
+          ? null
+          : yield* reader
+              .GetChat({
+                userId,
+                chatId: state.workshopAttached as ChatId
+              })
+              .pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
+      const connections = execution.workshopCapabilities.get(MCP_CAPABILITY)
+        ? yield* reader.McpWorkshopConnections({ userId, chatId })
+        : []
+      return yield* capabilitiesFrom(chat.kind, state, grants, story, connections)
+    })
+  /**
+   * What a workshop not made yet offers (owner, 2026-11-17: its composer is the saved one before
+   * the first send): as `CreateWorkshop` makes it, with no choices of its own yet. Beside a
+   * story, its reading of the story is allowed, as that write makes it.
+   */
+  const newCapabilitiesOf = (userId: UserId, attachTo: ChatId | undefined) =>
+    Effect.gen(function* () {
+      const story = attachTo === undefined ? null : yield* reader.GetChat({ userId, chatId: attachTo })
+      if (attachTo !== undefined && (story?.status !== "active" || chatKinds.get(story.kind)?.allowsSideChat !== true))
+        return yield* new NotFound({ entity: "chat", id: attachTo })
+      const state: ChatState = attachTo === undefined ? foldState([]) : { ...foldState([]), workshopAttached: attachTo }
+      const grants = new Map<string, CapabilityMode>(
+        attachTo === undefined ? [] : [["chats.read", SIDE_STORY_READ_MODE]]
+      )
+      const connections = execution.workshopCapabilities.get(MCP_CAPABILITY)
+        ? (yield* reader.McpStoryConnections({ userId })).map((connection) => ({ connection, grant: null }))
+        : []
+      return yield* capabilitiesFrom(WORKSHOP_KIND, state, grants, story, connections)
+    })
   return {
     ListWorkshopCapabilities: ({ chatId }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
         return yield* capabilitiesOf(userId, chatId)
       }).pipe(internal("ListWorkshopCapabilities")),
+    ListNewWorkshopCapabilities: ({ attachTo }) =>
+      Effect.gen(function* () {
+        const userId = (yield* CurrentUser).id
+        return yield* newCapabilitiesOf(userId, attachTo)
+      }).pipe(internal("ListNewWorkshopCapabilities")),
     // Only the user's own request reaches this: no tool is given these operations.
     SetWorkshopGrant: ({ chatId, capability, mode, target }) =>
       Effect.gen(function* () {
@@ -281,9 +327,22 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       Effect.flatMap(CurrentUser, (user) => writer.SetWorkshopPersona({ userId: user.id, persona })).pipe(
         internal("SetWorkshopPersona")
       ),
+    // Grants chosen before the first message: only what a new workshop offers, each as
+    // `SetWorkshopGrant` would take it there, so nothing the strip couldn't set gets in.
     CreateWorkshop: (input) =>
-      Effect.flatMap(CurrentUser, (user) => writer.CreateWorkshop({ ...input, userId: user.id })).pipe(
-        internal("CreateWorkshop")
-      )
+      Effect.gen(function* () {
+        const userId = (yield* CurrentUser).id
+        const grants = input.grants ?? []
+        if (grants.length > 0) {
+          const offered = yield* newCapabilitiesOf(userId, input.attachTo)
+          for (const grant of grants) {
+            const row = offered.find((c) => c.id === grant.capability && (c.target ?? "") === (grant.target ?? ""))
+            if (!row) return yield* new GrantRefused({ message: "A new workshop doesn't offer that." })
+            if (grant.mode !== null && !row.modes.includes(grant.mode))
+              return yield* new GrantRefused({ message: `“${row.label}” can't be set that way.` })
+          }
+        }
+        return yield* writer.CreateWorkshop({ ...input, userId })
+      }).pipe(internal("CreateWorkshop"))
   } satisfies Parameters<typeof WorkshopApi.of>[0]
 })

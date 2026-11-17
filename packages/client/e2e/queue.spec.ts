@@ -1,6 +1,7 @@
 // The conflict must stay queued while both tabs edit, whatever the host's load.
 import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { asPage } from "./support/rpc.ts"
 
 // A reply lasts at least 100 seconds, beyond this test's 60-second deadline. The
 // test stops it explicitly; the other chat flows keep their short synthetic replies.
@@ -18,9 +19,9 @@ test("saving a queued message another tab changed meanwhile is a conflict, not a
     })
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/chats`)
-  await page.getByLabel("Title of the new chat").fill("Queue conflict")
-  await page.getByRole("button", { name: "New chat" }).click()
+  // Made before its first message (New chat makes nothing until then): both tabs open the saved chat.
+  const chat = await asPage(page, server(), (api) => api.CreateChat({ title: "Queue conflict" }))
+  await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(page.getByRole("heading", { name: "Queue conflict", level: 1 })).toBeVisible()
   const other = await context.newPage()
   await other.goto(page.url())
@@ -67,6 +68,8 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "New chat" }).click()
     await composer(page).fill("Start a long reply.")
     await page.getByRole("button", { name: "Send", exact: true }).click()
+    // New chat opens the chat not made yet; the first send makes it and moves to its page.
+    await expect(page).toHaveURL(/\/chats\/[^/?]+/)
     await expect(page.getByText("generating", { exact: true })).toBeVisible()
 
     const image = await page.evaluate(() => {

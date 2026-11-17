@@ -2,7 +2,7 @@
 // this workshop, the choices it offers, and the chip's words.
 import { Atom } from "effect/reactivity"
 import type { ChatId } from "@rp/shared/chat.ts"
-import type { CapabilityMode, WorkshopCapability } from "@rp/shared/workshopApi.ts"
+import type { CapabilityMode, WorkshopCapability, WorkshopGrantChoice } from "@rp/shared/workshopApi.ts"
 import { AppClient } from "../../rpc.ts"
 
 export type { WorkshopCapability } from "@rp/shared/workshopApi.ts"
@@ -59,3 +59,49 @@ export const chipLabel = (capabilities: ReadonlyArray<WorkshopCapability>) => {
   const off = capabilities.filter((c) => c.mode === "off").length
   return `What the assistant may do: ${can} allowed${asks > 0 ? `, ${asks} asking first` : ""}${off > 0 ? `, ${off} off` : ""}`
 }
+
+/**
+ * What a workshop not made yet would offer (`ListNewWorkshopCapabilities`): one beside the story
+ * `attachTo`, or ("") one of its own. Its composer's chip lists them before the first send.
+ */
+export const newCapabilitiesAtom = Atom.family((attachTo: string) =>
+  AppClient.query("ListNewWorkshopCapabilities", attachTo === "" ? {} : { attachTo: attachTo as ChatId }, {
+    reactivityKeys: [CAPABILITIES_KEY, `new:${attachTo}`]
+  })
+)
+
+/** Grants chosen before the first send, by capability and target (`grantKey`), as `CreateWorkshop` takes them. */
+export type PendingGrants = ReadonlyMap<string, WorkshopGrantChoice>
+
+/** One row's key: its capability and, for an MCP server, its target. */
+export const grantKey = (capability: string, target?: string) => JSON.stringify([capability, target ?? ""])
+
+/** A choice on a row before the first send: its mode, or null for the default. */
+export const choosePending = (
+  grants: PendingGrants,
+  capability: WorkshopCapability,
+  mode: CapabilityMode | null
+): PendingGrants => {
+  const next = new Map(grants)
+  next.set(grantKey(capability.id, capability.target), {
+    capability: capability.id,
+    mode,
+    ...(capability.target === undefined ? {} : { target: capability.target })
+  })
+  return next
+}
+
+/** The rows as they'll stand once made: the server's, with the choices made before the first send. */
+export const withPendingGrants = (
+  capabilities: ReadonlyArray<WorkshopCapability>,
+  grants: PendingGrants
+): ReadonlyArray<WorkshopCapability> =>
+  grants.size === 0
+    ? capabilities
+    : capabilities.map((capability) => {
+        const choice = grants.get(grantKey(capability.id, capability.target))
+        if (choice === undefined) return capability
+        return choice.mode === null
+          ? { ...capability, mode: capability.defaultMode, chosen: false }
+          : { ...capability, mode: choice.mode, chosen: true }
+      })

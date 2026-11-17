@@ -1477,7 +1477,19 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         yield* refused(actor.api.CreateWorkshop({ persona: owner.cardId }), "NotFound")
         // Another user's preset, chosen before the first message.
         yield* refused(actor.api.CreateWorkshop({ preset: { _tag: "Lock", ref: owner.refId } }), "NotFound")
+        // Grants chosen before the first message, beside another user's story.
+        yield* refused(
+          actor.api.CreateWorkshop({
+            attachTo: owner.chat.chatId,
+            grants: [{ capability: "chats.read", mode: "off" }]
+          }),
+          "NotFound"
+        )
       })
+  },
+  ListNewWorkshopCapabilities: {
+    // What a workshop beside another user's story would offer.
+    probe: (actor, owner) => refused(actor.api.ListNewWorkshopCapabilities({ attachTo: owner.chat.chatId }), "NotFound")
   },
   ListAttachedWorkshops: {
     probe: (actor, owner) => refused(actor.api.ListAttachedWorkshops({ chatId: owner.chat.chatId }), "NotFound")
