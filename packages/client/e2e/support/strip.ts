@@ -45,3 +45,19 @@ export const pickReply = async (page: Page, name: string | null) => {
   ).click()
   await expect(group).toHaveCount(0)
 }
+
+/**
+ * The capability chip's text as a whole-string pattern, from counts of the registered workshop
+ * capabilities (ListWorkshopCapabilities), so adding a capability doesn't break a spec.
+ */
+export const capabilityChip = (counts: { readonly can: number; readonly asks: number; readonly off?: number }) =>
+  new RegExp(
+    `^Can: ${counts.can}${counts.asks > 0 ? ` · Asks: ${counts.asks}` : ""}${counts.off ? ` · Off: ${counts.off}` : ""}$`
+  )
+
+/** How many of a workshop's capabilities are allowed, ask first, and off. */
+export const capabilityCounts = (capabilities: ReadonlyArray<{ readonly mode: string }>) => ({
+  can: capabilities.filter((c) => c.mode === "allow").length,
+  asks: capabilities.filter((c) => c.mode === "ask").length,
+  off: capabilities.filter((c) => c.mode === "off").length
+})
