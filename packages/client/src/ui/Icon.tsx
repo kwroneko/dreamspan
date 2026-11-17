@@ -288,7 +288,15 @@ const paths = {
   camera: [
     "M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z",
     "M12 16a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"
-  ]
+  ],
+  /** A folder in Files. */
+  folder: [
+    "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"
+  ],
+  /** A file in Files. */
+  file: ["M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z", "M14 2v4a2 2 0 0 0 2 2h4"],
+  /** Sends files from this device: the reverse of download. */
+  upload: ["M12 3v12", "m17 8-5-5-5 5", "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"]
 } as const
 
 export type IconName = keyof typeof paths

@@ -7,7 +7,7 @@
 // name in the opened folder and are renamed over the target, which replaces a link rather than
 // following it. Main-thread async file I/O only; no SQLite. Linux (procfs) only.
 import { constants, type Stats } from "node:fs"
-import { lstat, open, readdir, rename, unlink, mkdir, type FileHandle } from "node:fs/promises"
+import { lstat, open, readdir, rename, unlink, mkdir, rmdir, type FileHandle } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 
 const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_DIRECTORY, O_NOFOLLOW, O_NONBLOCK } = constants
@@ -174,6 +174,28 @@ export const removeFile = async (root: string, segments: ReadonlyArray<string>) 
   } finally {
     await dir.close()
   }
+}
+
+/**
+ * Removes the entry `name` in the opened folder `dir` and, for a folder, everything in it. Each
+ * subfolder is opened with O_DIRECTORY|O_NOFOLLOW and walked through its own descriptor, so a
+ * link swapped in for a folder mid-walk is unlinked, never followed (unlike `rm -r` by path).
+ */
+export const removeTreeAt = async (dir: FileHandle, name: string): Promise<void> => {
+  let sub: FileHandle
+  try {
+    sub = await open(at(dir, name), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === "ENOTDIR" || code === "ELOOP") return unlink(at(dir, name))
+    throw error
+  }
+  try {
+    for (const child of await readdir(`/proc/self/fd/${sub.fd}`)) await removeTreeAt(sub, child)
+  } finally {
+    await sub.close()
+  }
+  await rmdir(at(dir, name))
 }
 
 /** Removes an empty folder; used to put back folders an undone creation made. */
