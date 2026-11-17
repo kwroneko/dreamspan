@@ -118,6 +118,7 @@ function Row({
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="flex min-w-0 items-baseline gap-2">
               <span
+                data-layout-name
                 className={`truncate ${unseen > 0 ? "font-semibold" : "font-medium"}`}
                 onMouseEnter={titleIfClipped(name.name)}
               >
@@ -139,7 +140,11 @@ function Row({
               )}
             </span>
             {others.length > 0 && (
-              <span className="truncate text-xs text-muted" onMouseEnter={titleIfClipped(others.join(", "))}>
+              <span
+                data-layout-name
+                className="truncate text-xs text-muted"
+                onMouseEnter={titleIfClipped(others.join(", "))}
+              >
                 with {others.join(", ")}
               </span>
             )}

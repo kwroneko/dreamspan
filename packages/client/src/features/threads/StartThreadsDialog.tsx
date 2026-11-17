@@ -64,7 +64,9 @@ function CastChip({
       >
         {pressed && <Icon name="check" size={12} className="shrink-0" />}
         {mine && <Icon name="person" size={12} className="shrink-0" />}
-        <span className="truncate">{name}</span>
+        <span data-layout-name className="truncate">
+          {name}
+        </span>
       </button>
     </Tooltip>
   )

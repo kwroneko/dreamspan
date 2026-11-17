@@ -117,6 +117,7 @@ function EntryRow({
           <Link
             to="/library/$refId"
             params={{ refId: entry.refId }}
+            data-layout-name
             className="min-w-0 truncate text-sm font-medium text-accent hover:underline"
           >
             {entry.label || "Untitled"}

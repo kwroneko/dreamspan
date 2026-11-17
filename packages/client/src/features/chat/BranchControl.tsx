@@ -111,7 +111,9 @@ function BranchRow({
             onEditingChange={setRenaming}
             onRename={onRename}
           >
-            <span className="min-w-0 truncate font-medium">{label}</span>
+            <span data-layout-name className="min-w-0 truncate font-medium">
+              {label}
+            </span>
           </InlineRename>
           {fork.current && !renaming && (
             <Tooltip label={OPENS_HERE_HINT}>

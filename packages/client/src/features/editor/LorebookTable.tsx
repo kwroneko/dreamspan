@@ -162,6 +162,7 @@ function TitleCell({
             <button
               type="button"
               onClick={onKeys}
+              data-layout-name
               className="max-w-full min-w-0 truncate rounded-sm px-2 text-left text-xs text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
               aria-label={`Keys of ${title}: ${keys || "none"}. Open the entry to edit them.`}
             >

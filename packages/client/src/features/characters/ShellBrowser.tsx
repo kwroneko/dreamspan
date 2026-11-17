@@ -376,12 +376,12 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
                 return result.ok
               }}
             >
-              <span data-chat-title className="min-w-0 truncate font-medium">
+              <span data-chat-title data-layout-name className="min-w-0 truncate font-medium">
                 {title}
               </span>
             </InlineRename>
           ) : (
-            <span data-chat-title className="min-w-0 flex-1 truncate font-medium">
+            <span data-chat-title data-layout-name className="min-w-0 flex-1 truncate font-medium">
               {title}
             </span>
           )}
@@ -1252,6 +1252,7 @@ function Browser() {
                 <Tooltip label={`Back to ${cardLabel}'s chats.`}>
                   <button
                     type="button"
+                    data-layout-name
                     className="min-w-0 truncate text-accent hover:underline"
                     onClick={() => setScope({ entity: scope.entity, chat: null })}
                   >
@@ -1259,7 +1260,12 @@ function Browser() {
                   </button>
                 </Tooltip>
               ) : (
-                <span aria-current="location" className="min-w-0 truncate font-medium" title={cardLabel}>
+                <span
+                  aria-current="location"
+                  data-layout-name
+                  className="min-w-0 truncate font-medium"
+                  title={cardLabel}
+                >
                   {cardLabel}
                 </span>
               )}
@@ -1270,7 +1276,7 @@ function Browser() {
               <span aria-hidden className="shrink-0 text-muted">
                 ›
               </span>
-              <span aria-current="location" className="min-w-0 truncate font-medium" title={chatLabel}>
+              <span aria-current="location" data-layout-name className="min-w-0 truncate font-medium" title={chatLabel}>
                 {chatLabel}
               </span>
             </>

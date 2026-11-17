@@ -740,7 +740,9 @@ export function SharedNotePicker({
                   className="flex w-full min-w-0 flex-col gap-0.5 rounded-md border border-border px-3 py-2 text-left outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
                 >
                   <span className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{note.title || "Untitled"}</span>
+                    <span data-layout-name className="truncate text-sm font-medium">
+                      {note.title || "Untitled"}
+                    </span>
                     <span className="shrink-0 text-xs text-muted">
                       {note.usedBy === 0 ? "unused" : `used in ${note.usedBy}`}
                     </span>

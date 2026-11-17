@@ -1,5 +1,5 @@
 import { Tooltip } from "../../ui/Tooltip.tsx"
-import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
+import { CenterHeaderContent, compactHeaderControls } from "../../ui/CenterHeader.tsx"
 import { DocumentSwitcher } from "../editor/DocumentSwitcher.tsx"
 import { SNIPPET_FOCUS } from "../editor/workspaceViews.ts"
 // A snippet in the large editor (owner, 2026-11-02): open in the chat's centre column while the
@@ -88,7 +88,7 @@ export function SnippetLarge({
         </Tooltip>
       )}
       <CenterHeaderContent>
-        <header className="flex min-w-0 items-center gap-2">
+        <header className={`flex min-w-0 items-center gap-2 ${compactHeaderControls}`}>
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <InlineRename
               value={typedTitle}

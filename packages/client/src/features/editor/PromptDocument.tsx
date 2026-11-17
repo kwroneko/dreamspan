@@ -476,7 +476,11 @@ function PromptBlock({
       open={!collapsed}
       onToggle={toggle}
       label={name}
-      name={<span className="block truncate">{name}</span>}
+      name={
+        <span data-layout-name className="block truncate">
+          {name}
+        </span>
+      }
       hint={collapsed ? "Click to show the prompt’s text" : "Click to hide the prompt’s text"}
       derived={label.derived}
       dim={!entry.enabled}
