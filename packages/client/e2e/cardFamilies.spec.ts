@@ -227,7 +227,8 @@ for (const width of [1440, 390])
       try {
         await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
           Effect.gen(function* () {
-            for (let n = 0; n < 3; n++) yield* api.CreateCard({ label: `Synthetic ${n}`, name: `Synthetic ${n}` })
+            // One row of tiles: short at every width, also under two rows of navigation tiles.
+            for (let n = 0; n < 2; n++) yield* api.CreateCard({ label: `Synthetic ${n}`, name: `Synthetic ${n}` })
           })
         )
         await apiLogin(page.request, server, ADMIN.handle, ADMIN.password)

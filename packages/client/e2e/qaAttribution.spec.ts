@@ -235,14 +235,17 @@ for (const width of [1440, 390])
       await expect(heading).toBeVisible()
       // The title can appear before the branch control finishes loading. Check
       // the final header rather than that transient extra space.
-      await expect(page.getByRole("button", { name: /^Branch: Original, 1 of 1:/ })).toBeDisabled()
+      const branch = page.getByRole("button", { name: /^Branch: Original, 1 of 1:/ })
+      await expect(branch).toBeDisabled()
       // A clamped title still has the full accessible name, so inspect its actual text box.
       const label = heading.locator("span").first()
-      await expect
-        .poll(() =>
-          label.evaluate((node) => node.scrollHeight <= node.clientHeight && node.scrollWidth <= node.clientWidth)
-        )
-        .toBeTruthy()
+      const whole = (node: Element) => node.scrollHeight <= node.clientHeight && node.scrollWidth <= node.clientWidth
+      if (width === 390) {
+        // At phone width the chat's name gives up room before a short branch name does
+        // (branchlabel1, 2026-11-17): "Original" shows in full, and the name keeps its 6rem.
+        await expect.poll(() => branch.locator("span").last().evaluate(whole)).toBeTruthy()
+        await expect.poll(async () => (await label.boundingBox())!.width).toBeGreaterThanOrEqual(96)
+      } else await expect.poll(() => label.evaluate(whole)).toBeTruthy()
       // Since the one-row header (4c46cbd5) the name's box is as wide as its text, not the room
       // around it, so the check above (nothing cut off) is what "the full name has room" means.
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()

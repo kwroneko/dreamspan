@@ -260,9 +260,14 @@ test("the menu's confirmation applies the edited title", async ({ page }) => {
   await confirm(page).getByRole("button", { name: "Make its own chat", exact: true }).click()
   await expect(page.getByText("Branch is now its own chat", { exact: true })).toBeVisible()
   await expect(chatRow(page, f.market)).toContainText("Market days")
+  // At 1000 px, under two rows of navigation tiles, the column is short for both foot lists, so
+  // Related chats starts folded; its header shows it.
+  const related = page.getByRole("region", { name: "Related chats", exact: true })
+  await expect(related).toHaveAttribute("aria-busy", "false")
+  const relatedToggle = related.getByRole("button", { name: /^Related chats \(/ })
+  if ((await relatedToggle.getAttribute("aria-expanded")) === "false") await relatedToggle.click()
   await expect(
-    page
-      .getByRole("region", { name: "Related chats", exact: true })
+    related
       .getByRole("group", { name: "This chat was split from", exact: true })
       .getByRole("link", { name: "Open chat Split demo · Harbor", exact: true })
   ).toBeVisible()

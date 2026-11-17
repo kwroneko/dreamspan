@@ -48,7 +48,10 @@ for (const width of [1440, 390]) {
   test(`chat rows list their branches, and the open chat's branches sit at the panel's foot at ${width}`, async ({
     page
   }) => {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    // The phone's sheet is taller than 844 here: under two rows of navigation tiles a shorter one
+    // folds the foot on its own (short-column collapse, covered by the layout audit), and this
+    // case is about the foot's list and its remembered open state.
+    await page.setViewportSize({ width, height: width === 390 ? 1000 : 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/`)
     const phone = width === 390
