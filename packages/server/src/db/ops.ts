@@ -45,7 +45,8 @@ import {
   EffectUndoRefused,
   ReplyEffects,
   UndoAllReport,
-  WorkshopDefaults
+  WorkshopDefaults,
+  WorkshopPresetChoice
 } from "@rp/shared/workshopApi.ts"
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
@@ -2799,7 +2800,8 @@ export class WriteOpsLibrary extends RpcGroup.make(
       title: Schema.optionalKey(Schema.String),
       attachTo: Schema.optionalKey(ChatId),
       card: Schema.optionalKey(Schema.String),
-      persona: Schema.optionalKey(Schema.NullOr(Schema.String))
+      persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      preset: Schema.optionalKey(WorkshopPresetChoice)
     },
     success: Chat,
     error: Schema.Union([NotFound, StorageError])

@@ -98,6 +98,17 @@ export const WorkshopDefaults = Schema.Struct({
 })
 export type WorkshopDefaults = typeof WorkshopDefaults.Type
 
+/**
+ * A new workshop's prompt preset, chosen before its first message (owner, 2026-11-17): kept for
+ * this workshop (`Lock`, a preset ref of the user's, or null for the built-in one), or following
+ * the account's preset (`Account`). Absent: the workshop default preset, kept for this workshop.
+ */
+export const WorkshopPresetChoice = Schema.Union([
+  Schema.Struct({ _tag: Schema.Literal("Lock"), ref: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ _tag: Schema.Literal("Account") })
+])
+export type WorkshopPresetChoice = typeof WorkshopPresetChoice.Type
+
 export class WorkshopApi extends RpcGroup.make(
   Rpc.make("ListWorkshopCapabilities", {
     payload: { chatId: Chat.fields.id },
@@ -109,13 +120,15 @@ export class WorkshopApi extends RpcGroup.make(
    * default assistant). `persona`: who the user is there (default the workshop persona, never
    * the story one; null for none). `attachTo`: a side chat beside that story, reading it through
    * its tools (spec/WORKSHOP.md §4); it never plays the story's persona or one of its cards.
+   * `preset`: its prompt preset (`WorkshopPresetChoice`; default the workshop default preset).
    */
   Rpc.make("CreateWorkshop", {
     payload: {
       title: Schema.optionalKey(Schema.String),
       attachTo: Schema.optionalKey(Chat.fields.id),
       card: Schema.optionalKey(Schema.String),
-      persona: Schema.optionalKey(Schema.NullOr(Schema.String))
+      persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      preset: Schema.optionalKey(WorkshopPresetChoice)
     },
     success: Chat,
     error: Schema.Union([NotFound, ServerError])

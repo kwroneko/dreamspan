@@ -1475,6 +1475,8 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         // Another user's card as the assistant or as the persona.
         yield* refused(actor.api.CreateWorkshop({ card: owner.cardId }), "NotFound")
         yield* refused(actor.api.CreateWorkshop({ persona: owner.cardId }), "NotFound")
+        // Another user's preset, chosen before the first message.
+        yield* refused(actor.api.CreateWorkshop({ preset: { _tag: "Lock", ref: owner.refId } }), "NotFound")
       })
   },
   ListAttachedWorkshops: {

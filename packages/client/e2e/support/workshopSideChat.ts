@@ -270,28 +270,33 @@ export function workshopSideChatTests() {
           )
           await item.click()
           await expect(page).toHaveURL(/[?&]panel=workshop(&|$)/)
-          await expect(page).toHaveURL(/[?&]workshop=[^&]+/)
-          const workshopId = new URL(page.url()).searchParams.get("workshop")!
+          // None yet: the tab opens on a new one's composer, and nothing is made until it's sent.
+          await expect(page).not.toHaveURL(/[?&]workshop=/)
           const panel = sidePanel(page)
-          const side = panel.locator(`[data-side-chat="${workshopId}"]`)
+          const pending = panel.locator("[data-side-chat-pending]")
           await expect(panel.locator("[data-side-chat-reading]")).toContainText(
             "Regenerate uses this position; Resume needs the original position."
           )
-          await expect(side).toBeVisible()
-          await expect(side).toHaveAttribute("data-chat-kind", "workshop")
-          await expect(side.locator('[data-kind-badge="workshop"]')).toBeVisible()
-          await expect(side.getByRole("button", { name: `Workshop: About ${title}`, exact: true })).toBeVisible()
+          await expect(pending.locator("[data-side-chat-intro]")).toBeVisible()
+          await expect(pending).toHaveAttribute("data-chat-kind", "workshop")
+          await expect(pending.locator('[data-kind-badge="workshop"]')).toBeVisible()
           // The workshop's accent inside, the story's outside.
           const storyAccent = await accentOf(page, "[data-chat-main]")
-          const sideAccent = await accentOf(page, `[data-side-chat="${workshopId}"]`)
-          expect(sideAccent).not.toBe(storyAccent)
+          expect(await accentOf(page, "[data-side-chat-pending]")).not.toBe(storyAccent)
           await shot("opened")
           await expectLayout(page, info, `side-chat-opened-${width}-${theme}`, { scope: panelScope })
 
-          // A message in the side chat: the assistant reads the story through its tool.
+          // A message in the side chat makes it; the assistant reads the story through its tool.
           const before = provider().bodies.length
-          await side.getByLabel("Message", { exact: true }).fill("What has happened so far?")
-          await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          await pending.getByLabel("Message", { exact: true }).fill("What has happened so far?")
+          await pending.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+          await expect(page).toHaveURL(/[?&]workshop=[^&]+/)
+          const workshopId = new URL(page.url()).searchParams.get("workshop")!
+          const side = panel.locator(`[data-side-chat="${workshopId}"]`)
+          await expect(side).toBeVisible()
+          await expect(side).toHaveAttribute("data-chat-kind", "workshop")
+          await expect(side.getByRole("button", { name: `Workshop: About ${title}`, exact: true })).toBeVisible()
+          expect(await accentOf(page, `[data-side-chat="${workshopId}"]`)).not.toBe(storyAccent)
           const answer = side.getByRole("article").filter({ hasText: SIDE_ANSWER })
           await expect(answer).toHaveCount(1, { timeout: 60_000 })
           // Text arrives before the final event, which folds live steps. Open only after it settles.
@@ -373,23 +378,21 @@ export function workshopSideChatTests() {
           await expect(sidePanel(page).locator(`[data-side-chat="${workshopId}"]`)).toBeVisible()
           await expect(page).not.toHaveURL(/[?&]workshop=/)
 
-          // Deleted: the tab offers to start another.
+          // Deleted: the tab is a new one's composer again.
           await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
             api.DeleteChat({ chatId: workshopId as ChatId })
           )
           await page.goto(`${server().url}/chats/${story.id}?panel=workshop&workshop=${workshopId}`)
           await expect(page.getByText("That workshop isn't beside this chat any more.").first()).toBeVisible()
-          const empty = sidePanel(page).locator("[data-side-chat-empty]")
-          await expect(empty).toBeVisible()
-          const startButton = empty.getByRole("button", { name: "Start a workshop", exact: true })
-          await expect(startButton).toHaveAccessibleDescription(
-            "Starts a new workshop beside this chat, to talk about it out of character."
-          )
+          const empty = sidePanel(page).locator("[data-side-chat-pending]")
+          await expect(empty.locator("[data-side-chat-intro]")).toBeVisible()
+          await expect(sidePanel(page).getByRole("button", { name: "Start a workshop" })).toHaveCount(0)
           await shot("empty")
           await expectLayout(page, info, `side-chat-empty-${width}-${theme}`, { scope: panelScope })
           // Stale choices of the removed workshop must not leak into the replacement.
           await page.goto(`${page.url()}&side.fork=${story.currentForkId}&side.messageDialog=old&side.stepEdit=old`)
-          await startButton.click()
+          await empty.getByLabel("Message", { exact: true }).fill("Start over.")
+          await empty.getByRole("button", { name: /^Send( as .+)?$/ }).click()
           await expect(sidePanel(page).locator("[data-side-chat]")).toBeVisible()
           await expect(page).toHaveURL(/[?&]workshop=[^&]+/)
           expect(new URL(page.url()).searchParams.get("workshop")).not.toBe(workshopId)

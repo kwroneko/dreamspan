@@ -13,7 +13,13 @@ import { panelHere, panelTabs, type PanelProps } from "../src/features/chat/pane
 import { registerPanels } from "../src/features/chat/registerPanels.tsx"
 import type { ChatSession, ChatView } from "../src/features/chat/session.ts"
 import { register as registerWorkshop } from "../src/features/workshop/index.tsx"
-import { chooseSideChat, sideChatSearch, SIDE_CHAT_SCOPE, SIDE_CHAT_TAB } from "../src/features/workshop/sideChat.ts"
+import {
+  chooseSideChat,
+  NEW_SIDE_CHAT,
+  sideChatSearch,
+  SIDE_CHAT_SCOPE,
+  SIDE_CHAT_TAB
+} from "../src/features/workshop/sideChat.ts"
 import { storyPosition, WorkshopSidePanel } from "../src/features/workshop/SidePanel.tsx"
 
 vi.hoisted(() => {
@@ -54,6 +60,11 @@ describe("the workshop shown beside a story", () => {
   it("shows none for a story without workshops, saying so only when one was named", () => {
     expect(chooseSideChat([], null)).toEqual({ shown: null, missing: false })
     expect(chooseSideChat([], "deleted")).toEqual({ shown: null, missing: true })
+  })
+
+  it("shows a new one's composer for `new`, beside existing ones too", () => {
+    expect(chooseSideChat([newest, older], NEW_SIDE_CHAT)).toEqual({ shown: null, missing: false })
+    expect(chooseSideChat([], NEW_SIDE_CHAT)).toEqual({ shown: null, missing: false })
   })
 })
 
