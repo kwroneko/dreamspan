@@ -987,6 +987,29 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       return itemId
     })
 
+  /** An MCP server connection (spec/MCP.md §12): to the bin like a provider connection. */
+  const deleteMcpConnection = (userId: UserId, connectionId: string) =>
+    Effect.gen(function* () {
+      const [connection] = yield* sql<{ name: string; url: string | null }>`
+        SELECT name, url FROM mcp_connections
+        WHERE id = ${connectionId} AND owner_user_id = ${userId} AND deleted_at IS NULL AND purged_at IS NULL`
+      if (!connection) return yield* new NotFound({ entity: "mcp_connection", id: connectionId })
+      const itemId = yield* insertItem({
+        userId,
+        kind: "mcp_connection",
+        targetId: connectionId,
+        chatId: null,
+        title: connection.name,
+        excerpt: "MCP server",
+        origin: { connectionId },
+        byteSize: 0
+      })
+      yield* sql`UPDATE mcp_connections SET deleted_at = ${Date.now()}, bin_item_id = ${itemId},
+          cache_revision = cache_revision + 1, row_version = row_version + 1
+        WHERE id = ${connectionId}`
+      return itemId
+    })
+
   // --- Restoring and deleting for good -----------------------------------------------
 
   /** SQL: bin items that name the fork a deletion was in (`origin_json.forkId`). */
@@ -1153,7 +1176,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         version: "versions",
         entity: "entities",
         connection: "connections",
-        card_asset: "entities"
+        card_asset: "entities",
+        mcp_connection: "mcp_connections"
       }[item.kind]
       // An import's copy of a deleted branch root carries the item and the root's marker too.
       if (item.kind === "branch") {
@@ -1326,9 +1350,32 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         `DELETE FROM credentials WHERE connection_owned = 1
            AND id IN (SELECT credential_id FROM connections WHERE id IN (${targets("connection")}))
            AND NOT EXISTS (SELECT 1 FROM connections c WHERE c.credential_id = credentials.id
-             AND c.id NOT IN (${targets("connection")}))`,
-        params
+             AND c.id NOT IN (${targets("connection")}))
+           AND NOT EXISTS (SELECT 1 FROM mcp_connections m WHERE m.credential_id = credentials.id
+             AND m.id NOT IN (${targets("mcp_connection")}))`,
+        [...params, ...params]
       )
+      // The same for a key typed into a purged MCP connection.
+      yield* run(
+        `DELETE FROM credentials WHERE connection_owned = 1
+           AND id IN (SELECT credential_id FROM mcp_connections WHERE id IN (${targets("mcp_connection")}))
+           AND NOT EXISTS (SELECT 1 FROM mcp_connections m WHERE m.credential_id = credentials.id
+             AND m.id NOT IN (${targets("mcp_connection")}))
+           AND NOT EXISTS (SELECT 1 FROM connections c WHERE c.credential_id = credentials.id
+             AND c.id NOT IN (${targets("connection")}))`,
+        [...params, ...params]
+      )
+      // An MCP connection stays as a tombstone with no address, program or secret, so the call
+      // ledger still names it (spec/MCP.md §12); its users' uses go, freeing their keys.
+      yield* run(`DELETE FROM mcp_uses WHERE connection_id IN (${targets("mcp_connection")})`)
+      yield* run(
+        `UPDATE mcp_connections SET purged_at = ?, url = NULL, command_json = NULL, env_enc = NULL,
+           env_names_json = '[]', credential_id = NULL, headers_enc = NULL, header_names_json = '[]',
+           headers_origin = NULL, proxy_mode = 'inherit', proxy_url_enc = NULL, share_scope = 'private'
+         WHERE id IN (${targets("mcp_connection")})`,
+        [now]
+      )
+      yield* run(`DELETE FROM mcp_connection_shares WHERE connection_id IN (${targets("mcp_connection")})`)
 
       // A connection stays as a tombstone without secrets: old messages and ledger rows
       // still name their model (PROVIDERS §10).
@@ -1583,6 +1630,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
     deleteVersion,
     deleteEntity,
     deleteConnection,
+    deleteMcpConnection,
     restore,
     restoreMany,
     purge,

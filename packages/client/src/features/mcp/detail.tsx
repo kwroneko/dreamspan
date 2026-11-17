@@ -1,0 +1,948 @@
+// One MCP server's page (spec/MCP.md §13.1). Its sections are entries in the `mcp.sections` slot,
+// so a plugin can add its own, as for provider connections.
+import type { Credential, CredentialId, ProxyMode } from "@rp/shared/providers.ts"
+import { originOf } from "@rp/shared/providers.ts"
+import {
+  MCP_DESCRIPTION_LIMIT,
+  type McpCall,
+  type McpCheck,
+  type McpConnection,
+  type McpConnectionId,
+  mcpAnnotationNotes,
+  mcpToolAllowed,
+  mcpToolIsNew,
+  type McpTool,
+  type RemoteMcpTransport
+} from "@rp/shared/mcp.ts"
+import { Link, useNavigate, useParams } from "@tanstack/react-router"
+import { type FormEvent, useId, useState } from "react"
+import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
+import { defineSlot, SlotOutlet } from "../../slots.tsx"
+import { Button } from "../../ui/Button.tsx"
+import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
+import { Checkbox, RadioGroup } from "../../ui/Choice.tsx"
+import { ConfirmDialog, Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Field, Fieldset, focusFirstInvalid, formText, Input, SecretInput, Textarea } from "../../ui/Field.tsx"
+import { Select } from "../../ui/Select.tsx"
+import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
+import { formatWhen } from "../chat/chatTitle.ts"
+import { AllowHostDialog } from "../credentials.tsx"
+import { useTitle } from "../shell.tsx"
+import {
+  bytesLabel,
+  callLabel,
+  callStatusLabels,
+  credentialsAtom,
+  durationLabel,
+  mcpCallsAtom,
+  mcpConnectionAtom,
+  mcpHost,
+  mcpStatus,
+  transportLabels
+} from "./data.ts"
+import { addressProblem, parseTimeout, transportItems } from "./list.tsx"
+
+export interface McpSectionProps {
+  readonly connection: McpConnection
+  readonly credentials: ReadonlyArray<Credential>
+}
+
+export const mcpSections = defineSlot<McpSectionProps>("mcp.sections")
+
+/** What Check found, as an alert, with the switch it suggests. */
+function CheckResult({ connection, check }: { connection: McpConnection; check: McpCheck }) {
+  const action = useAction()
+  const other = check.alternative
+  return (
+    <Alert
+      tone={check.ok ? "success" : "danger"}
+      title={check.ok ? "It works" : "It doesn't work"}
+      actions={
+        other !== null && connection.url !== null ? (
+          <Button
+            hint={`Saves the server with ${transportLabels[other]} and checks it again.`}
+            pending={action.pending}
+            onClick={() =>
+              void action.run(
+                (client) =>
+                  client("UpdateMcpConnection", {
+                    connectionId: connection.id,
+                    expectedRowVersion: connection.rowVersion,
+                    settings: {
+                      name: connection.name,
+                      about: connection.about,
+                      transport: other,
+                      url: connection.url!,
+                      timeoutS: connection.timeoutS
+                    }
+                  }),
+                ["mcp"]
+              )
+            }
+          >
+            Switch to {transportLabels[other]}
+          </Button>
+        ) : undefined
+      }
+    >
+      <p>{check.detail}</p>
+      {check.route && <p className="text-muted">Route: {check.route}</p>}
+      <ErrorAlert error={action.error} />
+    </Alert>
+  )
+}
+
+interface ServerDraft {
+  readonly name: string
+  readonly about: string
+  readonly transport: RemoteMcpTransport
+  readonly url: string
+  readonly timeoutS: string
+}
+
+const draftOf = (connection: McpConnection): ServerDraft => ({
+  name: connection.name,
+  about: connection.about,
+  transport: connection.transport === "sse" ? "sse" : "streamable-http",
+  url: connection.url ?? "",
+  timeoutS: String(connection.timeoutS)
+})
+
+export function ServerSection({ connection }: McpSectionProps) {
+  const action = useAction()
+  const [draft, setDraft] = useState<ServerDraft | null>(null)
+  const [check, setCheck] = useState<McpCheck | null>(null)
+  const [submitted, setSubmitted] = useState(false)
+  const values = draft ?? draftOf(connection)
+  const edit = (change: Partial<ServerDraft>) => setDraft({ ...values, ...change })
+  const timeout = parseTimeout(values.timeoutS)
+  const problems = {
+    name: values.name.trim() === "" ? "Give the server a name." : null,
+    url: addressProblem(values.url),
+    timeoutS: timeout.problem
+  }
+  const shown = (problem: string | null) => (submitted ? problem : null)
+  const changed = draft !== null && JSON.stringify(draft) !== JSON.stringify(draftOf(connection))
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSubmitted(true)
+    if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
+    const result = await action.run(
+      (client) =>
+        client("UpdateMcpConnection", {
+          connectionId: connection.id,
+          expectedRowVersion: connection.rowVersion,
+          settings: {
+            name: values.name.trim(),
+            about: values.about.trim(),
+            transport: values.transport,
+            url: values.url.trim(),
+            timeoutS: timeout.value
+          }
+        }),
+      ["mcp"]
+    )
+    if (result.ok) {
+      setDraft(null)
+      setSubmitted(false)
+      setCheck(result.value.check)
+    }
+  }
+  const discard = () => {
+    setDraft(null)
+    setSubmitted(false)
+    action.clearError()
+  }
+
+  return (
+    <Card>
+      <CardHeader title="Server" />
+      <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
+        <Field
+          label="Name"
+          about="How this server is listed. The model knows its tools by a short key that stays."
+          error={shown(problems.name)}
+        >
+          <Input value={values.name} onValueChange={(name) => edit({ name })} autoComplete="off" />
+        </Field>
+        <Field label="What it’s for" about="Shown to the model so it knows when to use these tools. In your own words.">
+          <Textarea value={values.about} onChange={(event) => edit({ about: event.currentTarget.value })} rows={2} />
+        </Field>
+        <Field label="Transport" about="How the app talks to the server. Most servers speak Streamable HTTP.">
+          <Select items={transportItems} value={values.transport} onValueChange={(transport) => edit({ transport })} />
+        </Field>
+        <Field
+          label="Address"
+          about="The server’s full address. A key or headers set for another address must be entered again."
+          error={shown(problems.url)}
+        >
+          <Input
+            value={values.url}
+            onValueChange={(url) => edit({ url })}
+            inputMode="url"
+            autoCapitalize="none"
+            spellCheck={false}
+          />
+        </Field>
+        <Field
+          label="Timeout (seconds)"
+          about="How long a request may wait for the server before it counts as failed. Progress the server reports restarts the wait."
+          error={shown(problems.timeoutS)}
+        >
+          <Input value={values.timeoutS} onValueChange={(timeoutS) => edit({ timeoutS })} inputMode="numeric" />
+        </Field>
+        <ErrorAlert
+          error={action.error}
+          title="Not saved"
+          actions={
+            action.error?.tag === "StaleWrite" ? (
+              <Button
+                variant="ghost"
+                hint="Drops your changes here and shows the settings saved meanwhile."
+                onClick={discard}
+              >
+                Load the latest
+              </Button>
+            ) : undefined
+          }
+        />
+        {check && <CheckResult connection={connection} check={check} />}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            hint="Saves the server. A new address or transport is checked again at once."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={!changed}
+          >
+            Save
+          </Button>
+          {changed && (
+            <Button hint="Discards the unsaved changes to this server." variant="ghost" onClick={discard}>
+              Discard changes
+            </Button>
+          )}
+        </div>
+      </form>
+    </Card>
+  )
+}
+
+function SetKeyDialog({
+  connection,
+  onOpenChange
+}: {
+  connection: McpConnection
+  onOpenChange: (open: boolean) => void
+}) {
+  const action = useAction()
+  const origin = connection.url === null ? null : originOf(connection.url)
+  const [empty, setEmpty] = useState(true)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const apiKey = formText(event.currentTarget, "apiKey")
+    const result = await action.run(
+      (client) =>
+        client("SetMcpKey", { connectionId: connection.id, apiKey, expectedRowVersion: connection.rowVersion }),
+      ["mcp", "credentials"]
+    )
+    if (result.ok) onOpenChange(false)
+  }
+  return (
+    <Dialog open onOpenChange={onOpenChange} title="Enter a bearer token">
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field
+          label="Token"
+          about={origin ? `Sent only to ${origin}, as “Authorization: Bearer”. It's never shown again.` : undefined}
+        >
+          <SecretInput name="apiKey" onEmptyChange={setEmpty} />
+        </Field>
+        <ErrorAlert error={action.error} />
+        <DialogActions>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Saves the token for this server."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={empty}
+          >
+            Save token
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+}
+
+function SavedKeyDialog({
+  connection,
+  credentials,
+  onOpenChange
+}: McpSectionProps & { onOpenChange: (open: boolean) => void }) {
+  const action = useAction()
+  const [credentialId, setCredentialId] = useState<CredentialId | null>(
+    connection.credentialId ?? credentials[0]?.id ?? null
+  )
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    const result = await action.run(
+      (client) => client("SetMcpCredential", { connectionId: connection.id, credentialId }),
+      ["mcp", "credentials"]
+    )
+    if (result.ok) onOpenChange(false)
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      title="Use a saved key"
+      description="A saved key is sent only to the addresses it was allowed for."
+    >
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field label="Saved key">
+          <Select
+            items={credentials.map((credential) => ({
+              value: credential.id,
+              label: credential.keyHint ? `${credential.name} (•••• ${credential.keyHint})` : credential.name
+            }))}
+            value={credentialId}
+            onValueChange={setCredentialId}
+          />
+        </Field>
+        <ErrorAlert error={action.error} />
+        <DialogActions>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Sends the chosen saved key to this server."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={credentialId === null}
+          >
+            Use this key
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+}
+
+interface HeaderRow {
+  readonly id: number
+  readonly name: string
+  readonly filled: boolean
+}
+
+function HeadersDialog({
+  connection,
+  onOpenChange
+}: {
+  connection: McpConnection
+  onOpenChange: (open: boolean) => void
+}) {
+  const action = useAction()
+  const origin = connection.url === null ? null : originOf(connection.url)
+  const [rows, setRows] = useState<ReadonlyArray<HeaderRow>>(() =>
+    connection.headerNames.length > 0
+      ? connection.headerNames.map((name, id) => ({ id, name, filled: false }))
+      : [{ id: 0, name: "", filled: false }]
+  )
+  const update = (id: number, change: Partial<HeaderRow>) =>
+    setRows(rows.map((row) => (row.id === id ? { ...row, ...change } : row)))
+  const named = rows.filter((row) => row.name.trim() !== "")
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const headers =
+      named.length === 0
+        ? null
+        : Object.fromEntries(named.map((row) => [row.name.trim(), formText(form, `value-${row.id}`)]))
+    const result = await action.run(
+      (client) =>
+        client("SetMcpHeaders", { connectionId: connection.id, headers, expectedRowVersion: connection.rowVersion }),
+      ["mcp"]
+    )
+    if (result.ok) onOpenChange(false)
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      title="Request headers"
+      description={`These replace all current headers. Values often hold secrets, so they're never shown again${origin ? `, and they're sent only to ${origin}` : ""}.`}
+    >
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <div aria-hidden="true" className="grid grid-cols-[1fr_1fr_2.25rem] gap-2 text-sm font-medium">
+          <span>Name</span>
+          <span>Value</span>
+        </div>
+        {rows.map((row, index) => (
+          <div key={row.id} className="-mt-2 grid grid-cols-[1fr_1fr_2.25rem] items-end gap-2">
+            <Field label={<span className="sr-only">Header {index + 1} name</span>}>
+              <Input
+                value={row.name}
+                onValueChange={(name) => update(row.id, { name })}
+                autoCapitalize="none"
+                spellCheck={false}
+              />
+            </Field>
+            <Field label={<span className="sr-only">Header {index + 1} value</span>}>
+              <SecretInput name={`value-${row.id}`} onEmptyChange={(empty) => update(row.id, { filled: !empty })} />
+            </Field>
+            <Button
+              hint="Removes this request header."
+              variant="ghost"
+              aria-label={`Remove header ${index + 1}`}
+              onClick={() => setRows(rows.filter((other) => other.id !== row.id))}
+            >
+              ✕
+            </Button>
+          </div>
+        ))}
+        <div>
+          <Button
+            hint="Adds an empty request header."
+            variant="ghost"
+            onClick={() =>
+              setRows([...rows, { id: Math.max(-1, ...rows.map((row) => row.id)) + 1, name: "", filled: false }])
+            }
+          >
+            Add a header
+          </Button>
+        </div>
+        <ErrorAlert error={action.error} />
+        <DialogActions>
+          <Button hint="Closes this dialog without applying changes." onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            hint="Saves the request headers."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={named.some((row) => !row.filled)}
+          >
+            {named.length === 0 ? "Remove all headers" : "Save headers"}
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+}
+
+export function SignInSection(props: McpSectionProps) {
+  const { connection, credentials } = props
+  const remove = useAction()
+  const [dialog, setDialog] = useState<"key" | "saved" | "remove" | "allow" | "headers" | null>(null)
+  const close = (open: boolean) => setDialog(open ? dialog : null)
+  const origin = connection.url === null ? null : originOf(connection.url)
+  const credential = credentials.find((entry) => entry.id === connection.credentialId)
+  const keyBlocked = credential !== undefined && origin !== null && !credential.origins.includes(origin)
+  const headersBlocked = connection.headerNames.length > 0 && connection.headersOrigin !== origin
+  return (
+    <Card>
+      <CardHeader
+        title="Sign-in"
+        about="What the server needs to know it's you: a bearer token, or headers its documentation names. Neither is shown again once saved."
+      />
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium">Bearer token</p>
+          {connection.hasKey ? (
+            <p className="text-sm">
+              {connection.keyHint ? (
+                <>
+                  Token ending in <span className="font-mono">{connection.keyHint}</span>
+                </>
+              ) : (
+                "A short token (no hint shown)"
+              )}
+              {connection.credentialName && (
+                <span className="text-muted">, saved as “{connection.credentialName}”</span>
+              )}
+            </p>
+          ) : (
+            <p className="text-sm text-muted">None.</p>
+          )}
+          {keyBlocked && (
+            <Alert
+              tone="warning"
+              title={`This key isn't allowed for ${origin}`}
+              actions={
+                <Button
+                  hint="Asks for the key again, then lets it go to this address."
+                  onClick={() => setDialog("allow")}
+                >
+                  Allow it
+                </Button>
+              }
+            >
+              Requests are refused until you enter the key again for this address.
+            </Alert>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              hint="Gives the server a token you type, sent only to its address."
+              onClick={() => setDialog("key")}
+            >
+              Enter a token
+            </Button>
+            <Button
+              disabled={credentials.length === 0}
+              focusableWhenDisabled
+              hint={
+                credentials.length === 0
+                  ? "No saved keys yet."
+                  : "Uses a key saved in Settings → Keys, which others can share."
+              }
+              onClick={() => setDialog("saved")}
+            >
+              Use a saved key
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={!connection.hasKey}
+              focusableWhenDisabled
+              hint={
+                connection.hasKey
+                  ? "Sends requests without a token. You’ll confirm first."
+                  : "There's no token to remove."
+              }
+              onClick={() => setDialog("remove")}
+            >
+              Remove
+            </Button>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium">Headers</p>
+          {connection.headerNames.length > 0 ? (
+            <ul className="flex flex-wrap gap-2" aria-label="Header names">
+              {connection.headerNames.map((name) => (
+                <li key={name}>
+                  <Badge>{name}</Badge>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted">None.</p>
+          )}
+          {headersBlocked && (
+            <Alert tone="warning" title="The headers were set for another address">
+              Requests are refused until you set them again for {origin}.
+            </Alert>
+          )}
+          <div>
+            <Button hint="Opens the request header editor." onClick={() => setDialog("headers")}>
+              {connection.headerNames.length > 0 ? "Replace headers" : "Add headers"}
+            </Button>
+          </div>
+        </div>
+      </div>
+      {dialog === "key" && <SetKeyDialog connection={connection} onOpenChange={close} />}
+      {dialog === "saved" && <SavedKeyDialog {...props} onOpenChange={close} />}
+      {dialog === "headers" && <HeadersDialog connection={connection} onOpenChange={close} />}
+      {dialog === "allow" && credential && connection.url && (
+        <AllowHostDialog credential={credential} url={connection.url} open onOpenChange={close} />
+      )}
+      <ConfirmDialog
+        open={dialog === "remove"}
+        onOpenChange={close}
+        title="Remove the token?"
+        description="The server will be asked without one. A token used only here is deleted; a saved key stays."
+        confirmLabel="Remove token"
+        pending={remove.pending}
+        onConfirm={async () => {
+          const result = await remove.run(
+            (client) =>
+              client("SetMcpKey", {
+                connectionId: connection.id,
+                apiKey: null,
+                expectedRowVersion: connection.rowVersion
+              }),
+            ["mcp", "credentials"]
+          )
+          if (result.ok) setDialog(null)
+        }}
+      >
+        <ErrorAlert error={remove.error} />
+      </ConfirmDialog>
+    </Card>
+  )
+}
+
+/** A tool's description for its hover: cut to a few lines. */
+const shortDescription = (tool: McpTool) => {
+  const text = tool.description.trim() || "The server gives no description."
+  return text.length > 280 ? `${text.slice(0, 279)}…` : text
+}
+
+function ToolRow({
+  tool,
+  connection,
+  onChange,
+  pending
+}: {
+  tool: McpTool
+  connection: McpConnection
+  onChange: (tool: McpTool, on: boolean) => void
+  pending: boolean
+}) {
+  const allowed = mcpToolAllowed(tool, connection.use)
+  const isNew = mcpToolIsNew(tool, connection.use)
+  const notes = mcpAnnotationNotes(tool.annotations)
+  return (
+    <li className="flex flex-col gap-1 py-2 first:pt-0 last:pb-0">
+      <Checkbox
+        checked={allowed}
+        disabled={tool.problem !== null || pending}
+        onCheckedChange={(on) => onChange(tool, on)}
+        hint={tool.problem ?? shortDescription(tool)}
+        hintInline={false}
+        description={
+          <span className="flex flex-col gap-0.5">
+            <span className="font-mono text-xs [overflow-wrap:anywhere]">{tool.exposed}</span>
+            {tool.problem && <span className="text-danger">Can't be used: {tool.problem}</span>}
+            {tool.description.length > MCP_DESCRIPTION_LIMIT && (
+              <span>Its description is cut to {MCP_DESCRIPTION_LIMIT.toLocaleString()} characters for the model.</span>
+            )}
+          </span>
+        }
+      >
+        <span className="inline-flex flex-wrap items-center gap-2 [overflow-wrap:anywhere]">
+          {tool.title ?? tool.name}
+          {isNew && <Badge tone="accent">New</Badge>}
+        </span>
+      </Checkbox>
+      {notes.length > 0 && (
+        <Tooltip label="What the server says about this tool. The app can't check it, so it changes nothing.">
+          <p tabIndex={0} className="ml-6.5 self-start text-xs text-muted">
+            {notes.join(" · ")}
+          </p>
+        </Tooltip>
+      )}
+    </li>
+  )
+}
+
+export function ToolsSection({ connection }: McpSectionProps) {
+  const check = useAction()
+  const choose = useAction()
+  const [result, setResult] = useState<McpCheck | null>(null)
+  const status = mcpStatus(connection)
+  const allowed = connection.tools.filter((tool) => mcpToolAllowed(tool, connection.use)).length
+  const host = mcpHost(connection)
+  /** Every tool's choice as the page shows it, so tools listed later stay off until chosen here. */
+  const choose1 = (tool: McpTool, on: boolean) => {
+    const choices = Object.fromEntries(
+      connection.tools.map((entry) => [
+        entry.name,
+        { on: entry.name === tool.name ? on : mcpToolAllowed(entry, connection.use) }
+      ])
+    )
+    void choose.run(
+      (client) =>
+        client("SetMcpUse", {
+          connectionId: connection.id,
+          tools: { choices, reviewedRevision: connection.catalogRevision }
+        }),
+      ["mcp"]
+    )
+  }
+  return (
+    <Card>
+      <CardHeader
+        title="Tools"
+        about="Allowed tools are offered to the model wherever this server is turned on. What the server says about a tool is shown, but can't be checked."
+        description={
+          connection.listedAt === null
+            ? "Not checked yet."
+            : `${status.label} · ${allowed} of ${connection.tools.length} allowed · listed ${formatWhen(connection.listedAt)}`
+        }
+        actions={
+          <Button
+            hint={`Connects to ${host} and asks for its tools. Nothing from your chats is sent.`}
+            pending={check.pending}
+            onClick={async () => {
+              setResult(null)
+              const outcome = await check.run(
+                (client) => client("CheckMcpConnection", { connectionId: connection.id }),
+                ["mcp"]
+              )
+              if (outcome.ok) setResult(outcome.value.check)
+            }}
+          >
+            Check now
+          </Button>
+        }
+      />
+      <div className="flex flex-col gap-4">
+        {result && <CheckResult connection={connection} check={result} />}
+        {!result && connection.checkError !== null && (
+          <Alert tone="danger" title="The last check failed">
+            {connection.checkError}
+          </Alert>
+        )}
+        <ErrorAlert error={check.error} title="Not checked" />
+        <ErrorAlert error={choose.error} title="Not changed" />
+        {connection.tools.length === 0 ? (
+          <p className="text-sm text-muted">
+            {connection.listedAt === null ? "Check the server to see its tools." : "The server lists no tools."}
+          </p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-border" aria-label="Tools">
+            {connection.tools.map((tool) => (
+              <ToolRow
+                key={tool.name}
+                tool={tool}
+                connection={connection}
+                onChange={choose1}
+                pending={choose.pending}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+export function RouteSection({ connection }: McpSectionProps) {
+  const action = useAction()
+  const legend = useId()
+  const [mode, setMode] = useState<ProxyMode | null>(null)
+  const [urlEmpty, setUrlEmpty] = useState(true)
+  const current = mode ?? connection.proxyMode
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const url = formText(event.currentTarget, "proxyUrl")
+    const result = await action.run(
+      (client) =>
+        client("SetMcpProxy", {
+          connectionId: connection.id,
+          mode: current,
+          url: current === "custom" ? url.trim() : null
+        }),
+      ["mcp"]
+    )
+    if (result.ok) {
+      setMode(null)
+      setUrlEmpty(true)
+    }
+  }
+  return (
+    <Card>
+      <CardHeader
+        title="Network route"
+        about="How requests to this server leave the app: as the instance sends them, direct, or through a proxy of its own."
+      />
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Fieldset
+          legend={
+            <span id={legend} className="sr-only">
+              Route
+            </span>
+          }
+        >
+          <RadioGroup<ProxyMode>
+            aria-labelledby={legend}
+            value={current}
+            onValueChange={setMode}
+            options={[
+              { value: "inherit", label: "Instance settings", description: "The admin's proxy and bypass list." },
+              { value: "direct", label: "Direct", description: "Never through a proxy." },
+              { value: "custom", label: "Own proxy", description: "HTTP, HTTPS or SOCKS5." }
+            ]}
+          />
+        </Fieldset>
+        {current === "custom" && (
+          <Field
+            label="Proxy URL"
+            description={
+              connection.proxyMode === "custom"
+                ? "A proxy is set. Enter its URL again to change it; any password stays hidden."
+                : "For example socks5://user:password@host:1080."
+            }
+          >
+            <SecretInput name="proxyUrl" masked={false} onEmptyChange={setUrlEmpty} />
+          </Field>
+        )}
+        <ErrorAlert error={action.error} title="The route wasn't changed" />
+        <div>
+          <Button
+            hint="Saves this server’s route."
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={mode === null || (current === "custom" && urlEmpty)}
+          >
+            Save route
+          </Button>
+        </div>
+      </form>
+    </Card>
+  )
+}
+
+function CallRow({ call }: { call: McpCall }) {
+  return (
+    <li className="flex flex-col gap-0.5 py-2 text-sm first:pt-0 last:pb-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium [overflow-wrap:anywhere]">{callLabel(call)}</span>
+        <Badge tone={call.status === "complete" ? "success" : call.status === "running" ? "neutral" : "danger"}>
+          {callStatusLabels[call.status]}
+        </Badge>
+        {call.purpose === "check" && <Badge>Check</Badge>}
+      </div>
+      <p className="text-muted">
+        {formatWhen(call.startedAt)} · {durationLabel(call)} · {bytesLabel(call.sentBytes)} sent ·{" "}
+        {bytesLabel(call.receivedBytes)} back
+      </p>
+      {call.error && <p className="text-muted [overflow-wrap:anywhere]">{call.error}</p>}
+    </li>
+  )
+}
+
+export function CallsSection({ connection }: McpSectionProps) {
+  const more = useAction()
+  const [older, setOlder] = useState<ReadonlyArray<McpCall>>([])
+  const [done, setDone] = useState(false)
+  return (
+    <Card>
+      <CardHeader
+        title="Recent calls"
+        about="Every request the app sent to this server, newest first. What was sent is kept with the chat it was for."
+      />
+      <AsyncView atom={mcpCallsAtom(connection.id)} loading="Loading calls…">
+        {(calls) => {
+          const all = [...calls, ...older]
+          const last = all.at(-1)
+          return all.length === 0 ? (
+            <p className="text-sm text-muted">Nothing sent yet.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <ul className="flex flex-col divide-y divide-border" aria-label="Recent calls">
+                {all.map((call) => (
+                  <CallRow key={call.id} call={call} />
+                ))}
+              </ul>
+              {!done && calls.length >= 50 && last && (
+                <div>
+                  <Button
+                    hint="Shows the next 50 older calls."
+                    variant="ghost"
+                    pending={more.pending}
+                    onClick={async () => {
+                      const page = await more.run((client) =>
+                        client("ListMcpCalls", {
+                          connectionId: connection.id,
+                          before: { startedAt: last.startedAt, id: last.id }
+                        })
+                      )
+                      if (!page.ok) return
+                      setOlder([...older, ...page.value])
+                      if (page.value.length < 50) setDone(true)
+                    }}
+                  >
+                    Show older
+                  </Button>
+                </div>
+              )}
+              <ErrorAlert error={more.error} />
+            </div>
+          )
+        }}
+      </AsyncView>
+    </Card>
+  )
+}
+
+export function DeleteSection({ connection }: McpSectionProps) {
+  const action = useAction()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  return (
+    <Card>
+      <CardHeader
+        title="Delete the server"
+        about="Moves this server to the bin, from which it can be restored later. Its record of calls stays."
+        actions={
+          <Button hint="Moves this server to the bin." variant="danger" onClick={() => setOpen(true)}>
+            Delete
+          </Button>
+        }
+      />
+      <ConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={`Delete “${connection.name}”?`}
+        description="Moves this server to the bin, from which it can be restored later."
+        confirmLabel="Delete"
+        pending={action.pending}
+        onConfirm={async () => {
+          const result = await action.run(
+            (client) => client("DeleteMcpConnection", { connectionId: connection.id }),
+            ["mcp", "credentials", "bin"]
+          )
+          if (result.ok) void navigate({ to: "/settings/mcp" })
+        }}
+      >
+        <ErrorAlert error={action.error} />
+      </ConfirmDialog>
+    </Card>
+  )
+}
+
+function ServerView(props: McpSectionProps) {
+  const { connection } = props
+  useTitle(connection.name)
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        {/* On a phone the settings layout has the way back above the page. */}
+        <Tooltip label="Returns to MCP servers.">
+          <Link to="/settings/mcp" className="hidden self-start text-sm text-muted hover:text-text md:block">
+            ← MCP servers
+          </Link>
+        </Tooltip>
+        <CenterHeaderContent>
+          <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{connection.name}</h1>
+        </CenterHeaderContent>
+        <p className="text-sm text-muted [overflow-wrap:anywhere]">
+          {transportLabels[connection.transport]} · {connection.url ?? "Local program"}
+        </p>
+      </div>
+      <SlotOutlet slot={mcpSections} props={props} />
+    </div>
+  )
+}
+
+function Loaded({ connectionId }: { connectionId: McpConnectionId }) {
+  return (
+    <AsyncView atom={credentialsAtom} loading="Loading the server…">
+      {(credentials) => (
+        <AsyncView atom={mcpConnectionAtom(connectionId)} loading="Loading the server…">
+          {(connection) => <ServerView connection={connection} credentials={credentials} />}
+        </AsyncView>
+      )}
+    </AsyncView>
+  )
+}
+
+export function McpServerPage() {
+  const { connectionId }: { connectionId?: string } = useParams({ strict: false })
+  if (connectionId === undefined)
+    return (
+      <EmptyState title="This server doesn't exist">
+        <p>It may have been deleted.</p>
+      </EmptyState>
+    )
+  return <Loaded connectionId={connectionId as McpConnectionId} />
+}

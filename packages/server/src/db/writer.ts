@@ -37,6 +37,7 @@ import { makeDecisionWriteHandlers } from "./decisions.ts"
 import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeAdoptWriteHandlers } from "./cardOrigins.ts"
 import { makeProviderWriteHandlers } from "./providerWrites.ts"
+import { makeMcpWriteHandlers } from "./mcpWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
 import { makeStImportWriteHandlers } from "./stImportWrites.ts"
 import { makeStImportJobWriteHandlers } from "./stImportJobWrites.ts"
@@ -94,6 +95,8 @@ const handlers = Layer.unwrap(
               ...library,
               ...binOps,
               ...providers,
+              // --- MCP servers (spec/MCP.md §12)
+              ...(yield* makeMcpWriteHandlers),
               ...accounts,
               ...chatSetup,
               ...(yield* makeWorkshopEffectHandlers(

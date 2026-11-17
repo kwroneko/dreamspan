@@ -18,6 +18,7 @@ import * as chat from "./chat/index.tsx"
 import * as insertMessage from "./chat/insertMessage/index.tsx"
 import * as moveMessage from "./chat/moveMessage.tsx"
 import * as connections from "./connections/index.ts"
+import * as mcp from "./mcp/index.ts"
 import * as decisions from "./decisions/index.tsx"
 import * as credentials from "./credentials.tsx"
 import * as editor from "./editor/index.tsx"
@@ -70,6 +71,7 @@ export const registerFeatures = () => {
   snippets.register()
   bin.register()
   connections.register()
+  mcp.register()
   decisions.register()
   firstRun.register()
   costs.register()

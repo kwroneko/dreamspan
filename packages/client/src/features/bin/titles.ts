@@ -41,6 +41,7 @@ export const binTitle = (item: BinItem) => {
     case "card_asset":
     case "entity":
     case "connection":
+    case "mcp_connection":
       return item.title
   }
 }
@@ -79,6 +80,7 @@ export const purgeTitle = (item: BinItem) => {
       return `Delete the chat “${binTitle(item)}” for good?`
     case "entity":
     case "connection":
+    case "mcp_connection":
       return item.title === "" ? "Delete this for good?" : `Delete “${item.title}” for good?`
   }
 }

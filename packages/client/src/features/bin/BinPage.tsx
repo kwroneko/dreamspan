@@ -52,6 +52,8 @@ const kindLabel = (item: BinItem) => {
       return "Gallery image"
     case "connection":
       return "Connection"
+    case "mcp_connection":
+      return "MCP server"
     case "entity": {
       const kind = typeof item.origin.kind === "string" ? item.origin.kind : "entry"
       return kind[0]!.toUpperCase() + kind.slice(1)
@@ -81,6 +83,8 @@ const purgeEffect = (item: BinItem) => {
       return "The image is removed from the bin for good. Earlier card revisions keep their images."
     case "connection":
       return "The connection goes for good, with the key typed into it. Usage records keep its name."
+    case "mcp_connection":
+      return "The server goes for good, with the key typed into it. Its record of calls keeps its name."
   }
 }
 
@@ -168,7 +172,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
       {item.origin.kind !== "card" && typeof item.origin.subtitle === "string" && item.origin.subtitle && (
         <p className="text-sm text-muted">{item.origin.subtitle}</p>
       )}
-      {item.excerpt && item.kind !== "entity" && item.kind !== "connection" && (
+      {item.excerpt && item.kind !== "entity" && item.kind !== "connection" && item.kind !== "mcp_connection" && (
         <p className="line-clamp-3 text-sm whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{item.excerpt}</p>
       )}
       <p className="text-xs text-muted">

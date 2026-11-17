@@ -1,5 +1,18 @@
 // Each unexposed RPC is an explicit decision. New operations must be classified here or exposed.
 export const operationExclusions: Readonly<Record<string, string>> = {
+  // MCP servers (spec/MCP.md §2): only the user connects, checks and allows them.
+  CheckMcpConnection: "User-only security, consent, account, credential or network configuration.",
+  CreateMcpConnection: "User-only security, consent, account, credential or network configuration.",
+  DeleteMcpConnection: "User-only security, consent, account, credential or network configuration.",
+  GetMcpConnection: "User-only security, consent, account, credential or network configuration.",
+  ListMcpCalls: "User-only security, consent, account, credential or network configuration.",
+  ListMcpConnections: "User-only security, consent, account, credential or network configuration.",
+  SetMcpCredential: "User-only security, consent, account, credential or network configuration.",
+  SetMcpHeaders: "User-only security, consent, account, credential or network configuration.",
+  SetMcpKey: "User-only security, consent, account, credential or network configuration.",
+  SetMcpProxy: "User-only security, consent, account, credential or network configuration.",
+  SetMcpUse: "User-only security, consent, account, credential or network configuration.",
+  UpdateMcpConnection: "User-only security, consent, account, credential or network configuration.",
   WriteForMe: "Only a user's composer submit authorizes this single draft request.",
   GetDraftRunContext: "The user inspects their own composer request.",
   GetLastDraftRollout: "The user opens their own branch's composer request.",

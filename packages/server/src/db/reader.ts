@@ -33,6 +33,7 @@ import { makeWorkshopGrantReadHandlers } from "./workshopGrants.ts"
 import { makeWorkshopAttachReadHandlers } from "./workshopAttach.ts"
 import { ReadOps } from "./ops.ts"
 import { makeProviderReadHandlers } from "./providerReads.ts"
+import { makeMcpReadHandlers } from "./mcpReads.ts"
 import { makeReadHandlers } from "./reads.ts"
 import { makeStImportReadHandlers } from "./stImportReads.ts"
 import { makeStImportPlanReadHandlers } from "./stImportPlanReads.ts"
@@ -75,7 +76,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               makeLibraryReplaceReadHandlers,
               makeWorkshopGrantReadHandlers,
               makeWorkshopAttachReadHandlers,
-              makePluginReadHandlers
+              makePluginReadHandlers,
+              makeMcpReadHandlers
             ]),
             ([
               history,
@@ -99,7 +101,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
               libraryReplace,
               grants,
               attached,
-              plugins
+              plugins,
+              mcp
             ]) =>
               ReadOps.of(
                 stateModuleHandlers(
@@ -126,7 +129,8 @@ RpcServer.layer(ReadOps, { concurrency: 1, disableFatalDefects: true }).pipe(
                       ...libraryReplace,
                       ...grants,
                       ...attached,
-                      ...plugins
+                      ...plugins,
+                      ...mcp
                     })
                   )
                 )

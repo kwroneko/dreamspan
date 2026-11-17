@@ -19,6 +19,7 @@ import {
   AuthenticatedDecisionApi,
   AuthenticatedThinkingApi,
   AuthenticatedProviderListApi,
+  AuthenticatedMcpApi,
   AuthenticatedSplitChatApi,
   AuthenticatedMessageSelectionApi,
   AuthenticatedChatContextsApi,
@@ -135,6 +136,8 @@ import * as ProviderBuiltins from "./providers/builtins.ts"
 import * as Providers from "./providers/Providers.ts"
 import * as Secrets from "./secrets.ts"
 import { makeTextSearchHandlers } from "./api/textSearch.ts"
+import { makeMcpHandlers } from "./api/mcp.ts"
+import * as McpConnections from "./mcp/McpConnections.ts"
 
 const VERSION = "0.0.0"
 const startedAt = Date.now()
@@ -221,6 +224,7 @@ const HandlerLayers = Layer.mergeAll(
   AuthenticatedCardSourcesApi.toLayer(makeCardSourceHandlers),
   AuthenticatedGalleryApi.toLayer(makeGalleryHandlers),
   AuthenticatedProviderListApi.toLayer(makeProviderListHandlers),
+  AuthenticatedMcpApi.toLayer(makeMcpHandlers),
   AuthenticatedExternalMediaApi.toLayer(makeExternalMediaHandlers),
   AuthenticatedSavedMediaApi.toLayer(makeSavedMediaHandlers),
 
@@ -615,6 +619,7 @@ const InterruptedRequests = Layer.effectDiscard(
     const writer = yield* Database.Writer
     const { interrupted } = yield* writer.InterruptRunningLlmRequests()
     if (interrupted > 0) yield* Effect.logWarning(`${interrupted} model requests were interrupted by the last shutdown`)
+    yield* McpConnections.interruptRunningCalls
   })
 )
 
@@ -771,6 +776,8 @@ export const serverWith = <E>(
     Layer.provideMerge(SavedMedia.layer),
     // One set of held files for uploads, the ST folder import and adopting a source's cards.
     Layer.provideMerge(MediaHolds.layer),
+    // MCP servers (spec/MCP.md): Check and, later, tool calls, over the same network.
+    Layer.provideMerge(McpConnections.layer.pipe(Layer.provide(ProvidersLive))),
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),

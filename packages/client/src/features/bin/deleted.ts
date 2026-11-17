@@ -12,7 +12,7 @@ import { showToast } from "../../ui/Toast.tsx"
 import { binTitle } from "./titles.ts"
 
 /** What a restore can bring back, for the lists showing it to read again. */
-export const RESTORED_KEYS = ["bin", "chats", "library", "connections"]
+export const RESTORED_KEYS = ["bin", "chats", "library", "connections", "mcp"]
 
 /** Restores a bin item; the lists that show what came back read again. */
 export const restoreItem = (registry: AtomRegistry.AtomRegistry, itemId: string, keys = RESTORED_KEYS) =>
@@ -102,7 +102,9 @@ export const useDeletedToast = () => {
         title: `${binTitle(item)} moved to the bin.`,
         // Long enough to reach Undo after reading it; hovering or focusing it holds it.
         timeout: 10_000,
-        ...(item.excerpt && item.kind !== "entity" && item.kind !== "connection" ? { description: item.excerpt } : {}),
+        ...(item.excerpt && item.kind !== "entity" && item.kind !== "connection" && item.kind !== "mcp_connection"
+          ? { description: item.excerpt }
+          : {}),
         actions: [
           {
             label: "Undo",

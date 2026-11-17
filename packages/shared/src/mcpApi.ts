@@ -1,0 +1,114 @@
+// The MCP server RPCs (spec/MCP.md §2, §10, §13.1), in a group of their own: AppCoreApi is at
+// TypeScript's instantiation depth (TS2589). Every one is the user's own: the agent is never
+// handed any of them (agent/exposures/exclusions.ts).
+import { Schema } from "effect"
+import { Rpc, RpcGroup } from "effect/rpc"
+import { BinItem } from "./bin.ts"
+import { NotFound, ServerError, StaleWrite } from "./errors.ts"
+import {
+  McpCall,
+  McpCheck,
+  McpConnection,
+  McpConnectionId,
+  McpConnectionSettings,
+  McpConnectionSummary,
+  McpRefused,
+  McpToolChoices
+} from "./mcp.ts"
+import { CredentialId, ProxyMode } from "./providers.ts"
+
+export class McpApi extends RpcGroup.make(
+  /** The user's connections, oldest first (the order their tools are offered in). */
+  Rpc.make("ListMcpConnections", { success: Schema.Array(McpConnectionSummary), error: ServerError }),
+  /** One connection with its tool catalog. */
+  Rpc.make("GetMcpConnection", {
+    payload: { connectionId: McpConnectionId },
+    success: McpConnection,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * A new remote server. A typed key becomes a credential bound to its address. The app then
+   * checks it once (initialize and the tool list, nothing of the user's), as the user asked.
+   */
+  Rpc.make("CreateMcpConnection", {
+    payload: {
+      settings: McpConnectionSettings,
+      apiKey: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      credentialId: Schema.optionalKey(Schema.NullOr(CredentialId))
+    },
+    success: Schema.Struct({ connection: McpConnection, check: McpCheck }),
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /** A changed address or transport is checked again at once. */
+  Rpc.make("UpdateMcpConnection", {
+    payload: { connectionId: McpConnectionId, settings: McpConnectionSettings, expectedRowVersion: Schema.Int },
+    success: Schema.Struct({ connection: McpConnection, check: Schema.NullOr(McpCheck) }),
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /** A key typed for the connection, bound to its address; null for none. */
+  Rpc.make("SetMcpKey", {
+    payload: {
+      connectionId: McpConnectionId,
+      apiKey: Schema.NullOr(Schema.String),
+      expectedRowVersion: Schema.Int
+    },
+    success: McpConnection,
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /** A key saved in Settings → Keys, or none. */
+  Rpc.make("SetMcpCredential", {
+    payload: { connectionId: McpConnectionId, credentialId: Schema.NullOr(CredentialId) },
+    success: McpConnection,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** Header values, bound to the connection's address like a key; null removes them all. */
+  Rpc.make("SetMcpHeaders", {
+    payload: {
+      connectionId: McpConnectionId,
+      headers: Schema.NullOr(Schema.Record(Schema.String, Schema.String)),
+      expectedRowVersion: Schema.Int
+    },
+    success: McpConnection,
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  Rpc.make("SetMcpProxy", {
+    payload: { connectionId: McpConnectionId, mode: ProxyMode, url: Schema.NullOr(Schema.String) },
+    success: McpConnection,
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /** Connects to the server, asks for its tools, stores them and closes. Nothing from chats is sent. */
+  Rpc.make("CheckMcpConnection", {
+    payload: { connectionId: McpConnectionId },
+    success: Schema.Struct({ connection: McpConnection, check: McpCheck }),
+    error: Schema.Union([McpRefused, NotFound, StaleWrite, ServerError])
+  }),
+  /**
+   * The user's own use of a connection: the account switches, and the tool allow list with the
+   * catalog revision the page showed (tools listed after it stay off until chosen). Fields left
+   * out stay as they are.
+   */
+  Rpc.make("SetMcpUse", {
+    payload: {
+      connectionId: McpConnectionId,
+      stories: Schema.optionalKey(Schema.Boolean),
+      workshops: Schema.optionalKey(Schema.Boolean),
+      tools: Schema.optionalKey(Schema.Struct({ choices: McpToolChoices, reviewedRevision: Schema.Int }))
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  Rpc.make("DeleteMcpConnection", {
+    payload: { connectionId: McpConnectionId },
+    success: BinItem,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** The requests sent to a connection, newest first, a page at a time. */
+  Rpc.make("ListMcpCalls", {
+    payload: {
+      connectionId: McpConnectionId,
+      before: Schema.NullOr(Schema.Struct({ startedAt: Schema.Number, id: Schema.String }))
+    },
+    success: Schema.Array(McpCall),
+    error: Schema.Union([NotFound, ServerError])
+  })
+) {}
