@@ -11,7 +11,11 @@ const slots: Record<string, readonly [string, string]> = {
   main: ["Main", "The main instruction for the chat. A card's own prompt can replace it."],
   jailbreak: ["Post-history", "Instructions sent after the chat history. A card's own prompt can replace it."],
   nsfw: ["Auxiliary", "Additional instructions alongside the main prompt."],
-  enhanceDefinitions: ["Enhance definitions", "Instructions for expanding the character definitions."]
+  enhanceDefinitions: ["Enhance definitions", "Instructions for expanding the character definitions."],
+  agentInstructions: [
+    "Agent instructions",
+    "Sent only when a reply uses tools: tells the model it has tools and how to give its reply. Empty, the app's default text is sent. Last in the list, it goes at the very end of the request; anywhere else, it's its own message there."
+  ]
 }
 const markers: Record<string, readonly [string, IconName, string]> = {
   worldInfoBefore: ["World Info before", "insert-above", "Lorebook entries placed before the character definitions"],

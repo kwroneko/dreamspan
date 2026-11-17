@@ -8,8 +8,16 @@ import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { DEFAULT_RESPONSE, withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
-import { charDefinitions, newestMessage, ownTurnNotes, presetOrder, withMain } from "@rp/shared/presetOrder.ts"
-import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
+import {
+  agentInstructionsPlace,
+  agentInstructionsPrompt,
+  charDefinitions,
+  newestMessage,
+  ownTurnNotes,
+  presetOrder,
+  withMain
+} from "@rp/shared/presetOrder.ts"
+import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PresetPrompt, type PromptCondition } from "@rp/shared/docs/preset.ts"
 import { conditionOf, triggersFor } from "@rp/shared/presetConditions.ts"
 import {
   CONTINUE_NUDGE,
@@ -1078,6 +1086,8 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
       (assembly.request.agent?.workshop && prompt.identifier === "workshopTurn")
     )
       continue
+    // Agent instructions in the order only where it's its own message (`agentInstructionsAt`).
+    if (prompt.identifier === agentInstructionsPrompt.identifier && agentInstructionsAt(assembly) !== "order") continue
     const condition = conditionOf(prompt)
     const allowed = entry.enabled && triggersFor(prompt, type) && conditionHolds(assembly, condition)
     if (entry.identifier === "chatHistory") afterHistory = true
@@ -1094,9 +1104,11 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
     }
     if (!allowed && entry.identifier !== "main") continue
     const own = () =>
-      allowed && prompt.content
-        ? presetText(assembly, prompt.identifier, prompt.content, {}, condition === "always" ? undefined : condition)
-        : null
+      prompt.identifier === agentInstructionsPrompt.identifier && allowed
+        ? agentInstructionsText(assembly, prompt, condition)
+        : allowed && prompt.content
+          ? presetText(assembly, prompt.identifier, prompt.content, {}, condition === "always" ? undefined : condition)
+          : null
     // A note may replace it in this chat (DESIGN §4.2).
     const text = allowed ? withReplacement(assembly, `preset:${prompt.identifier}`, own) : null
     const summary = text !== null && hasSummary(assembly, text.piece)
@@ -1119,6 +1131,48 @@ const collectionOf = (assembly: Assembly): Array<StPrompt> => {
   }
   assembly.skippedPrompts = skipped
   return collection
+}
+
+/**
+ * Where this request sends the agent instructions (`agentInstructionsPlace`), or null: the reply
+ * doesn't use tools, or it's a workshop's, whose own text is `workshopTurn`.
+ */
+const agentInstructionsAt = (assembly: Assembly) => {
+  const agent = assembly.request.agent
+  if (!agent || agent.workshop || assembly.request.summarizing) return null
+  const doc = need(assembly, "preset").doc
+  return agentInstructionsPlace(doc.prompts, doc.order).place
+}
+
+/**
+ * The agent instructions' text: the preset's own (macros expanded), or, when it's empty or the
+ * preset has no such prompt, the app's default for the tools offered and the reply contract.
+ */
+const agentInstructionsText = (
+  assembly: Assembly,
+  prompt: PresetPrompt | null,
+  condition: PromptCondition = "always"
+): Text | null => {
+  if (prompt?.content.trim()) {
+    const text = presetText(
+      assembly,
+      prompt.identifier,
+      prompt.content,
+      {},
+      condition === "always" ? undefined : condition
+    )
+    return text.text.trim() ? text : null
+  }
+  const instructions = assembly.request.agent?.instructions.trim()
+  if (!instructions) return null
+  return {
+    text: instructions,
+    piece: need(assembly, "macros").verbatim(
+      "agent:instructions",
+      { kind: "assembler", what: "Agent instructions" },
+      instructions
+    )
+  }
 }
 
 /** Puts a prompt where its marker is, or at the end when the order has none (preparePromptsForChatCompletion). */
@@ -2708,17 +2762,15 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
       const text = presetText(assembly, identifier, content)
       return text.text.trim() === "" ? [] : [text]
     })
-    // An agent reply's instructions come last, so the prefix is the plain reply's (spec/AGENTIC.md §6).
-    const instructions = assembly.request.agent?.workshop ? "" : assembly.request.agent?.instructions.trim()
-    if (instructions)
-      parts.push({
-        text: instructions,
-        piece: need(assembly, "macros").verbatim(
-          "agent:instructions",
-          { kind: "assembler", what: "Agent instructions" },
-          instructions
-        )
-      })
+    // An agent reply's instructions come last, so the prefix is the plain reply's (spec/AGENTIC.md
+    // §6), unless the preset places its Agent instructions prompt elsewhere or turns it off.
+    if (agentInstructionsAt(assembly) === "end") {
+      const own = doc.prompts.find((p) => p.identifier === agentInstructionsPrompt.identifier) ?? null
+      const sent =
+        own === null || (triggersFor(own, need(assembly, "cast").type) && conditionHolds(assembly, conditionOf(own)))
+      const text = sent ? agentInstructionsText(assembly, own, own ? conditionOf(own) : "always") : null
+      if (text) parts.push(text)
+    }
     if (parts.length === 0) return
     return {
       role: "user",

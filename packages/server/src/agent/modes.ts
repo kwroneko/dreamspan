@@ -1,6 +1,7 @@
 // Internal reply planning (CHARACTER-CONTEXT §1): plugins replace or wrap the default
 // entry. The built-in planner combines independent chat settings; modes are not chat state.
-import type { ChatState } from "@rp/shared/state.ts"
+import { agentInstructions } from "@rp/shared/agentInstructions.ts"
+import { type ChatState, DEFAULT_REQUEST_CAP } from "@rp/shared/state.ts"
 
 export type OutputContract = "final_text" | "send_message" | "both" | "several"
 
@@ -13,9 +14,13 @@ export interface AgentPlan {
   readonly contract: OutputContract
   /** The send tool says who is present for the message (`agent.send_presence`); absent: it doesn't. */
   readonly sendPresence?: "optional" | "required"
-  /** Most provider requests one reply makes; the last is made without tools. */
   readonly continuity?: "fork" | "resume_previous"
-  readonly turnCap: number
+  /**
+   * The most model requests one reply makes (`agent.request_cap`); the last is made without
+   * tools. Absent: no cap, the run goes on until the model ends it or the user stops it (a
+   * workshop's, owner 2026-11-17: "It cannot be limited, much like how claude code wouldn't be").
+   */
+  readonly turnCap?: number
   /** What the mode changes in the context; absent: the plain reply's. */
   readonly assembly?: {
     /**
@@ -58,20 +63,11 @@ const DEFAULT_TOOLS: ReadonlyArray<string> = [
   "edit_card"
 ]
 
-/** What an agent turn is told with the end of the request: that it has tools, and how to reply. */
-export const agentInstructions = (offered: ReadonlyArray<string>, contract: OutputContract) =>
-  [
-    offered.length > 0
-      ? "Before you write, you can use your tools to check earlier events, summaries, lore and notes, and to keep notes. Use them only when they help."
-      : "",
-    contract === "final_text"
-      ? "When you're ready, write the reply as your answer, and nothing else."
-      : contract === "send_message"
-        ? "When you're ready, send the reply with send_message."
-        : "When you're ready, send the reply with send_message, or write it as your answer."
-  ]
-    .filter(Boolean)
-    .join(" ")
+/**
+ * What an agent turn is told with the end of the request: that it has tools, and how to reply.
+ * The default of the preset's Agent instructions prompt (`agentInstructionsPrompt`).
+ */
+export { agentInstructions }
 
 /** One shared context; tools and card rotation are independent settings. */
 export const defaultMode: OrchestrationMode = {
@@ -90,7 +86,7 @@ export const defaultMode: OrchestrationMode = {
       tools: state.agentTools ?? DEFAULT_TOOLS,
       contract: sendPresence === "required" ? "send_message" : chosen,
       ...(sendPresence ? { sendPresence } : {}),
-      turnCap: 12,
+      turnCap: state.requestCap ?? DEFAULT_REQUEST_CAP,
       assembly: { instructions: agentInstructions, speakerCardOnly: state.cardsRotation === true }
     }
   }

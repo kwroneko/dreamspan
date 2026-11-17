@@ -310,6 +310,8 @@ export const compose = (input: {
     .map((p) => p.identifier)
   for (const id of ["nsfw", "jailbreak", ...userRelative]) relative(id)
   if (has("enhanceDefinitions")) relative("enhanceDefinitions")
+  // The Agent instructions, where the order places them (the stage collects them only then).
+  relative("agentInstructions")
   const main = slots.get(index("main"))
   for (const { message, at } of input.beside) {
     if (at === "start") main!.unshift(message)

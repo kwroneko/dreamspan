@@ -168,7 +168,8 @@ export const layer = Layer.effect(
           readonly agent?: {
             readonly mode: string
             readonly contract: OutputContract
-            readonly turnCap: number
+            /** Absent: no cap (a workshop's). */
+            readonly turnCap?: number
             readonly tools: ReadonlyArray<FrozenTool>
             readonly cardSkills?: ReadonlyArray<Skill>
             readonly inspection?: Generation["inspection"]
@@ -218,7 +219,7 @@ export const layer = Layer.effect(
               strategy: "agent",
               tools: tools.map((t) => t.id),
               contract: frozen.contract,
-              turnCap: frozen.turnCap
+              ...(frozen.turnCap === undefined ? {} : { turnCap: frozen.turnCap })
             },
             mode: frozen.mode,
             checkpoints: (snapshot as ContinuousSnapshot).continuity?.breakpoints ?? [],

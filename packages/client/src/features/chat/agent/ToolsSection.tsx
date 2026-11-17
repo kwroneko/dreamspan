@@ -1,8 +1,9 @@
 // Tools and instructions are independent of card layout; the allowed list survives switching off.
 import { useState, useSyncExternalStore } from "react"
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
+import { DEFAULT_REQUEST_CAP, MAX_REQUEST_CAP } from "@rp/shared/state.ts"
 import { Checkbox, RadioGroup, Switch } from "../../../ui/Choice.tsx"
-import { Fieldset } from "../../../ui/Field.tsx"
+import { Field, Fieldset, Input } from "../../../ui/Field.tsx"
 import type { ChatSession } from "../session.ts"
 import { McpServersFieldset } from "./McpServersFieldset.tsx"
 import { useReplyTools } from "./replyTools.ts"
@@ -12,6 +13,53 @@ type SendPresence = "off" | "optional" | "required"
 /** What the setting does, when, and one example. */
 const PRESENT_ABOUT =
   "Requires Separate contexts. Let each reply say which characters are there for it, from the next reply on this branch. Anyone it leaves out is marked away starting with that message, and is back once a reply names them again. Example: Wren's reply has Mira walk out and names only Wren and Tobin, so Mira is away until a later reply names her. Your own character and a narrator never change this way."
+
+/** What the request cap is, in requests and steps, never turns (a turn is a message here). */
+const CAP_ABOUT = `A reply that uses tools sends the model a request, gets back a tool call or the reply, and repeats. This caps how many requests one reply makes; the last one can't use tools, so the model writes the reply then. From 1 to ${MAX_REQUEST_CAP}; the default is ${DEFAULT_REQUEST_CAP}. Applies from the next reply on this branch. Example: at 3, a reply can look something up twice and must reply on the third request.`
+
+/** The request cap, typed and saved when it's a whole number in range and the field is left. */
+function RequestCapField({
+  cap,
+  disabled,
+  onSave
+}: {
+  cap: number
+  disabled: boolean
+  onSave: (cap: number | null) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const text = draft ?? String(cap)
+  const value = Number(text)
+  const valid = /^\d+$/.test(text.trim()) && value >= 1 && value <= MAX_REQUEST_CAP
+  const commit = () => {
+    if (draft === null) return
+    setDraft(null)
+    if (valid && value !== cap) onSave(value === DEFAULT_REQUEST_CAP ? null : value)
+  }
+  return (
+    <Field
+      label="Model requests per reply"
+      about={CAP_ABOUT}
+      description={`At most ${valid ? value : cap} model requests per reply.`}
+      error={valid ? null : `A whole number from 1 to ${MAX_REQUEST_CAP}.`}
+    >
+      <Input
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={MAX_REQUEST_CAP}
+        step={1}
+        value={text}
+        disabled={disabled}
+        onChange={(event) => setDraft(event.currentTarget.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit()
+        }}
+      />
+    </Field>
+  )
+}
 
 export function ToolsSection({ session }: { session: ChatSession }) {
   const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
@@ -70,6 +118,13 @@ export function ToolsSection({ session }: { session: ChatSession }) {
         </Fieldset>
       )}
       {on && <McpServersFieldset session={session} choices={cast.agentMcp ?? {}} />}
+      {on && (
+        <RequestCapField
+          cap={cast.requestCap ?? DEFAULT_REQUEST_CAP}
+          disabled={pending}
+          onSave={(cap) => void write({ _tag: "RequestCap", cap })}
+        />
+      )}
       {on && (
         <Fieldset legend="Who's in the scene" about={PRESENT_ABOUT}>
           <RadioGroup<SendPresence>
