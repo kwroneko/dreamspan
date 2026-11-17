@@ -12,6 +12,7 @@ import {
   McpConnectionId,
   McpConnectionSettings,
   McpConnectionSummary,
+  McpLoading,
   McpRefused,
   McpToolChoices
 } from "./mcp.ts"
@@ -108,6 +109,19 @@ export class McpApi extends RpcGroup.make(
       stories: Schema.optionalKey(Schema.Boolean),
       workshops: Schema.optionalKey(Schema.Boolean),
       tools: Schema.optionalKey(Schema.Struct({ choices: McpToolChoices, reviewedRevision: Schema.Int }))
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /**
+   * How the connection's tools reach the model: "Send its tools" and "Use the server's
+   * instructions" (spec/MCP.md §4.4). Fields left out stay as they are. Nothing is sent to it.
+   */
+  Rpc.make("SetMcpLoading", {
+    payload: {
+      connectionId: McpConnectionId,
+      loading: Schema.optionalKey(McpLoading),
+      useInstructions: Schema.optionalKey(Schema.Boolean)
     },
     success: McpConnection,
     error: Schema.Union([NotFound, ServerError])

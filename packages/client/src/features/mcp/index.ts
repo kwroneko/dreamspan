@@ -4,6 +4,7 @@ import { settingsGroups } from "../settings/groups.ts"
 import {
   CallsSection,
   DeleteSection,
+  LoadingSection,
   McpServerPage,
   mcpSections,
   RouteSection,
@@ -34,6 +35,7 @@ export const register = () => {
   mcpSections.register({ id: "sign-in", order: 20, component: SignInSection })
   mcpSections.register({ id: "uses", order: 25, component: UsesSection })
   mcpSections.register({ id: "tools", order: 30, component: ToolsSection })
+  mcpSections.register({ id: "loading", order: 35, component: LoadingSection })
   mcpSections.register({ id: "route", order: 40, component: RouteSection })
   mcpSections.register({ id: "calls", order: 50, component: CallsSection })
   mcpSections.register({ id: "delete", order: 100, component: DeleteSection })

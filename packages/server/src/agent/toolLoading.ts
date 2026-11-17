@@ -15,6 +15,27 @@ export const TOOL_SEARCH = "tool_search"
 export const LOAD_SKILL = "load_skill"
 export const LOADERS: ReadonlySet<string> = new Set([TOOL_SEARCH, LOAD_SKILL])
 
+/**
+ * Tools whose own setting decides over the kind's profile whether they're sent from the start:
+ * an MCP server's "Send its tools" (spec/MCP.md §4.4), by tool name.
+ */
+export type LoadingOverrides = ReadonlyMap<string, "immediate" | "deferred">
+
+/** The tools sent from the start: the profile's, with each override's own choice. */
+const immediateOf = (
+  names: ReadonlyArray<string>,
+  profile: ToolLoadingProfile,
+  overrides: LoadingOverrides | undefined
+): ReadonlySet<string> => {
+  const byProfile = new Set(matchPatterns(names, profile.immediate))
+  return new Set(
+    names.filter((n) => {
+      const own = overrides?.get(n)
+      return own === undefined ? byProfile.has(n) : own === "immediate"
+    })
+  )
+}
+
 /** Which tools a chat kind sends from the first request on (registry `toolLoadingProfiles`). */
 export interface ToolLoadingProfile {
   /** The chat kind. A kind without a profile sends every tool from the start. */
@@ -239,12 +260,13 @@ export const splitOffer = <T extends { readonly id: string }>(input: {
   readonly wire: ToolLoadingWire | undefined
   readonly target: WireTarget | null
   readonly loaders: (deferred: ReadonlyArray<T>) => ReadonlyArray<T>
+  readonly overrides?: LoadingOverrides
 }): ToolOffer<T> => {
   const { tools, profile, wire, target } = input
   const none = { tools, deferred: new Set<string>() }
   if (!profile || !wire || !target || !wire.supports(target)) return none
   const names = tools.map((t) => t.id)
-  const immediate = new Set(matchPatterns(names, profile.immediate))
+  const immediate = immediateOf(names, profile, input.overrides)
   const deferred = tools.filter((t) => !immediate.has(t.id) && !LOADERS.has(t.id))
   if (deferred.length === 0) return none
   const loaders = input.loaders(deferred)
@@ -314,9 +336,13 @@ export const skillsFor = (skills: ReadonlyArray<Skill>, deferred: ReadonlyArray<
  * the start and not a loader. Empty without a profile, or when the profile sends everything (RP).
  * This doesn't depend on the wire: the run's skills are the same in every loading mode.
  */
-export const loadableTools = (names: ReadonlyArray<string>, profile: ToolLoadingProfile | undefined) => {
+export const loadableTools = (
+  names: ReadonlyArray<string>,
+  profile: ToolLoadingProfile | undefined,
+  overrides?: LoadingOverrides
+) => {
   if (!profile) return []
-  const immediate = new Set(matchPatterns(names, profile.immediate))
+  const immediate = immediateOf(names, profile, overrides)
   return names.filter((n) => !immediate.has(n) && !LOADERS.has(n))
 }
 

@@ -53,6 +53,7 @@ import { McpConnections } from "../mcp/McpConnections.ts"
 import {
   enabledServers,
   enabledStoryServers,
+  mcpLoadingOverrides,
   mcpOfferTools,
   mcpSkillOf,
   mcpToolFromFrozen,
@@ -504,10 +505,14 @@ export const layer = Layer.effect(
                   kind: chat.kind,
                   tools,
                   model: generation.model,
-                  // Each server is a skill: its index line is the user's own "What it's for". Story
-                  // replies send their servers' tools from the start (deferred loading is M4).
-                  skills: profile.allowsOutside ? mcpServers.map((entry) => mcpSkillOf(entry.connection)) : [],
-                  cards: snapshot.inputs.cards.filter((c) => !state.playedByMe.includes(c.entity as never))
+                  // Each server is a skill: its index line is the user's own "What it's for". Its
+                  // "Send its tools" decides, in both kinds, whether its tools wait for loading.
+                  skills: mcpServers.map((entry) => mcpSkillOf(entry.connection, !profile.allowsOutside)),
+                  ...(mcpServers.length ? { loading: mcpLoadingOverrides(mcpServers, !profile.allowsOutside) } : {}),
+                  // A story's cards bring no skills: only its servers' tools can wait for loading.
+                  cards: profile.allowsOutside
+                    ? snapshot.inputs.cards.filter((c) => !state.playedByMe.includes(c.entity as never))
+                    : []
                 }
               )
             : { offer: { tools, deferred: new Set<string>() }, cardSkills: [] }

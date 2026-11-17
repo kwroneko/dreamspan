@@ -1005,6 +1005,10 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
         )
       })
   },
+  SetMcpLoading: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetMcpLoading({ connectionId: owner.mcpConnectionId, loading: "deferred" }), "NotFound")
+  },
   GetMcpConnection: {
     probe: (actor, owner) => refused(actor.api.GetMcpConnection({ connectionId: owner.mcpConnectionId }), "NotFound")
   },

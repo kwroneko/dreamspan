@@ -69,6 +69,16 @@ export const makeMcpHandlers = Effect.gen(function* () {
           at: Date.now()
         })
       ).pipe(internal("SetMcpUse")),
+    SetMcpLoading: ({ connectionId, loading, useInstructions }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.SetMcpLoading({
+          userId: id,
+          connectionId,
+          ...(loading === undefined ? {} : { loading }),
+          ...(useInstructions === undefined ? {} : { useInstructions }),
+          at: Date.now()
+        })
+      ).pipe(internal("SetMcpLoading")),
     DeleteMcpConnection: ({ connectionId }) =>
       Effect.flatMap(userId, (id) => writer.DeleteMcpConnection({ userId: id, connectionId })).pipe(
         internal("DeleteMcpConnection")

@@ -209,6 +209,17 @@ export const makeMcpWriteHandlers = Effect.gen(function* () {
         return yield* reload(userId, connectionId)
       }).pipe(transaction(sql, "SetMcpUse")),
 
+    SetMcpLoading: ({ userId, connectionId, loading, useInstructions, at }) =>
+      Effect.gen(function* () {
+        yield* owned(userId, connectionId)
+        yield* sql`UPDATE mcp_connections SET ${sql.update({
+          ...(loading === undefined ? {} : { loading }),
+          ...(useInstructions === undefined ? {} : { use_instructions: useInstructions ? 1 : 0 }),
+          updated_at: at
+        })}, row_version = row_version + 1 WHERE id = ${connectionId}`
+        return yield* reload(userId, connectionId)
+      }).pipe(transaction(sql, "SetMcpLoading")),
+
     OpenMcpCall: ({ userId, call }) =>
       Effect.gen(function* () {
         // A connection of the user's that isn't purged: a call may still be closing after a delete.

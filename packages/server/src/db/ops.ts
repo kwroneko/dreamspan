@@ -7,6 +7,7 @@ import {
   McpConnectionId,
   McpConnectionSettings,
   McpConnectionSummary,
+  McpLoading,
   McpServerInfo,
   McpTool,
   McpToolChoices
@@ -834,6 +835,18 @@ const McpWriteOps = RpcGroup.make(
       stories: Schema.optionalKey(Schema.Boolean),
       workshops: Schema.optionalKey(Schema.Boolean),
       tools: Schema.optionalKey(Schema.Struct({ choices: McpToolChoices, reviewedRevision: Schema.Int })),
+      at: Schema.Number
+    },
+    success: McpConnection,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** How a connection's tools reach the model (spec/MCP.md §4.4); fields left out stay as they are. */
+  Rpc.make("SetMcpLoading", {
+    payload: {
+      userId: UserId,
+      connectionId: McpConnectionId,
+      loading: Schema.optionalKey(McpLoading),
+      useInstructions: Schema.optionalKey(Schema.Boolean),
       at: Schema.Number
     },
     success: McpConnection,

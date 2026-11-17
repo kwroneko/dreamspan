@@ -169,6 +169,9 @@ describe("MCP servers in workshops", () => {
         connectionId: a.id,
         tools: { choices: { hidden: { on: false } }, reviewedRevision: a.catalogRevision }
       })
+      // With two tools, Automatically sends them from the start with no skill (spec/MCP.md §4.4);
+      // When the model asks makes Alpha a skill. This wire carries no deferral, so all are sent.
+      yield* api.SetMcpLoading({ connectionId: a.id, loading: "deferred" })
 
       yield* run(api, chat, events, "first")
       yield* run(api, chat, events, "second")
