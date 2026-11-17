@@ -152,4 +152,4 @@ Each milestone has its own tests; the browser ones run at 1440 and 390, light an
 
 ## 11. Question for the owner
 
-1. A workshop started on one branch: should it also appear beside the story's other existing branches (each getting an empty branch of it when first opened there), or only beside the branch it was started on and the branches made from that one later (proposed, following "the new branch is attached to the new branch")?
+1. **Answered.** **[D]** (owner, 2026-11-17, answer "Ok." to the coordinator's recommendation) A workshop appears only beside the story branch it was started on and the branches made from that branch later; existing sibling branches don't list it. Starting to talk on a sibling starts a separate workshop there. (The question was: A workshop started on one branch: should it also appear beside the story's other existing branches (each getting an empty branch of it when first opened there), or only beside the branch it was started on and the branches made from that one later (proposed, following "the new branch is attached to the new branch")?)
