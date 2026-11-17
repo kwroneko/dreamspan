@@ -300,8 +300,21 @@ export function ToolTabs({
   }
   const drop = (dragged: string, over: Over | null) => {
     if (over === null) return
-    if (over.zone === "more") reorder(moved(values, values.indexOf(dragged), values.length - 1))
-    else reorder(placedBefore(values, dragged, over.before))
+    if (over.zone === "more") return reorder(moved(values, values.indexOf(dragged), values.length - 1))
+    // The row's end and More's start are one place in the order; which one the tool lands in
+    // is the one it was dropped in: a step on while it would show in the row though dropped
+    // in More, a step back while it would stay in More though dropped in the row.
+    let next = placedBefore(values, dragged, over.before)
+    const shows = (order: ReadonlyArray<string>) => {
+      const at = order.indexOf(dragged)
+      return at < fitFor(order, -1).count
+    }
+    const step = over.zone === "menu" ? 1 : -1
+    for (let at = next.indexOf(dragged); shows(next) !== (over.zone === "strip"); at += step) {
+      if (at + step < 0 || at + step >= next.length) break
+      next = moved(next, at, at + step)
+    }
+    reorder(next)
     if (over.zone === "strip") setMenuOpen(false)
   }
   const latest = useRef({ target, drop, menuOpen })

@@ -147,7 +147,8 @@ test("dragging onto More sends a tool to the end; More's tools drag among themse
   page
 }) => {
   await open(page)
-  const first = (await rowValues(page))[0]!
+  // Not the open tool (This chat): under More it would be the guest, its room kept beside More.
+  const first = (await rowValues(page))[1]!
   // Onto More: last.
   await drag(page, tool(page, first), await center(more(page)))
   await expect.poll(() => allValues(page).then((values) => values.at(-1))).toBe(first)
@@ -166,7 +167,7 @@ test("dragging onto More sends a tool to the end; More's tools drag among themse
   await expect(moreMenu(page)).toHaveCount(0)
   await expect.poll(() => rowValues(page).then((values) => values[0])).toBe(last)
   // A tool held on More opens it, to drop at a place inside.
-  const second = (await rowValues(page))[1]!
+  const second = (await rowValues(page))[2]!
   await drag(page, tool(page, second), await center(more(page)), async () => {
     await expect(moreMenu(page)).toBeVisible()
     const target = moreMenu(page).locator('[role="menuitem"][data-tab-value]').first()
@@ -282,12 +283,20 @@ test("Arrange tabs… lists every tool to move with buttons", async ({ page }) =
     .nth(1)
     .getByRole("button", { name: /^Move .+ up$/ })
     .click()
-  await expect.poll(() => rowValues(page).then((values) => values[0])).toBe(usual[1])
-  await expect(dialog.getByRole("button", { name: "Reset tab order", exact: true })).toBeEnabled()
-  await dialog.getByRole("button", { name: "Reset tab order", exact: true }).click()
-  await expect.poll(() => rowValues(page).then((values) => values[0])).toBe(usual[0])
+  // The dialog is modal: the row behind it is checked once it's closed, the stored order meanwhile.
+  await expect.poll(() => stored().then((values) => values[0])).toBe(usual[1])
   await dialog.getByRole("button", { name: "Done", exact: true }).click()
   await expect(dialog).toHaveCount(0)
+  await expect.poll(() => rowValues(page).then((values) => values[0])).toBe(usual[1])
+  // Reset, from the list.
+  await more(page).click()
+  await page.getByRole("menuitem", { name: "Arrange tabs…", exact: true }).click()
+  await expect(dialog.getByRole("button", { name: "Reset tab order", exact: true })).toBeEnabled()
+  await dialog.getByRole("button", { name: "Reset tab order", exact: true }).click()
+  await expect.poll(stored).toEqual([])
+  await expect(dialog.getByRole("button", { name: "Reset tab order", exact: true })).toBeDisabled()
+  await dialog.getByRole("button", { name: "Done", exact: true }).click()
+  await expect.poll(() => allValues(page)).toEqual(usual)
 })
 
 for (const width of [1440, 390])
