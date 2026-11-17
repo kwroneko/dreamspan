@@ -100,7 +100,7 @@ The budget is per run, not per message; `noReply` is reported after a delivered 
 | reference-harness | ours |
 |---|---|
 | `send_message` tool | `sendMessageDefinition` (`agent/tools.ts`): one `message` argument, ends the loop (`finishTurn`); a second call gets an error. `present` added by send presence. No `final`: an RP reply is one message ("[D] RP produces one message per turn"). |
-| `no_reply` | none. A story reply always produces a message. A workshop's `several` contract ends on plain text. |
+| `no_reply` | none yet. **[D]** Stories get it (§3.1): a pass shows as the line "<Name> stays silent", swipeable. A workshop's `several` contract ends on plain text. |
 | Nudge | one nudge under `send_message` (`SEND_NUDGE`, an `rpHarness` message sent as a user turn), then plain text is taken as the reply. |
 | `throwIfLlmFailure` | a failed provider turn fails the version (`failure` in `session.ts`) before `finishTurn` can nudge (`failed` check). |
 | Stop authoritative | `signal.aborted` ends the loop in `finishTurn`. |
@@ -120,7 +120,12 @@ Everything below is **[P]** unless DESIGN marks it decided.
 
 `send_message` becomes the default contract for agentic story replies (the default planner's `chosen` when `output.contract` isn't set). `final_text` and `both` stay as choices, in This chat → Tools as a radio group ("Send tool", "Plain answer", "Either"), with the same hover explanation pattern. Send presence is unchanged: `required` already forces `send_message`.
 
-No `final` flag: a story reply is one message, so a successful send ends the run, as now. No `no_reply` tool in stories: a reply always has a message. (A workshop keeps `several`, §3.7.)
+**[D]** (owner, 2026-11-17, "ok" to the coordinator's proposal, after the owner's point "Why would the automated reply order know better than the actual LLM? It's the same with the decision model") **Stories get `no_reply`: the replying character may pass.**
+- A pass is never a failure and never invisible: the chat shows a small line "<Name> stays silent", which is swipeable like a message, so the user can get an actual reply from it.
+- In a group or round, the next character in the round then replies; with no round, the turn returns to the user.
+- In 1:1 the same line appears and the turn returns to the user.
+- **Progress messages (`final: false`) are not used in stories:** one reply is one message, so a successful send ends the run, as now, with no `final` flag. Anything written along the way shows in Steps. Workshops keep their progress messages (`several`, §3.7).
+- A model that neither sends nor passes after 3 nudges still fails visibly (§3.4).
 
 ### 3.2 Text outside a send is never the reply
 
@@ -129,7 +134,7 @@ Under `send_message`, a turn's text never streams into the body (today it stream
 ### 3.3 The nudge, as reference-harness's
 
 - **Trigger:** `finishTurn` sees a clean turn (not `error`, not `aborted`, not stopped) with no tool call, before the cap's last request.
-- **Text:** reference-harness's `not_sent` wording without the `no_reply` line, as a preset utility prompt **"When the reply wasn't sent"** (identifier `sendNudge`) with a built-in default, under the same fallback rule as the Agent instructions: a preset without it sends the default.
+- **Text:** reference-harness's `not_sent` wording, with its `no_reply` line now that stories have the tool (§3.1), as a preset utility prompt **"When the reply wasn't sent"** (identifier `sendNudge`) with a built-in default, under the same fallback rule as the Agent instructions: a preset without it sends the default.
 
   ```
   Your turn ended without sending a message. You must end every turn by calling send_message with your reply.
@@ -158,7 +163,7 @@ The last request at the cap has no tools and asks "Write the reply now." Its pla
 
 - **Mechanical records:** a pure `contractAttempts(transcript, cuts)` over the stored transcript and `rollout_branches`, with reference-harness's failure types where they apply to us: `invalid_tool_call` (a send refused, e.g. by send presence), `textual_tool_call` (markup patterns), `context_mimicry` (our own context's tags: the history's speaker labels and `<Name>` card blocks, from one constant the assembler also uses, with a test keeping them in step), `text_only`, `empty`. Shown in the inspector's run view and summed per model in Settings → Models later. No backfill needed: nothing real is stored yet.
 - **Rejected [D]: no redo on another model** (owner, 2026-11-17, on the checks gate redoing a turn on a different model): "This is not an autonomous agent. The user can switch a model and swipe themselves. Moreover, we don't have the affordance for choosing a secondary model" The output gate's model-switching redo (§1.5, §1.6: a judged refusal redoing the turn on a rule's model) is not part of the delta design, and is rejected, not deferred. A failed ending stays visible (§3.4) and the user switches the model and swipes. Any ending check is observe-only.
-- **Ending checks:** our refusal judge already judges finished replies. Extending it to an exhausted ending ("was the stray text a reply?") is the only ending check we'd need, since we have no `no_reply`. Opt-in, like every decision send.
+- **Ending checks:** our refusal judge already judges finished replies. Extending it to an exhausted ending ("was the stray text a reply?") is the only ending check we'd need, since a deliberate pass is `no_reply`, never stray text. Opt-in, like every decision send.
 - **Revise at a send:** reference-harness's `revise` remedy for style or duplicate checks. Not proposed now.
 
 ### 3.7 Workshops
