@@ -51,7 +51,9 @@ function PresetColumn({ store }: { store: EditorStore }) {
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <span className="min-w-0 font-medium">
               <RefName store={store}>
-                <span className="block min-w-0 truncate">{state.snapshot.ref.label}</span>
+                <span data-layout-name className="block min-w-0 truncate">
+                  {state.snapshot.ref.label}
+                </span>
               </RefName>
             </span>
             <Badge>preset</Badge>

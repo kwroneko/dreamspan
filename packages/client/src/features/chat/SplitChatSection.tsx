@@ -33,6 +33,7 @@ export function SplitLink({
           requestSplitReveal(group.id)
           navigation.picked()
         }}
+        data-layout-name
         className="min-w-0 truncate rounded text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
       >
         {children}

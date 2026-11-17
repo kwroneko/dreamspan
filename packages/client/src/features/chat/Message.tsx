@@ -1044,7 +1044,10 @@ export const Message = memo(function Message({
               Choosing who replies…
             </span>
           ) : (
-            <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate">
+            <span
+              data-layout-name
+              className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate"
+            >
               {name}
             </span>
           )}

@@ -104,7 +104,9 @@ function ThreadRow({
             onEditingChange={setRenaming}
             onRename={rename}
           >
-            <span className="min-w-0 truncate font-medium">{name}</span>
+            <span data-layout-name className="min-w-0 truncate font-medium">
+              {name}
+            </span>
           </InlineRename>
           {shown && !renaming && (
             <span className="ms-auto flex shrink-0">

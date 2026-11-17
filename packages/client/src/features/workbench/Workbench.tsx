@@ -872,7 +872,10 @@ function TabButton({
               <TabIcon tab={tab} store={store} />
               {/* As wide as the title in either style: keeping a preview moves nothing after it. */}
               <span className="grid min-w-0">
-                <span className={`col-start-1 row-start-1 min-w-0 truncate ${tab.preview ? "italic" : ""}`}>
+                <span
+                  data-layout-name
+                  className={`col-start-1 row-start-1 min-w-0 truncate ${tab.preview ? "italic" : ""}`}
+                >
                   {title}
                 </span>
                 <span

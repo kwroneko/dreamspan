@@ -775,11 +775,15 @@ function Chip({
       {onClick ? (
         <Tooltip label={hint ?? ""}>
           <button type="button" className="inline-flex min-w-0 items-center gap-1 outline-none" onClick={onClick}>
-            <span className="truncate">{children}</span>
+            <span data-layout-name className="truncate">
+              {children}
+            </span>
           </button>
         </Tooltip>
       ) : (
-        <span className="min-w-0 truncate">{children}</span>
+        <span data-layout-name className="min-w-0 truncate">
+          {children}
+        </span>
       )}
       <IconButton
         label="Remove"
@@ -971,7 +975,7 @@ function RemoteTile({ card, browse }: { card: RemoteSummary; browse: SourceBrows
         </>
       }
     >
-      <span data-remote-creator className="truncate text-xs text-muted">
+      <span data-remote-creator data-layout-name className="truncate text-xs text-muted">
         {card.creator ? `by ${card.creator}` : " "}
       </span>
       <span className="mt-auto truncate text-xs text-muted">
@@ -1170,7 +1174,7 @@ function RemoteLorebookTile({ card, browse }: { card: RemoteSummary; browse: Sou
         </>
       }
     >
-      <span data-remote-creator className="truncate text-xs text-muted">
+      <span data-remote-creator data-layout-name className="truncate text-xs text-muted">
         {card.creator ? `by ${card.creator}` : " "}
       </span>
       <span className="mt-auto truncate text-xs text-muted">
@@ -1443,7 +1447,9 @@ function RecentRow({ browse }: { browse: SourceBrowse }) {
                     size="xl"
                     {...(r.thumb ? { src: remoteImageUrl(info.id, r.thumb) } : {})}
                   />
-                  <span className="w-full truncate">{r.name}</span>
+                  <span data-layout-name className="w-full truncate">
+                    {r.name}
+                  </span>
                 </Link>
               </Tooltip>
             </li>

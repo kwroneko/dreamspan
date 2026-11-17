@@ -199,7 +199,7 @@ function HitRow({ hit }: { hit: MessageHit }) {
           className="flex w-full max-w-controls min-w-0 flex-col gap-0.5 rounded-md border border-border p-2 text-left hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           <span className="flex min-w-0 items-baseline gap-2 text-sm">
-            <span data-hit-chat className="min-w-0 flex-1 truncate font-medium">
+            <span data-hit-chat data-layout-name className="min-w-0 flex-1 truncate font-medium">
               {hit.chatName}
             </span>
             <span className="shrink-0 text-xs text-muted tabular-nums">{formatMoment(hit.createdAt)}</span>

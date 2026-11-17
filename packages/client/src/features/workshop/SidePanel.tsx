@@ -225,7 +225,9 @@ function SideChatHeader({
             aria-label={`Workshop: ${shown.title}`}
             className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1.5 py-1 text-left text-sm font-medium hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus outline-none"
           >
-            <span className="min-w-0 truncate">{shown.title}</span>
+            <span data-layout-name className="min-w-0 truncate">
+              {shown.title}
+            </span>
             <Icon name="down" className="shrink-0 text-muted" />
           </button>
         }

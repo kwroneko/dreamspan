@@ -195,7 +195,9 @@ export function Gallery({ store, call }: Pick<CardTabProps, "store" | "call">) {
                           </button>
                         </Tooltip>
                         <div className="flex min-w-0 items-center gap-2">
-                          <span className="min-w-0 flex-1 truncate text-xs">{asset.name || "Image"}</span>
+                          <span data-layout-name className="min-w-0 flex-1 truncate text-xs">
+                            {asset.name || "Image"}
+                          </span>
                           <Menu
                             label="Image actions"
                             hint={`Rename, change kind or remove ${asset.name || "this image"}.`}

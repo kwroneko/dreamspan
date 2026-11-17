@@ -1,6 +1,6 @@
 import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Fragment } from "react"
-import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
+import { CenterHeaderContent, compactHeaderControls } from "../../ui/CenterHeader.tsx"
 import { DocumentSwitcher } from "./DocumentSwitcher.tsx"
 import { usePlaceParam } from "../../usePlaceParam.ts"
 // A list of notes as blocks (owner, 2026-11-01), the shape a preset's prompts have (ui/Block):
@@ -248,14 +248,14 @@ export function NoteBlock({
   const { ref: summaryRef, truncated: summaryTruncated } = useTruncated(summary)
   const titleHint = open ? "Hide the note's text" : "Show the note's text"
   const name = (
-    <span ref={titleRef} data-note-title className="block min-w-0 truncate">
+    <span ref={titleRef} data-note-title data-layout-name className="block min-w-0 truncate">
       {title}
     </span>
   )
   const HeaderRow = large ? CenterHeaderContent : Fragment
   const toggle = large ? (
     <Tooltip label={<span className="[overflow-wrap:anywhere]">{title}</span>} enabled={titleTruncated}>
-      <h2 aria-label={title} className="min-w-0 truncate text-base font-semibold">
+      <h2 aria-label={title} className="min-w-0 text-base font-semibold sm:truncate">
         <DocumentSwitcher
           refId={ref.id}
           label={title}
@@ -306,6 +306,7 @@ export function NoteBlock({
           ref={summaryRef}
           data-note-summary
           tabIndex={summaryTruncated ? 0 : undefined}
+          data-layout-name
           className="block min-w-0 flex-1 truncate outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           {summary}
@@ -330,7 +331,10 @@ export function NoteBlock({
       <Block ref={box} aria-label={`Note ${title}`} className="bg-canvas">
         <BlockHeader className="@container/note-header block!">
           <HeaderRow>
-            <div data-note-title-row className="flex w-full min-w-0 items-center gap-1">
+            <div
+              data-note-title-row
+              className={`flex w-full min-w-0 items-center gap-1 ${large ? compactHeaderControls : ""}`}
+            >
               {/* The note's switch leads the header, as before, so nothing moves when opening
               the note adds its save cluster at the end (owner, 2026-11-03). */}
               {entry.control && (

@@ -148,7 +148,9 @@ function CardOptions({
                 size="md"
               />
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate">{card.name}</span>
+                <span data-layout-name className="truncate">
+                  {card.name}
+                </span>
                 <CardVersion card={card} truncate />
               </span>
               {/* Played as the persona, a character card joins the chat; a persona takes the
@@ -546,7 +548,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
                 <span aria-hidden="true" className="size-1" />
               )}
               {!compact && (
-                <span className="min-w-0 truncate">
+                <span data-layout-name className="min-w-0 truncate">
                   {name}
                   {defaultLabel}
                 </span>

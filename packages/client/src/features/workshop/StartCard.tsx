@@ -40,7 +40,11 @@ function Choice({
       <span className="w-20 shrink-0 text-muted">{label}</span>
       <PickerPopover
         title={title}
-        trigger={<span className="min-w-0 truncate">{name}</span>}
+        trigger={
+          <span data-layout-name className="min-w-0 truncate">
+            {name}
+          </span>
+        }
         triggerLabel={`${label}: ${name}`}
         triggerClassName="flex h-8 min-w-0 max-w-full items-center rounded-md border border-border px-2 text-left text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus/40 data-popup-open:bg-surface-raised"
         hint={hint}

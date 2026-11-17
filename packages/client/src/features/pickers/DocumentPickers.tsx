@@ -38,12 +38,15 @@ import { useEditedPresetSelection } from "./presetSelection.ts"
 
 /** A header switcher's trigger: the document's name with a chevron, the header's own look. */
 const headerSwitcherClass =
-  "flex h-9 w-full max-w-controls min-w-0 items-center justify-between gap-2 rounded-md border border-transparent px-1 text-left text-base text-text outline-none select-none hover:bg-surface-raised focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 data-popup-open:bg-surface-raised sm:text-sm"
+  "flex min-h-9 w-full max-w-controls min-w-0 items-center justify-between gap-2 rounded-md border border-transparent px-1 text-left text-base text-text outline-none select-none hover:bg-surface-raised focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 data-popup-open:bg-surface-raised sm:text-sm"
 
 function HeaderTrigger({ text }: { text: string }) {
   return (
     <>
-      <span className="min-w-0 truncate">{text}</span>
+      {/* On a phone the name takes a second line before it is cut: a short one always shows whole. */}
+      <span className="min-w-0 max-sm:line-clamp-2 max-sm:leading-tight max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere] sm:truncate">
+        {text}
+      </span>
       <Icon name="down" size={14} className="shrink-0 text-muted" />
     </>
   )

@@ -49,7 +49,9 @@ function RelativeRow({ item, sourceId }: { item: RemoteRelative; sourceId: strin
       />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm font-medium">{item.name}</span>
+          <span data-layout-name className="truncate text-sm font-medium">
+            {item.name}
+          </span>
           {item.held && (
             <Badge tone="accent">
               <span data-family-held>{item.held.archived ? "Yours, archived" : "Yours"}</span>

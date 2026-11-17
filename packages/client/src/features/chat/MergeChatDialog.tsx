@@ -233,7 +233,9 @@ function SourcePicker({
                 onClick={() => pick(chat)}
                 className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus aria-pressed:bg-surface-raised aria-pressed:font-medium"
               >
-                <span className="min-w-0 truncate">{chat.title || "Untitled chat"}</span>
+                <span data-layout-name className="min-w-0 truncate">
+                  {chat.title || "Untitled chat"}
+                </span>
                 {chat.listed === thisChat && <span className="shrink-0 text-xs text-muted">This chat</span>}
               </button>
             </Tooltip>

@@ -421,7 +421,9 @@ export function LcmFields({
                   triggerClassName="flex h-9 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-left text-sm text-text hover:bg-surface-raised"
                   trigger={
                     <>
-                      <span className="min-w-0 truncate">{current?.label ?? "Choose a preset"}</span>
+                      <span data-layout-name className="min-w-0 truncate">
+                        {current?.label ?? "Choose a preset"}
+                      </span>
                       <Icon name="down" size={14} />
                     </>
                   }

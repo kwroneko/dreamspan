@@ -255,7 +255,7 @@ function SortableHandleContent<Item>({
           <circle cx="10.5" cy="12.5" r="1.25" />
         </svg>
         {named && (
-          <span className="min-w-0 flex-1 truncate" title={itemLabel}>
+          <span data-layout-name className="min-w-0 flex-1 truncate" title={itemLabel}>
             {itemLabel}
           </span>
         )}

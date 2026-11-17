@@ -178,7 +178,7 @@ function Row({
     <>
       <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted">
         <span className="font-semibold text-text tabular-nums">#{number}</span>
-        <span className="min-w-0 truncate" title={writer}>
+        <span data-layout-name className="min-w-0 truncate" title={writer}>
           {writer}
         </span>
         <span aria-hidden="true">·</span>

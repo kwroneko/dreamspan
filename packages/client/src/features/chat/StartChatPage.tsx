@@ -108,7 +108,10 @@ function Greeting({
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">
-          <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate">
+          <span
+            data-layout-name
+            className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate"
+          >
             {name}
           </span>
           {groupOnly && <span className="shrink-0 text-xs text-muted">group greeting</span>}

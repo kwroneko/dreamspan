@@ -19,7 +19,9 @@ const dropdown =
 function Trigger({ text, muted = false }: { text: string; muted?: boolean }) {
   return (
     <>
-      <span className={`min-w-0 truncate ${muted ? "text-muted" : ""}`}>{text}</span>
+      <span data-layout-name className={`min-w-0 truncate ${muted ? "text-muted" : ""}`}>
+        {text}
+      </span>
       <Icon name="down" size={14} className="text-muted" />
     </>
   )

@@ -85,7 +85,9 @@ export function FolderBrowser({
               onClick={() => open(`${listing.path === "/" ? "" : listing.path}/${folder.name}`)}
             >
               <FolderIcon />
-              <span className="min-w-0 truncate">{folder.name}</span>
+              <span data-layout-name className="min-w-0 truncate">
+                {folder.name}
+              </span>
               {folder.st && <Badge tone="success">SillyTavern</Badge>}
             </button>
           </Tooltip>

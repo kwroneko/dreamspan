@@ -18,6 +18,13 @@ export function CenterHeaderEnd() {
   return <SlotOutlet slot={centerHeaderEnd} props={{}} />
 }
 
+/**
+ * An editor's row in the column header, on a phone: its icon buttons at 24 px with tighter gaps,
+ * so the document's name beside them shows whole (a short one never cut, layout audit).
+ */
+export const compactHeaderControls =
+  "max-sm:gap-1 max-sm:[&_button.size-8]:size-6! max-sm:[&_[data-save-state]_button]:size-6!"
+
 /** The registered column boundary shared by chats, pages and full editors. */
 export function CenterHeader(props: HeaderProps) {
   return <SlotOutlet slot={centerHeaders} only="shell.center-header" props={props} />

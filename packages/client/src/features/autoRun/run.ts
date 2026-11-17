@@ -1,6 +1,6 @@
 // Auto replies (DESIGN §2.3; ST's auto mode, bounded): the characters reply to each other for a
 // set number of turns with nothing sent from the user. The run lives in the tab that started
-// it and is driven from there: each turn is the same request ▶ Reply now makes, started only
+// it and is driven from there: each turn is the same request the composer's Generate button makes, started only
 // after the one before it finished and only while everything is as the run left it. Anything
 // else ends it. This file is the run's state and its one rule (`stepOf`); AutoRun.tsx drives it.
 import type { EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"

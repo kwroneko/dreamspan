@@ -453,7 +453,7 @@ export function TileFace({
     <>
       <span className={`relative aspect-[2/3] w-full overflow-hidden ${dim ? "opacity-50" : ""}`}>{portrait}</span>
       <span className="flex w-full min-w-0 flex-1 flex-col gap-0.5 p-2">
-        <span className="truncate text-sm font-medium" {...(title === undefined ? {} : { title })}>
+        <span data-layout-name className="truncate text-sm font-medium" {...(title === undefined ? {} : { title })}>
           {name}
         </span>
         {children}

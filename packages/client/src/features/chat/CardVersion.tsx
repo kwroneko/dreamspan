@@ -10,6 +10,7 @@ export function CardVersion({ card, truncate = false }: { card: CastCard; trunca
     <span
       data-card-version
       title={`Version: ${version}`}
+      data-layout-name
       className={`max-w-full text-xs text-muted ${truncate ? "truncate" : "[overflow-wrap:anywhere]"}`}
     >
       {version}

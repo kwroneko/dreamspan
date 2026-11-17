@@ -1,6 +1,6 @@
 import { addedTo } from "./StandaloneLorebook.tsx"
 import { RefVariants } from "./RefVariants.tsx"
-import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
+import { CenterHeaderContent, compactHeaderControls } from "../../ui/CenterHeader.tsx"
 import { DocumentSwitcher } from "./DocumentSwitcher.tsx"
 import { SearchReplaceButton } from "../../ui/SearchReplace.tsx"
 import { PersonaBadge } from "../../ui/PersonaBadge.tsx"
@@ -309,7 +309,10 @@ export function Editor({
                 </CardHeader>
               ) : (
                 <CenterHeaderContent>
-                  <div data-editor-header className="flex w-full min-w-0 items-center justify-between gap-2">
+                  <div
+                    data-editor-header
+                    className={`flex w-full min-w-0 items-center justify-between gap-2 ${compactHeaderControls}`}
+                  >
                     <div className="min-w-0 flex-1">{title("text-base")}</div>
                     <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
                     {onClose && <WindowClose onClick={onClose} />}

@@ -1,4 +1,4 @@
-import { CenterHeaderContent } from "../../ui/CenterHeader.tsx"
+import { CenterHeaderContent, compactHeaderControls } from "../../ui/CenterHeader.tsx"
 import { useSearchHighlights } from "./searchHighlights.ts"
 // The shared four-row card header (owner, 2026-11-03): name/version/save, nickname,
 // Persona and chats/token counts (Persona last in the side panel). Names retain their rename questions.
@@ -260,7 +260,7 @@ export function CardNameHeader({
       <Identity>
         <div
           data-card-header-row="identity"
-          className={`relative flex w-full min-w-0 items-center gap-1 ${centerTitle ? "[--card-name-min:1rem] max-sm:[&_[data-save-state]_button]:size-6!" : ""}`}
+          className={`relative flex w-full min-w-0 items-center gap-1 ${centerTitle ? `[--card-name-min:1rem] ${compactHeaderControls}` : ""}`}
         >
           <div className="flex min-w-[min(100%,calc(2*var(--card-name-min)+0.25rem))] flex-1 items-center gap-1 has-[[data-renaming]]:min-w-[min(100%,calc(4*var(--card-name-min)+0.75rem))]">
             <InlineRename
@@ -270,7 +270,10 @@ export function CardNameHeader({
               fieldLabel="Display name"
               goTo={nameMatch}
               highlights={nameHighlights}
-              className="min-w-[var(--card-name-min)]! max-w-[min(60%,calc(100%_-_var(--card-name-min)_-_0.25rem))] shrink data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]! data-[renaming]:max-w-none"
+              // In the column header the name's switcher comes first: the version gives up its room
+              // before the name does, so a short name always shows whole (at 390 px the old 60% cap
+              // left "Card 390" as "Car…" beside an empty version's "Add …").
+              className={`min-w-[var(--card-name-min)]! shrink data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]! data-[renaming]:max-w-none ${centerTitle ? "max-w-[calc(100%_-_var(--card-name-min)_-_2rem)]" : "max-w-[min(60%,calc(100%_-_var(--card-name-min)_-_0.25rem))]"}`}
               onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
             >
               {/* The pencil beside the heading, not in it: the heading's name is the card's name. */}
@@ -278,6 +281,7 @@ export function CardNameHeader({
                 <Title
                   aria-label={name || "Unnamed card"}
                   data-card-name
+                  data-layout-name
                   className={`min-w-0 truncate font-semibold ${heading === "h1" ? "text-2xl leading-8" : "text-lg leading-7"}`}
                 >
                   {centerTitle ?? (name || "Unnamed card")}
@@ -293,7 +297,7 @@ export function CardNameHeader({
               highlights={versionHighlights}
               allowEmpty
               // Leave the full editor's name switcher room for text beside its chevron.
-              className={`min-w-[var(--card-name-min)]! shrink text-xs text-muted data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]! ${centerTitle ? "max-w-[calc(40%_-_0.25rem)] data-[renaming]:max-w-none" : ""}`}
+              className={`min-w-[var(--card-name-min)]! shrink text-xs text-muted data-[renaming]:min-w-[calc(3*var(--card-name-min)+0.5rem)]! ${centerTitle ? "shrink-[100] max-w-[calc(40%_-_0.25rem)] data-[renaming]:max-w-none" : ""}`}
               onRename={async (next) => {
                 if (await clashes(name, next)) return false
                 write({ version: next })
@@ -301,11 +305,15 @@ export function CardNameHeader({
             >
               <Tooltip label={VERSION_HINT}>
                 {version ? (
-                  <span data-card-version className="min-w-0 truncate text-xs text-muted">
+                  <span data-card-version data-layout-name className="min-w-0 truncate text-xs text-muted">
                     {version}
                   </span>
                 ) : (
-                  <span data-card-version className="min-w-0 truncate text-xs text-muted/70">
+                  // On a phone the header keeps only the pencil for an empty version; its hint says what it does.
+                  <span
+                    data-card-version
+                    className={`min-w-0 truncate text-xs text-muted/70 ${centerTitle ? "max-sm:sr-only" : ""}`}
+                  >
                     Add a version
                   </span>
                 )}
@@ -340,7 +348,7 @@ export function CardNameHeader({
         >
           <Tooltip label={NICKNAME_HINT}>
             {nickname ? (
-              <span data-card-nickname className="min-w-0 truncate text-muted">
+              <span data-card-nickname data-layout-name className="min-w-0 truncate text-muted">
                 In chat: {nickname}
               </span>
             ) : (
