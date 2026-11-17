@@ -22,6 +22,20 @@ const AppConfigFromEnv = Config.all({
    * available for this platform. A security setting, so configurable only here.
    */
   commandSandbox: Config.String(serverEnvironment.COMMAND_SANDBOX).pipe(Config.withDefault("")),
+  /**
+   * Each account's Files quota by default (spec/FILES-AND-ENVIRONMENT.md §1.2): files, their
+   * versions and the home folder together. Bytes, or a number with K, M, G or T (binary units,
+   * e.g. `10G`); checked at startup (files/quota.ts). An admin can set another per account.
+   */
+  filesQuota: Config.String(serverEnvironment.FILES_QUOTA).pipe(Config.withDefault("10G")),
+  /**
+   * The server's public addresses (IPs, CIDR ranges or host names) that commands may not
+   * reach, besides its own interfaces' and those PUBLIC_ORIGINS' hosts resolve to. Behind NAT
+   * the public address isn't on any interface (sandbox/network.ts).
+   */
+  publicAddresses: Config.Array(Schema.String, serverEnvironment.PUBLIC_ADDRESSES).pipe(
+    Config.withDefault<ReadonlyArray<string>>([])
+  ),
   dbReaders: Config.schema(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)), serverEnvironment.DB_READERS).pipe(
     Config.withDefault(2)
   ),

@@ -31,8 +31,9 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
               created_at: now
             })} ON CONFLICT (sha256) DO NOTHING`
             const [row] = yield* sql<{ id: string }>`SELECT id FROM media_assets WHERE sha256 = ${version.sha256}`
+            // No media_refs row: a version is reached through its own row, and a reference
+            // would keep the bytes after retention removed the version.
             mediaId = row!.id
-            yield* sql`INSERT INTO media_refs ${sql.insert({ media_id: mediaId, owner_user_id: userId })} ON CONFLICT DO NOTHING`
           }
           const id = uuidv7()
           yield* sql`INSERT INTO file_versions ${sql.insert({
@@ -52,6 +53,30 @@ export const makeFileVersionWriteHandlers = Effect.gen(function* () {
         }
         return ids
       }).pipe(transaction(sql, "RecordFileVersions")),
+    PruneFileVersions: ({ userId, before, limit }) =>
+      Effect.gen(function* () {
+        const gone = yield* sql<{ media_id: string | null }>`DELETE FROM file_versions WHERE id IN (
+            SELECT id FROM file_versions WHERE created_at < ${before}
+              ${userId === undefined ? sql`` : sql`AND owner_user_id = ${userId}`}
+            LIMIT ${limit})
+          RETURNING media_id`
+        const media = [...new Set(gone.flatMap((row) => (row.media_id === null ? [] : [row.media_id])))]
+        // A content goes only when nothing names it: no other version, no account's reference,
+        // saved address, cover, attachment or composer image.
+        const removed = media.length
+          ? yield* sql<{ id: string }>`DELETE FROM media_assets
+              WHERE id IN (SELECT value FROM json_each(${JSON.stringify(media)}))
+                AND NOT EXISTS (SELECT 1 FROM file_versions WHERE media_id = media_assets.id)
+                AND NOT EXISTS (SELECT 1 FROM media_refs WHERE media_id = media_assets.id)
+                AND NOT EXISTS (SELECT 1 FROM saved_media WHERE media_id = media_assets.id)
+                AND NOT EXISTS (SELECT 1 FROM chats WHERE cover_media_id = media_assets.id)
+                AND NOT EXISTS (SELECT 1 FROM forks WHERE cover_media_id = media_assets.id)
+                AND NOT EXISTS (SELECT 1 FROM version_attachments WHERE media_id = media_assets.id)
+                AND NOT EXISTS (SELECT 1 FROM composer_images WHERE media_id = media_assets.id)
+              RETURNING id`
+          : []
+        return { versions: gone.length, media: removed.length }
+      }).pipe(transaction(sql, "PruneFileVersions")),
     /** The file was put back on disk by the host; this marks the agent's change undone. */
     CompleteFileUndo: (input) =>
       Effect.gen(function* () {
@@ -99,6 +124,12 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
           sha256: row.sha256,
           mediaPath: row.media_path
         }
-      }).pipe(query("FileVersion"))
+      }).pipe(query("FileVersion")),
+    FileVersionBytes: ({ userId }) =>
+      sql<{ bytes: number | null }>`SELECT sum(m.byte_size) AS bytes FROM media_assets m
+        WHERE m.id IN (SELECT media_id FROM file_versions WHERE owner_user_id = ${userId} AND media_id IS NOT NULL)`.pipe(
+        Effect.map(([row]) => row?.bytes ?? 0),
+        query("FileVersionBytes")
+      )
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

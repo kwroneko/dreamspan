@@ -29,6 +29,8 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   dataDir: tempDir("server"),
   filesDir: "",
   commandSandbox: "",
+  filesQuota: "10G",
+  publicAddresses: [],
   dbReaders: 1,
   formatWorkers: 1,
   thumbnailWorkers: 1,

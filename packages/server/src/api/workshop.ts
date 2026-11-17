@@ -169,6 +169,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         : []
       // Commands without a sandbox here: the row says why and how to fix it (spec §3.3).
       const noCommands = offered.has("commands") ? yield* files.commandsUnavailable() : null
+      // Available, but without a cgroup per command: the row says the limits are weaker.
+      const commandsNote = offered.has("commands") && !noCommands ? yield* files.commandsNote() : null
       const builtins = execution.workshopCapabilities
         .list()
         .filter((capability) => offered.has(capability.id) && capability.id !== MCP_CAPABILITY)
@@ -186,7 +188,9 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
                 }
               : capability.id === "commands" && noCommands
                 ? { ...capability, explanation: `${capability.explanation} Not available here: ${noCommands}` }
-                : capability
+                : capability.id === "commands" && commandsNote
+                  ? { ...capability, explanation: `${capability.explanation} ${commandsNote}` }
+                  : capability
           )
         )
       return [...builtins, ...servers]

@@ -6,13 +6,20 @@
 import { execFileSync, spawn } from "node:child_process"
 import { mkdirSync, readdirSync, readFileSync, existsSync, symlinkSync, writeFileSync } from "node:fs"
 import { rm, statfs } from "node:fs/promises"
-import { createServer, type Server } from "node:http"
+import { createServer, request as httpRequest, type Server } from "node:http"
 import { connect } from "node:net"
 import { randomBytes } from "node:crypto"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { linuxBwrap } from "../src/sandbox/linuxBwrap.ts"
-import { PROXY_MAX_CONNECTIONS, reachableAddresses, sandboxMayReach, sandboxNetworks } from "../src/sandbox/network.ts"
+import { deniedCalls, linuxBwrap, seccompFilter, sweepRunFolders } from "../src/sandbox/linuxBwrap.ts"
+import { selectLimiter } from "../src/sandbox/cgroupLimits.ts"
+import {
+  PROXY_MAX_CONNECTIONS,
+  reachableAddresses,
+  sandboxMayReach,
+  sandboxNetworks,
+  setPublicAddresses
+} from "../src/sandbox/network.ts"
 import type { RunSpec } from "../src/sandbox/registry.ts"
 import { FilePathRefused, listFolder, readRegularFile, writeRegularFile } from "../src/files/safePath.ts"
 import { tempDir } from "./support/tempDir.ts"
@@ -111,6 +118,10 @@ sandboxed("the Linux sandbox", () => {
     const [count] = text.split("\n")
     expect(Number(count)).toBeLessThan(10)
     expect(text).not.toContain("vitest")
+    // bubblewrap took its arguments from a descriptor: no host folder or end marker in them.
+    expect(text).toMatch(/bwrap --args \d /)
+    expect(text).not.toContain(data)
+    expect(text).not.toContain("__rp_cwd_")
   })
 
   it("can't follow a link or .. out of its files", async () => {
@@ -445,7 +456,142 @@ sandboxed("the Linux sandbox, further attempts", () => {
   })
 })
 
+const limiter = await selectLimiter()
+if ("none" in limiter) console.warn(`sandboxEscapes: no cgroup limiter here, its tests are skipped: ${limiter.none}`)
+
+describe.skipIf(skipReason !== null || "none" in limiter)("the Linux sandbox with a cgroup per command", () => {
+  const capped = { timeoutMs: 30_000, processes: 64, memoryBytes: 2 ** 30, fileBytes: 4 * 2 ** 30, openFiles: 256 }
+
+  it("stops 1.5 GiB of shared mappings, memfds and processes together under a 1 GiB cap", async () => {
+    // A shared anonymous mapping and a memfd aren't counted by `ulimit -d`; four processes of
+    // 400 MiB each pass any per-process cap. The markers are built when printed.
+    const shared = [
+      "import mmap",
+      "m = mmap.mmap(-1, 1536 << 20, mmap.MAP_SHARED | mmap.MAP_ANONYMOUS)",
+      "for i in range(0, 1536 << 20, 4096): m[i] = 1",
+      'print("SHARED" + "-OK")'
+    ].join("\n")
+    const memfd = [
+      "import os",
+      "fd = os.memfd_create('x')",
+      "chunk = b'x' * (1 << 20)",
+      "for _ in range(1536): os.write(fd, chunk)",
+      'print("MEMFD" + "-OK")'
+    ].join("\n")
+    const quote = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`
+    for (const [script, marker] of [
+      [`python3 -c ${quote(shared)}`, "SHARED-OK"],
+      [`python3 -c ${quote(memfd)}`, "MEMFD-OK"],
+      [
+        `for i in 1 2 3 4; do python3 -c 'import time; x = bytearray(400 << 20); time.sleep(4); print("EACH" + "-OK")' & done; wait; echo "ALL" "DONE"`,
+        "EACH-OK"
+      ]
+    ] as const) {
+      const result = await run(script, { limits: capped })
+      expect(output(result)).not.toContain(marker)
+      expect(result.exitCode).not.toBe(0)
+      expect(result.memoryCapped).toBe(true)
+    }
+    // Below the cap, programs work.
+    const fine = await run(
+      `python3 -c ${quote(shared.replace(/1536/g, "256"))}; node -e 'const b = Buffer.alloc(256 * 2 ** 20); b.fill(1); console.log("SMALL" + "-OK")'`,
+      { limits: capped }
+    )
+    expect(output(fine)).toContain("SHARED-OK")
+    expect(output(fine)).toContain("SMALL-OK")
+    expect(fine.memoryCapped).toBeUndefined()
+  }, 120_000)
+
+  it("caps processes for the whole command", async () => {
+    const result = await run("for i in $(seq 1 100); do sleep 5 & done 2>&1 | head -1; wait; echo done", {
+      limits: { ...capped, processes: 32 }
+    })
+    expect(output(result)).toMatch(/fork|Resource temporarily unavailable|retry/i)
+  }, 60_000)
+})
+
+describe("the Linux sandbox's start and filters", () => {
+  it("removes run folders only of servers that are gone", async () => {
+    const root = tempDir("run-folders")
+    // A process id that can't be running: above the kernel's largest.
+    const dead = join(root, "rp-sbx-99999999-abcdef")
+    const mine = join(root, `rp-sbx-${process.pid}-abcdef`)
+    const unrelated = join(root, "rp-sbx-something-else")
+    for (const dir of [dead, mine, unrelated]) mkdirSync(join(dir, "rp"), { recursive: true })
+    expect(await sweepRunFolders(root)).toBe(1)
+    expect(existsSync(dead)).toBe(false)
+    expect(existsSync(mine)).toBe(true)
+    expect(existsSync(unrelated)).toBe(true)
+  })
+
+  it("builds the seccomp filter for x86_64 and aarch64, and none elsewhere", () => {
+    for (const [arch, audit, x32] of [
+      ["x64", 0xc000003e, 1],
+      ["arm64", 0xc00000b7, 0]
+    ] as const) {
+      const filter = seccompFilter(arch)!
+      const calls = Object.values(deniedCalls(arch))
+      expect(filter.length).toBe((4 + x32 + calls.length + 2) * 8)
+      expect(filter.readUInt32LE(8 + 4)).toBe(audit)
+      // Every refused call is compared once, and the last two instructions are allow, then EPERM.
+      const compared = Array.from({ length: calls.length }, (_, i) => filter.readUInt32LE((4 + x32 + i) * 8 + 4))
+      expect(compared).toEqual(calls)
+      expect(filter.readUInt32LE(filter.length - 4)).toBe(0x00050001)
+      expect(filter.readUInt32LE(filter.length - 12)).toBe(0x7fff0000)
+    }
+    expect(deniedCalls("arm64").mount).toBe(40)
+    expect(deniedCalls("arm64").uselib).toBeUndefined()
+    expect(seccompFilter("riscv64")).toBeNull()
+  })
+})
+
 describe("the commands proxy", () => {
+  /** One request through the proxy's socket: its status and body. Nothing leaves the host. */
+  const through = (socketPath: string, options: { method: string; path: string }) =>
+    new Promise<{ status: number; body: string }>((done, fail) => {
+      const req = httpRequest({ socketPath, method: options.method, path: options.path }, (res) => {
+        let body = ""
+        res.on("data", (chunk: Buffer) => (body += chunk.toString("utf8")))
+        res.on("end", () => done({ status: res.statusCode ?? 0, body }))
+      })
+      req.on("error", fail)
+      req.end()
+    })
+
+  it("sends plain HTTP only to ports 80 and 443, as tunnels", async () => {
+    const socketPath = join(tempDir("proxy-ports"), "p.sock")
+    const proxy = await sandboxNetworks.get("public")!.open(socketPath)
+    try {
+      // A public address (a literal, so no lookup), on mail and SSH ports: refused before dialling.
+      for (const port of [25, 22, 587, 6379, 8080]) {
+        const answer = await through(socketPath, { method: "POST", path: `http://8.8.4.4:${port}/` })
+        expect(answer.status).toBe(403)
+        expect(answer.body).toContain("Commands can reach HTTPS (port 443) and HTTP (port 80) only.")
+      }
+    } finally {
+      await proxy.close()
+    }
+  })
+
+  it("refuses the server's own public addresses behind NAT", async () => {
+    expect(sandboxMayReach("8.8.4.4")).toBe(true)
+    const before = setPublicAddresses((address) => address === "8.8.4.4" || address === "2001:4860:4860::8844")
+    const socketPath = join(tempDir("proxy-own"), "p.sock")
+    const proxy = await sandboxNetworks.get("public")!.open(socketPath)
+    try {
+      expect(sandboxMayReach("8.8.4.4")).toBe(false)
+      expect(sandboxMayReach("2001:4860:4860::8844")).toBe(false)
+      expect(sandboxMayReach("8.8.8.8")).toBe(true)
+      expect(await reachableAddresses("8.8.4.4")).toEqual([])
+      const answer = await through(socketPath, { method: "GET", path: "http://8.8.4.4/" })
+      expect(answer.status).toBe(403)
+      expect(answer.body).toContain("Only public internet addresses can be reached from commands.")
+    } finally {
+      setPublicAddresses(before)
+      await proxy.close()
+    }
+  })
+
   it("holds at most its connection cap open at once", async () => {
     const socketPath = join(tempDir("proxy"), "p.sock")
     const proxy = await sandboxNetworks.get("public")!.open(socketPath)

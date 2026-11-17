@@ -2,6 +2,7 @@ import { PluginApi } from "./plugins.ts"
 import { ExternalMediaApi } from "./externalMedia.ts"
 import { SavedMediaApi } from "./savedMedia.ts"
 import { WorkshopApi } from "./workshopApi.ts"
+import { FilesQuotaApi } from "./filesQuotaApi.ts"
 import { SplitChatApi } from "./splitChat.ts"
 import { MessageSelectionApi } from "./messageSelectionApi.ts"
 import { ChatContextsApi } from "./contextsApi.ts"
@@ -457,6 +458,9 @@ export class AuthenticatedChatEventsApi extends ChatEventsApi.middleware(Authent
 /** The agent RPCs (agentApi.ts). */
 export class AuthenticatedWorkshopApi extends WorkshopApi.middleware(Authentication) {}
 
+/** The Files quota (filesQuotaApi.ts). */
+export class AuthenticatedFilesQuotaApi extends FilesQuotaApi.middleware(Authentication) {}
+
 export class AuthenticatedAgentApi extends AgentApi.middleware(Authentication) {}
 
 /** The decision-model settings RPCs (decisionApi.ts). */
@@ -496,6 +500,7 @@ export class AppApi extends AppCoreApi.merge(AuthenticatedMessageVersionApi)
   .merge(AuthenticatedChatEventsApi)
   .merge(AuthenticatedAgentApi)
   .merge(AuthenticatedWorkshopApi)
+  .merge(AuthenticatedFilesQuotaApi)
   .merge(AuthenticatedDecisionApi)
   .merge(AuthenticatedThinkingApi)
   .merge(AuthenticatedCardArchiveApi)

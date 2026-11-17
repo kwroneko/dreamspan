@@ -16,19 +16,43 @@ export type Resolve = (host: string) => Promise<ReadonlyArray<string>>
 const defaultResolve: Resolve = (host) =>
   lookup(host, { all: true, verbatim: true }).then((found) => found.map((entry) => entry.address))
 
+/**
+ * The server's public addresses its interfaces don't show: behind NAT (a router's port
+ * forward, Docker's published ports), a command reaching the public address would reach the
+ * router's forwards and the app itself as an anonymous internet user. Set at startup from
+ * PUBLIC_ADDRESSES and the addresses PUBLIC_ORIGINS' hosts resolve to (files/WorkshopFiles.ts),
+ * kept resolved by net/addressSet.ts. Empty until then.
+ */
+let publicAddresses: (address: string) => boolean = () => false
+
+/** Installs the check for the server's own public addresses; returns the one it replaced. */
+export const setPublicAddresses = (check: (address: string) => boolean) => {
+  const before = publicAddresses
+  publicAddresses = check
+  return before
+}
+
 /** This host's own addresses: a public one would reach the app itself. */
-const ownAddresses = () =>
-  new Set(
+const ownAddresses = () => {
+  const interfaces = new Set(
     Object.values(networkInterfaces())
       .flatMap((list) => list ?? [])
       .map((entry) => entry.address.toLowerCase())
   )
+  const configured = publicAddresses
+  return { has: (address: string) => interfaces.has(address) || configured(address) }
+}
 
 const bare = (host: string) => (host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host)
 
-/** Whether a command may reach this address: public, and not one of this host's. */
-export const sandboxMayReach = (address: string, own: ReadonlySet<string> = ownAddresses()) =>
-  isPublicMediaAddress(address) && !own.has(address.toLowerCase())
+/**
+ * Whether a command may reach this address: public, and not one of this host's (its
+ * interfaces, or its public addresses behind NAT).
+ */
+export const sandboxMayReach = (
+  address: string,
+  own: { readonly has: (address: string) => boolean } = ownAddresses()
+) => isPublicMediaAddress(address) && !own.has(address.toLowerCase())
 
 /** The addresses of `host` a command may reach, in the resolver's order; empty: refused. */
 export const reachableAddresses = async (host: string, resolve: Resolve = defaultResolve) => {
@@ -53,13 +77,15 @@ export interface SandboxNetwork {
 }
 
 const REFUSED = "Only public internet addresses can be reached from commands.\n"
-const PORT_REFUSED = "Commands can open HTTPS (port 443) and HTTP (port 80) tunnels only.\n"
+const PORT_REFUSED = "Commands can reach HTTPS (port 443) and HTTP (port 80) only.\n"
 
 /**
- * The ports a CONNECT tunnel may reach: HTTPS and HTTP. Any other port would be raw TCP from the
- * server's address (SSH, SMTP, scanning), which the tool's description says commands don't have.
+ * The ports commands may reach, by a CONNECT tunnel or plain HTTP: HTTPS and HTTP. Any other
+ * port would be raw TCP from the server's address (SSH, SMTP, scanning), which the tool's
+ * description says commands don't have; a plain-HTTP body can carry another protocol's
+ * commands too (a POST to an SMTP port).
  */
-export const CONNECT_PORTS: ReadonlySet<number> = new Set([443, 80])
+const CONNECT_PORTS: ReadonlySet<number> = new Set([443, 80])
 /**
  * Connections one command may hold open through its proxy at once. Each costs the server's
  * process two descriptors; unbounded, a command could exhaust them for every account.
@@ -123,10 +149,15 @@ const openPublicProxy = async (socketPath: string, resolve: Resolve = defaultRes
       res.writeHead(400).end()
       return
     }
+    const port = url.port === "" ? 80 : Number(url.port)
     void reachableAddresses(url.hostname, resolve).then((addresses) => {
       const address = addresses[0]
       if (address === undefined) {
         res.writeHead(403, { "content-type": "text/plain" }).end(REFUSED)
+        return
+      }
+      if (!CONNECT_PORTS.has(port)) {
+        res.writeHead(403, { "content-type": "text/plain" }).end(PORT_REFUSED)
         return
       }
       const headers = { ...req.headers }
@@ -135,7 +166,7 @@ const openPublicProxy = async (socketPath: string, resolve: Resolve = defaultRes
       const upstream = httpRequest(
         {
           host: address,
-          port: url.port === "" ? 80 : Number(url.port),
+          port,
           method: req.method,
           path: url.pathname + url.search,
           headers,

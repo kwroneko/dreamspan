@@ -52,8 +52,13 @@ COPY --from=build /app/packages/client/dist packages/client/dist
 COPY --from=build /app/packages/server/dist/workers packages/server/dist/workers
 # The two guarded development imports must fail plainly in this image.
 RUN test ! -d packages/server/src/dev && /usr/bin/setpriv --help | grep -q -- --seccomp-filter && mkdir -p /data/plugins && chown -R node:node /data
+# Started as root (compose `user: "0:0"`), the entrypoint gives commands a cgroup subtree and
+# runs the server as node; started as node it runs the server as it is (docker/README.md).
+COPY docker/entrypoint.sh /usr/local/bin/rp-entrypoint
+RUN chmod 0755 /usr/local/bin/rp-entrypoint && mkdir -p /run/rp-cgroup && unshare --help | grep -q -- --map-users
 USER node
 VOLUME /data
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --start-interval=1s CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ENTRYPOINT ["/usr/local/bin/rp-entrypoint"]
 CMD ["node", "packages/server/src/main.ts"]

@@ -192,6 +192,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   ListSnippets: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListSummaryRevisions: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListUsers: "User-only security, consent, account, credential or network configuration.",
+  GetFilesUsage: "User-only security, consent, account, credential or network configuration.",
+  SetFilesQuota: "User-only security, consent, account, credential or network configuration.",
   ListVersionEffects: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListVersions: "Not in W6's first exposures; use the bounded workshop read tools.",
   ListWorkshopCapabilities: "Not in W6's first exposures; use the bounded workshop read tools.",
