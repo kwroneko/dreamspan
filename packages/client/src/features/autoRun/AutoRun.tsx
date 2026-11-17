@@ -152,7 +152,13 @@ export function AutoRunEntry({ session }: { session: ChatSession }) {
   const context = useSyncExternalStore(composer.subscribe, composer.get, composer.get)
   const [place, setPlace] = usePlaceParam(useChatPlaceKey("autoReplies"), "")
   const running = run !== null && run.stop === null
-  const characters = cast === null ? 0 : cast.participants.filter((id) => !cast.playedByMe.includes(id)).length
+  // Who could take turns: the composer's reply candidates (the old strip chip's test), else the cast.
+  const characters =
+    context !== null
+      ? context.reply.candidates.length
+      : cast === null
+        ? 0
+        : cast.participants.filter((id) => !cast.playedByMe.includes(id) && !cast.absent.includes(id)).length
   if (characters < 2 && run === null) return null
   return (
     <div className="flex min-h-9 shrink-0 items-center">
