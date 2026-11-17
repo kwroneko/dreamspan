@@ -140,7 +140,7 @@ export const register = () => {
     title: (url) => url.searchParams.get("name") || "Picture",
     icon: "image"
   })
-  routes.register({ id: "picture", parent: "app", path: PICTURE_PATH, component: PicturePage })
+  routes.register({ id: "picture", parent: "app", path: PICTURE_PATH, component: PicturePage, fill: true })
   routes.register({
     id: "chats",
     parent: "app",
@@ -154,6 +154,7 @@ export const register = () => {
     parent: "app",
     path: "/chats/$chatId",
     component: LazyChatPage,
+    fill: true,
     retainSearch: sidebarSearch
   })
   // The request inspector: the context a reply was generated from (DESIGN §7.4).
@@ -182,6 +183,7 @@ export const register = () => {
     parent: "app",
     path: "/cards/$entityId/chat",
     component: LazyStartChatPage,
+    fill: true,
     retainSearch: sidebarSearch
   })
   // A card on a card source, the same way (spec/CARD-SOURCES.md §4.2): adding it is the first send's.
@@ -190,6 +192,7 @@ export const register = () => {
     parent: "app",
     path: "/sources/$sourceId/cards/$remoteId/chat",
     component: LazyRemoteStartChatPage,
+    fill: true,
     retainSearch: sidebarSearch
   })
   routes.register({
@@ -197,6 +200,7 @@ export const register = () => {
     parent: "app",
     path: "/groups/$chatId/new",
     component: LazyStartGroupChatPage,
+    fill: true,
     retainSearch: sidebarSearch
   })
 }

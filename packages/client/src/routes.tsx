@@ -43,6 +43,19 @@ export interface RouteEntry {
    * removes them itself: state of the shell that outlives the screen's own links.
    */
   readonly retainSearch?: ReadonlyArray<string>
+  /**
+   * The screen fills the height below the header and scrolls inside itself, as a chat does
+   * (its composer anchored to the bottom); without it the screen scrolls as a page. Declared
+   * by the route, so a screen added later (a plugin's too) can't fall out of a path list.
+   */
+  readonly fill?: boolean
+}
+
+declare module "@tanstack/react-router" {
+  interface StaticDataRouteOption {
+    /** RouteEntry.fill. */
+    fill?: boolean
+  }
 }
 
 export const routes = makeRegistry<RouteEntry>()
@@ -98,10 +111,11 @@ export const buildRouter = (
         const search = entry.retainSearch
           ? { search: { middlewares: [retainSearchParams([...entry.retainSearch])] } }
           : {}
+        const shared = { component: component(entry), staticData: { fill: entry.fill === true }, ...search }
         const route =
           entry.path === undefined
-            ? createRoute({ getParentRoute: () => parent, id: entry.id, component: component(entry), ...search })
-            : createRoute({ getParentRoute: () => parent, path: entry.path, component: component(entry), ...search })
+            ? createRoute({ getParentRoute: () => parent, id: entry.id, ...shared })
+            : createRoute({ getParentRoute: () => parent, path: entry.path, ...shared })
         const nested = children(entry.id, route)
         return nested.length > 0 ? route.addChildren(nested) : route
       })
