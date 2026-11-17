@@ -5,6 +5,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import type { PathWindow } from "@rp/shared/chatApi.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
 import type { PathEntry, StoryAt } from "@rp/shared/chat.ts"
+import type { RolloutStep } from "@rp/shared/agent.ts"
 import { Effect } from "effect"
 import { ASSEMBLER_VERSION, type ContextSnapshot } from "../assembler/types.ts"
 import type { Reader } from "../db/Database.ts"
@@ -213,9 +214,7 @@ export const summarizeMessageSteps = Effect.fnUntraced(function* (
       true,
       entry.version.id
     )
-    const words = steps
-      .filter((s) => s.kind === "tool")
-      .map((s) => `${s.label}${s.title ? `: ${s.title}` : ""}${s.status === "error" ? " (failed)" : ""}`)
+    const words = stepWords(steps)
     // The number lets read_run read them back (spec/WORKSHOP-CONTEXT.md §3.2).
     if (words.length)
       summaries[entry.version.id] =
@@ -223,6 +222,20 @@ export const summarizeMessageSteps = Effect.fnUntraced(function* (
   }
   return summaries
 })
+
+/**
+ * A message's tool steps as its summary names them. An MCP tool's label is the server's title
+ * for it, so outside the data boundary only its exposed name (the app's, sanitized) stands for it
+ * (spec/MCP.md §9).
+ */
+export const stepWords = (steps: ReadonlyArray<RolloutStep>) =>
+  steps.flatMap((s) =>
+    s.kind === "tool"
+      ? [
+          `${s.effectClass === "mcp" ? s.tool : s.label}${s.title ? `: ${s.title}` : ""}${s.status === "error" ? " (failed)" : ""}`
+        ]
+      : []
+  )
 
 /**
  * When a carried request passes ELIDE_TRIGGER of the room (the context maximum less the reply
