@@ -103,9 +103,9 @@ for (const [width, height] of [
 
       // The row's price changes from the model's general one to Together's once its list is in.
       const row = page.getByRole("listitem").filter({ has: page.getByRole("button", { name: `Edit ${PINNED}` }) })
-      await expect(row.locator('[data-price-source="pinned"]')).toContainText("$0.2 / $0.6 per M tokens (Together)")
+      await expect(row.locator('[data-price-source="pinned"]')).toContainText("$0.2 / $0.6 per M tokens, from Together")
       await expect(row).not.toContainText("$50")
-      await hover(page, /per M tokens \(Together\)/, /Together.s own price, because the routing pins it/)
+      await hover(page, /per M tokens, from Together/, /Together.s own price, because the routing pins it/)
       expect(provider.endpointRequests).toContain(PINNED)
 
       await page.getByRole("button", { name: `Edit ${PINNED}`, exact: true }).click()

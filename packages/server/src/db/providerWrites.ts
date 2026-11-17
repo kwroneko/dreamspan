@@ -276,10 +276,12 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           const known = byKey.get(model.key)
           const upstream = JSON.stringify(model.upstream)
           if (known) {
-            // A refresh rewrites the upstream but keeps the endpoint list fetched for a pinned route.
+            // A refresh rewrites the upstream but keeps the endpoint list fetched for a pinned route
+            // and the price endpoint's feed: each is rewritten only by its own fetch.
             yield* sql`UPDATE models SET
-                         upstream_json = CASE WHEN json_extract(upstream_json, '$.endpoints') IS NULL THEN ${upstream}
-                           ELSE json_set(${upstream}, '$.endpoints', json(json_extract(upstream_json, '$.endpoints'))) END,
+                         upstream_json = json_patch(${upstream}, json_object(
+                           'endpoints', json(json_extract(upstream_json, '$.endpoints')),
+                           'priceFeed', json(json_extract(upstream_json, '$.priceFeed')))),
                          fetched_at = ${fetchedAt}, missing_since = NULL
                        WHERE id = ${known.id}`
             updated++
@@ -352,6 +354,25 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
                    WHERE id = ${modelId}`
         return yield* reloadModel(modelId)
       }).pipe(transaction(sql, "SetModelEndpoints")),
+
+    SetModelPriceFeeds: ({ userId, connectionId, feeds }) =>
+      Effect.gen(function* () {
+        yield* ownedConnection(userId, connectionId)
+        let updated = 0
+        for (const { key, feed } of feeds) {
+          const rows =
+            feed === null
+              ? yield* sql<{ id: string }>`
+                  UPDATE models SET upstream_json = json_remove(upstream_json, '$.priceFeed')
+                  WHERE connection_id = ${connectionId} AND model_key = ${key}
+                    AND json_extract(upstream_json, '$.priceFeed') IS NOT NULL RETURNING id`
+              : yield* sql<{ id: string }>`
+                  UPDATE models SET upstream_json = json_set(upstream_json, '$.priceFeed', json(${JSON.stringify(feed)}))
+                  WHERE connection_id = ${connectionId} AND model_key = ${key} RETURNING id`
+          updated += rows.length
+        }
+        return { updated }
+      }).pipe(transaction(sql, "SetModelPriceFeeds")),
 
     SetModelHidden: ({ userId, modelId, hidden }) =>
       Effect.gen(function* () {

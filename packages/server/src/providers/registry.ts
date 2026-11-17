@@ -154,6 +154,28 @@ export interface ResponseObserver {
 }
 
 /**
+ * Where a model's price for one request can come from (spec/PRICES.md §3.1), each with what the
+ * ledger records about it. A source with no price for the model is null.
+ */
+export interface PriceSources {
+  /** The connection's own price endpoint (PRICES §4), when the user opted in. */
+  readonly endpoint: { readonly price: Price; readonly fetchedAt: number } | null
+  /** The provider's model list, or for a pinned route its endpoint list (`endpoints`). */
+  readonly list: { readonly price: Price; readonly fetchedAt: number | null; readonly endpoints: boolean } | null
+  /** The built-in table: the supplement over pi-ai's catalog. */
+  readonly builtin: { readonly price: Price; readonly version: string } | null
+}
+
+/** What a cost formula is given. `price` is the first known of `sources`, for formulas that don't care which. */
+interface CostInput {
+  readonly pricing?: UserPricing
+  readonly counts: TokenCounts
+  readonly capture: Capture
+  readonly price: Price | null
+  readonly sources?: PriceSources
+}
+
+/**
  * Prices a finished request for the ledger (PROVIDERS §9.3). Formulas are tried newest
  * registration first, and the first that returns a cost wins: a user's or a plugin's
  * formula goes before the built-ins. Returning null passes to the next.
@@ -168,20 +190,11 @@ export interface CostFormula {
     readonly inputTokens: number
     readonly outputTokens: number
     readonly price: Price | null
+    readonly sources?: PriceSources
   }) => Omit<Cost, "formula"> | null
   /** Undefined passes through; null means no single-currency estimate is possible. */
-  readonly estimate?: (input: {
-    readonly pricing?: UserPricing
-    readonly counts: TokenCounts
-    readonly capture: Capture
-    readonly price: Price | null
-  }) => (Omit<Cost, "formula"> & { readonly formula?: string }) | null | undefined
-  readonly cost: (input: {
-    readonly pricing?: UserPricing
-    readonly counts: TokenCounts
-    readonly capture: Capture
-    readonly price: Price | null
-  }) => (Omit<Cost, "formula"> & { readonly formula?: string }) | null
+  readonly estimate?: (input: CostInput) => (Omit<Cost, "formula"> & { readonly formula?: string }) | null | undefined
+  readonly cost: (input: CostInput) => (Omit<Cost, "formula"> & { readonly formula?: string }) | null
 }
 
 export interface ProviderRegistryShape {

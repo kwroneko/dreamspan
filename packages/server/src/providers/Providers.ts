@@ -91,6 +91,23 @@ import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
 import { parseServiceAccount } from "./vertex.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
+import { firstPrice, priceSources } from "./priceSources.ts"
+import { feedsFor, fetchPriceList } from "./priceEndpoint.ts"
+
+/** A request's model prices by source, now, for its connection's kind and region (PRICES §5.1). */
+const sourcesOf = (
+  connection: { readonly kind: ProviderKindEntry; readonly settings: ProviderSettings },
+  model: Model
+) =>
+  priceSources(
+    {
+      provider: connection.kind.piProvider,
+      region: connection.settings.region,
+      priceEndpoint: connection.settings.priceEndpoint
+    },
+    model,
+    Date.now()
+  )
 import { readDecisionUsage, unwrapEnvelope } from "@rp/shared/decisions.ts"
 
 export { ProviderError } from "./errors.ts"
@@ -968,7 +985,53 @@ export const layer = (options: ProvidersOptions = {}) =>
           const result = yield* fromStorage(
             writer.SyncFetchedModels({ userId, connectionId, models, fetchedAt: Date.now() })
           )
+          yield* refreshPriceFeeds(
+            userId,
+            prepared,
+            models.map((m) => m.key)
+          )
           return { ...result, route }
+        })
+
+      /**
+       * The connection's own price list (PRICES §4), asked only when its user turned on
+       * `priceEndpoint`, with the same credentials as its model list. A failure keeps the last
+       * good prices; it never fails the refresh.
+       */
+      const refreshPriceFeeds = (userId: UserId, prepared: Prepared, keys: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          if (prepared.settings.priceEndpoint !== true) return
+          const auth: Record<string, string> =
+            prepared.apiKey === null
+              ? {}
+              : prepared.api === "anthropic-messages"
+                ? { "x-api-key": prepared.apiKey, "anthropic-version": "2023-06-01" }
+                : { authorization: `Bearer ${prepared.apiKey}` }
+          const probe = yield* Effect.tryPromise((signal) =>
+            fetchPriceList(
+              fetchFor(prepared, () => {}),
+              prepared.baseUrl,
+              { ...auth, ...prepared.headers },
+              null,
+              signal
+            )
+          ).pipe(
+            Effect.timeoutOrElse({ duration: endpointsTimeoutMs, orElse: () => Effect.succeed(null) }),
+            Effect.orElseSucceed(() => null)
+          )
+          if (probe?.state !== "supported") {
+            yield* Effect.logInfo(
+              `price list of ${prepared.connection.id}: ${probe === null ? "no answer" : probe.state === "unchanged" ? "unchanged" : prepared.scrub(probe.detail)}`
+            )
+            return
+          }
+          yield* fromStorage(
+            writer.SetModelPriceFeeds({
+              userId,
+              connectionId: prepared.connection.id,
+              feeds: feedsFor(keys, probe, Date.now())
+            })
+          ).pipe(Effect.catch((e) => Effect.logWarning("could not store a price list", e)))
         })
 
       const endpointsTimeoutMs = options.endpointsTimeoutMs ?? 10_000
@@ -1295,10 +1358,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                 .pipe(Effect.catch((e) => Effect.logWarning("could not record an image token sample", e)))
             // A pinned route is priced by its own endpoint list: the one fetched alongside the reply
             // if it has arrived, else the stored one. The close never waits for the fetch.
+            const sources = sourcesOf(prepared, latest.current)
             const cost = costOf(
               registry.costs.list(),
               { kind: prepared.kind.id, api: prepared.api, model: model.key },
-              { counts, pricing, capture: state.capture, price: modelPrice(latest.current) }
+              { counts, pricing, capture: state.capture, price: firstPrice(sources), sources }
             )
             yield* writer
               .CloseLlmRequest({
@@ -1389,6 +1453,8 @@ export const layer = (options: ProvidersOptions = {}) =>
             const formulas = [...registry.costs.list()]
               .reverse()
               .filter((f) => f.appliesTo(target) && f.id !== "reported")
+            const sources = sourcesOf(prepared, model)
+            const price = firstPrice(sources)
             const formula = formulas.find(
               (f) =>
                 f.reserves?.({ pricing }) ||
@@ -1403,11 +1469,11 @@ export const layer = (options: ProvidersOptions = {}) =>
                     reasoning: null
                   },
                   capture: emptyCapture(),
-                  price: modelPrice(model)
+                  price,
+                  sources
                 }) !== null
             )
-            const bound =
-              formula?.upperBound?.({ inputTokens, outputTokens, pricing, price: modelPrice(model) }) ?? null
+            const bound = formula?.upperBound?.({ inputTokens, outputTokens, pricing, price, sources }) ?? null
             const allowed = yield* fromStorage(
               writer.OpenLlmRequest({
                 userId: request.userId,
@@ -2118,11 +2184,13 @@ export const layer = (options: ProvidersOptions = {}) =>
                 reasoning: null
               }
               const capture: Capture = { ...emptyCapture(), reportedCost: usage.cost, rawUsage: rawUsage as never }
+              const sources = sourcesOf(prepared, model)
               const cost = costOf(registry.costs.list(), target, {
                 counts,
                 pricing,
                 capture,
-                price: modelPrice(model)
+                price: firstPrice(sources),
+                sources
               })
               yield* writer
                 .CloseLlmRequest({
@@ -2229,6 +2297,13 @@ export const layer = (options: ProvidersOptions = {}) =>
           const connection = yield* fromStorage(reader.GetConnection({ userId, connectionId }))
           const model = yield* fromStorage(reader.GetModel({ userId, modelId }))
           if (model.connectionId !== connection.id) return null
+          const kind = registry.kinds.get(connection.kind)
+          const sources = kind
+            ? sourcesOf(
+                { kind, settings: resolveProviderSettings(providerOf(connection), connection.providerSettings) },
+                model
+              )
+            : null
           return costOf(
             registry.costs.list(),
             { kind: connection.kind, api: connection.api, model: model.key },
@@ -2241,7 +2316,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                 model: model.key
               },
               capture: emptyCapture(),
-              price: modelPrice(model)
+              price: sources ? firstPrice(sources) : modelPrice(model),
+              ...(sources ? { sources } : {})
             },
             true
           )

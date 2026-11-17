@@ -64,10 +64,17 @@ const sourceName = (formula: string) =>
   formula === "reported"
     ? "the provider's charge"
     : formula === "builtin"
-      ? "the model's price list"
-      : formula.startsWith("user:")
-        ? "your cost formula"
-        : formula
+      ? // Costs recorded before sources were told apart: the catalog or the model list's price.
+        "the model's price list"
+      : formula.startsWith("builtin:")
+        ? "the app's built-in prices"
+        : formula === "list" || formula.startsWith("list:")
+          ? "the provider's price list"
+          : formula.startsWith("endpoint:")
+            ? "this server's price list"
+            : formula.startsWith("user:")
+              ? "your cost formula"
+              : formula
 
 const requestsText = (n: number) => (n === 1 ? "1 request" : `${n} requests`)
 
