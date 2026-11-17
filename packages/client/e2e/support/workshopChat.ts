@@ -12,7 +12,7 @@ import { expectLayout } from "./layoutAudit.ts"
 import { closePanel, openPanel } from "./panel.ts"
 import { loginCookie, withCookie, type Client } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
-import { nextReply } from "./strip.ts"
+import { capabilityChip, capabilityCounts, nextReply } from "./strip.ts"
 import {
   startWorkshopProvider,
   STORY_REPLY,
@@ -204,7 +204,9 @@ export function workshopChatTests() {
             await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"))
           }
           const chip = nextReply(page).getByRole("button", { name: /^What the assistant may do: / })
-          await expect(chip).toHaveText(/Can: 7 · Asks: 5/)
+          // Counted from the registered capabilities, so a new one doesn't break this spec.
+          const capabilities = await admin((api) => api.ListWorkshopCapabilities({ chatId: workshopId }))
+          await expect(chip).toHaveText(capabilityChip(capabilityCounts(capabilities)))
           await expect(nextReply(page).getByRole("button", { name: /^Next: / })).toHaveCount(0)
           await chip.click()
           const popover = page.getByRole("dialog", { name: "What the assistant may do" })
@@ -235,7 +237,7 @@ export function workshopChatTests() {
               popover.locator(`[data-capability="${id}"]`).getByRole("button", { name: "Ask first", exact: true })
             ).toHaveAttribute("aria-pressed", "true")
           }
-          await expect(popover.locator("[data-capability]")).toHaveCount(12)
+          await expect(popover.locator("[data-capability]")).toHaveCount(capabilities.length)
           await expect(popover.getByText("These hold for this workshop only.")).toBeVisible()
           await shot("capabilities")
           await expectLayout(page, info, `workshop-capabilities-${width}-${theme}`, { scope: '[role="dialog"]' })

@@ -16,7 +16,7 @@ import { openPanel } from "./panel.ts"
 import { asUser, type Client } from "./rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./server.ts"
 import { showActions } from "./message.ts"
-import { nextReply } from "./strip.ts"
+import { capabilityChip, capabilityCounts, nextReply } from "./strip.ts"
 import { startWorkshopProvider, WORKSHOP_ANSWER, WORKSHOP_FIRST } from "./workshopProvider.ts"
 
 const shots = process.env.SCREENSHOT_DIR
@@ -106,10 +106,15 @@ export function workshopApprovalTests() {
 
           await page.goto(`${server().url}/chats/${workshop.id}`)
           await expect(page.getByTestId("composer")).toBeVisible()
-          await expect(chip).toHaveText(/^Can: 7 · Asks: 5$/)
+          // The defaults, counted from the registered capabilities; library.write is allowed by default.
+          const base = capabilityCounts(await admin((api) => api.ListWorkshopCapabilities({ chatId: workshop.id })))
+          expect(base.off).toBe(0)
+          const initial = capabilityChip(base)
+          const askFirst = capabilityChip({ can: base.can - 1, asks: base.asks + 1 })
+          await expect(chip).toHaveText(initial)
 
           // Ask first: chosen in the chip, it says so there.
-          const popover = await choose("library.write", "Ask first", /^Can: 6 · Asks: 6$/)
+          const popover = await choose("library.write", "Ask first", askFirst)
           await expect(
             popover.locator('[data-capability="library.write"]').getByRole("button", { name: "Use the default" })
           ).toBeVisible()
@@ -152,7 +157,7 @@ export function workshopApprovalTests() {
           await reloaded.getByRole("button", { name: "Allow", exact: true }).click()
           const done = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })
           await expect(done).toHaveCount(1, { timeout: 30_000 })
-          await expect(chip).toHaveText(/^Can: 6 · Asks: 6$/)
+          await expect(chip).toHaveText(askFirst)
           expect(await effects()).toHaveLength(1)
 
           // The next one asks again; Allow in this workshop also allows it from now on.
@@ -163,7 +168,7 @@ export function workshopApprovalTests() {
           await expect(page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER })).toHaveCount(2, {
             timeout: 30_000
           })
-          await expect(chip).toHaveText(/^Can: 7 · Asks: 5$/)
+          await expect(chip).toHaveText(initial)
           expect(await effects()).toHaveLength(2)
           const latest = page.getByRole("article").last()
           await openSteps(latest)
@@ -259,7 +264,11 @@ export function workshopApprovalTests() {
           await expect(page.getByRole("article").last().locator("[data-effect]").first()).toContainText("Undone")
 
           // Off: the tool isn't in the next request at all, and nothing more is made.
-          const off = await choose("library.write", "Off", /^Can: 6 · Asks: 5 · Off: 1$/)
+          const off = await choose(
+            "library.write",
+            "Off",
+            capabilityChip({ can: base.can - 1, asks: base.asks, off: 1 })
+          )
           await page.keyboard.press("Escape")
           await expect(off).toHaveCount(0)
           const offAt = provider.bodies.length
