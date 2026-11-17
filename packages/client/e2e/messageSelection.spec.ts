@@ -268,7 +268,16 @@ for (const width of [1440, 390] as const)
       await bar(page).getByRole("button", { name: "Hide from the model" }).click()
       await expect(page.getByText("4 messages hidden from the model.")).toBeVisible()
       await expect(bar(page)).toHaveCount(0)
-      await expect(hiddenRows()).toContainText([COUNT - 3, COUNT - 2, COUNT - 1, COUNT].map(line))
+      // Ticking line 27 scrolled it into view, so the list no longer follows its end; the rows
+      // grow by their Hidden note and the last one can leave the mounted window. Back to the end.
+      await expect(async () => {
+        await page.getByTestId("messages").evaluate((list) => {
+          list.scrollTop = list.scrollHeight
+        })
+        await expect(hiddenRows()).toContainText([COUNT - 3, COUNT - 2, COUNT - 1, COUNT].map(line), {
+          timeout: 1_000
+        })
+      }).toPass()
       await expect(message(page, COUNT)).toHaveAttribute("data-hidden", "true")
 
       // One Undo shows them all again.
