@@ -66,6 +66,7 @@ import { useIsPanelTab } from "./panels.tsx"
 import { firstId, PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
 import { chatColumns } from "./presentation.tsx"
 import { seedChat } from "./session.ts"
+import { seedSplitChats } from "./splitChats.ts"
 import { preloadChatPage } from "./chatPageLoader.ts"
 import { DraftRequestDialog, type PreviewInput, useDraftPreview } from "./draftRequest.tsx"
 
@@ -382,11 +383,14 @@ function Pending({
                 limit: 60
               })
               const cast = yield* client("GetCast", { chatId: started.chat.id, slotId: path.leafSlotId })
-              return { path, cast }
+              // The header names the chat from this answer; without it, it shows its placeholder.
+              const split = yield* client("GetSplitChats", { chatId: started.chat.id, forkId: path.forkId })
+              return { path, cast, split }
             })
           )
           if (Option.isSome(opened)) {
-            const { path, cast } = opened.value
+            const { path, cast, split } = opened.value
+            seedSplitChats(started.chat.id, path.forkId, split)
             seedChat(started.chat.id, {
               chat: started.chat,
               forkId: path.forkId,
