@@ -42,7 +42,8 @@ import { ChatSession, type ChatView } from "../chat/session.ts"
 import { branchLabel, useChatForks } from "../chat/forks.ts"
 import { ReplyExtrasContext, type ReplyExtrasSource } from "../chat/replyExtras.ts"
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
-import { useWorkbench, useWorkbenchTab } from "../workbench/tab.tsx"
+import { useCanOpenBeside } from "../workbench/OpenBeside.tsx"
+import { useOpenBesideThis } from "./storyLink.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { chooseSideChat, sideChatSearch, SIDE_CHAT_PARAM, SIDE_CHAT_SCOPE, SIDE_CHATS_KEY } from "./sideChat.ts"
 
@@ -82,19 +83,8 @@ function ReadingLine({ story, view }: { story: ChatSession; view: ChatView }) {
   )
 }
 
-/** Opens a chat in a tab of its own, beside this one. */
-function useOpenOwn() {
-  const workbench = useWorkbench()
-  const tab = useWorkbenchTab()
-  const navigate = useNavigate()
-  return useCallback(
-    (href: string) => {
-      if (workbench) workbench.openIn(tab ? workbench.frameOf(tab.tabId) : undefined, href)
-      else void navigate({ href })
-    },
-    [workbench, tab, navigate]
-  )
-}
+/** Opens the workshop beside the story, never in its place (owner, 2026-11-17): storyLink.tsx. */
+const useOpenOwn = () => useOpenBesideThis().open
 
 export function WorkshopSidePanel(props: PanelProps) {
   return props.active ? <ActiveWorkshopSidePanel {...props} /> : null
@@ -210,6 +200,7 @@ function SideChatHeader({
   onStart: () => void
 }) {
   const open = useOpenOwn()
+  const wide = useCanOpenBeside()
   const href = `/chats/${shown.id}`
   const [panel, setPanel] = usePlaceParam(chatPlaceKey(SIDE_CHAT_SCOPE, "panel"), "")
   return (
@@ -266,8 +257,12 @@ function SideChatHeader({
         Changes
       </Button>
       <IconLink
-        label="Open in its own tab"
-        hint="Opens this workshop in a tab of its own, with its settings and panels."
+        label="Open beside the story"
+        hint={
+          wide
+            ? "Opens this workshop beside the story, in its own pane."
+            : "Opens this workshop on its own page. Back returns to the story."
+        }
         icon="external"
         href={href}
         onOpen={() => open(href)}

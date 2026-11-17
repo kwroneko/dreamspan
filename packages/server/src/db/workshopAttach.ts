@@ -6,6 +6,7 @@ import { createHash } from "node:crypto"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"
+import type { ChatId } from "@rp/shared/chat.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 
@@ -38,6 +39,25 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
             AND c.kind = 'workshop' AND c.status = 'active'
           GROUP BY c.id ORDER BY c.created_at DESC, c.id DESC LIMIT 200`
         return rows.map(toChat)
-      }).pipe(query("AttachedWorkshops"))
+      }).pipe(query("AttachedWorkshops")),
+    WorkshopStories: ({ userId, chatIds }) =>
+      Effect.gen(function* () {
+        if (chatIds.length === 0) return []
+        // The newest attachment event of each of the user's workshops; the story's title only
+        // while it's live and the user's (a deleted or purged story reads as deleted: null).
+        const rows = yield* sql<{ workshopId: string; storyId: string; title: string | null }>`
+          SELECT w.id AS workshopId, json_extract(e.value_json, '$.chat') AS storyId,
+            (SELECT s.title FROM chats s WHERE s.id = json_extract(e.value_json, '$.chat')
+              AND s.owner_user_id = ${userId} AND s.deleted_at IS NULL AND s.status = 'active') AS title
+          FROM chats w JOIN state_events e ON e.chat_id = w.id
+          WHERE w.id IN ${sql.in(chatIds.slice(0, 500))} AND w.owner_user_id = ${userId}
+            AND e.key = 'workshop.attached' AND e.slot_id IS NULL
+          GROUP BY w.id`
+        return rows.map((r) => ({
+          workshopId: r.workshopId as ChatId,
+          storyId: r.storyId as ChatId,
+          title: r.title
+        }))
+      }).pipe(query("WorkshopStories"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

@@ -45,7 +45,8 @@ import {
   EffectUndoRefused,
   ReplyEffects,
   UndoAllReport,
-  WorkshopDefaults
+  WorkshopDefaults,
+  WorkshopStory
 } from "@rp/shared/workshopApi.ts"
 import { ApprovalPrompt } from "@rp/shared/agent.ts"
 import { ArchiveCriteria, ArchiveCandidate, CardArchiveReceipt } from "@rp/shared/cardArchive.ts"
@@ -5480,6 +5481,12 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, chatId: ChatId },
     success: Schema.Array(Chat),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The story each of these workshops is about (db/workshopAttach.ts); none for one without. */
+  Rpc.make("WorkshopStories", {
+    payload: { userId: UserId, chatIds: Schema.Array(ChatId) },
+    success: Schema.Array(WorkshopStory),
+    error: StorageError
   }),
   /** A workshop's grants (workshopGrants.ts): capability → mode, expired ones left out. */
   Rpc.make("WorkshopGrants", {
