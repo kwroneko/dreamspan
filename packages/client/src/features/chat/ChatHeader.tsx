@@ -398,8 +398,8 @@ function ChatHeaderFrame({
     <TooltipProvider>
       {/* Narrow by the chat column's own width, not the screen's: below 40rem it takes the phone's
           layout, leaving out the faces, the pin and the rename pencil (the side panel has the cast,
-          the chat lists the pin, ⋯ has Rename), and the branch control gives up room before the
-          name does. */}
+          the chat lists the pin, ⋯ has Rename), and the chat's name gives up room before a short
+          branch name does. */}
       <CenterHeader endControls={false}>
         {/* The desktop's hidden sidebar comes back from here. */}
         <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
@@ -484,7 +484,7 @@ function ChatHeaderFrame({
             </div>
           )
         )}
-        <div className="flex min-w-24 flex-1 flex-col @max-[40rem]/header:max-w-[calc(100%_-_9rem)] @max-[40rem]/header:flex-none">
+        <div className="flex min-w-24 flex-1 flex-col @max-[40rem]/header:max-w-[calc(100%_-_9rem)] @max-[40rem]/header:flex-initial">
           <div className="flex min-w-0 items-center gap-2">{title}</div>
           {about !== null && (
             <p className="truncate text-xs text-muted" title={about}>
@@ -492,9 +492,10 @@ function ChatHeaderFrame({
             </p>
           )}
         </div>
-        {/* Only the branch control shrinks, cutting its name short; the buttons keep their size. */}
+        {/* The chat's name gives up room before a short branch name does; only a long branch name
+            is cut short. The buttons keep their size. */}
         {actions && (
-          <div className="flex min-w-0 items-center justify-end gap-0.5 *:shrink-0 @max-[40rem]/header:flex-1 sm:gap-1">
+          <div className="flex min-w-0 items-center justify-end gap-0.5 *:shrink-0 @max-[40rem]/header:min-w-fit @max-[40rem]/header:flex-1 sm:gap-1">
             {actions}
           </div>
         )}

@@ -442,6 +442,10 @@ export function BranchControl(props: BranchControlProps) {
   const place = `${shown && forks ? `${ordered.indexOf(shown) + 1} of ${forks.length}` : ""}${off ? ", not the one the chat opens on" : ""}`
   const title = "Branches of this chat"
   const body = <BranchList {...props} forks={forks} shown={shown} onDone={() => setOpen(false)} />
+  // A short name ("Original", "From #14") always shows in full: the chat's name gives up room
+  // first. Only a long user-given name may be cut, and only that one is marked as a name the
+  // layout audit lets truncate.
+  const short = label.length <= 12
   if (narrow)
     return (
       <>
@@ -461,10 +465,10 @@ export function BranchControl(props: BranchControlProps) {
           type="button"
           aria-label={!ready ? "Loading…" : `${kind}: ${label}, ${place}: switch ${kind.toLowerCase()}`}
           onClick={() => setOpen(true)}
-          className="inline-flex h-8 max-w-32 min-w-7 shrink! items-center gap-1 rounded-md px-1.5 text-sm text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+          className={`inline-flex h-8 min-w-7 items-center ${short ? "shrink-0" : "max-w-32 shrink!"} gap-1 rounded-md px-1.5 text-sm text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus`}
         >
           <Icon name={icon} size={16} />
-          <span data-layout-name className="truncate">
+          <span data-layout-name={short ? undefined : ""} className="truncate">
             {label}
           </span>
         </Button>
