@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { toolDataPage, TOOL_RESULT_CHARS } from "../toolData.ts"
+import { toolDataBody, toolDataPage, TOOL_RESULT_CHARS } from "../toolData.ts"
 // The way back to a run's tool results (spec/WORKSHOP-CONTEXT.md §3.2), reference-harness's
 // read_session_transcript as a delta: a message's own steps, read from the run that wrote it.
 // Causal: only messages on the path before the one being generated, each cut at its own post.
@@ -191,9 +191,10 @@ const readRun: RolloutTool<{
         const cursor = steps.some((s) => s.id === call)
           ? undefined
           : call?.match(/^page:v1:(\d+):(\d+):([a-f0-9]{24})$/)
-        // Provider call ids and plugin tool names are source text too, not app metadata.
+        // Provider call ids and plugin tool names are source text too, not app metadata. A stored
+        // quoted result is paged from its original, so the page quotes it once, by its offsets.
         const payload = (s: (typeof steps)[number]) =>
-          `${JSON.stringify({ call: s.id, tool: s.tool })}\n${JSON.stringify(s.args)}\n${s.result ?? "(no result)"}`
+          `${JSON.stringify({ call: s.id, tool: s.tool })}\n${JSON.stringify(s.args)}\n${s.result === undefined || s.result === null ? "(no result)" : toolDataBody(s.result)}`
         const fingerprint = (s: (typeof steps)[number]) =>
           createHash("sha256")
             .update(

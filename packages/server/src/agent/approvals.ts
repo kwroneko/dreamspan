@@ -119,7 +119,14 @@ export interface PermitDeps {
    * A story reply (spec/MCP.md §5.1): the branch's own server choices at the reply's parent
    * (`agent.mcp`), frozen with the run, decide over the account's Stories switch. Absent: a workshop.
    */
-  readonly story?: { readonly mcpChoices: Readonly<Record<string, boolean>> }
+  readonly story?: {
+    readonly mcpChoices: Readonly<Record<string, boolean>>
+    /**
+     * The branch's choices as they are now, read at each call: a server turned off since the run
+     * began (a Resume's included) is off. Absent or failing: the frozen ones.
+     */
+    readonly choicesNow?: Effect.Effect<Readonly<Record<string, boolean>>, unknown>
+  }
 }
 
 /**
@@ -169,12 +176,17 @@ export const makePermit =
       if (tool.capability === MCP_CAPABILITY && tool.mcp) {
         const ref = tool.mcp
         const story = deps.story
+        const choices = story
+          ? story.choicesNow
+            ? yield* story.choicesNow.pipe(Effect.orElseSucceed(() => story.mcpChoices))
+            : story.mcpChoices
+          : undefined
         const entry = story
           ? (yield* reader.McpStoryConnections({ userId: userId as never }))
               .filter((c) => c.id === ref.connection)
               .map((connection) => ({
                 connection,
-                grant: mcpStoryOn(connection, story.mcpChoices) ? ("allow" as const) : ("off" as const)
+                grant: mcpStoryOn(connection, choices) ? ("allow" as const) : ("off" as const)
               }))[0]
           : (yield* reader.McpWorkshopConnections({
               userId: userId as never,
