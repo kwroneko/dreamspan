@@ -8,6 +8,7 @@ import { editorNotices } from "../editor/editorSlots.ts"
 // off a lorebook wait behind the floating bar's Save and Revert (@rp/shared/presetHeld.ts;
 // owner 2026-11-02), a prompt's on/off switch excepted.
 import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
+import type { RefId } from "@rp/shared/library.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -17,14 +18,14 @@ import { useCaller } from "../editor/caller.ts"
 import { RecoveredNotice, RestoredNotice } from "../editor/controls.tsx"
 import { PresetSettings } from "../editor/PresetEditor.tsx"
 import { presetEditorWarnings } from "../editor/presetSections.ts"
-import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
+import { PresetWorkspace, usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { SearchNavigation, type SearchMatch } from "../editor/searchNavigation.ts"
 import { PromptDocument } from "../editor/PromptDocument.tsx"
 import { RefName } from "../editor/RefDialogs.tsx"
 import { HeldChangesBar } from "../editor/SaveRevert.tsx"
 import { SaveRevision } from "../editor/SaveRevision.tsx"
 import { type EditorStore, useEditorState, useLeaveGuard } from "../editor/store.ts"
-import { useChatPreset } from "./chatPreset.ts"
+import { useChatPreset, useSelectedPreset } from "./chatPreset.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 function PresetColumn({ store }: { store: EditorStore }) {
@@ -95,14 +96,29 @@ function PresetColumn({ store }: { store: EditorStore }) {
   )
 }
 
-export function PresetTab({ session, view }: { session: ChatSession; view: ChatView }) {
+/** The preset's column, or what stands in for it while there's none to edit. */
+function PresetBody({ preset, builtin }: { preset: string | undefined; builtin: boolean }) {
   const workspace = usePresetWorkspace()
-  const { ref, builtin } = useChatPreset(session, view)
-  return ref && workspace ? (
-    <PresetColumn key={ref} store={workspace.store(ref)} />
+  return preset && workspace ? (
+    <PresetColumn key={preset} store={workspace.store(preset as RefId)} />
   ) : (
     <p className="text-sm text-muted">
       {builtin ? "The built-in default. Import a preset to edit its prompts." : "Loading the current preset…"}
     </p>
   )
+}
+
+export function PresetTab({ session, view }: { session: ChatSession; view: ChatView }) {
+  const { ref, builtin } = useChatPreset(session, view)
+  return <PresetBody preset={ref} builtin={builtin} />
+}
+
+/**
+ * A chat not made yet: the account's preset, which its first reply is built with, edited the
+ * same way. Its page has no chat providers, so the tab brings the editors' workspace.
+ */
+export function PendingPresetTab() {
+  const selected = useSelectedPreset(null)
+  const body = <PresetBody preset={selected?.ref ?? undefined} builtin={selected !== null && selected.ref === null} />
+  return usePresetWorkspace() ? body : <PresetWorkspace>{body}</PresetWorkspace>
 }

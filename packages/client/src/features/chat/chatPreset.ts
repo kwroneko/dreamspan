@@ -9,9 +9,10 @@ import type { ChatSession, ChatView } from "./session.ts"
 
 /**
  * The account's selected preset, the next reply's when the chat has no context estimate yet: a
- * chat without messages has none, so the tab would otherwise wait for a first message.
+ * chat without messages has none, so the tab would otherwise wait for a first message. A chat
+ * not made yet (no session) uses it too.
  */
-function useSelectedPreset(session: ChatSession) {
+export function useSelectedPreset(session: ChatSession | null) {
   // The pickers' read, shared: a read of its own here was one more at every chat open (night/tabperf).
   const result = useAtomValue(defaultsAtom)
   useRefreshOnContext(session, defaultsAtom)
