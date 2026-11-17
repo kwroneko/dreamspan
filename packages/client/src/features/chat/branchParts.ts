@@ -28,6 +28,11 @@ export interface BranchTrigger {
   readonly hint: string
 }
 
+export interface BranchRowNoteProps extends BranchControlContext {
+  /** The row's fork. */
+  readonly fork: Fork
+}
+
 export interface BranchSectionProps extends BranchControlContext {
   /** Closes the popover or sheet: after opening a fork, say. */
   readonly onDone: () => void
@@ -46,6 +51,8 @@ export const branchControlParts = makeRegistry<{
   readonly listed?: (fork: Fork, context: BranchControlContext) => boolean
   /** Shown above the Branches list. */
   readonly Section?: ComponentType<BranchSectionProps>
+  /** A line under a branch row's name ("For the story's “Tavern fight”"); renders nothing when not its. */
+  readonly RowNote?: ComponentType<BranchRowNoteProps>
 }>()
 
 let version = 0

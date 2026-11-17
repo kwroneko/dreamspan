@@ -1,10 +1,11 @@
 // The workshop beside a story (spec/WORKSHOP.md §4, W9): the story's Workshop tab shows a whole
 // workshop chat, its messages and its composer, at the panel's width. It's a chat of its own: its
 // own session and event stream, its own branch (`side.fork`) and dialogs (`side.messageDialog`)
-// in the URL, so neither chat moves or opens anything in the other. The assistant reads the story
-// through its story tools, at the branch and newest message this tab shows (`storyAt`, sent with
-// each request from here); nothing said here is in the story's context.
-import type { Chat, ChatId, ForkId, PathEntry, StoryAt } from "@rp/shared/chat.ts"
+// in the URL, so neither chat moves or opens anything in the other. It follows the story branch
+// shown: it lists the workshops with a branch going with it and shows that branch
+// (spec/WORKSHOP-BRANCHES.md §8.1). The assistant reads the story through its story tools, where
+// the server places each reply (the paired story branch); nothing said here is in the story's context.
+import type { Chat, ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
 import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult, Atom } from "effect/reactivity"
@@ -39,12 +40,13 @@ import type { PanelProps } from "../chat/panels.tsx"
 import { ChatSurfaceProviders, chatComposer, chatComposerNotes, chatOverlays } from "../chat/presentation.tsx"
 import { ChatSession, type ChatView } from "../chat/session.ts"
 import { branchLabel, useChatForks } from "../chat/forks.ts"
-import { ReplyExtrasContext, type ReplyExtrasSource } from "../chat/replyExtras.ts"
 import { SkeletonMessages } from "../chat/SkeletonMessages.tsx"
 import { useCanOpenBeside } from "../workbench/OpenBeside.tsx"
 import { useOpenBesideThis } from "./storyLink.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { PendingSideChat } from "./PendingWorkshop.tsx"
+import { pairedWith, useWorkshopBranches } from "./workshopBranches.tsx"
+import type { WorkshopBranch } from "@rp/shared/workshopApi.ts"
 import {
   chooseSideChat,
   NEW_SIDE_CHAT,
@@ -57,32 +59,24 @@ import {
 const attachedTo = Atom.family((chatId: ChatId) =>
   AppClient.query("ListAttachedWorkshops", { chatId }, { reactivityKeys: [SIDE_CHATS_KEY, chatId] })
 )
+/** Those with a branch going with one story branch (key: `chatId forkId`). */
+const besideBranch = Atom.family((key: string) => {
+  const [chatId, forkId] = key.split(" ") as [ChatId, ForkId]
+  return AppClient.query("ListAttachedWorkshops", { chatId, forkId }, { reactivityKeys: [SIDE_CHATS_KEY, chatId] })
+})
 
 /** The page's own: the portrait column and the editor tabs' workspace stay the story's. */
 const PAGE_PROVIDERS: ReadonlySet<string> = new Set(["chat.portraits", "chat.preset-workspace"])
 
-/** An older window can end before the branch's tip; don't read the unseen tail. */
-const shownStoryLeaf = (view: ChatView) =>
-  view.newer != null ? (view.entries.at(-1)?.slotId ?? null) : view.leafSlotId
-
-/** Where this tab shows the story, read at the moment of each request; none before it's open. */
-export const storyPosition = (story: ChatSession): StoryAt | undefined => {
-  const view = story.snapshot()
-  const forkId = view.forkId ?? view.chat?.currentForkId ?? null
-  if (view.loading || view.chat === null || forkId === null) return undefined
-  return { chatId: story.id, forkId, leafSlotId: shownStoryLeaf(view) }
-}
-
-/** "Reads “Original”, up to message 12": the branch and message the next request reads to. */
+/** "Reads “Original”, up to message 12": the story branch shown, which its replies read, to its end. */
 function ReadingLine({ story, view }: { story: ChatSession; view: ChatView }) {
   const { shown } = useChatForks(story, view)
-  const leaf = view.entries.find((e) => e.slotId === shownStoryLeaf(view))
-  const upTo = leaf ? (leaf.position ?? leaf.depth) + 1 : null
+  const tip = view.newer == null ? view.entries.at(-1) : undefined
+  const upTo = tip ? (tip.position ?? tip.depth) + 1 : null
   return (
     <p className="shrink-0 border-b border-border px-3 py-1.5 text-xs text-muted" data-side-chat-reading="">
       Reads {shown ? <span className="font-medium text-text">“{branchLabel(shown)}”</span> : "this branch"}
-      {upTo !== null ? `, up to message ${upTo}` : ""}. Regenerate uses this position; Resume needs the original
-      position.
+      {upTo !== null ? `, up to message ${upTo}` : ""}.
     </p>
   )
 }
@@ -95,9 +89,17 @@ export function WorkshopSidePanel(props: PanelProps) {
 }
 
 function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
-  const atom = attachedTo(session.id)
+  // The story branch shown: the tab lists and shows what goes with it.
+  const storyFork = storyView.forkId ?? storyView.chat?.currentForkId ?? null
+  const all = useAtomValue(attachedTo(session.id))
+  const refreshAll = useAtomRefresh(attachedTo(session.id))
+  const atom = besideBranch(`${session.id} ${storyFork ?? ""}`)
   const result = useAtomValue(atom)
-  const refresh = useAtomRefresh(atom)
+  const refreshBeside = useAtomRefresh(atom)
+  const refresh = useCallback(() => {
+    refreshAll()
+    refreshBeside()
+  }, [refreshAll, refreshBeside])
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const wanted = typeof search[SIDE_CHAT_PARAM] === "string" ? (search[SIDE_CHAT_PARAM] as string) : ""
@@ -124,7 +126,16 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
         : [created.chat, ...read],
     [read, created]
   )
-  const choice = list === null ? null : chooseSideChat(list, created?.moving ? created.chat.id : wanted || null)
+  // One beside the story but with no branch going with the shown one isn't gone: the tab shows
+  // this branch's default instead, and the URL keeps naming it for the branch that has it. (Until
+  // the whole list is read, it isn't taken as gone either.)
+  const elsewhere =
+    wanted !== "" &&
+    wanted !== NEW_SIDE_CHAT &&
+    !(list ?? []).some((chat) => chat.id === wanted) &&
+    (!AsyncResult.isSuccess(all) || all.value.some((chat) => chat.id === wanted))
+  const choice =
+    list === null ? null : chooseSideChat(list, created?.moving ? created.chat.id : elsewhere ? null : wanted || null)
   // Once the URL names it, and then once the list has it, it's shown as any other.
   if (created?.moving && wanted === created.chat.id) setCreated({ chat: created.chat, moving: false })
   else if (created && !created.moving && read?.some((chat) => chat.id === created.chat.id)) setCreated(null)
@@ -148,14 +159,6 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
     setWanted("", true)
     refresh()
   }, [setWanted, refresh])
-  // Where the story is read for a reply, at the moment of each request.
-  const extras = useMemo<ReplyExtrasSource>(
-    () => () => {
-      const storyAt = storyPosition(session)
-      return storyAt ? { storyAt } : {}
-    },
-    [session]
-  )
   // The workshop the first send made: its composer is ready to go on, as the one typed in was.
   const [focusMade, setFocusMade] = useState<ChatId | null>(null)
   const onCreated = useCallback(
@@ -193,12 +196,12 @@ function ActiveWorkshopSidePanel({ session, view: storyView }: PanelProps) {
   )
   // None yet, or a new one: its composer, ready; the first send makes it.
   if (choice.shown === null)
-    return <PendingSideChat key="new" story={session} storyAt={extras} header={header} onCreated={onCreated} />
+    return <PendingSideChat key="new" story={session} attachFork={storyFork} header={header} onCreated={onCreated} />
   return (
     <SideChat
       key={choice.shown.id}
       chat={choice.shown}
-      extras={extras}
+      storyFork={storyFork}
       focusComposer={focusMade === choice.shown.id}
       header={header}
       onGone={gone}
@@ -232,9 +235,9 @@ function SideChatHeader({
         </span>
       ) : (
         <Menu
-          label="Workshops beside this chat"
+          label="Workshops beside this branch"
           align="start"
-          hint="Switches to another workshop beside this chat, or starts a new one."
+          hint="Switches to another workshop beside this branch of the story, or starts a new one."
           trigger={
             <button
               type="button"
@@ -264,7 +267,7 @@ function SideChatHeader({
             description={
               shown === null
                 ? "Shown now: your first message starts it."
-                : "Opens a new workshop beside this chat; your first message starts it."
+                : "Opens a new workshop beside this branch of the story; your first message starts it."
             }
             onClick={onNew}
           >
@@ -307,14 +310,14 @@ function SideChatHeader({
 /** One workshop beside the story: its own session, at the panel's width. */
 function SideChat({
   chat,
-  extras,
+  storyFork,
   focusComposer,
   header,
   onGone
 }: {
   chat: Chat
-  /** Where the story beside it is read for each reply request (`storyPosition`). */
-  extras: ReplyExtrasSource
+  /** The story branch shown: the workshop shows a branch of its own that goes with it. */
+  storyFork: ForkId | null
   /** Just made by the composer's first send: its composer takes the focus the first one had. */
   focusComposer: boolean
   header: ReactNode
@@ -324,14 +327,21 @@ function SideChat({
   const userId = useSession().user.id
   const forkKey = chatPlaceKey(SIDE_CHAT_SCOPE, "fork")
   const [urlFork, setUrlFork] = usePlaceParam(forkKey, "")
-  const fork = (urlFork || null) as ForkId | null
-  // Opened once on the URL's branch; later the URL moves this session (Back, Forward) rather
-  // than starting another.
-  const [opening] = useState(fork)
+  // The URL's branch while it goes with the story branch shown, else the one of those chatted in
+  // last (spec/WORKSHOP-BRANCHES.md §8.1).
+  const branches = useWorkshopBranches(chat.id, (urlFork || null) as ForkId | null)
+  const beside = branches === null ? null : pairedWith(branches, storyFork)
+  const fork =
+    beside === null ? null : ((beside.find((branch) => branch.forkId === urlFork) ?? beside[0])?.forkId ?? null)
+  const known = beside !== null
+  // Opened once on that branch; later the branch shown moves this session (Back, Forward, a story
+  // branch switch) rather than starting another.
+  const [opening, setOpening] = useState<{ readonly fork: ForkId | null } | null>(null)
+  if (opening === null && known) setOpening({ fork })
   const [session, setSession] = useState<ChatSession | null>(null)
   useLayoutEffect(() => {
-    const next = new ChatSession(chat.id, opening, registry, userId, (title) => showToast({ title }))
-    next.setReplyExtras(extras)
+    if (opening === null) return
+    const next = new ChatSession(chat.id, opening.fork, registry, userId, (title) => showToast({ title }))
     // Shown once its first page is read, as a chat page's is (ChatPage.tsx).
     let shown = false
     const ready = () => {
@@ -346,7 +356,7 @@ function SideChat({
       unsubscribe()
       next.dispose()
     }
-  }, [chat.id, opening, registry, userId, extras])
+  }, [chat.id, opening, registry, userId])
   if (session === null || session.id !== chat.id)
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -355,22 +365,22 @@ function SideChat({
       </div>
     )
   return (
-    <ReplyExtrasContext value={extras}>
-      <SideChatSurface
-        session={session}
-        fork={fork}
-        onFork={setUrlFork}
-        header={header}
-        focusComposer={focusComposer}
-        onGone={onGone}
-      />
-    </ReplyExtrasContext>
+    <SideChatSurface
+      session={session}
+      fork={fork}
+      beside={beside ?? []}
+      onFork={setUrlFork}
+      header={header}
+      focusComposer={focusComposer}
+      onGone={onGone}
+    />
   )
 }
 
 function SideChatSurface({
   session,
   fork,
+  beside,
   onFork,
   header,
   focusComposer,
@@ -378,6 +388,8 @@ function SideChatSurface({
 }: {
   session: ChatSession
   fork: ForkId | null
+  /** Its branches going with the story branch shown, last chatted in first. */
+  beside: ReadonlyArray<WorkshopBranch>
   onFork: (fork: string) => void
   header: ReactNode
   focusComposer: boolean
@@ -448,6 +460,9 @@ function SideChatSurface({
             style={{ ...kindRoot.style, "--chat-portrait-width": "48px" } as CSSProperties}
           >
             {header}
+            {beside.length > 1 && (
+              <SideBranchMenu session={session} view={view} beside={beside} shown={fork} onPick={onFork} />
+            )}
             {problem && (
               <div className="px-3 pt-2">
                 <Alert tone="danger">{problem}</Alert>
@@ -484,5 +499,63 @@ function SideChatSurface({
         </CastContext>
       </ChatSurfaceProviders>
     </ChatPlaceScope>
+  )
+}
+
+/**
+ * The workshop's branches that go with the story branch shown (§8.3): beside a story, the side
+ * chat never shows talk about another story branch. Shown once there's more than one.
+ */
+function SideBranchMenu({
+  session,
+  view,
+  beside,
+  shown,
+  onPick
+}: {
+  session: ChatSession
+  view: ChatView
+  beside: ReadonlyArray<WorkshopBranch>
+  shown: ForkId | null
+  onPick: (fork: string) => void
+}) {
+  const { forks } = useChatForks(session, view)
+  const label = (forkId: ForkId) => {
+    const fork = forks?.find((f) => f.id === forkId)
+    return fork ? branchLabel(fork) : "Branch"
+  }
+  const current = shown ?? beside[0]?.forkId ?? null
+  return (
+    <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-3 py-2" data-side-chat-branches="">
+      <Menu
+        label="Workshop branches for this story branch"
+        align="start"
+        hint="Each branch of this workshop goes with one branch of the story. These go with the one shown."
+        trigger={
+          <button
+            type="button"
+            aria-label={`Workshop branch: ${current ? label(current) : "Branch"}, 1 of ${beside.length}: switch branch`}
+            className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-left text-xs text-muted hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus outline-none"
+          >
+            <Icon name="branch" className="shrink-0" />
+            <span data-layout-name className="min-w-0 truncate">
+              {current ? label(current) : "Branch"}
+            </span>
+            <Icon name="down" className="shrink-0" />
+          </button>
+        }
+      >
+        {beside.map((branch) => (
+          <MenuItem
+            key={branch.forkId}
+            {...(branch.forkId === current ? { icon: "check" as const } : {})}
+            description={branch.forkId === current ? "Shown now." : "Shows this branch of the workshop here."}
+            onClick={() => onPick(branch.forkId)}
+          >
+            {label(branch.forkId)}
+          </MenuItem>
+        ))}
+      </Menu>
+    </div>
   )
 }

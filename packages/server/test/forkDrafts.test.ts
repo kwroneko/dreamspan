@@ -127,7 +127,7 @@ describe("unsaved note text and forks", () => {
       yield* save(api, note.id, source)
       yield* type(api, note.id, source, "Typed on at the insertion.")
       const preview = yield* api.PreviewForkNotes({ chatId, fromForkId: main, atSlotId: first })
-      assert.lengthOf(preview, 1)
+      assert.lengthOf(preview.notes, 1)
       const made = yield* api.CreateFork({
         chatId,
         fromForkId: main,
@@ -198,7 +198,7 @@ describe("unsaved note text and forks", () => {
       yield* type(api, note.id, tip, "Saved later, and typed on.")
 
       const preview = yield* api.PreviewForkNotes({ chatId, fromForkId: main, atSlotId: first })
-      const row = preview.find((r) => r.note === note.entityId)!
+      const row = preview.notes.find((r) => r.note === note.entityId)!
       assert.strictEqual(row.now.content, "Saved later.")
       assert.strictEqual(row.unsaved, "Saved later, and typed on.")
 

@@ -138,16 +138,8 @@ const storyTool = (id: string) => storyTools.find((t) => t.id === id)! as Rollou
  * One workshop turn: the user's message, then the reply, waited for to its end. With `prompts`,
  * each call waiting for the user is allowed once and its approval kept there.
  */
-const turn = (
-  api: Api,
-  workshop: Chat,
-  content: string,
-  prompts?: Array<ApprovalPrompt>,
-  /** Where the tab it's sent from shows the story; by default its story's current branch now. */
-  at?: StoryAt | null
-) =>
+const turn = (api: Api, workshop: Chat, content: string, prompts?: Array<ApprovalPrompt>) =>
   Effect.gen(function* () {
-    const storyAt = at === null ? undefined : (at ?? (yield* storyOf(api, workshop)))
     const events: Array<ChatEvent> = []
     const answered = new Set<string>()
     yield* api.SubscribeChat({ chatId: workshop.id }).pipe(
@@ -164,7 +156,6 @@ const turn = (
                     rolloutId: step.approval.rolloutId,
                     toolCallId: step.approval.toolCallId,
                     digest: step.approval.digest,
-                    ...(storyAt ? { storyAt } : {}),
                     answer: "allow"
                   })
                 }
@@ -181,8 +172,7 @@ const turn = (
       api.Generate({
         chatId: chat.id,
         parentSlotId: sent.entry.slotId,
-        branch: false,
-        ...(storyAt ? { storyAt } : {})
+        branch: false
       })
     )
     yield* eventually(() => finished(events, generated.entry.version.id as VersionId) !== undefined)
@@ -396,7 +386,7 @@ describe("side chat", () => {
       })
       const workshop = yield* api.CreateWorkshop({ attachTo: story.chat.id })
       const first = yield* storyOf(api, workshop)
-      yield* turn(api, workshop, "What happened so far?", undefined, first)
+      yield* turn(api, workshop, "What happened so far?")
       const leaf = (yield* api.GetChat({ chatId: workshop.id })).activeLeafSlotId
       const readRun = toolForKind(yield* ExecutionRegistry, "workshop", "read_run")! as RolloutTool<
         Record<string, unknown>
@@ -556,7 +546,7 @@ describe("side chat", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("refuses archived stories, and preserves separate lifetimes through restore and purge", () => {
+  it.live("refuses archived stories; a story's deletion, restore and purge take its workshops along", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()
@@ -595,18 +585,17 @@ describe("side chat", () => {
       assert.strictEqual((yield* api.GetChat({ chatId: story.id })).id, story.id)
       yield* writer.RestoreBinItem({ userId, itemId: removedWorkshop.id })
       assert.lengthOf(yield* api.ListAttachedWorkshops({ chatId: story.id }), 1)
+      // Its workshops are part of the story's branches (spec/WORKSHOP-BRANCHES.md §6.4): they go with it.
       const removedStory = yield* api.DeleteChat({ chatId: story.id })
       assert.include((yield* read()).text, "isn't available any more")
-      assert.strictEqual((yield* api.GetChat({ chatId: workshop.id })).id, workshop.id)
+      assert.strictEqual(yield* outcome(api.GetChat({ chatId: workshop.id })), "NotFound")
       yield* writer.RestoreBinItem({ userId, itemId: removedStory.id })
+      assert.strictEqual((yield* api.GetChat({ chatId: workshop.id })).id, workshop.id)
       assert.include((yield* read()).text, "Visible story.")
       const purgedStory = yield* api.DeleteChat({ chatId: story.id })
       yield* writer.PurgeBinItem({ userId, itemId: purgedStory.id })
       assert.include((yield* read()).text, "isn't available any more")
-      // A dangling attachment fails closed; it doesn't erase the workshop or its grant.
-      assert.strictEqual((yield* api.GetChat({ chatId: workshop.id })).id, workshop.id)
-      const purgedWorkshop = yield* api.DeleteChat({ chatId: workshop.id })
-      yield* writer.PurgeBinItem({ userId, itemId: purgedWorkshop.id })
+      assert.strictEqual(yield* outcome(api.GetChat({ chatId: workshop.id })), "NotFound")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -897,13 +886,10 @@ describe("side chat", () => {
       assert.strictEqual(yield* outcome(bob.ListAttachedWorkshops({ chatId: story.chat.id })), "NotFound")
       assert.strictEqual(yield* outcome(bob.CreateWorkshop({ attachTo: story.chat.id })), "NotFound")
 
-      // The story in the bin: the side chat says so, and the story lists nothing.
-      // Sent from a tab that still shows the story as it was before the delete.
-      const lastShown = yield* storyOf(alice, workshop)
+      // The story in the bin: its workshops go with it (spec/WORKSHOP-BRANCHES.md §6.4).
       yield* alice.DeleteChat({ chatId: story.chat.id })
-      const gone = mock.requests().length
-      yield* turn(alice, workshop, "Is it still there?", undefined, lastShown)
-      assert.include(results(mock.requests()[gone + 1]!.body as Body)[0], "isn&apos;t available any more")
+      assert.strictEqual(yield* outcome(alice.GetChat({ chatId: workshop.id })), "NotFound")
+      assert.strictEqual(yield* outcome(alice.ListAttachedWorkshops({ chatId: story.chat.id })), "NotFound")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -1171,88 +1157,101 @@ it.effect("sidechat2: every registered workshop tool declares how it reads story
   }).pipe(Effect.scoped, Effect.provide(ExecutionRegistry.layer))
 )
 
-it.live("review: loaded dispatcher story tools keep the tab's position and show no branch ids in approvals", () => {
-  const config = testConfig()
-  return Effect.gen(function* () {
-    let storyId = ""
-    const mock = yield* Effect.acquireRelease(
-      Effect.promise(() =>
-        startMockProvider((request, res) => {
-          const body = request.body as Body
-          if (!toolNames(body).includes("call_tool")) return sse(res, completionChunks(["Story reply."], {}))
-          const done = results(body).length
-          sse(
-            res,
-            done === 0
-              ? call("tool_search", { query: "select:get_cast,change_chat" }, "load")
-              : done === 1
-                ? call("call_tool", { name: "get_cast", arguments: { chat: storyId } }, "cast")
-                : done === 2
-                  ? call(
-                      "call_tool",
-                      { name: "change_chat", arguments: { chat: storyId, change: { _tag: "AgentEnabled", on: true } } },
-                      "setup"
-                    )
-                  : completionChunks(["Done."], {})
-          )
-        })
-      ),
-      (m) => Effect.promise(() => m.close())
-    )
-    const api = yield* client()
-    const story = yield* generateReply(api, {
-      connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "dispatcher" } },
-      model: {}
-    })
-    storyId = story.chat.id
-    const original = yield* api.GetChat({ chatId: storyId as Chat["id"] })
-    const at: StoryAt = { chatId: original.id, forkId: original.currentForkId!, leafSlotId: original.activeLeafSlotId }
-    const originalPreset = yield* api.CreatePreset({ label: "ALPHA setup" })
-    const siblingPreset = yield* api.CreatePreset({ label: "BRAVO setup" })
-    yield* api.ChangeCast({
-      chatId: original.id,
-      forkId: at.forkId,
-      slotId: at.leafSlotId,
-      change: { _tag: "Preset", ref: originalPreset.id }
-    })
-    const sibling = yield* api.CreateFork({
-      chatId: original.id,
-      fromForkId: at.forkId,
-      atSlotId: at.leafSlotId,
-      name: "Sibling"
-    })
-    yield* api.ChangeCast({
-      chatId: original.id,
-      forkId: sibling.fork.id,
-      slotId: at.leafSlotId,
-      change: { _tag: "Preset", ref: siblingPreset.id }
-    })
-    const workshop = yield* api.CreateWorkshop({ attachTo: original.id })
-    yield* api.SetWorkshopGrant({ chatId: workshop.id, capability: "chats.setup", mode: "ask" })
-    const prompts: Array<ApprovalPrompt> = []
-    const reply = yield* turn(api, workshop, "Review the setup, then enable tools.", prompts, at)
-    const transcript = yield* api.GetRunTranscript({ versionId: reply.id })
-    const cast = transcript.entries.find((e) => e.role === "toolResult" && e.tool === "get_cast")
-    assert.isTrue(cast?.role === "toolResult")
-    if (cast?.role === "toolResult") {
-      assert.include(cast.text, originalPreset.id)
-      assert.notInclude(cast.text, siblingPreset.id)
-    }
-    const approval = prompts.find((p) => p.capability === "chats.setup")!
-    assert.isDefined(approval.storyScope)
-    assert.notInclude(JSON.stringify(approval.rows), at.forkId)
-    const effects = yield* api.ListVersionEffects({ versionId: reply.id })
-    assert.lengthOf(effects, 1)
-    assert.notInclude(effects[0]!.title, at.forkId)
-    assert.isTrue((yield* api.GetCast({ chatId: original.id, forkId: at.forkId, slotId: at.leafSlotId })).agentEnabled)
-    assert.isFalse(
-      Boolean(
-        (yield* api.GetCast({ chatId: original.id, forkId: sibling.fork.id, slotId: at.leafSlotId })).agentEnabled
+it.live(
+  "review: loaded dispatcher story tools keep the paired branch's position and show no branch ids in approvals",
+  () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      let storyId = ""
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((request, res) => {
+            const body = request.body as Body
+            if (!toolNames(body).includes("call_tool")) return sse(res, completionChunks(["Story reply."], {}))
+            const done = results(body).length
+            sse(
+              res,
+              done === 0
+                ? call("tool_search", { query: "select:get_cast,change_chat" }, "load")
+                : done === 1
+                  ? call("call_tool", { name: "get_cast", arguments: { chat: storyId } }, "cast")
+                  : done === 2
+                    ? call(
+                        "call_tool",
+                        {
+                          name: "change_chat",
+                          arguments: { chat: storyId, change: { _tag: "AgentEnabled", on: true } }
+                        },
+                        "setup"
+                      )
+                    : completionChunks(["Done."], {})
+            )
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
       )
-    )
-    yield* api.UndoRolloutEffect(effects[0]!)
-    assert.isFalse(
-      Boolean((yield* api.GetCast({ chatId: original.id, forkId: at.forkId, slotId: at.leafSlotId })).agentEnabled)
-    )
-  }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
-})
+      const api = yield* client()
+      const story = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, providerSettings: { toolLoading: "dispatcher" } },
+        model: {}
+      })
+      storyId = story.chat.id
+      const original = yield* api.GetChat({ chatId: storyId as Chat["id"] })
+      const at: StoryAt = {
+        chatId: original.id,
+        forkId: original.currentForkId!,
+        leafSlotId: original.activeLeafSlotId
+      }
+      const originalPreset = yield* api.CreatePreset({ label: "ALPHA setup" })
+      const siblingPreset = yield* api.CreatePreset({ label: "BRAVO setup" })
+      yield* api.ChangeCast({
+        chatId: original.id,
+        forkId: at.forkId,
+        slotId: at.leafSlotId,
+        change: { _tag: "Preset", ref: originalPreset.id }
+      })
+      const sibling = yield* api.CreateFork({
+        chatId: original.id,
+        fromForkId: at.forkId,
+        atSlotId: at.leafSlotId,
+        name: "Sibling"
+      })
+      yield* api.ChangeCast({
+        chatId: original.id,
+        forkId: sibling.fork.id,
+        slotId: at.leafSlotId,
+        change: { _tag: "Preset", ref: siblingPreset.id }
+      })
+      // Started beside the original branch: its replies read and write there, not on the sibling.
+      const workshop = yield* api.CreateWorkshop({ attachTo: original.id, attachFork: at.forkId })
+      yield* api.SetWorkshopGrant({ chatId: workshop.id, capability: "chats.setup", mode: "ask" })
+      const prompts: Array<ApprovalPrompt> = []
+      const reply = yield* turn(api, workshop, "Review the setup, then enable tools.", prompts)
+      const transcript = yield* api.GetRunTranscript({ versionId: reply.id })
+      const cast = transcript.entries.find((e) => e.role === "toolResult" && e.tool === "get_cast")
+      assert.isTrue(cast?.role === "toolResult")
+      if (cast?.role === "toolResult") {
+        assert.include(cast.text, originalPreset.id)
+        assert.notInclude(cast.text, siblingPreset.id)
+      }
+      const approval = prompts.find((p) => p.capability === "chats.setup")!
+      assert.isDefined(approval.storyScope)
+      assert.notInclude(JSON.stringify(approval.rows), at.forkId)
+      const effects = yield* api.ListVersionEffects({ versionId: reply.id })
+      assert.lengthOf(effects, 1)
+      assert.notInclude(effects[0]!.title, at.forkId)
+      assert.isTrue(
+        (yield* api.GetCast({ chatId: original.id, forkId: at.forkId, slotId: at.leafSlotId })).agentEnabled
+      )
+      assert.isFalse(
+        Boolean(
+          (yield* api.GetCast({ chatId: original.id, forkId: sibling.fork.id, slotId: at.leafSlotId })).agentEnabled
+        )
+      )
+      yield* api.UndoRolloutEffect(effects[0]!)
+      assert.isFalse(
+        Boolean((yield* api.GetCast({ chatId: original.id, forkId: at.forkId, slotId: at.leafSlotId })).agentEnabled)
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  }
+)

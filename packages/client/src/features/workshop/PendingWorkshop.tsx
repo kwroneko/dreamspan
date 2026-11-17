@@ -10,7 +10,7 @@
 // then the new chat's path and cast seeded (`seedChat`), so it opens on them with nothing
 // loading in between. What's typed is kept as a pending chat's first message is (`useUserDraft`).
 // Used beside a story (`PendingSideChat`, the Workshop tab) and on its own page (StartWorkshopPage.tsx).
-import type { CastCard, Chat, ChatId, EntityId } from "@rp/shared/chat.ts"
+import type { CastCard, Chat, ChatId, EntityId, ForkId } from "@rp/shared/chat.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { WorkshopPresetChoice } from "@rp/shared/workshopApi.ts"
@@ -41,7 +41,6 @@ import {
   type PendingComposerContext
 } from "../chat/pendingComposerControls.tsx"
 import { pendingView } from "../chat/pendingChat.ts"
-import type { ReplyExtrasSource } from "../chat/replyExtras.ts"
 import { planReply } from "../chat/replyPolicy.ts"
 import { seedChat } from "../chat/session.ts"
 import { PresetPickerPopover } from "../pickers/PresetPicker.tsx"
@@ -157,7 +156,7 @@ function useCards() {
 
 export function PendingWorkshop({
   attachTo = null,
-  storyAt,
+  attachFork = null,
   title,
   start,
   onPersona,
@@ -170,8 +169,8 @@ export function PendingWorkshop({
 }: {
   /** The story it's beside: a side chat (spec/WORKSHOP.md §4). */
   attachTo?: ChatId | null
-  /** Where the story is read for the first reply, at the moment of the send (`storyPosition`). */
-  storyAt?: ReplyExtrasSource
+  /** The story branch shown: the workshop's first branch goes with it (spec/WORKSHOP-BRANCHES.md §8.1). */
+  attachFork?: ForkId | null
   /** Its title, typed before the first send ("" the server's default). */
   title?: string
   start: WorkshopStart
@@ -230,7 +229,6 @@ export function PendingWorkshop({
     if (busy || !ready || (first === "send" && submitted.trim() === "")) return
     // Generate with guidance off leaves the text, which goes along to the saved composer.
     const consumed = first === "send" || guidance
-    const extras = storyAt?.() ?? {}
     const result = await action.run(
       (client) =>
         Effect.gen(function* () {
@@ -238,6 +236,7 @@ export function PendingWorkshop({
             made.current ??
             (yield* client("CreateWorkshop", {
               ...(attachTo === null ? {} : { attachTo }),
+              ...(attachFork ? { attachFork } : {}),
               ...(title === undefined || title.trim() === "" ? {} : { title }),
               ...(start.card === "" ? {} : { card: start.card }),
               ...(start.persona === "" ? {} : { persona: start.persona === NO_PERSONA ? null : start.persona }),
@@ -271,8 +270,7 @@ export function PendingWorkshop({
               speakerEntityId: speaker,
               replySpeakerEntityId: plan.replier,
               ...(plan.reply ? {} : { reply: false }),
-              ...(plan.reply && plan.round.length > 0 ? { round: plan.round } : {}),
-              ...extras
+              ...(plan.reply && plan.round.length > 0 ? { round: plan.round } : {})
             })
             if (sent._tag === "Posted") latest = sent.chat
             // Its reply, as after any send; a server without a generator still keeps the message.
@@ -284,8 +282,7 @@ export function PendingWorkshop({
                   parentSlotId: sent.entry.slotId,
                   branch: false,
                   speakerEntityId: plan.replier,
-                  ...(plan.round.length > 0 ? { round: plan.round } : {}),
-                  ...extras
+                  ...(plan.round.length > 0 ? { round: plan.round } : {})
                 })
               )
           } else {
@@ -296,8 +293,7 @@ export function PendingWorkshop({
               parentSlotId: opening.leafSlotId,
               branch: false,
               speakerEntityId: speaker,
-              ...(guidance && submitted.trim() !== "" ? { direction: submitted } : {}),
-              ...extras
+              ...(guidance && submitted.trim() !== "" ? { direction: submitted } : {})
             })
             if (generated._tag === "Posted") latest = generated.chat
           }
@@ -465,13 +461,14 @@ const SIDE_CHAT_INTRO =
 /** The workshop beside a story before it exists: the Workshop tab's chat surface (SidePanel.tsx). */
 export function PendingSideChat({
   story,
-  storyAt,
+  attachFork,
   header,
   onCreated
 }: {
   /** The story it's beside. */
   story: { readonly id: ChatId }
-  storyAt: ReplyExtrasSource
+  /** The story branch shown: the workshop's first branch goes with it. */
+  attachFork: ForkId | null
   header: ReactNode
   onCreated: (chat: Chat) => void
 }) {
@@ -480,7 +477,7 @@ export function PendingSideChat({
   return (
     <PendingWorkshop
       attachTo={story.id}
-      storyAt={storyAt}
+      attachFork={attachFork}
       start={{ card: "", persona }}
       onPersona={setPersona}
       header={header}

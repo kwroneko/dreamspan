@@ -39,6 +39,8 @@ type Reference =
   | { readonly table: "mcp_connection"; readonly id: string }
   | { readonly table: "model"; readonly id: string; readonly connection: string | undefined }
   | { readonly table: "chat"; readonly id: string }
+  | { readonly table: "storyFork"; readonly id: string }
+  | { readonly table: "storySlot"; readonly id: string }
 
 type Declared = StateKeyDeclaration
 
@@ -89,6 +91,10 @@ const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference>
           return { table: "model", id, connection: field(declaration.connection) }
         case "chat":
           return { table: "chat", id }
+        case "storyFork":
+          return { table: "storyFork", id }
+        case "storySlot":
+          return { table: "storySlot", id }
       }
     })
   })
@@ -159,6 +165,17 @@ export const checkStateReferences = (
           case "chat":
             return sql<{ n: number }>`SELECT count(*) AS n FROM chats WHERE id = ${reference.id}
               AND id <> ${chatId} AND owner_user_id = ${userId} AND (${live} = 0 OR deleted_at IS NULL)`
+          // A fork or message of the user's live story that this workshop is beside (WORKSHOP-BRANCHES §2).
+          case "storyFork":
+            return sql<{ n: number }>`SELECT count(*) AS n FROM forks f JOIN chats s ON s.id = f.chat_id
+              WHERE f.id = ${reference.id} AND f.deleted_at IS NULL AND s.owner_user_id = ${userId}
+                AND s.deleted_at IS NULL AND s.id = (SELECT json_extract(value_json, '$.chat') FROM state_events
+                  WHERE chat_id = ${chatId} AND key = 'workshop.attached' AND slot_id IS NULL LIMIT 1)`
+          case "storySlot":
+            return sql<{ n: number }>`SELECT count(*) AS n FROM slots x JOIN chats s ON s.id = x.chat_id
+              WHERE x.id = ${reference.id} AND s.owner_user_id = ${userId}
+                AND s.id = (SELECT json_extract(value_json, '$.chat') FROM state_events
+                  WHERE chat_id = ${chatId} AND key = 'workshop.attached' AND slot_id IS NULL LIMIT 1)`
         }
       })()
       return Effect.gen(function* () {

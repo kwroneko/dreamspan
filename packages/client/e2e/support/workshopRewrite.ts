@@ -217,7 +217,8 @@ function sideWriteTests() {
                   defaults: { model: { connection: connection.id, model: model.id }, preset: null }
                 })
                 yield* api.SetDisplayPrefs({ prefs: { steps: "expanded" } })
-                const side = yield* api.CreateWorkshop({ attachTo: fixture.chat.id })
+                // Started beside the older branch: a workshop shows beside the story branch it goes with.
+                const side = yield* api.CreateWorkshop({ attachTo: fixture.chat.id, attachFork: fixture.original })
                 yield* api.SetWorkshopGrant({ chatId: side.id, capability: "chats.rewrite", mode: "ask" })
                 return side
               })
@@ -249,10 +250,9 @@ function sideWriteTests() {
             await side.getByLabel("Message", { exact: true }).fill("Change the first message on the renamed branch.")
             await side.getByRole("button", { name: /^Send( as .+)?$/ }).click()
             await expect(approval).toContainText("Branch “Renamed original”")
+            // Beside the newer branch this workshop isn't there: it goes with the original one.
             await page.goto(url(fixture.newer))
-            await expect(approval).toBeVisible()
-            await approval.getByRole("button", { name: "Allow", exact: true }).click()
-            await expect(approval).toContainText("The story tab moved")
+            await expect(page.locator("[data-approval]")).toHaveCount(0)
             await page.goto(url(fixture.original))
             await expect(approval).toBeVisible()
             await approval.getByRole("button", { name: "Allow", exact: true }).click()
@@ -282,7 +282,20 @@ function sideWriteTests() {
             await expect(effect).toContainText("Undone")
             expect((await read(fixture.original)).entries[0]!.version.content).toBe("OLDER sentinel")
             expect((await read(fixture.newer)).entries[0]!.version.content).toBe("NEWER sentinel")
-            await admin((api) => api.DeleteFork({ forkId: fixture.original }))
+            // Branching the original gives the workshop a branch going with the new one, so the
+            // workshop stays when the original goes to the bin (its own branch goes with it).
+            const first = (await read(fixture.original)).entries[0]!
+            await admin((api) =>
+              Effect.gen(function* () {
+                yield* api.CreateFork({
+                  chatId: fixture.chat.id,
+                  fromForkId: fixture.original,
+                  atSlotId: first.slotId,
+                  name: "Kept"
+                })
+                yield* api.DeleteFork({ forkId: fixture.original })
+              })
+            )
             await page.reload()
             await expect(effect).toContainText(
               `Tab target ${width} ${theme} · Branch “Renamed original” · messages 1–1 (deleted)`

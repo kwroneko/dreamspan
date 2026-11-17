@@ -1,6 +1,6 @@
 import type { RefId } from "@rp/shared/library.ts"
 /** One writer transaction creates the seeds, their setting, the chat and its greeting. */
-import { type ChatId, type EntityId, NewVersion } from "@rp/shared/chat.ts"
+import { type ChatId, type EntityId, type ForkId, NewVersion } from "@rp/shared/chat.ts"
 import { newCardDoc } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
@@ -48,6 +48,7 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
       userId,
       title,
       attachTo,
+      attachFork,
       card: chosenCard,
       persona: chosenPersona,
       preset: chosenPreset,
@@ -62,6 +63,14 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
                 WHERE id = ${attachTo} AND owner_user_id = ${userId} AND deleted_at IS NULL AND status = 'active'`
         if (attachTo !== undefined && (!story || chatKinds.get(story.kind)?.allowsSideChat !== true))
           return yield* new NotFound({ entity: "chat", id: attachTo })
+        // The story branch it's started beside (spec/WORKSHOP-BRANCHES.md §2.1): a live one of that story.
+        const [pairedFork] =
+          attachTo === undefined
+            ? []
+            : yield* sql<{ id: string }>`SELECT f.id FROM forks f JOIN chats c ON c.id = f.chat_id
+                WHERE c.id = ${attachTo} AND f.deleted_at IS NULL AND f.id = coalesce(${attachFork ?? null}, c.current_fork_id)`
+        if (attachTo !== undefined && !pairedFork)
+          return yield* new NotFound({ entity: "fork", id: attachFork ?? attachTo })
         const stored = yield* readStoredWorkshopDefaults(sql, userId)
         // A deleted or foreign seed is replaced individually; the other editable seed survives.
         const seed = (kind: "card" | "preset", id: string | undefined) =>
@@ -154,6 +163,10 @@ export const makeWorkshopWriteHandlers = (steps: LibrarySteps, bin: Bin) => {
           yield* graph.insertStateEvent(userId, chatId, null, null, null, {
             key: "workshop.attached",
             value: { chat: attachTo }
+          })
+          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
+            key: "workshop.paired",
+            value: { fork: pairedFork!.id as ForkId }
           })
           // §4: reading the story it's beside is allowed in this workshop; the strip can change it.
           yield* writeGrant(sql, userId, chatId, "chats.read", SIDE_STORY_READ_MODE)

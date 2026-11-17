@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { PathWindow } from "@rp/shared/chatApi.ts"
 import type { AgentMessage } from "@earendil-works/pi-agent-core"
-import type { PathEntry, StoryAt } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, PathEntry, StoryAt, VersionId } from "@rp/shared/chat.ts"
 import type { RolloutStep } from "@rp/shared/agent.ts"
 import { Effect } from "effect"
 import { ASSEMBLER_VERSION, type ContextSnapshot } from "../assembler/types.ts"
@@ -40,6 +40,24 @@ export const storyReadStamp = (reader: Reader["Service"], userId: UserId, at: St
   at === undefined
     ? Effect.succeed(undefined)
     : reader.StoryReadStamp({ userId, chatId: at.chatId }).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
+
+/**
+ * Where a workshop beside a story reads it for a reply in its fork `forkId` (null: its current
+ * one): the paired story branch to that branch's newest message now, or where version
+ * `versionId` recorded the story standing (spec/WORKSHOP-BRANCHES.md §2.2). Undefined for every
+ * other chat, or with the paired branch gone. The server's, never a browser tab's.
+ */
+export const serverStoryAt = (
+  reader: Reader["Service"],
+  userId: UserId,
+  chatId: ChatId,
+  forkId: ForkId | null,
+  versionId?: VersionId
+) =>
+  reader.WorkshopStoryPosition({ userId, chatId, forkId, ...(versionId ? { versionId } : {}) }).pipe(
+    Effect.map((at) => at ?? undefined),
+    Effect.orElseSucceed(() => undefined)
+  )
 
 export const pathStamp = (entry: PathEntry) =>
   JSON.stringify([

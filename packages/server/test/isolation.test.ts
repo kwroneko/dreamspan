@@ -1502,6 +1502,9 @@ const matrix: { readonly [Tag in Rpc.Tag<AppRpcs>]: Entry } = {
   ListAttachedWorkshops: {
     probe: (actor, owner) => refused(actor.api.ListAttachedWorkshops({ chatId: owner.chat.chatId }), "NotFound")
   },
+  ListWorkshopBranches: {
+    probe: (actor, owner) => refused(actor.api.ListWorkshopBranches({ chatId: owner.chat.chatId }), "NotFound")
+  },
   ListWorkshopStories: {
     // Another user's chat ids name nothing (the owner's side: e2e/workshopPopOut.spec.ts).
     probe: (actor, owner) =>

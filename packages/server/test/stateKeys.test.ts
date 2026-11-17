@@ -72,7 +72,11 @@ const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
   "lorebook.embedded": { value: (t) => ({ entity: t.card.entity, on: false }) },
   "agent.mcp": { value: (t) => ({ connection: t.mcp, on: true }) },
   "agent.permission": { value: (t) => ({ note: t.note.entity, card: t.card.entity, field: "description", on: true }) },
-  "workshop.attached": { value: (t) => ({ chat: t.chat }), creationOnly: true }
+  "workshop.attached": { value: (t) => ({ chat: t.chat }), creationOnly: true },
+  // Written only by CreateWorkshop and the fork hook (pairing), and by the version insert (story_at).
+  // A chat's first fork has the chat's id.
+  "workshop.paired": { value: (t) => ({ fork: t.chat }), creationOnly: true },
+  "workshop.story_at": { value: (t) => ({ leaf: t.chat }), creationOnly: true }
 }
 
 const kinds: ReadonlyArray<EntityKind> = ["card", "preset", "lorebook", "note", "preset_overlay"]

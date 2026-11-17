@@ -2,7 +2,8 @@
 // the story's ⋯ menu, the Workshop tab showing the workshop's own messages and composer, the
 // assistant reading the story through read_story, the story left as it was, a reload and a second
 // tab showing the same workshop, an unknown one falling back, and a deleted one leaving the empty
-// state; and two tabs on two branches, each reading its own (workfix1). Run by workshopSideChat.spec.ts and, with LAYOUT_AUDIT_WORKSHOP_ONLY=1, by
+// state; and two tabs on two branches, each showing and reading its own workshop branch
+// (workshopbranch1). Run by workshopSideChat.spec.ts and, with LAYOUT_AUDIT_WORKSHOP_ONLY=1, by
 // layoutAudit.spec.ts. Synthetic data and a scripted loopback provider only.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
@@ -130,14 +131,15 @@ export function workshopSideChatEffectsTests() {
 }
 
 /**
- * Two browser tabs on two branches of one story (workfix1): each says which branch and message it
- * reads, and each side-chat request reads its own tab's branch, never the other.
+ * Two browser tabs on two branches of one story (spec/WORKSHOP-BRANCHES.md): each shows the
+ * workshop's branch that goes with its story branch, says which branch and message it reads, and
+ * each side-chat request reads its paired branch, never the other.
  */
 export function workshopSideChatBranchTests() {
   test.describe("workshop beside a story, two branches", () => {
     const server = serverPerFile(withAdmin)
     const provider = useSideChatProvider(server)
-    test("each tab's side chat reads the branch that tab shows", async ({ page, context }) => {
+    test("each tab's side chat is the workshop branch of the story branch it shows", async ({ page, context }) => {
       test.setTimeout(120_000)
       const story = await makeStory(server, "Two roads")
       await page.setViewportSize({ width: 1440, height: 900 })
@@ -160,6 +162,8 @@ export function workshopSideChatBranchTests() {
             else yield* Effect.sleep("100 millis")
           }
           const chat = yield* api.GetChat({ chatId: story.id })
+          // Started beside the first branch: branching the story gives it a branch for the second.
+          const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
           // Another message 2, in place of the reply: a second branch.
           const sent = yield* api.SendMessage({
             chatId: chat.id,
@@ -170,7 +174,6 @@ export function workshopSideChatBranchTests() {
           if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
           const moved = yield* api.GetChat({ chatId: story.id })
           yield* api.NameFork({ forkId: moved.currentForkId!, name: "Other road" })
-          const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
           return { original: chat.currentForkId!, branch: moved.currentForkId!, workshop }
         })
       )
@@ -180,14 +183,12 @@ export function workshopSideChatBranchTests() {
         return sidePanel(tab).locator(`[data-side-chat="${workshop.id}"]`)
       }
       const first = await open(page, original)
-      await expect(sidePanel(page).locator("[data-side-chat-reading]")).toHaveText(
-        "Reads “Original”, up to message 2. Regenerate uses this position; Resume needs the original position."
-      )
+      await expect(sidePanel(page).locator("[data-side-chat-reading]")).toHaveText("Reads “Original”, up to message 2.")
       const second = await context.newPage()
       await second.setViewportSize({ width: 1440, height: 900 })
       const secondSide = await open(second, branch)
       await expect(sidePanel(second).locator("[data-side-chat-reading]")).toHaveText(
-        "Reads “Other road”, up to message 2. Regenerate uses this position; Resume needs the original position."
+        "Reads “Other road”, up to message 2."
       )
 
       const ask = async (side: typeof first, text: string, answers: number) => {
@@ -203,7 +204,9 @@ export function workshopSideChatBranchTests() {
       expect(fromSecond).toContain(other)
       expect(fromSecond).not.toContain(STORY_REPLY)
       expect(fromSecond).toContain('branch=\\"Other road\\" up_to_message=\\"2\\"')
-      const fromFirst = await ask(first, "And on this one?", 2)
+      // The first tab's workshop branch holds none of the second's talk.
+      await expect(first.getByText("What happens on this road?")).toHaveCount(0)
+      const fromFirst = await ask(first, "And on this one?", 1)
       expect(fromFirst).toContain(STORY_REPLY)
       expect(fromFirst).not.toContain(other)
       expect(fromFirst).toContain('branch=\\"Original\\" up_to_message=\\"2\\"')
@@ -274,9 +277,7 @@ export function workshopSideChatTests() {
           await expect(page).not.toHaveURL(/[?&]workshop=/)
           const panel = sidePanel(page)
           const pending = panel.locator("[data-side-chat-pending]")
-          await expect(panel.locator("[data-side-chat-reading]")).toContainText(
-            "Regenerate uses this position; Resume needs the original position."
-          )
+          await expect(panel.locator("[data-side-chat-reading]")).toContainText("Reads “Original”")
           await expect(pending.locator("[data-side-chat-intro]")).toBeVisible()
           await expect(pending).toHaveAttribute("data-chat-kind", "workshop")
           await expect(pending.locator('[data-kind-badge="workshop"]')).toBeVisible()
@@ -446,7 +447,8 @@ export function workshopSideChatChangesTests() {
                 })
                 if (second._tag !== "Posted") return yield* Effect.die("unexpected queue")
                 const sibling = (yield* api.GetChat({ chatId: story.id })).currentForkId!
-                const workshop = yield* api.CreateWorkshop({ attachTo: story.id })
+                // Beside the branch the page shows: a workshop goes with the branch it's started on.
+                const workshop = yield* api.CreateWorkshop({ attachTo: story.id, attachFork: original })
                 return { story, workshop, original, sibling, storySlot: first.entry.slotId }
               })
           )

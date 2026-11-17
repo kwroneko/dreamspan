@@ -1,7 +1,9 @@
 // Human note inheritance is a comparison of two projections of the same source fork.
 // Both the reader's preview and the writer's atomic validation use this query.
 import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
-import type { ForkNote } from "@rp/shared/chatApi.ts"
+import type { ForkNote, ForkPreview } from "@rp/shared/chatApi.ts"
+import type { ForkRow } from "./rows.ts"
+import { previewForkWorkshops } from "./workshopForks.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import { FoldableEvent, foldState, noteSwitches } from "@rp/shared/state.ts"
@@ -140,4 +142,21 @@ export const previewForkNotes = Effect.fnUntraced(function* (
     })
   }
   return result
+})
+
+/**
+ * Everything "Branch from here" asks about (spec/WORKSHOP-BRANCHES.md §4): the notes above and
+ * the workshops beside the story whose branch would leave messages out by default. The reader's
+ * preview and the writer's check in CreateFork both read it.
+ */
+export const previewFork = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  input: { userId: UserId; chatId: ChatId; fromForkId: ForkId | null; atSlotId: SlotId | null }
+) {
+  const notes = yield* previewForkNotes(sql, input)
+  const [fork] = yield* sql<ForkRow>`SELECT f.* FROM forks f JOIN chats c ON c.id = f.chat_id
+    WHERE c.id = ${input.chatId} AND c.owner_user_id = ${input.userId}
+      AND f.id = coalesce(${input.fromForkId}, c.current_fork_id) AND f.deleted_at IS NULL`
+  const workshops = fork ? yield* previewForkWorkshops(sql, input.chatId, fork, input.atSlotId) : []
+  return { notes, workshops } satisfies ForkPreview
 })

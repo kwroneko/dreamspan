@@ -16,7 +16,6 @@ import {
   PathEntry,
   QueuedMessage,
   SlotId,
-  StoryAtField,
   Version,
   VersionId
 } from "./chat.ts"
@@ -400,10 +399,34 @@ export const ForkNote = Schema.Struct({
   unsaved: Schema.optionalKey(Schema.String)
 })
 export type ForkNote = typeof ForkNote.Type
+/**
+ * A workshop beside the story whose branch for the new story branch would leave messages out by
+ * default (spec/WORKSHOP-BRANCHES.md §4): sent after the story stood at the fork point.
+ */
+export const ForkWorkshop = Schema.Struct({
+  workshop: ChatId,
+  title: Schema.String,
+  /** The workshop branch it's branched from, and its newest message: the comparison covers both. */
+  sourceForkId: ForkId,
+  tipSlotId: Schema.NullOr(SlotId),
+  /** What "As it was then" leaves out: how many, and the first 20 (speaker, first line), newest last. */
+  leftOut: Schema.Struct({
+    count: Schema.Int,
+    first: Schema.Array(Schema.Struct({ speaker: Schema.String, line: Schema.String }))
+  })
+})
+export type ForkWorkshop = typeof ForkWorkshop.Type
+/** What "Branch from here" asks about: the notes changed after the fork point, and the workshops. */
+export const ForkPreview = Schema.Struct({ notes: Schema.Array(ForkNote), workshops: Schema.Array(ForkWorkshop) })
+export type ForkPreview = typeof ForkPreview.Type
 export const ForkNoteSelection = Schema.Struct({
-  /** The exact comparison reviewed by the user, checked again inside the write transaction. */
+  /** The exact comparison reviewed by the user (`ForkPreview`), checked again inside the write transaction. */
   comparison: Schema.String,
-  choices: Schema.Array(Schema.Struct({ note: EntityId, choice: Schema.Literals(["then", "now"]) }))
+  choices: Schema.Array(Schema.Struct({ note: EntityId, choice: Schema.Literals(["then", "now"]) })),
+  /** Each workshop row's choice; a workshop left out takes "then". */
+  workshops: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ workshop: ChatId, choice: Schema.Literals(["then", "now"]) }))
+  )
 })
 export type ForkNoteSelection = typeof ForkNoteSelection.Type
 
@@ -624,9 +647,7 @@ export class ChatApi extends RpcGroup.make(
        * model's "Who replies next", when the user turned it on, may choose another for each.
        */
       autoPick: Schema.optionalKey(Schema.Boolean),
-      composer: ComposerCommit,
-      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
-      storyAt: StoryAtField
+      composer: ComposerCommit
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, ServerError])
@@ -665,9 +686,7 @@ export class ChatApi extends RpcGroup.make(
        * nothing changed since that the run didn't cause (AutoRefused otherwise, nothing sent).
        */
       auto: Schema.optionalKey(Schema.Struct({ token: Schema.NullOr(Schema.String) })),
-      composer: ComposerCommit,
-      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
-      storyAt: StoryAtField
+      composer: ComposerCommit
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, AutoRefused, GenerationUnavailable, ServerError])
@@ -700,9 +719,7 @@ export class ChatApi extends RpcGroup.make(
        * A one-turn direction for this version (the guidance editor's box); empty for none.
        * Absent, the version it replaces gives its own.
        */
-      direction: Schema.optionalKey(Schema.String),
-      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
-      storyAt: StoryAtField
+      direction: Schema.optionalKey(Schema.String)
     },
     success: PathEntry,
     error: Schema.Union([...WriteErrors, GenerationUnavailable])
@@ -720,9 +737,7 @@ export class ChatApi extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       expectedRowVersion: Schema.Int,
       /** A one-turn direction for the continued version; the continued one's isn't reused. */
-      direction: Schema.optionalKey(Schema.String),
-      /** From a side chat: where its story is read for the reply (spec/WORKSHOP.md §4). */
-      storyAt: StoryAtField
+      direction: Schema.optionalKey(Schema.String)
     },
     success: PathEntry,
     error: Schema.Union([...WriteErrors, GenerationUnavailable, NotContinuable])
@@ -1016,7 +1031,7 @@ export class ChatApi extends RpcGroup.make(
    */
   Rpc.make("PreviewForkNotes", {
     payload: { chatId: ChatId, fromForkId: Schema.NullOr(ForkId), atSlotId: Schema.NullOr(SlotId) },
-    success: Schema.Array(ForkNote),
+    success: ForkPreview,
     error: Schema.Union([...Errors])
   }),
   Rpc.make("CreateFork", {

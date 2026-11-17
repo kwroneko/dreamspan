@@ -41,6 +41,7 @@ import { binItemForks } from "./binForks.ts"
 import { placeAsShown } from "./forkOrder.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { NotFound } from "./ops.ts"
+import { pairedWorkshopForks } from "./workshopPairing.ts"
 import { setSplitApplied } from "./threads.ts"
 import type { QueuedRow } from "./queueRows.ts"
 
@@ -713,7 +714,65 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         WHERE id = ${forkId}`
       yield* replaceCurrentFork(fork.chat_id)
       yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${fork.chat_id}`
+      yield* binWorkshopBranches(userId, fork.chat_id, forkId, itemId)
       return itemId
+    })
+
+  /** Item `id` goes with item `main`: restored and purged with it, and not listed on its own. */
+  const markCompanion = (id: string, main: string) =>
+    sql`UPDATE bin_items SET origin_json = json_set(origin_json, '$.companionOf', ${main}) WHERE id = ${id}`
+
+  /** The items that went to the bin with `main`, and those that went with them, in that order. */
+  const companionsOf = (main: string) =>
+    Effect.map(
+      sql<{ id: string }>`WITH RECURSIVE c(id, depth) AS (
+          SELECT id, 1 FROM bin_items WHERE origin_json ->> '$.companionOf' = ${main}
+          UNION ALL SELECT b.id, c.depth + 1 FROM c JOIN bin_items b ON b.origin_json ->> '$.companionOf' = c.id)
+        SELECT c.id FROM c JOIN bin_items b ON b.id = c.id ORDER BY c.depth, b.deleted_at, b.id`,
+      (rows) => rows.map((row) => row.id)
+    )
+
+  /**
+   * The workshop branches that go with story fork `forkId` (their own branches included) go to
+   * the bin with it, under items that go with `main` (spec/WORKSHOP-BRANCHES.md §6.4). A workshop
+   * that would be left with no live branch goes whole: a chat's last fork can't go alone.
+   */
+  const binWorkshopBranches = (
+    userId: UserId,
+    storyId: string,
+    forkId: string,
+    main: string
+  ): Effect.Effect<void, NotFound | SqlError.SqlError> =>
+    Effect.gen(function* () {
+      const paired = yield* pairedWorkshopForks(sql, storyId, forkId)
+      const byWorkshop = new Map<string, Array<string>>()
+      for (const fork of paired) byWorkshop.set(fork.chat_id, [...(byWorkshop.get(fork.chat_id) ?? []), fork.id])
+      for (const [workshopId, forkIds] of byWorkshop) {
+        const [other] = yield* sql`SELECT id FROM forks WHERE chat_id = ${workshopId} AND deleted_at IS NULL
+          AND id NOT IN ${sql.in(forkIds)} LIMIT 1`
+        if (!other) {
+          yield* markCompanion(yield* deleteChat(userId, workshopId), main)
+          continue
+        }
+        const [chat] = yield* sql<{ title: string | null }>`SELECT title FROM chats WHERE id = ${workshopId}`
+        const itemId = yield* insertItem({
+          userId,
+          kind: "branch",
+          targetId: forkIds[0]!,
+          chatId: workshopId,
+          title: `${forkIds.length === 1 ? "A branch" : `${forkIds.length} branches`} of ${chatName(chat?.title)}`,
+          excerpt: "",
+          origin: {
+            chatId: workshopId,
+            chatTitle: chat?.title ?? null,
+            forkId: forkIds[0]!,
+            forkIds,
+            companionOf: main
+          },
+          byteSize: 0
+        })
+        for (const id of forkIds) yield* removeFork(userId, id, { itemId, forkIds })
+      }
     })
 
   const deleteFork = (userId: UserId, forkId: string) =>
@@ -907,7 +966,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       return itemId
     })
 
-  const deleteChat = (userId: UserId, chatId: string) =>
+  const deleteChat = (userId: UserId, chatId: string): Effect.Effect<string, NotFound | SqlError.SqlError> =>
     Effect.gen(function* () {
       const [chat] = yield* sql<{ id: string; title: string }>`
         SELECT id, title FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -942,6 +1001,13 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         byteSize: (stats?.bytes ?? 0) + records!.n
       })
       yield* sql`UPDATE chats SET deleted_at = ${Date.now()}, bin_item_id = ${itemId}, row_version = row_version + 1 WHERE id = ${chatId}`
+      // A story's workshops are part of its branches: they go with it (spec/WORKSHOP-BRANCHES.md §6.4).
+      const beside = yield* sql<{
+        id: string
+      }>`SELECT DISTINCT c.id FROM state_events a JOIN chats c ON c.id = a.chat_id
+        WHERE json_extract(a.value_json, '$.chat') = ${chatId} AND a.key = 'workshop.attached' AND a.slot_id IS NULL
+          AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+      for (const workshop of beside) yield* markCompanion(yield* deleteChat(userId, workshop.id), itemId)
       return itemId
     })
 
@@ -1134,7 +1200,16 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       }
     })
 
+  /** Restores an item and the items that went to the bin with it (`markCompanion`). */
   const restore = (userId: UserId, itemId: string, recovered?: Map<string, string>) =>
+    Effect.gen(function* () {
+      const companions = yield* companionsOf(itemId)
+      const restored = yield* restoreOne(userId, itemId, recovered)
+      for (const companion of companions) yield* restoreOne(userId, companion)
+      return restored
+    })
+
+  const restoreOne = (userId: UserId, itemId: string, recovered?: Map<string, string>) =>
     Effect.gen(function* () {
       const item = yield* loadItem(userId, itemId)
       if (item.kind === "card_asset") {
@@ -1409,11 +1484,19 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       if (actual.size !== expected.size || [...actual].some((id) => !expected.has(id))) return yield* new BinChanged()
     })
 
+  /** An item and, after it, every item that went to the bin with it, each purged as it is. */
+  const purgeWithCompanions = (itemId: string) =>
+    Effect.gen(function* () {
+      const companions = yield* companionsOf(itemId)
+      yield* purgeWhere("id = ?", [itemId])
+      for (const companion of companions) yield* purgeWhere("id = ?", [companion])
+    })
+
   const purge = (userId: UserId, itemId: string, expectedForkIds?: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       const item = yield* loadItem(userId, itemId)
       yield* confirmForks(userId, [itemId], expectedForkIds)
-      yield* purgeWhere("id = ?", [item.id])
+      yield* purgeWithCompanions(item.id)
       return item.chat_id === null ? [] : [item.chat_id]
     })
 
@@ -1422,9 +1505,12 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       const rows = yield* sql<{
         id: string
         chat_id: string | null
-      }>`SELECT id, chat_id FROM bin_items WHERE user_id = ${userId}`
+        companion: string | null
+      }>`SELECT id, chat_id, origin_json ->> '$.companionOf' AS companion FROM bin_items WHERE user_id = ${userId}`
       const confirmed = new Set(itemIds)
-      if (rows.length !== confirmed.size || !rows.every((row) => confirmed.has(row.id))) {
+      // The items that went with another aren't listed: the user confirmed those they saw.
+      const listed = rows.filter((row) => row.companion === null)
+      if (listed.length !== confirmed.size || !listed.every((row) => confirmed.has(row.id))) {
         return yield* new BinChanged()
       }
       yield* confirmForks(userId, itemIds, expectedForkIds)
@@ -1465,6 +1551,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
               const [oldest] = yield* sql<BinRow>`
                 SELECT * FROM bin_items
                 WHERE user_id = ${userId} AND NOT ${sql.in("id", made)} AND (deleted_at, id) > (${after.deleted_at}, ${after.id})
+                  AND origin_json ->> '$.companionOf' IS NULL
                 ORDER BY deleted_at, id LIMIT 1`
               if (!oldest) return yield* new NoRoom()
               after = oldest
@@ -1503,7 +1590,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
                 }
               }
               yield* sql
-                .withTransaction(purgeWhere("id = ?", [oldest.id]))
+                .withTransaction(purgeWithCompanions(oldest.id))
                 .pipe(
                   Effect.catch((error) =>
                     Effect.logWarning(`bin eviction skipped ${oldest.kind} item ${oldest.id}`, error.reason.cause)

@@ -155,7 +155,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
             data: { key: "participant.leave", value: { entity: h.card.entityId } }
           })
           const preview = yield* h.reader.PreviewForkNotes(h.payload)
-          const note = preview.find((row) => row.note === h.cardNote.entityId)
+          const note = preview.notes.find((row) => row.note === h.cardNote.entityId)
           assert.isDefined(note)
           assert.isTrue(note!.then.enabled)
           assert.isFalse(note!.now.enabled)
@@ -255,8 +255,8 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
     it.effect("previews text and switches; mixed choices persist independently and later forks inherit them", () =>
       Effect.gen(function* () {
         const h = yield* setup
-        assert.strictEqual(h.preview.length, 2)
-        const note = h.preview.find((row) => row.note === h.note.entityId)!
+        assert.strictEqual(h.preview.notes.length, 2)
+        const note = h.preview.notes.find((row) => row.note === h.note.entityId)!
         assert.strictEqual(note.then.content, "The cities are at war.")
         assert.strictEqual(note.now.content, "The cities are now at peace.")
         assert.isTrue(note.then.enabled)
@@ -297,7 +297,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
           assert.include(state.activeNotes, h.note.entityId)
           // Default-on card notes require no explicit activate event with the legacy API.
           const comparison = yield* h.reader.PreviewForkNotes({ ...h.payload, fromForkId: made.fork.id })
-          assert.strictEqual(comparison.length, 0)
+          assert.strictEqual(comparison.notes.length, 0)
         }
       })
     )
@@ -344,12 +344,12 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
           data: { key: "note.activate", value: { note: h.note.entityId } }
         })
         const preview = yield* h.reader.PreviewForkNotes(h.payload)
-        assert.isFalse(preview.find((row) => row.note === h.note.entityId)!.now.enabled)
+        assert.isFalse(preview.notes.find((row) => row.note === h.note.entityId)!.now.enabled)
         const made = yield* h.writer.CreateFork({
           ...h.payload,
           notes: {
             comparison: canonicalJson(preview),
-            choices: preview.map((row) => ({ note: row.note, choice: "now" as const }))
+            choices: preview.notes.map((row) => ({ note: row.note, choice: "now" as const }))
           }
         })
         const state = yield* h.state(made.fork.id)

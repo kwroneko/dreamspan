@@ -6,7 +6,8 @@ import { createHash } from "node:crypto"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"
-import type { ChatId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import { attachedStory, pairedWorkshopForks, storyPositionOf, workshopForkPairs } from "./workshopPairing.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 
@@ -27,7 +28,7 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
         if (!row) return yield* new NotFound({ entity: "story", id: chatId })
         return createHash("sha256").update(row.stamp).digest("hex")
       }).pipe(query("StoryReadStamp")),
-    AttachedWorkshops: ({ userId, chatId }) =>
+    AttachedWorkshops: ({ userId, chatId, forkId }) =>
       Effect.gen(function* () {
         const [story] = yield* sql<{ id: string }>`SELECT id FROM chats
           WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL AND status = 'active'`
@@ -38,8 +39,70 @@ export const makeWorkshopAttachReadHandlers = Effect.gen(function* () {
             AND e.slot_id IS NULL AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
             AND c.kind = 'workshop' AND c.status = 'active'
           GROUP BY c.id ORDER BY c.created_at DESC, c.id DESC LIMIT 200`
-        return rows.map(toChat)
+        if (forkId === undefined) return rows.map(toChat)
+        // Beside one story branch: those with a live branch going with it (WORKSHOP-BRANCHES §8.1).
+        // The one chatted in last first: each workshop's newest paired branch (listed first per chat).
+        const recency = new Map<string, number>()
+        for (const fork of yield* pairedWorkshopForks(sql, chatId, forkId))
+          if (!recency.has(fork.chat_id)) recency.set(fork.chat_id, fork.last_chatted_at ?? fork.created_at)
+        return rows
+          .filter((row) => recency.has(row.id))
+          .sort((a, b) => recency.get(b.id)! - recency.get(a.id)!)
+          .map(toChat)
       }).pipe(query("AttachedWorkshops")),
+    WorkshopBranches: ({ userId, chatId }) =>
+      Effect.gen(function* () {
+        const [workshop] = yield* sql<{ id: string }>`SELECT id FROM chats
+          WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!workshop) return yield* new NotFound({ entity: "chat", id: chatId })
+        const attached = yield* attachedStory(sql, userId, chatId)
+        const forks = (yield* workshopForkPairs(sql, chatId)).filter((fork) => fork.deleted_at === null)
+        const stories = new Map(
+          attached === null
+            ? []
+            : (yield* sql<{ id: string; name: string | null; parent_fork_id: string | null; created_at: number }>`
+                SELECT f.id, f.name, f.parent_fork_id, f.created_at FROM forks f JOIN chats s ON s.id = f.chat_id
+                WHERE f.chat_id = ${attached.story} AND s.owner_user_id = ${userId} AND s.deleted_at IS NULL
+                  AND f.deleted_at IS NULL`).map((f) => [f.id, f])
+        )
+        // The branch chatted in last first, as the side panel picks its default (§8.1).
+        forks.sort(
+          (a, b) =>
+            (b.last_chatted_at ?? -1) - (a.last_chatted_at ?? -1) ||
+            b.created_at - a.created_at ||
+            b.id.localeCompare(a.id)
+        )
+        return forks.map((fork) => {
+          const story = fork.story_fork_id === null ? undefined : stories.get(fork.story_fork_id)
+          return {
+            forkId: fork.id as ForkId,
+            story:
+              story === undefined
+                ? null
+                : {
+                    chatId: attached!.story as ChatId,
+                    forkId: story.id as ForkId,
+                    name: story.name,
+                    original: story.parent_fork_id === null,
+                    createdAt: story.created_at
+                  }
+          }
+        })
+      }).pipe(query("WorkshopBranches")),
+    WorkshopStoryPosition: ({ userId, chatId, forkId, versionId }) =>
+      Effect.gen(function* () {
+        // Where the version recorded the story standing (an edit's: its source's), and in which fork.
+        const [recorded] =
+          versionId === undefined
+            ? []
+            : yield* sql<{ leaf: string; fork_id: string }>`SELECT json_extract(e.value_json, '$.leaf') AS leaf,
+                e.fork_id FROM state_events e JOIN versions v ON v.id = ${versionId}
+              WHERE e.chat_id = ${chatId} AND e.key = 'workshop.story_at'
+                AND (e.version_id = v.id OR e.version_id = v.source_version_id)
+              ORDER BY e.version_id = v.id DESC LIMIT 1`
+        const now = yield* storyPositionOf(sql, userId, chatId, forkId ?? recorded?.fork_id ?? null)
+        return now !== null && recorded ? { ...now, leafSlotId: recorded.leaf as SlotId } : now
+      }).pipe(query("WorkshopStoryPosition")),
     WorkshopStories: ({ userId, chatIds }) =>
       Effect.gen(function* () {
         if (chatIds.length === 0) return []

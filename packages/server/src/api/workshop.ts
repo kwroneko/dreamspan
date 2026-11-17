@@ -261,7 +261,7 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         if (mode === "off") cancelCapability(chatId, capability, target)
         return yield* capabilitiesOf(userId, chatId)
       }).pipe(internal("SetWorkshopGrant")),
-    AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note, storyAt }) =>
+    AnswerToolApproval: ({ rolloutId, toolCallId, digest, answer, note }) =>
       Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
         const text = note?.trim() ?? ""
@@ -270,7 +270,6 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           rolloutId,
           toolCallId,
           digest,
-          ...(storyAt ? { storyAt } : {}),
           answer,
           note: text === "" ? null : text
         })
@@ -315,9 +314,13 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
           return { undone, refused: null, left: [] }
         })
       ).pipe(internal("UndoRolloutEffects")),
-    ListAttachedWorkshops: ({ chatId }) =>
-      Effect.flatMap(CurrentUser, (user) => reader.AttachedWorkshops({ userId: user.id, chatId })).pipe(
-        internal("ListAttachedWorkshops")
+    ListAttachedWorkshops: ({ chatId, forkId }) =>
+      Effect.flatMap(CurrentUser, (user) =>
+        reader.AttachedWorkshops({ userId: user.id, chatId, ...(forkId ? { forkId } : {}) })
+      ).pipe(internal("ListAttachedWorkshops")),
+    ListWorkshopBranches: ({ chatId }) =>
+      Effect.flatMap(CurrentUser, (user) => reader.WorkshopBranches({ userId: user.id, chatId })).pipe(
+        internal("ListWorkshopBranches")
       ),
     ListWorkshopStories: ({ chatIds }) =>
       Effect.flatMap(CurrentUser, (user) => reader.WorkshopStories({ userId: user.id, chatIds })).pipe(

@@ -1,6 +1,6 @@
 import { ProviderRegistry } from "../providers/registry.ts"
 import { CALL_TOOL, dispatcherDefinition } from "../agent/dispatcher.ts"
-import { storyReadStamp } from "../agent/continuity.ts"
+import { serverStoryAt, storyReadStamp } from "../agent/continuity.ts"
 import { loadingWireFor } from "../agent/loadingPlan.ts"
 import { loadedSet } from "../agent/toolLoading.ts"
 import { isDeepStrictEqual } from "node:util"
@@ -152,7 +152,6 @@ const agentVersionResumer = Effect.gen(function* () {
     options?: {
       readonly model?: RetryModel
       readonly direction?: string
-      readonly storyAt?: StoryAt
       readonly saved?: boolean
     }
   ) =>
@@ -162,14 +161,19 @@ const agentVersionResumer = Effect.gen(function* () {
       const userId = (yield* CurrentUser).id
       const refuse = (message: string) => Effect.fail(new NotResumable({ versionId, message }))
       const material = yield* reader.RolloutMaterial({ userId, versionId })
-      if (!isDeepStrictEqual((JSON.parse(material.snapshot) as Frozen).storyAt, options?.storyAt))
+      // A workshop beside a story reads its paired branch where it stands now (WORKSHOP-BRANCHES §2.2).
+      const located = yield* reader.GetVersion({ userId, versionId })
+      const storyAt = yield* serverStoryAt(
+        reader,
+        userId,
+        (yield* reader.GetSlot({ userId, slotId: located.slotId, forkId })).chatId,
+        forkId
+      )
+      if (!isDeepStrictEqual((JSON.parse(material.snapshot) as Frozen).storyAt, storyAt))
         return yield* refuse(
           "The story position changed. Return to the branch and message this reply read before resuming, or regenerate it to use the position shown now."
         )
-      if (
-        (JSON.parse(material.snapshot) as Frozen).storyStamp !==
-        (yield* storyReadStamp(reader, userId, options?.storyAt))
-      )
+      if ((JSON.parse(material.snapshot) as Frozen).storyStamp !== (yield* storyReadStamp(reader, userId, storyAt)))
         return yield* refuse(
           "The story changed since this reply read it. Regenerate it to read the story as it is now."
         )
@@ -383,8 +387,7 @@ const agentVersionResumer = Effect.gen(function* () {
         versionId: added.version.id,
         forkId: added.forkId,
         ...(planned.continuation === undefined ? {} : { initial: { text: planned.continuation, reasoning: "" } }),
-        // A side chat's story is read where the tab asking for this showed it (spec/WORKSHOP.md §4).
-        ...(options?.storyAt ? { storyAt: options.storyAt } : {}),
+        ...(storyAt ? { storyAt } : {}),
         resume: {
           rolloutId,
           snapshot,
@@ -408,7 +411,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
         internal("GetRolloutSteps")
       ),
 
-    ResumeVersion: ({ versionId, forkId, expectedRowVersion, storyAt, saved }) =>
+    ResumeVersion: ({ versionId, forkId, expectedRowVersion, saved }) =>
       resume(
         versionId,
         forkId ?? null,
@@ -422,10 +425,10 @@ export const makeAgentHandlers = Effect.gen(function* () {
                 historical: frozen.continuity?.historical ?? 0
               }),
         "resume",
-        storyAt || saved ? { ...(storyAt ? { storyAt } : {}), ...(saved ? { saved: true } : {}) } : undefined
+        saved ? { saved: true } : undefined
       ).pipe(internal("ResumeVersion")),
 
-    ResumeFromStep: ({ versionId, step, edit, forkId, expectedRowVersion, storyAt }) =>
+    ResumeFromStep: ({ versionId, step, edit, forkId, expectedRowVersion }) =>
       resume(
         versionId,
         forkId ?? null,
@@ -440,8 +443,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
             versionId,
             frozen.continuity?.historical ?? 0
           ),
-        "edit",
-        storyAt ? { storyAt } : undefined
+        "edit"
       ).pipe(internal("ResumeFromStep")),
     GetRunTranscript: ({ versionId }) =>
       Effect.flatMap(CurrentUser, (user) => reader.RolloutTranscript({ userId: user.id, versionId })).pipe(
@@ -548,20 +550,23 @@ export const regenerateSeveral = Effect.fnUntraced(function* (input: {
   readonly expectedRowVersion: number
   readonly model?: RetryModel
   readonly direction?: string
-  readonly storyAt?: StoryAt
 }) {
   const userId = (yield* CurrentUser).id
   const reader = yield* Reader
   const material = yield* reader.RolloutMaterial({ userId, versionId: input.versionId }).pipe(Effect.option)
   if (material._tag === "None" || (JSON.parse(material.value.snapshot) as Frozen).agent?.contract !== "several")
     return null
+  const located = yield* reader.GetVersion({ userId, versionId: input.versionId })
+  const storyAt = yield* serverStoryAt(
+    reader,
+    userId,
+    (yield* reader.GetSlot({ userId, slotId: located.slotId, forkId: input.forkId })).chatId,
+    input.forkId
+  )
   // A new version can assemble afresh at the current position; a retained transcript
   // cannot, because its old tool results may contain another branch or later messages.
-  if (!isDeepStrictEqual((JSON.parse(material.value.snapshot) as Frozen).storyAt, input.storyAt)) return null
-  if (
-    (JSON.parse(material.value.snapshot) as Frozen).storyStamp !==
-    (yield* storyReadStamp(reader, userId, input.storyAt))
-  )
+  if (!isDeepStrictEqual((JSON.parse(material.value.snapshot) as Frozen).storyAt, storyAt)) return null
+  if ((JSON.parse(material.value.snapshot) as Frozen).storyStamp !== (yield* storyReadStamp(reader, userId, storyAt)))
     return null
   const resume = yield* agentVersionResumer
   return yield* resume(

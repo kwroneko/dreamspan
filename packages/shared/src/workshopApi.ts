@@ -1,4 +1,4 @@
-import { StoryAtField } from "./chat.ts"
+import { ForkId } from "./chat.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Chat } from "./chat.ts"
@@ -130,6 +130,25 @@ export const WorkshopGrantChoice = Schema.Struct({
 })
 export type WorkshopGrantChoice = typeof WorkshopGrantChoice.Type
 
+/**
+ * One branch of a workshop beside a story and the story branch it goes with
+ * (spec/WORKSHOP-BRANCHES.md §8): `story` null when that branch isn't live, or for a workshop
+ * beside no story. Ordered by the branch chatted in last first.
+ */
+export const WorkshopBranch = Schema.Struct({
+  forkId: ForkId,
+  story: Schema.NullOr(
+    Schema.Struct({
+      chatId: Chat.fields.id,
+      forkId: ForkId,
+      name: Schema.NullOr(Schema.String),
+      original: Schema.Boolean,
+      createdAt: Schema.Number
+    })
+  )
+})
+export type WorkshopBranch = typeof WorkshopBranch.Type
+
 export class WorkshopApi extends RpcGroup.make(
   Rpc.make("ListWorkshopCapabilities", {
     payload: { chatId: Chat.fields.id },
@@ -158,6 +177,8 @@ export class WorkshopApi extends RpcGroup.make(
     payload: {
       title: Schema.optionalKey(Schema.String),
       attachTo: Schema.optionalKey(Chat.fields.id),
+      /** The story branch it's started beside (spec/WORKSHOP-BRANCHES.md §2.1); absent: the story's current one. */
+      attachFork: Schema.optionalKey(ForkId),
       card: Schema.optionalKey(Schema.String),
       persona: Schema.optionalKey(Schema.NullOr(Schema.String)),
       preset: Schema.optionalKey(WorkshopPresetChoice),
@@ -166,10 +187,16 @@ export class WorkshopApi extends RpcGroup.make(
     success: Chat,
     error: Schema.Union([NotFound, GrantRefused, ServerError])
   }),
-  /** The workshops beside a story, newest first. */
+  /** The workshops beside a story, newest first; with `forkId`, those with a branch going with that story branch. */
   Rpc.make("ListAttachedWorkshops", {
-    payload: { chatId: Chat.fields.id },
+    payload: { chatId: Chat.fields.id, forkId: Schema.optionalKey(ForkId) },
     success: Schema.Array(Chat),
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** A workshop's branches, each with the story branch it goes with. */
+  Rpc.make("ListWorkshopBranches", {
+    payload: { chatId: Chat.fields.id },
+    success: Schema.Array(WorkshopBranch),
     error: Schema.Union([NotFound, ServerError])
   }),
   /** The story each of these workshops is about (its title, or deleted); none for one without. */
@@ -224,7 +251,6 @@ export class WorkshopApi extends RpcGroup.make(
    */
   Rpc.make("AnswerToolApproval", {
     payload: {
-      storyAt: StoryAtField,
       rolloutId: Schema.String,
       toolCallId: Schema.String,
       digest: Schema.String,
