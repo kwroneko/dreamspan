@@ -14,10 +14,10 @@ export const capabilitiesAtom = Atom.family((chatId: ChatId) =>
   AppClient.query("ListWorkshopCapabilities", { chatId }, { reactivityKeys: [CAPABILITIES_KEY, chatId] })
 )
 
-export const modeLabel: Record<CapabilityMode, string> = { off: "Off", ask: "Ask first", allow: "Allowed" }
+const modeLabel: Record<CapabilityMode, string> = { off: "Off", ask: "Ask first", allow: "Allowed" }
 
 /** Each choice's hover explanation. */
-export const modeDescription: Record<CapabilityMode, string> = {
+const modeDescription: Record<CapabilityMode, string> = {
   off: "The assistant can't do this here. It's told so, and doesn't try.",
   ask: "The assistant asks you each time, showing what it will do, before it does it.",
   allow: "The assistant does this without asking. Each change can be undone from its step or Changes."

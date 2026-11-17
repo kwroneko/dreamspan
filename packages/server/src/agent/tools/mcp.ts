@@ -38,7 +38,7 @@ export const mcpHostOf = (connection: Pick<McpConnection, "url">) => {
 }
 
 /** The tools of a server the user allowed, by the name the model sees. */
-export const allowedTools = (connection: McpConnection): ReadonlyArray<McpTool> =>
+const allowedTools = (connection: McpConnection): ReadonlyArray<McpTool> =>
   connection.tools
     .filter((tool) => mcpToolAllowed(tool, connection.use))
     .toSorted((a, b) => (a.exposed < b.exposed ? -1 : a.exposed > b.exposed ? 1 : 0))
@@ -73,7 +73,7 @@ const base64Bytes = (data: string) => Math.floor((data.replace(/=+$/, "").length
  * image when the model takes images (at most 4, each at most 5 MB), anything else as a short line.
  * The text is cut at 4 MiB, saying how much the server sent.
  */
-export const resultOf = (
+const resultOf = (
   raw: unknown,
   vision: boolean
 ): {

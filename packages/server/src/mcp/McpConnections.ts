@@ -163,7 +163,7 @@ export interface McpConnectionsShape {
 }
 
 /** How one `tools/call` went. `sent`: the request left the app, so it may have happened. */
-export type McpCallOutcome =
+type McpCallOutcome =
   | { readonly _tag: "Result"; readonly result: unknown; readonly scrub: (text: string) => string }
   | {
       readonly _tag: "Failed"
