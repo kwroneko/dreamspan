@@ -4,6 +4,7 @@ import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import { Checkbox, RadioGroup, Switch } from "../../../ui/Choice.tsx"
 import { Fieldset } from "../../../ui/Field.tsx"
 import type { ChatSession } from "../session.ts"
+import { McpServersFieldset } from "./McpServersFieldset.tsx"
 import { useReplyTools } from "./replyTools.ts"
 
 type SendPresence = "off" | "optional" | "required"
@@ -68,6 +69,7 @@ export function ToolsSection({ session }: { session: ChatSession }) {
           )}
         </Fieldset>
       )}
+      {on && <McpServersFieldset session={session} choices={cast.agentMcp ?? {}} />}
       {on && (
         <Fieldset legend="Who's in the scene" about={PRESENT_ABOUT}>
           <RadioGroup<SendPresence>

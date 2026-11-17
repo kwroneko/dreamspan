@@ -27,6 +27,20 @@ describe("foldState", () => {
     expect(disabled.cardsRotation).toBe(true)
   })
 
+  it("keeps a branch's MCP server choices by server, and null drops one", () => {
+    const a = "019a0000-0000-7000-8000-00000000000a" as never
+    const b = "019a0000-0000-7000-8000-00000000000b" as never
+    expect(foldState([]).agentMcp).toBeUndefined()
+    const chosen = foldState([
+      e({ key: "agent.mcp", value: { connection: a, on: true } }),
+      e({ key: "agent.mcp", value: { connection: b, on: false } })
+    ])
+    expect(chosen.agentMcp).toEqual({ [a]: true, [b]: false })
+    const reset = foldState([e({ key: "agent.mcp", value: { connection: a, on: null } })], chosen)
+    expect(reset.agentMcp).toEqual({ [b]: false })
+    expect(foldState([e({ key: "agent.mcp", value: { connection: b, on: null } })], reset).agentMcp).toBeUndefined()
+  })
+
   it("selects only the last persona on events and supplied initial state", () => {
     const state = foldState([e({ key: "played_by_me.set", value: { entities: [mira, tomas, mira] } })])
     expect(state.playedByMe).toEqual([mira])

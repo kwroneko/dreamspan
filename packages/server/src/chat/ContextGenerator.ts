@@ -1,4 +1,4 @@
-import { outsideEffect } from "../agent/effects.ts"
+import { admitsEffect, outsideEffect } from "../agent/effects.ts"
 import { toolForKind } from "../execution.ts"
 import { DEFAULT_MAX_IMAGES } from "../assembler/images.ts"
 import { providerRequest } from "../assembler/wire.ts"
@@ -37,6 +37,7 @@ import type { OutputContract } from "../agent/modes.ts"
 import {
   type FrozenTool,
   frozenTool,
+  type RolloutTool,
   sendMessageDefinition,
   sendMessageWithPresence,
   severalMessageDefinition,
@@ -49,7 +50,14 @@ import { dispatcherDefinition } from "../agent/dispatcher.ts"
 import { frozenOffer, loadedSet, type Skill } from "../agent/toolLoading.ts"
 import { DecisionEngine } from "../decision/engine.ts"
 import { McpConnections } from "../mcp/McpConnections.ts"
-import { enabledServers, mcpOfferTools, mcpSkillOf, mcpToolFromFrozen } from "../agent/tools/mcp.ts"
+import {
+  enabledServers,
+  enabledStoryServers,
+  mcpOfferTools,
+  mcpSkillOf,
+  mcpToolFromFrozen,
+  readResultTool
+} from "../agent/tools/mcp.ts"
 import type { LoreAdmission, LoreInput } from "../decision/points/lore.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
@@ -163,6 +171,8 @@ export const layer = Layer.effect(
             readonly tools: ReadonlyArray<FrozenTool>
             readonly cardSkills?: ReadonlyArray<Skill>
             readonly inspection?: Generation["inspection"]
+            /** A story branch's own MCP server choices at the reply's parent (`agent.mcp`). */
+            readonly mcpChoices?: Readonly<Record<string, boolean>>
           }
         }
         const generation = {
@@ -188,8 +198,12 @@ export const layer = Layer.effect(
         if (!profile)
           return yield* new GenerationFailed({ class: "unavailable", message: "This chat kind is unavailable." })
         const tools = frozen.tools.flatMap((t) => {
-          const tool = toolForKind(execution, chat.kind, t.name) ?? loaderFor(execution, t) ?? mcpToolFromFrozen(mcp, t)
-          return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
+          const tool =
+            toolForKind(execution, chat.kind, t.name) ??
+            loaderFor(execution, t) ??
+            mcpToolFromFrozen(mcp, t) ??
+            (t.name === readResultTool.id ? (readResultTool as unknown as RolloutTool<never>) : undefined)
+          return tool && admitsEffect(profile, tool.effect) ? [tool] : []
         })
         const reply = strategy.run({
           purpose: profile.purpose,
@@ -222,7 +236,8 @@ export const layer = Layer.effect(
               writer,
               userId: request.userId,
               chatId: request.chatId,
-              rolloutId
+              rolloutId,
+              ...(profile.allowsOutside ? {} : { story: { mcpChoices: frozen.mcpChoices ?? {} } })
             }),
             onChanged: (target) => {
               hub.publish(target, { _tag: "Reload" })
@@ -332,21 +347,33 @@ export const layer = Layer.effect(
                 "Replies that say who's in the scene need Separate contexts. Choose Separate contexts, or set Who's in the scene to Replies don't say."
             })
           const agentic = plan.strategy !== "reply"
-          // The MCP servers on in this workshop (spec/MCP.md §5.1), read from storage: planning
-          // never reaches a server. Stories get theirs in M3.
+          // The MCP servers on in this workshop or for this story branch (spec/MCP.md §5.1), read
+          // from storage: planning never reaches a server. A story's own choices are the branch's
+          // at the reply's parent, frozen with the run.
+          const storyMcp = agentic && mcp !== undefined && admitsEffect({ ...profile, allowsOutside: false }, "mcp")
+          const mcpChoices = state.agentMcp ?? {}
           const mcpServers =
-            agentic && mcp && profile.allowsOutside
-              ? enabledServers(
-                  yield* reader
-                    .McpWorkshopConnections({ userId, chatId })
-                    .pipe(
-                      Effect.catchTag(
-                        ["StorageError", "RpcClientError", "NotFound"],
-                        serverFailure("McpWorkshopConnections")
+            agentic && mcp && !profile.allowsOutside
+              ? storyMcp
+                ? enabledStoryServers(
+                    yield* reader
+                      .McpStoryConnections({ userId })
+                      .pipe(Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("McpStoryConnections"))),
+                    mcpChoices
+                  )
+                : []
+              : agentic && mcp && profile.allowsOutside
+                ? enabledServers(
+                    yield* reader
+                      .McpWorkshopConnections({ userId, chatId })
+                      .pipe(
+                        Effect.catchTag(
+                          ["StorageError", "RpcClientError", "NotFound"],
+                          serverFailure("McpWorkshopConnections")
+                        )
                       )
-                    )
-                )
-              : []
+                  )
+                : []
           const candidates = [
             ...plan.tools.flatMap((id) => {
               const tool = toolForKind(execution, chat.kind, id)
@@ -354,7 +381,11 @@ export const layer = Layer.effect(
               return tool && (profile.allowsOutside || !outsideEffect(tool.effect)) ? [tool] : []
             }),
             // After the built-in tools: servers in creation order, each one's tools by name (§4.3).
-            ...(mcp && mcpServers.length ? mcpOfferTools(mcp, mcpServers) : [])
+            ...(mcp && mcpServers.length ? mcpOfferTools(mcp, mcpServers) : []),
+            // A story pages a long server result with read_result, which reads only this run (§9).
+            ...(mcp && mcpServers.length && !profile.allowsOutside
+              ? [readResultTool as unknown as RolloutTool<never>]
+              : [])
           ]
           // A capability turned off in the workshop isn't offered (spec/WORKSHOP.md §3.4).
           const { tools, off } = yield* offeredByGrants({ registries: execution, reader, userId, chatId }, candidates)
@@ -473,8 +504,9 @@ export const layer = Layer.effect(
                   kind: chat.kind,
                   tools,
                   model: generation.model,
-                  // Each server is a skill: its index line is the user's own "What it's for".
-                  skills: mcpServers.map((entry) => mcpSkillOf(entry.connection)),
+                  // Each server is a skill: its index line is the user's own "What it's for". Story
+                  // replies send their servers' tools from the start (deferred loading is M4).
+                  skills: profile.allowsOutside ? mcpServers.map((entry) => mcpSkillOf(entry.connection)) : [],
                   cards: snapshot.inputs.cards.filter((c) => !state.playedByMe.includes(c.entity as never))
                 }
               )
@@ -693,7 +725,8 @@ export const layer = Layer.effect(
                       turnCap: plan.turnCap,
                       inspection: generation.inspection,
                       tools: frozenTools,
-                      ...(cardSkills.length ? { cardSkills } : {})
+                      ...(cardSkills.length ? { cardSkills } : {}),
+                      ...(storyMcp && Object.keys(mcpChoices).length ? { mcpChoices } : {})
                     }
                   )}}`
                 : decisionsOff.length
@@ -763,7 +796,15 @@ export const layer = Layer.effect(
                     ...(loadingWireFor(execution, model) ? { loadingWire: loadingWireFor(execution, model)! } : {}),
                     reader,
                     writer,
-                    permit: makePermit({ registries: execution, reader, writer, userId, chatId, rolloutId }),
+                    permit: makePermit({
+                      registries: execution,
+                      reader,
+                      writer,
+                      userId,
+                      chatId,
+                      rolloutId,
+                      ...(profile.allowsOutside ? {} : { story: { mcpChoices } })
+                    }),
                     onChanged: (target) => {
                       hub.publish(target, { _tag: "Reload" })
                       hub.publish(target, { _tag: "Lcm" })

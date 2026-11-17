@@ -15,3 +15,12 @@ export const rolloutEffectClasses = makeRegistry([
 export const outsideEffect = (effect: string) => rolloutEffectClasses.get(effect)?.outsideChat !== false
 export const UNCERTAIN_EFFECT =
   "The app stopped while this was running. It may already have happened; check before trying it again."
+
+/**
+ * Whether a chat kind admits a tool's effect class: everything where outside effects are allowed,
+ * else only the classes that stay in the chat and the ones the kind names (`outsideClasses`).
+ */
+export const admitsEffect = (
+  profile: { readonly allowsOutside: boolean; readonly outsideClasses?: ReadonlyArray<string> } | undefined,
+  effect: string
+) => profile?.allowsOutside === true || !outsideEffect(effect) || profile?.outsideClasses?.includes(effect) === true

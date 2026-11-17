@@ -17,9 +17,24 @@ import {
 } from "./mcp.ts"
 import { CredentialId, ProxyMode } from "./providers.ts"
 
+/**
+ * One server as a story chat's Tools offers it (spec/MCP.md §13.2): its name and host, how many of
+ * its tools the user allowed, and the account's Stories switch, which a branch may override.
+ */
+export const StoryMcpServer = Schema.Struct({
+  connectionId: McpConnectionId,
+  name: Schema.String,
+  host: Schema.String,
+  allowedTools: Schema.Int,
+  stories: Schema.Boolean
+})
+export type StoryMcpServer = typeof StoryMcpServer.Type
+
 export class McpApi extends RpcGroup.make(
   /** The user's connections, oldest first (the order their tools are offered in). */
   Rpc.make("ListMcpConnections", { success: Schema.Array(McpConnectionSummary), error: ServerError }),
+  /** The user's remote servers as a story chat's Tools lists them, oldest first. */
+  Rpc.make("ListStoryMcpServers", { success: Schema.Array(StoryMcpServer), error: ServerError }),
   /** One connection with its tool catalog. */
   Rpc.make("GetMcpConnection", {
     payload: { connectionId: McpConnectionId },

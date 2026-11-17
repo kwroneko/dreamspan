@@ -7,6 +7,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   GetMcpConnection: "User-only security, consent, account, credential or network configuration.",
   ListMcpCalls: "User-only security, consent, account, credential or network configuration.",
   ListMcpConnections: "User-only security, consent, account, credential or network configuration.",
+  ListStoryMcpServers: "User-only security, consent, account, credential or network configuration.",
   SetMcpCredential: "User-only security, consent, account, credential or network configuration.",
   SetMcpHeaders: "User-only security, consent, account, credential or network configuration.",
   SetMcpKey: "User-only security, consent, account, credential or network configuration.",

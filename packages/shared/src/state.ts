@@ -7,6 +7,7 @@ import { ChatId, EntityId } from "./chat.ts"
 import { REPLACEABLE_CARD_FIELDS } from "./docs/note.ts"
 import { ID_TABLE } from "./id.ts"
 import { type EntityKind, RefId, RevisionId } from "./library.ts"
+import { McpConnectionId } from "./mcp.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 import { makeRegistry, type Registry } from "./registry.ts"
 
@@ -126,6 +127,11 @@ export const StateEventData = Schema.Union([
       on: Schema.NullOr(Schema.Boolean)
     })
   ),
+  /**
+   * Whether agent replies on this branch use an MCP server's tools (spec/MCP.md §5.1), over the
+   * account's Stories switch. `on: null` drops the chat's choice: the account's holds again.
+   */
+  event("agent.mcp", Schema.Struct({ connection: McpConnectionId, on: Schema.NullOr(Schema.Boolean) })),
   event("rollout.continuity", Schema.Literals(["fork", "resume_previous"])),
   event("lorebook.binding", Schema.Struct({ entity: EntityId, ref: Schema.NullOr(RefId) })),
   event("lorebook.attach", Schema.Struct({ ref: RefId })),
@@ -164,6 +170,8 @@ type IdField<F extends string> =
   | { readonly table: "ref"; readonly kind: EntityKind; readonly entity?: F }
   | { readonly table: "revision"; readonly kind: EntityKind; readonly entity?: F; readonly ref?: F }
   | { readonly table: "connection" }
+  /** An MCP server the acting user can use (spec/MCP.md §5.1). */
+  | { readonly table: "mcp_connection" }
   | { readonly table: "model"; readonly connection: F }
   /** Another live chat of the acting user's (not in the bin), never the chat itself. */
   | { readonly table: "chat" }
@@ -238,6 +246,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "agent.permission": {
     ids: { note: { table: "entity", kind: "note", chatOwned: true }, card: { table: "entity", kind: "card" } }
   },
+  "agent.mcp": { ids: { connection: { table: "mcp_connection" } } },
   "rollout.continuity": { ids: {} },
   "lorebook.binding": { ids: { entity: { table: "entity", kind: "card" }, ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.attach": { ids: { ref: { table: "ref", kind: "lorebook" } } },
@@ -469,6 +478,8 @@ export interface ChatState {
   readonly decisionsOff?: ReadonlyArray<string>
   /** `agent.permission`s by `permissionKey`: on or off, over the note's or card's own. */
   readonly agentPermissions: Readonly<Record<string, boolean>>
+  /** `agent.mcp`: MCP servers this branch turns on or off, by connection id; absent: none chosen. */
+  readonly agentMcp?: Readonly<Record<string, boolean>>
   readonly rolloutContinuity: "fork" | "resume_previous" | null
   readonly lorebookBindings: Readonly<Record<string, string | null>>
   /** The attached lorebooks that are on, in listed order. */
@@ -677,6 +688,12 @@ const applyCore = (
         return { ...state, agentPermissions: { ...state.agentPermissions, [key]: data.value.on } }
       const { [key]: _dropped, ...rest } = state.agentPermissions
       return { ...state, agentPermissions: rest }
+    }
+    case "agent.mcp": {
+      const { [data.value.connection]: _was, ...kept } = state.agentMcp ?? {}
+      const agentMcp = data.value.on === null ? kept : { ...kept, [data.value.connection]: data.value.on }
+      const { agentMcp: _old, ...rest } = state
+      return Object.keys(agentMcp).length ? { ...rest, agentMcp } : rest
     }
     case "rollout.continuity":
       return { ...state, rolloutContinuity: data.value }

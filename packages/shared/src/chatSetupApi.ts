@@ -25,6 +25,7 @@ import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { EditRefused, InvalidDocument } from "./editorApi.ts"
 import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
+import { McpConnectionId } from "./mcp.ts"
 import { RegexScript } from "./docs/regexScript.ts"
 import { GlobalRegex, GlobalScripts } from "./regexScripts.ts"
 
@@ -395,6 +396,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   sendPresence: Schema.optionalKey(Schema.Literals(["optional", "required"])),
   /** The decision points this chat turns off (`decision.points`), by id; absent: none. */
   decisionsOff: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** MCP servers this branch turns on or off (`agent.mcp`), by connection id; absent: none chosen. */
+  agentMcp: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   /** Active and departed cards, including former personas, to retain historical names and portraits. */
   cards: Schema.Array(CastCard)
 }) {}
@@ -474,6 +477,11 @@ export const CastChange = Schema.Union([
     ]),
     on: Schema.NullOr(Schema.Boolean)
   }),
+  /**
+   * Whether agent replies on this branch use an MCP server's tools from here on (`agent.mcp`),
+   * over the account's Stories switch; null follows that switch again (spec/MCP.md §5.1).
+   */
+  Schema.TaggedStruct("McpConnection", { connection: McpConnectionId, on: Schema.NullOr(Schema.Boolean) }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type
