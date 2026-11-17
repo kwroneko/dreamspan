@@ -99,7 +99,7 @@ describe("0002_files", () => {
       const ledger = yield* sql<{ name: string }>`SELECT name FROM effect_sql_migrations ORDER BY migration_id`
       assert.deepStrictEqual(
         ledger.map((r) => r.name),
-        ["baseline", "files"]
+        ["baseline", "files", "subagents"]
       )
       // The existing row is kept, an image by default.
       assert.deepStrictEqual(yield* sql`SELECT id, alt_text, kind, name FROM composer_images`, [
