@@ -79,7 +79,14 @@ export const MoveMessageInput = Schema.Struct({
   forkId: ForkId,
   slotId: SlotId,
   direction: Schema.Literals(["up", "down"]),
-  expectedRowVersion: Schema.Int
+  expectedRowVersion: Schema.Int,
+  /**
+   * The shown message the tab would swap it with. When the fork shows another one there now (a
+   * move from another tab), the move is refused with `StaleWrite` and the tab reloads, instead
+   * of moving it one step past what the tab showed. Absent: not checked (the neighbour isn't
+   * loaded in the tab).
+   */
+  expectedNeighbourId: Schema.optionalKey(SlotId)
 })
 export type MoveMessageInput = typeof MoveMessageInput.Type
 

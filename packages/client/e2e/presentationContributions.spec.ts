@@ -23,7 +23,12 @@ test.beforeAll(async ({ browser }) => {
       port: 0,
       proxy: {
         "/rpc": { target: server().url.replace(/^http/, "ws"), ws: true },
-        "/auth": { target: server().url }
+        "/auth": { target: server().url },
+        // vite.config.ts sends these to the dev server's default port otherwise (merged config):
+        // the app's plugin list and its health check would come from whatever runs there.
+        "/plugins": { target: server().url },
+        "/healthz": { target: server().url },
+        "/frame/panel": { target: server().url }
       }
     }
   })

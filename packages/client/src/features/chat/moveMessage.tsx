@@ -19,7 +19,8 @@ const neighbour = ({ session, entry }: MessageActionContext, direction: "up" | "
 const move = (direction: "up" | "down") =>
   viewOf((context) => {
     const { session, entry, report, generating } = context
-    const end = neighbour(context, direction) === null
+    const next = neighbour(context, direction)
+    const end = next === null
     const refusal = generating
       ? "Wait until it's finished."
       : end
@@ -36,7 +37,11 @@ const move = (direction: "up" | "down") =>
           : "Swap this message with the one below it, in this branch only. Later replies see the new order.",
       ...(refusal !== null ? { disabled: refusal } : {}),
       onSelect: async () => {
-        const outcome = await session.moveMessage(entry, direction)
+        const outcome = await session.moveMessage(
+          entry,
+          direction,
+          next !== null && next !== true ? next.slotId : undefined
+        )
         report(outcome)
         if (outcome.ok)
           showToast({
