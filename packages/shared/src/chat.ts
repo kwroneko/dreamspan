@@ -178,7 +178,12 @@ export const RecordedGeneration = Schema.Struct({
   /** ST's own count of the text with its reasoning, by the tokenizer it had set; not a provider's. */
   tokens: Schema.optionalKey(Schema.Int),
   firstTokenMs: Schema.optionalKey(Schema.Number),
-  reasoningMs: Schema.optionalKey(Schema.Number)
+  reasoningMs: Schema.optionalKey(Schema.Number),
+  /**
+   * How its reasoning came to be, where ST recorded it as the user's (`extra.reasoning_type`):
+   * `edited` (the model's, edited) or `manual` (added). Absent: the model's or parsed.
+   */
+  reasoningType: Schema.optionalKey(Schema.Literals(["edited", "manual"]))
 })
 export type RecordedGeneration = typeof RecordedGeneration.Type
 

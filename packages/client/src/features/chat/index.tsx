@@ -11,6 +11,7 @@ import { registerCompositionActions } from "./compositionActions.tsx"
 import { registerRewrites } from "./rewrites.tsx"
 import { registerGuidanceEdit } from "./guidanceEdit.tsx"
 import { registerReasoningActions } from "./reasoningActions.tsx"
+import { registerEditThinking } from "./editThinking.tsx"
 import { registerReasoningPanels } from "./Reasoning.tsx"
 import { registerAgent } from "./agent/register.tsx"
 import { registerVersionMetrics } from "./versionMetrics.tsx"
@@ -90,6 +91,7 @@ export const register = () => {
   registerRewrites()
   registerGuidanceEdit()
   registerReasoningActions()
+  registerEditThinking()
   registerReasoningPanels()
   registerAgent()
   registerMessageDetails()

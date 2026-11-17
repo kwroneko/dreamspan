@@ -1,5 +1,6 @@
 import { useMediaPermit } from "./externalMedia.tsx"
 import { messageEditorTools, messageTextEditor, useMessageSaveOptions } from "./editorHistory.tsx"
+import { forgetThinking, messageEditorThinking, thinkingKey } from "./editThinking.tsx"
 // One message: who wrote it (avatar and name, with the registered message details: time and
 // model in the header, number, generation time and tokens under the portrait;
 // messageDetails.tsx), its versions (swipe through them, pick one in the version picker, or
@@ -356,23 +357,37 @@ function Editor({
           )}
         </p>
       ) : (
-        <SlotOutlet
-          slot={messageTextEditor}
-          props={{
-            label,
-            value: text,
-            base,
-            // Opened from the chat's other view, it leaves focus there (Composition.tsx).
-            autoFocus: !draft.mirror,
-            caret: initialCaret,
-            quietMarkers: true,
-            // Text just added to your version: marked and scrolled to, focus left where it is.
-            flash: added,
-            // In place in the chat, already as wide as the message: no Open large.
-            expand: false,
-            onChange: (value) => draft.setText(value)
-          }}
-        />
+        <>
+          {/* An edit's thinking, above its text as the thinking panel is above the reply (editThinking.tsx). */}
+          {draft.target._tag === "Edit" && (
+            <SlotOutlet
+              slot={messageEditorThinking}
+              props={{
+                session,
+                entry,
+                draft,
+                source: source ?? (original?.id === draft.target.versionId ? original : undefined)
+              }}
+            />
+          )}
+          <SlotOutlet
+            slot={messageTextEditor}
+            props={{
+              label,
+              value: text,
+              base,
+              // Opened from the chat's other view, it leaves focus there (Composition.tsx).
+              autoFocus: !draft.mirror,
+              caret: initialCaret,
+              quietMarkers: true,
+              // Text just added to your version: marked and scrolled to, focus left where it is.
+              flash: added,
+              // In place in the chat, already as wide as the message: no Open large.
+              expand: false,
+              onChange: (value) => draft.setText(value)
+            }}
+          />
+        </>
       )}
       {error && (
         <p role="alert" className="text-sm text-danger">
@@ -430,6 +445,12 @@ function Editor({
             props={{
               draft,
               base,
+              session,
+              entry,
+              source:
+                draft.target._tag === "Edit"
+                  ? (source ?? (original?.id === draft.target.versionId ? original : undefined))
+                  : undefined,
               images:
                 (draft.target._tag === "Edit"
                   ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.images
@@ -875,14 +896,28 @@ export const Message = memo(function Message({
     const source =
       target._tag === "Edit" ? (await load(true))?.find((candidate) => candidate.id === target.versionId) : undefined
     if (target._tag === "Edit" && source === undefined) return
+    // The edit's thinking field (editThinking.tsx), saved with its text.
+    const thinkingEditor = target._tag === "Edit" ? session.editor(thinkingKey(target.versionId)) : undefined
     const submitted = await editor.ready()
+    const thought = thinkingEditor === undefined ? undefined : await thinkingEditor.ready()
     const { text, draft, images } = submitted
     const outcome =
       editing === "edit"
-        ? await session.edit({ ...entry, version: source! }, text, draft, images)
+        ? await session.edit(
+            { ...entry, version: source! },
+            text,
+            draft,
+            images,
+            thought && { text: thought.text, draft: thought.draft }
+          )
         : await session.writeVersion(entry, text, draft, images)
     report(outcome)
     if (!outcome.ok) return
+    if (thinkingEditor !== undefined && thought !== undefined && thinkingEditor.committed(thought)) {
+      if (thought.draft === null) await thinkingEditor.discard()
+      session.closeEditor(thinkingEditor)
+      if (target._tag === "Edit") forgetThinking(target.versionId)
+    }
     await after?.(text)
     // An edit of a generated version, or of one being written, is saved as a new one; so is
     // your own version, which shows where it went among the many it was composed from.
@@ -919,9 +954,16 @@ export const Message = memo(function Message({
           })}
       onCancel={async () => {
         // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).
+        const target = editor.target
+        const thinkingEditor = target._tag === "Edit" ? session.editor(thinkingKey(target.versionId)) : undefined
+        const thought = thinkingEditor === undefined ? undefined : await thinkingEditor.discard()
+        if (thought !== undefined && !thought.ok) return report(thought)
         const outcome = await editor.discard()
         report(outcome)
-        if (outcome.ok) session.closeEditor(editor)
+        if (!outcome.ok) return
+        if (thinkingEditor !== undefined) session.closeEditor(thinkingEditor)
+        if (target._tag === "Edit") forgetThinking(target.versionId)
+        session.closeEditor(editor)
       }}
       offerSaves={editing === "edit"}
       onSaveWith={(after) => void saveEdit(after)}

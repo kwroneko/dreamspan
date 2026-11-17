@@ -6,7 +6,7 @@ import { createHash } from "node:crypto"
 // ends (ARCHITECTURE.md §13), and each part is read on its own: lines are separate JSON
 // documents, each under the shared JSON caps. Pure: no database, no files.
 import { formatByteSize } from "@rp/shared/byteSize.ts"
-import { originalReply, type ReplySections, sectionsDisplay } from "@rp/shared/replySections.ts"
+import { editableThinking, originalReply, type ReplySections, sectionsDisplay } from "@rp/shared/replySections.ts"
 import { ReportBuilder, shownText } from "@rp/shared/importReport.ts"
 import { Predicate } from "effect"
 import { defaultLimits, fail, type Limits, parseJson } from "./safety.ts"
@@ -149,22 +149,65 @@ const stReasoningOf = (source: unknown) => {
  * reasoning when it has no provider reasoning; with both, the provider's goes there and the
  * sections stay in `mes`, in their tags, so nothing is lost.
  */
-export const stReasoningExtra = (version: {
-  readonly content: string
-  readonly reasoning?: string | undefined
-  readonly replySections?: ReplySections | undefined
-}): { readonly mes: string; readonly extra: { readonly reasoning?: string; readonly reasoning_type?: string } } => {
+export const stReasoningExtra = (
+  version: {
+    readonly content: string
+    readonly reasoning?: string | undefined
+    readonly replySections?: ReplySections | undefined
+  },
+  /** The user's hand in it (`stReasoningType`): ST's type for reasoning edited or added. */
+  userType?: "edited" | "manual"
+): { readonly mes: string; readonly extra: { readonly reasoning?: string; readonly reasoning_type?: string } } => {
   if (version.reasoning)
     return {
       mes: originalReply(version.content, version.replySections),
-      extra: { reasoning: version.reasoning, reasoning_type: "model" }
+      extra: { reasoning: version.reasoning, reasoning_type: userType ?? "model" }
     }
   if (version.replySections?.sections.length)
     return {
       mes: version.content,
-      extra: { reasoning: sectionsDisplay(version.replySections), reasoning_type: "parsed" }
+      extra: { reasoning: sectionsDisplay(version.replySections), reasoning_type: userType ?? "parsed" }
     }
   return { mes: version.content, extra: {} }
+}
+
+/** What `stReasoningType` reads of a version. */
+interface ThinkingOf {
+  readonly id: string
+  readonly writer: "human" | "model"
+  readonly sourceVersionId: string | null
+  readonly reasoning?: string | undefined
+  readonly replySections?: ReplySections | undefined
+  readonly recorded?: { readonly reasoningType?: "edited" | "manual" } | undefined
+}
+
+/**
+ * ST's `reasoning_type` for a version's thinking where the user had a hand in it, as ST sets it
+ * (`updateReasoningFromValue`): `edited` for thinking an edit changed, `manual` for thinking
+ * added where there was none; undefined for the model's or parsed. An import's own record
+ * wins; an edit that kept its source's thinking has the source's type. `versions`: the
+ * message's, where an edit's source is found.
+ */
+export const stReasoningType = (
+  version: ThinkingOf,
+  versions: ReadonlyArray<ThinkingOf>
+): "edited" | "manual" | undefined => {
+  const seen = new Set<string>()
+  let at: ThinkingOf | undefined = version
+  while (at !== undefined && !seen.has(at.id)) {
+    seen.add(at.id)
+    if (editableThinking(at) === "") return undefined
+    if (at.recorded?.reasoningType) return at.recorded.reasoningType
+    if (at.writer !== "human") return undefined
+    const sourceId: string | null = at.sourceVersionId
+    const source: ThinkingOf | undefined =
+      sourceId === null ? undefined : versions.find((candidate) => candidate.id === sourceId)
+    // A version the user wrote, with thinking: added. An edit's source not among them: changed.
+    if (source === undefined) return sourceId === null ? "manual" : "edited"
+    if (editableThinking(source) !== editableThinking(at)) return editableThinking(source) === "" ? "manual" : "edited"
+    at = source
+  }
+  return undefined
 }
 
 /** One version of a message, in the writer's terms (db/stImportWrites.ts). */
@@ -197,6 +240,7 @@ interface StGeneration {
   readonly tokens?: number
   readonly firstTokenMs?: number
   readonly reasoningMs?: number
+  readonly reasoningType?: "edited" | "manual"
 }
 
 const MAX_API_CHARS = 64
@@ -227,6 +271,12 @@ const stGenerationOf = (holder: unknown, extra: unknown): StGeneration | undefin
       : {}),
     ...(whole(x.reasoning_duration, MAX_DURATION_MS) !== undefined
       ? { reasoningMs: whole(x.reasoning_duration, MAX_DURATION_MS)! }
+      : {}),
+    // The user's own reasoning, kept for the way back (`stReasoningType`).
+    ...(typeof x.reasoning === "string" &&
+    x.reasoning !== "" &&
+    (x.reasoning_type === "edited" || x.reasoning_type === "manual")
+      ? { reasoningType: x.reasoning_type }
       : {})
   }
   return Object.keys(generation).length === 0 ? undefined : generation

@@ -4,7 +4,7 @@
 // ST's public source (`public/global.d.ts`, `script.js`: `saveReply`, `syncMesToSwipe`).
 // Pure: the reads are chatExport.ts's.
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
-import { stReasoningExtra } from "./stChat.ts"
+import { stReasoningExtra, stReasoningType } from "./stChat.ts"
 
 /** Who a message is from, as ST names it. */
 export interface StSpeaker {
@@ -115,7 +115,7 @@ export const stLine = (
   const all = exportedVersions(entry, versions)
   const shown = all.findIndex((version) => version.id === entry.version.id)
   const of = (version: Version) => {
-    const { mes, extra } = stReasoningExtra(version)
+    const { mes, extra } = stReasoningExtra(version, stReasoningType(version, all))
     return { mes: shownText(mes, version, speaker, userName), extra: { ...extra, ...generationExtra(version) } }
   }
   const selected = of(entry.version)

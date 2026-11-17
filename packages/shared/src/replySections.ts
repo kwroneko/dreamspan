@@ -84,3 +84,31 @@ export const sectionsDisplay = (sections: ReplySections | null | undefined) =>
 
 /** Whether the reply ended inside its last section. */
 export const sectionUnclosed = (sections: ReplySections | null | undefined) => sections?.sections.at(-1)?.close === null
+
+/**
+ * The thinking a message's edit shows and changes (SillyTavern's reasoning block): the
+ * provider's reasoning, or without one its reply sections' text, as ST's auto-parse makes
+ * parsed reasoning the message's own (an imported ST chat's `parsed` reasoning is a section).
+ */
+export const editableThinking = (version: {
+  readonly reasoning?: string | null | undefined
+  readonly replySections?: ReplySections | null | undefined
+}) => version.reasoning || sectionsDisplay(version.replySections)
+
+/** Whether an edit's thinking is the version's reply sections (it has no provider reasoning). */
+export const thinkingInSections = (version: {
+  readonly reasoning?: string | null | undefined
+  readonly replySections?: ReplySections | null | undefined
+}) => !version.reasoning && (version.replySections?.sections.length ?? 0) > 0
+
+/**
+ * Sections with thinking typed in an edit: unchanged when it reads the same, none when it's
+ * empty, otherwise one section in the first one's tags with that text, before the same gap,
+ * so the reply put back together keeps its tags and the section is still sent back as one.
+ */
+export const sectionsWithThinking = (sections: ReplySections, text: string): ReplySections | null => {
+  if (text === sectionsDisplay(sections)) return sections
+  const first = sections.sections[0]
+  if (text === "" || first === undefined) return null
+  return { sections: [{ lead: first.lead, open: first.open, text, close: first.close }], gap: sections.gap }
+}

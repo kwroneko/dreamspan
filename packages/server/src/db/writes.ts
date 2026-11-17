@@ -16,7 +16,7 @@ import { SqlClient, type SqlError } from "effect/sql"
 import { cleanName, renamedTitle } from "@rp/shared/chatName.ts"
 import { composerKey, type DraftKey, parseDraftTarget } from "@rp/shared/drafts.ts"
 import type { Bin } from "./bin.ts"
-import { NotAmendable } from "@rp/shared/chatApi.ts"
+import { EDIT_THINKING_FIELD, NotAmendable } from "@rp/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { newChatLcmSettings, ownedModel } from "./generationSettings.ts"
@@ -441,7 +441,16 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       // --- Chats
 
-      AddSelectedVersion: ({ userId, slotId, forkId, version, expectedRowVersion, model, commitDraft }) =>
+      AddSelectedVersion: ({
+        userId,
+        slotId,
+        forkId,
+        version,
+        expectedRowVersion,
+        model,
+        commitDraft,
+        commitReasoningDraft
+      }) =>
         Effect.gen(function* () {
           // The row version the user saw is the slot's as their fork shows it (slotInFork).
           const { slot, fork, rowVersion } = yield* slotInFork(userId, slotId, forkId ?? null)
@@ -478,6 +487,7 @@ export const makeWriteHandlers = (bin: Bin) =>
               ? {
                   targetKind: "version_edit",
                   targetId: version.sourceVersionId,
+                  matchesField: (_kind, field) => field === "",
                   content: version.rewrite?.raw ?? row.content,
                   images: toVersion(row).images ?? [],
                   // The edit's history goes on with the version its Save made (owner, 2026-11-02).
@@ -490,10 +500,31 @@ export const makeWriteHandlers = (bin: Bin) =>
                   images: toVersion(row).images ?? []
                 }
           )
+          // Its thinking, typed into the same edit's thinking field, goes on with it the same way.
+          if (version.sourceVersionId && commitReasoningDraft)
+            yield* drafts.commit(userId, commitReasoningDraft, {
+              targetKind: "version_edit",
+              targetId: version.sourceVersionId,
+              matchesField: (_kind, field) => field === EDIT_THINKING_FIELD,
+              content: commitReasoningDraft.text,
+              moveTo: row.id
+            })
           return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId, version: toVersion(row) }
         }).pipe(transaction("AddSelectedVersion")),
 
-      AmendVersion: ({ userId, versionId, forkId, content, images, expectedRowVersion, commitDraft, rewrite }) =>
+      AmendVersion: ({
+        userId,
+        versionId,
+        forkId,
+        content,
+        images,
+        reasoning,
+        replySections,
+        expectedRowVersion,
+        commitDraft,
+        commitReasoningDraft,
+        rewrite
+      }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, true)
           if (row.writer !== "human") return yield* new NotAmendable({ versionId })
@@ -514,15 +545,42 @@ export const makeWriteHandlers = (bin: Bin) =>
           yield* drafts.commit(userId, commitDraft ?? null, {
             targetKind: "version_edit",
             targetId: versionId,
+            matchesField: (_kind, field) => field === "",
             content: rewrite?.raw ?? content,
             images: images ?? (JSON.parse(row.images_json ?? "[]") as MessageImages)
+          })
+          // The thinking, typed into the edit's thinking field, is committed the same way.
+          yield* drafts.commit(userId, commitReasoningDraft ?? null, {
+            targetKind: "version_edit",
+            targetId: versionId,
+            matchesField: (_kind, field) => field === EDIT_THINKING_FIELD,
+            content: commitReasoningDraft?.text ?? ""
           })
           // The images it had, as its history keeps them, when this amend changes them.
           const had = JSON.parse(row.images_json ?? "[]") as MessageImages
           const normal = (list: MessageImages) =>
             JSON.stringify(list.map((image) => ({ mediaId: image.mediaId, altText: image.altText ?? "" })))
           const before = images !== undefined && normal(images) !== normal(had) ? normal(had) : null
-          if (content === row.content && before === null) return toVersion(shown)
+          // Its thinking, when this amend changes it: plain text, never a provider's signed block.
+          const thinking = reasoning === undefined ? (row.reasoning ?? null) : reasoning || null
+          const reasoningChanged = thinking !== (row.reasoning ?? null)
+          // Or its reply sections, the thinking of a version without reasoning.
+          const sections =
+            replySections === undefined
+              ? (row.reply_sections ?? null)
+              : replySections === null || replySections.sections.length === 0
+                ? null
+                : JSON.stringify(replySections)
+          const sectionsChanged = sections !== (row.reply_sections ?? null)
+          const thinkingChanged = reasoningChanged || sectionsChanged
+          // What its history keeps of the thinking it had (JSON: a string, or null for none).
+          const hadThinking = JSON.stringify(row.reasoning ?? null)
+          const hadSections = row.reply_sections ?? null
+          const rewritten = rewriteColumns(rewrite)
+          // Scripts' record of the thinking only changes with the thinking.
+          const rawReasoning = reasoningChanged ? rewritten.raw_reasoning : (row.raw_reasoning ?? null)
+          const rawSections = sectionsChanged ? rewritten.raw_sections : (row.raw_sections ?? null)
+          if (content === row.content && before === null && !thinkingChanged) return toVersion(shown)
           if (before !== null) yield* checkImages(userId, images!)
           const attach = (target: string) =>
             Effect.forEach(
@@ -540,25 +598,28 @@ export const makeWriteHandlers = (bin: Bin) =>
             yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
             const at = Date.now()
             if (content !== row.content) {
-              const rewritten = rewriteColumns(rewrite)
-              yield* sql`UPDATE version_records SET content = ${content}, raw_content = ${rewritten.raw_content},
-                raw_reasoning = ${rewritten.raw_reasoning}, raw_sections = ${rewritten.raw_sections},
-                rewrite_json = ${rewritten.rewrite_json}, updated_at = ${at}
+              // The trigger keeps the earlier text and thinking in version_history.
+              yield* sql`UPDATE version_records SET content = ${content}, reasoning = ${thinking},
+                reply_sections = ${sections}, raw_content = ${rewritten.raw_content}, raw_reasoning = ${rawReasoning},
+                raw_sections = ${rawSections}, rewrite_json = ${rewritten.rewrite_json}, updated_at = ${at}
                 WHERE id = ${versionId}`
+            } else {
+              yield* sql`UPDATE versions SET updated_at = ${at} WHERE id = ${versionId}`
+              // Images or thinking alone: the entry the trigger would have written.
+              yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json, sections_json)
+                VALUES (${versionId}, ${row.content}, ${at}, ${before ?? normal(had)}, ${hadThinking}, ${hadSections})`
+              if (thinkingChanged)
+                yield* sql`UPDATE version_records SET reasoning = ${thinking}, raw_reasoning = ${rawReasoning},
+                  reply_sections = ${sections}, raw_sections = ${rawSections}, updated_at = ${at} WHERE id = ${versionId}`
+              // The import matcher reads whether this history exists, even when text did
+              // not change. Certify image- and thinking-only amends in its whole-chat snapshot too.
+              yield* sql`UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = ${slot.chat_id}`
             }
             if (before !== null) {
-              if (content === row.content) yield* sql`UPDATE versions SET updated_at = ${at} WHERE id = ${versionId}`
               // The trigger kept the earlier text, if it changed; that entry keeps the earlier images too.
               if (content !== row.content)
                 yield* sql`UPDATE version_history SET images_json = ${before}
                   WHERE id = (SELECT max(id) FROM version_history WHERE version_id = ${versionId})`
-              else {
-                yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
-                  VALUES (${versionId}, ${row.content}, ${at}, ${before})`
-                // The import matcher reads whether this history exists, even when text did
-                // not change. Certify image-only amends in its whole-chat snapshot too.
-                yield* sql`UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = ${slot.chat_id}`
-              }
               yield* sql`DELETE FROM version_attachments WHERE version_id = ${versionId}`
               yield* attach(versionId)
             }
@@ -580,13 +641,13 @@ export const makeWriteHandlers = (bin: Bin) =>
              FROM version_records v WHERE v.id = ?`,
             [copy, content, original, fork.id, fork.id, at, at, versionId]
           )
-          const rewritten = rewriteColumns(rewrite)
-          yield* sql`UPDATE version_records SET raw_content = ${rewritten.raw_content}, raw_reasoning = ${rewritten.raw_reasoning},
-            raw_sections = ${rewritten.raw_sections}, rewrite_json = ${rewritten.rewrite_json} WHERE id = ${copy}`
-          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
-            SELECT ${copy}, content, replaced_at, images_json FROM version_history WHERE version_id = ${versionId} ORDER BY id`
-          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
-            VALUES (${copy}, ${row.content}, ${at}, ${normal(had)})`
+          yield* sql`UPDATE version_records SET reasoning = ${thinking}, reply_sections = ${sections},
+            raw_content = ${rewritten.raw_content}, raw_reasoning = ${rawReasoning}, raw_sections = ${rawSections},
+            rewrite_json = ${rewritten.rewrite_json} WHERE id = ${copy}`
+          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json, sections_json)
+            SELECT ${copy}, content, replaced_at, images_json, reasoning_json, sections_json FROM version_history WHERE version_id = ${versionId} ORDER BY id`
+          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json, reasoning_json, sections_json)
+            VALUES (${copy}, ${row.content}, ${at}, ${normal(had)}, ${hadThinking}, ${hadSections})`
           if (before !== null) yield* attach(copy)
           else
             yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
@@ -600,6 +661,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           )
           // The edit's history goes on with the copy that now shows its text (owner, 2026-11-02).
           if (commitDraft) yield* drafts.moveTo(commitDraft.draftId, versionId, copy)
+          if (commitReasoningDraft) yield* drafts.moveTo(commitReasoningDraft.draftId, versionId, copy)
           return toVersion((yield* versionAsShown(sql, fork.id, copy))!)
         }).pipe(transaction("AmendVersion")),
 

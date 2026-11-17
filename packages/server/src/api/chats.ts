@@ -4,7 +4,13 @@ import { regenerateSeveral } from "./agent.ts"
 // Chat RPC handlers (@rp/shared/chatApi.ts). Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
 // to the chat's subscribers, from every tab of the user, after it's committed.
-import { originalReply } from "@rp/shared/replySections.ts"
+import {
+  editableThinking,
+  originalReply,
+  type ReplySections,
+  sectionsWithThinking,
+  thinkingInSections
+} from "@rp/shared/replySections.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import {
   PathEntry,
@@ -57,6 +63,14 @@ const generating = {
   macroMode: "verbatim" as const,
   origin: "generated" as const
 }
+
+/** What an edit's Save does to the version's thinking (`thinkingChange` in the handlers). */
+type ThinkingChange =
+  | { readonly _tag: "Kept" }
+  | { readonly _tag: "Reasoning"; readonly text: string }
+  /** The reply sections it has from now on; null: none. */
+  | { readonly _tag: "Sections"; readonly sections: ReplySections | null }
+const KEPT: ThinkingChange = { _tag: "Kept" }
 
 export const makeChatHandlers = Effect.gen(function* () {
   const reader = yield* Reader
@@ -272,7 +286,9 @@ export const makeChatHandlers = Effect.gen(function* () {
     slotId: SlotId,
     forkId: ForkId | null | undefined,
     versionId: import("@rp/shared/chat.ts").VersionId,
-    content: string
+    content: string,
+    /** Thinking typed in the edit: the reasoning scripts that run on edits rewrite it too. */
+    thinking: ThinkingChange = KEPT
   ) =>
     Effect.gen(function* () {
       const { chatId } = yield* reader.GetSlot({ userId: user, slotId, forkId: forkId ?? null })
@@ -282,9 +298,26 @@ export const makeChatHandlers = Effect.gen(function* () {
         forkId,
         at: { slotId, versionId },
         edit: true,
-        content
+        content,
+        ...(thinking._tag === "Reasoning" && thinking.text ? { reasoning: thinking.text } : {}),
+        ...(thinking._tag === "Sections" && thinking.sections ? { sections: thinking.sections } : {})
       })
     })
+
+  /**
+   * The thinking an edit's Save sets, from the field's text (`reasoning`; absent: not sent): the
+   * version's reasoning, or without reasoning its reply sections (`thinkingInSections`), as the
+   * field showed them. Text that reads as the version's thinking changes nothing.
+   */
+  const thinkingChange = (
+    version: { readonly reasoning?: string | undefined; readonly replySections?: ReplySections | undefined },
+    reasoning: string | undefined
+  ): ThinkingChange => {
+    if (reasoning === undefined || reasoning === editableThinking(version)) return KEPT
+    return thinkingInSections(version)
+      ? { _tag: "Sections", sections: sectionsWithThinking(version.replySections!, reasoning) }
+      : { _tag: "Reasoning", text: reasoning }
+  }
 
   const handlers = {
     ListChatSummaries: ({ chatIds }) =>
@@ -631,13 +664,31 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // An edit or a version the user writes is still the message's speaker's, as a swipe is:
     // an edit its source's, a written version the one shown's.
-    EditVersion: ({ images, slotId, forkId, sourceVersionId, content, expectedRowVersion, draft }) =>
+    // Its thinking is the source's unless the edit changed it: plain text either way, since a
+    // version keeps no provider signature (signed blocks stay in the source's run transcript).
+    EditVersion: ({
+      images,
+      slotId,
+      forkId,
+      sourceVersionId,
+      content,
+      reasoning,
+      expectedRowVersion,
+      draft,
+      reasoningDraft
+    }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const source = yield* reader.GetVersion({ userId: id, versionId: sourceVersionId })
-        // An edit goes through the scripts that run on edits (ST's updateMessage).
-        const written = yield* editRewrite(id, slotId, forkId, sourceVersionId, content)
+        // An edit goes through the scripts that run on edits (ST's updateMessage), its thinking too.
+        const change = thinkingChange(source, reasoning)
+        const written = yield* editRewrite(id, slotId, forkId, sourceVersionId, content, change)
         const version = userText(written.content, "edited", source.speakerEntityId, sourceVersionId)
+        // The thinking goes with the text unless the edit changed it, its sections too (ST keeps
+        // the reasoning block of an edited message).
+        const thinking = change._tag === "Reasoning" ? (written.reasoning ?? change.text) : source.reasoning
+        const sections =
+          change._tag === "Sections" ? change.sections && (written.sections ?? change.sections) : source.replySections
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
@@ -645,10 +696,15 @@ export const makeChatHandlers = Effect.gen(function* () {
           version: {
             ...version,
             ...(images === undefined ? {} : { images }),
+            ...(thinking ? { reasoning: thinking } : {}),
+            ...(sections?.sections.length ? { replySections: sections } : {}),
             ...(written.rewrite ? { rewrite: written.rewrite } : {})
           },
           expectedRowVersion,
-          commitDraft: draft ?? null
+          commitDraft: draft ?? null,
+          commitReasoningDraft: reasoningDraft
+            ? { ...reasoningDraft, text: reasoning ?? editableThinking(source) }
+            : null
         })
         return yield* publishSlot(id, slotId, added.forkId)
       }).pipe(internal("EditVersion")),
@@ -746,6 +802,8 @@ export const makeChatHandlers = Effect.gen(function* () {
           forkId,
           content: state.content,
           ...(state.images === undefined ? {} : { images: state.images }),
+          ...(state.reasoning === undefined ? {} : { reasoning: state.reasoning }),
+          ...(state.sections === undefined ? {} : { replySections: state.sections }),
           expectedRowVersion,
           commitDraft: null
         })
@@ -834,11 +892,13 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // An amend another fork shows gives this fork a copy in its place: its message changed
     // here only, and tabs on other forks read it again as theirs shows it.
-    AmendVersion: ({ versionId, forkId, content, images, expectedRowVersion, draft }) =>
+    AmendVersion: ({ versionId, forkId, content, images, reasoning, expectedRowVersion, draft, reasoningDraft }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const amended = yield* reader.GetVersion({ userId: id, versionId })
-        const written = yield* editRewrite(id, amended.slotId, forkId, versionId, content)
+        // Thinking typed differently from what it has is plain text, through the edit scripts.
+        const change = thinkingChange(amended, reasoning)
+        const written = yield* editRewrite(id, amended.slotId, forkId, versionId, content, change)
         const version = yield* writer.AmendVersion({
           userId: id,
           versionId,
@@ -846,8 +906,15 @@ export const makeChatHandlers = Effect.gen(function* () {
           content: written.content,
           ...(written.rewrite ? { rewrite: written.rewrite } : {}),
           ...(images === undefined ? {} : { images }),
+          ...(change._tag === "Reasoning" ? { reasoning: (written.reasoning ?? change.text) || null } : {}),
+          ...(change._tag === "Sections"
+            ? { replySections: change.sections && (written.sections ?? change.sections) }
+            : {}),
           expectedRowVersion,
-          commitDraft: draft ?? null
+          commitDraft: draft ?? null,
+          commitReasoningDraft: reasoningDraft
+            ? { ...reasoningDraft, text: reasoning ?? editableThinking(amended) }
+            : null
         })
         const { chatId, entry } = yield* reader.GetSlot({ userId: id, slotId: version.slotId, forkId: forkId ?? null })
         if (version.id === versionId) hub.publish(chatId, { _tag: "Version", version })
