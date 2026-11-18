@@ -1,3 +1,4 @@
+import { previewNamesOf } from "./cards.ts"
 import { previewText, type PreviewMacro, type PreviewNames } from "./previewText.ts"
 import { makeShellEpoch } from "./shellEpoch.ts"
 import { ActiveStateModules } from "./stateModules.ts"
@@ -178,10 +179,6 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           )
         ])
       )
-      const cardName: PreviewNames = (id) => {
-        const card = byCard.get(id)
-        return card === undefined ? undefined : (card.modelName ?? card.name)
-      }
       const chatPins = yield* sql<{ chat_id: string }>`SELECT chat_id FROM chat_pins WHERE user_id = ${userId}`
       const pinnedChats = new Set(chatPins.map((row) => row.chat_id))
       // Each live fork with its chat and its stored summary, when there is one: only what the shell shows.
@@ -452,6 +449,12 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       for (const record of joinedRows)
         placesByChat.set(record.chat_id, [...(placesByChat.get(record.chat_id) ?? []), stored.get(record.id)!.threads])
       const shownByChat = new Map([...placesByChat].map(([chat, places]) => [chat, shownSplits(places)]))
+      // Names as the chat reads them, binned cards included.
+      const cardName: PreviewNames = yield* previewNamesOf(
+        sql,
+        userId,
+        joinedRows.map((record) => stored.get(record.id)!.previewMacro)
+      )
       const forks: Array<Fork> = joinedRows.map((record) => {
         const physical = chatById.get(record.chat_id)!
         const groupId = groups.get(record.id)!

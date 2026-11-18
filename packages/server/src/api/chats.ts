@@ -12,7 +12,15 @@ import {
   thinkingInSections
 } from "@rp/shared/replySections.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { PathEntry, type ChatId, type EntityId, type ForkId, type NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import {
+  Fork,
+  PathEntry,
+  type ChatId,
+  type EntityId,
+  type ForkId,
+  type NewVersion,
+  type SlotId
+} from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import { NotFound } from "@rp/shared/errors.ts"
@@ -115,6 +123,18 @@ export const makeChatHandlers = Effect.gen(function* () {
    * A slot as it is now in a fork (null: the fork through it), published to its chat. Tabs
    * showing another fork read it again as theirs shows it (`PathEntry.shownForkId`).
    */
+  // A fork a write returns shows its last message as the branch list does (greeting macros replaced).
+  // Only a tip with a macro in it can read differently, so an ordinary fork costs no read.
+  const withShownTip = (user: UserId, fork: Fork) =>
+    !fork.tipExcerpt.includes("{{")
+      ? Effect.succeed(fork)
+      : reader.ListForks({ userId: user, chatId: fork.chatId }).pipe(
+          Effect.map((list) => {
+            const listed = list.find((f) => f.id === fork.id)
+            return listed === undefined ? fork : new Fork({ ...fork, tipExcerpt: listed.tipExcerpt })
+          }),
+          Effect.catch(() => Effect.succeed(fork))
+        )
   const publishSlot = (user: UserId, slotId: SlotId, forkId: ForkId | null = null) =>
     Effect.map(reader.GetSlot({ userId: user, slotId, forkId }), ({ chatId, entry }) => {
       hub.publish(chatId, { _tag: "Slot", entry })
@@ -958,7 +978,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const target = yield* writer.SwitchBranch({ userId: id, chatId, slotId, index, forkId: forkId ?? null })
-        return new BranchSwitch(target)
+        return new BranchSwitch({ ...target, fork: yield* withShownTip(id, target.fork) })
       }).pipe(internal("SwitchBranch")),
 
     GetDisplayPrefs: () =>
@@ -1017,7 +1037,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           ...(name === undefined ? {} : { name })
         })
         hub.publish(chatId, { _tag: "Chat", chat: made.chat })
-        return made
+        return { ...made, fork: yield* withShownTip(id, made.fork) }
       }).pipe(internal("CreateFork")),
 
     // The fork's first message shows its name among the alternates: subscribers get it again.
@@ -1027,11 +1047,13 @@ export const makeChatHandlers = Effect.gen(function* () {
         const named = yield* writer.SetForkName({ userId: id, forkId, name })
         if (named.startSlotId !== null)
           yield* publishSlot(id, named.startSlotId).pipe(Effect.catchTag("NotFound", () => Effect.void))
-        return named.fork
+        return yield* withShownTip(id, named.fork)
       }).pipe(internal("NameFork")),
 
     PinFork: ({ forkId, pinned }) =>
-      Effect.flatMap(userId, (id) => writer.SetForkPinned({ userId: id, forkId, pinned })).pipe(internal("PinFork")),
+      Effect.flatMap(userId, (id) =>
+        Effect.flatMap(writer.SetForkPinned({ userId: id, forkId, pinned }), (fork) => withShownTip(id, fork))
+      ).pipe(internal("PinFork")),
 
     // Through CacheWarmth, which waits while a reply runs in the chat, then works it out afresh.
     GetNextContext: ({ chatId, leafSlotId, forkId }) =>

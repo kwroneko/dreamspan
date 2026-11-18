@@ -5,7 +5,8 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { type PathPiece, displaySlots, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import { forkRecency, forksShowing, lastShown } from "./forks.ts"
-import { shownIn, slotDeletedIn } from "./forkState.ts"
+import { slotDeletedIn } from "./forkState.ts"
+import { tipPreview } from "./previewTip.ts"
 import type { ForkRow } from "./rows.ts"
 
 export const binItemForks = (sql: SqlClient.SqlClient, userId: UserId, itemIds: ReadonlyArray<string>) =>
@@ -31,16 +32,14 @@ export const binItemForks = (sql: SqlClient.SqlClient, userId: UserId, itemIds: 
       )
       for (const fork of forks) {
         const end = yield* lastShown(sql, item.chat_id, fork)
-        const [tip] = yield* sql<{ excerpt: string }>`
-              SELECT substr(v.content, 1, 80) AS excerpt FROM slots t JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "t")}
-              WHERE t.id = ${end}`
+        const tip = yield* tipPreview(sql, userId, item.chat_id, fork.id, end, 80)
         shown.push(
           new BinForkShown({
             itemId: item.id,
             forkId: fork.id,
             chatTitle: origin.chatTitle ?? "",
             name: fork.name,
-            tipExcerpt: tip?.excerpt ?? "",
+            tipExcerpt: tip,
             deleted: fork.deleted_at !== null
           })
         )
@@ -104,10 +103,7 @@ export const binItemBranches = (sql: SqlClient.SqlClient, userId: UserId, itemId
     const tipOf = (chatId: string, fork: ForkRow) =>
       Effect.gen(function* () {
         const end = yield* lastShown(sql, chatId, fork)
-        const [tip] = yield* sql<{ excerpt: string }>`
-          SELECT substr(v.content, 1, 80) AS excerpt FROM slots t JOIN version_records v ON v.id = ${shownIn(sql, fork.id, "t")}
-          WHERE t.id = ${end}`
-        return tip?.excerpt ?? ""
+        return yield* tipPreview(sql, userId, chatId, fork.id, end, 80)
       })
     /** The nearest message `fork` shows in positions `first` to `last` of `pieces`, nearest `towards` first. */
     const nearestShown = (

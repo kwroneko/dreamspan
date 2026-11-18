@@ -19,6 +19,7 @@ import {
   cardSummary,
   chatCast,
   chatStateAt,
+  previewNamesOf,
   castCardAt,
   loadCards,
   loadCastCards
@@ -63,22 +64,23 @@ type Member = ChatGroup["members"][number]
 /** A chat's last message for its row: its start, with a greeting's macros replaced as the chat shows them. */
 const shownLast = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
+  userId: UserId,
   chatId: ChatId,
   fork: string,
-  leaf: string | null,
-  cast: ReadonlyArray<CastCard>
+  leaf: string | null
 ) {
   const last = yield* lastText(sql, chatId, fork, leaf)
   if (last === null) return null
-  const { template, ...shown } = last
+  const { template, parent, ...shown } = last
   if (template !== 1) return shown as ChatSummary["last"]
-  const state = yield* chatStateAt(sql, chatId, leaf)
-  const names = new Map(cast.map((card) => [card.entityId as string, card.modelName ?? card.name]))
+  // As the chat shows it: the cast as it stood before the message (after its parent).
+  const state = yield* chatStateAt(sql, chatId, parent, fork)
   const macro = {
     speaker: last.speaker ?? state.participants.find((id) => !state.playedByMe.includes(id)) ?? null,
     user: state.playedByMe[0] ?? null
   }
-  return { ...shown, text: previewText(last.text, macro, (id) => names.get(id)) } as ChatSummary["last"]
+  const names = yield* previewNamesOf(sql, userId, [macro])
+  return { ...shown, text: previewText(last.text, macro, names) } as ChatSummary["last"]
 })
 
 export const makeChatSetupReadHandlers = Effect.gen(function* () {
@@ -303,7 +305,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               chatId,
               cast,
               messages: positions ?? (leaf ? leaf.depth + 1 : 0),
-              last: yield* shownLast(sql, chatId, chat.fork, chat.leaf, cast)
+              last: yield* shownLast(sql, userId, chatId, chat.fork, chat.leaf)
             })
           )
         }

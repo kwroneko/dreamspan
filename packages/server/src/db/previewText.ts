@@ -22,6 +22,9 @@ const registry = (() => {
   return made
 })()
 
+/** A start is at most a few hundred characters, and every list read expands one per row: a greeting can't make a read slow. */
+const PREVIEW_LIMITS = { maxWork: 20_000, maxExpansions: 200, maxDepth: 8, maxLength: 2_000 }
+
 /** A draw that's the same each time for the same text. */
 const seeded = (text: string) => {
   let seed = 0
@@ -42,12 +45,14 @@ const seeded = (text: string) => {
  */
 export const previewText = (text: string, macro: PreviewMacro | null, names: PreviewNames): string => {
   if (macro === null || !text.includes("{{")) return text
-  const complete = text.replace(/\{\{[^}]*$/, "")
+  const open = text.lastIndexOf("{{")
+  const complete = open >= 0 && text.indexOf("}}", open) < 0 ? text.slice(0, open) : text
   const result = expand({
     text: complete,
     origin: { kind: "message", macroMode: "template" },
     purpose: "display",
     registry,
+    limits: PREVIEW_LIMITS,
     context: {
       names: {
         user: (macro.user !== null && names(macro.user)) || "User",

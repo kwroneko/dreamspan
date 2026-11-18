@@ -7,7 +7,7 @@ import { Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
 import { Migrations, migrations } from "../src/db/migrations.ts"
-import { FORK_SUMMARY_FORMAT } from "../src/db/summaryValidity.ts"
+import { FORK_SUMMARY_FORMAT, summaryValidSql } from "../src/db/summaryValidity.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 interface Entry {
@@ -309,8 +309,15 @@ describe("0005_preview_macro", () => {
       assert.deepStrictEqual(yield* sql`SELECT format, preview, preview_macro FROM fork_summaries`, [
         { format: FORK_SUMMARY_FORMAT - 1, preview: "Hello {{user}}", preview_macro: null }
       ])
-      // Valid only at the current format: this one is recomputed when read.
-      assert.notStrictEqual(FORK_SUMMARY_FORMAT - 1, FORK_SUMMARY_FORMAT)
+      // Valid only at the current format: the older row is read as stale and recomputed.
+      const valid = () =>
+        sql<{ ok: number }>`SELECT coalesce(${sql.literal(summaryValidSql("s", "c", "0"))}, 0) AS ok
+          FROM fork_summaries s JOIN chats c ON c.id = s.chat_id`.pipe(Effect.map(([row]) => row!.ok))
+      yield* sql`UPDATE fork_summaries SET format = ${FORK_SUMMARY_FORMAT}, stamp = (SELECT shell_stamp FROM chats WHERE id = 'c')`
+      const current = yield* valid()
+      yield* sql`UPDATE fork_summaries SET format = ${FORK_SUMMARY_FORMAT - 1}`
+      assert.strictEqual(yield* valid(), 0, "a format-10 row is stale")
+      assert.strictEqual(current, 1, "the same row at the current format would be valid")
     }).pipe(Effect.provide(layer()))
   )
 })

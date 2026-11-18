@@ -1014,11 +1014,11 @@ export const makeReadHandlers = Effect.gen(function* () {
                 SELECT ${columns} FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
                   AND x.chat_id = ${slot.chat_id} AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id`
-        // A greeting's macros are replaced as the chat shows them, by the fork's persona.
+        // A greeting's macros are replaced as the chat shows them: against the cast before the
+        // alternates' place (after their parent), in the fork shown.
         let previews = rows.map((row) => row.preview)
         if (rows.some((row) => row.template === 1)) {
-          const [fork] = yield* sql<{ tip_slot_id: string | null }>`SELECT tip_slot_id FROM forks WHERE id = ${shown}`
-          const state = yield* chatStateAt(sql, slot.chat_id as ChatId, fork?.tip_slot_id ?? null)
+          const state = yield* chatStateAt(sql, slot.chat_id as ChatId, slot.parent_slot_id, shown ?? undefined)
           const other = state.participants.find((id) => !state.playedByMe.includes(id)) ?? null
           const macros = rows.map((row) =>
             row.template === 1 ? { speaker: row.speaker ?? other, user: state.playedByMe[0] ?? null } : null

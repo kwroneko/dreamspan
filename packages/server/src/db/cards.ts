@@ -254,8 +254,13 @@ export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId:
   )
 
 /** A chat's state folded at `leaf`, as its cast is read there. */
-export const chatStateAt = Effect.fnUntraced(function* (sql: SqlClient.SqlClient, chatId: ChatId, leaf: string | null) {
-  const fork = yield* forkAt(sql, chatId, leaf)
+export const chatStateAt = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  chatId: ChatId,
+  leaf: string | null,
+  forkId?: string
+) {
+  const fork = forkId ?? (yield* forkAt(sql, chatId, leaf))
   // At the fork's tip, its cast as it stands: through its display end, which an inserted
   // message after the tip is (spec/MESSAGE-INSERT.md §2.3).
   const [tip] =
@@ -279,13 +284,13 @@ export const chatStateAt = Effect.fnUntraced(function* (sql: SqlClient.SqlClient
 /** The names list previews give `{{user}}` and `{{char}}` (`previewText`): each card's model name, else its name. */
 export const previewNamesOf = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
-  userId: UserId,
+  userId: string,
   macros: ReadonlyArray<{ readonly speaker: string | null; readonly user: string | null } | null>
 ) {
   const ids = [...new Set(macros.flatMap((m) => (m === null ? [] : [m.speaker, m.user])))].filter(
     (id): id is string => id !== null
   )
-  const cards = ids.length === 0 ? [] : yield* loadCastCards(sql, userId, ids as Array<EntityId>)
+  const cards = ids.length === 0 ? [] : yield* loadCastCards(sql, userId as UserId, ids as Array<EntityId>)
   const byId = new Map(cards.map((card) => [card.entityId as string, card.modelName ?? card.name]))
   return (id: string) => byId.get(id)
 })
