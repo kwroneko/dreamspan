@@ -2,13 +2,14 @@ import { useCardGrouping } from "./cardGrouping.tsx"
 // What lists characters, in one set of parts: the filter (All, With chats, Never used,
 // Favourites, Personas, Groups, each with its count), Include personas, the sort with its direction, the date a date sort
 // orders by, the favourite star and the grid of tiles. The home grid and the left panel's
-// grid use them; each place keeps its own sort and direction (`useCardBrowse(place)`),
-// remembered on the account, since a narrow panel and the home page are used
-// differently. Home overlays this memory with its URL state (`useHomeBrowse`); elsewhere
-// the filter starts at All on each visit.
+// grid use them; each place keeps its own sort, direction, Include personas and Group forks,
+// in this browser tab's URL (owner, 2026-11-18: how a tab shows something is the tab's): Home
+// in its own params (`useHomeBrowse`), the left panel's and the Cast tab's as layout params
+// carried over the tab's navigation (`useSidebarBrowse`, `useCardBrowse`). Absent, each is its
+// default. The Cast tab's filter starts at All on each visit.
 import { useState } from "react"
 import { useAction } from "../../actions.tsx"
-import { useViewPrefs } from "../../ui/viewPrefs.ts"
+import { useLayoutParam, writeLayoutParams } from "../../tabLayoutParams.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
@@ -31,19 +32,27 @@ export interface CardBrowse {
    * off by default). Personas alone are the `personas` filter, whatever this says.
    */
   readonly withPersonas: boolean
+  /** Group forks: a card and the cards forked from it as one tile (cardFamilies.ts). Off by default. */
+  readonly grouped: boolean
 }
 const FILTERS = CARD_FILTERS
 const SORTS = ["recent", "created", "added", "name"] as const
 
+/** The Cast tab's Add characters sort, direction and Include personas: layout params, absent at the defaults. */
+export const CAST_BROWSE_PARAMS = { sort: "csort", reversed: "crev", withPersonas: "cper" } as const
+
+export const readCardSort = (raw: unknown): CardSort => SORTS.find((v) => v === raw) ?? "recent"
+
 /**
- * A place's filter, and its sort and Include personas remembered on the account.
- * A new sort starts its own way round.
+ * The Cast tab's filter (All on each visit), and its sort, direction and Include personas in
+ * this tab's URL. A new sort starts its own way round.
  */
-export function useCardBrowse(place: "sidebar" | "home" | "cast") {
-  const { prefs, change: savePrefs, ready } = useViewPrefs()
-  const key = ({ sidebar: "sidebarCards", home: "homeCards", cast: "castCards" } as const)[place]
+export function useCardBrowse() {
+  const sort = readCardSort(useLayoutParam(CAST_BROWSE_PARAMS.sort))
+  const reversed = useLayoutParam(CAST_BROWSE_PARAMS.reversed) === "on"
+  const withPersonas = useLayoutParam(CAST_BROWSE_PARAMS.withPersonas) === "on"
   const [filter, setFilter] = useState<CardFilter>("all")
-  const state: CardBrowse = { ...prefs[key], filter }
+  const state: CardBrowse = { filter, sort, reversed, withPersonas, grouped: false }
   const update = (change: Partial<CardBrowse>) => {
     const next = {
       ...state,
@@ -51,10 +60,13 @@ export function useCardBrowse(place: "sidebar" | "home" | "cast") {
       ...change
     }
     setFilter(next.filter)
-    if (next.sort !== state.sort || next.reversed !== state.reversed || next.withPersonas !== state.withPersonas)
-      void savePrefs({ [key]: { sort: next.sort, reversed: next.reversed, withPersonas: next.withPersonas } })
+    writeLayoutParams({
+      [CAST_BROWSE_PARAMS.sort]: next.sort === "recent" ? null : next.sort,
+      [CAST_BROWSE_PARAMS.reversed]: next.reversed ? "on" : null,
+      [CAST_BROWSE_PARAMS.withPersonas]: next.withPersonas ? "on" : null
+    })
   }
-  return [state, update, ready] as const
+  return [state, update] as const
 }
 
 /** By name, in-chat name or version, ignoring case; `needle` already lowercased and trimmed. */
@@ -272,12 +284,17 @@ export function IncludePersonas({
 
 /**
  * Group forks: a card and the cards forked from it as one tile, which expands to them
- * (cardFamilies.ts). One choice for the account, off until chosen. Kept in place but invisible
- * where no cards are grouped (Groups), so the controls around it don't shift.
+ * (cardFamilies.ts). Each place's own (`CardBrowse.grouped`), off until chosen. Kept in place but
+ * invisible where no cards are grouped (Groups), so the controls around it don't shift.
  */
-export function GroupFamiliesToggle({ browse }: { browse: CardBrowse }) {
-  const { prefs, change } = useViewPrefs()
-  const on = prefs.cardFamilies
+export function GroupFamiliesToggle({
+  browse,
+  onChange
+}: {
+  browse: CardBrowse
+  onChange: (change: Partial<CardBrowse>) => void
+}) {
+  const on = browse.grouped
   return (
     <IconButton
       label="Group forks"
@@ -290,15 +307,15 @@ export function GroupFamiliesToggle({ browse }: { browse: CardBrowse }) {
       aria-pressed={on}
       data-group-families
       className={`${browse.filter === "groups" ? "invisible" : ""} ${on ? "" : "text-text!"} aria-pressed:bg-surface-raised aria-pressed:text-accent`}
-      onClick={() => void change({ cardFamilies: !on })}
+      onClick={() => onChange({ grouped: !on })}
     />
   )
 }
 
-/** Whether a place's list groups families now: the account's choice, and no search (a search lists each card it finds). */
-export const useGroupedFamilies = (search: string) => {
+/** Whether a place's list groups families now: its choice, and no search (a search lists each card it finds). */
+export const useGroupedFamilies = (browse: CardBrowse, search: string) => {
   const part = useCardGrouping()
-  return useViewPrefs().prefs.cardFamilies && part !== undefined && search.trim() === ""
+  return browse.grouped && part !== undefined && search.trim() === ""
 }
 
 const SORT_LABELS: Record<CardSort, { label: string; hint: string }> = {

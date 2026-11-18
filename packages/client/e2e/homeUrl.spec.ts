@@ -7,12 +7,6 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 test.setTimeout(120_000)
-test.beforeEach(async () => {
-  await admin((api) =>
-    api.SetDisplayPrefs({ prefs: { homeCards: { sort: "recent", reversed: false, withPersonas: false } } })
-  )
-})
-
 test.beforeAll(async () => {
   await admin((api) =>
     Effect.gen(function* () {
@@ -43,7 +37,7 @@ const search = (page: Page) => main(page).getByRole("searchbox", { name: "Search
 const historyLength = (page: Page) => page.evaluate(() => history.length)
 
 for (const width of [1440, 390]) {
-  test(`${width}: every home choice reloads and a copied link wins over account memory`, async ({ page, browser }) => {
+  test(`${width}: every home choice reloads and a copied link shows the same`, async ({ page, browser }) => {
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(server().url)
@@ -75,9 +69,6 @@ for (const width of [1440, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 900 } })
     try {
       await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
-      await admin((api) =>
-        api.SetDisplayPrefs({ prefs: { homeCards: { sort: "added", reversed: false, withPersonas: false } } })
-      )
       const copied = await context.newPage()
       await copied.goto(link)
       await assertState(copied)
@@ -120,22 +111,35 @@ for (const width of [1440, 390]) {
   })
 }
 
-test("bare visits keep the account sort; bad parameters use defaults", async ({ page }) => {
+test("a bare visit is the defaults, whatever another page chose; bad parameters use defaults", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await admin((api) =>
-    api.SetDisplayPrefs({ prefs: { homeCards: { sort: "added", reversed: true, withPersonas: false } } })
-  )
+  // Another page of this browser sorts its Home and groups forks: nothing reaches this one.
+  const other = await page.context().newPage()
+  await other.goto(server().url)
+  await sort(other, "Added").click()
+  await main(other).getByRole("button", { name: "Group forks", exact: true }).click()
+  await expect(other).toHaveURL(/sort=added/)
+  await expect(other).toHaveURL(/group=true/)
   await page.goto(server().url)
-  await expect(sort(page, "Added")).toHaveAttribute("aria-pressed", "true")
-  await expect(main(page).getByRole("button", { name: "Order: Oldest first", exact: true })).toBeVisible()
-  await expect(page).toHaveURL(/sort=added/)
+  await expect(sort(page, "Recent")).toHaveAttribute("aria-pressed", "true")
+  await expect(main(page).getByRole("button", { name: "Group forks", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "false"
+  )
+  await expect(page).toHaveURL(`${server().url}/`)
+  await other.reload()
+  await expect(sort(other, "Added")).toHaveAttribute("aria-pressed", "true")
+  await expect(main(other).getByRole("button", { name: "Group forks", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  )
+  await other.close()
   await page.goto(`${server().url}/?show=gone&sort=gone&reverse=sideways&q=123&pinsSort=gone`)
   await expect(show(page, "All")).toHaveAttribute("aria-pressed", "true")
   await expect(sort(page, "Recent")).toHaveAttribute("aria-pressed", "true")
   await expect(main(page).getByRole("button", { name: "Order: Newest first", exact: true })).toBeVisible()
   await expect(search(page)).toHaveValue("")
   await expect(pinsSort(page, "Recent")).toHaveAttribute("aria-pressed", "true")
-  await expect(page).toHaveURL(`${server().url}/`)
   await page.reload()
   await expect(sort(page, "Recent")).toHaveAttribute("aria-pressed", "true")
 })

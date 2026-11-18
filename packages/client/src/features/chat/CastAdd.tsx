@@ -106,7 +106,7 @@ function AddGrid({
   const cast = useSyncExternalStore(target.subscribe, target.cast)
   const [search, setSearch] = useState("")
   // Its own filter and sort, apart from the left panel's (cardBrowse.tsx).
-  const [browse, setBrowse] = useCardBrowse("cast")
+  const [browse, setBrowse] = useCardBrowse()
   // The adds under way, in the order clicked: each waits for the one before (one write at a time).
   const [adding, setAdding] = useState<ReadonlyArray<EntityId>>([])
   const queue = useRef<Promise<void>>(Promise.resolve())

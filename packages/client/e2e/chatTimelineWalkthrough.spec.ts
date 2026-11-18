@@ -101,9 +101,7 @@ for (const width of [1440, 390])
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await admin((api) =>
-        api.SetDisplayPrefs({ prefs: { timeline: "originals", coverageRail: false, portraitSize: "default" } })
-      )
+      await admin((api) => api.SetDisplayPrefs({ prefs: { portraitSize: "default" } }))
       const path = await admin((api) =>
         api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 500 })
       )

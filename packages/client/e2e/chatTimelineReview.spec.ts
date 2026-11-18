@@ -53,9 +53,9 @@ const fixture = async (count = 8, covered = 4) => {
         expectedRowVersion: current.rowVersion,
         commitDraft: null
       })
-      yield* api.SetDisplayPrefs({ prefs: { timeline: "summaries" } })
     })
   )
+  // Summaries in chat is the tab's URL (`timeline=summaries`), on in every visit below.
   return { ...chat, summary }
 }
 
@@ -72,7 +72,7 @@ for (const width of [1440, 390])
       await page.emulateMedia({ colorScheme })
       const chat = await fixture()
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await page.goto(`${server().url}/chats/${chat.id}`)
+      await page.goto(`${server().url}/chats/${chat.id}?timeline=summaries`)
       const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
       await summary.getByRole("button", { name: /^Expand messages/ }).click()
       const message = page.locator(`article[data-slot="${chat.entries[0]!.slotId}"]`)
@@ -95,7 +95,7 @@ for (const width of [1440, 390])
       await page.emulateMedia({ colorScheme })
       const chat = await fixture()
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[1]!.slotId}`)
+      await page.goto(`${server().url}/chats/${chat.id}?timeline=summaries&slot=${chat.entries[1]!.slotId}`)
       await expect(page.locator(`[data-timeline-summary="${chat.summary.id}"]`)).toBeVisible()
       await expect(page.locator(`article[data-slot="${chat.entries[1]!.slotId}"]`)).toBeInViewport({ ratio: 1 })
       await shoot(page, `covered-link-${width}-${colorScheme}`)
@@ -106,7 +106,7 @@ test("expanded pages refresh originals outside the main window without losing ea
   await page.setViewportSize({ width: 1440, height: 1000 })
   const chat = await fixture(130, 120)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/chats/${chat.id}`)
+  await page.goto(`${server().url}/chats/${chat.id}?timeline=summaries`)
   const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
   // The selected layer arrives after the message window and can replace its rows.
   await expect(async () => {
@@ -169,7 +169,7 @@ for (const width of [1440, 390])
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await recordFlashes(page)
     const base = `${server().url}/chats/${chat.id}`
-    await page.goto(`${base}?slot=${chat.entries[1]!.slotId}`)
+    await page.goto(`${base}?timeline=summaries&slot=${chat.entries[1]!.slotId}`)
     const summary = page.locator(`[data-timeline-summary="${top.id}"]`)
     const message = (index: number) => page.locator(`article[data-slot="${chat.entries[index]!.slotId}"]`)
     await expect(summary).toBeVisible()
@@ -196,7 +196,7 @@ for (const width of [1440, 390])
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const chat = await fixture(130, 120)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[1]!.slotId}`)
+    await page.goto(`${server().url}/chats/${chat.id}?timeline=summaries&slot=${chat.entries[1]!.slotId}`)
     const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
     await expect(summary.locator("article")).toHaveCount(100)
     const later = summary.getByRole("button", { name: "Later messages", exact: true })
@@ -258,7 +258,7 @@ test("a delayed page response cannot land in another link's page", async ({ page
   })
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const base = `${server().url}/chats/${chat.id}`
-  await page.goto(`${base}?slot=${chat.entries[1]!.slotId}`)
+  await page.goto(`${base}?timeline=summaries&slot=${chat.entries[1]!.slotId}`)
   const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
   await expect(summary.locator("article")).toHaveCount(100)
   await summary.getByRole("button", { name: "Later messages", exact: true }).click()

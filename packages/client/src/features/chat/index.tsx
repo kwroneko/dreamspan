@@ -1,3 +1,6 @@
+import { CHAT_VIEW_PARAMS } from "./chatViewParams.ts"
+import { SINGLE_PORTRAIT_PARAM } from "../../ui/Portrait.tsx"
+import { CAST_BROWSE_PARAMS } from "../characters/cardBrowse.tsx"
 import { tabKinds } from "../workbench/kinds.ts"
 import { registerChatHeader } from "./headerContributions.tsx"
 import { registerSummaryDetails } from "./SummaryDetails.tsx"
@@ -117,6 +120,8 @@ export const register = () => {
   // The Chats page's first start card; the workshop adds the second (features/workshop).
   // The Cast tab's Add characters section, open or not: the browser tab's layout.
   layoutParams.register({ id: "chats.cast-add", keys: [CAST_ADD_PARAM] })
+  layoutParams.register({ id: "chats.view", keys: [...CHAT_VIEW_PARAMS, SINGLE_PORTRAIT_PARAM] })
+  layoutParams.register({ id: "chats.cast-browse", keys: Object.values(CAST_BROWSE_PARAMS) })
   chatStartSections.register({ id: "chats.start-empty", order: 10, component: EmptyChatCard })
   // One tab per chat (features/workbench): its branches and messages are places within it.
   tabKinds.register({

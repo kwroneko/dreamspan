@@ -100,7 +100,7 @@ export function CardBrowseBar({
         <>
           <CardSortControl compact sort={browse.sort} reversed={browse.reversed} onChange={onChange} />
           {includePersonas && <IncludePersonas browse={browse} onChange={onChange} />}
-          {families && <CardGroupingControl browse={browse} />}
+          {families && <CardGroupingControl browse={browse} onChange={onChange} />}
         </>
       )}
     </div>

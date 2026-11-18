@@ -404,15 +404,31 @@ test("portraits stack in the column at 1440: one on top of another, closed one b
   await expect(viewers).toHaveCount(1)
   await expect(column("Tall")).toBeVisible()
 
-  // The account's choice: after a reload, still one at a time.
+  // This tab's choice, in its URL: after a reload, still one at a time.
+  expect(new URL(page.url()).searchParams.get("psingle")).toBe("on")
   await page.reload()
-  // The viewer is itself restored, as well as the one-at-a-time preference.
+  // The viewer is itself restored, as well as the one-at-a-time choice.
   await column("Tall").getByRole("button", { name: "Viewer options", exact: true }).click()
   await expect(page.getByRole("menuitemcheckbox", { name: SINGLE, exact: true })).toHaveAttribute(
     "aria-checked",
     "true"
   )
   await page.keyboard.press("Escape")
+  // Another page of this browser on the same chat: stacking, as it was.
+  const other = await page.context().newPage()
+  await other.setViewportSize({ width: 1440, height: 900 })
+  const here = new URL(page.url())
+  await other.goto(`${here.origin}${here.pathname}`)
+  await other.locator("article[data-slot]").getByRole("button", { name: "View Tall's portrait" }).first().click()
+  await other
+    .getByRole("complementary", { name: "Tall's portrait", exact: true })
+    .getByRole("button", { name: "Viewer options", exact: true })
+    .click()
+  await expect(other.getByRole("menuitemcheckbox", { name: SINGLE, exact: true })).toHaveAttribute(
+    "aria-checked",
+    "false"
+  )
+  await other.close()
   await openPanel(page, "Cast")
   await cast.getByRole("button", { name: "View Standard's portrait" }).click()
   await expect(viewers).toHaveCount(1)

@@ -11,9 +11,7 @@ export const sidebarSearch = [
   "forks",
   "side",
   "sideShow",
-  "sideSort",
-  "sideReverse",
-  "sidePersonas",
+  // sideSort, sideReverse, sidePersonas, sideGroup are layout params (useSidebarBrowse.ts).
   "sideQ",
   // The chat search looks through message text (MessageSearch.tsx).
   "sideIn",

@@ -32,8 +32,8 @@ import {
 } from "./lcm.ts"
 import { ClampedText, HintBadge, LevelBadge, SummaryBadges } from "./summaryParts.tsx"
 import type { ChatSession } from "./session.ts"
+import { useCoverageRail, writeCoverageRail } from "./chatViewParams.ts"
 import { TimelineToggle } from "./TimelineToggle.tsx"
-import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { audienceName, SummaryViewer } from "./SummaryViewer.tsx"
 import { SummaryDraft } from "./summaryDraft.ts"
 import { summaryPreviews } from "./presentation.tsx"
@@ -772,7 +772,7 @@ export function SummaryPanel({
   /** Turns summaries on for the chat, asking first what it costs. */
   onEnable: () => void
 }) {
-  const viewer = useViewPrefs()
+  const rail = useCoverageRail()
   const inUse = useMemo(() => new Set<string>(lcm.layer.map((s) => s.id)), [lcm.layer])
   const version = useSyncExternalStore(session.subscribe, session.snapshot).lcmVersion
   const [fetched, setFetched] = useState<LcmSummary | null>(null)
@@ -842,11 +842,7 @@ export function SummaryPanel({
             <TimelineToggle />
             <Tooltip label="See which summary covers each message, as bars beside the messages. Click one to open its summary.">
               <span className="inline-flex">
-                <Switch
-                  checked={viewer.prefs.coverageRail}
-                  disabled={!viewer.ready || viewer.pending}
-                  onCheckedChange={(coverageRail) => void viewer.change({ coverageRail })}
-                >
+                <Switch checked={rail} onCheckedChange={writeCoverageRail}>
                   Coverage rail
                 </Switch>
               </span>
@@ -866,7 +862,6 @@ export function SummaryPanel({
             Summaries are off for this chat.
           </Alert>
         )}
-        {viewer.error && <Problem error={viewer.error} />}
         {lcm.enabled && <SummaryViewer session={session} />}
       </div>
       {lcm.enabled && <Backfill session={session} lcm={lcm} />}

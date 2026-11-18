@@ -14,6 +14,8 @@ export const homeSearch = [
   "sort",
   "reverse",
   "personas",
+  // Group forks (cardFamilies.ts): `group=true`.
+  "group",
   "q",
   "pinsSort",
   // The family shown open under Group forks (cardFamilies.ts).
@@ -73,6 +75,7 @@ export const readHomeSearch = (search: Record<string, unknown>): HomeBrowse => {
     sort: (["recent", "created", "added", "name"] as const).find((v) => v === search.sort) ?? "recent",
     reversed: search.reverse === true,
     withPersonas: search.personas === true,
+    grouped: search.group === true,
     search: typeof search.q === "string" ? search.q : "",
     pinsSort: (["recent", "created", "name"] as const).find((v) => v === search.pinsSort) ?? "recent",
     family: typeof search.family === "string" && search.family !== "" ? search.family.slice(0, 64) : null,
@@ -94,6 +97,7 @@ export const writeHomeSearch = (state: HomeBrowse) => ({
   sort: state.sort === "recent" ? undefined : state.sort,
   reverse: state.reversed || undefined,
   personas: state.withPersonas || undefined,
+  group: state.grouped || undefined,
   q: state.search || undefined,
   pinsSort: state.pinsSort === "recent" ? undefined : state.pinsSort,
   family: state.family ?? undefined,

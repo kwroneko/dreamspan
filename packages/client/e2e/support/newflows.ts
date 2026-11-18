@@ -256,7 +256,9 @@ export function newflowTests() {
             await page.goto(`${server().url}/library/${preset.id}`)
             await expect(page.getByRole("switch", { name: `Panel preset book ${suffix}`, exact: true })).toBeChecked()
           })
-          test(`sorts: account memory after browser storage is cleared ${suffix}`, async ({ page }) => {
+          test(`sorts: each place's in this tab's URL, carried, and no other page follows ${suffix}`, async ({
+            page
+          }) => {
             const { chat } = await admin((api) =>
               Effect.gen(function* () {
                 const card = yield* api.CreateCard({ label: `Sort card ${suffix}`, name: `Sort card ${suffix}` })
@@ -268,55 +270,53 @@ export function newflowTests() {
                 })
               })
             )
-            await admin((api) =>
-              api.SetDisplayPrefs({
-                prefs: {
-                  homeCards: { sort: "name", reversed: true, withPersonas: false },
-                  sidebarCards: { sort: "added", reversed: false, withPersonas: false },
-                  castCards: { sort: "created", reversed: true, withPersonas: false }
-                }
-              })
-            )
-            await page.goto(server().url)
-            await page.evaluate(() => localStorage.clear())
+            const param = (key: string) => new URL(page.url()).searchParams.get(key)
             await page.goto(`${server().url}/?fresh=${width}-${theme}`)
             const home = page.locator("[data-card-grid-controls]")
-            await expect(home.getByRole("button", { name: "Name", exact: true })).toHaveAttribute(
-              "aria-pressed",
-              "true"
-            )
-            await expect(home.getByRole("button", { name: "Order: Z to A", exact: true })).toBeVisible()
             await home.getByRole("button", { name: "Added", exact: true }).click()
-            await expect.poll(async () => (await admin((api) => api.GetDisplayPrefs({}))).homeCards.sort).toBe("added")
-            await page.goto(`${server().url}/?fresh=again-${width}-${theme}`)
-            await expect(home.getByRole("button", { name: "Added", exact: true })).toHaveAttribute(
-              "aria-pressed",
-              "true"
-            )
+            await expect.poll(() => param("sort")).toBe("added")
             await showAppNavigation(page)
             await page
               .getByRole("group", { name: "Left panel", exact: true })
               .getByRole("button", { name: "Characters", exact: true })
               .click()
-            await expect(page.getByRole("button", { name: "Sort by: Added", exact: true })).toBeVisible()
-            await page.getByRole("button", { name: "Sort by: Added", exact: true }).click()
+            await page.getByRole("button", { name: "Sort by: Recent", exact: true }).click()
             await page.getByRole("menuitemcheckbox", { name: "Name", exact: true }).click()
-            await expect
-              .poll(async () => (await admin((api) => api.GetDisplayPrefs({}))).sidebarCards.sort)
-              .toBe("name")
+            await expect.poll(() => param("sideSort")).toBe("name")
             await hideAppNavigation(page)
-            await page.goto(`${server().url}/chats/${chat.id}`)
+            // Into a chat in this tab: the left panel's sort comes along.
+            await page.evaluate((href) => {
+              const a = Object.assign(document.createElement("a"), { href })
+              document.body.append(a)
+              a.click()
+              a.remove()
+            }, `/chats/${chat.id}`)
+            await expect.poll(() => new URL(page.url()).pathname).toBe(`/chats/${chat.id}`)
+            await expect.poll(() => param("sideSort")).toBe("name")
             const cast = await openPanel(page, "Cast")
             await cast.getByRole("button", { name: "Add characters", exact: true }).click()
             const adding = cast.getByRole("region", { name: "Add characters", exact: true })
-            await expect(adding.getByRole("button", { name: "Sort by: Created", exact: true })).toBeVisible()
-            await expect(adding.getByRole("button", { name: "Order: Oldest first", exact: true })).toBeVisible()
-            await adding.getByRole("button", { name: "Sort by: Created", exact: true }).click()
+            await adding.getByRole("button", { name: "Sort by: Recent", exact: true }).click()
             await page.getByRole("menuitemcheckbox", { name: "Name", exact: true }).click()
-            await expect.poll(async () => (await admin((api) => api.GetDisplayPrefs({}))).castCards.sort).toBe("name")
-            const prefs = await admin((api) => api.GetDisplayPrefs({}))
-            expect(prefs.sidebarCards.sort).toBe("name")
-            expect(prefs.castCards.sort).toBe("name")
+            await expect.poll(() => param("csort")).toBe("name")
+            await page.reload()
+            await expect(
+              (await openPanel(page, "Cast"))
+                .getByRole("region", { name: "Add characters", exact: true })
+                .getByRole("button", { name: "Sort by: Name", exact: true })
+            ).toBeVisible()
+            // Another page of this browser: every sort at its default.
+            const other = await page.context().newPage()
+            await other.goto(`${server().url}/chats/${chat.id}`)
+            const otherCast = await openPanel(other, "Cast")
+            await otherCast.getByRole("button", { name: "Add characters", exact: true }).click()
+            await expect(
+              otherCast
+                .getByRole("region", { name: "Add characters", exact: true })
+                .getByRole("button", { name: "Sort by: Recent", exact: true })
+            ).toBeVisible()
+            expect(new URL(other.url()).searchParams.get("sideSort")).toBeNull()
+            await other.close()
           })
         })
       }
