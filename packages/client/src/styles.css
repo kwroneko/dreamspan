@@ -180,16 +180,10 @@ body,
 }
 
 /*
- * A list row of a chat of an accented kind (kindRowProps): tinted, with an accent edge drawn inside
- * the row so nothing shifts. The kind's badge says it in words too.
+ * A list row of a chat of an accented kind (kindRowProps, `data-kind-row`) takes no tint or edge of
+ * its own: those read as the selected row (owner, 2026-11-18). Its accent badge on the row's
+ * secondary line says what it is.
  */
-[data-kind-row] {
-  background-image: linear-gradient(
-    color-mix(in oklab, var(--chat-accent) 12%, transparent),
-    color-mix(in oklab, var(--chat-accent) 12%, transparent)
-  );
-  box-shadow: inset 4px 0 0 var(--chat-accent);
-}
 
 body {
   margin: 0;

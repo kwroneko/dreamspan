@@ -126,21 +126,24 @@ function Row({
               >
                 {name.name}
               </span>
-              <KindBadge kind={chat.kind} inLink />
               <SlotOutlet slot={chatRowAbout} props={{ chat }} />
               <span className="ml-auto shrink-0 text-xs text-muted">
                 {formatWhen(chat.lastMessageAt ?? chat.createdAt)}
               </span>
             </span>
             {/* What tells two chats of the same cast apart, on a line of its own so it's never cut off. */}
-            <span data-chat-meta className="text-xs text-muted">
-              <span>started {formatDay(name.started ?? new Date(chat.createdAt))}</span>
-              {summary && (
-                <>
-                  {" · "}
-                  <span className="whitespace-nowrap">{plural(summary.messages, "message")}</span>
-                </>
-              )}
+            {/* A workshop's badge beside it, out of the title's line (owner, 2026-11-18). */}
+            <span data-chat-meta className="flex min-w-0 items-start gap-1.5 text-xs text-muted">
+              <span className="min-w-0">
+                <span>started {formatDay(name.started ?? new Date(chat.createdAt))}</span>
+                {summary && (
+                  <>
+                    {" · "}
+                    <span className="whitespace-nowrap">{plural(summary.messages, "message")}</span>
+                  </>
+                )}
+              </span>
+              <KindBadge kind={chat.kind} inLink size="sm" />
             </span>
             {others.length > 0 && (
               <span

@@ -307,8 +307,12 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
       <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
         {fork.preview || "No messages yet"}
       </span>
-      <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
-        Last message {formatMoment(fork.endAt ?? fork.createdAt)}
+      {/* A workshop's badge beside the date, never in the title's line (owner, 2026-11-18). */}
+      <span data-row-when className="flex min-w-0 items-start gap-1.5 text-xs text-muted">
+        <span className="min-w-0 [overflow-wrap:anywhere]">
+          Last message {formatMoment(fork.endAt ?? fork.createdAt)}
+        </span>
+        <KindBadge kind={fork.chat.kind} size="sm" />
       </span>
     </>
   )
@@ -386,7 +390,6 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
               {title}
             </span>
           )}
-          {!renaming && <KindBadge kind={fork.chat.kind} />}
           {!renaming && <SlotOutlet slot={chatRowAbout} props={{ chat: fork.chat }} />}
           {/* While renaming, the field takes the whole title line (owner, 2026-11-05). */}
           {fork.current && fork.branches > 1 && !renaming && (
@@ -670,8 +673,6 @@ export function ForkRow({
                   <span className="font-medium">
                     {nameless ? <PlaceholderBar className="inline-block w-32 align-middle" /> : title}
                   </span>
-                  {/* A workshop says so where it's named (spec/WORKSHOP.md §2.5). */}{" "}
-                  <KindBadge kind={fork.chat.kind} inLink />
                   {opensHere && (
                     <>
                       {" "}
@@ -729,9 +730,14 @@ export function ForkRow({
                     <PlaceholderBar className="w-24" />
                   </span>
                 ) : (
-                  <span data-row-when className="mt-auto text-xs text-muted">
-                    {perFork ? "Last message " : ""}
-                    {perFork ? formatMoment(last) : formatWhen(last)}
+                  // A workshop's badge on the date's line, out of the title's flow, so the title
+                  // wraps and clamps as a story chat's does and the row is no taller (owner, 2026-11-18).
+                  <span data-row-when className="mt-auto flex min-w-0 items-start gap-1.5 text-xs text-muted">
+                    <span className="min-w-0">
+                      {perFork ? "Last message " : ""}
+                      {perFork ? formatMoment(last) : formatWhen(last)}
+                    </span>
+                    <KindBadge kind={fork.chat.kind} inLink size="sm" />
                   </span>
                 )}
               </span>
