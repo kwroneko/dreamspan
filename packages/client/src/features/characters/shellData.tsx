@@ -29,6 +29,7 @@ import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
 import type { CardSort } from "./cardRecency.ts"
 import { type FamilyPlace } from "./cardFamilies.ts"
 import { Icon } from "../../ui/Icon.tsx"
+import { rememberPanel } from "../chat/ChatPanels.tsx"
 
 /** A fork row with its cast's cards, which the wire names once in `people`. */
 export type ShellFork = Omit<ShellForkRow, "cast" | "added" | "thread"> & {
@@ -279,11 +280,7 @@ export function useOpenCharacter() {
       : undefined
     const latest = card?.open ?? null
     const panel = `card:${entity}`
-    try {
-      localStorage.setItem(`rp.chatPanel.${userId}`, panel)
-    } catch {
-      /* URL carries it. */
-    }
+    rememberPanel(userId, panel)
     if (latest)
       void navigate({
         to: "/chats/$chatId",

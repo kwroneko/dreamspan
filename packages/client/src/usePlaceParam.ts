@@ -1,7 +1,7 @@
 // A place's small URL choices follow home's conventions: omit defaults, preserve unrelated
 // keys, replace filters, push places, and keep the surrounding scroll position.
-import { useNavigate, useSearch } from "@tanstack/react-router"
-import { useCallback, useEffect, useMemo, useRef } from "react"
+import { useNavigate, useRouter, useSearch } from "@tanstack/react-router"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { showToast } from "./ui/Toast.tsx"
 
 export function usePlaceParam(
@@ -60,6 +60,37 @@ export function usePlaceList(key: string) {
     [navigate, key, value]
   )
   return [value, set] as const
+}
+
+/**
+ * A query value as the router decoded it, and a setter that replaces it (no history entry),
+ * computing the next value from the URL as it is at the call, so updates in a row compose.
+ * `undefined` removes it. A value set shows in the same render, before the router has
+ * settled the navigation (an entry opened and focused at once), until the URL changes.
+ */
+export function usePlaceValue(key: string) {
+  const raw: unknown = useSearch({ strict: false, select: (s: Record<string, unknown>) => s[key] })
+  const navigate = useNavigate()
+  const router = useRouter()
+  const [local, setLocal] = useState<{ readonly base: unknown; readonly value: unknown } | null>(null)
+  const shown = local !== null && local.base === raw ? local.value : raw
+  const set = useCallback(
+    (next: (current: unknown) => unknown) => {
+      const current = (router.latestLocation.search as Record<string, unknown>)[key]
+      const value = next(current)
+      if (JSON.stringify(value) === JSON.stringify(current)) return
+      setLocal({ base: raw, value })
+      void navigate({
+        to: ".",
+        search: (prev: Record<string, unknown>) => ({ ...prev, [key]: value }),
+        state: (prev) => ({ ...prev }),
+        replace: true,
+        resetScroll: false
+      })
+    },
+    [router, navigate, key, raw]
+  )
+  return [shown, set] as const
 }
 
 let recentNotice = { title: "", at: 0 }

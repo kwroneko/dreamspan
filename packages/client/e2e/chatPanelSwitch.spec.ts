@@ -95,11 +95,15 @@ test("the tab this browser remembers leaves the previous chat's character", asyn
   await page.goto(`${server().url}/chats/${first.chat}?panel=card:${first.card}`)
   const panel = page.getByRole("complementary", { name: "Chat panel" })
   await expect(panel.getByRole("heading", { name: "Odalys Fenwick", exact: true })).toBeVisible({ timeout: 30_000 })
-  // Chosen, so this browser remembers it; then a chat opened afresh, with no tab in the URL.
+  // Chosen, so this browser tab remembers it; then Home, with no tab in the URL, and from there
+  // the other chat.
   await page.getByRole("tab", { name: "Cast", exact: true }).click()
   await page.getByRole("tab", { name: "Odalys Fenwick", exact: true }).click()
   await expect(panel.getByRole("heading", { name: "Odalys Fenwick", exact: true })).toBeVisible()
-  await page.goto(`${server().url}/chats/${second.chat}`)
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Home" }).click()
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/")
+  await page.getByRole("link", { name: /^Open chat Marguerite Quill/ }).click()
+  await expect(page).toHaveURL(new RegExp(`/chats/${second.chat}`))
   await showsSecond(page)
 })
 

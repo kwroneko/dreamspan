@@ -20,12 +20,10 @@ let personaRef = ""
 let unusedRef = ""
 let original = ""
 let secondary = ""
-let userId = ""
 
 test.beforeAll(async () => {
   await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
-      userId = (yield* api.Whoami()).id
       const first = yield* api.CreateCard({ label: "Mira", name: "Mira" })
       const other = yield* api.CreateCard({ label: "Wren", name: "Wren" })
       const me = yield* api.CreateCard({ label: "Rowan", name: "Rowan" })
@@ -192,17 +190,17 @@ for (const width of [1440, 390]) {
     await page.reload()
     await showNavigation(page)
     await expect.poll(value).toBe(enlarged)
-    expect(await page.evaluate((id) => localStorage.getItem(`rp.branchHeight.${id}`), userId)).toBe(String(enlarged))
+    expect(new URL(page.url()).searchParams.get("fbh")).toBe(String(enlarged))
     await handle.press("Home")
     expect(await value()).toBe(Number(await handle.getAttribute("aria-valuemin")))
     await handle.press("End")
     expect(await value()).toBe(Number(await handle.getAttribute("aria-valuemax")))
-    const preferred = await page.evaluate((id) => localStorage.getItem(`rp.branchHeight.${id}`), userId)
+    const preferred = new URL(page.url()).searchParams.get("fbh")
     await page.setViewportSize({ width, height: 600 })
     await expect(branches(nav).getByRole("button", { name: /^Branches of / })).toHaveAttribute("aria-expanded", "false")
     await page.setViewportSize({ width, height: 1200 })
     await expect(handle).toBeVisible()
-    expect(await page.evaluate((id) => localStorage.getItem(`rp.branchHeight.${id}`), userId)).toBe(preferred)
+    expect(new URL(page.url()).searchParams.get("fbh")).toBe(preferred)
     await handle.dblclick()
     await expect.poll(value).toBe(initial)
     await page.reload()

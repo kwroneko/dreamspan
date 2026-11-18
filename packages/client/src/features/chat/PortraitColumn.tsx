@@ -10,7 +10,6 @@
 // column for all the frames (portraitSources.ts): pictures opened from any view stack in it.
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { useSession } from "../../session.ts"
 import { MAX_UPSCALE, type NaturalSize } from "../../ui/ImageViewer.tsx"
 import { mediaUrl, pictureUrl } from "../../ui/mediaImage.ts"
 import { popupOpen } from "../../ui/openPopups.ts"
@@ -90,7 +89,6 @@ function SharedColumn({
 function Column({ asTabOf }: { asTabOf: (id: string) => OpenAsTab }) {
   const viewer = usePortraitViewer()!
   const shown = viewer.shown
-  const userId = useSession().user.id
   const [measured, setMeasured] = useState<Readonly<Record<string, Measured>>>({})
   // Escape closes the top one from anywhere on the chat page, after anything focused has had
   // it (a menu, a popup, an editor's own Escape), and never while typing or over a dialog.
@@ -113,7 +111,7 @@ function Column({ asTabOf }: { asTabOf: (id: string) => OpenAsTab }) {
   const fitted = fits.length > 0 ? Math.max(...fits) : Math.round(2 * (600 / 3) + GUTTER)
   // The user's width when they dragged its edge, else the widest image's; it gives way first,
   // before the sidebar and the side panel, so the messages keep their minimum (ui/columnLayout.ts).
-  const { width, max, change, reset } = usePanelWidth(userId, "portrait", fitted, MIN, true, 1)
+  const { width, max, change, reset } = usePanelWidth("portrait", fitted, MIN, true, 1)
   const name = (index: number) => shown[index]?.portrait.name ?? ""
   return (
     <div

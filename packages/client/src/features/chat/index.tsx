@@ -29,6 +29,8 @@ import { chatStartSections, ChatsPage, EmptyChatCard } from "./ChatsPage.tsx"
 import { ChatSkeleton } from "./SkeletonMessages.tsx"
 import { PICTURE_PATH, PicturePage } from "./PicturePage.tsx"
 import { sidebarSearch } from "../characters/sidebarSearch.ts"
+import { layoutParams } from "../../tabLayoutParams.ts"
+import { CAST_ADD_PARAM } from "./castAddState.ts"
 
 // The chat view carries the Markdown renderer, most of the bundle: it loads with the first chat opened.
 const ChatPage = lazy(loadChatPage)
@@ -113,6 +115,8 @@ export const register = () => {
   registerChatHeader()
   registerReplyCommands()
   // The Chats page's first start card; the workshop adds the second (features/workshop).
+  // The Cast tab's Add characters section, open or not: the browser tab's layout.
+  layoutParams.register({ id: "chats.cast-add", keys: [CAST_ADD_PARAM] })
   chatStartSections.register({ id: "chats.start-empty", order: 10, component: EmptyChatCard })
   // One tab per chat (features/workbench): its branches and messages are places within it.
   tabKinds.register({

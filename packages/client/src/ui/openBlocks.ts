@@ -1,7 +1,10 @@
-// Which blocks of a list are open (owner, 2026-11-01): each one's own choice, remembered in this
-// browser under `key` (one per user and list), and until a block has one, the list's default:
-// open while the list is short. Expand all and Collapse all set every block's.
-import { useCallback, useState } from "react"
+// Which blocks of a list are open (owner, 2026-11-01): each one's own choice, in the URL's
+// `param` (owner, 2026-11-18: the URL is the tab's state; one param per list), and until a
+// block has one, the list's default: open while the list is short. The value lists the blocks
+// with a choice, an open one by its id and a closed one as `!id`. Expand all and Collapse all
+// set every block's.
+import { useMemo } from "react"
+import { usePlaceValue } from "../usePlaceParam.ts"
 
 /** Up to this many blocks, a list opens them all by default. */
 const OPEN_WHEN_FEWER_THAN = 5
@@ -9,24 +12,19 @@ const OPEN_WHEN_FEWER_THAN = 5
 /** How many choices are kept per list: the oldest go first. */
 const KEPT = 500
 
-type Choices = Readonly<Record<string, boolean>>
+type Choices = ReadonlyMap<string, boolean>
 
-const read = (key: string): Choices => {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "{}")
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? (parsed as Choices) : {}
-  } catch {
-    return {}
-  }
-}
+export const decodeChoices = (raw: unknown): Choices =>
+  new Map(
+    (Array.isArray(raw) ? raw : [])
+      .filter((v): v is string => typeof v === "string" && v !== "" && v !== "!")
+      .map((v) => (v.startsWith("!") ? [v.slice(1), false] : [v, true]))
+  )
 
-const write = (key: string, choices: Choices) => {
-  try {
-    const entries = Object.entries(choices)
-    localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries.slice(-KEPT))))
-  } catch {
-    /* Kept in memory while storage is off. */
-  }
+/** The URL's value: undefined (absent) with no choices. */
+export const encodeChoices = (choices: Choices) => {
+  const list = [...choices].map(([id, open]) => (open ? id : `!${id}`)).slice(-KEPT)
+  return list.length === 0 ? undefined : list
 }
 
 export interface OpenBlocks {
@@ -37,28 +35,33 @@ export interface OpenBlocks {
 }
 
 /**
- * The open state of a list's blocks. `count` is how many the list shows: below
- * `OPEN_WHEN_FEWER_THAN`, a block with no choice of its own is open.
+ * The open state of a list's blocks, kept in the URL's `param`. `count` is how many the list
+ * shows: below `OPEN_WHEN_FEWER_THAN`, a block with no choice of its own is open.
  */
-export function useOpenBlocks(key: string, count: number): OpenBlocks {
-  const [choices, setChoices] = useState<Choices>(() => read(key))
-  const change = useCallback(
-    (next: (current: Choices) => Choices) =>
-      setChoices((current) => {
-        const changed = next(current)
-        write(key, changed)
-        return changed
-      }),
-    [key]
-  )
+export function useOpenBlocks(param: string, count: number): OpenBlocks {
+  const [raw, setRaw] = usePlaceValue(param)
+  const choices = useMemo(() => decodeChoices(raw), [raw])
+  const change = (next: (current: Map<string, boolean>) => void) =>
+    setRaw((current) => {
+      const map = new Map(decodeChoices(current))
+      next(map)
+      return encodeChoices(map)
+    })
   const fallback = count < OPEN_WHEN_FEWER_THAN
   return {
-    isOpen: (id) => choices[id] ?? fallback,
+    isOpen: (id) => choices.get(id) ?? fallback,
     setOpen: (id, open) =>
-      change((current) => {
-        const { [id]: _old, ...rest } = current
-        return { ...rest, [id]: open }
+      change((map) => {
+        // The latest choice goes last, so the oldest are dropped first.
+        map.delete(id)
+        map.set(id, open)
       }),
-    setAll: (ids, open) => change((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, open])) }))
+    setAll: (ids, open) =>
+      change((map) => {
+        for (const id of ids) {
+          map.delete(id)
+          map.set(id, open)
+        }
+      })
   }
 }

@@ -19,6 +19,7 @@ import type { IconName } from "./ui/Icon.tsx"
 import { useEffect, type ReactNode } from "react"
 import { isChunkLoadError, reportChunkFailure, StalePart, useStaleBuild } from "./staleBuild.tsx"
 import { makeRegistry } from "./registry.ts"
+import { layoutKeys, setLayoutHistory } from "./tabLayoutParams.ts"
 
 export interface RouteEntry {
   readonly id: string
@@ -110,8 +111,30 @@ function RouteError({ error }: ErrorComponentProps) {
 }
 
 /**
+ * Carries the browser tab's layout params (`tabLayoutParams.ts`, read from the registry at each
+ * navigation) over every navigation that doesn't set them, as `retainSearchParams` does.
+ */
+const retainLayout = ({
+  search,
+  next
+}: {
+  search: Record<string, unknown>
+  next: (search: Record<string, unknown>) => Record<string, unknown>
+}) => {
+  const result = next(search)
+  let copy: Record<string, unknown> | null = null
+  for (const key of layoutKeys())
+    if (!(key in result) && search[key] !== undefined) {
+      copy ??= { ...result }
+      copy[key] = search[key]
+    }
+  return copy ?? result
+}
+
+/**
  * A router over the routes registered so far. A workbench tab (features/workbench) has its
- * own, over its own history, with the shell's layout entries swapped for its page frame.
+ * own, over its own history, with the shell's layout entries swapped for its page frame; the
+ * one without a history is the browser tab's, which holds the layout params.
  */
 export const buildRouter = (
   options: { history?: RouterHistory; layouts?: Readonly<Record<string, () => ReactNode>> } = {}
@@ -119,7 +142,9 @@ export const buildRouter = (
   const rootRoute = createRootRoute({
     component: Outlet,
     notFoundComponent: NotFound,
-    search: { middlewares: [retainSearchParams(["plugins"])] }
+    search: {
+      middlewares: options.history ? [retainSearchParams(["plugins"])] : [retainSearchParams(["plugins"]), retainLayout]
+    }
   })
   const component = (entry: RouteEntry) => options.layouts?.[entry.id] ?? entry.component
   const children = (parentId: string, parent: AnyRoute): Array<AnyRoute> =>
@@ -138,9 +163,11 @@ export const buildRouter = (
         const nested = children(entry.id, route)
         return nested.length > 0 ? route.addChildren(nested) : route
       })
-  return createRouter({
+  const router = createRouter({
     defaultErrorComponent: RouteError,
     routeTree: rootRoute.addChildren(children("root", rootRoute)),
     ...(options.history ? { history: options.history } : {})
   })
+  if (!options.history) setLayoutHistory(router.history)
+  return router
 }

@@ -1,44 +1,33 @@
-// The desktop's resizable columns: a width each user chooses in this browser, with a minimum
-// and no maximum but the room the other columns and the middle leave (columnLayout.ts). What
-// is stored is the choice; a window too narrow for it shows less, never rewriting it.
-import { useLayoutEffect, useRef, useState } from "react"
+// The desktop's resizable columns: a width chosen in this browser tab, with a minimum and no
+// maximum but the room the other columns and the middle leave (columnLayout.ts). The choice is
+// a layout param in the tab's URL (`tabLayoutParams.ts`), whole pixels, absent at the default,
+// written once when a drag ends. A window too narrow for it shows less, never rewriting it.
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { holdLayoutWrites, useLayoutNumber, writeLayoutParam } from "../tabLayoutParams.ts"
 import { removeColumn, setColumn, useColumnWidth } from "./columnLayout.ts"
 import { Tooltip } from "./Tooltip.tsx"
 
-const read = (key: string, min: number) => {
-  try {
-    const stored = localStorage.getItem(key)
-    const value = Number(stored)
-    return stored !== null && Number.isFinite(value) && value >= min ? value : null
-  } catch {
-    return null
-  }
-}
-const write = (key: string, value: number | null) => {
-  try {
-    if (value === null) localStorage.removeItem(key)
-    else localStorage.setItem(key, String(value))
-  } catch {
-    /* In memory when storage is off. */
-  }
-}
+/** Each column's param (registered as layout params by the shell). */
+export const WIDTH_PARAMS = { sidebar: "sbw", chat: "cpw", portrait: "ptw", presetOutline: "pow" } as const
+
+const write = (key: string, value: number | null, initial: number) =>
+  writeLayoutParam(key, value === null || value === initial ? null : String(value))
 
 /**
- * A column's width: the user's choice (`rp.panelWidth.<user id>.<panel>`) or `initial`, at
+ * A column's width: the choice in this tab's URL (`WIDTH_PARAMS`) or `initial`, at
  * least `min`, shown as the room allows. `active` false (a phone's sheet) leaves the layout.
  * `initial` may change (the portrait column's follows its image) while no choice is stored.
  * `yields`: which give way first in a short window (columnLayout.ts).
  */
 export function usePanelWidth(
-  userId: string,
   panel: "sidebar" | "chat" | "portrait",
   initial: number,
   min: number,
   active = true,
   yields = 0
 ) {
-  const key = `rp.panelWidth.${userId}.${panel}`
-  const [saved, setSaved] = useState(() => read(key, min))
+  const key = WIDTH_PARAMS[panel]
+  const saved = useLayoutNumber(key, min)
   const entry = active ? { preferred: saved ?? initial, min, yields } : null
   const preferred = entry?.preferred
   useLayoutEffect(() => {
@@ -50,34 +39,26 @@ export function usePanelWidth(
     if (!active) removeColumn(panel)
   }, [active, panel])
   const { width, max } = useColumnWidth(panel, entry)
-  const change = (next: number) => {
-    const value = Math.round(Math.max(min, Math.min(max, next)))
-    setSaved(value)
-    write(key, value)
-  }
-  const reset = () => {
-    setSaved(null)
-    write(key, null)
-  }
+  const change = (next: number) => write(key, Math.round(Math.max(min, Math.min(max, next))), initial)
+  const reset = () => write(key, null, initial)
   return { width, min, max, change, reset }
 }
 
 /**
  * A column inside a page rather than beside the chat (the preset editor's outline): the
- * user's choice (`rp.panelWidth.<user id>.<panel>`) or `initial`, between `min` and `limit`,
+ * choice in this tab's URL (`WIDTH_PARAMS`) or `initial`, between `min` and `limit`,
  * and never so wide that its parent keeps less than `reserve` for the rest. It isn't one of
  * the window's columns (columnLayout.ts), so it measures its parent instead.
  */
 export function useInnerPanelWidth(
-  userId: string,
   panel: "presetOutline",
   initial: number,
   min: number,
   limit: number,
   reserve: number
 ) {
-  const key = `rp.panelWidth.${userId}.${panel}`
-  const [saved, setSaved] = useState(() => read(key, min))
+  const key = WIDTH_PARAMS[panel]
+  const saved = useLayoutNumber(key, min)
   const ref = useRef<HTMLElement>(null)
   const [available, setAvailable] = useState(window.innerWidth)
   useLayoutEffect(() => {
@@ -91,15 +72,8 @@ export function useInnerPanelWidth(
   }, [])
   const max = Math.max(min, Math.min(limit, available - reserve))
   const width = Math.max(min, Math.min(max, saved ?? initial))
-  const change = (next: number) => {
-    const value = Math.round(Math.max(min, Math.min(max, next)))
-    setSaved(value)
-    write(key, value)
-  }
-  const reset = () => {
-    setSaved(null)
-    write(key, null)
-  }
+  const change = (next: number) => write(key, Math.round(Math.max(min, Math.min(max, next))), initial)
+  const reset = () => write(key, null, initial)
   return { ref, width, min, max, change, reset }
 }
 
@@ -135,7 +109,13 @@ export function ResizeHandle({
   onChange: (width: number) => void
   onReset: () => void
 }) {
-  const drag = useRef<{ at: number; width: number } | null>(null)
+  const drag = useRef<{ at: number; width: number; release: () => void } | null>(null)
+  // A drag's widths show at once and reach the URL once, when it ends.
+  const end = () => {
+    drag.current?.release()
+    drag.current = null
+  }
+  useEffect(() => () => drag.current?.release(), [])
   const vertical = axis === "y"
   const at = (event: { clientX: number; clientY: number }) => (vertical ? event.clientY : event.clientX)
   const [less, more] = vertical ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"]
@@ -162,22 +142,19 @@ export function ResizeHandle({
           if (event.button !== 0) return
           event.preventDefault()
           event.currentTarget.focus()
-          drag.current = { at: at(event), width }
+          drag.current?.release()
+          drag.current = { at: at(event), width, release: holdLayoutWrites() }
           event.currentTarget.setPointerCapture(event.pointerId)
         }}
         onPointerMove={(event) => {
           if (drag.current) onChange(drag.current.width + (at(event) - drag.current.at) * direction)
         }}
         onPointerUp={(event) => {
-          drag.current = null
+          end()
           event.currentTarget.releasePointerCapture(event.pointerId)
         }}
-        onPointerCancel={() => {
-          drag.current = null
-        }}
-        onLostPointerCapture={() => {
-          drag.current = null
-        }}
+        onPointerCancel={end}
+        onLostPointerCapture={end}
         onDoubleClick={onReset}
         onKeyDown={(event) => {
           const step = event.shiftKey ? 40 : 10

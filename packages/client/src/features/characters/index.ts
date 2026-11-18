@@ -26,6 +26,8 @@ import { registerDefaultPersona } from "./defaultPersona.tsx"
 import { PersonaFolderSwitch } from "./personaFolder.tsx"
 import { CardChatsLink, CastChatsLink } from "./chatLinks.tsx"
 import { castMemberNavigation } from "../chat/presentation.tsx"
+import { layoutParams } from "../../tabLayoutParams.ts"
+import { FOOT_PARAMS } from "./useBranchHeight.tsx"
 
 export const register = () => {
   cardGrouping.register({ id: "forks", group: groupFamilies, control: GroupFamiliesToggle })
@@ -69,6 +71,11 @@ export const register = () => {
   sidebarFoot.register({ id: "split-chats", order: 20, component: SplitChatSection })
   // The sidebar's place belongs to the browser's URL, never to a tab (features/workbench).
   shellSearchKeys.register({ id: "characters.sidebar", keys: sidebarSearch })
+  // The sidebar foot's closed sections and heights: the browser tab's layout (tabLayoutParams.ts).
+  layoutParams.register({
+    id: "characters.sidebar-foot",
+    keys: [...Object.values(FOOT_PARAMS.open), ...Object.values(FOOT_PARAMS.height)]
+  })
   tabKinds.register({
     id: "card",
     order: 200,

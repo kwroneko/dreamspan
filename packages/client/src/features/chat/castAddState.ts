@@ -1,9 +1,10 @@
-// Whether the Cast tab's Add characters section is open, remembered per account in this
-// browser (collapsed until opened), and requests to open it from elsewhere: the speaker
-// switcher's "Add to chat" opens the Cast tab and asks for it, so the person lands on the
-// grid with its search focused rather than on a closed section. A request made before the
-// tab has loaded is taken when the section mounts; without the section (a plugin removed
-// it), a request does nothing.
+// Whether the Cast tab's Add characters section is open, a layout param in the browser tab's
+// URL (`cadd=open`, `tabLayoutParams.ts`; closed while absent), and requests to open it from
+// elsewhere: the speaker switcher's "Add to chat" opens the Cast tab and asks for it, so the
+// person lands on the grid with its search focused rather than on a closed section. A request
+// made before the tab has loaded is taken when the section mounts; without the section (a
+// plugin removed it), a request does nothing.
+import { writeLayoutParam } from "../../tabLayoutParams.ts"
 
 const listeners = new Set<() => void>()
 let requests = 0
@@ -31,21 +32,7 @@ export const takeCastAddRequest = () => {
   return Date.now() - requestedAt < FRESH_MS
 }
 
-const key = (userId: string) => `rp.castAdd.open.${userId}`
+/** The layout param (registered by the chat feature). */
+export const CAST_ADD_PARAM = "cadd"
 
-export const readCastAddOpen = (userId: string) => {
-  try {
-    return localStorage.getItem(key(userId)) === "1"
-  } catch {
-    return false
-  }
-}
-
-export const writeCastAddOpen = (userId: string, open: boolean) => {
-  try {
-    if (open) localStorage.setItem(key(userId), "1")
-    else localStorage.removeItem(key(userId))
-  } catch {
-    /* Not remembered, still applied. */
-  }
-}
+export const writeCastAddOpen = (open: boolean) => writeLayoutParam(CAST_ADD_PARAM, open ? "open" : null)
