@@ -8,6 +8,7 @@ import { SlotOutlet } from "../../slots.tsx"
 import { ChangeContextSize, contextOrigin, reserveOrigin, targetOrigin, withOrigin } from "./budgetSources.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { MergedChatRow } from "./MergedChatRow.tsx"
+import { SummaryTabs } from "./SummaryTabs.tsx"
 import { timelineBoundaries, timelineSummaries } from "./presentation.tsx"
 import type { TimelineTransformV1, TimelineInputV1, TimelineRowV1 } from "../../../../plugin-api/src/display.ts"
 import { mergeTimeline, historyTimeline, lcmTimeline } from "./timelineParts.ts"
@@ -228,6 +229,11 @@ const builtinTimelineBodies: ReadonlyArray<Parameters<typeof timelineBodies.regi
         )
       }
     }
+  },
+  {
+    id: "lcm-tabs",
+    source: import.meta.url,
+    row: (_body, _context, fields) => ({ ...fields, render: () => <SummaryTabs at="start" /> })
   },
   {
     id: "lcm-boundary",

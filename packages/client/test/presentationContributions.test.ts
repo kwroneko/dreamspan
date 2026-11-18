@@ -223,7 +223,10 @@ it("keeps the LCM divider before a coincident history divider and projects cover
         (rows, entry) => entry.transform(rows, { view, lcm, summaries, divider: 1, historyDivider: 1 }),
         messageRows(entries)
       )
+  // Summaries exist and the window starts at the first message: the Messages and Summaries tabs
+  // above it (owner, 2026-11-18).
   expect(project(false).map((row) => row.key)).toEqual([
+    "lcm-tabs",
     "slot-0",
     "lcm-boundary",
     "history-boundary",
@@ -232,13 +235,14 @@ it("keeps the LCM divider before a coincident history divider and projects cover
   ])
   const rows = project(true)
   expect(rows.map((row) => row.key)).toEqual([
+    "lcm-tabs",
     "synthetic-summary",
     "lcm-boundary",
     "history-boundary",
     "slot-1",
     "slot-2"
   ])
-  expect(rows[0]).toMatchObject({ from: 0, to: 0, lastSlotId: "slot-0" })
+  expect(rows[1]).toMatchObject({ from: 0, to: 0, lastSlotId: "slot-0" })
 })
 
 it("anchors built-in dividers to messages after an earlier plugin inserts a row", () => {

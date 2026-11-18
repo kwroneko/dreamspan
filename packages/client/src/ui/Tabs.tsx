@@ -113,3 +113,61 @@ export function Tabs<Value extends string>({
     </BaseTabs.Root>
   )
 }
+
+/**
+ * A row of tabs with no panels of its own: choosing one changes what the content beside it
+ * shows. `hang="down"` (the usual) sits on what follows, its line below and the chosen tab
+ * marked at the bottom; `hang="up"` hangs from what is above it (owner, 2026-11-18: the chat's
+ * Messages and Summaries tabs, "connected to the *top*"), its line on top, the chosen tab
+ * marked there and joined to it. Arrow keys (Home and End to the ends) choose the next tab as they move to it.
+ */
+export function TabRow<Value extends string>({
+  tabs,
+  value,
+  onValueChange,
+  label,
+  hang = "down",
+  align = "start",
+  className = ""
+}: {
+  tabs: ReadonlyArray<{
+    readonly value: Value
+    readonly label: string
+    /** What choosing it shows, in a tooltip on hover and focus. */
+    readonly description: string
+  }>
+  value: Value
+  onValueChange: (value: Value) => void
+  label: string
+  hang?: "down" | "up"
+  align?: "start" | "center"
+  className?: string
+}) {
+  const up = hang === "up"
+  return (
+    <BaseTabs.Root value={value} onValueChange={(next) => onValueChange(next as Value)} className={className}>
+      <BaseTabs.List
+        aria-label={label}
+        // No panel to read first: an arrow key shows what the next tab holds at once.
+        activateOnFocus
+        className={`flex min-w-0 flex-wrap gap-x-1 border-border ${up ? "border-t" : "border-b"} ${align === "center" ? "justify-center" : ""}`}
+      >
+        {tabs.map((tab) => (
+          <Tooltip key={tab.value} label={tab.description}>
+            <BaseTabs.Tab
+              data-layout-audit-ignore="inset: Tabs meet the line they hang from"
+              value={tab.value}
+              className={`relative px-3 py-1.5 text-sm whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-active:border-accent data-active:text-text ${
+                up
+                  ? "-mt-px rounded-b-md border-t-2 border-transparent"
+                  : "-mb-px rounded-t-md border-b-2 border-transparent"
+              }`}
+            >
+              {tab.label}
+            </BaseTabs.Tab>
+          </Tooltip>
+        ))}
+      </BaseTabs.List>
+    </BaseTabs.Root>
+  )
+}

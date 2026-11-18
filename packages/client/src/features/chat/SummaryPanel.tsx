@@ -33,7 +33,6 @@ import {
 import { ClampedText, HintBadge, LevelBadge, SummaryBadges } from "./summaryParts.tsx"
 import type { ChatSession } from "./session.ts"
 import { useCoverageRail } from "./chatViewParams.ts"
-import { TimelineToggle } from "./TimelineToggle.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { audienceName, SummaryViewer } from "./SummaryViewer.tsx"
 import { SummaryDraft } from "./summaryDraft.ts"
@@ -841,7 +840,6 @@ export function SummaryPanel({
         </Tooltip>
         {lcm.enabled ? (
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <TimelineToggle />
             <Tooltip label="See which summary covers each message, as bars beside the messages. Click one to open its summary. Chats you open next start the same way.">
               <span className="inline-flex">
                 <Switch checked={rail} onCheckedChange={setRail}>
