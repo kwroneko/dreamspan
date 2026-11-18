@@ -5,7 +5,7 @@
 import { link, mkdir, symlink, truncate, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { Effect, Fiber, Stream } from "effect"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -69,6 +69,132 @@ describe("a walk that stops at its limits", () => {
   )
 })
 
+describe("the cached figure between walks", () => {
+  const setup = async (name: string) => {
+    const root = tempDir(name)
+    await mkdir(join(root, "files", "sub"), { recursive: true })
+    await writeFile(join(root, "files", "sub", "a"), Buffer.alloc(100_000, 1))
+    let walks = 0
+    /** The next walk stops after reading the folders, until `gate.open()`. */
+    const gate: { reached: Promise<void>; open: () => void; arm: () => void } = {
+      reached: Promise.resolve(),
+      open: () => undefined,
+      arm: () => undefined
+    }
+    let armed: { reached: () => void; wait: Promise<void> } | null = null
+    gate.arm = () => {
+      let reached!: () => void
+      let open!: () => void
+      gate.reached = new Promise<void>((resolve) => (reached = resolve))
+      armed = { reached, wait: new Promise<void>((resolve) => (open = resolve)) }
+      gate.open = open
+    }
+    const quota = makeFilesQuota({
+      reader: {
+        GetAppSetting: () => Effect.succeed(null),
+        FileVersionBytes: () =>
+          Effect.promise(async () => {
+            walks++
+            const mine = armed
+            armed = null
+            if (mine) {
+              mine.reached()
+              await mine.wait
+            }
+            return 0
+          })
+      } as never,
+      writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, media: 0 }) } as never,
+      folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
+      defaultBytes: 10 * 2 ** 30
+    })
+    return { quota, walks: () => walks, gate, root }
+  }
+
+  it.live("reading usage again walks nothing; writes raise it and frees lower it", () =>
+    Effect.gen(function* () {
+      const { quota, walks } = yield* Effect.promise(() => setup("quota-cached"))
+      const first = yield* quota.usage("u")
+      yield* quota.usage("u")
+      yield* quota.usage("u")
+      assert.strictEqual(walks(), 1)
+      quota.wrote("u", 5_000)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, first.usedBytes + 5_000)
+      quota.freed("u", 30_000)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, first.usedBytes - 25_000)
+      // A removal that didn't happen gives it back; it never goes below nothing.
+      quota.unfreed("u", 30_000, quota.epochOf("u"))
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, first.usedBytes + 5_000)
+      quota.freed("u", 10 * 2 ** 30)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, 0)
+      assert.strictEqual(walks(), 1)
+      // A measurement sees the folder itself and drops both.
+      const measured = yield* quota.measure("u")
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes)
+    })
+  )
+
+  it.live("a walk keeps what landed while it ran, and drops what it began with", () =>
+    Effect.gen(function* () {
+      const { quota, gate } = yield* Effect.promise(() => setup("quota-race"))
+      yield* quota.usage("u")
+      quota.wrote("u", 500)
+      gate.arm()
+      const walking = yield* Effect.forkChild(quota.measure("u"))
+      yield* Effect.promise(() => gate.reached)
+      // A write that lands after the walk read the folders is in no figure the walk makes.
+      quota.wrote("u", 1_000)
+      gate.open()
+      const measured = yield* Fiber.join(walking)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes + 1_000)
+    })
+  )
+
+  it.live("a command's walk starts after the command, not joined from before it", () =>
+    Effect.gen(function* () {
+      const { quota, gate, root, walks } = yield* Effect.promise(() => setup("quota-command"))
+      const before = yield* quota.usage("u")
+      gate.arm()
+      const sweeping = yield* Effect.forkChild(quota.measure("u"))
+      yield* Effect.promise(() => gate.reached)
+      // The command writes its output while the sweep is mid-walk.
+      yield* Effect.promise(() => writeFile(join(root, "files", "out.bin"), Buffer.alloc(300_000, 2)))
+      const after = yield* Effect.forkChild(quota.afterCommand("u"))
+      gate.open()
+      yield* Fiber.join(sweeping)
+      yield* Fiber.join(after)
+      assert.strictEqual(walks(), 3)
+      assert.isAtLeast((yield* quota.usage("u")).usedBytes, before.usedBytes + 300_000)
+    })
+  )
+
+  it.live("a give-back after a walk has nothing left to undo", () =>
+    Effect.gen(function* () {
+      const { quota } = yield* Effect.promise(() => setup("quota-epoch"))
+      const first = yield* quota.usage("u")
+      const epoch = quota.epochOf("u")
+      assert.isTrue(quota.reserve("u", 1_000, first.usedBytes + 10_000))
+      yield* quota.measure("u")
+      quota.wrote("u", 700)
+      const measured = yield* quota.usage("u")
+      quota.release("u", 1_000, epoch)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes)
+      quota.release("u", 300, quota.epochOf("u"))
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes - 300)
+    })
+  )
+
+  it.live("freed room is room for a streaming write", () =>
+    Effect.gen(function* () {
+      const { quota } = yield* Effect.promise(() => setup("quota-room"))
+      const now = yield* quota.usage("u")
+      assert.isFalse(quota.reserve("u", 1_000, now.usedBytes))
+      quota.freed("u", 2_000)
+      assert.isTrue(quota.reserve("u", 1_000, now.usedBytes))
+    })
+  )
+})
+
 describe("measuring", () => {
   it("reads sizes with binary units", () => {
     assert.strictEqual(parseByteSize("10G"), 10 * 2 ** 30)
@@ -96,6 +222,9 @@ describe("measuring", () => {
       assert.isFalse(measured.partial)
       assert.isAtLeast(measured.bytes, 2 ** 30 + 2 ** 20)
       assert.isBelow(measured.bytes, 2 ** 30 + 2 * 2 ** 20)
+      // What deleting frees for sure leaves out a file another link keeps.
+      const sole = await measureTree(root, undefined, undefined, true)
+      assert.isBelow(sole.bytes, measured.bytes - 2 ** 20 + 4096 * 4)
       const missing = await measureTree(join(root, "nothing"))
       assert.strictEqual(missing.bytes, 0)
       const cut = await measureTree(root, 2)

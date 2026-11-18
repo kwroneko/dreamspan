@@ -7,7 +7,7 @@ import { join } from "node:path"
 import type { FolderListing } from "@rp/shared/files.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
-import { serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
 
 const call = (path: string, init?: RequestInit) =>
   Effect.gen(function* () {
@@ -259,6 +259,89 @@ describe("file routes", () => {
       // Replacing a file counts only what it adds.
       const replaced = yield* upload("/files/a.bin", bytes(700_000), "replace")
       assert.strictEqual(replaced.status, 200, yield* body(replaced))
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("deleting a folder gives its room back without a new walk; a deleted file's version still counts", () => {
+    const config = testConfig({ filesQuota: "1M" })
+    const bytes = (size: number) => "x".repeat(size)
+    return Effect.gen(function* () {
+      assert.strictEqual((yield* upload("/files/a.bin", bytes(500_000))).status, 200)
+      for (const name of ["x", "y", "z"]) assert.strictEqual((yield* upload(`/files/dir/${name}.bin`, bytes(150_000))).status, 200)
+      assert.strictEqual((yield* upload("/files/more.bin", bytes(200_000))).status, 507)
+      // A folder's files aren't versioned: all they hold comes off the figure at once.
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/dir" })).status, 200)
+      assert.strictEqual((yield* upload("/files/b.bin", bytes(400_000))).status, 200)
+      // A deleted file's kept version holds its bytes: no room comes back (and none is claimed).
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/b.bin" })).status, 200)
+      assert.strictEqual((yield* upload("/files/c.bin", bytes(200_000))).status, 507)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("the cached figure follows replaces, folders and refused uploads, and a refresh walks nothing", () => {
+    const config = testConfig({ filesQuota: "2M" })
+    const bytes = (size: number) => "x".repeat(size)
+    const streamed = (path: string, size: number) =>
+      Effect.gen(function* () {
+        const port = yield* serverPort
+        return yield* Effect.promise(async () => {
+          const chunk = new Uint8Array(64 * 1024).fill(120)
+          let sent = 0
+          const stream = new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (sent >= size) return controller.close()
+              sent += chunk.byteLength
+              controller.enqueue(chunk)
+            }
+          })
+          const response = await fetch(`http://127.0.0.1:${port}/files/upload?${new URLSearchParams({ path })}`, {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body: stream,
+            duplex: "half"
+          } as RequestInit)
+          return response.status
+        })
+      })
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const cached = api.GetFilesUsage({})
+      const walked = api.GetFilesUsage({ fresh: true })
+      /** The cached figure is the walk's, to the byte (a version counts once, as in the walk). */
+      const agrees = Effect.gen(function* () {
+        const figure = yield* cached
+        const truth = yield* walked
+        assert.strictEqual(figure.usedBytes, truth.usedBytes)
+      })
+      // The account's folders are made by its first request; the baseline walk comes after.
+      assert.strictEqual((yield* upload("/files/warm.bin", "w")).status, 200)
+      yield* walked
+      assert.strictEqual((yield* upload("/files/r.bin", bytes(300_000))).status, 200)
+      yield* agrees
+      // Replaced by a smaller file, then a larger one.
+      assert.strictEqual((yield* upload("/files/r.bin", bytes(100_000), "replace")).status, 200)
+      yield* agrees
+      assert.strictEqual((yield* upload("/files/r.bin", bytes(250_000), "replace")).status, 200)
+      yield* agrees
+      // A plain refresh and a delete read the figure without walking.
+      const first = yield* cached
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/r.bin" })).status, 200)
+      const second = yield* cached
+      assert.strictEqual((yield* cached).measuredAt, first.measuredAt)
+      assert.strictEqual(second.measuredAt, first.measuredAt)
+      yield* agrees
+      // New folders (made directly, or as an upload's parents) count, never under.
+      const beforeFolders = yield* cached
+      assert.strictEqual((yield* json("/files/folder", { path: "/files/one" })).status, 200)
+      assert.strictEqual((yield* upload("/files/two/three/f.bin", bytes(1_000))).status, 200)
+      const withFolders = yield* cached
+      assert.isAbove(withFolders.usedBytes, beforeFolders.usedBytes + 1_000)
+      assert.isAtLeast(withFolders.usedBytes, (yield* walked).usedBytes)
+      // A refused upload leaves the figure where it was.
+      assert.strictEqual((yield* upload("/files/a.bin", bytes(1_000_000))).status, 200)
+      const beforeRefused = yield* cached
+      assert.strictEqual(yield* streamed("/files/c.bin", 1_500_000), 507)
+      assert.strictEqual((yield* cached).usedBytes, beforeRefused.usedBytes)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 })
