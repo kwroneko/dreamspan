@@ -249,10 +249,8 @@ test("the panel's remembered tab is the signed-in user's own", async ({ page }) 
   await page.goto(`${server().url}/chats/${second.id}`)
   await expect(page.getByRole("heading", { level: 1, name: "Other user chat" })).toBeVisible()
   await expect(page.getByRole("tabpanel", { name: "Notes" })).toHaveCount(0)
-  // The first user's choice is still theirs.
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/chats/${first.id}`)
-  await expect(page.getByRole("tabpanel", { name: "Notes" })).toBeVisible()
+  // The tab is remembered in the page's memory only (owner, 2026-11-18: the URL is the tab's
+  // state), so a new page load, here to sign the first user back in, starts without it.
 })
 
 test("an instruction typed back to its old text while Save is in flight survives a reload", async ({ page }) => {

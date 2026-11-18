@@ -138,7 +138,7 @@ export const holdLayoutWrites = () => {
 
 /**
  * Runs `write` (a URL write of a page's own, a portrait's size) now, or while a drag holds
- * writes, once it ends: only the last one given for `key`.
+ * writes, once it ends: only the last one given for `key` (so each writer keys its own).
  */
 export const whenDragEnds = (key: string, write: () => void) => {
   if (held === 0) write()

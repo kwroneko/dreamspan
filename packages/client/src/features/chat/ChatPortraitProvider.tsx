@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useId, useState } from "react"
 import { Effect } from "effect"
 import { galleryPortraits, galleryRef } from "../gallery/portraits.ts"
 import { useCaller } from "../editor/caller.ts"
@@ -73,6 +73,7 @@ export function ChatPortraitProvider({
   // (`portraitSizes`, each workbench tab its own), written once a drag of a boundary ends;
   // meanwhile the drag's shares show from `dragging`.
   const [savedWeights, setSavedWeights] = usePlaceValue("portraitSizes")
+  const writeKey = useId()
   const [dragging, setDragging] = useState<Record<string, number> | null>(null)
   const weights = dragging ?? decodeWeights(savedWeights)
   const portraits = [...new Set(ids)].flatMap((id) => {
@@ -98,11 +99,14 @@ export function ChatPortraitProvider({
     }))
     const nextIds = next.map((e) => e.portrait.id)
     if (JSON.stringify(nextIds) !== JSON.stringify(ids)) setIds(nextIds)
-    // Only the portraits shown, rounded: equal shares are the default and leave the URL.
+    // Only the portraits shown, rounded: the default share (1 each) leaves the URL. Not merely
+    // equal shares: the column stacks every workbench frame's portraits, so a frame's lone
+    // portrait at 0.9 is a share against another frame's, and must stay.
     const nextWeights = Object.fromEntries(next.map((e) => [e.portrait.id, Math.round(e.weight * 1000) / 1000]))
-    const even = Object.values(nextWeights).every((w, _, all) => w === all[0])
+    const even = Object.values(nextWeights).every((w) => w === 1)
     setDragging(nextWeights)
-    whenDragEnds("portraitSizes", () => {
+    // Keyed by this provider: one drag changes every frame's share, and each frame writes its own.
+    whenDragEnds(`portraitSizes:${writeKey}`, () => {
       setSavedWeights(() => (even ? undefined : nextWeights))
       setDragging(null)
     })
