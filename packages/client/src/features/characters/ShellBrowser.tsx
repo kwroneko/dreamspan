@@ -50,6 +50,7 @@ import { WindowedList } from "../../ui/WindowedList.tsx"
 import { listNames } from "../chat/cast.ts"
 import { chatRowAbout } from "../chat/presentation.tsx"
 import { KindBadge } from "../chat/KindBadge.tsx"
+import { TextThenBadges } from "../chat/RowBadges.tsx"
 import { kindRowProps, useChatKindLook } from "../chat/kindLooks.ts"
 import { SidebarFeet, useBranchHeight } from "./useBranchHeight.tsx"
 import {
@@ -307,12 +308,11 @@ function BranchListRow({ fork, here, open }: { fork: ShellFork; here: boolean; o
       <span className="line-clamp-2 min-h-8 text-xs text-muted [overflow-wrap:anywhere]">
         {fork.preview || "No messages yet"}
       </span>
-      {/* A workshop's badge beside the date, never in the title's line (owner, 2026-11-18). */}
-      <span data-row-when className="flex min-w-0 items-start gap-1.5 text-xs text-muted">
-        <span className="min-w-0 [overflow-wrap:anywhere]">
-          Last message {formatMoment(fork.endAt ?? fork.createdAt)}
-        </span>
-        <KindBadge kind={fork.chat.kind} size="sm" />
+      {/* A workshop's badge right after the date, never in the title's line (owner, 2026-11-18). */}
+      <span data-row-when className="block text-xs text-muted [overflow-wrap:anywhere]">
+        <TextThenBadges text={`Last message ${formatMoment(fork.endAt ?? fork.createdAt)}`}>
+          <KindBadge kind={fork.chat.kind} size="sm" />
+        </TextThenBadges>
       </span>
     </>
   )
@@ -673,12 +673,6 @@ export function ForkRow({
                   <span className="font-medium">
                     {nameless ? <PlaceholderBar className="inline-block w-32 align-middle" /> : title}
                   </span>
-                  {opensHere && (
-                    <>
-                      {" "}
-                      <Badge>opens here</Badge>
-                    </>
-                  )}
                 </span>
                 {branchLine !== null && (
                   <span
@@ -730,14 +724,17 @@ export function ForkRow({
                     <PlaceholderBar className="w-24" />
                   </span>
                 ) : (
-                  // A workshop's badge on the date's line, out of the title's flow, so the title
-                  // wraps and clamps as a story chat's does and the row is no taller (owner, 2026-11-18).
-                  <span data-row-when className="mt-auto flex min-w-0 items-start gap-1.5 text-xs text-muted">
-                    <span className="min-w-0">
-                      {perFork ? "Last message " : ""}
-                      {perFork ? formatMoment(last) : formatWhen(last)}
-                    </span>
-                    <KindBadge kind={fork.chat.kind} inLink size="sm" />
+                  // The badges (Workshop, opens here) right after the date, out of the title's flow, so
+                  // the title wraps and clamps as any other's and the row is no taller (owner, 2026-11-18).
+                  <span data-row-when className="mt-auto block text-xs text-muted">
+                    <TextThenBadges text={perFork ? `Last message ${formatMoment(last)}` : formatWhen(last)}>
+                      <KindBadge kind={fork.chat.kind} inLink size="sm" />
+                      {opensHere && (
+                        <span data-opens-here className="inline-flex align-top">
+                          <Badge size="sm">opens here</Badge>
+                        </span>
+                      )}
+                    </TextThenBadges>
                   </span>
                 )}
               </span>

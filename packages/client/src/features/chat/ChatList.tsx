@@ -26,6 +26,7 @@ import { chatName, formatDay, formatWhen } from "./chatTitle.ts"
 import { chatRowAbout } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { KindBadge } from "./KindBadge.tsx"
+import { TextThenBadges } from "./RowBadges.tsx"
 import { kindRowProps, useChatKindLook } from "./kindLooks.ts"
 
 const PAGE = 50
@@ -133,17 +134,20 @@ function Row({
             </span>
             {/* What tells two chats of the same cast apart, on a line of its own so it's never cut off. */}
             {/* A workshop's badge beside it, out of the title's line (owner, 2026-11-18). */}
-            <span data-chat-meta className="flex min-w-0 items-start gap-1.5 text-xs text-muted">
-              <span className="min-w-0">
-                <span>started {formatDay(name.started ?? new Date(chat.createdAt))}</span>
-                {summary && (
-                  <>
-                    {" · "}
-                    <span className="whitespace-nowrap">{plural(summary.messages, "message")}</span>
-                  </>
-                )}
-              </span>
-              <KindBadge kind={chat.kind} inLink size="sm" />
+            <span data-chat-meta className="block text-xs text-muted">
+              {summary ? (
+                <>
+                  <span>started {formatDay(name.started ?? new Date(chat.createdAt))}</span>
+                  {" · "}
+                  <TextThenBadges text={plural(summary.messages, "message")} whole>
+                    <KindBadge kind={chat.kind} inLink size="sm" />
+                  </TextThenBadges>
+                </>
+              ) : (
+                <TextThenBadges text={`started ${formatDay(name.started ?? new Date(chat.createdAt))}`}>
+                  <KindBadge kind={chat.kind} inLink size="sm" />
+                </TextThenBadges>
+              )}
             </span>
             {others.length > 0 && (
               <span
