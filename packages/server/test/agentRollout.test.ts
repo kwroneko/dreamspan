@@ -8,7 +8,8 @@ import { Deferred, Effect, Fiber } from "effect"
 import { DatabaseSync } from "node:sqlite"
 import type { ServerResponse } from "node:http"
 import { databaseFile } from "../src/db/connection.ts"
-import { SEND_NUDGE, WRITE_NOW } from "../src/agent/session.ts"
+import { WRITE_NOW } from "../src/agent/session.ts"
+import { sendNudgeText } from "@rp/shared/agentInstructions.ts"
 import { agentInstructions } from "../src/agent/modes.ts"
 import { ExecutionRegistry } from "../src/execution.ts"
 import type { RolloutTool } from "../src/agent/tools.ts"
@@ -90,6 +91,9 @@ const scripted = (request: Recorded, res: ServerResponse) => {
   } else sse(res, toolCallChunks("look_up", { topic: "lighthouse" }, "Let me check."))
 }
 
+/** The nudge a custom plan without the pass gets (spec/REPLY-CONTRACT.md §3.3). */
+const SEND_NUDGE = sendNudgeText(false)
+
 describe("agent rollouts", () => {
   it.live("Tools settings affect the next reply on their branch without changing an earlier run", () => {
     const config = testConfig()
@@ -127,7 +131,7 @@ describe("agent rollouts", () => {
       assert.notProperty(bodies[0], "tools")
       assert.deepStrictEqual(
         (bodies.at(-1)!.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
-        ["send_message"]
+        ["send_message", "no_reply"]
       )
       assert.isEmpty((yield* api.GetRunTranscript({ versionId: version.id })).tools)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
@@ -251,7 +255,11 @@ describe("agent rollouts", () => {
       const { version, events } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {},
-        state: [{ key: "agent.enabled", value: { on: true } }]
+        // Text streams into the body only where it may be the reply.
+        state: [
+          { key: "agent.enabled", value: { on: true } },
+          { key: "output.contract", value: "both" }
+        ]
       })
       // An agent reply without steps still says it is one, so it can be resumed.
       assert.strictEqual(version.agent, true)
@@ -550,7 +558,10 @@ describe("agent rollouts", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: { prefill: "tool_schema" },
         preset: { assistant_prefill: "Hm." },
-        state: [{ key: "agent.enabled", value: { on: true } }]
+        state: [
+          { key: "agent.enabled", value: { on: true } },
+          { key: "output.contract", value: "both" }
+        ]
       })
       assert.strictEqual(version.status, "complete")
       assert.strictEqual(version.content, "Done.")
@@ -786,7 +797,7 @@ describe("agent rollouts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("send_message: a reply written as text is asked once to be sent", () => {
+  it.live("send_message: a reply written as text is asked to be sent, and never streams into the body", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const registry = yield* ExecutionRegistry
@@ -812,7 +823,8 @@ describe("agent rollouts", () => {
         state: [{ key: "agent.enabled", value: { on: true } }]
       })
       assert.strictEqual(version.content, "Sent words.")
-      assert.isTrue(events.some((e) => e._tag === "Delta" && e.versionId === version.id && e.replace === true))
+      // The text was never the reply (spec/REPLY-CONTRACT.md §3.2): it didn't stream, so nothing restarted.
+      assert.isFalse(events.some((e) => e._tag === "Delta" && e.versionId === version.id && e.text.includes("Plain")))
       const bodies = mock
         .requests()
         .filter((r) => r.path === "/v1/chat/completions")
@@ -823,6 +835,11 @@ describe("agent rollouts", () => {
         { role: "assistant", content: "Plain words." },
         { role: "user", content: SEND_NUDGE }
       ])
+      // The app's ask is labelled as a nudge in the run inspector.
+      assert.deepInclude(
+        (yield* api.GetRunTranscript({ versionId: version.id })).entries.find((e) => e.role === "app"),
+        { text: SEND_NUDGE, nudge: 1 }
+      )
       // The plain turn the app asked to be sent is a step: what the model wrote, then sent.
       assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
         { kind: "text", text: "Plain words." }
@@ -907,14 +924,14 @@ describe("agent rollouts", () => {
       ]
       assert.deepStrictEqual(
         (first!.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
-        [...offered, "send_message"]
+        [...offered, "send_message", "no_reply"]
       )
       const last = (first!.messages as Array<{ role: string; content: string }>).at(-1)!
       assert.strictEqual(last.role, "user")
-      assert.isTrue(last.content.endsWith(`\n${agentInstructions(offered, "both")}`), last.content)
+      assert.isTrue(last.content.endsWith(`\n${agentInstructions(offered, "send_message")}`), last.content)
       const db = read(config.dataDir, version.id)
       assert.deepStrictEqual(db.snapshot.agentAssembly, {
-        instructions: agentInstructions(offered, "both"),
+        instructions: agentInstructions(offered, "send_message"),
         speakerCardOnly: false
       })
       const reader = yield* Reader
@@ -955,7 +972,7 @@ describe("agent rollouts", () => {
         .map((r) => r.body!)
       assert.deepStrictEqual(
         (first!.tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
-        ["look_up", "send_message"]
+        ["look_up", "send_message", "no_reply"]
       )
       const messages = first!.messages as Array<{ role: string; content: string }>
       const card = messages.flatMap((m, i) => (m.content.includes("keeps the ledger") ? [i] : []))
@@ -963,7 +980,7 @@ describe("agent rollouts", () => {
       assert.strictEqual(card.length, 1)
       assert.isBelow(card[0]!, messages.length - 2, "the card isn't moved to the end of the request")
       assert.notInclude(messages.at(-2)!.content, "keeps the ledger")
-      assert.include(messages.at(-1)!.content, agentInstructions(["look_up"], "both"))
+      assert.include(messages.at(-1)!.content, agentInstructions(["look_up"], "send_message"))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

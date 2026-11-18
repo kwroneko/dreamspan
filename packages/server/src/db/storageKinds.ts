@@ -97,7 +97,8 @@ export const storageKinds = makeRegistry<StorageKind>([
   },
   {
     id: "versions.mark",
-    values: ["refused"]
+    // `silent`: a pass (`no_reply`, spec/REPLY-CONTRACT.md §3.1).
+    values: ["refused", "silent"]
   },
   {
     id: "version_attachments.kind",

@@ -111,7 +111,9 @@ const story = (handler: (request: Recorded, res: ServerResponse) => void) =>
       model: {},
       state: [
         { key: "agent.enabled", value: { on: true } },
-        { key: "agent.tools", value: { tools: [] } }
+        { key: "agent.tools", value: { tools: [] } },
+        // The replies here end in plain text: the contract that takes it.
+        { key: "output.contract", value: "both" }
       ]
     })
     yield* eventually(() => finished(events, version.id) !== undefined)

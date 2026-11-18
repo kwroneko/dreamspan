@@ -228,8 +228,11 @@ export const TranscriptEntry = Schema.Union([
     /** Its call's step, whose result it is. */
     ...StepIndex
   }),
-  /** A message the app sent the model (a nudge to send the reply, the turn cap's last word). */
-  Schema.Struct({ role: Schema.Literal("app"), text: Schema.String })
+  /**
+   * A message the app sent the model (a nudge to send the reply, the turn cap's last word).
+   * `nudge`: the run's nth ask to send the reply (spec/REPLY-CONTRACT.md §3.3).
+   */
+  Schema.Struct({ role: Schema.Literal("app"), text: Schema.String, nudge: Schema.optionalKey(Schema.Int) })
 ])
 export type TranscriptEntry = typeof TranscriptEntry.Type
 

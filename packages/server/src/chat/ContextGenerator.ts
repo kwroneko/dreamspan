@@ -38,6 +38,7 @@ import {
   type FrozenTool,
   frozenTool,
   type RolloutTool,
+  noReplyDefinition,
   sendMessageDefinition,
   sendMessageWithPresence,
   severalMessageDefinition,
@@ -222,6 +223,7 @@ export const layer = Layer.effect(
               ...(frozen.turnCap === undefined ? {} : { turnCap: frozen.turnCap })
             },
             mode: frozen.mode,
+            ...(snapshot.sendNudge === undefined ? {} : { sendNudge: snapshot.sendNudge }),
             checkpoints: (snapshot as ContinuousSnapshot).continuity?.breakpoints ?? [],
             recentPrefix: ((snapshot as ContinuousSnapshot).continuity?.prefix ?? snapshot).lcm?.measure?.recentNow,
             allowsOutside: profile.allowsOutside,
@@ -541,7 +543,9 @@ export const layer = Layer.effect(
                     ? severalMessageDefinition
                     : plan.sendPresence
                       ? sendMessageWithPresence(plan.sendPresence)
-                      : sendMessageDefinition
+                      : sendMessageDefinition,
+                  // The pass beside the send (spec/REPLY-CONTRACT.md §3.1), frozen with it for Resume.
+                  ...(plan.noReply && plan.contract === "send_message" ? [noReplyDefinition] : [])
                 ]
           const frozenTools: ReadonlyArray<FrozenTool> = [
             ...frozenOffer(offer.tools, offer.deferred, frozenTool),
@@ -806,6 +810,7 @@ export const layer = Layer.effect(
               ? {
                   agent: {
                     plan,
+                    ...(snapshot.sendNudge === undefined ? {} : { sendNudge: snapshot.sendNudge }),
                     ...(seed ? { resume: { transcript: seed, historical: continuity?.historical ?? 0 } } : {}),
                     mode: planned.mode,
                     checkpoints: continuity?.breakpoints ?? [],

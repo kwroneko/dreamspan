@@ -487,6 +487,17 @@ const SETTINGS: ReadonlyArray<{
     explanation: `${NEXT}, replies say who is in the scene either optionally, always, or not at all.`
   },
   {
+    id: "output-contract",
+    label: "How the reply is given",
+    value: (state) =>
+      state.outputContract === "final_text"
+        ? "plain answer"
+        : state.outputContract === "both" || state.outputContract === "several"
+          ? "either"
+          : "send tool",
+    explanation: `${NEXT}, a reply that uses tools is either a message it sends, its last answer, or either one.`
+  },
+  {
     id: "request-cap",
     label: "Model requests per reply",
     value: (state) => `at most ${state.requestCap ?? DEFAULT_REQUEST_CAP}`,
@@ -542,6 +553,7 @@ const settingsKind = folded({
     "agent.enabled",
     "agent.send_presence",
     "agent.request_cap",
+    "output.contract",
     "decision.points",
     "roles.projection",
     "merge.layout",

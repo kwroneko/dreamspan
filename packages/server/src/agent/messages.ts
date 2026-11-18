@@ -13,8 +13,17 @@ declare module "@earendil-works/pi-agent-core" {
       readonly message: import("../assembler/types.ts").RequestMessage
       readonly timestamp: number
     }
-    /** A message the app adds (the turn cap's "write now"), sent as the user's and labelled as the app's. */
-    rpHarness: { readonly role: "rpHarness"; readonly content: string; readonly timestamp: number }
+    /**
+     * A message the app adds (the turn cap's "write now", a nudge to send the reply), sent as the
+     * user's and labelled as the app's. `nudge`: the run's nth ask to send (spec/REPLY-CONTRACT.md
+     * §3.3), counted from the transcript so a resumed run goes on with the count.
+     */
+    rpHarness: {
+      readonly role: "rpHarness"
+      readonly content: string
+      readonly timestamp: number
+      readonly nudge?: number
+    }
   }
 }
 
@@ -37,3 +46,11 @@ export const liveSuffix = (messages: ReadonlyArray<AgentMessage | Message>): Arr
       return []
     })
 }
+
+/** How many times this run has been asked to send its reply: the nudges in its transcript. */
+export const nudgesIn = (messages: ReadonlyArray<AgentMessage>) =>
+  messages.filter((m) => m.role === "rpHarness" && typeof (m as { nudge?: unknown }).nudge === "number").length
+
+/** Whether `message` is one of the app's asks to send the reply. */
+export const isNudge = (message: AgentMessage | undefined) =>
+  message?.role === "rpHarness" && typeof (message as { nudge?: unknown }).nudge === "number"

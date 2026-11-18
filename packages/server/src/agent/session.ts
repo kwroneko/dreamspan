@@ -31,7 +31,8 @@ import type { ReplyOutputStrategy } from "../chat/replyOutput.ts"
 import type { Providers, ProviderError } from "../providers/Providers.ts"
 import { ProviderRegistry } from "../providers/registry.ts"
 import type { AgentPlan } from "./modes.ts"
-import { countSteps, SEND_MESSAGE, stepsOf } from "./steps.ts"
+import { countSteps, NO_REPLY, SEND_MESSAGE, stepsOf } from "./steps.ts"
+import { SEND_NUDGES, sendNudgeText } from "@rp/shared/agentInstructions.ts"
 import { danglingCalls } from "./resume.ts"
 import type { ApprovalPrompt, SubagentRow } from "@rp/shared/agent.ts"
 import type { PermitInput, PermitResult } from "./approvals.ts"
@@ -59,7 +60,7 @@ import {
   missingTool,
   resolveDispatch
 } from "./dispatcher.ts"
-import { liveSuffix } from "./messages.ts"
+import { liveSuffix, nudgesIn } from "./messages.ts"
 import { loadedSet, loadPoints, type Skill, type ToolLoadingWire } from "./toolLoading.ts"
 import { executionRegistry } from "../execution.ts"
 
@@ -84,6 +85,11 @@ export interface AgentRun {
   readonly cardSkills?: ReadonlyArray<Skill>
   /** How this model's wire API carries deferred tools; absent: every tool is sent from the start. */
   readonly loadingWire?: ToolLoadingWire
+  /**
+   * The preset's own "When the reply wasn't sent" text, frozen with the run's snapshot
+   * (spec/REPLY-CONTRACT.md §3.3); absent: the default.
+   */
+  readonly sendNudge?: string
   /** Carrying on a stopped run (resume.ts): its kept transcript, and text cut off to continue. */
   readonly resume?: {
     readonly transcript: ReadonlyArray<unknown>
@@ -115,7 +121,15 @@ export interface AgentStrategyInput {
 
 export const WRITE_NOW = "Write the reply now."
 
-export const SEND_NUDGE = "Send your reply with send_message."
+/**
+ * What a reply that never sent fails with (spec/REPLY-CONTRACT.md §3.4): `times` plain turns,
+ * the nudges' and the first. Resume and Regenerate are offered on it.
+ */
+export const contractFailure = (times: number) =>
+  new GenerationFailed({
+    class: "contract",
+    message: `The model didn't send a reply: it wrote text ${times} times without calling send_message.`
+  })
 
 /** A tool result's `details` when a stop cut the call off: resume runs the call again. */
 const INTERRUPTED = { interrupted: true } as const
@@ -135,7 +149,7 @@ const PARTIAL_SAVE_MS = 2000
  */
 const sendMessageTool = (
   definition: FrozenTool,
-  send: { readonly sent: () => boolean; readonly take: (message: string) => boolean },
+  send: { readonly sent: () => boolean; readonly take: (message: string) => boolean; readonly passed?: () => boolean },
   declare?: (toolCallId: string, present: ReadonlyArray<string>) => Promise<string | null>
 ): AgentTool => {
   const presence = sendPresenceOf(definition)
@@ -148,6 +162,7 @@ const sendMessageTool = (
     executionMode: "sequential",
     execute: async (id, params) => {
       const { message, present } = params as { message: string; present?: unknown }
+      if (send.passed?.()) return refuse("You passed this turn with no_reply: nothing more is sent.")
       if (send.sent()) return refuse("Only one message a turn: the first one was sent.")
       if (presence !== null && declare) {
         const names = Array.isArray(present) && present.every((name) => typeof name === "string") ? present : null
@@ -165,6 +180,29 @@ const sendMessageTool = (
     }
   }
 }
+
+/**
+ * The pass (spec/REPLY-CONTRACT.md §3.1): the character says nothing this turn. It ends the turn
+ * like a send; after a send, or a second time, it's refused.
+ */
+const noReplyTool = (
+  definition: FrozenTool,
+  pass: { readonly sent: () => boolean; readonly take: () => boolean }
+): AgentTool => ({
+  name: definition.name,
+  label: definition.label,
+  description: definition.description,
+  parameters: definition.parameters as AgentTool["parameters"],
+  executionMode: "sequential",
+  execute: async () =>
+    !pass.sent() && pass.take()
+      ? { content: [{ type: "text", text: "Passed." }], details: null, terminate: true }
+      : {
+          content: [{ type: "text", text: "The reply has already been given this turn." }],
+          details: null,
+          isError: true
+        }
+})
 
 /** A send that had to say who is present and didn't, or said it as something other than names. */
 const PRESENT_NEEDED =
@@ -226,12 +264,34 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       let working = { slotId: request.slotId, versionId: request.versionId }
       const historical = run.resume?.historical ?? 0
       let sent: string | undefined
+      /** The character passed (`no_reply`): the version is the silent line. */
+      let passed = false
       const send = (message: string) => {
-        if (sent !== undefined) return false
+        if (sent !== undefined || passed) return false
         sent = message
         emit(message)
         return true
       }
+      const pass = () => {
+        if (sent !== undefined || passed) return false
+        passed = true
+        // Anything streamed meanwhile (the pass's own thinking stays as the version's reasoning).
+        emit({ silent: true })
+        return true
+      }
+      /** Under the send tool alone, text is never the reply (§3.2): it shows in Steps, not the body. */
+      const sendOnly = plan.contract === "send_message"
+      /** The pass, where the snapshot froze it beside the send tool. */
+      const passDefinition = sendOnly ? run.offered?.find((t) => t.name === NO_REPLY) : undefined
+      const passTool = passDefinition
+        ? noReplyTool(passDefinition, { sent: () => sent !== undefined || passed, take: pass })
+        : undefined
+      /** The ask to send, as the preset words it or by default (§3.3). */
+      const nudgeText = run.sendNudge ?? sendNudgeText(passTool !== undefined)
+      /** Set when the nudges ran out: the version fails with the contract's message (§3.4). */
+      let exhausted: GenerationFailed | undefined
+      /** A nudge the next request answers, appended after the failed turn. */
+      let pendingNudge: number | undefined
       const sendTool: AgentTool = several
         ? {
             ...(run.offered?.find((t) => t.name === SEND_MESSAGE) ?? severalMessageDefinition),
@@ -278,13 +338,13 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         : sendMessageTool(
             // What the snapshot froze, so a resume offers and reads the same tool.
             run.offered?.find((t) => t.name === SEND_MESSAGE) ?? sendMessageDefinition,
-            { sent: () => sent !== undefined, take: send },
+            { sent: () => sent !== undefined, take: send, passed: () => passed },
             (id, present) =>
               runPromise(declarePresence(context(id), present)).catch(() => "Who is present could not be saved.")
           )
       // A resume offers the definitions its snapshot froze, exactly as they were sent.
       const frozen = (run.offered ?? tools.map(frozenTool)).filter(
-        (t) => t.name !== SEND_MESSAGE && t.name !== CALL_TOOL
+        (t) => t.name !== SEND_MESSAGE && t.name !== CALL_TOOL && t.name !== NO_REPLY
       )
       // Deferred tools (spec/TOOL-LOADING.md): declared from the first request where the wire API
       // declares them (Anthropic), else sent only at their load points (Responses). Without a wire
@@ -299,6 +359,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       let piTools: ReadonlyArray<Tool> = [
         ...frozen.filter((t) => !deferred.has(t.name)).map(definition),
         ...(sends ? [{ name: sendTool.name, description: sendTool.description, parameters: sendTool.parameters }] : []),
+        ...(passTool
+          ? [{ name: passTool.name, description: passTool.description, parameters: passTool.parameters }]
+          : []),
         ...(loadingWire?.declaresDeferred ? frozen.filter((t) => deferred.has(t.name)).map(definition) : [])
       ]
       const dispatch = loadingWire?.dispatcher === true && deferred.size > 0
@@ -433,7 +496,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                     done = event.message
                     rawArguments = event.toolArguments
                   } else if (event.type === "toolcall") {
-                    const sending = sends && event.name === SEND_MESSAGE && !last
+                    const sending = sends && (event.name === SEND_MESSAGE || event.name === NO_REPLY) && !last
                     // Thinking before the message is the message's reasoning; text before any
                     // call, or thinking before another tool, was a step.
                     if (!called && (sending ? body.prose : body.text)) emit({ restart: true })
@@ -486,6 +549,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                       }, due)
                     const decoded = yield* output.decode(event)
                     if (Result.isFailure(decoded) || called) return
+                    // Under the send tool alone, a turn's text isn't the reply: it shows in Steps
+                    // once the turn ends (spec/REPLY-CONTRACT.md §3.2). The cap's answer is.
+                    if (sendOnly && !last && typeof decoded.success === "string") return
                     body.text = true
                     if (typeof decoded.success === "string") body.prose = true
                     emit(decoded.success)
@@ -870,6 +936,30 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             isError: true
           })
         })
+      if (passTool)
+        agentTools.push(
+          dispatch
+            ? {
+                ...passTool,
+                parameters: Type.Any(),
+                execute: async (id, params, signal) => {
+                  const call = agent.state.messages
+                    .flatMap((m) =>
+                      m.role === "assistant" ? m.content.filter((p) => p.type === "toolCall" && p.id === id) : []
+                    )
+                    .at(-1)
+                  const refusal = call?.type === "toolCall" ? dispatchRefusal(call) : undefined
+                  if (refusal || !fitsTool(passTool, params))
+                    return {
+                      content: [{ type: "text" as const, text: refusal ?? BAD_ARGS }],
+                      details: null,
+                      isError: true
+                    }
+                  return passTool.execute(id, params as never, signal)
+                }
+              }
+            : passTool
+        )
       if (sends)
         agentTools.push(
           dispatch
@@ -894,8 +984,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
               }
             : sendTool
         )
-      let nudged = seed?.some((m) => m.role === "rpHarness" && m.content === SEND_NUDGE) ?? false
-      let nudgeSent = nudged
+      /** The asks to send so far: counted from the transcript, so a resumed run goes on with the count (§3.3). */
+      let nudges = nudgesIn(seed?.slice(historical) ?? [])
       const agent: Agent = new Agent({
         initialState: {
           model: {
@@ -916,7 +1006,15 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             ? seed.slice()
             : [
                 { role: "rpRequest", timestamp: Date.now() },
-                ...(cap <= 1 ? [{ role: "rpHarness" as const, content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }] : [])
+                ...(cap <= 1
+                  ? [
+                      {
+                        role: "rpHarness" as const,
+                        content: run.subagent?.writeNow ?? WRITE_NOW,
+                        timestamp: Date.now()
+                      }
+                    ]
+                  : [])
               ]
         },
         prepareRequest: async ({ context }, signal) => {
@@ -1006,33 +1104,47 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           if (tool && !admits(tool.effect))
             return { block: true, reason: "This chat does not allow tools with outside effects." }
           if (requests >= cap) return { block: true, reason: "The last model request of this reply can't use tools." }
-          if (!several && sent !== undefined) return { block: true, reason: "The reply has already been sent." }
+          if (!several && (sent !== undefined || passed))
+            return { block: true, reason: "The reply has already been sent." }
           // A process kill after an effect commits must leave its call ID durable,
           // so recovery can replay the receipt instead of sampling a duplicate call.
           const saved = await flush()
           return saved ? undefined : { block: true, reason: "The tool call could not be saved. Go on without it." }
         },
-        // One message a turn (DESIGN §7.2): a sent message ends the loop. Under `send_message`
-        // alone, a reply written as plain text is asked once to be sent; then it's taken as it is.
+        // One message a turn (DESIGN §7.2): a sent message, or a pass, ends the loop. Under
+        // `send_message` alone, a turn that ends in plain text is asked to send it, as reference-harness's
+        // forced completion (spec/REPLY-CONTRACT.md §3.3), at most SEND_NUDGES times a run; then the
+        // reply fails (§3.4). A failed or stopped turn is never nudged: it fails or stops the reply.
         finishTurn: ({ message }, signal) => {
           // The cap's request is the last, whatever it asked for; a stop ends the loop here.
-          if (sent !== undefined || requests >= cap || signal?.aborted) return { action: "end" }
+          if (sent !== undefined || passed || requests >= cap || signal?.aborted) return { action: "end" }
           const plain = !message.content.some((p) => p.type === "toolCall")
           const failed = message.stopReason === "error" || message.stopReason === "aborted"
-          if (plain && !failed && plan.contract === "send_message" && !nudged && requests < cap) {
-            nudged = true
+          if (plain && !failed && sendOnly) {
             if (body.text) emit({ restart: true })
+            if (nudges >= SEND_NUDGES) {
+              exhausted = contractFailure(nudges + 1)
+              return { action: "end" }
+            }
+            // The cap's "write now" takes precedence: its answer is the reply (§3.5).
+            if (requests < cap - 1) pendingNudge = ++nudges
             return { action: "continue" }
           }
           return undefined
         },
         // The last request is made without tools, after the app's "write now".
-        prepareNextTurnWithContext: () =>
-          requests === cap - 1
-            ? { messages: [{ role: "rpHarness", content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }] }
-            : nudged && !nudgeSent
-              ? ((nudgeSent = true), { messages: [{ role: "rpHarness", content: SEND_NUDGE, timestamp: Date.now() }] })
-              : undefined
+        prepareNextTurnWithContext: () => {
+          if (requests === cap - 1) {
+            pendingNudge = undefined
+            return {
+              messages: [{ role: "rpHarness", content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }]
+            }
+          }
+          if (pendingNudge === undefined) return undefined
+          const nudge = pendingNudge
+          pendingNudge = undefined
+          return { messages: [{ role: "rpHarness", content: nudgeText, nudge, timestamp: Date.now() }] }
+        }
       })
 
       // The transcript is the agent's whole state, flushed in order after each turn and at the
@@ -1152,8 +1264,15 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             )
               send(part.arguments.message)
         }
+        // A pass saved before the process died is the reply's ending too.
+        if (
+          sent === undefined &&
+          passTool &&
+          seed.slice(historical).some((m) => m.role === "toolResult" && m.toolName === NO_REPLY && !m.isError)
+        )
+          pass()
       }
-      const dangling = sent === undefined ? danglingCalls(agent.state.messages) : []
+      const dangling = sent === undefined && !passed ? danglingCalls(agent.state.messages) : []
       if (dangling.length > 0) {
         const signal = new AbortController()
         yield* Effect.addFinalizer(() => Effect.sync(() => signal.abort()))
@@ -1220,8 +1339,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         yield* Effect.promise(() => flush())
       }
       showSteps(false)
-      // The call carried on was the message itself.
-      if (sent !== undefined) {
+      // The call carried on was the message itself (or the pass).
+      if (sent !== undefined || passed) {
         yield* Effect.promise(() => flushing)
         showSteps(true)
         return yield* Queue.end(queue)
@@ -1233,6 +1352,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       if (Option.isNone(started)) return yield* Queue.fail(queue, failure!)
       yield* Effect.promise(() => flushing)
       showSteps(true)
+      // The nudges ran out: the reply fails visibly, its stray text kept in its steps (§3.4).
+      if (exhausted) return yield* Queue.fail(queue, exhausted)
       const final = agent.state.messages.at(-1)
       if (final?.role === "assistant" && (final.stopReason === "error" || final.stopReason === "aborted")) {
         return yield* Queue.fail(

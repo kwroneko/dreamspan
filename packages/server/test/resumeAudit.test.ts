@@ -70,7 +70,11 @@ const agentWith = (tools: ReadonlyArray<RolloutTool<never>>) =>
     })
   })
 
-const agentOn = [{ key: "agent.enabled" as const, value: { on: true } }]
+// These replies end in plain text: the contract that takes it (the send tool's nudge is replyContract.test.ts).
+const agentOn = [
+  { key: "agent.enabled" as const, value: { on: true } },
+  { key: "output.contract" as const, value: "both" as const }
+]
 
 const mockOf = (handler: (request: Recorded, res: ServerResponse) => void | Promise<void>) =>
   Effect.acquireRelease(

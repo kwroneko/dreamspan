@@ -3103,7 +3103,7 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
           three({ events: rotation && !tools ? [events[1]!] : [] }),
           tools
             ? {
-                agent: { instructions: agentInstructions(plan.tools, "both"), speakerCardOnly: rotation }
+                agent: { instructions: agentInstructions(plan.tools, "send_message"), speakerCardOnly: rotation }
               }
             : {}
         )

@@ -341,7 +341,7 @@ function Added({
   return entry.role === "toolResult" ? (
     <StepBox target={{ kind: "result", entry }} editing={editing} id={id} />
   ) : (
-    <Box title="Added by the app">
+    <Box title={entry.nudge === undefined ? "Added by the app" : "The app asked for the reply to be sent"}>
       <Verbatim text={entry.text} />
     </Box>
   )

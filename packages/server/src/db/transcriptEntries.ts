@@ -76,7 +76,10 @@ export const transcriptEntries = (
       return [{ role: "app", text: m.message.content + (m.message.images?.length ? " [image]" : "") }]
     }
     const other = m as { readonly role: string; readonly content?: unknown }
-    if (other.role === "rpHarness" || other.role === "user") return [{ role: "app", text: textOf(other.content) }]
+    if (other.role === "rpHarness" || other.role === "user") {
+      const nudge = (m as { readonly nudge?: unknown }).nudge
+      return [{ role: "app", text: textOf(other.content), ...(typeof nudge === "number" ? { nudge } : {}) }]
+    }
     return []
   })
 }

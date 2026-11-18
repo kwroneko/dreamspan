@@ -67,7 +67,29 @@ const startNoteProvider = async () => {
           chunk({}, "tool_calls")
         ])
       }
-      send(res, [chunk({ role: "assistant", content: "Mira nods." }), chunk({}, "stop")])
+      // The reply through the send tool where it's offered (spec/REPLY-CONTRACT.md §3.1).
+      const sends =
+        Array.isArray(body.tools) &&
+        body.tools.some((t: { function?: { name?: string } }) => t.function?.name === "send_message")
+      send(
+        res,
+        sends
+          ? [
+              chunk({
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `send_${replies}`,
+                    type: "function",
+                    function: { name: "send_message", arguments: JSON.stringify({ message: "Mira nods." }) }
+                  }
+                ]
+              }),
+              chunk({}, "tool_calls")
+            ]
+          : [chunk({ role: "assistant", content: "Mira nods." }), chunk({}, "stop")]
+      )
     })
   })
   await new Promise<void>((done) => http.listen(0, "127.0.0.1", done))

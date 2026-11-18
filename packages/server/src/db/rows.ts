@@ -146,7 +146,7 @@ export interface VersionRow {
   readonly reasoning?: string | null
   /** Its leading tagged sections as JSON (spec/REPLY-SECTIONS.md); absent where a query doesn't select it. */
   readonly reply_sections?: string | null
-  readonly mark?: "refused" | null
+  readonly mark?: "refused" | "silent" | null
   readonly frozen_macros: string | null
   /** Absent where a query doesn't select them. */
   readonly raw_content?: string | null

@@ -30,7 +30,13 @@ import {
 } from "../agent/resume.ts"
 import { countSteps } from "../agent/steps.ts"
 import { notesAt } from "../agent/tools/notes.ts"
-import { type FrozenTool, frozenTool, sendMessageDefinition, severalMessageDefinition } from "../agent/tools.ts"
+import {
+  type FrozenTool,
+  frozenTool,
+  noReplyDefinition,
+  sendMessageDefinition,
+  severalMessageDefinition
+} from "../agent/tools.ts"
 import { offeredByGrants } from "../agent/approvals.ts"
 import { planTurn } from "../agent/modes.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
@@ -124,7 +130,7 @@ const agentVersionResumer = Effect.gen(function* () {
         { registries: execution, reader, userId: at.userId, chatId: at.chatId },
         candidates
       )
-      const contract = new Set([sendMessageDefinition.name, severalMessageDefinition.name])
+      const contract = new Set([sendMessageDefinition.name, severalMessageDefinition.name, noReplyDefinition.name])
       const kept = at.frozen.filter((t) => !contract.has(t.name) && !removed.has(t.name))
       const now = [...kept, ...added.map(frozenTool), ...at.frozen.filter((t) => contract.has(t.name))]
       return isDeepStrictEqual(
