@@ -444,6 +444,7 @@ export const filesRoutes = Layer.unwrap(
             // old file goes, so a measurement in between can only over-count.
             freeToken = quota.freed(userId, Math.max(0, freesOnReplace - taken))
             await rename(at(dir, temporary), at(dir, name))
+            held.landed()
           } catch (error) {
             await unlink(at(dir, temporary)).catch(() => undefined)
             quota.unfreed(userId, freeToken)

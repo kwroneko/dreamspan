@@ -103,6 +103,8 @@ export interface QuotaDeps {
   readonly defaultBytes: number
   /** A walk's entry limit; the default outside tests. */
   readonly walkMaxEntries?: number
+  /** A test seam: called once a walk has read the folders, with the account's pending entries. */
+  readonly afterRead?: (pending: Map<number, number> | undefined) => void
 }
 
 export const makeFilesQuota = (deps: QuotaDeps) => {
@@ -117,6 +119,8 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const pending = new Map<string, Map<number, number>>()
   /** Bytes app-side deletes and smaller replacements freed since the last measurement, by token. */
   const frees = new Map<string, Map<number, number>>()
+  /** Uploads that landed (were renamed into place) while the account's walk ran. */
+  const landing = new Map<string, Set<number>>()
   let nextId = 1
   const ambient = new Map<string, number>()
   const total = (entries: Map<number, number> | undefined) => {
@@ -150,6 +154,8 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       // that ends later either counted the file (clearing the free over-counts) or reached it
       // after (clearing is exact); keeping it could subtract bytes the walk never counted.
       const heldBefore = new Map(pending.get(userId))
+      const landedDuring = new Set<number>()
+      landing.set(userId, landedDuring)
       const { filesRoot, home } = deps.folders(userId)
       const [files, homeUse] = yield* Effect.promise(() =>
         Promise.all([measureTree(filesRoot, deps.walkMaxEntries), measureTree(home, deps.walkMaxEntries)])
@@ -167,21 +173,26 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
         measuredAt: started,
         partial: files.partial || homeUse.partial
       }
-      const entries = pending.get(userId)
-      // An entry never shrinks, so one smaller than at the start is a bug, not a state to repair.
-      for (const [id, was] of heldBefore) {
-        const now = entries?.get(id)
-        if (now !== undefined && now < was)
-          return yield* Effect.die(new Error(`files quota: pending entry ${id} shrank from ${was} to ${now}`))
-      }
+      landing.delete(userId)
+      deps.afterRead?.(pending.get(userId))
       usages.set(userId, usage)
+      const entries = pending.get(userId)
+      const shrunk: Array<string> = []
       for (const [id, was] of heldBefore) {
         const now = entries?.get(id)
         if (now === undefined) continue
-        if (now === was) entries!.delete(id)
+        // An upload renamed into place during the walk may have been listed as its temporary
+        // name and gone before it was read: the walk may not hold it at all, so its entry stays
+        // (over-counting until the next walk, never missing it).
+        if (landedDuring.has(id)) continue
+        // An entry only grows or goes, so a smaller one is a bug: say so, and take off what is
+        // left of it rather than fail the call that asked for a figure.
+        if (now < was) shrunk.push(`files quota: pending entry ${id} shrank from ${was} to ${now}`)
+        if (now <= was) entries!.delete(id)
         else entries!.set(id, now - was)
       }
       frees.delete(userId)
+      for (const warning of shrunk) yield* Effect.logWarning(warning)
       return usage
     })
 
@@ -272,6 +283,10 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
         grow(userId, id, bytes)
         return true
       },
+      /** The file is in place: a walk running now may not have seen it, so its entry stays. */
+      landed: () => {
+        landing.get(userId)?.add(id)
+      },
       release: () => {
         released = true
         pending.get(userId)?.delete(id)
@@ -336,7 +351,11 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       if (at < since) {
         asked.delete(userId)
         usages.delete(userId)
-      } else yield* measure(userId)
+      } else
+        // One account's failure doesn't stop the others.
+        yield* measure(userId).pipe(
+          Effect.catchCause((cause) => Effect.logWarning(`measuring ${userId}'s Files usage failed`, cause))
+        )
   })
 
   /** An admin's quota for one account; null returns it to the instance default. */
