@@ -39,6 +39,8 @@ const sidebarChat = (page: Page, title: string) =>
 const homeButton = (page: Page) => page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Home" })
 const path = (page: Page) => new URL(page.url()).pathname
 const chatUrl = (id: string) => new RegExp(`/chats/${id}(\\?|$)`)
+/** Home, with the frames beside it in the URL's `wb` when there are any. */
+const homeUrl = /^http:\/\/[^/]+\/(\?wb=[^&]*)?$/
 
 /** Home in the left frame and chat A opened beside it (Alt-click), as in the owner's report. */
 const homeBesideChat = async (page: Page) => {
@@ -74,19 +76,19 @@ test("the root URL opens Home alone, and the Home button shows Home from any lay
   await page.goto(`${server().url}/`)
   await homeBesideChat(page)
   await homeButton(page).click()
-  await expect(page).toHaveURL(`${server().url}/`)
+  await expect(page).toHaveURL(homeUrl)
   await expect(home(page)).toBeVisible()
   await frames(page).nth(1).getByText("The tide is out").click()
   await expect(page).toHaveURL(chatUrl(fixtures.chatA))
   await homeButton(page).click()
-  await expect(page).toHaveURL(`${server().url}/`)
+  await expect(page).toHaveURL(homeUrl)
   await expect(home(page)).toBeVisible()
 })
 
 test("focusing a frame puts its tab in the URL; Back and Forward go between places", async ({ page }) => {
   await homeBesideChat(page)
   await frames(page).first().getByRole("heading", { name: "Characters", exact: true }).click()
-  await expect(page).toHaveURL(`${server().url}/`)
+  await expect(page).toHaveURL(homeUrl)
   await frames(page).nth(1).getByText("The tide is out").click()
   await expect(page).toHaveURL(chatUrl(fixtures.chatA))
 
@@ -111,10 +113,10 @@ test("a reload keeps this browser tab's frames, with the URL's item focused", as
   await expect(page).toHaveURL(chatUrl(fixtures.chatA))
   // Focus survives too: the URL stays the chat's, and Home is a frame away.
   await frames(page).first().getByRole("heading", { name: "Characters", exact: true }).click()
-  await expect(page).toHaveURL(`${server().url}/`)
+  await expect(page).toHaveURL(homeUrl)
   await page.reload()
   await expect(frames(page)).toHaveCount(2)
-  await expect(page).toHaveURL(`${server().url}/`)
+  await expect(page).toHaveURL(homeUrl)
 })
 
 for (const width of [1440, 390])

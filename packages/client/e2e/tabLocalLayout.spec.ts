@@ -12,12 +12,23 @@ const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 
 let chatId: string
+let otherId: string
 
 test.beforeAll(async () => {
   chatId = await admin((api) =>
     Effect.gen(function* () {
       const mira = yield* api.CreateCard({ label: "Mira", name: "Mira" })
-      yield* api.CreateCard({ label: "Wren", name: "Wren" })
+      const wren = yield* api.CreateCard({ label: "Wren", name: "Wren" })
+      const other = yield* api.CreateChat({ title: "Lighthouse night" })
+      yield* api.ChangeCast({ chatId: other.id, slotId: null, change: { _tag: "Join", entityId: wren.entityId } })
+      yield* api.SendMessage({
+        chatId: other.id,
+        parentSlotId: null,
+        branch: false,
+        content: "The lamp turns, and the stairs go up forever.",
+        reply: false
+      })
+      otherId = other.id
       const made = yield* api.CreateChat({ title: "Harbour walk" })
       yield* api.ChangeCast({ chatId: made.id, slotId: null, change: { _tag: "Join", entityId: mira.entityId } })
       yield* api.SendMessage({
@@ -152,6 +163,11 @@ test("a dragged column width stays in its own tab, through reload, navigation an
   await expect(libraryHeading(copy)).toBeVisible()
   expect(await widthOf(grip(copy))).toBe(dragged)
 
+  // A link's own address doesn't carry the layout: opened in a new browser tab (a middle
+  // click), it starts from the defaults.
+  const row = sidebar(one).getByRole("link", { name: /^Open chat Harbour walk/ })
+  expect(new URL((await row.getAttribute("href"))!, server().url).searchParams.has("sbw")).toBe(false)
+
   // A double click returns to the default and leaves the URL.
   await grip(one).dblclick()
   await expect.poll(() => param(one, "sbw")).toBeNull()
@@ -193,4 +209,58 @@ test("the chat panel's width and its open Add characters section stay in their o
 
   await add(one).click()
   await expect.poll(() => param(one, "cadd")).toBeNull()
+})
+
+test("the workbench's frames are in the URL: reload, a copied URL, another page unaffected, Back and Forward go between pages", async ({
+  context
+}) => {
+  const [one, two] = await twoPages(context)
+  const frames = (page: Page) => page.locator("[data-frame]")
+  const lamp = (page: Page) => frames(page).getByText("The lamp turns")
+  // A page navigation first (pushed), then the layout changes (replaced).
+  await sidebar(one)
+    .getByRole("link", { name: /^Open chat Lighthouse night/ })
+    .click()
+  await expect(lamp(one)).toBeVisible()
+  await expect.poll(() => new URL(one.url()).pathname).toBe(`/chats/${otherId}`)
+  const entries = await one.evaluate(() => history.length)
+  await one.getByRole("button", { name: "Split right" }).first().click()
+  await expect(frames(one)).toHaveCount(2)
+  await expect.poll(() => param(one, "wb")).toMatch(/^\["r",/)
+  expect(await one.evaluate(() => history.length)).toBe(entries)
+  if (process.env.LAYOUT_AUDIT) await expectLayout(one, test.info(), "tab-local-workbench-split")
+
+  // The other page, same storage: one frame, also after a reload.
+  await expect(frames(two)).toHaveCount(1)
+  await two.reload()
+  await expect(said(two)).toBeVisible()
+  await expect(frames(two)).toHaveCount(1)
+  expect(param(two, "wb")).toBeNull()
+
+  await one.reload()
+  await expect(frames(one)).toHaveCount(2)
+  await expect(lamp(one)).toHaveCount(2)
+
+  const copy = await open(context, one.url())
+  await expect(frames(copy)).toHaveCount(2)
+  await expect(lamp(copy)).toHaveCount(2)
+
+  // Back goes to the page before, not to before the split; Forward comes back.
+  await one.goBack()
+  await expect.poll(() => new URL(one.url()).pathname).toBe(`/chats/${chatId}`)
+  await expect(said(one)).toBeVisible()
+  await expect(frames(one)).toHaveCount(2)
+  await expect.poll(() => param(one, "wb")).toMatch(/^\["r",/)
+  await one.goForward()
+  await expect.poll(() => new URL(one.url()).pathname).toBe(`/chats/${otherId}`)
+  await expect(frames(one)).toHaveCount(2)
+
+  // Closing back to one tab leaves the URL with no frames.
+  const second = frames(one)
+    .nth(1)
+    .locator("[data-tab]")
+    .getByRole("button", { name: /^Close / })
+  while ((await frames(one).count()) > 1) await second.first().click()
+  await expect(frames(one)).toHaveCount(1)
+  await expect.poll(() => param(one, "wb")).toBeNull()
 })

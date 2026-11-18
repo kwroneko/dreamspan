@@ -1,18 +1,22 @@
-// The layout a browser tab shows around its pages (owner, 2026-11-18): whether the sidebar is
-// hidden, the columns' widths, the sidebar foot's sections. It's in the browser tab's URL, as
-// query params omitted at their defaults, so reload, Back and Forward, a copied link and a
-// duplicated tab all show it, and nothing one tab does reaches another (no browser storage).
+// The layout a browser tab shows (owner, 2026-11-18: layout "has to be in the URL"): whether the
+// sidebar is hidden, the columns' widths, the sidebar foot's sections, the workbench's frames.
+// It's in the browser tab's URL, as query params omitted at their defaults, so a reload, a
+// copied link and a duplicated tab all show it, and nothing one tab does reaches another (no
+// browser storage).
 //
 // The params are registered (`layoutParams`) and belong to the browser's URL, never a workbench
-// tab's (workbench/store.ts keeps them off tabs' URLs and on the browser's). The browser's router
-// carries them over every navigation that doesn't name them (routes.tsx), so moving around the
-// app keeps the layout; a link opened in a new browser tab starts from the defaults.
+// tab's (workbench/store.ts keeps them off tabs' URLs). The page holds the current layout and
+// the URL follows it: read from the URL the page loaded with, then changed only by a write here.
+// Every navigation of the browser tab (a link, a programmatic navigation, Back, Forward) carries
+// it: when one lands without it, the entry is replaced with it put back. So moving around keeps
+// the layout, and Back and Forward go between pages, not between layout changes. A link's own
+// address carries none of it, so one opened in a new browser tab starts from the defaults.
 //
 // A change replaces the browser's history entry (no new one). While a drag holds writes
 // (`holdLayoutWrites`), its values show at once and reach the URL once when it ends.
-import { makeRegistry } from "./registry.ts"
 import type { RouterHistory } from "@tanstack/react-router"
 import { useSyncExternalStore } from "react"
+import { makeRegistry } from "./registry.ts"
 
 /** Query params that are the browser tab's layout: carried over navigation, the browser's own. */
 export const layoutParams = makeRegistry<{ readonly id: string; readonly keys: ReadonlyArray<string> }>()
@@ -22,32 +26,27 @@ export const layoutKeys = () => new Set(layoutParams.list().flatMap((entry) => e
 let browser: RouterHistory | null = null
 let unsubscribe: (() => void) | null = null
 const listeners = new Set<() => void>()
-/** Values written while a drag holds writes, ahead of the URL. null: removed. */
-const pending = new Map<string, string | null>()
+/** The URL the page loaded with: a param not written since reads from it. */
+let loaded = new URLSearchParams()
+/** The values written since, ahead of the load's. null: removed. */
+const values = new Map<string, string | null>()
 let held = 0
 /** Other URL writes a drag defers (`whenDragEnds`), the latest per key. */
 const deferred = new Map<string, () => void>()
+let writing = false
+let queued = false
 
 const notify = () => {
   for (const listener of listeners) listener()
 }
 
-/** The browser tab's own history (the app's router, routes.tsx): where layout params live. */
-export const setLayoutHistory = (history: RouterHistory) => {
-  unsubscribe?.()
-  browser = history
-  pending.clear()
-  unsubscribe = history.subscribe(notify)
-  notify()
-}
+/** The router writes a string that reads as JSON in quotes; these are words, numbers and JSON. */
+const unquote = (value: string | null) =>
+  value !== null && value.length > 1 && value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value
 
-const params = () => new URLSearchParams(browser?.location.search ?? "")
-/** The router writes a string that reads as JSON in quotes; the params here are words and numbers. */
-const unquote = (value: string | null) => (value === null ? null : value.replace(/^"(.*)"$/, "$1"))
-
-/** A layout param's value: a held write's, else the browser URL's; null when absent. */
+/** A layout param's value: the page's current one; null when absent. */
 export const readLayoutParam = (key: string): string | null =>
-  pending.has(key) ? (pending.get(key) ?? null) : unquote(params().get(key))
+  values.has(key) ? (values.get(key) ?? null) : unquote(loaded.get(key))
 
 const clean = (state: unknown) => {
   if (typeof state !== "object" || state === null) return {}
@@ -55,32 +54,73 @@ const clean = (state: unknown) => {
   return rest
 }
 
-const flush = () => {
-  if (!browser || pending.size === 0) {
-    pending.clear()
-    return
-  }
-  const url = new URL(browser.location.href, "http://tab.invalid")
-  for (const [key, value] of pending) {
+/** `href` with the layout as the page has it. */
+export const withLayoutParams = (href: string) => {
+  const url = new URL(href, "http://tab.invalid")
+  for (const key of layoutKeys()) {
+    const value = readLayoutParam(key)
     if (value === null) url.searchParams.delete(key)
-    else url.searchParams.set(key, value)
+    else if (unquote(url.searchParams.get(key)) !== value) url.searchParams.set(key, value)
   }
-  pending.clear()
-  const href = `${url.pathname}${url.search}${url.hash}`
-  if (href === browser.location.href) return notify()
-  browser.replace(href, clean(browser.location.state), { ignoreBlocker: true })
+  const search = url.searchParams.toString()
+  return `${url.pathname}${search ? `?${search}` : ""}${url.hash}`
 }
 
-/** Sets (null: removes) layout params in the browser's URL, replacing its entry. */
-const writeLayoutParams = (values: Readonly<Record<string, string | null>>) => {
-  for (const [key, value] of Object.entries(values)) pending.set(key, value)
-  if (held > 0) notify()
-  else flush()
+/** Puts the browser's URL in step with the layout, replacing its entry, unless it is already. */
+const sync = () => {
+  queued = false
+  if (!browser || held > 0) return
+  const href = withLayoutParams(browser.location.href)
+  const same = (a: string, b: string) => {
+    const x = new URL(a, "http://tab.invalid")
+    const y = new URL(b, "http://tab.invalid")
+    return [...layoutKeys()].every((key) => unquote(x.searchParams.get(key)) === unquote(y.searchParams.get(key)))
+  }
+  if (same(href, browser.location.href)) return
+  writing = true
+  try {
+    browser.replace(href, clean(browser.location.state), { ignoreBlocker: true })
+  } finally {
+    writing = false
+  }
+}
+
+/** After whatever else follows this navigation (the workbench's own mirror) has run. */
+const queueSync = () => {
+  if (queued) return
+  queued = true
+  queueMicrotask(sync)
+}
+
+/** The browser tab's own history (the app's router, routes.tsx): where layout params live. */
+export const setLayoutHistory = (history: RouterHistory) => {
+  unsubscribe?.()
+  browser = history
+  loaded = new URLSearchParams(history.location.search)
+  values.clear()
+  unsubscribe = history.subscribe(() => {
+    if (!writing) queueSync()
+    notify()
+  })
+  notify()
+}
+
+/** Sets (null: removes) layout params: shown at once, in the browser's URL by replacing its entry. */
+const writeLayoutParams = (next: Readonly<Record<string, string | null>>) => {
+  let changed = false
+  for (const [key, value] of Object.entries(next))
+    if (readLayoutParam(key) !== value) {
+      values.set(key, value)
+      changed = true
+    }
+  if (!changed) return
+  notify()
+  if (held === 0) sync()
 }
 
 export const writeLayoutParam = (key: string, value: string | null) => writeLayoutParams({ [key]: value })
 
-/** Holds writes during a drag: shown at once, written to the URL once by the returned release. */
+/** Holds URL writes during a drag: shown at once, written to the URL once by the returned release. */
 export const holdLayoutWrites = () => {
   held++
   let released = false
@@ -89,7 +129,7 @@ export const holdLayoutWrites = () => {
     released = true
     held--
     if (held > 0) return
-    flush()
+    sync()
     const run = [...deferred.values()]
     deferred.clear()
     for (const write of run) write()
@@ -110,7 +150,7 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener)
 }
 
-/** A layout param, following the URL (Back, Forward, a write). */
+/** A layout param, following writes. */
 export const useLayoutParam = (key: string) => useSyncExternalStore(subscribe, () => readLayoutParam(key))
 
 /** A layout param read as a whole number of at least `min`, else null. */

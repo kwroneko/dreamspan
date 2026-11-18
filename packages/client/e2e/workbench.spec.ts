@@ -12,7 +12,7 @@ import { openPanel } from "./support/panel.ts"
 import { expectTextBox, replaceEditorText } from "./support/textbox.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { replaceStoredLayout, storedLayout } from "./support/workbench.ts"
+import { gotoWithLayout, storedLayout } from "./support/workbench.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -158,7 +158,7 @@ test("two chats side by side; the side panel follows the frame focused last; it 
   await expect(page.locator("[data-frame]")).toHaveCount(2)
 
   // A reload brings back the frames and their tabs.
-  await expect.poll(() => storedLayout(page)).toContain('"type":"split"')
+  await expect.poll(() => storedLayout(page)).toContain('["r",')
   await page.reload()
   await expect(page.locator("[data-frame]")).toHaveCount(2)
   await expect(said(page, "The lamp turns")).toBeVisible()
@@ -190,41 +190,29 @@ test("stale layouts keep deleted items closable and unknown versions start fresh
   await fresh(page, 1440)
   await page.goto(`${server().url}/chats/${fixtures.chatA}`)
   await expect(said(page, "The tide is out")).toBeVisible()
-  await sidebarChat(page, "Harbour walk").dblclick()
-  await expect.poll(() => storedLayout(page)).not.toBeNull()
   const missing = "00000000-0000-4000-8000-000000000000"
-  await replaceStoredLayout(
-    page,
-    JSON.stringify({
-      version: 1,
-      root: {
-        type: "frame",
-        id: "restored",
-        active: "live",
-        tabs: [
-          { id: "live", href: `/chats/${fixtures.chatA}`, preview: false },
-          { id: "gone-chat", href: `/chats/${missing}`, preview: false },
-          { id: "gone-item", href: `/library/${missing}`, preview: false }
-        ]
-      },
-      focused: "restored",
-      recent: ["live"]
-    })
-  )
-  await page.reload()
+  // A copied URL naming tabs whose items are gone: the URL's own chat and two others.
+  await gotoWithLayout(page, server().url, `/chats/${fixtures.chatA}`, [
+    0,
+    "=",
+    `/chats/${missing}`,
+    `/library/${missing}`
+  ])
   await expect(tabs(page)).toHaveCount(3)
-  const missingItem = page.locator('[data-tab="gone-item"]')
+  const missingItem = page.locator("[data-tab]").nth(2)
   await missingItem.getByRole("tab").click()
   await expect(page.getByText("This item was deleted or never existed", { exact: false })).toBeVisible()
   await missingItem.getByRole("button", { name: /^Close / }).click()
-  const missingChat = page.locator('[data-tab="gone-chat"]')
+  await expect(tabs(page)).toHaveCount(2)
+  const missingChat = page.locator("[data-tab]").nth(1)
   await missingChat.getByRole("tab").click()
   await expect(page.getByRole("alert").first()).toBeVisible()
   await missingChat.getByRole("button", { name: /^Close / }).click()
   await expect(said(page, "The tide is out")).toBeVisible()
-  await expect.poll(() => storedLayout(page)).not.toContain(missing)
-  await replaceStoredLayout(page, JSON.stringify({ version: 0, root: {} }))
-  await page.reload()
+  // One tab left: the URL is the whole layout.
+  await expect.poll(() => storedLayout(page)).toBeNull()
+  // Junk in the param: the URL's page alone.
+  await page.goto(`${server().url}/chats/${fixtures.chatA}?wb=${encodeURIComponent('{"version":0}')}`)
   await expect(said(page, "The tide is out")).toBeVisible()
   await expect(tabs(page)).toHaveCount(0)
 })
@@ -349,15 +337,14 @@ for (const width of [1024, 390])
       await shot(page, `single-chat-${width}-${theme}`)
       if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), `single-chat-${width}-${theme}`)
       await page.getByRole("textbox", { name: "Message" }).fill("Kept")
-      // Typing kept the tab; the saved layout has it before the page is left.
-      await expect.poll(() => storedLayout(page)).toContain('"preview":false')
-      // The next chat opens beside it (a URL loaded afresh would open alone).
+      // Typing kept the tab: the next chat opens beside it, and the URL's layout has it kept.
       if (width < 1024) await page.getByRole("button", { name: "Chats and menu" }).click()
       await page.getByRole("link", { name: /^Open chat Lighthouse night/ }).click()
       await expect(said(page, "The lamp turns")).toBeVisible()
       // Phones have no splits; the strip switches between the open tabs.
       await expect(page.getByRole("button", { name: "Split right" })).toHaveCount(width < 1024 ? 0 : 1)
       await expect(tabs(page)).toHaveCount(2)
+      await expect.poll(() => storedLayout(page)).toContain(`"/chats/${fixtures.chatA}?`)
       await shot(page, `two-tabs-${width}-${theme}`)
       await page.getByRole("tab", { name: "Harbour walk" }).click()
       await expect(said(page, "The tide is out")).toBeVisible()

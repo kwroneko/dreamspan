@@ -39,8 +39,10 @@ export function usePanelWidth(
     if (!active) removeColumn(panel)
   }, [active, panel])
   const { width, max } = useColumnWidth(panel, entry)
-  const change = (next: number) => write(key, Math.round(Math.max(min, Math.min(max, next))), initial)
-  const reset = () => write(key, null, initial)
+  // The portrait column's default follows its image: a width chosen stays, even one equal to it.
+  const omitAt = panel === "portrait" ? Number.NaN : initial
+  const change = (next: number) => write(key, Math.round(Math.max(min, Math.min(max, next))), omitAt)
+  const reset = () => write(key, null, omitAt)
   return { width, min, max, change, reset }
 }
 
@@ -76,6 +78,9 @@ export function useInnerPanelWidth(
   const reset = () => write(key, null, initial)
   return { ref, width, min, max, change, reset }
 }
+
+/** A keyboard resize writes the URL this long after the last key, if no key is let go first. */
+const KEY_IDLE_MS = 400
 
 const HINT = "Drag to resize, or use the arrow keys (Shift for bigger steps), Home and End. Double-click resets."
 const SPLIT_HINT =
@@ -115,7 +120,26 @@ export function ResizeHandle({
     drag.current?.release()
     drag.current = null
   }
-  useEffect(() => () => drag.current?.release(), [])
+  // Arrow keys (held down, they repeat) show each step at once and write the URL once the keys
+  // are let go, or after a short pause: never a URL write per repeat.
+  const keys = useRef<{ release: () => void; timer: ReturnType<typeof setTimeout> } | null>(null)
+  const endKeys = () => {
+    if (!keys.current) return
+    clearTimeout(keys.current.timer)
+    keys.current.release()
+    keys.current = null
+  }
+  const holdKeys = () => {
+    if (keys.current) clearTimeout(keys.current.timer)
+    keys.current = { release: keys.current?.release ?? holdLayoutWrites(), timer: setTimeout(endKeys, KEY_IDLE_MS) }
+  }
+  useEffect(
+    () => () => {
+      drag.current?.release()
+      endKeys()
+    },
+    []
+  )
   const vertical = axis === "y"
   const at = (event: { clientX: number; clientY: number }) => (vertical ? event.clientY : event.clientX)
   const [less, more] = vertical ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"]
@@ -156,7 +180,10 @@ export function ResizeHandle({
         onPointerCancel={end}
         onLostPointerCapture={end}
         onDoubleClick={onReset}
+        onKeyUp={endKeys}
+        onBlur={endKeys}
         onKeyDown={(event) => {
+          if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) holdKeys()
           const step = event.shiftKey ? 40 : 10
           if (event.key === less || event.key === more) {
             event.preventDefault()

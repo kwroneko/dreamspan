@@ -62,24 +62,46 @@ export function usePlaceList(key: string) {
   return [value, set] as const
 }
 
+/** A value just set, over the URL's `base` it was set from. */
+export interface PlaceOverride {
+  readonly base: string
+  readonly value: unknown
+}
+
+const text = (value: unknown) => JSON.stringify(value) ?? "undefined"
+
+/**
+ * What shows: a value just set while the URL still has what it was set from, else the URL's.
+ * Once the URL's value has moved off `base` (the replace landing, or Back or Forward to an entry
+ * with another value) the override is spent (`spentOverride`), so a later return to `base`
+ * shows the URL's, not the old override.
+ */
+export const shownPlaceValue = (local: PlaceOverride | null, raw: unknown) =>
+  local !== null && local.base === text(raw) ? local.value : raw
+
+export const spentOverride = (local: PlaceOverride | null, raw: unknown) => local !== null && local.base !== text(raw)
+
 /**
  * A query value as the router decoded it, and a setter that replaces it (no history entry),
  * computing the next value from the URL as it is at the call, so updates in a row compose.
  * `undefined` removes it. A value set shows in the same render, before the router has
- * settled the navigation (an entry opened and focused at once), until the URL changes.
+ * settled the navigation (an entry opened and focused at once), until the URL's value changes;
+ * then the URL's shows, so Back and Forward show what their entries hold.
  */
 export function usePlaceValue(key: string) {
   const raw: unknown = useSearch({ strict: false, select: (s: Record<string, unknown>) => s[key] })
   const navigate = useNavigate()
   const router = useRouter()
-  const [local, setLocal] = useState<{ readonly base: unknown; readonly value: unknown } | null>(null)
-  const shown = local !== null && local.base === raw ? local.value : raw
+  const [local, setLocal] = useState<PlaceOverride | null>(null)
+  // Dropped in render once the URL moved (React's "adjusting state when a prop changes").
+  if (spentOverride(local, raw)) setLocal(null)
+  const shown = shownPlaceValue(local, raw)
   const set = useCallback(
     (next: (current: unknown) => unknown) => {
       const current = (router.latestLocation.search as Record<string, unknown>)[key]
       const value = next(current)
-      if (JSON.stringify(value) === JSON.stringify(current)) return
-      setLocal({ base: raw, value })
+      if (text(value) === text(current)) return
+      setLocal({ base: text(raw), value })
       void navigate({
         to: ".",
         search: (prev: Record<string, unknown>) => ({ ...prev, [key]: value }),

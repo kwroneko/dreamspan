@@ -127,13 +127,11 @@ for (const kind of ["lorebook", "preset", "card"] as const) {
       .first()
     await expect(field).toBeVisible()
     if (kind === "lorebook") {
-      // Expand all keeps all forty in the URL, even though only a window of rows is mounted.
+      // Expand all opens all forty, even though only a window of rows is mounted: in the URL
+      // as a mode, not a list.
       await expect
-        .poll(
-          () =>
-            (JSON.parse(new URL(page.url()).searchParams.get(`entries:${ref.id}::open`) ?? "[]") as unknown[]).length
-        )
-        .toBe(40)
+        .poll(() => JSON.parse(new URL(page.url()).searchParams.get(`entries:${ref.id}::open`) ?? "[]") as unknown)
+        .toEqual(["all"])
     }
     await resizeAndUse(page, editor, async () => {
       await replaceEditorText(field, "Edited after resizing.")

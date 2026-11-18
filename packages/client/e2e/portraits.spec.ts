@@ -319,7 +319,5 @@ test("both sidebars resize by pointer and keyboard, keep widths per user, and re
     await expect(handle).toHaveAttribute("aria-valuenow", value!)
   }
   // A reset forgets the choice: the default shows, and a later default would too.
-  expect(
-    await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("rp.panelWidth.")).length)
-  ).toBe(0)
+  await expect.poll(() => ["sbw", "cpw"].filter((key) => new URL(page.url()).searchParams.has(key))).toEqual([])
 })

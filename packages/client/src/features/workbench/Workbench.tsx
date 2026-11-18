@@ -43,6 +43,7 @@ import {
   type Layout,
   stripCorners,
   neighbours,
+  restoreLayout,
   type Node,
   type Split,
   type Tab,
@@ -52,7 +53,8 @@ import { type DropZone, dropZone } from "./dropOpen.ts"
 import { dragPayloadOf, isAppDrag } from "../../ui/appDrags.ts"
 import { OPEN_BESIDE } from "./OpenBeside.tsx"
 import { WorkbenchStore } from "./store.ts"
-import { readTabLayout, writeTabLayout } from "./tabLayout.ts"
+import { decodeLayout, encodeLayout, WORKBENCH_PARAM } from "./layoutParam.ts"
+import { readLayoutParam, withoutLayoutParams, writeLayoutParam } from "../../tabLayoutParams.ts"
 import { TabContext, useTabShown, useWorkbenchTab, WorkbenchContext } from "./tab.tsx"
 
 const TAB_MIME = "application/x-rp-workbench-tab"
@@ -87,17 +89,32 @@ const useWideScreen = () => useSyncExternalStore(subscribeWide, () => matchMedia
 /** Sets where the side panel's toggle goes: the top-right strip's end (tab.tsx `usePanelTogglePlace`). */
 const PanelToggleHostRef = createContext<(element: HTMLElement | null) => void>(() => {})
 
+/** The layout as `WorkbenchStore` saves it (`saveLayout`), into the browser tab's URL. */
+const saveToUrl = (json: string) => {
+  const layout = restoreLayout(JSON.parse(json))
+  writeLayoutParam(WORKBENCH_PARAM, layout ? encodeLayout(layout, (href) => href, withoutLayoutParams) : null)
+}
+
 /** Registered in the shell's center column (`centerColumn`). */
 export function Workbench() {
   const userId = useSession().user.id
   return <WorkbenchFor key={userId} userId={userId} />
 }
 
-/** This browser tab's frames: its own layout after a reload, else just its URL (tabLayout.ts). */
+/**
+ * This browser tab's frames, from its URL (`layoutParam.ts`): a reload, a copied link or a
+ * duplicated tab opens them again; a URL without them opens its page alone.
+ */
 function WorkbenchFor({ userId }: { userId: string }) {
   const router = useRouter()
   const [store] = useState(
-    () => new WorkbenchStore(userId, router.history, readTabLayout(userId), (layout) => writeTabLayout(userId, layout))
+    () =>
+      new WorkbenchStore(
+        userId,
+        router.history,
+        decodeLayout(readLayoutParam(WORKBENCH_PARAM), withoutLayoutParams(router.history.location.href)),
+        saveToUrl
+      )
   )
   useEffect(() => store.start(), [store])
   useLinkGestures(store)

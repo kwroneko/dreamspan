@@ -227,11 +227,13 @@ test("a stored width too wide for the window shows narrower, and comes back on a
   await expect(sidebar).toHaveAttribute("aria-valuenow", "600")
   await resizeTo(page, "Resize chat panel", 800)
   await expect(panel).toHaveAttribute("aria-valuenow", "800")
-  const stored = () =>
-    page.evaluate(() =>
-      Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("rp.panelWidth.")))
-    )
-  const before = await stored()
+  // The choices are in the tab's URL (layout params).
+  const stored = () => {
+    const search = new URL(page.url()).searchParams
+    return { sbw: search.get("sbw"), cpw: search.get("cpw") }
+  }
+  await expect.poll(stored).toEqual({ sbw: "600", cpw: "800" })
+  const before = stored()
   // 1440: 1000 px for the columns; they give way in proportion to how far each is above its minimum.
   await page.setViewportSize({ width: 1440, height: 900 })
   await expect.poll(async () => Math.round(await width(middle(page)))).toBeGreaterThanOrEqual(MIDDLE - 1)
@@ -242,8 +244,8 @@ test("a stored width too wide for the window shows narrower, and comes back on a
   expect(await now(panel)).toBeGreaterThan(260)
   await noSideScroll(page)
   await shoot(page, "squeezed-1440")
-  // Storage keeps the choice; a reload at this size shows the same.
-  expect(await stored()).toEqual(before)
+  // The URL keeps the choice, not what the window shows; a reload at this size shows the same.
+  expect(stored()).toEqual(before)
   await page.reload()
   await expect(page.getByLabel("Message", { exact: true })).toBeEditable({ timeout: 30_000 })
   await expect.poll(async () => Math.round(await width(middle(page)))).toBeLessThanOrEqual(MIDDLE + 1)

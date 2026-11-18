@@ -19,7 +19,7 @@ import type { IconName } from "./ui/Icon.tsx"
 import { useEffect, type ReactNode } from "react"
 import { isChunkLoadError, reportChunkFailure, StalePart, useStaleBuild } from "./staleBuild.tsx"
 import { makeRegistry } from "./registry.ts"
-import { layoutKeys, setLayoutHistory } from "./tabLayoutParams.ts"
+import { layoutKeys, setLayoutHistory, withLayoutParams } from "./tabLayoutParams.ts"
 
 export interface RouteEntry {
   readonly id: string
@@ -111,10 +111,13 @@ function RouteError({ error }: ErrorComponentProps) {
 }
 
 /**
- * Carries the browser tab's layout params (`tabLayoutParams.ts`, read from the registry at each
- * navigation) over every navigation that doesn't set them, as `retainSearchParams` does.
+ * Leaves the browser tab's layout params (`tabLayoutParams.ts`) out of every location the
+ * browser's router builds, so a link's address carries none (opened in a new browser tab, it
+ * starts from the defaults). A navigation in this tab gets them back as it's committed
+ * (`buildRouter`), so it lands with the layout, and a link to where the tab already is stays
+ * the same place rather than a new history entry.
  */
-const retainLayout = ({
+const withoutLayout = ({
   search,
   next
 }: {
@@ -122,19 +125,15 @@ const retainLayout = ({
   next: (search: Record<string, unknown>) => Record<string, unknown>
 }) => {
   const result = next(search)
-  let copy: Record<string, unknown> | null = null
-  for (const key of layoutKeys())
-    if (!(key in result) && search[key] !== undefined) {
-      copy ??= { ...result }
-      copy[key] = search[key]
-    }
-  return copy ?? result
+  const keys = layoutKeys()
+  if (!Object.keys(result).some((key) => keys.has(key))) return result
+  return Object.fromEntries(Object.entries(result).filter(([key]) => !keys.has(key)))
 }
 
 /**
  * A router over the routes registered so far. A workbench tab (features/workbench) has its
  * own, over its own history, with the shell's layout entries swapped for its page frame; the
- * one without a history is the browser tab's, which holds the layout params.
+ * one without a history is the browser tab's, whose URL holds the layout params (tabLayoutParams.ts).
  */
 export const buildRouter = (
   options: { history?: RouterHistory; layouts?: Readonly<Record<string, () => ReactNode>> } = {}
@@ -143,7 +142,9 @@ export const buildRouter = (
     component: Outlet,
     notFoundComponent: NotFound,
     search: {
-      middlewares: options.history ? [retainSearchParams(["plugins"])] : [retainSearchParams(["plugins"]), retainLayout]
+      middlewares: options.history
+        ? [retainSearchParams(["plugins"])]
+        : [retainSearchParams(["plugins"]), withoutLayout]
     }
   })
   const component = (entry: RouteEntry) => options.layouts?.[entry.id] ?? entry.component
@@ -168,6 +169,15 @@ export const buildRouter = (
     routeTree: rootRoute.addChildren(children("root", rootRoute)),
     ...(options.history ? { history: options.history } : {})
   })
-  if (!options.history) setLayoutHistory(router.history)
+  if (!options.history) {
+    setLayoutHistory(router.history)
+    const commit = router.commitLocation
+    router.commitLocation = (next) => {
+      const href = withLayoutParams(next.href)
+      const publicHref = withLayoutParams(next.publicHref)
+      if (href === next.href && publicHref === next.publicHref) return commit(next)
+      return commit({ ...next, href, publicHref, searchStr: new URL(href, "http://tab.invalid").search })
+    }
+  }
   return router
 }
