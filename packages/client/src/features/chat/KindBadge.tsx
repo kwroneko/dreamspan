@@ -7,7 +7,8 @@ import { kindAccentProps, useChatKindLook } from "./kindLooks.ts"
 /**
  * Nothing for a kind without a badge (a story chat). `inLink`: inside a row's link, which is the
  * tab stop; the badge keeps its explanation on hover and its word in the link's name. `sm`: on a
- * list row's secondary line, beside its date, so the row is no taller than a story chat's.
+ * list row's secondary line, after its date, so the row is no taller than a story chat's: aligned to
+ * the line's top, its 16 px fills the text-xs line without growing it.
  */
 export function KindBadge({
   kind,
@@ -28,7 +29,7 @@ export function KindBadge({
         data-kind-badge={kind}
         // In the kind's accent, so the word reads as the kind's wherever it's named.
         {...kindAccentProps(look)}
-        className="inline-flex shrink-0 rounded-full align-middle outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className={`inline-flex shrink-0 rounded-full outline-none ${size === "sm" ? "align-top" : "align-middle"} focus-visible:ring-2 focus-visible:ring-focus`}
       >
         <Badge tone={look?.accent === undefined ? "neutral" : "accent"} size={size}>
           {badge.label}

@@ -16,6 +16,23 @@ const shots = process.env.DECISIONS_SHOTS ?? "<work>/artifacts/decisions1113"
 const server = serverPerFile(withAdmin)
 let ids = { solo: "", pair: "", workshop: "" }
 
+/** The gap from where a badge's line's text ends to the badge, and the badge's top against the text's. */
+const afterText = (badge: import("@playwright/test").Locator) =>
+  badge.evaluate((el) => {
+    const glue = el.parentElement!
+    const range = document.createRange()
+    range.selectNodeContents(glue.firstChild!)
+    const text = [...range.getClientRects()].at(-1)!
+    const box = el.getBoundingClientRect()
+    return { gap: box.left - text.right, top: Math.abs(box.top - text.top) }
+  })
+const expectAfterText = async (badge: import("@playwright/test").Locator) => {
+  const at = await afterText(badge)
+  expect(at.gap).toBeGreaterThanOrEqual(0)
+  expect(at.gap).toBeLessThanOrEqual(8)
+  expect(at.top).toBeLessThanOrEqual(2)
+}
+
 test.beforeAll(async () => {
   ids = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
@@ -149,6 +166,7 @@ for (const width of [1440, 390])
       await expect(item).toHaveAttribute("data-kind-row", "")
       await expect(item.locator('[data-kind-badge="workshop"]')).toHaveText("Workshop")
       await expect(item.locator('[data-chat-meta] [data-kind-badge="workshop"]')).toHaveCount(1)
+      await expectAfterText(item.locator('[data-chat-meta] [data-kind-badge="workshop"]'))
       expect(await item.evaluate((el) => getComputedStyle(el).backgroundImage)).toBe("none")
       await expect(list.locator("li", { has: page.getByRole("link", { name: /Harbor solo/ }) })).not.toHaveAttribute(
         "data-kind-row",
@@ -211,6 +229,8 @@ for (const width of [1440, 390])
         await expect(row).toHaveAttribute("data-kind-row", "")
         await expect(row.locator('[data-row-when] [data-kind-badge="workshop"]')).toHaveText("Workshop")
         await expect(row.locator("[data-branch-title-line] [data-kind-badge]")).toHaveCount(0)
+        // Right after "Last message …", where its text ends, not pushed to the row's edge.
+        await expectAfterText(row.locator('[data-row-when] [data-kind-badge="workshop"]'))
         await expect(row.locator("[data-chat-id]")).toHaveAccessibleName(/Workshop/)
       }
       await expectLayout(page, info, `workshop-branch-footer-${width}-${theme}`, {
@@ -221,6 +241,11 @@ for (const width of [1440, 390])
       const listed = page.locator(`[data-fork-row]:has([data-chat-id="${ids.workshop}"])`)
       await expect.poll(() => listed.count()).toBeGreaterThanOrEqual(2)
       for (const row of await listed.all()) await expect(row).toHaveAttribute("data-kind-row", "")
+      // Right after "Last message …" in every shown row. The compact row's "opens here" stays on
+      // its one-line, truncated title line (branchRows.spec.ts), which can't wrap.
+      for (const row of await listed.filter({ visible: true }).all())
+        await expectAfterText(row.locator('[data-row-when] [data-kind-badge="workshop"]'))
+      await expect(listed.locator("[data-row-when] [data-opens-here]")).toHaveCount(0)
       await expectLayout(page, info, `workshop-branch-list-${width}-${theme}`, {
         scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
       })
@@ -276,6 +301,7 @@ for (const width of [1440, 390])
       const workshop = await measure(same.workshop)
       expect(workshop.title).toBe(story.title)
       expect(workshop.row).toBe(story.row)
+      await expectAfterText(row(same.workshop).locator('[data-row-when] [data-kind-badge="workshop"]'))
       // The open workshop looks selected; an unselected workshop doesn't, and has no tint or edge.
       const look = (id: string) =>
         row(id).evaluate((el) => {
