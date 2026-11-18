@@ -312,6 +312,7 @@ Not taken: its terminal pane and the AI's terminal tabs. Commands show in Steps 
   
   Every action has a hover explanation (memory: explain on hover).
 - **A Files page**, `/files/<path>`, in the main navigation, with the same component full width: a tree on the left at wide widths, and the panel's layout on a phone. Each opened file is a workbench tab whose URL is `/files/<path>?view=…` (memory: URL is truth).
+- **Changed (filesnav1, 2026-11-18)**: the Files page is no longer one of the sidebar's page buttons; it is opened from the workshop's Files tab or by its URL. The route, the `files` tab kind and the panel tab are unchanged.
 - **Live refresh**: the app publishes `FilesChanged { userId, paths }` on the existing per-account notice channel after app-side writes and after each command's scan. Open panels refresh those folders.
 - **Mobile**: one column; long press opens the row menu as well as its ⋯ button; drag-to-move becomes Move to…; uploads use the system picker. The layout audit covers 1440 and 390 in both themes.
 

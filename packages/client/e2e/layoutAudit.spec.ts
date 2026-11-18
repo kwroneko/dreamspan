@@ -168,8 +168,8 @@ for (const theme of ["light", "dark"] as const)
           }
         }
         const links = navigation.locator("a").filter({ has: page.locator("svg") })
-        // Home, Library, Files, Import, Settings, Bin (Files joined in filesui1).
-        await expect(links).toHaveCount(6)
+        // Home, Library, Import, Settings, Bin (Files left the row in filesnav1).
+        await expect(links).toHaveCount(5)
         for (const link of await links.all()) await expect(link).toBeInViewport()
         await expect
           .poll(async () => {
@@ -178,8 +178,9 @@ for (const theme of ["light", "dark"] as const)
             for (const box of boxes) counts.set(box.y, (counts.get(box.y) ?? 0) + 1)
             return [...counts.values()].sort().join(",")
           })
-          // Six tiles fit one row only in the widest sidebar; elsewhere two balanced rows.
-          .toBe(size === "maximum" ? "6" : "3,3")
+          // Five tiles fit one row in the default and wider sidebar and on the phone; only the
+          // 220 px minimum still wraps them into two balanced rows.
+          .toBe(size === "minimum" ? "2,3" : "5")
         await expectLayout(page, info, `navtiles-${size}-${theme}`, { scope: 'nav[aria-label="Main"]' })
         const box = await navigation.boundingBox()
         const widths = await links.evaluateAll((elements) => elements.map((el) => el.getBoundingClientRect().width))
@@ -198,7 +199,6 @@ for (const theme of ["light", "dark"] as const)
       await hideAppNavigation(page)
       for (const [label, explanation] of [
         ["Library", "Browse characters, personas, lorebooks and presets."],
-        ["Files", "Your files, and what the assistant made."],
         ["Import", "Import characters, chats and library items."],
         ["Settings", "Change your account and app preferences."],
         ["Bin", "Browse deleted items."],
