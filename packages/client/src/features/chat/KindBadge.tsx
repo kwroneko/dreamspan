@@ -6,9 +6,18 @@ import { kindAccentProps, useChatKindLook } from "./kindLooks.ts"
 
 /**
  * Nothing for a kind without a badge (a story chat). `inLink`: inside a row's link, which is the
- * tab stop; the badge keeps its explanation on hover and its word in the link's name.
+ * tab stop; the badge keeps its explanation on hover and its word in the link's name. `sm`: on a
+ * list row's secondary line, beside its date, so the row is no taller than a story chat's.
  */
-export function KindBadge({ kind, inLink = false }: { kind: string | undefined; inLink?: boolean }) {
+export function KindBadge({
+  kind,
+  inLink = false,
+  size = "md"
+}: {
+  kind: string | undefined
+  inLink?: boolean
+  size?: "md" | "sm"
+}) {
   const look = useChatKindLook(kind)
   const badge = look?.badge
   if (badge === undefined) return null
@@ -21,7 +30,9 @@ export function KindBadge({ kind, inLink = false }: { kind: string | undefined; 
         {...kindAccentProps(look)}
         className="inline-flex shrink-0 rounded-full align-middle outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
-        <Badge tone={look?.accent === undefined ? "neutral" : "accent"}>{badge.label}</Badge>
+        <Badge tone={look?.accent === undefined ? "neutral" : "accent"} size={size}>
+          {badge.label}
+        </Badge>
       </span>
     </Tooltip>
   )

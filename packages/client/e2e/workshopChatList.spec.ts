@@ -1,8 +1,9 @@
 // Workshop chats in the chat lists (owner, 2026-11-13: "they absolutely need their own filter and
 // entry style. They must be immediately recognizable as different."): the Chats filter's
-// Workshops choice, the other choices leaving workshops out, the row's accent edge, tint and badge
-// in the sidebar, the Chats page and its search, and no "New chat with this cast" in a workshop's
-// menu. Synthetic chats only; no provider is called.
+// Workshops choice, the other choices leaving workshops out, the row's accent badge on its
+// secondary line in the sidebar, the Chats page and its search (no tint or edge, which read as
+// selected; owner, 2026-11-18), a workshop row no taller than a story row with the same title, and
+// no "New chat with this cast" in a workshop's menu. Synthetic chats only; no provider is called.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
@@ -69,10 +70,12 @@ for (const width of [1440, 390])
       await expect(panel.getByRole("combobox", { name: "Show chats" })).toHaveText("All · 3")
       await expect(rows).toHaveCount(3)
 
-      // In All: the workshop row is tinted with an accent edge and says "Workshop", the story rows don't.
+      // In All: the workshop row says "Workshop" on its date line, the story rows don't. No tint or edge.
       const workshopRow = row(ids.workshop)
       await expect(workshopRow).toHaveAttribute("data-kind-row", "")
       await expect(workshopRow.locator('[data-kind-badge="workshop"]')).toHaveText("Workshop")
+      await expect(workshopRow.locator('[data-row-when] [data-kind-badge="workshop"]')).toHaveCount(1)
+      await expect(workshopRow.locator("[data-chat-title] [data-kind-badge]")).toHaveCount(0)
       await expect(workshopRow.locator("[data-chat-id]")).toHaveAccessibleName(/Tidy the library, Workshop$/)
       for (const story of [ids.solo, ids.pair]) {
         await expect(row(story)).not.toHaveAttribute("data-kind-row", "")
@@ -82,8 +85,7 @@ for (const width of [1440, 390])
         const style = getComputedStyle(el)
         return { shadow: style.boxShadow, image: style.backgroundImage }
       })
-      expect(edge.shadow).not.toBe("none")
-      expect(edge.image).toContain("linear-gradient")
+      expect(edge).toEqual({ shadow: "none", image: "none" })
       await expectLayout(page, info, `workshop-list-sidebar-${width}-${theme}`, {
         scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
       })
@@ -146,6 +148,8 @@ for (const width of [1440, 390])
       const item = list.locator("li", { has: page.getByRole("link", { name: /Tidy the library/ }) })
       await expect(item).toHaveAttribute("data-kind-row", "")
       await expect(item.locator('[data-kind-badge="workshop"]')).toHaveText("Workshop")
+      await expect(item.locator('[data-chat-meta] [data-kind-badge="workshop"]')).toHaveCount(1)
+      expect(await item.evaluate((el) => getComputedStyle(el).backgroundImage)).toBe("none")
       await expect(list.locator("li", { has: page.getByRole("link", { name: /Harbor solo/ }) })).not.toHaveAttribute(
         "data-kind-row",
         ""
@@ -205,7 +209,8 @@ for (const width of [1440, 390])
       await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(2)
       for (const row of await rows.all()) {
         await expect(row).toHaveAttribute("data-kind-row", "")
-        await expect(row.locator('[data-kind-badge="workshop"]')).toHaveText("Workshop")
+        await expect(row.locator('[data-row-when] [data-kind-badge="workshop"]')).toHaveText("Workshop")
+        await expect(row.locator("[data-branch-title-line] [data-kind-badge]")).toHaveCount(0)
         await expect(row.locator("[data-chat-id]")).toHaveAccessibleName(/Workshop/)
       }
       await expectLayout(page, info, `workshop-branch-footer-${width}-${theme}`, {
@@ -219,4 +224,78 @@ for (const width of [1440, 390])
       await expectLayout(page, info, `workshop-branch-list-${width}-${theme}`, {
         scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
       })
+    })
+
+// Owner, 2026-11-18: the badge wrapped onto the title's second line, so a workshop row was taller
+// than a story row with the same title, and the tint and edge made it look selected.
+const SAME = "About Masquerade at Corvina Hall"
+let same = { story: "", workshop: "" }
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a workshop row is as tall as a story row with its title, and only the open one looks selected, at ${width} ${theme}`, async ({
+      page
+    }, info) => {
+      test.setTimeout(120_000)
+      if (same.story === "")
+        same = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+          Effect.gen(function* () {
+            const card = yield* api.CreateCard({ label: "Corvina", name: "Corvina" })
+            const started = yield* api.StartChat({
+              cards: [card.entityId],
+              persona: null,
+              greeting: null,
+              first: { _tag: "Send", content: "A synthetic start.", speakerEntityId: null }
+            })
+            yield* api.RenameChat({ chatId: started.chat.id, name: SAME })
+            const workshop = yield* api.CreateWorkshop({})
+            yield* api.RenameChat({ chatId: workshop.id, name: SAME })
+            return { story: started.chat.id as string, workshop: workshop.id as string }
+          })
+        )
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      mkdirSync(shots, { recursive: true })
+      await page.goto(`${server().url}/chats/${same.workshop}?sideChatsShow=all`)
+      if (width === 390) await page.getByRole("button", { name: "Chats and menu", exact: true }).click()
+      const panel =
+        width === 390
+          ? page.locator(".fixed.inset-0")
+          : page.getByRole("complementary", { name: "Sidebar", exact: true })
+      const chats = panel.getByRole("region", { name: "Chats", exact: true })
+      const row = (id: string) => chats.locator(`[data-fork-row]:has([data-chat-id="${id}"])`)
+      await expect(row(same.story)).toBeVisible()
+      await expect(row(same.workshop).locator('[data-kind-badge="workshop"]')).toBeVisible()
+      const measure = (id: string) =>
+        row(id).evaluate((el) => ({
+          row: el.getBoundingClientRect().height,
+          title: el.querySelector("[data-chat-title]")!.getBoundingClientRect().height
+        }))
+      const story = await measure(same.story)
+      const workshop = await measure(same.workshop)
+      expect(workshop.title).toBe(story.title)
+      expect(workshop.row).toBe(story.row)
+      // The open workshop looks selected; an unselected workshop doesn't, and has no tint or edge.
+      const look = (id: string) =>
+        row(id).evaluate((el) => {
+          const style = getComputedStyle(el)
+          return {
+            border: style.borderColor,
+            background: style.backgroundColor,
+            shadow: style.boxShadow,
+            image: style.backgroundImage
+          }
+        })
+      const selected = await look(same.workshop)
+      const other = await look(ids.workshop)
+      await expect(row(same.workshop).locator("[data-chat-id]")).toHaveAttribute("aria-current", "page")
+      expect(selected.border).not.toBe(other.border)
+      expect(other).toMatchObject({ shadow: "none", image: "none" })
+      expect(other.background).toBe((await look(ids.solo)).background)
+      expect(other.border).toBe((await look(ids.solo)).border)
+      await expectLayout(page, info, `workshop-same-title-sidebar-${width}-${theme}`, {
+        scope: width === 390 ? ".fixed.inset-0" : '[aria-label="Sidebar"]'
+      })
+      await chats.screenshot({ path: resolve(shots, `same-title-${width}-${theme}.png`), animations: "disabled" })
     })

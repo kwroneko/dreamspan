@@ -63,8 +63,9 @@ export const kindAccentProps = (
       }
 
 /**
- * A list row of a chat whose kind has an accent: its kind and accent on the row, which styles.css
- * draws as a tinted row with an accent edge, so the kind shows without the badge. Nothing for a story.
+ * A list row of a chat whose kind has an accent: its kind and accent on the row, so what's inside
+ * (its badge, its selected border) takes the kind's accent. No tint or edge: those read as selected
+ * (owner, 2026-11-18). Nothing for a story.
  */
 export const kindRowProps = (look: ChatKindLook | undefined) => {
   const accent = kindAccentProps(look)

@@ -75,10 +75,19 @@ const badgeTones: Record<Tone, string> = {
   danger: "border-danger/40 text-danger"
 }
 
-export function Badge({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
+/** `sm`: one text-xs line tall, for a row's secondary line, which it then doesn't make taller. */
+export function Badge({
+  tone = "neutral",
+  size = "md",
+  children
+}: {
+  tone?: Tone
+  size?: "md" | "sm"
+  children: ReactNode
+}) {
   return (
     <span
-      className={`inline-flex h-5 items-center rounded-full border px-2 text-xs font-medium whitespace-nowrap ${badgeTones[tone]}`}
+      className={`inline-flex items-center rounded-full border text-xs font-medium whitespace-nowrap ${size === "sm" ? "h-4 px-1.5 leading-none" : "h-5 px-2"} ${badgeTones[tone]}`}
     >
       {children}
     </span>
