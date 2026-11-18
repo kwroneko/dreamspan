@@ -463,6 +463,8 @@ for (const width of [390, 1024, 1440])
     // The library page also exercises the wide table, which the chat overlay may not fit.
     await page.goto(`${server().url}/library/${refId}`)
     const main = page.getByRole("main")
-    await main.getByRole("button", { name: "Close Harbour", exact: true }).click()
+    // Each view's open entries are its own URL's (owner, 2026-11-18): the library page opens
+    // with Harbour closed, whatever the chat's views had open.
+    await expect(main.getByRole("button", { name: "Open Harbour", exact: true })).toBeVisible()
     await checkEntryControls(main, width, true)
   })
