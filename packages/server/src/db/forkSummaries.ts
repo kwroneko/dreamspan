@@ -248,8 +248,11 @@ const computeSummaries = (
     )
     const summaries: Array<ForkSummary> = []
     const previewCandidates: Array<Array<number>> = []
-    // Who `{{user}}` and a speakerless `{{char}}` are in each fork's state, for a template preview.
-    const previewPeople: Array<{ readonly user: string | null; readonly other: string | null }> = []
+    // Each candidate message's cast as it stood before it (the state after its parent, as the chat
+    // shows it), and the fork's own branch events to lay over it: who `{{user}}` and a speakerless
+    // `{{char}}` are in a template preview.
+    const previewStates: Array<Array<ReturnType<typeof foldState>>> = []
+    const previewBranch: Array<ReadonlyArray<Event>> = []
     for (const record of records) {
       let path = structural(record)
       const base = record.base_slot_id === null ? undefined : path.find((s) => s.id === record.base_slot_id)
@@ -327,6 +330,7 @@ const computeSummaries = (
       const lastSpoke = new Map<string, number>()
       let endpoint: Slot | undefined
       const candidates: Array<number> = []
+      const candidateStates: Array<ReturnType<typeof foldState>> = []
       let messages = 0
       // What it shares: its parent's path while that's live, else the history up to its base.
       const parent = record.parent_fork_id === null ? undefined : parentPaths.get(record.parent_fork_id)
@@ -348,7 +352,10 @@ const computeSummaries = (
         if (shared !== null && split === null && !shared(s)) split = { at: s.created_at, after: messages }
         messages++
         endpoint = s
-        if (s.status !== "failed" && s.content_length > 0) candidates.push(s.version_seq)
+        if (s.status !== "failed" && s.content_length > 0) {
+          candidates.push(s.version_seq)
+          candidateStates.push(state)
+        }
         const changes = positional.get(s.id)
         if (changes !== undefined || state.playedByMe.length > 1) state = foldState(changes ?? [], state)
         const record = (entity: string, at: number) => {
@@ -378,10 +385,8 @@ const computeSummaries = (
       }
       const present = state.participants.filter((id) => !state.playedByMe.includes(id) && !state.absent.includes(id))
       previewCandidates.push(candidates)
-      previewPeople.push({
-        user: state.playedByMe[0] ?? null,
-        other: state.participants.find((id) => !state.playedByMe.includes(id)) ?? null
-      })
+      previewStates.push(candidateStates)
+      previewBranch.push(branch)
       summaries.push({
         forkId: record.id,
         chatId: record.chat_id,
@@ -434,11 +439,15 @@ const computeSummaries = (
       const next: Array<number> = []
       for (const i of pending) {
         const found = excerpts.get(previewCandidates[i]!.pop()!)
+        const before = foldState(previewBranch[i]!, previewStates[i]!.pop()!)
         const text = found?.text ?? ""
         if (text.trim()) {
           previews[i] = text
           if (found!.template)
-            previewMacros[i] = { speaker: found!.speaker ?? previewPeople[i]!.other, user: previewPeople[i]!.user }
+            previewMacros[i] = {
+              speaker: found!.speaker ?? before.participants.find((id) => !before.playedByMe.includes(id)) ?? null,
+              user: before.playedByMe[0] ?? null
+            }
         } else if (previewCandidates[i]!.length > 0) next.push(i)
       }
       pending = next
