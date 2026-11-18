@@ -46,7 +46,14 @@ export const lcmTimeline = {
   source: import.meta.url,
   transform: (input) => {
     const { entries, lcm, summaries, divider, historyDivider } = input
-    if ((divider < 0 || !lcm) && (!summaries || !lcm?.layer.length)) return input.rows
+    // Above the chat's first message, the Messages and Summaries tabs (owner, 2026-11-18), when
+    // summaries exist and the boundary isn't the first row anyway.
+    const first = entries[0]
+    const start = !!lcm?.layer.length && first !== undefined && (first.position ?? first.depth) === 0 && divider !== 0
+    const top: ReadonlyArray<TimelineRowV1> = start
+      ? [{ key: "lcm-tabs", estimate: 44, from: Infinity, to: -1, body: { kind: "lcm-tabs" } }]
+      : []
+    if ((divider < 0 || !lcm) && (!summaries || !lcm?.layer.length)) return start ? [...top, ...input.rows] : input.rows
     const original = [...input.rows]
     if (divider >= 0 && lcm) {
       let at = boundary(original, input, divider)
@@ -89,7 +96,7 @@ export const lcmTimeline = {
         result.push(row)
     }
     while (next < layer.length) append()
-    return result
+    return [...top, ...result]
   }
 } satisfies TimelineTransformV1
 export const threadsTimeline = {

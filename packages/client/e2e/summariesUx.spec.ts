@@ -116,15 +116,9 @@ for (const [name, viewport] of [
         await expect(failed).toContainText("The provider was busy: The upstream model is overloaded. (HTTP 500)")
         await expect(failed).not.toContainText('{"')
         await expect(failed.getByRole("button", { name: /^Re-summarize messages 21–30/ })).toHaveText("Retry")
-        // The head: the two view switches on one row, each explained on hover.
-        const switches = [
-          panel.getByRole("switch", { name: "Summaries in chat" }),
-          panel.getByRole("switch", { name: "Coverage rail" })
-        ]
-        if (name === "1440") {
-          const [a, b] = await Promise.all(switches.map((s) => s.boundingBox()))
-          expect(Math.abs(a!.y - b!.y)).toBeLessThan(4)
-        }
+        // The head keeps the rail's switch, explained on hover; what the chat shows is the
+        // chat's own Messages and Summaries tabs (owner, 2026-11-18).
+        await expect(panel.getByRole("switch", { name: "Summaries in chat" })).toHaveCount(0)
         await hint(page, panel.getByText("Coverage rail", { exact: true }), /which summary covers each message/)
         await noSideways(page)
       })

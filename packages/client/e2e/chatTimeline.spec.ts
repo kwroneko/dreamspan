@@ -40,6 +40,9 @@ const fixture = async (title: string, count = 8) => {
   const tail = await level1(server().dataDir, chat.id, chat.entries.slice(4, 6), "The fifth and sixth messages.")
   return { ...chat, first, second, top, tail }
 }
+/** A tab of the chat's Messages and Summaries row, the first shown. */
+const viewTab = (page: Page, name: "Messages" | "Summaries") =>
+  page.getByTestId("messages").getByRole("tab", { name, exact: true }).first()
 const originals = (page: Page, entry: PathEntry) => page.locator(`article[data-slot="${entry.slotId}"]`)
 
 for (const width of [1440, 390]) {
@@ -54,9 +57,9 @@ for (const width of [1440, 390]) {
     await expect(page.locator("[data-timeline-summary]")).toHaveCount(0)
     const composer = page.getByLabel("Message", { exact: true })
     await composer.fill("A draft kept while switching the viewer.")
-    const toggle = page.getByTestId("messages").getByRole("switch", { name: "Summaries in chat" })
+    const toggle = viewTab(page, "Summaries")
     await toggle.click()
-    await expect(toggle).toBeChecked()
+    await expect(toggle).toHaveAttribute("aria-selected", "true")
     await expect(page.locator("[data-timeline-summary]")).toHaveCount(2)
     const top = page.locator(`[data-timeline-summary="${chat.top.id}"]`)
     const tail = page.locator(`[data-timeline-summary="${chat.tail.id}"]`)
@@ -84,12 +87,13 @@ for (const width of [1440, 390]) {
     await expect(originals(page, chat.entries[0]!)).toHaveCount(0)
     await expect(composer).toHaveValue("A draft kept while switching the viewer.")
     const panel = await openPanel(page, "Summaries")
-    await expect(panel.getByRole("switch", { name: "Summaries in chat" })).toBeChecked()
+    // The panel keeps the rail; what the chat shows is its own tabs.
+    await expect(panel.getByRole("switch", { name: "Summaries in chat" })).toHaveCount(0)
     await panel.getByRole("switch", { name: "Coverage rail" }).click()
     await expect(panel.getByRole("switch", { name: "Coverage rail" })).toBeChecked()
     await closePanel(page)
     await page.reload()
-    await expect(page.getByTestId("messages").getByRole("switch", { name: "Summaries in chat" })).toBeChecked()
+    await expect(viewTab(page, "Summaries")).toHaveAttribute("aria-selected", "true")
     await expect(page.getByTestId("coverage-rail")).toBeVisible()
     await expect(composer).toHaveValue("A draft kept while switching the viewer.")
     const other = await fixture(`Other chat ${width}`)
@@ -97,9 +101,9 @@ for (const width of [1440, 390]) {
     await expect(page.locator("[data-timeline-summary]")).toHaveCount(2)
     const otherPanel = await openPanel(page, "Summaries")
     await expect(otherPanel.getByRole("switch", { name: "Coverage rail" })).toBeChecked()
-    await otherPanel.getByRole("switch", { name: "Summaries in chat" }).click()
-    await expect(otherPanel.getByRole("switch", { name: "Summaries in chat" })).not.toBeChecked()
     await closePanel(page)
+    await viewTab(page, "Messages").click()
+    await expect(viewTab(page, "Messages")).toHaveAttribute("aria-selected", "true")
     await expect(page.locator("[data-timeline-summary]")).toHaveCount(0)
     await expect(originals(page, other.entries[5]!)).toBeVisible()
   })
@@ -144,7 +148,6 @@ test("viewer preferences belong to the account and patches preserve independent 
     )
     await page.goto(`${server().url}/chats/${otherChat.id}`)
     const panel = await openPanel(page, "Summaries")
-    await expect(panel.getByRole("switch", { name: "Summaries in chat" })).not.toBeChecked()
     await expect(panel.getByRole("switch", { name: "Coverage rail" })).not.toBeChecked()
     await openPanel(page, "Interface")
     await expect(page.getByLabel("Message portrait size", { exact: true })).toHaveText("Small (60 × 90)")
@@ -198,7 +201,7 @@ test("each pane keeps its own summaries and rail; a flip is the default only for
   const frames = (p: Page) => p.locator("[data-frame]")
   const summaries = (p: Page, i: number) => frames(p).nth(i).locator("[data-timeline-summary]")
   const toggle = (p: Page, i: number) =>
-    frames(p).nth(i).getByTestId("messages").getByRole("switch", { name: "Summaries in chat" })
+    frames(p).nth(i).getByTestId("messages").getByRole("tab", { name: "Summaries", exact: true }).first()
   // A page already open before the flip.
   const before = await page.context().newPage()
   await before.setViewportSize({ width: 1440, height: 1000 })
@@ -210,9 +213,9 @@ test("each pane keeps its own summaries and rail; a flip is the default only for
   await page.getByRole("button", { name: "Split right" }).first().click()
   await expect(frames(page)).toHaveCount(2)
   await toggle(page, 1).click()
-  await expect(toggle(page, 1)).toBeChecked()
+  await expect(toggle(page, 1)).toHaveAttribute("aria-selected", "true")
   await expect(summaries(page, 1).first()).toBeVisible()
-  await expect(toggle(page, 0)).not.toBeChecked()
+  await expect(toggle(page, 0)).toHaveAttribute("aria-selected", "false")
   await expect(summaries(page, 0)).toHaveCount(0)
   await expect.poll(async () => (await admin((api) => api.GetDisplayPrefs({}))).timeline).toBe("summaries")
 
