@@ -230,7 +230,9 @@ test("the open tool past the row shows as a guest before More, and goes when ano
 test("with a guest shown, the row settles at every width: no flipping at the boundaries", async ({ page }) => {
   await open(page)
   const hidden = await moreValues(page)
-  await moreMenu(page).locator(`[data-tab-value="${hidden.at(-1)}"]`).click()
+  await moreMenu(page)
+    .locator(`[data-tab-value="${hidden.at(-1)}"]`)
+    .click()
   await expect(guest(page)).toHaveCount(1)
   // Count changes to the row's tools after each pixel of resizing.
   await strip(page).evaluate((list) => {
@@ -255,9 +257,9 @@ test("with a guest shown, the row settles at every width: no flipping at the bou
     )
     await page.evaluate(() => ((window as unknown as { tabChanges: { changes: number } }).tabChanges.changes = 0))
     await page.waitForTimeout(60)
-    expect(await page.evaluate(() => (window as unknown as { tabChanges: { changes: number } }).tabChanges.changes)).toBe(
-      0
-    )
+    expect(
+      await page.evaluate(() => (window as unknown as { tabChanges: { changes: number } }).tabChanges.changes)
+    ).toBe(0)
     // Everything shown is inside the row.
     const row = (await strip(page).boundingBox())!
     const panel = (await page.locator("[data-chat-panel-tabs]").boundingBox())!
@@ -321,7 +323,9 @@ for (const width of [1440, 390])
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
       await open(page, width)
       const hidden = await moreValues(page)
-      await moreMenu(page).locator(`[data-tab-value="${hidden.at(-1)}"]`).click()
+      await moreMenu(page)
+        .locator(`[data-tab-value="${hidden.at(-1)}"]`)
+        .click()
       await expect(guest(page)).toHaveCount(1)
       await expectLayout(page, info, `tabs-guest-${width}-${theme}`, { scope: "[data-chat-panel-tabs]" })
       await page.screenshot({ path: info.outputPath(`guest-${width}-${theme}.png`) })

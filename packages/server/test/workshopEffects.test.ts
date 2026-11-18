@@ -225,6 +225,8 @@ describe("workshop setup effects", () => {
           "commands.network",
           "plugins.write",
           "plugins.apply",
+          // A subagent inside the reply (subagents1).
+          "subagents",
           "skills.card"
         ]
       )
@@ -244,6 +246,8 @@ describe("workshop setup effects", () => {
           "allow",
           "allow",
           "ask",
+          // Owner [D] (spec/SUBAGENTS.md §13): the recommendation, not asked.
+          "allow",
           "ask"
         ]
       )
@@ -257,6 +261,8 @@ describe("workshop setup effects", () => {
           ["off", "allow"],
           ["off", "ask", "allow"],
           ["off", "ask"],
+          // Subagents: Off, Ask first or Allowed.
+          ["off", "ask", "allow"],
           // A card's skills always ask; allowing one covers that skill's exact words only.
           ["off", "ask"]
         ]

@@ -383,6 +383,7 @@ const format = (ctx: ToolContext, report: string, metadata: string) =>
 
 /** The model's `agent` tool (spec/SUBAGENTS.md §2.1): workshops only, under the `subagents` capability. */
 export const agentTool: RolloutTool<AgentArgs> = {
+  source: import.meta.url,
   id: "agent",
   label: "Started a subagent",
   explanation: "Hand part of a task to a subagent that reports back",

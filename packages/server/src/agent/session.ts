@@ -916,7 +916,15 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
             ? seed.slice()
             : [
                 { role: "rpRequest", timestamp: Date.now() },
-                ...(cap <= 1 ? [{ role: "rpHarness" as const, content: run.subagent?.writeNow ?? WRITE_NOW, timestamp: Date.now() }] : [])
+                ...(cap <= 1
+                  ? [
+                      {
+                        role: "rpHarness" as const,
+                        content: run.subagent?.writeNow ?? WRITE_NOW,
+                        timestamp: Date.now()
+                      }
+                    ]
+                  : [])
               ]
         },
         prepareRequest: async ({ context }, signal) => {

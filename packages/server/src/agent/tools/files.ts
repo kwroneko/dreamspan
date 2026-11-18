@@ -286,6 +286,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   // --- read_file
   const readTool: RolloutTool<Record<string, unknown>> = {
+    source: import.meta.url,
     id: "read_file",
     label: "Read a file",
     capability: "files",
@@ -350,6 +351,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   // --- list_files
   const listTool: RolloutTool<Record<string, unknown>> = {
+    source: import.meta.url,
     id: "list_files",
     label: "Listed files",
     capability: "files",
@@ -432,6 +434,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   // --- search_files
   const searchTool: RolloutTool<Record<string, unknown>> = {
+    source: import.meta.url,
     id: "search_files",
     label: "Searched files",
     capability: "files",
@@ -590,6 +593,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   // --- write_file
   const writeTool: RolloutTool<Record<string, unknown>> = {
+    source: import.meta.url,
     id: "write_file",
     label: "Wrote a file",
     capability: "files",
@@ -628,6 +632,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
     { additionalProperties: false }
   )
   const editTool: RolloutTool<Record<string, unknown>> = {
+    source: import.meta.url,
     id: "edit_file",
     label: "Edited a file",
     capability: "files",
@@ -735,6 +740,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
 
   // --- bash
   const bashTool: RolloutTool<Record<string, unknown>> = {
+    source: import.meta.url,
     id: "bash",
     label: "Ran a command",
     capability: "commands",

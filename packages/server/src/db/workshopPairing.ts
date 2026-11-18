@@ -18,7 +18,7 @@ const writesPairing = (c: string) =>
   `EXISTS (SELECT 1 FROM state_events p WHERE p.fork_id = ${c}.id AND p.key = 'workshop.paired')`
 
 /** The story fork workshop fork `forkId` goes with; null for a workshop beside no story. */
-export const pairedStoryFork = (sql: SqlClient.SqlClient, forkId: string) =>
+const pairedStoryFork = (sql: SqlClient.SqlClient, forkId: string) =>
   Effect.map(
     sql<{ fork: string | null }>`WITH RECURSIVE up(id, n) AS (
         SELECT ${forkId}, 0

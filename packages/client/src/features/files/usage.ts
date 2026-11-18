@@ -4,7 +4,7 @@ import { formatByteSize } from "@rp/shared/byteSize.ts"
 import type { FilesUsage } from "@rp/shared/filesQuotaApi.ts"
 
 /** Past this share of the quota the usage line turns to a warning. */
-export const WARN_SHARE = 0.9
+const WARN_SHARE = 0.9
 
 type Usage = Pick<FilesUsage, "usedBytes" | "quotaBytes" | "over">
 

@@ -108,7 +108,6 @@ it.live("a preview follows the cast before the message, names binned cards, and 
         sourcePath: null
       })
     const { entityId: ana } = yield* make("Ana", "Hi {{user}}, I am {{char}}.")
-    const { entityId: bo } = yield* make("Bo", "Bo here, {{user}}.")
     const sam = yield* api.CreateCard({ label: "Sam", name: "Sam" })
     const kit = yield* api.CreateCard({ label: "Kit", name: "Kit" })
     for (const persona of [sam, kit]) yield* api.SetPersona({ entityId: persona.entityId, persona: true })

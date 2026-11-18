@@ -141,6 +141,8 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   GetStImport: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetStImportPlan: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetStImportPlanMessages: "Not in W6's first exposures; use the bounded workshop read tools.",
+  GetSubagentRun:
+    "The run inspector's own read of a child's run; the parent gets the child's report from the agent call.",
   GetSummary: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetSummaryDetails: "Not in W6's first exposures; use the bounded workshop read tools.",
   GetSummaryDraft: "Not in W6's first exposures; use the bounded workshop read tools.",
@@ -322,6 +324,7 @@ export const operationExclusions: Readonly<Record<string, string>> = {
   StartStPathImport: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   StartThreads: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   StopGeneration: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
+  StopSubagent: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",
   SubscribeChat: "Streaming UI subscription; a tool must return a bounded result.",
   SubscribeNotices: "Streaming UI subscription; a tool must return a bounded result.",
   SummaryDraftHistory: "Not exposed in W6: no approved, complete undo adapter for this UI workflow.",

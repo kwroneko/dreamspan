@@ -20,7 +20,7 @@ import { textField } from "@rp/shared/editing.ts"
 const decodeEvent = Schema.decodeUnknownSync(FoldableEvent)
 const CONTENT = textField(["content"])
 
-export const previewForkNotes = Effect.fnUntraced(function* (
+const previewForkNotes = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   {
     userId,
