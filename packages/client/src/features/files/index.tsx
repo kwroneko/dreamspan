@@ -1,7 +1,7 @@
 // Files in the client (spec/FILES-AND-ENVIRONMENT.md §8, track B1), registered as a plugin would:
 // the store it reads (`filesSources`), the viewers (`fileViewers`), the workshop's Files tab before
-// Changes, the Files page in the main navigation, and its workbench tabs (the browser one tab,
-// each opened file a tab of its own).
+// Changes, the Files page (reached from that tab and by its URL, not from the main navigation),
+// and its workbench tabs (the browser one tab, each opened file a tab of its own).
 import { routes } from "../../routes.tsx"
 import { kindShows } from "../chat/kindLooks.ts"
 import { chatPanels, lazyPanel, type PanelProps } from "../chat/panels.tsx"
@@ -35,8 +35,7 @@ export const register = () => [
     id: "files",
     parent: "app",
     path: FILES_PAGE,
-    component: FilesPage,
-    nav: { label: "Files", icon: "folder", description: "Your files, and what the assistant made.", order: 25 }
+    component: FilesPage
   }),
   tabKinds.register({
     id: "files",
