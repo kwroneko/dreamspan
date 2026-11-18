@@ -114,7 +114,7 @@ export function CardGridControls({
                   className="items-start! [&>button]:mt-[3px]"
                 />
                 <IncludePersonas browse={browse} onChange={onChange} />
-                <CardGroupingControl browse={browse} />
+                <CardGroupingControl browse={browse} onChange={onChange} />
               </>
             )}
           </div>

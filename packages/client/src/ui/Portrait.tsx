@@ -16,7 +16,10 @@ import { ToolbarSlider } from "./Slider.tsx"
 import { useAway } from "./away.ts"
 import { IconButton, Tooltip } from "./Tooltip.tsx"
 import { ViewerHeader } from "./ViewerHeader.tsx"
-import { useViewPrefs } from "./viewPrefs.ts"
+import { useLayoutParam, writeLayoutParam } from "../tabLayoutParams.ts"
+
+/** "Only keep one image open at a time" in this tab: `psingle=on`; absent, they stack. */
+export const SINGLE_PORTRAIT_PARAM = "psingle"
 
 export interface Portrait {
   readonly id: string
@@ -44,7 +47,10 @@ interface PortraitViewer {
   readonly split: (index: number, upper: number, total: number, min: number) => void
   readonly even: (index: number) => void
   readonly move: (id: string, index: number) => void
-  /** "Only keep one image open at a time" (`DisplayPrefs.singlePortrait`): the account's choice. */
+  /**
+   * "Only keep one image open at a time": this browser tab's, in its URL (`SINGLE_PORTRAIT_PARAM`,
+   * owner 2026-11-18: how a tab shows something is the tab's).
+   */
   readonly single: boolean
   /** Turns it on, keeping only `keep` open, or off, back to stacking. */
   readonly setSingle: (on: boolean, keep: string) => void
@@ -87,8 +93,7 @@ export function PortraitProvider({
     if (onStackChange) onStackChange(next)
     else setLocalStack(next)
   }
-  const prefs = useViewPrefs()
-  const single = prefs.prefs.singlePortrait
+  const single = useLayoutParam(SINGLE_PORTRAIT_PARAM) === "on"
   // A phone has room for one: a click there always replaces it.
   const replaces = single || !inline
   const shown = stack.map((entry) => ({ ...entry, portrait: current?.(entry.portrait) ?? entry.portrait }))
@@ -104,7 +109,7 @@ export function PortraitProvider({
     single,
     setSingle: (on, keep) => {
       if (on) setStack((stack) => keepOnly(stack, keep))
-      prefs.change({ singlePortrait: on })
+      writeLayoutParam(SINGLE_PORTRAIT_PARAM, on ? "on" : null)
     },
     set: (next) => setStack(() => next),
     tabHref

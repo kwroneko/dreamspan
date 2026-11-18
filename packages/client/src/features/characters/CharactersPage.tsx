@@ -101,7 +101,7 @@ function LocalCards({
   cards: ReturnType<typeof browseCards>
 }) {
   const [, setBrowse] = useHomeBrowse()
-  const grouped = useGroupedFamilies(search)
+  const grouped = useGroupedFamilies(browse, search)
   return (
     <>
       {browse.filter === "personas" && (

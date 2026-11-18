@@ -1,3 +1,4 @@
+import { useCoverageRail, useSummariesInChat } from "./chatViewParams.ts"
 import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { useSummariesOfUrl } from "./SummaryViewer.tsx"
 import { useTransformedRows, useTimelineInputs, useTimelineTransforms } from "./timelineContributions.tsx"
@@ -154,7 +155,8 @@ export function MessageList({
     timelineBoundaries.snapshot
   )
   const railSlots = useSyncExternalStore(timelineRails.subscribe, timelineRails.snapshot, timelineRails.snapshot)
-  const summaries = prefs.timeline === "summaries" && summarySlots.entries.length > 0
+  const [summariesInChat] = useSummariesInChat(view.lcm?.enabled === true)
+  const summaries = summariesInChat && summarySlots.entries.length > 0
   useRenderCount("listRenders")
   const lcm = view.lcm?.enabled === true && view.lcm.leafSlotId === view.leafSlotId ? view.lcm : null
   const history = view.history?.leafSlotId === view.leafSlotId ? view.history : null
@@ -989,7 +991,8 @@ function ChatSurface({
   const focus = summaryFocus || null
   const setFocus = useCallback((next: string | null) => setSummaryFocus(next ?? "", true), [setSummaryFocus])
   const { prefs } = useViewPrefs()
-  const rail = prefs.coverageRail
+  const [rail] = useCoverageRail(view.lcm?.enabled === true)
+  const [summariesInChat] = useSummariesInChat()
   const openSummaries = useCallback(
     (summaryId: string | null) => {
       setFocus(summaryId)
@@ -1119,7 +1122,7 @@ function ChatSurface({
               <MessageList
                 // A replacement layer has different row coordinates. Give it fresh
                 // virtualizer measurements rather than inheriting the old pixel anchor.
-                key={prefs.timeline}
+                key={summariesInChat ? "summaries" : "originals"}
                 session={session}
                 view={view}
                 anchor={reading ? reading.slot : slot}

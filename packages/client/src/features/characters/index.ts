@@ -1,3 +1,4 @@
+import { SIDEBAR_BROWSE_PARAMS } from "./useSidebarBrowse.ts"
 import { cardGrouping } from "./cardGrouping.tsx"
 import { groupFamilies } from "./cardFamilies.ts"
 import { GroupFamiliesToggle } from "./cardBrowse.tsx"
@@ -76,6 +77,7 @@ export const register = () => {
     id: "characters.sidebar-foot",
     keys: [...Object.values(FOOT_PARAMS.open), ...Object.values(FOOT_PARAMS.height)]
   })
+  layoutParams.register({ id: "characters.sidebar-browse", keys: Object.values(SIDEBAR_BROWSE_PARAMS) })
   tabKinds.register({
     id: "card",
     order: 200,

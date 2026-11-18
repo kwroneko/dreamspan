@@ -286,7 +286,7 @@ export function CardPicker({
   const shell = useAtomValue(shellAtom)
   const [remembered, update] = useCardSwitcherView()
   const [filter, setFilter] = useState<CardBrowse["filter"]>(persona || personasOnly ? "personas" : "all")
-  const browse: CardBrowse = { ...remembered, filter }
+  const browse: CardBrowse = { ...remembered, filter, grouped: false }
   const [query, setQuery] = useState("")
   const search = useRef<HTMLInputElement>(null)
   const listId = useId()

@@ -183,3 +183,68 @@ test("expansion reads the child revisions the parent condensed", async ({ page }
   await expect(child).toContainText("First pair of original messages.")
   await expect(child).not.toContainText("A later edit")
 })
+
+// Owner, 2026-11-18 (DESIGN §10.1): the same chat in two panes, summaries in one and the
+// originals in the other, to compare; a flip sets the account's default for panes opened later.
+test("each pane keeps its own summaries and rail; a flip is the default only for panes opened later", async ({
+  page
+}) => {
+  test.setTimeout(150_000)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await admin((api) => api.SetDisplayPrefs({ prefs: { timeline: "originals", coverageRail: false } }))
+  const chat = await fixture("Two panes")
+  const at = `/chats/${chat.id}?slot=${chat.entries[6]!.slotId}`
+  const frames = (p: Page) => p.locator("[data-frame]")
+  const summaries = (p: Page, i: number) => frames(p).nth(i).locator("[data-timeline-summary]")
+  const toggle = (p: Page, i: number) =>
+    frames(p).nth(i).getByTestId("messages").getByRole("switch", { name: "Summaries in chat" })
+  // A page already open before the flip.
+  const before = await page.context().newPage()
+  await before.setViewportSize({ width: 1440, height: 1000 })
+  await before.goto(`${server().url}${at}`)
+  await expect(originals(before, chat.entries[5]!)).toBeVisible()
+
+  await page.goto(`${server().url}${at}`)
+  await expect(originals(page, chat.entries[5]!)).toBeVisible()
+  await page.getByRole("button", { name: "Split right" }).first().click()
+  await expect(frames(page)).toHaveCount(2)
+  await toggle(page, 1).click()
+  await expect(toggle(page, 1)).toBeChecked()
+  await expect(summaries(page, 1).first()).toBeVisible()
+  await expect(toggle(page, 0)).not.toBeChecked()
+  await expect(summaries(page, 0)).toHaveCount(0)
+  await expect.poll(async () => (await admin((api) => api.GetDisplayPrefs({}))).timeline).toBe("summaries")
+
+  const check = async (p: Page) => {
+    await expect(frames(p)).toHaveCount(2)
+    await expect(summaries(p, 0)).toHaveCount(0)
+    await expect(summaries(p, 1).first()).toBeVisible()
+  }
+  await page.reload()
+  await check(page)
+  const copy = await page.context().newPage()
+  await copy.setViewportSize({ width: 1440, height: 1000 })
+  await copy.goto(page.url())
+  await check(copy)
+  await copy.close()
+
+  // The page open before keeps its own; a page opened now starts from the new default.
+  await expect(before.locator("[data-timeline-summary]")).toHaveCount(0)
+  await before.reload()
+  await expect(originals(before, chat.entries[5]!)).toBeVisible()
+  await expect(before.locator("[data-timeline-summary]")).toHaveCount(0)
+  await before.close()
+  const fresh = await page.context().newPage()
+  await fresh.setViewportSize({ width: 1440, height: 1000 })
+  await fresh.goto(`${server().url}/chats/${chat.id}`)
+  await expect(fresh.locator("[data-timeline-summary]").first()).toBeVisible()
+  await fresh.close()
+
+  // The rail is per pane in the same way: the copied layout of one pane with it, one without.
+  const wb = JSON.stringify(["r", [0.5, 0.5], [0, "="], [0, `${at}&rail=on&timeline=originals`]])
+  await page.goto(`${server().url}${at}&rail=off&timeline=originals&wb=${encodeURIComponent(wb)}`)
+  await expect(frames(page)).toHaveCount(2)
+  await expect(frames(page).nth(1).getByTestId("coverage-rail")).toBeVisible()
+  await expect(frames(page).nth(0).getByTestId("coverage-rail")).toHaveCount(0)
+})

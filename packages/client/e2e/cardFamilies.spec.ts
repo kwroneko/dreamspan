@@ -160,7 +160,7 @@ for (const width of [1440, 390])
         await expect(tiles(main)).toHaveCount(3)
         await expect(page).not.toHaveURL(/family=/)
 
-        // The left panel's grid: the same choice, its own open family.
+        // The left panel's grid: its own choice (off until chosen) and its own open family.
         await showAppNavigation(page)
         await page
           .getByRole("group", { name: "Left panel", exact: true })
@@ -169,6 +169,9 @@ for (const width of [1440, 390])
           .click()
         const list = page.locator("[data-shell-list]").filter({ visible: true })
         const side = list.locator("xpath=..").getByRole("button", { name: "Group forks", exact: true })
+        await expect(side).toHaveAttribute("aria-pressed", "false")
+        await side.click()
+        await expect(page).toHaveURL(/sideGroup=on/)
         await expect(tiles(list)).toHaveCount(3)
         await shot(list, "side-grouped", "[data-shell-list]")
         await list.getByRole("button", { name: "Tomas Reed: 2 cards in this family", exact: true }).click()
@@ -181,7 +184,7 @@ for (const width of [1440, 390])
         await expect(tiles(list)).toHaveCount(3)
         await page.goBack()
         await expect(list.locator(`[data-family="${seed.tomas}"]`)).toHaveCount(2)
-        // Back to every card on its own, here and on the page.
+        // Back to every card on its own in the panel (the page keeps its own choice).
         await side.click()
         await expect(tiles(list)).toHaveCount(6)
         await expect(list.locator("[data-family-toggle]")).toHaveCount(0)
@@ -211,7 +214,8 @@ for (const width of [1440, 390])
           })
         }
         await hideAppNavigation(page)
-        if (width === 1440) await expect(tiles(main)).toHaveCount(6)
+        // The page kept its own choice: still grouped.
+        if (width === 1440) await expect(tiles(main)).toHaveCount(3)
       } finally {
         await server.stop()
       }

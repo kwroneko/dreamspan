@@ -59,32 +59,23 @@ it.live("creates empty editable lorebooks, independent library notes and persona
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )
 
-it.live("each card list's sort follows the account without overwriting the other lists or switchers", () =>
+it.live("each switcher's sort follows the account without overwriting the others", () =>
   Effect.gen(function* () {
     const alice = yield* client({ "Remote-User": "alice" })
     const phone = yield* client({ "Remote-User": "alice" })
     const bob = yield* client({ "Remote-User": "bob" })
-    yield* alice.SetDisplayPrefs({ prefs: { homeCards: { sort: "name", reversed: true, withPersonas: true } } })
-    yield* phone.SetDisplayPrefs({ prefs: { sidebarCards: { sort: "added", reversed: false, withPersonas: false } } })
-    yield* alice.SetDisplayPrefs({
-      prefs: {
-        castCards: { sort: "created", reversed: true, withPersonas: false },
-        lorebookSort: "modified",
-        noteSort: "modified",
-        cardSwitcher: { sort: "name", reversed: false, withPersonas: false }
-      }
-    })
+    yield* alice.SetDisplayPrefs({ prefs: { lorebookSort: "modified" } })
+    yield* phone.SetDisplayPrefs({ prefs: { noteSort: "modified" } })
+    yield* alice.SetDisplayPrefs({ prefs: { cardSwitcher: { sort: "name", reversed: false, withPersonas: false } } })
     const reconnect = yield* client({ "Remote-User": "alice" })
     const prefs = yield* reconnect.GetDisplayPrefs({})
-    assert.deepStrictEqual(prefs.homeCards, { sort: "name", reversed: true, withPersonas: true })
-    assert.strictEqual(prefs.sidebarCards.sort, "added")
-    assert.strictEqual(prefs.castCards.sort, "created")
-    assert.strictEqual(prefs.castCards.reversed, true)
     assert.strictEqual(prefs.cardSwitcher.sort, "name")
     assert.strictEqual(prefs.lorebookSort, "modified")
     assert.strictEqual(prefs.noteSort, "modified")
     assert.deepStrictEqual(yield* bob.GetDisplayPrefs({}), DEFAULT_DISPLAY_PREFS)
     const decode = Schema.decodeUnknownOption(DisplayPrefsChange)
-    assert.strictEqual(decode({ homeCards: { sort: "invalid", reversed: false, withPersonas: false } })._tag, "None")
+    assert.strictEqual(decode({ cardSwitcher: { sort: "invalid", reversed: false, withPersonas: false } })._tag, "None")
+    // A list's view (its sort in a grid) is a browser tab's URL now, never the account's.
+    assert.strictEqual("homeCards" in prefs, false)
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )

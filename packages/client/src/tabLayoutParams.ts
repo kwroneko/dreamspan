@@ -106,7 +106,7 @@ export const setLayoutHistory = (history: RouterHistory) => {
 }
 
 /** Sets (null: removes) layout params: shown at once, in the browser's URL by replacing its entry. */
-const writeLayoutParams = (next: Readonly<Record<string, string | null>>) => {
+export const writeLayoutParams = (next: Readonly<Record<string, string | null>>) => {
   let changed = false
   for (const [key, value] of Object.entries(next))
     if (readLayoutParam(key) !== value) {
