@@ -89,7 +89,9 @@ describe("the cached figure between walks", () => {
       armed = { reached, wait: new Promise<void>((resolve) => (open = resolve)) }
       gate.open = open
     }
+    let afterRead: ((pending: Map<number, number> | undefined) => void) | undefined
     const quota = makeFilesQuota({
+      afterRead: (pending) => afterRead?.(pending),
       reader: {
         GetAppSetting: () => Effect.succeed(null),
         FileVersionBytes: () =>
@@ -108,7 +110,15 @@ describe("the cached figure between walks", () => {
       folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
       defaultBytes: 10 * 2 ** 30
     })
-    return { quota, walks: () => walks, gate, root }
+    return {
+      quota,
+      walks: () => walks,
+      gate,
+      root,
+      onRead: (fn: typeof afterRead) => {
+        afterRead = fn
+      }
+    }
   }
 
   it.live("reading usage again walks nothing; writes raise it and frees lower it", () =>
@@ -210,6 +220,69 @@ describe("the cached figure between walks", () => {
       // Giving back twice, or after everything is gone, changes nothing.
       upload.release()
       assert.strictEqual((yield* quota.usage("u")).usedBytes, two.usedBytes)
+    })
+  )
+
+  it.live("an upload renamed into place during a walk stays counted", () =>
+    Effect.gen(function* () {
+      const { quota, gate } = yield* Effect.promise(() => setup("quota-landed"))
+      const first = yield* quota.usage("u")
+      const upload = quota.hold("u")
+      assert.isTrue(upload.reserve(5_000, first.usedBytes + 100_000))
+      gate.arm()
+      const walking = yield* Effect.forkChild(quota.measure("u"))
+      yield* Effect.promise(() => gate.reached)
+      // The walk listed its temporary name and found it gone: the file isn't in its figure.
+      upload.landed()
+      gate.open()
+      const measured = yield* Fiber.join(walking)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes + 5_000)
+      // The next walk, which sees it on disk, takes the entry off.
+      const next = yield* quota.measure("u")
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, next.usedBytes)
+    })
+  )
+
+  it.live("an entry found smaller than a walk began with is logged and removed, not a failure", () =>
+    Effect.gen(function* () {
+      const { quota, onRead } = yield* Effect.promise(() => setup("quota-shrunk"))
+      yield* quota.usage("u")
+      quota.wrote("u", 800)
+      onRead((pending) => {
+        for (const id of pending!.keys()) pending!.set(id, 300)
+      })
+      const measured = yield* quota.measure("u")
+      onRead(undefined)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes)
+      // Writes after it count as ever.
+      quota.wrote("u", 50)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes + 50)
+    })
+  )
+
+  it.live("one account's failed measurement doesn't stop the sweep", () =>
+    Effect.gen(function* () {
+      const root = tempDir("quota-sweep")
+      yield* Effect.promise(() => mkdir(join(root, "files"), { recursive: true }))
+      const measuredFor: Array<string> = []
+      const quota = makeFilesQuota({
+        reader: {
+          GetAppSetting: () => Effect.succeed(null),
+          FileVersionBytes: ({ userId }: { userId: string }) =>
+            userId === "bad" && measuredFor.includes("bad")
+              ? Effect.die(new Error("boom"))
+              : Effect.sync(() => (measuredFor.push(userId), 0))
+        } as never,
+        writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, media: 0 }) } as never,
+        folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
+        defaultBytes: 2 ** 30
+      })
+      yield* quota.usage("bad")
+      yield* quota.usage("good")
+      measuredFor.length = 0
+      measuredFor.push("bad")
+      yield* quota.remeasureActive
+      assert.deepStrictEqual(measuredFor, ["bad", "good"])
     })
   )
 
