@@ -120,10 +120,10 @@ describe("the cached figure between walks", () => {
       assert.strictEqual(walks(), 1)
       quota.wrote("u", 5_000)
       assert.strictEqual((yield* quota.usage("u")).usedBytes, first.usedBytes + 5_000)
-      quota.freed("u", 30_000)
+      const token = quota.freed("u", 30_000)
       assert.strictEqual((yield* quota.usage("u")).usedBytes, first.usedBytes - 25_000)
       // A removal that didn't happen gives it back; it never goes below nothing.
-      quota.unfreed("u", 30_000, quota.epochOf("u"))
+      quota.unfreed("u", token)
       assert.strictEqual((yield* quota.usage("u")).usedBytes, first.usedBytes + 5_000)
       quota.freed("u", 10 * 2 ** 30)
       assert.strictEqual((yield* quota.usage("u")).usedBytes, 0)
@@ -168,19 +168,60 @@ describe("the cached figure between walks", () => {
     })
   )
 
-  it.live("a give-back after a walk has nothing left to undo", () =>
+  it.live("a give-back during a walk isn't taken off twice, and a write beside it stays", () =>
     Effect.gen(function* () {
-      const { quota } = yield* Effect.promise(() => setup("quota-epoch"))
+      const { quota, gate } = yield* Effect.promise(() => setup("quota-giveback"))
       const first = yield* quota.usage("u")
-      const epoch = quota.epochOf("u")
-      assert.isTrue(quota.reserve("u", 1_000, first.usedBytes + 10_000))
-      yield* quota.measure("u")
-      quota.wrote("u", 700)
-      const measured = yield* quota.usage("u")
-      quota.release("u", 1_000, epoch)
-      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes)
-      quota.release("u", 300, quota.epochOf("u"))
-      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes - 300)
+      const upload = quota.hold("u")
+      assert.isTrue(upload.reserve(1_000, first.usedBytes + 10_000))
+      gate.arm()
+      const walking = yield* Effect.forkChild(quota.measure("u"))
+      yield* Effect.promise(() => gate.reached)
+      // The upload aborts mid-walk, and another write lands.
+      upload.release()
+      quota.wrote("u", 500)
+      gate.open()
+      const measured = yield* Fiber.join(walking)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes + 500)
+    })
+  )
+
+  it.live("a hold gives back exactly what is still counted, however many walks came between", () =>
+    Effect.gen(function* () {
+      const { quota, gate } = yield* Effect.promise(() => setup("quota-hold"))
+      const first = yield* quota.usage("u")
+      const room = first.usedBytes + 100_000
+      const upload = quota.hold("u")
+      assert.isTrue(upload.reserve(1_000, room))
+      // A walk ends mid-upload: it took the first 1,000 off. Then more arrives.
+      const one = yield* quota.measure("u")
+      assert.isTrue(upload.reserve(400, room))
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, one.usedBytes + 400)
+      // A second walk starts, takes more during it, and ends; the upload then fails.
+      gate.arm()
+      const walking = yield* Effect.forkChild(quota.measure("u"))
+      yield* Effect.promise(() => gate.reached)
+      assert.isTrue(upload.reserve(300, room))
+      gate.open()
+      const two = yield* Fiber.join(walking)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, two.usedBytes + 300)
+      upload.release()
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, two.usedBytes)
+      // Giving back twice, or after everything is gone, changes nothing.
+      upload.release()
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, two.usedBytes)
+    })
+  )
+
+  it.live("a free taken off by a walk isn't given back after it", () =>
+    Effect.gen(function* () {
+      const { quota } = yield* Effect.promise(() => setup("quota-unfree"))
+      yield* quota.usage("u")
+      const token = quota.freed("u", 40_000)
+      const measured = yield* quota.measure("u")
+      quota.freed("u", 1_000)
+      quota.unfreed("u", token)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes - 1_000)
     })
   )
 
@@ -188,9 +229,10 @@ describe("the cached figure between walks", () => {
     Effect.gen(function* () {
       const { quota } = yield* Effect.promise(() => setup("quota-room"))
       const now = yield* quota.usage("u")
-      assert.isFalse(quota.reserve("u", 1_000, now.usedBytes))
+      const held = quota.hold("u")
+      assert.isFalse(held.reserve(1_000, now.usedBytes))
       quota.freed("u", 2_000)
-      assert.isTrue(quota.reserve("u", 1_000, now.usedBytes))
+      assert.isTrue(held.reserve(1_000, now.usedBytes))
     })
   )
 })

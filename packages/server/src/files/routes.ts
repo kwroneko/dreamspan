@@ -387,15 +387,13 @@ export const filesRoutes = Layer.unwrap(
         const keptBytes =
           outcome === "replaced" ? yield* keepVersion(userId, root, segments, `${parentPath}/${name}`, "upload") : 0
         let taken = 0
-        /** What the quota's room took for this upload: exactly what is given back on failure. */
-        let roomTaken = 0
-        let freedOnReplace = 0
-        const epoch = quota.epochOf(userId)
+        /** What the quota's room took for this upload: given back whole on failure. */
+        const held = quota.hold(userId)
+        let freeToken = 0
         const take = (bytes: number) => {
           const more = Math.max(0, taken + bytes - replacedBytes) - Math.max(0, taken - replacedBytes)
-          if (more > 0 && !quota.reserve(userId, more, room.quotaBytes)) return false
+          if (more > 0 && !held.reserve(more, room.quotaBytes)) return false
           taken += bytes
-          roomTaken += more
           return true
         }
         const temporary = `.${name.slice(0, 200)}.${randomBytes(6).toString("hex")}.rp-tmp`
@@ -435,7 +433,7 @@ export const filesRoutes = Layer.unwrap(
           } catch (error) {
             await handle.close().catch(() => undefined)
             await unlink(at(dir, temporary)).catch(() => undefined)
-            quota.release(userId, roomTaken, epoch)
+            held.release()
             throw error
           } finally {
             clearTimeout(idle)
@@ -444,13 +442,12 @@ export const filesRoutes = Layer.unwrap(
             // What the new file takes is already counted as it arrived; the old one's bytes are
             // freed unless a version kept them (counted in keepVersion). Lowered before the
             // old file goes, so a measurement in between can only over-count.
-            freedOnReplace = Math.max(0, freesOnReplace - taken)
-            quota.freed(userId, freedOnReplace)
+            freeToken = quota.freed(userId, Math.max(0, freesOnReplace - taken))
             await rename(at(dir, temporary), at(dir, name))
           } catch (error) {
             await unlink(at(dir, temporary)).catch(() => undefined)
-            quota.unfreed(userId, freedOnReplace, epoch)
-            quota.release(userId, roomTaken, epoch)
+            quota.unfreed(userId, freeToken)
+            held.release()
             throw error
           }
         }).pipe(Effect.ensuring(Effect.sync(() => quota.wrote(userId, keptBytes))))
@@ -506,8 +503,7 @@ export const filesRoutes = Layer.unwrap(
       const frees = info.isDirectory()
         ? (yield* Effect.tryPromise(() => measureTree(join(root, ...segments), undefined, undefined, true))).bytes
         : info.isFile() && info.nlink === 1 ? Math.max(0, info.size - kept) : 0
-      const epoch = quota.epochOf(userId)
-      quota.freed(userId, frees)
+      const freeToken = quota.freed(userId, frees)
       // A hard-linked file's bytes stay, and so does the version of it.
       if (info.isFile() && info.nlink > 1) quota.wrote(userId, kept)
       const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
@@ -516,7 +512,7 @@ export const filesRoutes = Layer.unwrap(
       yield* Effect.tryPromise(() =>
         info.isDirectory() ? removeTreeAt(dir, segments.at(-1)!) : unlink(at(dir, segments.at(-1)!))
       ).pipe(
-        Effect.tapError(() => Effect.sync(() => quota.unfreed(userId, frees, epoch))),
+        Effect.tapError(() => Effect.sync(() => quota.unfreed(userId, freeToken))),
         Effect.ensuring(Effect.promise(() => dir.close()))
       )
       return HttpServerResponse.jsonUnsafe({ binItemId: null })
