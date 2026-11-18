@@ -1211,10 +1211,6 @@ describe("connections and the usage ledger", () => {
       )
       return credentialId
     }
-    // Keys live in credentials; the retired per-connection columns stay empty.
-    expect(() => run(`UPDATE connections SET api_key_enc = x'00', key_hint = 'abcd' WHERE id = ?`, conn)).toThrow(
-      /credentials/
-    )
     // A connection uses only its owner's credentials.
     expect(() => run(`UPDATE connections SET credential_id = ? WHERE id = ?`, credential(stranger), conn)).toThrow(
       /owner's credentials/

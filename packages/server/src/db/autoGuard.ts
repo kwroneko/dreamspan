@@ -96,7 +96,6 @@ const CONNECTION_COLUMNS = [
   "kind",
   "api",
   "base_url",
-  "api_key_enc",
   "headers_enc",
   "header_names_json",
   "compat_json",
