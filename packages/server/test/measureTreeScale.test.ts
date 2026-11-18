@@ -16,31 +16,34 @@ const CONTENT = Buffer.alloc(128, 120)
 
 it("walks 20,000 files in 2,000 folders within one walk's budget", async () => {
   const root = tempDir("walk-scale")
-  const building = Date.now()
-  // The tree is built folder by folder, twenty folders at a time, so the writes overlap.
-  for (let start = 0; start < FOLDERS; start += 20) {
-    const folders = Array.from({ length: Math.min(20, FOLDERS - start) }, (_, i) => {
-      const folder = join(root, `folder-${String(start + i).padStart(4, "0")}`)
-      return mkdir(folder).then(() =>
-        Promise.all(
-          Array.from({ length: FILES / FOLDERS }, (_, j) => writeFile(join(folder, `file-${j}.bin`), CONTENT))
+  try {
+    const building = Date.now()
+    // The tree is built folder by folder, twenty folders at a time, so the writes overlap.
+    for (let start = 0; start < FOLDERS; start += 20) {
+      const folders = Array.from({ length: Math.min(20, FOLDERS - start) }, (_, i) => {
+        const folder = join(root, `folder-${String(start + i).padStart(4, "0")}`)
+        return mkdir(folder).then(() =>
+          Promise.all(
+            Array.from({ length: FILES / FOLDERS }, (_, j) => writeFile(join(folder, `file-${j}.bin`), CONTENT))
+          )
         )
-      )
-    })
-    await Promise.all(folders)
+      })
+      await Promise.all(folders)
+    }
+    const builtMs = Date.now() - building
+
+    const walking = Date.now()
+    const measured = await measureTree(root)
+    const walkedMs = Date.now() - walking
+
+    // The walk's own limits are 2,000,000 entries and 60 s (WALK_MAX_ENTRIES, WALK_MAX_MS):
+    // `partial` says it stopped at one of them, which for a real account means the figure is low.
+    assert.isFalse(measured.partial)
+    assert.isAtLeast(measured.bytes, FILES * CONTENT.length)
+    console.log(
+      `measureTree: ${FILES} files in ${FOLDERS} folders — built in ${builtMs} ms, walked in ${walkedMs} ms, ${measured.bytes} bytes`
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
-  const builtMs = Date.now() - building
-
-  const walking = Date.now()
-  const measured = await measureTree(root)
-  const walkedMs = Date.now() - walking
-
-  // The walk's own limits are 2,000,000 entries and 60 s (WALK_MAX_ENTRIES, WALK_MAX_MS):
-  // `partial` says it stopped at one of them, which for a real account means the figure is low.
-  assert.isFalse(measured.partial)
-  assert.isAtLeast(measured.bytes, FILES * CONTENT.length)
-  console.log(
-    `measureTree: ${FILES} files in ${FOLDERS} folders — built in ${builtMs} ms, walked in ${walkedMs} ms, ${measured.bytes} bytes`
-  )
-  await rm(root, { recursive: true, force: true })
 })

@@ -2,7 +2,7 @@
 // the real boundary: upload with the batch's conflict answers, listing, Range reads, folders,
 // renames, deletion, and links planted in the tree listed but never followed. Synthetic files only.
 import { assert, describe, it } from "@effect/vitest"
-import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { FolderListing } from "@rp/shared/files.ts"
 import { Effect } from "effect"
@@ -342,6 +342,57 @@ describe("file routes", () => {
       const beforeRefused = yield* cached
       assert.strictEqual(yield* streamed("/files/c.bin", 1_500_000), 507)
       assert.strictEqual((yield* cached).usedBytes, beforeRefused.usedBytes)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("hard-linked files: a replace frees nothing, a delete keeps the version's bytes counted", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const cached = api.GetFilesUsage({})
+      const walked = api.GetFilesUsage({ fresh: true })
+      const agrees = Effect.gen(function* () {
+        const figure = yield* cached
+        assert.strictEqual(figure.usedBytes, (yield* walked).usedBytes)
+      })
+      assert.strictEqual((yield* upload("/files/warm.bin", "w")).status, 200)
+      const filesDir = join(config.dataDir, "files")
+      const account = join(filesDir, readdirSync(filesDir)[0]!)
+      assert.strictEqual((yield* upload("/files/h.bin", "h".repeat(200_000))).status, 200)
+      linkSync(join(account, "h.bin"), join(account, "h2.bin"))
+      yield* walked
+      // The other link keeps the bytes; the version of what was deleted counts.
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/h.bin" })).status, 200)
+      yield* agrees
+      assert.strictEqual((yield* upload("/files/r.bin", "r".repeat(100_000))).status, 200)
+      linkSync(join(account, "r.bin"), join(account, "r2.bin"))
+      yield* walked
+      // Replaced while linked: the old file stays (the link holds it), the new one and the version are added.
+      assert.strictEqual((yield* upload("/files/r.bin", "s".repeat(150_000), "replace")).status, 200)
+      yield* agrees
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
+  it.live("a delete that fails gives its bytes back", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      assert.strictEqual((yield* upload("/files/ro/sub/f.bin", "f".repeat(200_000))).status, 200)
+      const filesDir = join(config.dataDir, "files")
+      const sub = join(filesDir, readdirSync(filesDir)[0]!, "ro", "sub")
+      yield* api.GetFilesUsage({ fresh: true })
+      const before = yield* api.GetFilesUsage({})
+      // A folder that can't be emptied: its parent is read-only.
+      chmodSync(sub, 0o555)
+      try {
+        const refused = yield* json("/files/delete", { path: "/files/ro" })
+        assert.isAtLeast(refused.status, 400)
+      } finally {
+        chmodSync(sub, 0o755)
+      }
+      const after = yield* api.GetFilesUsage({})
+      assert.strictEqual(after.usedBytes, before.usedBytes)
+      assert.strictEqual((yield* api.GetFilesUsage({ fresh: true })).usedBytes, before.usedBytes)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
 })
