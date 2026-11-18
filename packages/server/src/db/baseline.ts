@@ -1,9 +1,8 @@
 import { forkLabelSchema } from "./forkLabels.ts"
 import { mcpSchema } from "./mcpSchema.ts"
 
-// The schema, created whole. Nobody has run an earlier version of this software, so there
-// is no chain of migrations to replay: while that holds, a schema change edits this file and
-// the deploy starts from an empty data directory (ARCHITECTURE.md, Migrations).
+// The schema, created whole. Frozen since the final baseline (2026-11-18): every schema change
+// is a numbered migration in migrations.ts, never an edit here (ARCHITECTURE.md, Migrations).
 //
 // Generated from the 56-step chain it replaces (tables, indexes, triggers, views); the
 // chain's only rows were its ledger, so there is nothing to seed. Full-text tables create
@@ -340,6 +339,56 @@ const threadSchema: ReadonlyArray<string> = [
   `CREATE TRIGGER shell_thread_splits_insert AFTER INSERT ON thread_splits BEGIN ${bumpChat("NEW.chat_id")} END`
 ]
 
+/**
+ * A column's allowed values, checked by triggers rather than a CHECK, so a migration can add a
+ * value by dropping and recreating `<table>_<column>_values` and `<table>_<column>_values_update`
+ * instead of rebuilding the table (ARCHITECTURE.md, Migrations).
+ */
+export const valueList = (table: string, column: string, values: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const body = `BEGIN ${raise(`${table}.${column} must be one of ${values.join(", ")}`)}
+      WHERE NEW.${column} NOT IN (${values.map((value) => `'${value}'`).join(", ")}); END`
+  return [
+    `CREATE TRIGGER ${table}_${column}_values BEFORE INSERT ON ${table} ${body}`,
+    `CREATE TRIGGER ${table}_${column}_values_update BEFORE UPDATE OF ${column} ON ${table} ${body}`
+  ]
+}
+
+/** Value lists on the large and kernel tables; small tables keep their CHECKs. */
+const valueLists: ReadonlyArray<string> = [
+  ...valueList("drafts", "status", ["active", "committed", "discarded"]),
+  ...valueList("jobs", "status", ["pending", "processing", "complete", "failed"]),
+  ...valueList("jobs", "request_class", ["interactive", "idle", "background"]),
+  ...valueList("chats", "status", ["pending", "active", "archived"]),
+  ...valueList("chats", "title_source", ["auto", "user"]),
+  ...valueList("versions", "status", ["generating", "complete", "stopped", "failed", "interrupted"]),
+  ...valueList("versions", "writer", ["human", "model"]),
+  ...valueList("versions", "macro_mode", ["template", "verbatim"]),
+  ...valueList("rollouts", "status", [
+    "created",
+    "running",
+    "completed",
+    "stopped",
+    "failed",
+    "interrupted",
+    "discarded"
+  ]),
+  ...valueList("rollouts", "request_class", ["interactive", "idle", "background"]),
+  ...valueList("changesets", "status", ["applying", "applied", "reverted", "partially_reverted"]),
+  ...valueList("draft_history", "kind", ["edit", "restore", "revision"]),
+  ...valueList("llm_requests", "status", ["running", "complete", "failed", "aborted", "interrupted"]),
+  ...valueList("llm_requests", "usage_source", ["reported", "estimated", "none"]),
+  ...valueList("queued_messages", "kind", ["message", "generate"]),
+  ...valueList("summaries", "status", ["complete", "truncated", "superseded", "failed"]),
+  ...valueList("summarization_jobs", "status", ["pending", "processing", "complete", "failed"]),
+  ...valueList("summarization_jobs", "request_class", ["interactive", "idle", "background"]),
+  ...valueList("chat_merge_messages", "kind", ["message", "summary"]),
+  ...valueList("chat_merge_messages", "side", ["user", "assistant"]),
+  ...valueList("chat_merge_messages", "included", ["verbatim", "summarized", "left_out"]),
+  ...valueList("mcp_calls", "method", ["initialize", "tools/list", "tools/call", "oauth"]),
+  ...valueList("mcp_calls", "purpose", ["story", "workshop", "check"]),
+  ...valueList("mcp_calls", "status", ["running", "complete", "error", "failed", "timeout", "cancelled", "interrupted"])
+]
+
 export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -364,7 +413,7 @@ export const baseline: ReadonlyArray<string> = [
     row_version INTEGER NOT NULL DEFAULT 1,
     cleared_version INTEGER NOT NULL DEFAULT 0,
     deletions_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(deletions_json)),
-    updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
+    updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
     guidance INTEGER NOT NULL DEFAULT 0 CHECK (guidance IN (0, 1)),
     -- The composer's Next set to No one: a send asks for no reply until another choice (DESIGN §2.3).
     no_replies INTEGER NOT NULL DEFAULT 0 CHECK (no_replies IN (0, 1)),
@@ -448,8 +497,8 @@ export const baseline: ReadonlyArray<string> = [
     id TEXT PRIMARY KEY,
     owner_user_id TEXT REFERENCES users(id),
     kind TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'complete', 'failed')),
-    request_class TEXT NOT NULL DEFAULT 'background' CHECK (request_class IN ('interactive', 'idle', 'background')),
+    status TEXT NOT NULL DEFAULT 'pending',
+    request_class TEXT NOT NULL DEFAULT 'background',
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     attempts INTEGER NOT NULL DEFAULT 0,
     max_retries INTEGER NOT NULL DEFAULT 2,
@@ -654,9 +703,9 @@ export const baseline: ReadonlyArray<string> = [
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL REFERENCES users(id),
     kind TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')),
+    status TEXT NOT NULL,
     title TEXT NOT NULL DEFAULT '',
-    title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')),
+    title_source TEXT NOT NULL DEFAULT 'auto',
     cover_media_id TEXT REFERENCES media_assets(id),
     active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
     row_version INTEGER NOT NULL DEFAULT 1,
@@ -695,11 +744,11 @@ export const baseline: ReadonlyArray<string> = [
     id TEXT NOT NULL UNIQUE,
     slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
     ordinal INTEGER NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')),
+    status TEXT NOT NULL,
     speaker_entity_id TEXT REFERENCES entities(id),
-    writer TEXT NOT NULL CHECK (writer IN ('human', 'model')),
+    writer TEXT NOT NULL,
     content_length INTEGER NOT NULL DEFAULT 0 CHECK (content_length >= 0),
-    macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')),
+    macro_mode TEXT NOT NULL,
     origin TEXT NOT NULL,
     source_version_id TEXT REFERENCES versions(id),
     -- How a reply's speaker was chosen (SpeakerPick): {"by":"auto"} while the decision model
@@ -938,15 +987,14 @@ export const baseline: ReadonlyArray<string> = [
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN
-      ('created', 'running', 'completed', 'stopped', 'failed', 'interrupted', 'discarded')),
+    status TEXT NOT NULL,
     slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
     leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
     parent_rollout_id TEXT REFERENCES rollouts(id),
     role TEXT NOT NULL,
     connection_id TEXT REFERENCES connections(id),
     model_id TEXT REFERENCES models(id),
-    request_class TEXT NOT NULL CHECK (request_class IN ('interactive', 'idle', 'background')),
+    request_class TEXT NOT NULL,
     -- Provider-reported usage, rolled up. NULL means unknown, not zero (as in reference-harness).
     llm_requests INTEGER,
     usage_input_tokens INTEGER,
@@ -1117,7 +1165,7 @@ export const baseline: ReadonlyArray<string> = [
     rollout_id TEXT REFERENCES rollouts(id),
     fork_id TEXT NOT NULL REFERENCES forks(id), seq INTEGER NOT NULL,
     group_id TEXT NOT NULL REFERENCES changeset_groups(id),
-    status TEXT NOT NULL CHECK (status IN ('applying', 'applied', 'reverted', 'partially_reverted')),
+    status TEXT NOT NULL,
     created_at INTEGER NOT NULL
   ) STRICT`,
   `CREATE INDEX changesets_chat ON changesets(chat_id, created_at DESC)`,
@@ -1239,7 +1287,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE draft_history (
     draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
     seq INTEGER NOT NULL CHECK (seq >= 1),
-    kind TEXT NOT NULL CHECK (kind IN ('edit', 'restore', 'revision')),
+    kind TEXT NOT NULL,
     first_at INTEGER NOT NULL,
     at INTEGER NOT NULL,
     start INTEGER NOT NULL CHECK (start >= 0),
@@ -1291,8 +1339,6 @@ export const baseline: ReadonlyArray<string> = [
     base_url TEXT,
     -- Write-only secrets, encrypted with the server secret (PROVIDERS §5). Header values
     -- often carry credentials too, so only header names are ever shown.
-    api_key_enc BLOB,
-    key_hint TEXT,
     headers_enc BLOB,
     header_names_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(header_names_json)),
     compat_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(compat_json)),
@@ -1310,9 +1356,8 @@ export const baseline: ReadonlyArray<string> = [
     -- Purged connections stay as tombstones, so old messages and ledger rows still
     -- name their model (PROVIDERS §10).
     purged_at INTEGER, credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL, headers_origin TEXT, cache_revision INTEGER NOT NULL DEFAULT 0,
-    CHECK ((api_key_enc IS NULL) = (key_hint IS NULL)),
     CHECK ((proxy_mode = 'custom') = (proxy_url_enc IS NOT NULL)),
-    CHECK (purged_at IS NULL OR (api_key_enc IS NULL AND headers_enc IS NULL AND proxy_url_enc IS NULL AND base_url IS NULL))
+    CHECK (purged_at IS NULL OR (headers_enc IS NULL AND proxy_url_enc IS NULL AND base_url IS NULL))
   ) STRICT`,
   `CREATE INDEX connections_owner ON connections(owner_user_id)`,
   `CREATE TABLE models (
@@ -1349,7 +1394,7 @@ export const baseline: ReadonlyArray<string> = [
     -- gateway reports one (OpenRouter).
     response_model TEXT,
     upstream TEXT,
-    status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'aborted', 'interrupted')),
+    status TEXT NOT NULL,
     started_at INTEGER NOT NULL,
     first_token_at INTEGER,
     ended_at INTEGER,
@@ -1363,7 +1408,7 @@ export const baseline: ReadonlyArray<string> = [
     cache_write_long INTEGER,
     output INTEGER,
     reasoning INTEGER,
-    usage_source TEXT NOT NULL DEFAULT 'none' CHECK (usage_source IN ('reported', 'estimated', 'none')),
+    usage_source TEXT NOT NULL DEFAULT 'none',
     -- The provider's usage object verbatim, so counts can be recomputed if a
     -- normalization turns out wrong.
     raw_usage_json TEXT CHECK (raw_usage_json IS NULL OR json_valid(raw_usage_json)),
@@ -1507,12 +1552,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER connections_purged_no_credential BEFORE UPDATE OF purged_at, credential_id ON connections
     WHEN NEW.purged_at IS NOT NULL AND NEW.credential_id IS NOT NULL
     BEGIN SELECT RAISE(ABORT, 'a purged connection keeps no credential'); END`,
-  `CREATE TRIGGER connections_no_inline_key BEFORE INSERT ON connections
-    WHEN NEW.api_key_enc IS NOT NULL OR NEW.key_hint IS NOT NULL
-    BEGIN SELECT RAISE(ABORT, 'keys are stored as credentials'); END`,
-  `CREATE TRIGGER connections_no_inline_key_update BEFORE UPDATE OF api_key_enc, key_hint ON connections
-    WHEN NEW.api_key_enc IS NOT NULL OR NEW.key_hint IS NOT NULL
-    BEGIN SELECT RAISE(ABORT, 'keys are stored as credentials'); END`,
   `CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
@@ -1634,7 +1673,7 @@ export const baseline: ReadonlyArray<string> = [
     -- Order among the entries waiting in a chat.
     seq INTEGER NOT NULL,
     -- A message to post, or a reply to generate.
-    kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')),
+    kind TEXT NOT NULL,
     content TEXT NOT NULL,
     -- As on versions: the typed text before regex scripts rewrote it, and what they did.
     raw_content TEXT,
@@ -1763,7 +1802,7 @@ export const baseline: ReadonlyArray<string> = [
     -- whose separate view it summarizes: who held exactly its inputs over its range
     -- (spec/CHARACTER-CONTEXT.md §9.1).
     audience_json TEXT CHECK (audience_json IS NULL OR (json_valid(audience_json) AND json_type(audience_json) = 'array')),
-    status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'truncated', 'superseded', 'failed')),
+    status TEXT NOT NULL DEFAULT 'complete',
     sealed INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1)), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), batch_id TEXT, rollout_id TEXT REFERENCES rollouts(id),
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
@@ -1811,8 +1850,8 @@ export const baseline: ReadonlyArray<string> = [
     level INTEGER NOT NULL CHECK (level >= 1),
     first_slot_id TEXT NOT NULL REFERENCES slots(id),
     last_slot_id TEXT NOT NULL REFERENCES slots(id),
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'complete', 'failed')),
-    request_class TEXT NOT NULL DEFAULT 'background' CHECK (request_class IN ('interactive', 'idle', 'background')),
+    status TEXT NOT NULL DEFAULT 'pending',
+    request_class TEXT NOT NULL DEFAULT 'background',
     batch_id TEXT, leaf_slot_id TEXT REFERENCES slots(id), input_token_count INTEGER,
     target_token_count INTEGER NOT NULL,
     -- Level >= 2: the ordered child summary ids (JSON array).
@@ -2533,14 +2572,14 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE chat_merge_messages (
     merge_id TEXT NOT NULL REFERENCES chat_merges(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('message', 'summary')),
+    kind TEXT NOT NULL,
     source_slot_id TEXT,
     speaker_entity_id TEXT,
     speaker_name TEXT NOT NULL,
-    side TEXT NOT NULL CHECK (side IN ('user', 'assistant')),
+    side TEXT NOT NULL,
     content TEXT NOT NULL,
     sent_at INTEGER NOT NULL,
-    included TEXT NOT NULL CHECK (included IN ('verbatim', 'summarized', 'left_out')),
+    included TEXT NOT NULL,
     -- The cards that knew this source message in the source (its version's knowers,
     -- spec/CHARACTER-CONTEXT.md §9.1); NULL for summaries and messages with no cast recorded.
     knowers_json TEXT CHECK (knowers_json IS NULL OR (json_valid(knowers_json) AND json_type(knowers_json) = 'array')),
@@ -2599,5 +2638,6 @@ export const baseline: ReadonlyArray<string> = [
   ...threadSchema,
   ...shellSummaries,
   ...lcmStamp,
-  ...mcpSchema
+  ...mcpSchema,
+  ...valueLists
 ]

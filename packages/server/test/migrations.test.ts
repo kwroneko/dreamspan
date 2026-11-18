@@ -24,6 +24,13 @@ const chain = (
   }
 ).schema
 
+/** Every message down an error's cause chain. */
+const messages = (error: unknown): string => {
+  const out: Array<string> = []
+  for (let e: unknown = error; e instanceof Error; e = e.cause) out.push(e.message)
+  return out.join(" / ")
+}
+
 const layer = () => writerConnection(join(tempDir("mig"), "db.sqlite"))
 
 describe("0001_baseline", () => {
@@ -78,6 +85,20 @@ describe("0001_baseline", () => {
         const [row] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM ${sql(table.name)}`
         assert.strictEqual(row!.n, 0, table.name)
       }
+    }).pipe(Effect.provide(layer()))
+  )
+  it.effect("checks value lists with triggers, on insert and on update", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord({ "0001_baseline": migrations["0001_baseline"] }) })
+      const bad = yield* Effect.flip(
+        sql`INSERT INTO jobs (id, kind, status, payload_json, created_at, updated_at) VALUES ('j', 'k', 'odd', '{}', 0, 0)`
+      )
+      assert.match(messages(bad), /jobs\.status must be one of pending, processing, complete, failed/)
+      yield* sql`INSERT INTO jobs (id, kind, payload_json, created_at, updated_at) VALUES ('j', 'k', '{}', 0, 0)`
+      const update = yield* Effect.flip(sql`UPDATE jobs SET request_class = 'odd' WHERE id = 'j'`)
+      assert.match(messages(update), /jobs\.request_class must be one of/)
+      yield* sql`UPDATE jobs SET status = 'complete' WHERE id = 'j'`
     }).pipe(Effect.provide(layer()))
   )
 })
