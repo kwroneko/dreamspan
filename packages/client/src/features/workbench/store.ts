@@ -42,7 +42,7 @@ import {
   splitFrame,
   type Direction
 } from "./model.ts"
-import { layoutKeys, withoutLayoutParams } from "../../tabLayoutParams.ts"
+import { layoutKeys, readLayoutParam, withoutLayoutParams } from "../../tabLayoutParams.ts"
 
 export type HistoryState = Record<string, unknown>
 type Action = "PUSH" | "REPLACE"
@@ -186,8 +186,8 @@ export class WorkbenchStore {
   }
 
   /**
-   * Saves the layout: at once for what the user did (a reload right after keeps it), a moment
-   * later for a stream of changes (a divider dragged, a view settling its URL).
+   * Saves the layout: at once for what the user did and a tab's URL change (a reload right after
+   * keeps it), a moment later for a stream of changes (a divider dragged).
    */
   private schedule(after = 400) {
     if (this.saveTimer) clearTimeout(this.saveTimer)
@@ -276,7 +276,10 @@ export class WorkbenchStore {
     this.layout = setTabHref(this.layout, tabId, href)
     if (before !== this.layout) {
       for (const listener of this.listeners) listener()
-      this.schedule()
+      // At once (after this tick's other changes): a reload right after an unfocused tab's change
+      // (an entry opened in the panel beside) keeps it. The focused tab's URL is the browser's,
+      // so its changes leave the saved layout as it was.
+      this.schedule(0)
     }
     if (focused) this.mirror(action)
   }
@@ -332,9 +335,9 @@ export class WorkbenchStore {
       const value = change?.has(key) ? change.get(key) : current.searchParams.get(key)
       if (value !== null && value !== undefined) url.searchParams.set(key, value)
     }
-    // The layout is the browser tab's: only the browser's URL sets it (tabLayoutParams.ts).
+    // The layout is the browser tab's, as the page holds it (tabLayoutParams.ts).
     for (const key of layout) {
-      const value = current.searchParams.get(key)
+      const value = readLayoutParam(key)
       if (value !== null) url.searchParams.set(key, value)
     }
     const search = url.searchParams.toString()

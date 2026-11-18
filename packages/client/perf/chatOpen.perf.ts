@@ -90,7 +90,7 @@ test("interleaved reference/current chat opening", async ({ browser }) => {
   }
   writeFileSync(join(work!, "environment.json"), JSON.stringify(metadata, null, 2))
   try {
-    const fixture = await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
+    await asUser(server, ADMIN.handle, ADMIN.password, (api) =>
       Effect.gen(function* () {
         const chat = yield* api.GetChat({ chatId: chatId! })
         // Do this before measuring: opening an existing draft performs no write.
@@ -100,54 +100,49 @@ test("interleaved reference/current chat opening", async ({ browser }) => {
     )
     for (const context of contexts) {
       await apiLogin(context.request, server, ADMIN.handle, ADMIN.password)
-      await context.addInitScript(
-        ({ userId }) => {
-          localStorage.setItem(`rp.chatPanel.${userId}`, "snippets")
-          localStorage.setItem(`rp.chatPanelTab.${userId}`, "snippets")
-          const state: Milestones = {
-            start: 0,
-            epoch: 0,
-            editable: null,
-            painted: null,
-            attachments: null,
-            longTasks: []
+      await context.addInitScript(() => {
+        const state: Milestones = {
+          start: 0,
+          epoch: 0,
+          editable: null,
+          painted: null,
+          attachments: null,
+          longTasks: []
+        }
+        Object.assign(window, { __chatOpenTiming: state })
+        new PerformanceObserver((list) => {
+          if (!state.start) return
+          for (const e of list.getEntries())
+            if (e.startTime >= state.start)
+              state.longTasks.push({ start: e.startTime - state.start, duration: e.duration })
+        }).observe({ type: "longtask", buffered: true })
+        const check = () => {
+          if (!state.start) return
+          const composer = document.querySelector<HTMLTextAreaElement>("#composer")
+          if (composer && !composer.readOnly && composer.offsetHeight > 0 && state.editable === null) {
+            state.editable = performance.now() - state.start
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                state.painted = performance.now() - state.start
+              })
+            )
           }
-          Object.assign(window, { __chatOpenTiming: state })
-          new PerformanceObserver((list) => {
-            if (!state.start) return
-            for (const e of list.getEntries())
-              if (e.startTime >= state.start)
-                state.longTasks.push({ start: e.startTime - state.start, duration: e.duration })
-          }).observe({ type: "longtask", buffered: true })
-          const check = () => {
-            if (!state.start) return
-            const composer = document.querySelector<HTMLTextAreaElement>("#composer")
-            if (composer && !composer.readOnly && composer.offsetHeight > 0 && state.editable === null) {
-              state.editable = performance.now() - state.start
-              requestAnimationFrame(() =>
-                requestAnimationFrame(() => {
-                  state.painted = performance.now() - state.start
-                })
-              )
-            }
-            const attach = document.querySelector<HTMLButtonElement>('button[aria-label="Attach images"]')
-            if (composer && !composer.readOnly && attach && !attach.disabled && state.attachments === null)
-              state.attachments = performance.now() - state.start
-          }
-          document.addEventListener(
-            "click",
-            (event) => {
-              if (!(event.target instanceof Element) || !event.target.closest("button[data-chat-id]")) return
-              state.start = performance.now()
-              state.epoch = Date.now()
-              check()
-            },
-            true
-          )
-          new MutationObserver(check).observe(document, { subtree: true, childList: true, attributes: true })
-        },
-        { userId: fixture.user.user.id }
-      )
+          const attach = document.querySelector<HTMLButtonElement>('button[aria-label="Attach images"]')
+          if (composer && !composer.readOnly && attach && !attach.disabled && state.attachments === null)
+            state.attachments = performance.now() - state.start
+        }
+        document.addEventListener(
+          "click",
+          (event) => {
+            if (!(event.target instanceof Element) || !event.target.closest("button[data-chat-id]")) return
+            state.start = performance.now()
+            state.epoch = Date.now()
+            check()
+          },
+          true
+        )
+        new MutationObserver(check).observe(document, { subtree: true, childList: true, attributes: true })
+      })
     }
     const measure = async (build: number, pair: number, order: number) => {
       expect(otherHeavyJobs(), "measurement needs a quiet window").toEqual([])
@@ -184,7 +179,8 @@ test("interleaved reference/current chat opening", async ({ browser }) => {
           .poll(() => (pending.size === 0 ? Date.now() - last : 0), { timeout: 30000, intervals: [100] })
           .toBeGreaterThan(700)
       try {
-        await page.goto(`${server.url}/?side=chats`)
+        // The panel at Snippets: a sidebar row carries the URL's tab to the chat it opens.
+        await page.goto(`${server.url}/?side=chats&panel=snippets`)
         const target = page.locator(`button[data-chat-id="${chatId}"]`).first()
         await expect(target).toBeVisible()
         await idle()

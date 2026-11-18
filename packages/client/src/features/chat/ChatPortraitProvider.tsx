@@ -12,13 +12,20 @@ import { castPortrait, type CastView } from "./cast.ts"
 import { attachmentOf } from "./attachmentPictures.ts"
 import { whenDragEnds } from "../../tabLayoutParams.ts"
 
-/** The URL's shares, each a positive number. */
+/** A share's bounds: a crafted URL can't make the stack's sum overflow or a viewer vanish. */
+const MIN_WEIGHT = 0.05
+const MAX_WEIGHT = 20
+/** At most this many portraits' shares are read from the URL. */
+const MAX_WEIGHTS = 12
+
+/** The URL's shares, each a number clamped to the bounds. */
 const decodeWeights = (raw: unknown): Record<string, number> =>
   typeof raw === "object" && raw !== null && !Array.isArray(raw)
     ? Object.fromEntries(
-        Object.entries(raw).filter(
-          (e): e is [string, number] => typeof e[1] === "number" && Number.isFinite(e[1]) && e[1] > 0
-        )
+        Object.entries(raw)
+          .filter((e): e is [string, number] => typeof e[1] === "number" && Number.isFinite(e[1]) && e[1] > 0)
+          .slice(0, MAX_WEIGHTS)
+          .map(([id, w]) => [id, Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, w))])
       )
     : {}
 

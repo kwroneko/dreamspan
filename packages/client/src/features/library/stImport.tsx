@@ -95,12 +95,15 @@ const FOLDER_KINDS: ReadonlyArray<readonly [StSentKind, string]> = [
 
 const OUTCOMES = ["added", "updated", "failed"] as const
 
-/** Where the folder browser starts: the folder last looked in on this device, else the newest path import's. */
-const LAST_FOLDER = "rp.st-import.folder"
+/**
+ * Where the folder browser starts: the folder this account last looked in on this device, else
+ * the newest path import's. A preference per account (another account signing in here has its own).
+ */
+const lastFolderKey = (userId: string) => `rp.st-import.folder.${userId}`
 
-const lastFolder = (jobs: ReadonlyArray<StImportJob>) => {
+const lastFolder = (userId: string, jobs: ReadonlyArray<StImportJob>) => {
   try {
-    const stored = localStorage.getItem(LAST_FOLDER)
+    const stored = localStorage.getItem(lastFolderKey(userId))
     if (stored) return stored
   } catch {
     // Storage refused (a private window): the newest import's folder still serves.
@@ -677,12 +680,13 @@ type Chosen =
 function StartForm({ open, close, again }: StImportSectionProps & { close: (() => void) | null }) {
   const registry = useContext(RegistryContext)
   const action = useAction()
-  const admin = useSession().user.role === "admin"
+  const user = useSession().user
+  const admin = user.role === "admin"
   const jobs = useAtomValue(stImportsAtom)
   const running = AsyncResult.isSuccess(jobs) && jobs.value.some((job) => job.status === "running")
   // The folder last looked in (on this device, else the newest path import's), so coming back
   // goes on from there.
-  const last = AsyncResult.isSuccess(jobs) ? lastFolder(jobs.value) : null
+  const last = AsyncResult.isSuccess(jobs) ? lastFolder(user.id, jobs.value) : null
   // Null until the user types or opens a folder: the field shows where the browser starts
   // (the last folder, else IMPORT_START_DIR, else the home folder), so a deployment can point it at ST's data.
   const [typedPath, setFolderPath] = useState<string | null>(null)
@@ -715,7 +719,7 @@ function StartForm({ open, close, again }: StImportSectionProps & { close: (() =
     const scanned = await action.run((client) => client("ScanStFolder", { path })).finally(() => setScanning(false))
     if (!scanned.ok) return
     try {
-      localStorage.setItem(LAST_FOLDER, scanned.value.root)
+      localStorage.setItem(lastFolderKey(user.id), scanned.value.root)
     } catch {
       // Not kept on this device: the newest import's folder still is.
     }

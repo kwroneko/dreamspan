@@ -5,8 +5,12 @@ import { centerHeaderEnd } from "../../ui/CenterHeader.tsx"
 import { centerColumn } from "../shell.tsx"
 import { tabKinds } from "./kinds.ts"
 import { SplitButtons, Workbench } from "./Workbench.tsx"
+import { layoutParams } from "../../tabLayoutParams.ts"
+import { WORKBENCH_PARAM } from "./layoutParam.ts"
 
 export const register = () => [
+  // The frames and tabs: the browser tab's layout, in its URL (layoutParam.ts).
+  layoutParams.register({ id: "workbench.frames", keys: [WORKBENCH_PARAM] }),
   centerColumn.register({ id: "workbench", order: 10, component: Workbench }),
   centerHeaderEnd.register({ id: "workbench.split", order: 10, component: SplitButtons }),
   // What a frame opens when it's dropped there (owner, 2026-11-07): a portrait's picture, a

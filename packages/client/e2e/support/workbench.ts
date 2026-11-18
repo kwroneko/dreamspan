@@ -1,27 +1,24 @@
-// The layout a browser tab keeps for its reloads (client features/workbench/tabLayout.ts).
+// The layout a browser tab keeps in its URL (client features/workbench/layoutParam.ts): the `wb`
+// param, absent while one tab shows alone.
 import type { Page } from "@playwright/test"
 
-const PREFIX = "rp.workbench."
+/**
+ * This page's frames as its URL holds them, the focused tab (`"="`) spelled out as the URL's
+ * own path: null while one tab shows alone.
+ */
+export const storedLayout = (page: Page) => {
+  const url = new URL(page.url())
+  const text = url.searchParams.get("wb")
+  if (text === null) return null
+  // The tab's own URL: the browser's, without the layout params (a tab's never has them).
+  for (const key of ["wb", "sidebar", "sbw", "cpw", "ptw", "pow", "fb", "fs", "fbh", "fsh", "cadd"])
+    url.searchParams.delete(key)
+  return text.replace(/"=([~^]?)"/g, (_, mark: string) => JSON.stringify(`${mark}${url.pathname}${url.search}`))
+}
 
-/** This page's stored layout, as JSON text; null before its first save. */
-export const storedLayout = (page: Page) =>
-  page.evaluate((prefix) => {
-    for (let index = 0; index < sessionStorage.length; index++) {
-      const key = sessionStorage.key(index)
-      if (key?.startsWith(prefix)) return sessionStorage.getItem(key)
-    }
-    return null
-  }, PREFIX)
-
-/** Replaces this page's stored layout (it must have saved one), for its next reload. */
-export const replaceStoredLayout = (page: Page, layout: string) =>
-  page.evaluate(
-    ([prefix, text]) => {
-      for (let index = 0; index < sessionStorage.length; index++) {
-        const key = sessionStorage.key(index)
-        if (key?.startsWith(prefix)) return void sessionStorage.setItem(key, text)
-      }
-      throw new Error("no stored layout")
-    },
-    [PREFIX, layout] as const
-  )
+/** Opens `path` with `layout` (the compact form) as its frames. */
+export const gotoWithLayout = (page: Page, base: string, path: string, layout: unknown) => {
+  const url = new URL(path, base)
+  url.searchParams.set("wb", JSON.stringify(layout))
+  return page.goto(url.href)
+}

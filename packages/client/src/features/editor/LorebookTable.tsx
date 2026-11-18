@@ -680,7 +680,8 @@ export function LorebookTable(props: {
   usePlaceNotice(
     entry !== null && !book.entries.some((e) => e.uid === entry) ? "This entry is no longer in the lorebook." : null
   )
-  const [opened, setOpened] = useOpenEntries(entryScope, added)
+  const bookUids = useMemo(() => book.entries.map((e) => e.uid), [book.entries])
+  const [opened, setOpened] = useOpenEntries(entryScope, added, bookUids)
   // Opened entries whose settings are open too: closed again with the page.
   const [settings, setSettings] = useState<ReadonlySet<number>>(EMPTY)
   const showSettings = (uid: number, open: boolean) =>
