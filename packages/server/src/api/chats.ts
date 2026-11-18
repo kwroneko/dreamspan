@@ -124,14 +124,17 @@ export const makeChatHandlers = Effect.gen(function* () {
    * showing another fork read it again as theirs shows it (`PathEntry.shownForkId`).
    */
   // A fork a write returns shows its last message as the branch list does (greeting macros replaced).
+  // Only a tip with a macro in it can read differently, so an ordinary fork costs no read.
   const withShownTip = (user: UserId, fork: Fork) =>
-    reader.ListForks({ userId: user, chatId: fork.chatId }).pipe(
-      Effect.map((list) => {
-        const listed = list.find((f) => f.id === fork.id)
-        return listed === undefined ? fork : new Fork({ ...fork, tipExcerpt: listed.tipExcerpt })
-      }),
-      Effect.catch(() => Effect.succeed(fork))
-    )
+    !fork.tipExcerpt.includes("{{")
+      ? Effect.succeed(fork)
+      : reader.ListForks({ userId: user, chatId: fork.chatId }).pipe(
+          Effect.map((list) => {
+            const listed = list.find((f) => f.id === fork.id)
+            return listed === undefined ? fork : new Fork({ ...fork, tipExcerpt: listed.tipExcerpt })
+          }),
+          Effect.catch(() => Effect.succeed(fork))
+        )
   const publishSlot = (user: UserId, slotId: SlotId, forkId: ForkId | null = null) =>
     Effect.map(reader.GetSlot({ userId: user, slotId, forkId }), ({ chatId, entry }) => {
       hub.publish(chatId, { _tag: "Slot", entry })

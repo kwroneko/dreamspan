@@ -195,3 +195,20 @@ it.live("a group chat's greetings each name their own speaker", () =>
     assert.strictEqual(alternates[0]!.preview, "Ana: Ana greets Sam.")
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
 )
+
+it.live("an ordinary fork a write returns keeps its text, a typed macro included", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const card = yield* api.CreateCard({ label: "Ana", name: "Ana" })
+    const started = yield* api.StartChat({
+      cards: [card.entityId],
+      persona: null,
+      greeting: null,
+      first: { _tag: "Send", content: "Typed {{user}}.", speakerEntityId: null }
+    })
+    const named = yield* api.NameFork({ forkId: started.chat.currentForkId!, name: "Plain" })
+    assert.strictEqual(named.tipExcerpt, "Typed {{user}}.")
+    const pinned = yield* api.PinFork({ forkId: named.id, pinned: true })
+    assert.strictEqual(pinned.tipExcerpt, "Typed {{user}}.")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)
