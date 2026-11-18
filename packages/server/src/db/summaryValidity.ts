@@ -60,7 +60,7 @@ const slotChat = (slot: string) => `(SELECT chat_id FROM slots WHERE id = ${slot
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
 // Valid per fork (fork_shell_stamps), not while the chat's stamp stays put.
-export const FORK_SUMMARY_FORMAT = 10
+export const FORK_SUMMARY_FORMAT = 11
 
 /** SQL: whether summary row `s` was computed at or after its fork's last noted change. */
 const afterForkSql = (s: string) =>

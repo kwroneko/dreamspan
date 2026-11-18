@@ -1,0 +1,84 @@
+// A list row's preview of a greeting shows its macros replaced, as the chat does: `{{user}}`
+// is the persona the fork plays, `{{char}}` the speaker; a typed message stays as written.
+import { assert, it } from "@effect/vitest"
+import { Effect } from "effect"
+import { previewText } from "../src/db/previewText.ts"
+import { Writer } from "../src/db/Database.ts"
+import { client, serverLayer, testConfig } from "./support/config.ts"
+import { cardDoc } from "./support/docs.ts"
+
+const names = (id: string) => ({ persona: "Sam", greeter: "Ana" })[id]
+
+it("previewText replaces a template's macros by the persona and the speaker", () => {
+  const macro = { speaker: "greeter", user: "persona" }
+  assert.strictEqual(previewText("Hi {{user}}, I am {{char}}.", macro, names), "Hi Sam, I am Ana.")
+  assert.strictEqual(
+    previewText("Hi {{user}}.", { speaker: null, user: null }, names),
+    "Hi User.",
+    "without a persona, as the chat does"
+  )
+})
+
+it("previewText leaves a verbatim message as written, and drops a macro the start cut in two", () => {
+  assert.strictEqual(previewText("Say {{user}}.", null, names), "Say {{user}}.")
+  assert.strictEqual(
+    previewText("Hi {{user}}, then {{ch", { speaker: "greeter", user: "persona" }, names),
+    "Hi Sam, then "
+  )
+})
+
+it.live("shell rows, the branch list and the chats list show a greeting's macros replaced", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const writer = yield* Writer
+    const me = yield* api.Whoami()
+    const { entityId: greeter } = yield* writer.CreateEntity({
+      userId: me.id,
+      kind: "card",
+      label: "Ana",
+      subtitle: "",
+      doc: cardDoc("Ana", { first_mes: "Welcome, {{user}}. I am {{char}}." }),
+      schemaVersion: 1,
+      origin: "user",
+      sourcePath: null
+    })
+    const persona = yield* api.CreateCard({ label: "Sam", name: "Sam" })
+    yield* api.SetPersona({ entityId: persona.entityId, persona: true })
+    const started = yield* api.StartChat({
+      cards: [greeter],
+      persona: persona.entityId,
+      greeting: 0,
+      first: { _tag: "Send", content: "Typed {{user}}.", speakerEntityId: persona.entityId }
+    })
+    const path = yield* api.ReadPath({
+      chatId: started.chat.id,
+      forkId: null,
+      leafSlotId: null,
+      range: { _tag: "Bottom" },
+      limit: 10
+    })
+    assert.strictEqual(path.entries[0]!.version.content, "Welcome, {{user}}. I am {{char}}.")
+    const welcome = "Welcome, Sam. I am Ana."
+    const at = { chatId: started.chat.id, fromForkId: null, atSlotId: path.entries[0]!.slotId }
+    const { fork } = yield* api.CreateFork(at)
+    // The fork that ends at the greeting: the shell's row, the fork list and the chat's row.
+    const rows = yield* api.GetShellForks({
+      entity: null,
+      chat: null,
+      search: "",
+      sort: "recent",
+      sections: [{ id: "chats", limit: 10 }]
+    })
+    const row = rows.sections.flatMap((section) => section.rows).find((r) => r.forkId === fork.id)!
+    assert.strictEqual(row.preview, welcome)
+    const listed = (yield* api.ListForks({ chatId: started.chat.id })).find((f) => f.id === fork.id)!
+    assert.strictEqual(listed.tipExcerpt, welcome)
+    const [summary] = yield* api.ListChatSummaries({ chatIds: [started.chat.id] })
+    assert.strictEqual(summary!.last!.text, welcome)
+    // The typed message on the first fork stays as written.
+    const typed = (yield* api.ListForks({ chatId: started.chat.id })).find((f) => f.id !== fork.id)!
+    assert.strictEqual(typed.tipExcerpt, "Typed {{user}}.")
+    const branches = yield* api.ListBranches({ slotId: path.entries[0]!.slotId, forkId: null })
+    assert.strictEqual(branches[0]!.preview, welcome)
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+)

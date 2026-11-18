@@ -40,6 +40,8 @@ const shellSummaries: ReadonlyArray<string> = [
     stamp INTEGER NOT NULL,
     user_stamp INTEGER NOT NULL,
     preview TEXT NOT NULL,
+    -- A template preview (a greeting): the JSON of who its {{char}} and {{user}} follow, else null.
+    preview_macro TEXT CHECK (preview_macro IS NULL OR json_valid(preview_macro)),
     messages INTEGER NOT NULL,
     leaf TEXT,
     end_at INTEGER,

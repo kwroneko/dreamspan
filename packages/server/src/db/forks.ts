@@ -75,7 +75,7 @@ export const lastText = Effect.fn("lastText")(function* (
   const ranges = pieces.map((p) => [p.chainId, p.kind !== "run" ? p.depth : p.lo, p.kind !== "run" ? p.depth : p.hi])
   // Each chain range supplies its newest visible nonblank version with an index
   // walk. Sorting every message body before LIMIT 1 defeats the payload split.
-  const [row] = yield* sql<{ speaker: string | null; writer: string; text: string }>`
+  const [row] = yield* sql<{ speaker: string | null; writer: string; text: string; template: number }>`
     WITH candidates AS MATERIALIZED (
       SELECT cast(p.key AS INTEGER) AS position, (
         SELECT v.seq FROM slots s INDEXED BY slots_chain
@@ -90,7 +90,8 @@ export const lastText = Effect.fn("lastText")(function* (
     ), chosen AS MATERIALIZED (
       SELECT version_seq FROM candidates WHERE version_seq IS NOT NULL ORDER BY position DESC LIMIT 1
     )
-    SELECT v.speaker_entity_id AS speaker, v.writer, substr(t.content, 1, 240) AS text
+    SELECT v.speaker_entity_id AS speaker, v.writer, substr(t.content, 1, 240) AS text,
+      v.macro_mode = 'template' AS template
     FROM chosen c CROSS JOIN versions v ON v.seq = c.version_seq
     CROSS JOIN version_texts t ON t.version_seq = v.seq`
   return row ?? null
