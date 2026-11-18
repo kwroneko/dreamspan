@@ -61,6 +61,9 @@ const makeChat = async (title: string) => {
   return { ...chat, first, second, top, failed }
 }
 
+const timeline = (on: boolean) =>
+  admin((api) => api.SetDisplayPrefs({ prefs: { timeline: on ? "summaries" : "originals" } }))
+
 const hint = async (page: Page, target: ReturnType<Page["locator"]>, text: string | RegExp) => {
   await target.hover()
   await expect(page.getByText(text).last()).toBeVisible()
@@ -80,6 +83,7 @@ for (const [name, viewport] of [
 
       test("a summary block keeps its controls in its header and its text first", async ({ page }) => {
         const chat = await makeChat(`blocks ${name} ${colorScheme}`)
+        await timeline(false)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         await page.goto(`${server().url}/chats/${chat.id}`)
         const panel = await openPanel(page, "Summaries")
@@ -127,6 +131,7 @@ for (const [name, viewport] of [
 
       test("the divider keeps its badges with its line and says what they are", async ({ page }) => {
         const chat = await makeChat(`divider ${name} ${colorScheme}`)
+        await timeline(false)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[20]!.slotId}`)
         const boundary = page.getByTestId("lcm-boundary")
@@ -149,10 +154,11 @@ for (const [name, viewport] of [
         page
       }) => {
         const chat = await makeChat(`timeline ${name} ${colorScheme}`)
+        await timeline(true)
         await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
         // A link to message 15, inside the level-2 summary: it opens to it, flashing it.
         await recordFlashes(page)
-        await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[14]!.slotId}&timeline=summaries`)
+        await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[14]!.slotId}`)
         const target = page.locator(`article[data-slot="${chat.entries[14]!.slotId}"]`)
         await expect(target).toBeVisible({ timeout: 30_000 })
         await expect(target).toBeInViewport()
@@ -179,6 +185,7 @@ for (const [name, viewport] of [
         await expect(panel.locator(`[data-summary="${chat.top.id}"]`)).toBeVisible()
         await closePanel(page)
         await noSideways(page)
+        await timeline(false)
       })
     })
   }

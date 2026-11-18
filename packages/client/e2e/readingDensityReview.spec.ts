@@ -167,7 +167,7 @@ for (const width of [1440, 390])
       const { mediaId } = (await upload.json()) as { mediaId: string }
       const data = await admin((api) =>
         Effect.gen(function* () {
-          yield* api.SetDisplayPrefs({ prefs: { chatDensity: "compact" } })
+          yield* api.SetDisplayPrefs({ prefs: { chatDensity: "compact", timeline: "originals" } })
           const card = yield* api.CreateCard({
             label: "Synthetic long name",
             name: "A very long synthetic harbor keeper name ".repeat(8)
@@ -267,9 +267,8 @@ for (const width of [1440, 390])
       await versioned.getByRole("button", { name: /Version .*50|50 versions|Choose.*version/ }).click()
       await page.keyboard.press("Escape")
       await level1(server().dataDir, chatId, data.path.entries.slice(0, 2), "Synthetic summary of the harbor opening.")
-      await page.goto(
-        `${server().url}/chats/${chatId}?fork=${data.forkId}&slot=${data.path.entries[0]!.slotId}&timeline=summaries`
-      )
+      await admin((api) => api.SetDisplayPrefs({ prefs: { timeline: "summaries" } }))
+      await page.goto(`${server().url}/chats/${chatId}?fork=${data.forkId}&slot=${data.path.entries[0]!.slotId}`)
       await page.getByTestId("messages").evaluate((el) => {
         el.scrollTop = 0
       })

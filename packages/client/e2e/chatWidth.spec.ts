@@ -154,6 +154,7 @@ for (const [width, height] of [
     test(`the composer fills the chat column; banner and queue sit on the box (${width}px ${theme})`, async ({
       page
     }) => {
+      await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
       const { chatId } = await study(`Study ${width} ${theme}`)
       await settled(chatId)
       await open(page, width, height, theme, chatId)
@@ -204,28 +205,31 @@ for (const [width, height] of [
     })
   }
 
-test("the chat width follows its slider live, is in the tab's URL on release, and stays in its own tab", async ({
-  page,
-  browser
-}) => {
+test("the chat width follows its slider live, saves on release, and follows the account", async ({ page, browser }) => {
   // A chat made and settled, two browsers at 3840 px and a reload: 55-75 s alone at a load of
   // 90-120, so the 60 s default timed it out at whichever step it had reached.
   test.setTimeout(180_000)
+  await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
   const { chatId } = await study("Study slider")
   await settled(chatId)
-  // The width is this tab's, in its URL (`cw`), absent at the default.
-  const width = (p: Page) => new URL(p.url()).searchParams.get("cw")
+  const writes: Array<string> = []
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (typeof data === "string" && JSON.parse(data).tag === "SetDisplayPrefs") writes.push(data)
+      upstream.send(data)
+    })
+  })
   await open(page, 3840, 2160, "light", chatId)
-  expect(width(page)).toBeNull()
   const before = (await bounds(column(page))).width
   expect(Math.round(before)).toBe(CHAT_WIDTH.default)
   const panel = await openPanel(page, "Interface")
   const slider = panel.getByRole("slider", { name: "Chat width" })
   await expect(slider).toHaveAttribute("aria-valuetext", `${CHAT_WIDTH.default} px`)
-  // With the side panel open, the column still has the chosen width where there's room.
+  // With the side panel open, the column still has the account's width where there's room.
   expect(Math.round((await bounds(column(page))).width)).toBe(CHAT_WIDTH.default)
 
-  // Drag: the column follows while the pointer is down, and the URL changes once it's let go.
+  // Drag: the column follows while the pointer is down, and nothing is saved until it's let go.
   const thumb = await bounds(slider.locator(".."))
   // The slider's control: the track the thumb moves along.
   const track = await bounds(slider.locator("xpath=ancestor::*[contains(@class, 'touch-none')][1]"))
@@ -234,13 +238,14 @@ test("the chat width follows its slider live, is in the tab's URL on release, an
   await page.mouse.move(track.x + track.width * 0.4, thumb.y + thumb.height / 2, { steps: 8 })
   await expect.poll(async () => (await bounds(column(page))).width).toBeGreaterThan(before + 200)
   await expect.poll(async () => (await bounds(composerBox(page))).width).toBeGreaterThan(before + 200)
-  expect(width(page)).toBeNull()
+  expect(writes).toHaveLength(0)
   await page.mouse.move(track.x + track.width * 0.5, thumb.y + thumb.height / 2, { steps: 4 })
   await page.mouse.up()
+  await expect.poll(() => writes.length).toBe(1)
   const chosen = Number(await slider.getAttribute("aria-valuenow"))
   expect(chosen).toBeGreaterThan(CHAT_WIDTH.default + 200)
   expect(chosen % CHAT_WIDTH.step).toBe(0)
-  await expect.poll(() => width(page)).toBe(String(chosen))
+  await expect.poll(async () => (await rpc((api) => api.GetDisplayPrefs({}))).chatWidth).toBe(chosen)
   const wide = (await bounds(column(page))).width
   expect(Math.abs(wide - chosen)).toBeLessThanOrEqual(1)
   const input = await bounds(box(page))
@@ -248,38 +253,24 @@ test("the chat width follows its slider live, is in the tab's URL on release, an
   await noSideScroll(page)
   await shoot(page, "slider-3840-light")
 
-  // A key steps it by one notch and writes that.
+  // A key steps it by one notch and saves that.
   await slider.focus()
   await page.keyboard.press("ArrowLeft")
-  await expect.poll(() => width(page)).toBe(String(chosen - CHAT_WIDTH.step))
+  await expect.poll(async () => (await rpc((api) => api.GetDisplayPrefs({}))).chatWidth).toBe(chosen - CHAT_WIDTH.step)
   await expect.poll(async () => Math.round((await bounds(column(page))).width)).toBe(chosen - CHAT_WIDTH.step)
 
-  // Reload: the same width. Another page of this browser on the same chat: the default, also
-  // after a reload; the copied URL in another browser: the chosen width.
+  // Reload, and another browser signed in to the account: the same width.
   await page.reload()
   await expect(box(page)).toBeEditable()
   await expect.poll(async () => Math.round((await bounds(column(page))).width)).toBe(chosen - CHAT_WIDTH.step)
-  const sibling = await page.context().newPage()
-  await sibling.setViewportSize({ width: 3840, height: 2160 })
-  await sibling.goto(`${server().url}/chats/${chatId}`)
-  await expect(box(sibling)).toBeEditable()
-  await expect.poll(async () => Math.round((await bounds(column(sibling))).width)).toBe(CHAT_WIDTH.default)
-  await sibling.reload()
-  await expect(box(sibling)).toBeEditable()
-  expect(Math.round((await bounds(column(sibling))).width)).toBe(CHAT_WIDTH.default)
-  expect(width(sibling)).toBeNull()
-  await sibling.close()
   const other = await browser.newContext({ viewport: { width: 3840, height: 2160 } })
   try {
     const second = await other.newPage()
     await apiLogin(second.request, server(), ADMIN.handle, ADMIN.password)
-    // The copied URL, without its open side panel, so the column has the window to itself.
-    const copied = new URL(page.url())
-    copied.searchParams.delete("panel")
-    await second.goto(copied.href)
+    await second.goto(`${server().url}/chats/${chatId}`)
     await expect(box(second)).toBeEditable()
     await expect.poll(async () => Math.round((await bounds(column(second))).width)).toBe(chosen - CHAT_WIDTH.step)
-    // A narrower window fills its width, less the gutter, whatever the chosen width.
+    // A narrower window fills its width, less the gutter, whatever the account's width.
     await second.setViewportSize({ width: 1440, height: 900 })
     await expect
       .poll(async () => Math.round((await bounds(column(second))).width))
@@ -293,16 +284,18 @@ test("the chat width follows its slider live, is in the tab's URL on release, an
   await slider.focus()
   await page.keyboard.press("End")
   await expect(slider).toHaveAttribute("aria-valuetext", "Full width")
-  await expect.poll(() => width(page)).toBe(String(CHAT_WIDTH.max))
+  await expect.poll(async () => (await rpc((api) => api.GetDisplayPrefs({}))).chatWidth).toBe(CHAT_WIDTH.max)
   const main = await bounds(page.locator("main"))
   const panelAt = await bounds(page.getByRole("complementary", { name: "Chat panel" }))
   await expect
     .poll(async () => Math.round((await bounds(column(page))).width))
     .toBe(Math.round(main.width - panelAt.width - 32))
   await noSideScroll(page)
+  await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
 })
 
 test("with the side panel open at 1440 the text keeps the column's width", async ({ page }) => {
+  await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
   const { chatId } = await study("Study panel")
   await settled(chatId)
   await open(page, 1440, 900, "light", chatId)
@@ -322,6 +315,7 @@ test("with the side panel open at 1440 the text keeps the column's width", async
 // its icon in its middle, at 1x and 2x.
 for (const scale of [1, 2])
   test(`the composer's and the strip's icons sit in the middle of their chips (${scale}x)`, async ({ browser }) => {
+    await rpc((api) => api.SetDisplayPrefs({ prefs: { chatWidth: CHAT_WIDTH.default } }))
     const { chatId } = await study(`Study icons ${scale}x`)
     await settled(chatId)
     // A third card, so the strip has Next.

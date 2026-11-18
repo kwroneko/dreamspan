@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { DEFAULT_DISPLAY_PREFS, DisplayPrefsChange } from "@rp/shared/chatApi.ts"
+import { CHAT_WIDTH, DEFAULT_DISPLAY_PREFS, DisplayPrefsChange } from "@rp/shared/chatApi.ts"
 import { Effect, Schema } from "effect"
 import { client, testConfig, withServer } from "./support/config.ts"
 import { generateReply, eventually, finished } from "./support/generation.ts"
@@ -17,14 +17,14 @@ it.live("model pins, recent choices and sort persist per account and merge indep
     yield* phone.SetDisplayPrefs({
       prefs: { modelPins: { "local beta": true }, modelRecent: { "local beta": 200 }, modelSort: "used" }
     })
-    yield* alice.SetDisplayPrefs({ prefs: { modelPins: { "router alpha": false }, outputMacros: true } })
+    yield* alice.SetDisplayPrefs({ prefs: { modelPins: { "router alpha": false }, coverageRail: true } })
     const saved = yield* phone.GetDisplayPrefs({})
     assert.deepStrictEqual(saved.modelPins, { "router alpha": false, "local beta": true })
     assert.deepStrictEqual(saved.modelRecent, { "local beta": 200, "router alpha": 100 })
     yield* phone.SetDisplayPrefs({ prefs: { modelRecent: { "local beta": 150 } } })
     assert.strictEqual((yield* alice.GetDisplayPrefs({})).modelRecent["local beta"], 200)
     assert.strictEqual(saved.modelSort, "used")
-    assert.strictEqual(saved.outputMacros, true)
+    assert.strictEqual(saved.coverageRail, true)
     const separate = yield* bob.GetDisplayPrefs({})
     assert.deepStrictEqual(separate.modelPins, {})
     assert.deepStrictEqual(separate.modelRecent, {})
@@ -84,17 +84,36 @@ it.live("Enter sends patches persist per account and do not reset unrelated disp
     const alice = yield* client({ "Remote-User": "alice" })
     const bob = yield* client({ "Remote-User": "bob" })
     assert.strictEqual((yield* alice.GetDisplayPrefs({})).enterSends, "automatic")
-    yield* alice.SetDisplayPrefs({ prefs: { enterSends: "never", outputMacros: true } })
+    yield* alice.SetDisplayPrefs({ prefs: { enterSends: "never", coverageRail: true } })
     yield* alice.SetDisplayPrefs({ prefs: { reasoning: "collapsed" } })
     assert.strictEqual((yield* bob.GetDisplayPrefs({})).enterSends, "automatic")
     yield* bob.SetDisplayPrefs({ prefs: { enterSends: "always" } })
     const reconnect = yield* client({ "Remote-User": "alice" })
     const prefs = yield* reconnect.GetDisplayPrefs({})
     assert.strictEqual(prefs.enterSends, "never")
-    assert.strictEqual(prefs.outputMacros, true)
+    assert.strictEqual(prefs.coverageRail, true)
     assert.strictEqual(prefs.reasoning, "collapsed")
     assert.strictEqual((yield* bob.GetDisplayPrefs({})).enterSends, "always")
     assert.strictEqual(Schema.decodeUnknownOption(DisplayPrefsChange)({ enterSends: "sometimes" })._tag, "None")
+  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)
+
+it.live("the chat width persists per account, within its range, without resetting other choices", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const bob = yield* client({ "Remote-User": "bob" })
+    assert.strictEqual((yield* alice.GetDisplayPrefs({})).chatWidth, CHAT_WIDTH.default)
+    yield* alice.SetDisplayPrefs({ prefs: { coverageRail: true } })
+    yield* alice.SetDisplayPrefs({ prefs: { chatWidth: 1760 } })
+    const reconnect = yield* client({ "Remote-User": "alice" })
+    const prefs = yield* reconnect.GetDisplayPrefs({})
+    assert.strictEqual(prefs.chatWidth, 1760)
+    assert.strictEqual(prefs.coverageRail, true)
+    assert.strictEqual((yield* bob.GetDisplayPrefs({})).chatWidth, CHAT_WIDTH.default)
+    const decode = Schema.decodeUnknownOption(DisplayPrefsChange)
+    for (const value of [CHAT_WIDTH.min - 1, CHAT_WIDTH.max + 1, 1200.5, "1200px"])
+      assert.strictEqual(decode({ chatWidth: value })._tag, "None")
+    assert.strictEqual(decode({ chatWidth: CHAT_WIDTH.max })._tag, "Some")
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )
 
@@ -103,14 +122,14 @@ it.live("message spacing is comfortable until chosen, persists per account and k
     const alice = yield* client({ "Remote-User": "alice" })
     const bob = yield* client({ "Remote-User": "bob" })
     assert.strictEqual((yield* alice.GetDisplayPrefs({})).chatDensity, "comfortable")
-    yield* alice.SetDisplayPrefs({ prefs: { enterSends: "never" } })
+    yield* alice.SetDisplayPrefs({ prefs: { chatWidth: 1760 } })
     assert.strictEqual((yield* alice.SetDisplayPrefs({ prefs: { chatDensity: "compact" } })).chatDensity, "compact")
     const prefs = yield* (yield* client({ "Remote-User": "alice" })).GetDisplayPrefs({})
     assert.strictEqual(prefs.chatDensity, "compact")
-    assert.strictEqual(prefs.enterSends, "never")
+    assert.strictEqual(prefs.chatWidth, 1760)
     assert.strictEqual((yield* bob.GetDisplayPrefs({})).chatDensity, "comfortable")
     // Another choice written later leaves it.
-    assert.strictEqual((yield* alice.SetDisplayPrefs({ prefs: { outputMacros: true } })).chatDensity, "compact")
+    assert.strictEqual((yield* alice.SetDisplayPrefs({ prefs: { coverageRail: true } })).chatDensity, "compact")
     const decode = Schema.decodeUnknownOption(DisplayPrefsChange)
     for (const value of ["cosy", "", 1, null]) assert.strictEqual(decode({ chatDensity: value })._tag, "None")
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
@@ -125,7 +144,7 @@ it.live("message toolbar choices merge by action id per account, across clients,
     // Another device of the same account, writing only its own change.
     const phone = yield* client({ "Remote-User": "alice" })
     yield* phone.SetDisplayPrefs({ prefs: { messageToolbar: { "message.copy-text": true, "plugin.unknown": true } } })
-    yield* alice.SetDisplayPrefs({ prefs: { outputMacros: true } })
+    yield* alice.SetDisplayPrefs({ prefs: { coverageRail: true } })
     assert.deepStrictEqual((yield* alice.GetDisplayPrefs({})).messageToolbar, {
       "message.edit": false,
       "message.copy-text": true,
@@ -145,7 +164,7 @@ it.live("message toolbar choices merge by action id per account, across clients,
     assert.strictEqual(Object.keys(capped.messageToolbar).length, 200)
     assert.strictEqual(capped.messageToolbar["plugin.2.99"], true)
     assert.isUndefined(capped.messageToolbar["message.edit"])
-    assert.strictEqual(capped.outputMacros, true)
+    assert.strictEqual(capped.coverageRail, true)
     const decode = Schema.decodeUnknownOption(DisplayPrefsChange)
     assert.strictEqual(decode({ messageToolbar: { "message.edit": "yes" } })._tag, "None")
     assert.strictEqual(decode({ messageToolbar: { ["x".repeat(201)]: true } })._tag, "None")
@@ -179,7 +198,7 @@ it.live("explanation dismissals merge by box id and stay within the account", ()
     assert.deepStrictEqual((yield* alice.GetDisplayPrefs({})).dismissedInfo, {})
     yield* alice.SetDisplayPrefs({ prefs: { dismissedInfo: { "snippets.intro": true } } })
     yield* phone.SetDisplayPrefs({ prefs: { dismissedInfo: { "another.intro": true } } })
-    yield* phone.SetDisplayPrefs({ prefs: { outputMacros: true } })
+    yield* phone.SetDisplayPrefs({ prefs: { coverageRail: true } })
     assert.deepStrictEqual((yield* alice.GetDisplayPrefs({})).dismissedInfo, {
       "snippets.intro": true,
       "another.intro": true

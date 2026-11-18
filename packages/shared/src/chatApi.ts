@@ -127,6 +127,12 @@ const displayFields = {
   /** An agent reply's steps while it's written, open or folded, as reasoning's (DESIGN §7.4). */
   steps: ReasoningDisplay,
   portraitSize: Schema.Literals(["small", "default", "large", "largest"]),
+  /**
+   * "Summaries in chat" and the coverage rail as a newly opened chat starts (owner, 2026-11-18):
+   * each pane keeps its own in its URL; flipping one also sets these, for panes opened later.
+   */
+  timeline: Schema.Literals(["originals", "summaries"]),
+  coverageRail: Schema.Boolean,
   outputMacros: Schema.Boolean,
   displayRegex: Schema.Boolean,
   /** "Show HTML as formatting" (spec/HTML-MESSAGES.md §3.1): off, a message's HTML shows as text. */
@@ -137,6 +143,7 @@ const displayFields = {
    */
   panelDepth: Schema.NullOr(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))),
   enterSends: Schema.Literals(["automatic", "always", "never"]),
+  chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
   /**
    * "Message spacing": how much room messages take in a chat. `compact` tightens the gaps,
    * the text's line and paragraph spacing and the name row, and shows a message's version
@@ -182,9 +189,9 @@ const displayFields = {
 }
 /**
  * The account's display preferences: set once and the same in every browser tab. How a tab
- * shows something (the chat column's width, summaries in the timeline, the coverage rail, one
- * portrait at a time, the character grids' sort and grouping) is that tab's, in its URL
- * (client tabLayoutParams.ts), never here.
+ * shows something (one portrait at a time, the character grids' sort and grouping) is that
+ * tab's, in its URL (client tabLayoutParams.ts), never here; a pane's summaries and rail are
+ * its own, with a default here for new ones.
  */
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
@@ -196,11 +203,14 @@ export const DisplayPrefsChange = Schema.Struct({
   reasoning: Schema.optionalKey(displayFields.reasoning),
   steps: Schema.optionalKey(displayFields.steps),
   portraitSize: Schema.optionalKey(displayFields.portraitSize),
+  timeline: Schema.optionalKey(displayFields.timeline),
+  coverageRail: Schema.optionalKey(displayFields.coverageRail),
   outputMacros: Schema.optionalKey(displayFields.outputMacros),
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
   htmlFormatting: Schema.optionalKey(displayFields.htmlFormatting),
   panelDepth: Schema.optionalKey(displayFields.panelDepth),
   enterSends: Schema.optionalKey(displayFields.enterSends),
+  chatWidth: Schema.optionalKey(displayFields.chatWidth),
   chatDensity: Schema.optionalKey(displayFields.chatDensity),
   presetSort: Schema.optionalKey(displayFields.presetSort),
   modelSort: Schema.optionalKey(displayFields.modelSort),
@@ -228,11 +238,14 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   reasoning: "expanded",
   steps: "expanded",
   portraitSize: "default",
+  timeline: "originals",
+  coverageRail: false,
   outputMacros: false,
   displayRegex: true,
   htmlFormatting: true,
   panelDepth: null,
   enterSends: "automatic",
+  chatWidth: CHAT_WIDTH.default,
   chatDensity: "comfortable",
   presetSort: "name",
   modelSort: "name",

@@ -331,15 +331,16 @@ test("scroll the full length of 100,000 messages", async ({ page }) => {
 
 test("a summarized chat: the divider and the coverage rail, scrolling up across the boundary", async ({ page }) => {
   await openPage(page)
-  // The rail is drawn (this tab's `rail=on`): its bars are part of what must stay smooth.
+  // The rail is drawn: its bars are part of what must stay smooth.
+  await withClient(server, (api) => api.SetDisplayPrefs({ prefs: { coverageRail: true } }))
   const { chatId, boundary, covered } = fixture.summarized
   const openStart = Date.now()
-  await page.goto(chatUrl(chatId, "?rail=on"))
+  await page.goto(chatUrl(chatId))
   await onScreen(page)
   const bottomMs = Date.now() - openStart
   // Opened at the last summarized message, the divider is just below it and the rail beside it.
   const deepStart = Date.now()
-  await page.goto(chatUrl(chatId, `?slot=${covered}&rail=on`))
+  await page.goto(chatUrl(chatId, `?slot=${covered}`))
   await onScreen(page, covered)
   await expect(page.getByTestId("lcm-boundary")).toBeVisible({ timeout: 30_000 })
   await expect(page.getByTestId("coverage-rail").getByRole("button").first()).toBeVisible({ timeout: 30_000 })

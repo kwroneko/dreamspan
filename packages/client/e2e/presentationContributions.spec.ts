@@ -95,6 +95,7 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
         content: "A refused synthetic reply",
         expectedRowVersion: last.rowVersion
       })
+      yield* api.SetDisplayPrefs({ prefs: { timeline: "summaries", coverageRail: true } })
       return { chat, card, entries: path.entries, entry }
     })
   )
@@ -115,8 +116,7 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
       expectedVersionId: fixture.entry.version.id
     })
   )
-  // Summaries in chat and the coverage rail: this tab's, in its URL.
-  await page.goto(`${url}/chats/${fixture.chat.id}?timeline=summaries&rail=on`)
+  await page.goto(`${url}/chats/${fixture.chat.id}`)
   await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeEditable({ timeout: 30_000 })
   await expect(page.getByText("Synthetic retained summary", { exact: true })).toBeVisible()
   const article = page.locator(`article[data-slot="${fixture.entry.slotId}"]`)
