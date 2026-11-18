@@ -363,8 +363,9 @@ export const filesRoutes = Layer.unwrap(
           if (conflict.value === "replace") {
             if (existing.isDirectory()) return refuse(409, `“${name}” is a folder here. Choose Keep both or Skip.`)
             outcome = "replaced"
-            replacedBytes = existing.isFile() ? existing.size : 0
-            freesOnReplace = existing.isFile() && existing.nlink === 1 ? existing.size : 0
+            // A file with other links keeps its bytes: nothing is replaced, nothing freed.
+            replacedBytes = existing.isFile() && existing.nlink === 1 ? existing.size : 0
+            freesOnReplace = replacedBytes
           } else {
             const taken = new Set(
               (yield* Effect.tryPromise(() => listFolder(root, parent, LIST_LIMIT))).entries.map((e) => e.name)
@@ -386,11 +387,16 @@ export const filesRoutes = Layer.unwrap(
         const keptBytes =
           outcome === "replaced" ? yield* keepVersion(userId, root, segments, `${parentPath}/${name}`, "upload") : 0
         let taken = 0
+        /** What the quota's room took for this upload: exactly what is given back on failure. */
+        let roomTaken = 0
         let freedOnReplace = 0
+        const epoch = quota.epochOf(userId)
         const take = (bytes: number) => {
           const more = Math.max(0, taken + bytes - replacedBytes) - Math.max(0, taken - replacedBytes)
+          if (more > 0 && !quota.reserve(userId, more, room.quotaBytes)) return false
           taken += bytes
-          return more === 0 || quota.reserve(userId, more, room.quotaBytes)
+          roomTaken += more
+          return true
         }
         const temporary = `.${name.slice(0, 200)}.${randomBytes(6).toString("hex")}.rp-tmp`
         yield* Effect.tryPromise(async () => {
@@ -429,7 +435,7 @@ export const filesRoutes = Layer.unwrap(
           } catch (error) {
             await handle.close().catch(() => undefined)
             await unlink(at(dir, temporary)).catch(() => undefined)
-            quota.release(userId, Math.max(0, taken - replacedBytes))
+            quota.release(userId, roomTaken, epoch)
             throw error
           } finally {
             clearTimeout(idle)
@@ -443,8 +449,8 @@ export const filesRoutes = Layer.unwrap(
             await rename(at(dir, temporary), at(dir, name))
           } catch (error) {
             await unlink(at(dir, temporary)).catch(() => undefined)
-            quota.unfreed(userId, freedOnReplace)
-            quota.release(userId, Math.max(0, taken - replacedBytes))
+            quota.unfreed(userId, freedOnReplace, epoch)
+            quota.release(userId, roomTaken, epoch)
             throw error
           }
         }).pipe(Effect.ensuring(Effect.sync(() => quota.wrote(userId, keptBytes))))
@@ -500,14 +506,17 @@ export const filesRoutes = Layer.unwrap(
       const frees = info.isDirectory()
         ? (yield* Effect.tryPromise(() => measureTree(join(root, ...segments), undefined, undefined, true))).bytes
         : info.isFile() && info.nlink === 1 ? Math.max(0, info.size - kept) : 0
+      const epoch = quota.epochOf(userId)
       quota.freed(userId, frees)
+      // A hard-linked file's bytes stay, and so does the version of it.
+      if (info.isFile() && info.nlink > 1) quota.wrote(userId, kept)
       const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
       // A link or special file is removed itself, never what it points at. A folder is walked by
       // descriptor (removeTreeAt), so a link swapped in for a subfolder mid-delete isn't followed.
       yield* Effect.tryPromise(() =>
         info.isDirectory() ? removeTreeAt(dir, segments.at(-1)!) : unlink(at(dir, segments.at(-1)!))
       ).pipe(
-        Effect.tapError(() => Effect.sync(() => quota.unfreed(userId, frees))),
+        Effect.tapError(() => Effect.sync(() => quota.unfreed(userId, frees, epoch))),
         Effect.ensuring(Effect.promise(() => dir.close()))
       )
       return HttpServerResponse.jsonUnsafe({ binItemId: null })

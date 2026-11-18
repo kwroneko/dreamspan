@@ -112,6 +112,9 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const added = new Map<string, number>()
   /** Bytes app-side deletes and smaller replacements freed since the last measurement. */
   const freedSince = new Map<string, number>()
+  /** Counts the account's finished walks: a give-back made after one has nothing left to undo. */
+  const epochs = new Map<string, number>()
+  const epochOf = (userId: string) => epochs.get(userId) ?? 0
   const asked = new Map<string, number>()
   const measuring = new Map<string, Promise<Usage>>()
 
@@ -127,6 +130,12 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const walk = (userId: string): Effect.Effect<Usage> =>
     Effect.gen(function* () {
       const started = Date.now()
+      // What was added before this walk began may or may not be in what it reads, and it is
+      // taken off when the walk ends; what lands during the walk stays (over-counting at worst,
+      // never missing it). Frees go the other way: they are applied before the removal, so a walk
+      // that ends later either counted the file (clearing the free over-counts) or reached it
+      // after (clearing is exact); keeping it could subtract bytes the walk never counted.
+      const addedBefore = added.get(userId) ?? 0
       const { filesRoot, home } = deps.folders(userId)
       const [files, homeUse] = yield* Effect.promise(() => Promise.all([measureTree(filesRoot, deps.walkMaxEntries), measureTree(home, deps.walkMaxEntries)]))
       const versionsBytes = yield* deps.reader
@@ -143,15 +152,24 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
         partial: files.partial || homeUse.partial
       }
       usages.set(userId, usage)
-      added.delete(userId)
+      const rest = (added.get(userId) ?? 0) - addedBefore
+      if (rest > 0) added.set(userId, rest)
+      else added.delete(userId)
       freedSince.delete(userId)
+      epochs.set(userId, epochOf(userId) + 1)
       return usage
     })
 
-  /** Measures now; a measurement already running for the account is shared. */
-  const measure = (userId: string): Effect.Effect<Usage> =>
+  /**
+   * Measures now; a measurement already running for the account is shared, unless
+   * `startedAfterNow`: then it is waited out and one that began after this call answers
+   * (a command's output must be in the walk that reports on it).
+   */
+  const measure = (userId: string, startedAfterNow = false): Effect.Effect<Usage> =>
     Effect.suspend(() => {
       const running = measuring.get(userId)
+      if (running && startedAfterNow)
+        return Effect.promise(() => running.catch(() => undefined)).pipe(Effect.andThen(measure(userId)))
       if (running) return Effect.promise(() => running)
       const promise = Effect.runPromise(walk(userId)).finally(() => measuring.delete(userId))
       measuring.set(userId, promise)
@@ -218,9 +236,10 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   }
 
   /** Gives back what `reserve` took for a write that didn't land. */
-  const release = (userId: string, bytes: number) => {
-    const extra = added.get(userId)
-    if (extra !== undefined) added.set(userId, Math.max(0, extra - bytes))
+  const release = (userId: string, bytes: number, epoch: number) => {
+    // A walk since the reservation already took it off (and saw the file as it was).
+    if (epoch !== epochOf(userId)) return
+    added.set(userId, (added.get(userId) ?? 0) - bytes)
   }
 
   /** The refusal for a streaming write that ran out of room. */
@@ -239,13 +258,13 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
    * over-count, never subtract the same bytes twice.
    */
   const freed = (userId: string, bytes: number) => {
-    if (bytes > 0 && usages.has(userId)) freedSince.set(userId, (freedSince.get(userId) ?? 0) + bytes)
+    if (bytes > 0) freedSince.set(userId, (freedSince.get(userId) ?? 0) + bytes)
   }
 
   /** Takes back what `freed` lowered, for a removal that didn't happen. */
-  const unfreed = (userId: string, bytes: number) => {
-    const now = freedSince.get(userId)
-    if (now !== undefined) freedSince.set(userId, Math.max(0, now - bytes))
+  const unfreed = (userId: string, bytes: number, epoch: number) => {
+    if (epoch !== epochOf(userId)) return
+    freedSince.set(userId, (freedSince.get(userId) ?? 0) - bytes)
   }
 
   /**
@@ -253,7 +272,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
    * quota, so the result can say so; null otherwise.
    */
   const afterCommand = (userId: string) =>
-    measure(userId).pipe(
+    measure(userId, true).pipe(
       Effect.map((now) =>
         now.partial
           ? PARTIAL_TEXT("write files or run commands")
@@ -291,6 +310,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     wrote,
     freed,
     unfreed,
+    epochOf,
     reserve,
     release,
     overMessage,
