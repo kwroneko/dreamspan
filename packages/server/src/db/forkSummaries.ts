@@ -28,6 +28,7 @@ import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 import { placesOf, threadCandidates } from "./threads.ts"
 import { ActiveStateModules } from "./stateModules.ts"
 import type { ThreadPlace } from "@rp/shared/threads.ts"
+import type { PreviewMacro } from "./previewText.ts"
 
 export { FORK_SUMMARY_FORMAT, summaryValidSql }
 
@@ -39,6 +40,11 @@ export interface ForkSummary {
   readonly forkId: string
   readonly chatId: string
   readonly preview: string
+  /**
+   * Set when the preview's message is a template (a greeting): the ids its `{{char}}` and
+   * `{{user}}` follow, expanded when a read shows the row (`db/previewText.ts`).
+   */
+  readonly previewMacro: PreviewMacro | null
   readonly messages: number
   readonly leaf: string | null
   readonly endAt: number | null
@@ -242,6 +248,8 @@ const computeSummaries = (
     )
     const summaries: Array<ForkSummary> = []
     const previewCandidates: Array<Array<number>> = []
+    // Who `{{user}}` and a speakerless `{{char}}` are in each fork's state, for a template preview.
+    const previewPeople: Array<{ readonly user: string | null; readonly other: string | null }> = []
     for (const record of records) {
       let path = structural(record)
       const base = record.base_slot_id === null ? undefined : path.find((s) => s.id === record.base_slot_id)
@@ -370,10 +378,15 @@ const computeSummaries = (
       }
       const present = state.participants.filter((id) => !state.playedByMe.includes(id) && !state.absent.includes(id))
       previewCandidates.push(candidates)
+      previewPeople.push({
+        user: state.playedByMe[0] ?? null,
+        other: state.participants.find((id) => !state.playedByMe.includes(id)) ?? null
+      })
       summaries.push({
         forkId: record.id,
         chatId: record.chat_id,
         preview: "",
+        previewMacro: null,
         messages,
         leaf: endpoint?.id ?? null,
         endAt: endpoint?.at ?? null,
@@ -403,25 +416,34 @@ const computeSummaries = (
     // candidate excerpt, sharing reads where forks select the same version. A
     // whitespace-only prefix falls back to the next candidate, exactly as before.
     const previews: Array<string> = summaries.map(() => "")
-    const excerpts = new Map<number, string>()
+    const previewMacros: Array<PreviewMacro | null> = summaries.map(() => null)
+    const excerpts = new Map<number, { text: string; template: boolean; speaker: string | null }>()
     let pending = previewCandidates.flatMap((candidates, i) => (candidates.length ? [i] : []))
     while (pending.length > 0) {
       const unread = [...new Set(pending.map((i) => previewCandidates[i]!.at(-1)!))].filter((seq) => !excerpts.has(seq))
       if (unread.length > 0) {
-        const read = yield* sql<{ version_seq: number; text: string }>`
-          SELECT t.version_seq, substr(t.content, 1, 160) AS text FROM json_each(${JSON.stringify(unread)}) j
-          CROSS JOIN version_texts t ON t.version_seq = j.value`
-        for (const row of read) excerpts.set(row.version_seq, row.text)
+        const read = yield* sql<{ version_seq: number; text: string; template: number; speaker: string | null }>`
+          SELECT t.version_seq, substr(t.content, 1, 160) AS text, v.macro_mode = 'template' AS template,
+            v.speaker_entity_id AS speaker
+          FROM json_each(${JSON.stringify(unread)}) j
+          CROSS JOIN version_texts t ON t.version_seq = j.value
+          CROSS JOIN versions v ON v.seq = t.version_seq`
+        for (const row of read)
+          excerpts.set(row.version_seq, { text: row.text, template: row.template === 1, speaker: row.speaker })
       }
       const next: Array<number> = []
       for (const i of pending) {
-        const text = excerpts.get(previewCandidates[i]!.pop()!) ?? ""
-        if (text.trim()) previews[i] = text
-        else if (previewCandidates[i]!.length > 0) next.push(i)
+        const found = excerpts.get(previewCandidates[i]!.pop()!)
+        const text = found?.text ?? ""
+        if (text.trim()) {
+          previews[i] = text
+          if (found!.template)
+            previewMacros[i] = { speaker: found!.speaker ?? previewPeople[i]!.other, user: previewPeople[i]!.user }
+        } else if (previewCandidates[i]!.length > 0) next.push(i)
       }
       pending = next
     }
-    return summaries.map((summary, i) => ({ ...summary, preview: previews[i]! }))
+    return summaries.map((summary, i) => ({ ...summary, preview: previews[i]!, previewMacro: previewMacros[i]! }))
   })
 
 /** Navigation needs cast ordering, endpoints and split/thread metadata, without swipe activity. */
@@ -459,16 +481,18 @@ export const chatForkSummaries = (
             split_at: number | null
             split_after: number | null
             preview: string
+            preview_macro: string | null
             threads_json: string
-          }>`SELECT s.fork_id, s.end_at, s.split_at, s.split_after, s.preview, s.threads_json
+          }>`SELECT s.fork_id, s.end_at, s.split_at, s.split_after, s.preview, s.preview_macro, s.threads_json
       FROM fork_summaries s JOIN chats c ON c.id = s.chat_id
       WHERE s.chat_id = ${chatId} AND ${sql.literal(summaryValidSql("s", "c", String(userStamp)))}`
-    const byFork = new Map<string, Pick<ForkSummary, "endAt" | "split" | "preview" | "threads">>(
+    const byFork = new Map<string, Pick<ForkSummary, "endAt" | "split" | "preview" | "previewMacro" | "threads">>(
       stored.map((row) => [
         row.fork_id,
         {
           endAt: row.end_at,
           preview: row.preview,
+          previewMacro: row.preview_macro === null ? null : (JSON.parse(row.preview_macro) as PreviewMacro),
           split:
             row.split_at === null || row.split_after === null ? null : { at: row.split_at, after: row.split_after },
           threads: JSON.parse(row.threads_json) as ReadonlyArray<ThreadPlace>
@@ -479,7 +503,13 @@ export const chatForkSummaries = (
     // This read returns only previews, split markers and threads, never the shell's
     // cast/activity fields. Do not scan all alternatives to compute fields it discards.
     for (const s of yield* computeSummaries(sql, missing, missing.length <= 2, false))
-      byFork.set(s.forkId, { endAt: s.endAt, split: s.split, preview: s.preview, threads: s.threads })
+      byFork.set(s.forkId, {
+        endAt: s.endAt,
+        split: s.split,
+        preview: s.preview,
+        previewMacro: s.previewMacro,
+        threads: s.threads
+      })
 
     return byFork
   })
@@ -525,10 +555,11 @@ export const storeSummaries = (sql: SqlClient.SqlClient, userId: string, chats: 
         WHERE 1 ON CONFLICT (chat_id) DO UPDATE SET stamp = excluded.stamp`
     }
     const rows = `[${kept.map((c) => `[${JSON.stringify(c.chatId)},${c.stamp},${c.userStamp},${c.forks}]`).join(",")}]`
-    yield* sql`INSERT OR REPLACE INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, messages,
+    yield* sql`INSERT OR REPLACE INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, preview_macro, messages,
         leaf, end_at, split_at, split_after, cast_json, joined_json, departed_json, activity_json, added_json,
         threads_json)
       SELECT f.id, f.chat_id, ${FORK_SUMMARY_FORMAT}, c.value ->> 1, c.value ->> 2, s.value ->> 'preview',
+        s.value ->> 'previewMacro',
         s.value ->> 'messages', s.value ->> 'leaf', s.value ->> 'endAt', s.value ->> '$.split.at',
         s.value ->> '$.split.after', s.value -> 'cast', s.value -> 'joined',
         s.value -> 'departed', s.value -> 'activity', s.value -> 'added', coalesce(s.value -> 'threads', '[]')

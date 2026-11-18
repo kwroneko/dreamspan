@@ -7,6 +7,7 @@ import { Effect, Exit, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { writerConnection } from "../src/db/connection.ts"
 import { Migrations, migrations } from "../src/db/migrations.ts"
+import { FORK_SUMMARY_FORMAT } from "../src/db/summaryValidity.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 interface Entry {
@@ -99,7 +100,7 @@ describe("0002_files", () => {
       const ledger = yield* sql<{ name: string }>`SELECT name FROM effect_sql_migrations ORDER BY migration_id`
       assert.deepStrictEqual(
         ledger.map((r) => r.name),
-        ["baseline", "files", "subagents", "workshop_branches"]
+        ["baseline", "files", "subagents", "workshop_branches", "preview_macro"]
       )
       // The existing row is kept, an image by default.
       assert.deepStrictEqual(yield* sql`SELECT id, alt_text, kind, name FROM composer_images`, [
@@ -229,7 +230,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0001_baseline",
       "0002_files",
       "0003_subagents",
-      "0004_workshop_branches"
+      "0004_workshop_branches",
+      "0005_preview_macro"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -287,6 +289,28 @@ describe("0003_subagents", () => {
       const plan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
         SELECT id FROM rollouts WHERE spawned_by_rollout_id = 'parent' AND spawned_by_call_id = 'call_1'`
       assert.isTrue(plan.some((row) => row.detail.includes("rollouts_spawned")))
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0005_preview_macro", () => {
+  it.effect("adds the column to a database at 0004; its older summaries are stale by format", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0005_preview_macro": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
+      yield* sql`INSERT INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, messages,
+        cast_json, joined_json, departed_json, activity_json)
+        VALUES ('c', 'c', ${FORK_SUMMARY_FORMAT - 1}, 0, 0, 'Hello {{user}}', 1, '[]', '[]', '[]', '[]')`
+      yield* Effect.scoped(Layer.build(Migrations))
+      assert.isTrue((yield* sql`PRAGMA table_info(fork_summaries)`).some((r) => r.name === "preview_macro"))
+      assert.deepStrictEqual(yield* sql`SELECT format, preview, preview_macro FROM fork_summaries`, [
+        { format: FORK_SUMMARY_FORMAT - 1, preview: "Hello {{user}}", preview_macro: null }
+      ])
+      // Valid only at the current format: this one is recomputed when read.
+      assert.notStrictEqual(FORK_SUMMARY_FORMAT - 1, FORK_SUMMARY_FORMAT)
     }).pipe(Effect.provide(layer()))
   )
 })

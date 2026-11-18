@@ -1,3 +1,4 @@
+import { previewText, type PreviewMacro, type PreviewNames } from "./previewText.ts"
 import { makeShellEpoch } from "./shellEpoch.ts"
 import { ActiveStateModules } from "./stateModules.ts"
 import { shownIn, shownInSql, slotDeletedIn, slotDeletedInSql } from "./forkState.ts"
@@ -177,6 +178,10 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           )
         ])
       )
+      const cardName: PreviewNames = (id) => {
+        const card = byCard.get(id)
+        return card === undefined ? undefined : (card.modelName ?? card.name)
+      }
       const chatPins = yield* sql<{ chat_id: string }>`SELECT chat_id FROM chat_pins WHERE user_id = ${userId}`
       const pinnedChats = new Set(chatPins.map((row) => row.chat_id))
       // Each live fork with its chat and its stored summary, when there is one: only what the shell shows.
@@ -197,6 +202,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         s_format: number | null
         s_valid: number
         preview: string | null
+        preview_macro: string | null
         messages: number | null
         leaf: string | null
         end_at: number | null
@@ -212,7 +218,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             f.cover_media_id AS fork_cover, c.cover_media_id AS chat_cover,
             c.title, c.kind, c.current_fork_id, c.created_at AS chat_created_at, coalesce(c.added_at, c.created_at) AS chat_added_at,
             c.shell_stamp, s.format AS s_format,
-            coalesce(${sql.literal(summaryValidSql("s", "c", String(userStamp)))}, 0) AS s_valid, s.preview,
+            coalesce(${sql.literal(summaryValidSql("s", "c", String(userStamp)))}, 0) AS s_valid, s.preview, s.preview_macro,
             s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
             CASE WHEN s.fork_id IS NOT NULL
               THEN '[' || s.cast_json || ',' || s.joined_json || ',' || s.departed_json || ',' || s.activity_json || ',' || s.added_json || ',' || s.threads_json || ']' END AS lists
@@ -257,6 +263,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             forkId: row.id,
             chatId: row.chat_id,
             preview: row.preview ?? "",
+            previewMacro: row.preview_macro === null ? null : (JSON.parse(row.preview_macro) as PreviewMacro),
             messages: row.messages ?? 0,
             leaf: row.leaf,
             endAt: row.end_at,
@@ -277,6 +284,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             forkId: row.id,
             chatId: row.chat_id,
             preview: "",
+            previewMacro: null,
             messages: 0,
             leaf: null,
             endAt: null,
@@ -336,6 +344,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             forkId: row.id,
             chatId: row.chat_id,
             preview: "",
+            previewMacro: null,
             messages: 0,
             leaf: null,
             endAt,
@@ -469,7 +478,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         return {
           forkId: record.id,
           sourceChatId: record.chat_id as ChatId,
-          preview: s.preview,
+          preview: previewText(s.preview, s.previewMacro, cardName),
           messages: s.messages,
           chat: {
             id: row.id as ChatId,

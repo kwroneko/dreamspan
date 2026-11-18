@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 import { baseline } from "./baseline.ts"
 import { filesMigration } from "./migrationFiles.ts"
+import { previewMacroMigration } from "./migrationPreviewMacro.ts"
 import { subagentSchema } from "./subagentSchema.ts"
 import { workshopBranchesMigration } from "./migrationWorkshopBranches.ts"
 
@@ -22,7 +23,9 @@ export const migrations = {
   // spec/SUBAGENTS.md §11. Numbered after 0002_files, and independent of it.
   "0003_subagents": runAll(subagentSchema),
   // spec/WORKSHOP-BRANCHES.md §7: workshop branches paired with story branches.
-  "0004_workshop_branches": runAll(workshopBranchesMigration)
+  "0004_workshop_branches": runAll(workshopBranchesMigration),
+  // Greeting previews with macros replaced: one nullable column on the stored fork summaries.
+  "0005_preview_macro": runAll(previewMacroMigration)
 }
 
 /**

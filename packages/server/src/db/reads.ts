@@ -8,7 +8,8 @@ import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { composerImages } from "./composerImages.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 export { stateEventsOnPath } from "./stateRead.ts"
-import { chatCast } from "./cards.ts"
+import { chatCast, chatStateAt, previewNamesOf } from "./cards.ts"
+import { previewText } from "./previewText.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
 import {
@@ -277,6 +278,14 @@ export const walkTowards = (sql: SqlClient.SqlClient, leaf: SlotPosition, after:
     }
     return current.id === after.id ? null : current
   })
+
+interface BranchRow {
+  readonly id: SlotId
+  readonly branch_name: string | null
+  readonly preview: string
+  readonly template: number | null
+  readonly speaker: string | null
+}
 
 export const makeReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -950,6 +959,11 @@ export const makeReadHandlers = Effect.gen(function* () {
         const summaries = yield* chatForkSummaries(sql, userId, chatId, rows)
         // The thread sets each is in, of those still shown (two threads with a live fork).
         const shown = shownSplits(rows.map((row) => summaries.get(row.id)?.threads ?? []))
+        const names = yield* previewNamesOf(
+          sql,
+          userId,
+          rows.map((row) => summaries.get(row.id)?.previewMacro ?? null)
+        )
         return yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             const s = summaries.get(row.id)
@@ -957,7 +971,7 @@ export const makeReadHandlers = Effect.gen(function* () {
             return new Fork({
               ...toFork(row),
               startSlotId: (yield* branchStart(sql, row)) as SlotId | null,
-              tipExcerpt: s?.preview ?? "",
+              tipExcerpt: s ? previewText(s.preview, s.previewMacro, names) : "",
               split: s?.split ?? null,
               endAt: s?.endAt ?? null,
               ...(threads.length > 0 ? { threads } : {})
@@ -983,23 +997,37 @@ export const makeReadHandlers = Effect.gen(function* () {
           : yield* forkAt(sql, slot.chat_id, slotId)
         const columns = sql`x.id, ${sql.literal(branchLabel("x"))} AS branch_name, CASE WHEN NOT ${slotDeletedIn(sql, shown, "x")}
           THEN substr((SELECT v.content FROM version_records v WHERE v.id = ${shownIn(sql, shown, "x")}), 1, 160)
-          ELSE '' END AS preview`
+          ELSE '' END AS preview,
+          (SELECT v.macro_mode = 'template' FROM version_records v WHERE v.id = ${shownIn(sql, shown, "x")}) AS template,
+          (SELECT v.speaker_entity_id FROM version_records v WHERE v.id = ${shownIn(sql, shown, "x")}) AS speaker`
         // An inserted message has no alternates: it's the only one at its place.
         const rows =
           slot.inserted === 1
-            ? yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
+            ? yield* sql<BranchRow>`
                 SELECT ${columns} FROM slots x WHERE x.id = ${slotId}`
             : slot.parent_slot_id === null
-              ? yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
+              ? yield* sql<BranchRow>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${slot.chat_id}
                   AND x.depth = 0 AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id`
-              : yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
+              : yield* sql<BranchRow>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
                   AND x.chat_id = ${slot.chat_id} AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id`
+        // A greeting's macros are replaced as the chat shows them, by the fork's persona.
+        let previews = rows.map((row) => row.preview)
+        if (rows.some((row) => row.template === 1)) {
+          const [fork] = yield* sql<{ tip_slot_id: string | null }>`SELECT tip_slot_id FROM forks WHERE id = ${shown}`
+          const state = yield* chatStateAt(sql, slot.chat_id as ChatId, fork?.tip_slot_id ?? null)
+          const other = state.participants.find((id) => !state.playedByMe.includes(id)) ?? null
+          const macros = rows.map((row) =>
+            row.template === 1 ? { speaker: row.speaker ?? other, user: state.playedByMe[0] ?? null } : null
+          )
+          const names = yield* previewNamesOf(sql, userId, macros)
+          previews = rows.map((row, i) => previewText(row.preview, macros[i]!, names))
+        }
         return rows.map(
-          (row, index) => new Branch({ slotId: row.id, index, name: row.branch_name, preview: row.preview })
+          (row, index) => new Branch({ slotId: row.id, index, name: row.branch_name, preview: previews[index]! })
         )
       }).pipe(query("ListBranches")),
 

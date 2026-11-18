@@ -4,7 +4,7 @@ import { cardNames } from "@rp/shared/cardNames.ts"
 // in the reader workers; every one touches only the acting user's rows.
 import { makeShellReadHandlers } from "./shellReads.ts"
 import type { Chat } from "@rp/shared/chat.ts"
-import { type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
+import { type CastCard, type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
 import { chatName } from "@rp/shared/chatName.ts"
 import { avatarCropField } from "@rp/shared/media.ts"
 import { CardDefinition, CardForChat, CardUsage, ChatCard, ChatGroup } from "@rp/shared/chatSetupApi.ts"
@@ -14,7 +14,15 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
-import { type CardSummaryRow, cardSummary, chatCast, castCardAt, loadCards, loadCastCards } from "./cards.ts"
+import {
+  type CardSummaryRow,
+  cardSummary,
+  chatCast,
+  chatStateAt,
+  castCardAt,
+  loadCards,
+  loadCastCards
+} from "./cards.ts"
 import { type CardBinding, makeLibraryQueries } from "./library.ts"
 import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { chatQueue } from "./queueRows.ts"
@@ -23,6 +31,7 @@ import { query } from "./tx.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { forkAt, selectedInSql, shownIn, shownInSql, slotDeletedInSql } from "./forkState.ts"
 import { lastShown, lastText } from "./forks.ts"
+import { previewText } from "./previewText.ts"
 import { displayLength, displayThrough, pathPieces, rearranges } from "./displayPath.ts"
 
 /** A card's binding from the payload's, without the nulls; undefined for none. */
@@ -50,6 +59,27 @@ const definitionOf = (doc: Record<string, unknown>) =>
   })
 
 type Member = ChatGroup["members"][number]
+
+/** A chat's last message for its row: its start, with a greeting's macros replaced as the chat shows them. */
+const shownLast = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  chatId: ChatId,
+  fork: string,
+  leaf: string | null,
+  cast: ReadonlyArray<CastCard>
+) {
+  const last = yield* lastText(sql, chatId, fork, leaf)
+  if (last === null) return null
+  const { template, ...shown } = last
+  if (template !== 1) return shown as ChatSummary["last"]
+  const state = yield* chatStateAt(sql, chatId, leaf)
+  const names = new Map(cast.map((card) => [card.entityId as string, card.modelName ?? card.name]))
+  const macro = {
+    speaker: last.speaker ?? state.participants.find((id) => !state.playedByMe.includes(id)) ?? null,
+    user: state.playedByMe[0] ?? null
+  }
+  return { ...shown, text: previewText(last.text, macro, (id) => names.get(id)) } as ChatSummary["last"]
+})
 
 export const makeChatSetupReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -251,7 +281,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         query("CardUsage")
       ),
 
-    // The current fork's cast and card bindings, and its tip's bounded excerpt.
+    // The current fork's cast and card bindings, and its tip's bounded excerpt (macros replaced for a greeting).
     ChatSummaries: ({ userId, chatIds }) =>
       Effect.gen(function* () {
         const summaries: Array<ChatSummary> = []
@@ -273,7 +303,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               chatId,
               cast,
               messages: positions ?? (leaf ? leaf.depth + 1 : 0),
-              last: (yield* lastText(sql, chatId, chat.fork, chat.leaf)) as ChatSummary["last"]
+              last: yield* shownLast(sql, chatId, chat.fork, chat.leaf, cast)
             })
           )
         }

@@ -276,6 +276,20 @@ export const chatStateAt = Effect.fnUntraced(function* (sql: SqlClient.SqlClient
   )
 })
 
+/** The names list previews give `{{user}}` and `{{char}}` (`previewText`): each card's model name, else its name. */
+export const previewNamesOf = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  macros: ReadonlyArray<{ readonly speaker: string | null; readonly user: string | null } | null>
+) {
+  const ids = [...new Set(macros.flatMap((m) => (m === null ? [] : [m.speaker, m.user])))].filter(
+    (id): id is string => id !== null
+  )
+  const cards = ids.length === 0 ? [] : yield* loadCastCards(sql, userId, ids as Array<EntityId>)
+  const byId = new Map(cards.map((card) => [card.entityId as string, card.modelName ?? card.name]))
+  return (id: string) => byId.get(id)
+})
+
 /** The same selected revisions for chat-list metadata and chat search. */
 export const chatCast = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
