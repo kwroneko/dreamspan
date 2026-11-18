@@ -289,9 +289,8 @@ function SnippetBlock({
 
 function Workspace({ store }: { store: SnippetWorkspace }) {
   const state = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot)
-  const user = useSession().user.id
   const [query, setQuery] = useState("")
-  const blocks = useOpenBlocks(`rp.snippetBlocks.${user}`, state.items.length)
+  const blocks = useOpenBlocks("snippetsOpen", state.items.length)
   const shown = state.items.filter((i) =>
     `${i.title} ${i.content}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())
   )

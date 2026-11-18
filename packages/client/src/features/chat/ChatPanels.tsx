@@ -45,35 +45,24 @@ export const carryPanelFocus = (chatId: ChatId, wanted: boolean) => {
   else panelFocusHandovers.delete(chatId)
 }
 
-// --- Whether the panel is open and at which tab: each user's choice in this browser, kept in
-// its storage under keys naming the user, so another account signing in here has its own.
+// --- Whether the panel is open and at which tab: the URL's `panel` says (a chat's tab keeps it,
+// so a reload or a copied link shows it). Besides, this page remembers in memory, per user,
+// the tab last open, so a chat opened from a place without a panel (Home) shows the one this
+// browser tab had; nothing is stored, so no other browser tab follows it (owner, 2026-11-18).
 
 /** The tab open, absent while the panel is closed. */
-const panelKey = (userId: string) => `rp.chatPanel.${userId}`
+const lastOpen = new Map<string, PanelTab>()
 /** The tab last open, closed since or not: where the panel opens on a phone. */
-const tabKey = (userId: string) => `rp.chatPanelTab.${userId}`
+const lastTab = new Map<string, PanelTab>()
 
-const read = (key: string): PanelTab | null => {
-  try {
-    const value = localStorage.getItem(key)
-    return isPanelTab(value) ? value : null
-  } catch {
-    return null
-  }
-}
-
-/** The tab open when the user last used the panel, or null when they last closed it. */
-export const rememberedPanel = (userId: string) => read(panelKey(userId))
+/** The tab open when the user last used the panel in this page, or null when they last closed it. */
+export const rememberedPanel = (userId: string) => lastOpen.get(userId) ?? null
 
 export const rememberPanel = (userId: string, tab: PanelTab | null) => {
-  try {
-    if (tab === null) localStorage.removeItem(panelKey(userId))
-    else {
-      localStorage.setItem(panelKey(userId), tab)
-      localStorage.setItem(tabKey(userId), tab)
-    }
-  } catch {
-    // Storage off: the URL still carries the tab.
+  if (tab === null) lastOpen.delete(userId)
+  else {
+    lastOpen.set(userId, tab)
+    lastTab.set(userId, tab)
   }
 }
 
@@ -116,7 +105,7 @@ export function PanelToggles({
   const tabs = available.filter((tab) => tab.descriptor.header !== false)
   if (available.length === 0) return null
   const toggle = () => {
-    const remembered = read(tabKey(userId))
+    const remembered = lastTab.get(userId)
     onToggle(
       open ??
         available.find((tab) => tab.value === remembered)?.value ??
@@ -217,8 +206,7 @@ export function ChatSidePanel({
     if (savedId !== null) panelFocusHandovers.delete(savedId)
   }, [savedId])
   const navRef = useRef<HTMLDivElement>(null)
-  const userId = useSession().user.id
-  const { width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, wide)
+  const { width, min, max, change, reset } = usePanelWidth("chat", 416, 260, wide)
   const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
   const [notesCard, setNotesCard] = usePlaceParam("notesCard", "")
   const notesFocus = (notesCard || null) as EntityId | null
@@ -413,6 +401,10 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
       ? "This panel is no longer available in this chat."
       : null
   )
+  // A tab shown from the URL (a reload, a link) is the one this page goes on with.
+  useEffect(() => {
+    if (panel !== null) rememberPanel(userId, panel)
+  }, [userId, panel])
   // The URL names the tab shown, so a refresh or a copied link keeps it.
   useEffect(() => {
     // Location state can update before the route's search props, and this component can

@@ -34,7 +34,7 @@ import { logout, SessionContext, sessionAtom, useSession } from "../session.ts"
 import { Button } from "../ui/Button.tsx"
 import { WindowClose } from "../ui/WindowClose.tsx"
 import { ImageControls } from "../ui/ImageControls.tsx"
-import { ResizeHandle, usePanelWidth } from "../ui/ResizeHandle.tsx"
+import { ResizeHandle, usePanelWidth, WIDTH_PARAMS } from "../ui/ResizeHandle.tsx"
 import { NavigationTiles } from "../ui/NavigationTiles.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Toasts } from "../ui/Toast.tsx"
@@ -44,6 +44,7 @@ import { ShellNavigation, useShellNavigation } from "./characters/shellData.tsx"
 import { sidebarSearch } from "./characters/sidebarSearch.ts"
 import { setPageTitle, useNotices } from "./notices.tsx"
 import { useTabFocused, useTabInStrips, useTabMeta } from "./workbench/tab.tsx"
+import { layoutKeys, layoutParams, useLayoutParam, writeLayoutParam } from "../tabLayoutParams.ts"
 
 /**
  * Sets the browser tab's title while a screen is shown, and names its workbench tab; only the
@@ -166,11 +167,12 @@ export const openAppMenu = () => {
 /** Phones: a bar with the menu, which opens the sidebar over the page. */
 function PhoneBar() {
   // Open on the page it was opened on: going anywhere closes it. Browsing the panel itself
-  // (its crumbs and tabs, in the URL's sidebar params) doesn't; picking in it does.
+  // (its crumbs and tabs, in the URL's sidebar params) doesn't, nor does changing the layout
+  // (a foot section closed, a height dragged: layout params); picking in it does.
   const href = useLocation({
     select: (location) => {
       const params = new URLSearchParams(location.searchStr)
-      for (const key of sidebarSearch) params.delete(key)
+      for (const key of [...sidebarSearch, ...layoutKeys()]) params.delete(key)
       // The same place whatever order its keys come in: writing a sidebar key can reorder the rest.
       params.sort()
       return `${location.pathname}?${params}`
@@ -213,54 +215,23 @@ function PhoneBar() {
   )
 }
 
-// --- Whether the desktop sidebar is hidden: each user's choice in this browser
-// (`rp.sidebarHidden.<user id>`), followed by the browser's other tabs. Phones and tablets
-// don't use it: their sidebar is the menu over the page.
+// --- Whether the desktop sidebar is hidden: the browser tab's URL says so (`sidebar=hidden`,
+// a layout param: `tabLayoutParams.ts`), so a reload, Back, Forward or a copied link shows it
+// the same, navigation keeps it and no other tab follows it (owner, 2026-11-18). Absent, it's
+// shown. Phones and tablets don't use it: their sidebar is the menu over the page.
 
-const hiddenKey = (userId: string) => `rp.sidebarHidden.${userId}`
-/** Where storage is off. */
-const hiddenInMemory = new Map<string, boolean>()
-const hiddenListeners = new Set<() => void>()
-const setSidebarHidden = (userId: string, next: boolean) => {
-  hiddenInMemory.set(userId, next)
-  try {
-    if (next) localStorage.setItem(hiddenKey(userId), "1")
-    else localStorage.removeItem(hiddenKey(userId))
-  } catch {
-    /* In memory when storage is off. */
-  }
-  for (const listener of hiddenListeners) listener()
-}
+const SIDEBAR = "sidebar"
+const setSidebarHidden = (next: boolean) => writeLayoutParam(SIDEBAR, next ? "hidden" : null)
 /** Reveal navigation after an entry point elsewhere scopes the left column. */
-export const showAppNavigation = (userId: string) => {
-  setSidebarHidden(userId, false)
+export const showAppNavigation = () => {
+  setSidebarHidden(false)
   if (!matchMedia("(min-width: 1024px)").matches) openAppMenu()
-}
-const readHidden = (userId: string) => {
-  try {
-    return localStorage.getItem(hiddenKey(userId)) === "1"
-  } catch {
-    return hiddenInMemory.get(userId) ?? false
-  }
-}
-const subscribeHidden = (listener: () => void) => {
-  hiddenListeners.add(listener)
-  addEventListener("storage", listener)
-  return () => {
-    hiddenListeners.delete(listener)
-    removeEventListener("storage", listener)
-  }
 }
 /** The button to focus once the sidebar has hidden or shown, so focus isn't lost with it. */
 let focusNext: "sidebar" | "header" | null = null
 
 function useSidebarHidden(): [boolean, (hidden: boolean) => void] {
-  const userId = useSession().user.id
-  const hidden = useSyncExternalStore(subscribeHidden, () => readHidden(userId))
-  const set = (next: boolean) => {
-    setSidebarHidden(userId, next)
-  }
-  return [hidden, set]
+  return [useLayoutParam(SIDEBAR) === "hidden", setSidebarHidden]
 }
 
 /**
@@ -316,8 +287,7 @@ function DesktopSidebarColumn() {
 }
 
 function DesktopSidebar() {
-  const userId = useSession().user.id
-  const { width, min, max, change, reset } = usePanelWidth(userId, "sidebar", 320, 220)
+  const { width, min, max, change, reset } = usePanelWidth("sidebar", 320, 220)
   return (
     <aside
       aria-label="Sidebar"
@@ -459,6 +429,8 @@ function Main() {
 }
 
 export const register = () => {
+  layoutParams.register({ id: "shell.sidebar", keys: [SIDEBAR] })
+  layoutParams.register({ id: "shell.columnWidths", keys: Object.values(WIDTH_PARAMS) })
   centerHeaders.register({ id: "shell.center-header", order: 10, component: CenterHeaderFrame })
   routes.register({ id: "app", parent: "root", component: AppShell })
   sidebarToggle.register({ id: "sidebar-toggle", order: 10, component: SidebarToggle })

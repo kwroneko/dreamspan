@@ -680,7 +680,7 @@ export function LorebookTable(props: {
   usePlaceNotice(
     entry !== null && !book.entries.some((e) => e.uid === entry) ? "This entry is no longer in the lorebook." : null
   )
-  const [opened, setOpened] = useOpenEntries(store.refId, root, added, panel)
+  const [opened, setOpened] = useOpenEntries(entryScope, added)
   // Opened entries whose settings are open too: closed again with the page.
   const [settings, setSettings] = useState<ReadonlySet<number>>(EMPTY)
   const showSettings = (uid: number, open: boolean) =>

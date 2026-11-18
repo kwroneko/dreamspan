@@ -1,25 +1,15 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react"
-import { useSession } from "../../session.ts"
 import { FOOT_DEFAULT, FOOT_MIN, sidebarFootLayout, type FootKind, type FootPresence } from "./sidebarFootLayout.ts"
+import { useLayoutNumber, useLayoutParam, writeLayoutParam } from "../../tabLayoutParams.ts"
 
-const read = (key: string) => {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-const write = (key: string, value: string | null) => {
-  try {
-    if (value === null) localStorage.removeItem(key)
-    else localStorage.setItem(key, value)
-  } catch {
-    /* Preferences remain usable in memory. */
-  }
-}
-const openKey = (kind: FootKind, userId: string) =>
-  kind === "branch" ? `rp.openChatBranches.${userId}` : `rp.splitChatsOpen.${userId}`
-const heightKey = (kind: FootKind, userId: string) => `rp.${kind}Height.${userId}`
+// The sidebar foot's heights and closed sections: layout params in the browser tab's URL
+// (`tabLayoutParams.ts`), absent at their defaults (registered by the characters feature).
+export const FOOT_PARAMS = {
+  /** A section the user closed: "closed". */
+  open: { branch: "fb", split: "fs" },
+  /** A section's height the user dragged, whole pixels. */
+  height: { branch: "fbh", split: "fsh" }
+} as const
 
 type State = ReturnType<typeof sidebarFootLayout> & {
   expanded: Record<FootKind, boolean>
@@ -30,24 +20,20 @@ const FootContext = createContext<State | null>(null)
 
 /** Only actual footer sections take space; Chats flexes into everything left. */
 export function SidebarFeet({ children }: { children: ReactNode }) {
-  const userId = useSession().user.id
   const ref = useRef<HTMLDivElement>(null)
   const [available, setAvailable] = useState({ normal: 0, focused: 0 })
   const [focused, setFocused] = useState<FootKind | null>(null)
   const [presence, setPresence] = useState<FootPresence>({ branch: "absent", split: "absent" })
-  const [preferred, setPreferred] = useState(
-    () =>
-      Object.fromEntries(
-        (["branch", "split"] as const).map((kind) => {
-          const saved = Number(read(heightKey(kind, userId)))
-          return [kind, Number.isFinite(saved) && saved > 0 ? Math.max(FOOT_MIN[kind], saved) : FOOT_DEFAULT[kind]]
-        })
-      ) as Record<FootKind, number>
-  )
-  const [expanded, setExpanded] = useState(() => ({
-    branch: read(openKey("branch", userId)) !== "collapsed",
-    split: read(openKey("split", userId)) !== "collapsed"
-  }))
+  const branchHeight = useLayoutNumber(FOOT_PARAMS.height.branch, 1)
+  const splitHeight = useLayoutNumber(FOOT_PARAMS.height.split, 1)
+  const preferred: Record<FootKind, number> = {
+    branch: branchHeight === null ? FOOT_DEFAULT.branch : Math.max(FOOT_MIN.branch, branchHeight),
+    split: splitHeight === null ? FOOT_DEFAULT.split : Math.max(FOOT_MIN.split, splitHeight)
+  }
+  const expanded = {
+    branch: useLayoutParam(FOOT_PARAMS.open.branch) !== "closed",
+    split: useLayoutParam(FOOT_PARAMS.open.split) !== "closed"
+  }
   useLayoutEffect(() => {
     const parent = ref.current?.parentElement
     if (!parent) return
@@ -102,16 +88,14 @@ export function SidebarFeet({ children }: { children: ReactNode }) {
   const change = (kind: FootKind, value: number | null) => {
     const next =
       value === null ? FOOT_DEFAULT[kind] : Math.round(Math.max(FOOT_MIN[kind], Math.min(layout.max[kind], value)))
-    setPreferred((previous) => ({ ...previous, [kind]: next }))
-    write(heightKey(kind, userId), value === null ? null : String(next))
+    writeLayoutParam(FOOT_PARAMS.height[kind], value === null || next === FOOT_DEFAULT[kind] ? null : String(next))
   }
   const toggle = (kind: FootKind) => {
     const next = layout.collapsed[kind]
     const nextExpanded = { ...expanded, [kind]: next }
     const normal = sidebarFootLayout(available.normal, preferred, nextExpanded, presence)
     setFocused(next && (focused !== null || normal.collapsed[kind]) ? kind : null)
-    setExpanded(nextExpanded)
-    write(openKey(kind, userId), next ? "open" : "collapsed")
+    writeLayoutParam(FOOT_PARAMS.open[kind], next ? null : "closed")
   }
   return (
     <FootContext value={{ ...layout, expanded, change, toggle }}>

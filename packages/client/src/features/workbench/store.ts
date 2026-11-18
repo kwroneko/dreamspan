@@ -42,6 +42,7 @@ import {
   splitFrame,
   type Direction
 } from "./model.ts"
+import { layoutKeys, withoutLayoutParams } from "../../tabLayoutParams.ts"
 
 export type HistoryState = Record<string, unknown>
 type Action = "PUSH" | "REPLACE"
@@ -123,7 +124,8 @@ export class WorkbenchStore {
     this.userId = userId
     this.browser = browser
     this.save = save
-    const href = browser.location.href
+    // The browser tab's layout params stay on the browser's URL (tabLayoutParams.ts).
+    const href = withoutLayoutParams(browser.location.href)
     const restored = restoreLayout(saved)
     this.layout = restored ? openTab(restored, href, itemKey) : initialLayout(href)
     const tab = focusedTab(this.layout)
@@ -279,7 +281,8 @@ export class WorkbenchStore {
     if (focused) this.mirror(action)
   }
 
-  private fromBrowser(href: string, state: HistoryState, action: Action) {
+  private fromBrowser(browserHref: string, state: HistoryState, action: Action) {
+    const href = withoutLayoutParams(browserHref)
     const focused = focusedTab(this.layout)
     if (focused && itemKey(focused.href) === itemKey(href)) {
       // The tab first, so the browser's URL (Back's place) isn't copied back over it.
@@ -318,15 +321,21 @@ export class WorkbenchStore {
 
   private withShellParams(href: string) {
     const keys = shellKeys()
+    const layout = layoutKeys()
     const change = this.shellChange
     this.shellChange = null
-    if (keys.size === 0) return href
+    if (keys.size === 0 && layout.size === 0) return href
     const url = new URL(href, "http://tab.invalid")
     const current = new URL(this.browser.location.href, "http://tab.invalid")
-    for (const key of keys) url.searchParams.delete(key)
+    for (const key of [...keys, ...layout]) url.searchParams.delete(key)
     for (const key of keys) {
       const value = change?.has(key) ? change.get(key) : current.searchParams.get(key)
       if (value !== null && value !== undefined) url.searchParams.set(key, value)
+    }
+    // The layout is the browser tab's: only the browser's URL sets it (tabLayoutParams.ts).
+    for (const key of layout) {
+      const value = current.searchParams.get(key)
+      if (value !== null) url.searchParams.set(key, value)
     }
     const search = url.searchParams.toString()
     return `${url.pathname}${search ? `?${search}` : ""}${url.hash}`
@@ -335,7 +344,8 @@ export class WorkbenchStore {
   // --- What the user does.
 
   /** Opens an item (model.ts `openTab`), at its URL's history state. */
-  open(href: string, options: OpenOptions & { state?: HistoryState; mirror?: Action } = {}) {
+  open(link: string, options: OpenOptions & { state?: HistoryState; mirror?: Action } = {}) {
+    const href = withoutLayoutParams(link)
     const { state, mirror = "PUSH", ...rest } = options
     const { layout: next, tabId } = openTabAt(this.layout, href, itemKey, { ...rest, id: rest.id ?? newId("t") })
     // A tab already mounted (the item's own, or the preview taking it) navigates in place.

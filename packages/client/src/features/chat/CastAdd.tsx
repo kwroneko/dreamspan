@@ -8,7 +8,6 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import type { Cast } from "@rp/shared/chatSetupApi.ts"
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AsyncView } from "../../actions.tsx"
-import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -25,7 +24,8 @@ import {
 } from "../characters/shellData.tsx"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { NewCardButton } from "../editor/NewCard.tsx"
-import { readCastAddOpen, subscribeCastAdd, takeCastAddRequest, writeCastAddOpen } from "./castAddState.ts"
+import { CAST_ADD_PARAM, subscribeCastAdd, takeCastAddRequest, writeCastAddOpen } from "./castAddState.ts"
+import { useLayoutParam } from "../../tabLayoutParams.ts"
 import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession, Outcome } from "./session.ts"
 
@@ -233,28 +233,25 @@ export function PendingCastAddSection({ pending }: { pending: PendingChat }) {
 }
 
 function CastAdd({ target }: { target: CastAddTarget }) {
-  const userId = useSession().user.id
-  const [open, setOpen] = useState(() => readCastAddOpen(userId))
+  const open = useLayoutParam(CAST_ADD_PARAM) === "open"
   // Counts outside requests to add (the speaker switcher's "Add to chat"); 0 after a click here.
   const [focusSearch, setFocusSearch] = useState(0)
   const section = useRef<HTMLElement>(null)
   const id = useId()
   const toggle = (next: boolean) => {
-    setOpen(next)
     setFocusSearch(0)
-    writeCastAddOpen(userId, next)
+    writeCastAddOpen(next)
   }
   // A request made before this mounted is taken now; one made while it's shown, when made.
   useEffect(() => {
     const take = () => {
       if (!takeCastAddRequest()) return
-      setOpen(true)
-      writeCastAddOpen(userId, true)
+      writeCastAddOpen(true)
       setFocusSearch((n) => n + 1)
     }
     take()
     return subscribeCastAdd(take)
-  }, [userId])
+  }, [])
   useEffect(() => {
     if (focusSearch > 0) section.current?.scrollIntoView({ block: "start" })
   }, [focusSearch])

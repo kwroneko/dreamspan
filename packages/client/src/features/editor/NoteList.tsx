@@ -517,12 +517,11 @@ export function NoteBlock({
   )
 }
 
-/** Which notes are open, and which have their settings open: remembered per note in this browser. */
+/** Which notes are open, and which have their settings open: per note, in the URL (`ui/openBlocks.ts`). */
 export function useNoteBlocks(count: number) {
-  const userId = useSession().user.id
-  const blocks = useOpenBlocks(`rp.noteBlocks.${userId}`, count)
+  const blocks = useOpenBlocks("notesOpen", count)
   // Existing notes default to folded settings; creation explicitly opens a new note's.
-  const settings = useOpenBlocks(`rp.noteSettings.${userId}`, Number.POSITIVE_INFINITY)
+  const settings = useOpenBlocks("noteSettings", Number.POSITIVE_INFINITY)
   return { blocks, settings }
 }
 

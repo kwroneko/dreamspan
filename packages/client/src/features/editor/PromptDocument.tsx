@@ -719,10 +719,9 @@ const withOpen = (opened: Opened, id: string, open: boolean): Opened => {
   return { all: opened.all, except }
 }
 
-/** The large editor's outline of names, beside the document: resizable, its width kept per browser. */
+/** The large editor's outline of names, beside the document: resizable, its width in the browser tab's URL. */
 function Outline({ children }: { children: ReactNode }) {
-  const userId = useSession().user.id
-  const { ref, width, min, max, change, reset } = useInnerPanelWidth(userId, "presetOutline", 240, 140, 560, 480)
+  const { ref, width, min, max, change, reset } = useInnerPanelWidth("presetOutline", 240, 140, 560, 480)
   return (
     <nav
       ref={ref}

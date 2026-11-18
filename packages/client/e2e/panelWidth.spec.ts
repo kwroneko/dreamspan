@@ -304,12 +304,19 @@ for (const theme of ["light", "dark"] as const)
     expect(Math.abs(column.x + column.width / 2 - 960)).toBeLessThanOrEqual(2)
     await noSideScroll(page)
     await shoot(page, `sidebar-hidden-chat-1920-${theme}`)
-    // Remembered in this browser.
+    // In the tab's URL: a reload keeps it.
     await page.reload()
     await expect(show).toBeVisible()
     await expect(handle(page, "Resize sidebar")).toHaveCount(0)
-    // Other pages: a bar with the button.
-    await page.goto(`${server().url}/library`)
+    // Other pages, through an in-app link (navigation keeps it): a bar with the button.
+    await page.evaluate(() => {
+      const link = document.createElement("a")
+      link.href = "/library"
+      document.body.append(link)
+      link.click()
+      link.remove()
+    })
+    await expect(page).toHaveURL(/\/library\?(.*&)?sidebar=hidden/)
     const bar = page.getByRole("button", { name: "Show the sidebar", exact: true })
     await expect(bar).toBeVisible()
     await shoot(page, `sidebar-hidden-library-1920-${theme}`)

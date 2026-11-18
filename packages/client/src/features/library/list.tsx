@@ -13,7 +13,6 @@ import { AsyncResult } from "effect/reactivity"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { CARD_DRAG, carryOnDrag } from "../../ui/appDrags.ts"
 import { AsyncView } from "../../actions.tsx"
-import { useSession } from "../../session.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
@@ -33,6 +32,7 @@ import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { LISTED, libraryAtom } from "./data.ts"
 import { itemName, LibraryItemActions } from "./itemActions.tsx"
 import { libraryActions, libraryPanels } from "./slots.ts"
+import { useSession } from "../../session.ts"
 
 type Kind = (typeof LISTED)[number]["kind"]
 type Show = "all" | "characters" | "personas"
@@ -68,17 +68,16 @@ const writePrefs = (s: Prefs) => ({
   reverse: s.reversed || undefined,
   view: s.view === "list" ? undefined : s.view
 })
+/**
+ * The choices last made in this page, per user: a visit naming none (the Library link) opens
+ * at them. Memory only, so another browser tab, or a new one, starts from the defaults.
+ */
+const lastPrefs = new Map<string, Prefs>()
+
 function usePrefs() {
-  const key = `rp.library.${useSession().user.id}`
+  const userId = useSession().user.id
   const presetSort = useViewPrefs().prefs.presetSort
-  const [remembered] = useState(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(key) ?? "{}") as Prefs
-      return readPrefs({ ...stored, reverse: stored.reversed })
-    } catch {
-      return DEFAULTS
-    }
-  })
+  const [remembered] = useState(() => lastPrefs.get(userId) ?? DEFAULTS)
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const marked = useLocation({ select: (l) => l.state.libraryBrowse === true })
   const pathname = useLocation({ select: (l) => l.pathname })
@@ -100,12 +99,7 @@ function usePrefs() {
       })
   }, [marked, pathname, router, navigate, prefs, presetSort])
   const update = (change: Partial<Prefs>) => {
-    const next = { ...prefs, ...change }
-    try {
-      localStorage.setItem(key, JSON.stringify(next))
-    } catch {
-      /* URL still carries it. */
-    }
+    lastPrefs.set(userId, { ...prefs, ...change })
     void navigate({
       to: ".",
       search: (prev: Record<string, unknown>) => ({ ...prev, ...writePrefs({ ...readPrefs(prev), ...change }) }),

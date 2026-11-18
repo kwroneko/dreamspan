@@ -2,7 +2,6 @@
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useSyncExternalStore } from "react"
-import { useSession } from "../../session.ts"
 import { MenuItem } from "../../ui/Menu.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { CardSurfaceContext } from "../cardForks/surfaces.tsx"
@@ -15,7 +14,6 @@ const hint = (name: string) => `Shows every chat with ${name} in the left column
 
 function useCardChats(entityId: EntityId) {
   const navigate = useNavigate()
-  const userId = useSession().user.id
   const wide = useWide()
   const search = (prev: Record<string, unknown>) => ({
     ...prev,
@@ -30,7 +28,7 @@ function useCardChats(entityId: EntityId) {
       search,
       state: (prev) => ({ ...prev, ...(!wide ? { chatPanel: true } : {}) }),
       resetScroll: false
-    }).then(() => showAppNavigation(userId))
+    }).then(() => showAppNavigation())
   return { search, open }
 }
 
