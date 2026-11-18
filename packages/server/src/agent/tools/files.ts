@@ -886,6 +886,8 @@ export const makeFileTools = (deps: FileToolDeps) => {
             { bytes: current.bytes, inode: current.info.ino },
             "restore"
           )
+          // The kept version and the restored content count until the next measurement.
+          deps.quota?.wrote(env.userId, current.bytes.byteLength)
           if (typeof recipe.before === "string") {
             // A version past retention (30 days) is gone with its content.
             const version = yield* deps.reader
@@ -899,6 +901,7 @@ export const makeFileTools = (deps: FileToolDeps) => {
               return yield* new EffectUndoRefused({ message: "Its earlier content is gone." })
             const bytes = yield* attempt(() => readFile(join(deps.dataDir, version.mediaPath!)))
             yield* attempt(() => writeRegularFile(env.filesRoot, segments, bytes))
+            deps.quota?.wrote(env.userId, bytes.byteLength)
           } else yield* attempt(() => removeFile(env.filesRoot, segments))
           return yield* deps.writer.CompleteFileUndo({
             userId: actor.id,

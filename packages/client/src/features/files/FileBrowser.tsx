@@ -119,9 +119,12 @@ export function FileBrowser(props: FileBrowserProps) {
   const usageAction = useAction()
   // Its registry and state setters are stable, so the first render's run serves throughout.
   const usageRun = useRef(usageAction.run)
-  /** Measures the account's Files again; null when the server couldn't say. */
+  /**
+   * Reads the account's usage: the server's last measurement plus what its own writes and
+   * deletes changed since, so a refresh doesn't walk the whole folder. Null when it couldn't say.
+   */
   const readUsage = useCallback(async () => {
-    const result = await usageRun.current((client) => client("GetFilesUsage", { fresh: true }))
+    const result = await usageRun.current((client) => client("GetFilesUsage", { fresh: false }))
     if (!result.ok) return null
     setUsage(result.value)
     return result.value

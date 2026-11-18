@@ -66,7 +66,13 @@ export class QuotaExceeded extends Error {
  * 0. Each folder is read by name below the one before, so a folder swapped for a link mid-walk
  * is seen as the link.
  */
-export const measureTree = async (root: string, maxEntries = WALK_MAX_ENTRIES, maxMs = WALK_MAX_MS) => {
+export const measureTree = async (
+  root: string,
+  maxEntries = WALK_MAX_ENTRIES,
+  maxMs = WALK_MAX_MS,
+  /** Count only what deleting `root` would free for sure: a file with other links frees nothing. */
+  soleOwnerOnly = false
+) => {
   const seen = new Set<string>()
   const deadline = Date.now() + maxMs
   let bytes = 0
@@ -80,7 +86,7 @@ export const measureTree = async (root: string, maxEntries = WALK_MAX_ENTRIES, m
     if (seen.has(key)) continue
     seen.add(key)
     // Files and links by size; folders by the blocks their entries take.
-    bytes += info.isDirectory() ? info.blocks * 512 : info.size
+    bytes += info.isDirectory() ? info.blocks * 512 : soleOwnerOnly && info.nlink > 1 ? 0 : info.size
     if (++entries >= maxEntries || Date.now() > deadline) return { bytes, partial: true }
     if (info.isDirectory()) {
       const names = await readdir(path).catch(() => [] as Array<string>)
@@ -104,6 +110,8 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const usages = new Map<string, Usage>()
   /** Bytes app-side writes added since the last measurement, so checks between walks add up. */
   const added = new Map<string, number>()
+  /** Bytes app-side deletes and smaller replacements freed since the last measurement. */
+  const freedSince = new Map<string, number>()
   const asked = new Map<string, number>()
   const measuring = new Map<string, Promise<Usage>>()
 
@@ -136,6 +144,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       }
       usages.set(userId, usage)
       added.delete(userId)
+      freedSince.delete(userId)
       return usage
     })
 
@@ -155,8 +164,8 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
       asked.set(userId, Date.now())
       const known = usages.get(userId) ?? (yield* measure(userId))
       const quotaBytes = yield* quotaOf(userId)
-      const extra = added.get(userId) ?? 0
-      return { ...known, quotaBytes, usedBytes: known.usedBytes + extra }
+      const extra = (added.get(userId) ?? 0) - (freedSince.get(userId) ?? 0)
+      return { ...known, quotaBytes, usedBytes: Math.max(0, known.usedBytes + extra) }
     })
 
   const overText = (used: number, quota: number, what: string) =>
@@ -203,7 +212,7 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   const reserve = (userId: string, bytes: number, quotaBytes: number) => {
     const known = usages.get(userId)?.usedBytes ?? 0
     const extra = added.get(userId) ?? 0
-    if (known + extra + bytes > quotaBytes) return false
+    if (known + extra - (freedSince.get(userId) ?? 0) + bytes > quotaBytes) return false
     added.set(userId, extra + bytes)
     return true
   }
@@ -220,6 +229,23 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
   /** An app-side write landed: its bytes count until the next measurement. */
   const wrote = (userId: string, bytes: number) => {
     if (bytes > 0) added.set(userId, (added.get(userId) ?? 0) + bytes)
+  }
+
+  /**
+   * An app-side delete or smaller replacement freed `bytes` for sure (the caller counts only
+   * what nothing else still holds). It lowers the figure until the next measurement, which
+   * sees the folder as it is. Apply it before the file goes, and give it back with
+   * `unfreed` if the removal fails: a measurement that lands in between can then only
+   * over-count, never subtract the same bytes twice.
+   */
+  const freed = (userId: string, bytes: number) => {
+    if (bytes > 0 && usages.has(userId)) freedSince.set(userId, (freedSince.get(userId) ?? 0) + bytes)
+  }
+
+  /** Takes back what `freed` lowered, for a removal that didn't happen. */
+  const unfreed = (userId: string, bytes: number) => {
+    const now = freedSince.get(userId)
+    if (now !== undefined) freedSince.set(userId, Math.max(0, now - bytes))
   }
 
   /**
@@ -263,6 +289,8 @@ export const makeFilesQuota = (deps: QuotaDeps) => {
     measure,
     check,
     wrote,
+    freed,
+    unfreed,
     reserve,
     release,
     overMessage,

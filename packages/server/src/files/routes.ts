@@ -31,10 +31,14 @@ import { Writer } from "../db/Database.ts"
 import { MediaHolds } from "../importer/MediaHolds.ts"
 import { storeMedia } from "../importer/mediaFiles.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
+import { measureTree } from "./quota.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
 import { FilePathRefused, listFolder, openFolder, readRegularFile, removeTreeAt, statPath } from "./safePath.ts"
 
 const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW, O_NONBLOCK } = constants
+
+/** What a new folder takes on disk, counted until the next measurement. */
+const FOLDER_BYTES = 4096
 
 /** The largest file an upload takes (§1.1: 4 GiB, an instance setting later). */
 const MAX_FILE_UPLOAD_BYTES = 4 * 1024 ** 3
@@ -205,7 +209,7 @@ export const filesRoutes = Layer.unwrap(
     const keepVersion = (userId: string, root: string, segments: ReadonlyArray<string>, path: string, origin: string) =>
       Effect.gen(function* () {
         const info = yield* Effect.tryPromise(() => statPath(root, segments))
-        if (!info?.isFile() || info.size > VERSION_MAX_BYTES) return
+        if (!info?.isFile() || info.size > VERSION_MAX_BYTES) return 0
         const { bytes } = yield* Effect.tryPromise(() => readRegularFile(root, segments, VERSION_MAX_BYTES))
         const sha256 = createHash("sha256").update(bytes).digest("hex")
         yield* holds.holding(
@@ -220,6 +224,9 @@ export const filesRoutes = Layer.unwrap(
             })
           )
         )
+        // The caller counts the version's bytes: a delete nets them against what it frees, an
+        // upload adds them once the new file has landed (they don't take its own room).
+        return bytes.byteLength
       })
 
     const list = Effect.gen(function* () {
@@ -334,12 +341,21 @@ export const filesRoutes = Layer.unwrap(
       const parent = segments.slice(0, -1)
       const parentPath = `${FILES_TOP}/${parent.join("/")}`.replace(/\/$/, "")
       const message = NodeHttpServerRequest.toIncomingMessage(request)
+      // Folders this upload makes take room too (counted until the next measurement).
+      const made = yield* Effect.tryPromise(async () => {
+        for (let i = 0; i < parent.length; i++)
+          if (!(await statPath(root, parent.slice(0, i + 1)).catch(() => null))) return parent.length - i
+        return 0
+      })
       const dir = yield* Effect.tryPromise(() => openFolder(root, parent, { create: true }))
+      quota.wrote(userId, made * FOLDER_BYTES)
       return yield* Effect.gen(function* () {
         let name = segments.at(-1)!
         const existing = yield* Effect.tryPromise(() => lstat(at(dir, name)).catch(() => null))
         let outcome: UploadOutcome["outcome"] = "written"
         let replacedBytes = 0
+        /** What replacing frees for sure: a file with other links keeps its bytes. */
+        let freesOnReplace = 0
         if (existing) {
           if (conflict.value === "ask") return HttpServerResponse.jsonUnsafe({ taken: true }, { status: 409 })
           if (conflict.value === "skip")
@@ -348,6 +364,7 @@ export const filesRoutes = Layer.unwrap(
             if (existing.isDirectory()) return refuse(409, `“${name}” is a folder here. Choose Keep both or Skip.`)
             outcome = "replaced"
             replacedBytes = existing.isFile() ? existing.size : 0
+            freesOnReplace = existing.isFile() && existing.nlink === 1 ? existing.size : 0
           } else {
             const taken = new Set(
               (yield* Effect.tryPromise(() => listFolder(root, parent, LIST_LIMIT))).entries.map((e) => e.name)
@@ -366,8 +383,10 @@ export const filesRoutes = Layer.unwrap(
             )
           )
         )
-        if (outcome === "replaced") yield* keepVersion(userId, root, segments, `${parentPath}/${name}`, "upload")
+        const keptBytes =
+          outcome === "replaced" ? yield* keepVersion(userId, root, segments, `${parentPath}/${name}`, "upload") : 0
         let taken = 0
+        let freedOnReplace = 0
         const take = (bytes: number) => {
           const more = Math.max(0, taken + bytes - replacedBytes) - Math.max(0, taken - replacedBytes)
           taken += bytes
@@ -416,20 +435,26 @@ export const filesRoutes = Layer.unwrap(
             clearTimeout(idle)
           }
           try {
+            // What the new file takes is already counted as it arrived; the old one's bytes are
+            // freed unless a version kept them (counted in keepVersion). Lowered before the
+            // old file goes, so a measurement in between can only over-count.
+            freedOnReplace = Math.max(0, freesOnReplace - taken)
+            quota.freed(userId, freedOnReplace)
             await rename(at(dir, temporary), at(dir, name))
           } catch (error) {
             await unlink(at(dir, temporary)).catch(() => undefined)
+            quota.unfreed(userId, freedOnReplace)
             quota.release(userId, Math.max(0, taken - replacedBytes))
             throw error
           }
-        })
+        }).pipe(Effect.ensuring(Effect.sync(() => quota.wrote(userId, keptBytes))))
         return HttpServerResponse.jsonUnsafe({ path: `${parentPath}/${name}`, outcome } satisfies UploadOutcome)
       }).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
     })
 
     const folder = Effect.gen(function* () {
       const body = yield* jsonBody(PathBody)
-      const { root, full, segments } = yield* place(body.path)
+      const { userId, root, full, segments } = yield* place(body.path)
       if (segments.length === 0) return refuse(400, "Name the folder.")
       const problem = nameProblem(segments.at(-1)!)
       if (problem) return refuse(400, problem)
@@ -437,6 +462,7 @@ export const filesRoutes = Layer.unwrap(
       yield* Effect.tryPromise(() => mkdir(at(dir, segments.at(-1)!), { mode: 0o755 })).pipe(
         Effect.ensuring(Effect.promise(() => dir.close()))
       )
+      quota.wrote(userId, FOLDER_BYTES)
       return HttpServerResponse.jsonUnsafe({ path: full })
     })
 
@@ -469,13 +495,21 @@ export const filesRoutes = Layer.unwrap(
       if (segments.length === 0) return refuse(400, "The top folder can't be deleted.")
       const info = yield* Effect.tryPromise(() => statPath(root, segments))
       if (!info) return refuse(404, "Not found. It may have been moved or deleted.")
-      if (info.isFile()) yield* keepVersion(userId, root, segments, full, "delete")
+      // A kept version holds the file's bytes again, so only what no version keeps comes off.
+      const kept = info.isFile() ? yield* keepVersion(userId, root, segments, full, "delete") : 0
+      const frees = info.isDirectory()
+        ? (yield* Effect.tryPromise(() => measureTree(join(root, ...segments), undefined, undefined, true))).bytes
+        : info.isFile() && info.nlink === 1 ? Math.max(0, info.size - kept) : 0
+      quota.freed(userId, frees)
       const dir = yield* Effect.tryPromise(() => openFolder(root, segments.slice(0, -1)))
       // A link or special file is removed itself, never what it points at. A folder is walked by
       // descriptor (removeTreeAt), so a link swapped in for a subfolder mid-delete isn't followed.
       yield* Effect.tryPromise(() =>
         info.isDirectory() ? removeTreeAt(dir, segments.at(-1)!) : unlink(at(dir, segments.at(-1)!))
-      ).pipe(Effect.ensuring(Effect.promise(() => dir.close())))
+      ).pipe(
+        Effect.tapError(() => Effect.sync(() => quota.unfreed(userId, frees))),
+        Effect.ensuring(Effect.promise(() => dir.close()))
+      )
       return HttpServerResponse.jsonUnsafe({ binItemId: null })
     })
 

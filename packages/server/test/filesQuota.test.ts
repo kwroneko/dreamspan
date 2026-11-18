@@ -69,6 +69,58 @@ describe("a walk that stops at its limits", () => {
   )
 })
 
+describe("the cached figure between walks", () => {
+  const setup = async (name: string) => {
+    const root = tempDir(name)
+    await mkdir(join(root, "files", "sub"), { recursive: true })
+    await writeFile(join(root, "files", "sub", "a"), Buffer.alloc(100_000, 1))
+    let walks = 0
+    const quota = makeFilesQuota({
+      reader: {
+        GetAppSetting: () => Effect.succeed(null),
+        FileVersionBytes: () => Effect.sync(() => ++walks && 0)
+      } as never,
+      writer: { PruneFileVersions: () => Effect.succeed({ versions: 0, media: 0 }) } as never,
+      folders: () => ({ filesRoot: join(root, "files"), home: join(root, "home") }),
+      defaultBytes: 10 * 2 ** 30
+    })
+    return { quota, walks: () => walks }
+  }
+
+  it.live("reading usage again walks nothing; writes raise it and frees lower it", () =>
+    Effect.gen(function* () {
+      const { quota, walks } = yield* Effect.promise(() => setup("quota-cached"))
+      const first = yield* quota.usage("u")
+      yield* quota.usage("u")
+      yield* quota.usage("u")
+      assert.strictEqual(walks(), 1)
+      quota.wrote("u", 5_000)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, first.usedBytes + 5_000)
+      quota.freed("u", 30_000)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, first.usedBytes - 25_000)
+      // A removal that didn't happen gives it back; it never goes below nothing.
+      quota.unfreed("u", 30_000)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, first.usedBytes + 5_000)
+      quota.freed("u", 10 * 2 ** 30)
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, 0)
+      assert.strictEqual(walks(), 1)
+      // A measurement sees the folder itself and drops both.
+      const measured = yield* quota.measure("u")
+      assert.strictEqual((yield* quota.usage("u")).usedBytes, measured.usedBytes)
+    })
+  )
+
+  it.live("freed room is room for a streaming write", () =>
+    Effect.gen(function* () {
+      const { quota } = yield* Effect.promise(() => setup("quota-room"))
+      const now = yield* quota.usage("u")
+      assert.isFalse(quota.reserve("u", 1_000, now.usedBytes))
+      quota.freed("u", 2_000)
+      assert.isTrue(quota.reserve("u", 1_000, now.usedBytes))
+    })
+  )
+})
+
 describe("measuring", () => {
   it("reads sizes with binary units", () => {
     assert.strictEqual(parseByteSize("10G"), 10 * 2 ** 30)
@@ -96,6 +148,9 @@ describe("measuring", () => {
       assert.isFalse(measured.partial)
       assert.isAtLeast(measured.bytes, 2 ** 30 + 2 ** 20)
       assert.isBelow(measured.bytes, 2 ** 30 + 2 * 2 ** 20)
+      // What deleting frees for sure leaves out a file another link keeps.
+      const sole = await measureTree(root, undefined, undefined, true)
+      assert.isBelow(sole.bytes, measured.bytes - 2 ** 20 + 4096 * 4)
       const missing = await measureTree(join(root, "nothing"))
       assert.strictEqual(missing.bytes, 0)
       const cut = await measureTree(root, 2)

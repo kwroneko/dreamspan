@@ -261,4 +261,20 @@ describe("file routes", () => {
       assert.strictEqual(replaced.status, 200, yield* body(replaced))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
+
+  it.live("deleting a folder gives its room back without a new walk; a deleted file's version still counts", () => {
+    const config = testConfig({ filesQuota: "1M" })
+    const bytes = (size: number) => "x".repeat(size)
+    return Effect.gen(function* () {
+      assert.strictEqual((yield* upload("/files/a.bin", bytes(500_000))).status, 200)
+      for (const name of ["x", "y", "z"]) assert.strictEqual((yield* upload(`/files/dir/${name}.bin`, bytes(150_000))).status, 200)
+      assert.strictEqual((yield* upload("/files/more.bin", bytes(200_000))).status, 507)
+      // A folder's files aren't versioned: all they hold comes off the figure at once.
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/dir" })).status, 200)
+      assert.strictEqual((yield* upload("/files/b.bin", bytes(400_000))).status, 200)
+      // A deleted file's kept version holds its bytes: no room comes back (and none is claimed).
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/b.bin" })).status, 200)
+      assert.strictEqual((yield* upload("/files/c.bin", bytes(200_000))).status, 507)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
 })
