@@ -193,8 +193,10 @@ Each passes (null) when it has no price, so the next one is tried; unknown field
 Implements PROVIDERS §9.3 "Recomputing" under decision 2.
 
 - **Only on request:** Settings → Costs (after saving a rule) and a built-in correction offer "Apply to past requests", with the count and the date range first.
-- **Which rows may change:** rows whose `cost_formula` is `builtin:*`, `list:*` or `user:*` and matches the corrected source (the same model and connection or kind, the same `builtin` version, the same rule). Never `reported`. Never `endpoint:*`: those were the server's own price at the time, the same standing as a charge (§8 Q2).
+- **Which rows may change:** rows whose `cost_formula` is `builtin:*`, `list:*` or `user:*` and matches the corrected source (the same model and connection or kind, the same `builtin` version, the same rule). Never `reported`. `endpoint:*` and `list:*` rows change only for a price naming that connection, which replaces them and records them as `user:*` (§8 Q2, as built); an account-wide or per-type price never touches them.
 - The new cost, currency, formula and rates snapshot are written in one writer transaction per batch (the trigger already allows only cost changes on a closed row; it must be extended to allow the snapshot column the schema job adds).
+- **Not reversible in general:** the old cost, formula and rates are overwritten. Applying an earlier saved price again restores rows that a saved price had set (while that price is the one that applies); rows that were built-in, list or endpoint priced have nothing to go back to, and the dialog says so.
+- **`data:` video** stays blocked by design (SAVED-MEDIA §3.4): it names no file to save, so the tag shows as blocked, as it was before video was kept.
 - A release that corrects a built-in price doesn't recompute anything by itself; the Costs page offers it for rows priced from the old version.
 
 ## 7. UI [P]

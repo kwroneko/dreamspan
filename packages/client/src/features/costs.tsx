@@ -360,9 +360,14 @@ function PastRequests({ settings }: { settings: CostSettings }) {
                   : ` to ${dateFormat.format(shown.to)}`}
                 , would be re-priced.
               </p>
+              <p>
+                This changes their stored costs. To go back, apply your earlier saved price again (while it is the one
+                that applies). Requests that were priced from built-in, list or server prices can’t be restored this
+                way.
+              </p>
               <Button
                 variant="primary"
-                hint="Re-prices those requests with these prices. Charges the provider reported never change."
+                hint="Changes the stored costs of those requests to these prices. Charges the provider reported never change."
                 pending={action.pending}
                 onClick={async () => {
                   const result = await action.run((client) => client("ApplyCostRecompute", { target }), ["costs"])

@@ -171,7 +171,7 @@ describe("saved video", () => {
     assert.deepStrictEqual(byteRange("bytes=-3", 10), { start: 7, end: 9 })
     assert.deepStrictEqual(byteRange("bytes=-30", 10), { start: 0, end: 9 })
     assert.strictEqual(byteRange("bytes=10-", 10), "unsatisfiable")
-    assert.strictEqual(byteRange("bytes=5-2", 10), "unsatisfiable")
+    assert.isNull(byteRange("bytes=5-2", 10))
     assert.strictEqual(byteRange("bytes=-0", 10), "unsatisfiable")
   })
 })
@@ -331,6 +331,25 @@ it.live("saves approved media once, serves it locally and leaves the card unchan
     assert.strictEqual(past.status, 416)
     assert.strictEqual(past.headers.get("content-range"), `bytes */${PNG.length}`)
     yield* Effect.promise(() => past.arrayBuffer())
+    const inverted = yield* Effect.promise(() =>
+      fetch(`http://127.0.0.1:${port}/media/saved/${found!.mediaId}`, {
+        headers: { "Remote-User": "alice", range: "bytes=5-2" }
+      })
+    )
+    assert.strictEqual(inverted.status, 200)
+    assert.strictEqual((yield* Effect.promise(() => inverted.arrayBuffer())).byteLength, PNG.length)
+    for (const [validator, status] of [
+      [`"${found!.mediaId}"`, 206],
+      [`"other"`, 200]
+    ] as const) {
+      const conditional = yield* Effect.promise(() =>
+        fetch(`http://127.0.0.1:${port}/media/saved/${found!.mediaId}`, {
+          headers: { "Remote-User": "alice", range: "bytes=0-7", "if-range": validator }
+        })
+      )
+      assert.strictEqual(conditional.status, status)
+      yield* Effect.promise(() => conditional.arrayBuffer())
+    }
     const otherRange = yield* Effect.promise(() =>
       fetch(`http://127.0.0.1:${port}/media/saved/${found!.mediaId}`, {
         headers: { "Remote-User": "bob", range: "bytes=0-7" }

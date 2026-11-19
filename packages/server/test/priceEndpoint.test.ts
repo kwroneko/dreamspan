@@ -166,15 +166,45 @@ describe("the price list format", () => {
   })
 })
 
-const layer = (options: Providers.ProvidersOptions = {}) =>
-  Providers.layer({ retry: { maxRetries: 0, baseDelayMs: 5, maxDelayMs: 100 }, priceTimerMs: 0, ...options }).pipe(
+/** `breaks` makes the providers' storing of price lists, or their reading of a key, fail on demand. */
+const layer = (
+  options: Providers.ProvidersOptions = {},
+  breaks: { readonly store?: () => boolean; readonly key?: () => boolean } = {}
+) => {
+  const db = Database.layer({ dataDir: tempDir("price-endpoint"), readers: 1, allowNetworkFs: false, ...testWorkers })
+  const secrets = makeSecrets("a server secret for tests")
+  const brokenSecrets = Layer.succeed(Secrets)({
+    ...secrets,
+    decrypt: (blob, binding) =>
+      breaks.key?.()
+        ? Effect.fail({ _tag: "SecretUnreadable", message: "unreadable" } as never)
+        : secrets.decrypt(blob, binding)
+  })
+  const brokenWriter = Layer.effect(Database.Writer)(
+    Effect.gen(function* () {
+      const writer = yield* Database.Writer
+      return {
+        ...writer,
+        SetModelPriceFeeds: (args: Parameters<typeof writer.SetModelPriceFeeds>[0]) =>
+          breaks.store?.()
+            ? Effect.fail({ _tag: "StorageError", message: "disk full" } as never)
+            : writer.SetModelPriceFeeds(args)
+      } as typeof writer
+    })
+  ).pipe(Layer.provide(db))
+  return Providers.layer({
+    retry: { maxRetries: 0, baseDelayMs: 5, maxDelayMs: 100 },
+    priceTimerMs: 0,
+    ...options
+  }).pipe(
+    Layer.provide(brokenWriter),
+    Layer.provide(brokenSecrets),
     Layer.provideMerge(Network.layer),
     Layer.provideMerge(ProviderBuiltins.layer),
-    Layer.provideMerge(
-      Database.layer({ dataDir: tempDir("price-endpoint"), readers: 1, allowNetworkFs: false, ...testWorkers })
-    ),
-    Layer.provideMerge(Layer.succeed(Secrets)(makeSecrets("a server secret for tests")))
+    Layer.provideMerge(db),
+    Layer.provideMerge(Layer.succeed(Secrets)(secrets))
   )
+}
 
 const mock = (handler: Parameters<typeof startMockProvider>[0]) =>
   Effect.acquireRelease(
@@ -503,6 +533,112 @@ describe("when prices are asked again (PRICES §4.5, §4.6)", () => {
       assert.deepStrictEqual(after.price, before.price)
       assert.strictEqual((yield* state)!.state, "supported")
     }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now })))
+  })
+
+  it.live("a model added by Refresh models is priced from the endpoint, not left behind a 304", () => {
+    const time = clock()
+    let models = [{ id: "m" }]
+    return Effect.gen(function* () {
+      const server = yield* mock((request, res) => {
+        if (request.path.endsWith("/models")) {
+          json(res, 200, { data: models })
+          return
+        }
+        if (request.path === PRICES) {
+          if (request.headers["if-none-match"] === '"v1"') {
+            res.writeHead(304, { etag: '"v1"' })
+            res.end()
+            return
+          }
+          res.writeHead(200, { "content-type": "application/json", etag: '"v1"' })
+          res.end(
+            JSON.stringify({
+              object: "list",
+              unit: "USD per 1M tokens",
+              data: [
+                { id: "m", input: 2, output: 10 },
+                { id: "n", input: 4, output: 20 }
+              ]
+            })
+          )
+          return
+        }
+        sse(res, completionChunks(["Hi."], { prompt_tokens: 10, completion_tokens: 1 }))
+      })
+      const prices = () => server.requests().filter((r) => r.path === PRICES)
+      const { feedOf, refresh } = yield* connectWith(server.url, true)
+      assert.strictEqual(prices().length, 1)
+      models = [{ id: "m" }, { id: "n" }]
+      yield* refresh
+      assert.strictEqual(prices().length, 2)
+      assert.isUndefined(prices()[1]!.headers["if-none-match"])
+      assert.deepStrictEqual((yield* feedOf("n"))!.price, { input: 4, output: 20 })
+      // Now every model has its feed, and the next ask is conditional again.
+      yield* refresh
+      assert.strictEqual(prices()[2]!.headers["if-none-match"], '"v1"')
+      time.advance(0)
+    }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now })))
+  })
+
+  it.live("a connection that can't be prepared is retried at the failure interval, not every minute", () => {
+    const time = clock()
+    let unreadable = false
+    let prepares = 0
+    return Effect.gen(function* () {
+      const server = yield* gateway()
+      const { reply, timer } = yield* connectWith(server.url, true)
+      yield* reply("m")
+      unreadable = true
+      time.advance(61 * 60_000)
+      yield* timer
+      assert.strictEqual(prepares, 1)
+      for (let i = 0; i < 9; i++) {
+        time.advance(60_000)
+        yield* timer
+      }
+      assert.strictEqual(prepares, 1)
+      unreadable = false
+      time.advance(2 * 60_000)
+      const asked = () => server.requests().filter((r) => r.path === PRICES).length
+      const before = asked()
+      yield* timer
+      assert.strictEqual(prepares, 1)
+      assert.isAbove(asked(), before)
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        layer(
+          { now: time.now },
+          {
+            key: () => {
+              if (unreadable) prepares++
+              return unreadable
+            }
+          }
+        )
+      )
+    )
+  })
+
+  it.live("a failed store of the price lists is retried after ten minutes, not an hour", () => {
+    const time = clock()
+    let broken = false
+    return Effect.gen(function* () {
+      const server = yield* gateway()
+      const { reply, state, timer } = yield* connectWith(server.url, true)
+      yield* reply("m")
+      const prices = () => server.requests().filter((r) => r.path === PRICES).length
+      broken = true
+      time.advance(61 * 60_000)
+      yield* timer
+      assert.strictEqual(prices(), 2)
+      assert.strictEqual((yield* state)!.state, "failed")
+      broken = false
+      time.advance(11 * 60_000)
+      yield* timer
+      assert.strictEqual(prices(), 3)
+      assert.strictEqual((yield* state)!.state, "supported")
+    }).pipe(Effect.scoped, Effect.provide(layer({ now: time.now }, { store: () => broken })))
   })
 
   it.live("retries a failure after ten minutes and keeps the last good prices", () => {
