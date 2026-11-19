@@ -9,7 +9,7 @@ import type { PathEntry, VersionId } from "@dreamspan/shared/chat.ts"
 import { Effect } from "effect"
 import { CONTEXT_TAGS, looksLikeContextMarkup, nameBlock, speakerLabel } from "../src/assembler/contextMarkup.ts"
 import { summaryBlock } from "../src/assembler/lcm.ts"
-import { contractAttempts, looksLikeTextualToolCall } from "../src/agent/contract.ts"
+import { contractAttempts, looksLikeTextualToolCall, runOutcome } from "../src/agent/contract.ts"
 import { toolData } from "../src/agent/toolData.ts"
 import { Reader } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
@@ -162,6 +162,49 @@ describe("contractAttempts", () => {
       []
     )
     assert.lengthOf(record.attempts, 1)
+  })
+})
+
+describe("runOutcome: what an ended run records", () => {
+  const ended = { exhausted: false, stopped: false, failed: false, capped: false }
+  it("a stop before the nudge is stopped, never exhausted", () => {
+    // Plain text, then the Stop: the turn ended "stop" and no nudge followed it.
+    const record = contractAttempts([request, text("Mira waves.")], [])
+    assert.strictEqual(record.outcome, "exhausted")
+    assert.strictEqual(runOutcome(record, { ...ended, stopped: true }), "stopped")
+    // Stopped after nudges, while a nudge's answer was being written.
+    const later = contractAttempts([request, text("Hi."), nudge(1), text("Mira", "aborted")], [])
+    assert.strictEqual(runOutcome(later, { ...ended, stopped: true }), "stopped")
+  })
+
+  it("the request cap ending a run on a refused send is capped; running out of nudges is exhausted", () => {
+    const capped = contractAttempts(
+      [request, text("Hi."), writeNow, call("send_message", "a"), result("send_message", "a", true)],
+      []
+    )
+    assert.strictEqual(capped.outcome, "exhausted")
+    assert.strictEqual(runOutcome(capped, { ...ended, capped: true }), "capped")
+    const exhausted = contractAttempts(
+      [request, text("a"), nudge(1), text("b"), nudge(2), text("c"), nudge(3), text("d")],
+      []
+    )
+    assert.strictEqual(runOutcome(exhausted, { ...ended, exhausted: true, capped: true }), "exhausted")
+  })
+
+  it("a reply given stays as given; an error is failed", () => {
+    const sent = contractAttempts(
+      [request, text("Hi."), nudge(1), call("send_message", "a"), result("send_message", "a")],
+      []
+    )
+    assert.strictEqual(runOutcome(sent, { ...ended, stopped: true }), "recovered")
+    assert.strictEqual(
+      runOutcome(contractAttempts([request, writeNow, text("Hi.")], []), { ...ended, capped: true }),
+      "clean"
+    )
+    assert.strictEqual(
+      runOutcome(contractAttempts([request, text("", "error")], []), { ...ended, failed: true }),
+      "failed"
+    )
   })
 })
 

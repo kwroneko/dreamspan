@@ -299,6 +299,14 @@ const contractSummary = (record: ContractRecord) => {
       return `Stayed silent after the app asked ${asked}.`
     case "exhausted":
       return `Never sent, though the app asked ${asked}.`
+    case "stopped":
+      return record.nudges > 0 ? `Stopped before it was sent; the app asked ${asked}.` : "Stopped before it was sent."
+    case "failed":
+      return record.nudges > 0 ? `Failed before it was sent; the app asked ${asked}.` : "Failed before it was sent."
+    case "capped":
+      return record.nudges > 0
+        ? `Used every model request without sending; the app asked ${asked}.`
+        : "Used every model request without sending."
     default:
       return record.nudges > 0 ? `Not finished; the app asked ${asked}.` : "Not finished."
   }

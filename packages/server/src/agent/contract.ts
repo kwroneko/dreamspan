@@ -219,3 +219,31 @@ export const contractAttempts = (
 /** Whether the run is under the send tool alone: its frozen request says so (`rpRequest.contract`). */
 export const underSendContract = (messages: ReadonlyArray<AgentMessage>) =>
   (messages.find((m) => m.role === "rpRequest") as { contract?: string } | undefined)?.contract === SEND_MESSAGE
+
+/** How a run under the send tool ended, as the session saw it (the transcript alone can't say). */
+export interface RunEnd {
+  /** The nudges ran out (the session's own verdict, §3.4). */
+  readonly exhausted: boolean
+  /** Stopped before the run reached its own end: the user's Stop, or the app shutting down. */
+  readonly stopped: boolean
+  /** A provider or app error ended it. */
+  readonly failed: boolean
+  /** It made as many requests as the request cap allows. */
+  readonly capped: boolean
+}
+
+/**
+ * The outcome a run's record stores once it has ended (the per-model metrics): the transcript's
+ * own when its last attempt gave the reply (sent, passed or written), else why the run ended
+ * without one. A stop is never `exhausted`, even when the last turn was plain text the stop kept
+ * from being nudged; a run the cap ended is `capped`. An ended run with no other cause: `failed`.
+ */
+export const runOutcome = (record: ContractRecord, end: RunEnd): ContractOutcome => {
+  const { outcome } = record
+  if (outcome === "clean" || outcome === "recovered" || outcome === "gave_up") return outcome
+  if (end.exhausted) return "exhausted"
+  if (end.stopped) return "stopped"
+  if (end.failed) return "failed"
+  if (end.capped) return "capped"
+  return "failed"
+}

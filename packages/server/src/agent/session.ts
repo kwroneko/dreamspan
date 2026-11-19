@@ -61,7 +61,7 @@ import {
   resolveDispatch
 } from "./dispatcher.ts"
 import { cutAnswersIn, liveSuffix, nudgesIn, sendOnlyTranscript } from "./messages.ts"
-import { contractAttempts } from "./contract.ts"
+import { contractAttempts, runOutcome } from "./contract.ts"
 import { loadedSet, loadPoints, type Skill, type ToolLoadingWire } from "./toolLoading.ts"
 import { executionRegistry } from "../execution.ts"
 
@@ -1209,6 +1209,20 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       // The transcript is the agent's whole state, flushed in order after each turn and at the
       // end (reference-harness session-capture). A failed write is logged, never fatal.
       let flushing: Promise<void> = Promise.resolve()
+      // Whether the loop reached its own end; a scope closed before that was stopped (the user's
+      // Stop interrupts the run, and the finalizer aborts the agent).
+      let settled = false
+      let stopped = false
+      /** How the run ended, for its contract record: the transcript alone can't tell a stop. */
+      const runEnd = (messages: ReadonlyArray<AgentMessage>) => {
+        const last = messages.findLast((m) => m.role === "assistant")
+        return {
+          exhausted: exhausted !== undefined,
+          stopped: stopped || (last?.role === "assistant" && last.stopReason === "aborted"),
+          failed: failure !== undefined || (last?.role === "assistant" && last.stopReason === "error"),
+          capped: requests >= cap
+        }
+      }
       /**
        * `final`: the run ended, so a story reply under the send tool records how it met the
        * contract, for the per-model metrics (spec/REPLY-CONTRACT.md §3.6).
@@ -1219,6 +1233,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           final && sendOnly && (input.purpose ?? "generation") === "generation"
             ? contractAttempts(messages, [])
             : undefined
+        const outcome = record ? runOutcome(record, runEnd(messages)) : undefined
         const saving = flushing.then(() =>
           runPromise(
             writer
@@ -1227,7 +1242,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 rolloutId,
                 transcript: JSON.stringify(messages),
                 steps: countSteps(messages),
-                ...(record ? { contract: { outcome: record.outcome, nudges: record.nudges } } : {})
+                ...(record && outcome ? { contract: { outcome, nudges: record.nudges } } : {})
               })
               .pipe(
                 Effect.as(true),
@@ -1307,6 +1322,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
 
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
+          if (!settled) stopped = true
           if (progressTimer !== null) clearTimeout(progressTimer)
           progressTimer = null
           agent.abort()
@@ -1414,12 +1430,14 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       showSteps(false)
       // The call carried on was the message itself (or the pass).
       if (sent !== undefined || passed) {
+        settled = true
         yield* Effect.promise(() => flushing)
         showSteps(true)
         return yield* Queue.end(queue)
       }
       // The tail is the frozen request (or the kept transcript): the loop sends it, with no user turn of its own.
       const started = yield* Effect.tryPromise(() => agent.continue()).pipe(Effect.option)
+      settled = true
       if (Option.isNone(started) && !failure)
         failure = new GenerationFailed({ class: "server", message: "The agent couldn't start." })
       if (Option.isNone(started)) return yield* Queue.fail(queue, failure!)
