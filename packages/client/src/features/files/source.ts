@@ -14,7 +14,8 @@ import {
   type ShareMode,
   TextFile,
   UploadOutcome,
-  type UploadConflict
+  type UploadConflict,
+  encodeText
 } from "@dreamspan/shared/files.ts"
 import { Schema } from "effect"
 import { useSyncExternalStore } from "react"
@@ -61,14 +62,28 @@ export interface FilesSource {
   readonly readText: (path: string) => Promise<TextFile>
   /**
    * Writes the editor's text over the file, only while it still has the hash `base`: otherwise
-   * `FileChanged`. The earlier content is kept as a version.
+   * `FileChanged`. Line breaks and a byte order mark are written as `format` (the file's, as
+   * `readText` gave it). The earlier content is kept as a version.
    */
-  readonly saveText: (path: string, text: string, base: string) => Promise<UploadOutcome>
+  readonly saveText: (
+    path: string,
+    text: string,
+    base: string,
+    format: Pick<TextFile, "lineEnding" | "bom">
+  ) => Promise<UploadOutcome>
   /** Who a folder of yours is shared with (§1.4). A source without sharing leaves these out. */
   readonly shares?: (path: string) => Promise<ReadonlyArray<FolderShare>>
-  /** Shares a folder with an account by its name, or changes how; refused for an unknown name. */
+  /**
+   * Offers a folder to an account by its name (an invitation, the same answer whether or not the
+   * name is an account's), or changes the mode of one it accepted.
+   */
   readonly share?: (path: string, handle: string, mode: ShareMode) => Promise<FolderShare>
+  /** Stops sharing, or takes back an invitation. */
   readonly unshare?: (shareId: string) => Promise<void>
+  /** Shares an unavailable share's path again: the folder there now. */
+  readonly shareAgain?: (shareId: string) => Promise<FolderShare>
+  /** Accepts a folder offered to you (it appears under Shared), or declines it. */
+  readonly answerInvitation?: (invitationId: string, accept: boolean) => Promise<void>
   /** A file's earlier contents, newest first (§1.3). */
   readonly versions?: (path: string) => Promise<ReadonlyArray<FileVersionEntry>>
   /** Puts a version back; what was there is kept as a version, so restoring that one undoes it. */
@@ -161,13 +176,13 @@ export const httpFilesSource: FilesSource = {
     `${FILES_ROUTES.attachment}?${new URLSearchParams(download ? { id, name, download: "1" } : { id, name })}`,
   readText: async (path) =>
     json(TextFile, await reach(`${FILES_ROUTES.text}?${new URLSearchParams({ path })}`, { cache: "no-store" })),
-  saveText: async (path, text, base) =>
+  saveText: async (path, text, base, format) =>
     json(
       UploadOutcome,
       await reach(`${FILES_ROUTES.upload}?${new URLSearchParams({ path, conflict: "replace", base })}`, {
         method: "POST",
         headers: { "content-type": "application/octet-stream" },
-        body: new TextEncoder().encode(text)
+        body: encodeText(text, format.lineEnding, format.bom) as Uint8Array<ArrayBuffer>
       })
     ),
   shares: async (path) =>
@@ -177,6 +192,9 @@ export const httpFilesSource: FilesSource = {
     ),
   share: async (path, handle, mode) => json(FolderShare, await post(FILES_ROUTES.share, { path, handle, mode })),
   unshare: async (shareId) => done(await post(FILES_ROUTES.unshare, { shareId })),
+  shareAgain: async (shareId) => json(FolderShare, await post(FILES_ROUTES.shareAgain, { shareId })),
+  answerInvitation: async (invitationId, accept) =>
+    done(await post(FILES_ROUTES.answerInvitation, { invitationId, accept })),
   versions: async (path) =>
     json(
       Schema.Array(FileVersionEntry),

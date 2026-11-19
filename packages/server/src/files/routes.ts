@@ -18,6 +18,11 @@ import {
   type FileVersionEntry,
   type FolderShare,
   type RestoredVersion,
+  AnswerInvitationRequest,
+  type ShareInvitation,
+  type UnavailableShare,
+  lineEndingOf,
+  normalizeLineEndings,
   SHARED_FOLDER,
   ShareRequest,
   FILES_ROUTES,
@@ -299,18 +304,32 @@ const SHA256 = /^[0-9a-f]{64}$/
 const sha256Of = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
 
 const UnshareBody = Schema.Struct({ shareId: Schema.String.check(Schema.isMaxLength(64)) })
+
+/** Invitations an account sends at most per `INVITE_WINDOW_MS` (§1.4): names can't be probed in bulk. */
+const INVITES_PER_WINDOW = 20
+const INVITE_WINDOW_MS = 10 * 60_000
 const RestoreVersionBody = Schema.Struct({
   path: Schema.String.check(Schema.isMaxLength(4096)),
   versionId: Schema.String.check(Schema.isMaxLength(64))
 })
 
-/** A share as the grantee reads it (db/fileShares.ts `SharesWithMe`). */
+/** A share as the grantee reads it (db/fileShares.ts `SharesWithMe`), or the owner (`SharedByMe`). */
 interface ShareWithMe {
   readonly id: string
   readonly ownerUserId: string
   readonly path: string
   readonly mode: "view" | "edit"
   readonly handle: string
+  readonly createdAt: number
+  readonly inode: number | null
+  readonly device: number | null
+  readonly suspendedAt: number | null
+}
+
+/** A share in the grantee's Shared folder: the name it has there, and whether its folder is still the one shared. */
+interface Mounted {
+  readonly share: ShareWithMe
+  readonly name: string
 }
 
 /**
@@ -322,18 +341,31 @@ interface ShareWithMe {
 const ownerSegment = (share: ShareWithMe) =>
   /^[A-Za-z0-9_.-]{1,64}$/.test(share.handle) && !/^\.+$/.test(share.handle) ? share.handle : null
 
-const shareNames = (shares: ReadonlyArray<ShareWithMe>) => {
+/**
+ * Each share's name under `Shared/<owner>`: its folder's own name, " (2)" and on for a second of
+ * the same name, in path order, never one the grantee's own `Shared/<owner>` folder already holds
+ * (`ownTaken`): a share never hides the grantee's own files.
+ */
+const shareNames = async (shares: ReadonlyArray<ShareWithMe>, ownTaken: (name: string) => Promise<boolean>) => {
   const taken = new Set<string>()
-  const names = new Map<string, string>()
+  const names: Array<Mounted> = []
   for (const share of shares) {
     const own = share.path.slice(share.path.lastIndexOf("/") + 1)
     let name = own
-    for (let n = 2; taken.has(name); n++) name = `${own} (${n})`
+    for (let n = 2; taken.has(name) || (await ownTaken(name)); n++) name = `${own} (${n})`
     taken.add(name)
-    names.set(share.id, name)
+    names.push({ share, name })
   }
   return names
 }
+
+/** Whether a share's folder is the one it was made on (§1.4): same inode and device, and not in the bin since. */
+const isSharedFolder = (share: ShareWithMe, info: Stats | null) =>
+  info !== null &&
+  info.isDirectory() &&
+  share.suspendedAt === null &&
+  share.inode === info.ino &&
+  share.device === info.dev
 
 const MoveBody = Schema.Struct({
   from: Schema.String.check(Schema.isMaxLength(4096)),
@@ -376,6 +408,42 @@ export const filesRoutes = Layer.unwrap(
         })
       )
 
+    /** What is at a path of an account's own tree, or null (also for a path through a file or a link). */
+    const ownStat = (userId: string, segments: ReadonlyArray<string>) =>
+      Effect.promise(() => statPath(accountEnv(dirs, userId).filesRoot, segments).catch(() => null))
+
+    /**
+     * The owners whose shares appear under `Shared` (§1.4): an owner's segment is taken only
+     * where the grantee's own `Shared` holds nothing of that name, or a folder (whose entries
+     * stay beside the shares); a file or link there keeps its place and hides that owner's shares.
+     */
+    const ownersOf = (userId: string) =>
+      Effect.gen(function* () {
+        const owners = yield* sharesByOwner(userId)
+        for (const owner of [...owners.keys()]) {
+          const info = yield* ownStat(userId, [SHARED_FOLDER, owner])
+          if (info && !info.isDirectory()) owners.delete(owner)
+        }
+        return owners
+      })
+
+    /** An owner's shares as they appear to this account under `Shared/<owner>`, named around its own entries there. */
+    const mountsOf = (userId: string, owner: string, shares: ReadonlyArray<ShareWithMe>) =>
+      Effect.promise(() =>
+        shareNames(shares, async (name) => {
+          const root = accountEnv(dirs, userId).filesRoot
+          return (await statPath(root, [SHARED_FOLDER, owner, name]).catch(() => null)) !== null
+        })
+      )
+
+    /** The folder a share was made on, if it's still at the share's path (§1.4). */
+    const sharedFolderInfo = (share: ShareWithMe) =>
+      Effect.gen(function* () {
+        const base = yield* Effect.try(() => resolveFilesPath(share.path, FILES_TOP))
+        const info = yield* ownStat(share.ownerUserId, base.segments)
+        return { base, info, available: isSharedFolder(share, info) }
+      })
+
     /**
      * A path as the walk's components in the tree that holds it: the account's own, made on first
      * use, or, under `Shared/<owner>/<folder>`, the owner's (§1.4). `userId` is whose tree and
@@ -400,16 +468,28 @@ export const filesRoutes = Layer.unwrap(
         }
         const [top, owner, folder, ...rest] = resolved.segments
         if (top !== SHARED_FOLDER || owner === undefined) return own
-        const shares = (yield* sharesByOwner(user.id)).get(owner)
+        const shares = (yield* ownersOf(user.id)).get(owner)
         // No account of that name shares with you: it's your own folder of that name.
         if (!shares) return own
-        if (folder === undefined) return yield* Effect.fail(new Answer(400, "Folders shared with you go here."))
-        const names = shareNames(shares)
-        const share = shares.find((candidate) => names.get(candidate.id) === folder)
-        if (!share) return yield* Effect.fail(new Answer(404, "That folder isn't shared with you any more."))
+        // Your own folder of that name, where you have one, is yours as it always was.
+        const ownFolder = yield* ownStat(user.id, [SHARED_FOLDER, owner])
+        if (folder === undefined) {
+          if (ownFolder) return own
+          return yield* Effect.fail(new Answer(400, "Folders shared with you go here."))
+        }
+        const mounted = (yield* mountsOf(user.id, owner, shares)).find((candidate) => candidate.name === folder)
+        if (!mounted) {
+          if (ownFolder) return own
+          return yield* Effect.fail(new Answer(404, "That folder isn't shared with you any more."))
+        }
+        const share = mounted.share
+        const { base, available } = yield* sharedFolderInfo(share)
+        if (!available)
+          return yield* Effect.fail(
+            new Answer(404, "Its owner moved or deleted this folder. It opens again once they share it again.")
+          )
         if (access === "write" && share.mode === "view")
           return yield* Effect.fail(new Answer(403, "This folder is shared with you to view: it can't be changed."))
-        const base = yield* Effect.try(() => resolveFilesPath(share.path, FILES_TOP))
         return {
           userId: share.ownerUserId,
           actorId: user.id as string,
@@ -426,6 +506,50 @@ export const filesRoutes = Layer.unwrap(
       changed(placed.userId, [placed.ownerFull])
       if (placed.actorId !== placed.userId) changed(placed.actorId, [placed.full])
     }
+
+    /**
+     * At the moment a write lands: the share it came through still lets this account change it,
+     * and its folder is still the one shared (§1.4). A share stopped, made view-only or moved
+     * away while an upload streamed refuses it.
+     */
+    const stillPlaced = (placed: { actorId: string; share: ShareWithMe | null }) =>
+      Effect.gen(function* () {
+        if (!placed.share) return
+        const now = (yield* reader.SharesWithMe({ userId: placed.actorId as never })).find(
+          (candidate) => candidate.id === placed.share!.id
+        )
+        if (!now || now.path !== placed.share.path)
+          return yield* Effect.fail(new Answer(404, "That folder isn't shared with you any more."))
+        if (now.mode !== "edit")
+          return yield* Effect.fail(new Answer(403, "This folder is shared with you to view: it can't be changed."))
+        if (!(yield* sharedFolderInfo(now)).available)
+          return yield* Effect.fail(
+            new Answer(404, "Its owner moved or deleted this folder. It opens again once they share it again.")
+          )
+      })
+
+    /**
+     * One change at a time to a file (§8.2): the editor's content check, the version kept and the
+     * rename that lands it run under one lock per path of the tree, so two saves on the same base
+     * can't both pass and the second overwrite the first unkept.
+     */
+    const pathLocks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>()
+    const withPathLock = <A, E, R>(root: string, segments: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>) =>
+      Effect.suspend(() => {
+        const key = `${root}\0${segments.join("/")}`
+        const entry = pathLocks.get(key) ?? { lock: Semaphore.makeUnsafe(1), users: 0 }
+        pathLocks.set(key, entry)
+        entry.users++
+        return entry.lock
+          .withPermits(1)(effect)
+          .pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                if (--entry.users === 0) pathLocks.delete(key)
+              })
+            )
+          )
+      })
 
     const queryOf = Effect.map(
       HttpServerRequest.HttpServerRequest,
@@ -498,10 +622,23 @@ export const filesRoutes = Layer.unwrap(
     const listingAnswer = (listing: FolderListing) =>
       HttpServerResponse.jsonUnsafe(listing, { headers: { "cache-control": "no-store" } })
 
+    /** Invitations to this account (§1.4), as its listing shows them. */
+    const invitationsFor = (userId: string) =>
+      Effect.map(reader.ShareInvitationsReceived({ userId: userId as never }), (rows) =>
+        rows.map((row): ShareInvitation => ({
+          id: row.id,
+          ownerHandle: row.handle,
+          ownerName: row.displayName,
+          folder: row.path.slice(row.path.lastIndexOf("/") + 1),
+          mode: row.mode
+        }))
+      )
+
     /**
      * `Shared` and `Shared/<owner>` while other accounts share folders with this one (§1.4): the
-     * owners, then their folders (the ones still there). An own folder named Shared keeps its
-     * entries beside the owners; an owner's name wins a clash. Null: not such a place.
+     * owners, then their folders, with any of the account's own entries there kept beside them
+     * (a share is named around them, never over them). A share whose folder its owner moved,
+     * replaced or deleted is listed as unavailable. Null: not such a place.
      */
     const sharedListing = (path: string) =>
       Effect.gen(function* () {
@@ -509,17 +646,18 @@ export const filesRoutes = Layer.unwrap(
         const resolved = yield* Effect.try(() => resolveFilesPath(path, FILES_TOP))
         const [top, owner, ...rest] = resolved.segments
         if (top !== SHARED_FOLDER || rest.length > 0) return null
-        const owners = yield* sharesByOwner(user.id)
-        if (owners.size === 0) return null
-        const now = Date.now()
+        const owners = yield* ownersOf(user.id)
+        const env = accountEnv(dirs, user.id)
+        const ownList = (segments: ReadonlyArray<string>) =>
+          Effect.promise(() => listFolder(env.filesRoot, segments, LIST_LIMIT).catch(() => null))
         if (owner === undefined) {
-          const env = accountEnv(dirs, user.id)
-          const own = yield* Effect.tryPromise(() =>
-            listFolder(env.filesRoot, [SHARED_FOLDER], LIST_LIMIT).catch(() => null)
-          )
+          const invitations = yield* invitationsFor(user.id)
+          if (owners.size === 0 && invitations.length === 0) return null
+          const now = Date.now()
+          const own = yield* ownList([SHARED_FOLDER])
           const entries = [
-            ...[...owners.keys()].map((name) => ({ name, kind: "folder" as const, size: 0, mtimeMs: now })),
-            ...(own ? entriesOf(own).filter((entry) => !owners.has(entry.name)) : [])
+            ...(own ? entriesOf(own).filter((entry) => !owners.has(entry.name)) : []),
+            ...[...owners.keys()].map((name) => ({ name, kind: "folder" as const, size: 0, mtimeMs: now }))
           ]
           return {
             path: resolved.full,
@@ -527,22 +665,46 @@ export const filesRoutes = Layer.unwrap(
             more: own?.more ?? false,
             readOnly: false,
             bin: true,
-            shared: "list" as const
+            shared: "list" as const,
+            ...(invitations.length > 0 ? { invitations } : {})
           }
         }
         const shares = owners.get(owner)
         if (!shares) return null
-        const names = shareNames(shares)
-        const entries: Array<FileEntry> = []
-        for (const share of shares) {
-          const base = yield* Effect.try(() => resolveFilesPath(share.path, FILES_TOP))
-          const info = yield* Effect.tryPromise(() =>
-            statPath(accountEnv(dirs, share.ownerUserId).filesRoot, base.segments).catch(() => null)
-          )
-          if (info?.isDirectory())
-            entries.push({ name: names.get(share.id)!, kind: "folder", size: 0, mtimeMs: Math.round(info.mtimeMs) })
+        const own = yield* ownList([SHARED_FOLDER, owner])
+        const entries: Array<FileEntry> = own ? entriesOf(own) : []
+        for (const { share, name } of yield* mountsOf(user.id, owner, shares)) {
+          const { info, available } = yield* sharedFolderInfo(share)
+          entries.push({
+            name,
+            kind: "folder",
+            size: 0,
+            mtimeMs: Math.round(available ? info!.mtimeMs : share.createdAt),
+            ...(available ? {} : { unavailable: true })
+          })
         }
-        return { path: resolved.full, entries, more: false, readOnly: true, bin: false, shared: "list" as const }
+        // Your own folder there is yours to change; the shares beside it are reached by their names.
+        return {
+          path: resolved.full,
+          entries,
+          more: own?.more ?? false,
+          readOnly: own === null,
+          bin: own !== null,
+          shared: "list" as const
+        }
+      })
+
+    /** The owner's shares and invitations, each with whether its folder is still at its path (§1.4). */
+    const ownShares = (userId: string) =>
+      Effect.gen(function* () {
+        const shares = yield* reader.SharedByMe({ userId: userId as never })
+        const checked: Array<{ share: (typeof shares)[number]; available: boolean; folderThere: boolean }> = []
+        for (const share of shares) {
+          const { info, available } = yield* sharedFolderInfo(share)
+          checked.push({ share, available, folderThere: info?.isDirectory() ?? false })
+        }
+        const invitations = yield* reader.ShareInvitationsSent({ userId: userId as never })
+        return { checked, invitations }
       })
 
     const list = Effect.gen(function* () {
@@ -553,23 +715,43 @@ export const filesRoutes = Layer.unwrap(
       const placed = yield* place(path, "read")
       const listed = yield* Effect.tryPromise(() => listFolder(placed.root, placed.segments, LIST_LIMIT))
       let entries = entriesOf(listed)
+      const extra: { invitations?: Array<ShareInvitation>; unavailableShares?: Array<UnavailableShare> } = {}
       if (placed.share === null) {
-        // Your folders shared with others say so; at the top, Shared appears once anything is shared with you.
-        const mine = yield* reader.SharedByMe({ userId: placed.userId as never })
-        if (mine.length > 0) {
-          const counts = new Map<string, number>()
-          for (const share of mine) counts.set(share.path, (counts.get(share.path) ?? 0) + 1)
+        // Your folders shared with others (or offered) say so: only while their path holds the folder shared.
+        const { checked, invitations } = yield* ownShares(placed.userId)
+        const counts = new Map<string, number>()
+        for (const { share, available } of checked)
+          if (available) counts.set(share.path, (counts.get(share.path) ?? 0) + 1)
+        for (const invitation of invitations) counts.set(invitation.path, (counts.get(invitation.path) ?? 0) + 1)
+        if (counts.size > 0)
           entries = entries.map((entry) => {
             const count = entry.kind === "folder" ? counts.get(`${placed.full}/${entry.name}`) : undefined
             return count ? { ...entry, shared: count } : entry
           })
-        }
-        if (placed.segments.length === 0 && !entries.some((entry) => entry.name === SHARED_FOLDER)) {
-          const owners = yield* sharesByOwner(placed.actorId)
-          if (owners.size > 0) entries.push({ name: SHARED_FOLDER, kind: "folder", size: 0, mtimeMs: Date.now() })
+        if (placed.segments.length === 0) {
+          // At the top: Shared appears once anything is shared with you or offered to you, with the offers.
+          const received = yield* invitationsFor(placed.actorId)
+          if (received.length > 0) extra.invitations = received
+          if (!entries.some((entry) => entry.name === SHARED_FOLDER)) {
+            const owners = yield* ownersOf(placed.actorId)
+            if (owners.size > 0 || received.length > 0)
+              entries.push({ name: SHARED_FOLDER, kind: "folder", size: 0, mtimeMs: Date.now() })
+          }
+          const lost = checked.filter((entry) => !entry.available)
+          if (lost.length > 0)
+            extra.unavailableShares = lost.map(({ share, folderThere }) => ({
+              id: share.id,
+              path: share.path,
+              handle: share.handle,
+              displayName: share.displayName,
+              mode: share.mode,
+              reason: share.suspendedAt !== null ? ("bin" as const) : ("moved" as const),
+              folderThere
+            }))
         }
       }
       return listingAnswer({
+        ...extra,
         path: placed.full,
         entries,
         more: listed.more,
@@ -727,13 +909,19 @@ export const filesRoutes = Layer.unwrap(
         return refuse(413, `Text files over ${formatByteSize(TEXT_OPEN_MAX_BYTES)} open read-only, a page at a time.`)
       let decoded: string
       try {
-        decoded = new TextDecoder("utf-8", { fatal: true }).decode(read.bytes)
+        // The byte order mark is kept in the text here (`ignoreBOM`), and said apart below.
+        decoded = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(read.bytes)
       } catch {
         return refuse(415, "This file isn't plain text, so the editor can't open it.")
       }
+      // Line breaks and the byte order mark as the file has them, so a save writes them back (§8.2).
+      const bom = decoded.charCodeAt(0) === 0xfeff
+      const body = bom ? decoded.slice(1) : decoded
       const file: TextFile = {
         path: full,
-        text: decoded,
+        text: normalizeLineEndings(body),
+        lineEnding: lineEndingOf(body),
+        bom,
         sha256: sha256Of(read.bytes),
         size: read.bytes.byteLength,
         mtimeMs: read.info.mtimeMs
@@ -825,17 +1013,8 @@ export const filesRoutes = Layer.unwrap(
             )
           )
         )
-        const keptBytes =
-          outcome === "replaced"
-            ? yield* keepVersion(
-                userId,
-                root,
-                segments,
-                `${ownerParent}/${name}`,
-                base === null ? "upload" : "editor",
-                placed.actorId
-              )
-            : 0
+        /** What the version of the replaced content takes: counted once it's kept, whatever follows. */
+        let keptBytes = 0
         const digest = createHash("sha256")
         let taken = 0
         /** What the quota's room took for this upload: given back whole on failure. */
@@ -892,20 +1071,59 @@ export const filesRoutes = Layer.unwrap(
           } finally {
             clearTimeout(idle)
           }
-          try {
-            // What the new file takes is already counted as it arrived; the old one's bytes are
-            // freed unless a version kept them (counted in keepVersion). Lowered before the
-            // old file goes, so a measurement in between can only over-count.
-            freeToken = quota.freed(userId, Math.max(0, freesOnReplace - taken))
-            await rename(at(dir, temporary), at(dir, name))
-            held.landed()
-          } catch (error) {
-            await unlink(at(dir, temporary)).catch(() => undefined)
-            quota.unfreed(userId, freeToken)
-            held.release()
-            throw error
-          }
-        }).pipe(Effect.ensuring(Effect.sync(() => quota.wrote(userId, keptBytes))))
+        })
+        // It lands under the path's lock (§8.2): the share is checked again, an editor save's base
+        // is checked again just before the rename, and the content replaced is kept as a version
+        // as it is at that moment. A name taken meanwhile (not replacing) is never written over.
+        const target = [...parent, name]
+        const landed = yield* withPathLock(
+          root,
+          target,
+          Effect.gen(function* () {
+            yield* stillPlaced(placed)
+            if (base !== null && (yield* currentHash(root, target)) !== base) return false
+            if (outcome === "replaced")
+              keptBytes = yield* keepVersion(
+                userId,
+                root,
+                target,
+                `${ownerParent}/${name}`,
+                base === null ? "upload" : "editor",
+                placed.actorId
+              )
+            yield* Effect.tryPromise(async () => {
+              // What the new file takes is already counted as it arrived; the old one's bytes are
+              // freed unless a version kept them (counted in keepVersion). Lowered before the
+              // old file goes, so a measurement in between can only over-count.
+              freeToken = quota.freed(userId, Math.max(0, freesOnReplace - taken))
+              try {
+                if (outcome === "replaced") await rename(at(dir, temporary), at(dir, name))
+                else await renameNoReplace(at(dir, temporary), at(dir, name))
+              } catch (error) {
+                quota.unfreed(userId, freeToken)
+                throw error
+              }
+              held.landed()
+            })
+            return true
+          })
+        ).pipe(
+          Effect.tapError(() =>
+            Effect.promise(async () => {
+              await unlink(at(dir, temporary)).catch(() => undefined)
+              held.release()
+            })
+          ),
+          Effect.ensuring(Effect.sync(() => quota.wrote(userId, keptBytes)))
+        )
+        if (!landed) {
+          yield* Effect.promise(() => unlink(at(dir, temporary)).catch(() => undefined))
+          held.release()
+          return HttpServerResponse.jsonUnsafe(
+            { changed: true, message: "It changed since you opened it." },
+            { status: 409 }
+          )
+        }
         changedAt({ ...placed, full: `${parentPath}/${name}`, ownerFull: `${ownerParent}/${name}` })
         return HttpServerResponse.jsonUnsafe({
           path: `${parentPath}/${name}`,
@@ -989,7 +1207,14 @@ export const filesRoutes = Layer.unwrap(
       if (!info) return refuse(404, "Not found. It may have been moved or deleted.")
       // To the bin (§1.3): its bytes stay counted, under the bin, until it's emptied. In a
       // shared folder, the owner's bin: they can restore it; the caller has no Undo.
-      const item = yield* bin.toBin(userId, root, segments, placed.ownerFull)
+      const user = yield* CurrentUser
+      const item = yield* bin.toBin(
+        userId,
+        root,
+        segments,
+        placed.ownerFull,
+        placed.share ? { userId: user.id, handle: user.handle } : undefined
+      )
       changedAt(placed)
       return HttpServerResponse.jsonUnsafe({ binItemId: placed.share ? null : item.id })
     })
@@ -1132,40 +1357,96 @@ export const filesRoutes = Layer.unwrap(
         const info = yield* Effect.tryPromise(() => statPath(placed.root, placed.segments))
         if (!info) return yield* Effect.fail(new Answer(404, "Not found. It may have been moved or deleted."))
         if (!info.isDirectory()) return yield* Effect.fail(new Answer(400, "Only a folder can be shared."))
-        return { ...placed, inode: info.ino }
+        return { ...placed, inode: info.ino, device: info.dev }
       })
 
-    const toFolderShare = (share: { id: string; handle: string; displayName: string; mode: "view" | "edit" }) =>
-      ({ id: share.id, handle: share.handle, displayName: share.displayName, mode: share.mode }) satisfies FolderShare
+    const toFolderShare = (
+      share: { id: string; handle: string; displayName: string; mode: "view" | "edit" },
+      status: FolderShare["status"]
+    ) =>
+      ({
+        id: share.id,
+        handle: share.handle,
+        displayName: share.displayName,
+        mode: share.mode,
+        status
+      }) satisfies FolderShare
 
+    /** The folder's shares and invitations, as its owner's Share dialog lists them. */
     const shares = Effect.gen(function* () {
       const query = yield* queryOf
       const placed = yield* ownFolder(query.get("path") ?? "")
-      const mine = yield* reader.SharedByMe({ userId: placed.userId as never })
-      return HttpServerResponse.jsonUnsafe(mine.filter((share) => share.path === placed.full).map(toFolderShare), {
-        headers: { "cache-control": "no-store" }
-      })
+      const { checked, invitations } = yield* ownShares(placed.userId)
+      return HttpServerResponse.jsonUnsafe(
+        [
+          ...checked
+            .filter(({ share }) => share.path === placed.full)
+            .map(({ share, available }) => toFolderShare(share, available ? "active" : "unavailable")),
+          ...invitations
+            .filter((invitation) => invitation.path === placed.full)
+            .map((invitation) => toFolderShare(invitation, "invited"))
+        ],
+        { headers: { "cache-control": "no-store" } }
+      )
     })
 
+    /** Invitations each account sent lately (§1.4), for the rate limit. */
+    const invitesSent = new Map<string, Array<number>>()
+    const mayInvite = (userId: string) => {
+      const now = Date.now()
+      const recent = (invitesSent.get(userId) ?? []).filter((at) => at > now - INVITE_WINDOW_MS)
+      if (recent.length >= INVITES_PER_WINDOW) {
+        invitesSent.set(userId, recent)
+        return false
+      }
+      recent.push(now)
+      invitesSent.set(userId, recent)
+      return true
+    }
+
+    /**
+     * Offers the folder to the account of that name (§1.4). The answer is the same whether or not
+     * there is one: an invitation listed under the name as typed, which reaches only an account
+     * that has that name now. One that already accepted gets the new mode instead.
+     */
     const share = Effect.gen(function* () {
       const body = yield* jsonBody(ShareRequest)
       const placed = yield* ownFolder(body.path)
       const handle = body.handle.trim()
-      const grantee = handle === "" ? null : yield* reader.FindUserByHandle({ handle })
-      if (!grantee || grantee.id === placed.userId) return refuse(404, `No other account is called “${handle}”.`)
-      const made = yield* writer
-        .ShareFolder({
-          userId: placed.userId as never,
-          path: placed.full,
-          inode: placed.inode,
-          granteeUserId: grantee.id,
-          mode: body.mode
-        })
-        .pipe(
-          Effect.catchTag("NotFound", () => Effect.fail(new Answer(404, `No other account is called “${handle}”.`)))
-        )
-      changed(grantee.id, [`${FILES_TOP}/${SHARED_FOLDER}`])
-      return HttpServerResponse.jsonUnsafe(toFolderShare(made))
+      const user = yield* CurrentUser
+      if (handle === "") return refuse(400, "Type the name of the account to share it with.")
+      if (handle === user.handle) return refuse(400, "That's your own account.")
+      if (!mayInvite(placed.userId)) return refuse(429, "That's a lot of sharing at once. Try again in a few minutes.")
+      const made = yield* writer.InviteToFolder({
+        userId: placed.userId as never,
+        path: placed.full,
+        inode: placed.inode,
+        device: placed.device,
+        handle,
+        mode: body.mode
+      })
+      if ("share" in made) {
+        changed(made.share.granteeUserId, [`${FILES_TOP}/${SHARED_FOLDER}`])
+        return HttpServerResponse.jsonUnsafe(toFolderShare(made.share, "active"))
+      }
+      if (made.invitation.granteeUserId !== null)
+        changed(made.invitation.granteeUserId, [FILES_TOP, `${FILES_TOP}/${SHARED_FOLDER}`])
+      return HttpServerResponse.jsonUnsafe(toFolderShare(made.invitation, "invited"))
+    })
+
+    /** The owner shares an unavailable share's path again: the folder there now (§1.4). */
+    const shareAgain = Effect.gen(function* () {
+      const body = yield* jsonBody(UnshareBody)
+      const user = yield* CurrentUser
+      const mine = (yield* reader.SharedByMe({ userId: user.id })).find((candidate) => candidate.id === body.shareId)
+      if (!mine) return refuse(404, "That folder isn't shared any more.")
+      const placed = yield* ownFolder(mine.path)
+      const again = yield* writer
+        .RebindFolderShare({ userId: user.id, shareId: mine.id, inode: placed.inode, device: placed.device })
+        .pipe(Effect.catchTag("NotFound", () => Effect.fail(new Answer(404, "That folder isn't shared any more."))))
+      changed(again.granteeUserId, [`${FILES_TOP}/${SHARED_FOLDER}`])
+      changed(user.id, [FILES_TOP, placed.full])
+      return HttpServerResponse.jsonUnsafe(toFolderShare(again, "active"))
     })
 
     const unshare = Effect.gen(function* () {
@@ -1173,10 +1454,26 @@ export const filesRoutes = Layer.unwrap(
       const user = yield* CurrentUser
       const mine = yield* reader.SharedByMe({ userId: user.id })
       const gone = mine.find((candidate) => candidate.id === body.shareId)
+      const offered = (yield* reader.ShareInvitationsSent({ userId: user.id })).find(
+        (candidate) => candidate.id === body.shareId
+      )
       yield* writer
         .StopSharingFolder({ userId: user.id, shareId: body.shareId })
         .pipe(Effect.catchTag("NotFound", () => Effect.fail(new Answer(404, "That folder isn't shared any more."))))
       if (gone) changed(gone.granteeUserId, [`${FILES_TOP}/${SHARED_FOLDER}`])
+      if (offered?.granteeUserId) changed(offered.granteeUserId, [FILES_TOP, `${FILES_TOP}/${SHARED_FOLDER}`])
+      return HttpServerResponse.jsonUnsafe({})
+    })
+
+    /** The invited account accepts or declines (§1.4): accepted, the folder appears under Shared. */
+    const answerInvitation = Effect.gen(function* () {
+      const body = yield* jsonBody(AnswerInvitationRequest)
+      const user = yield* CurrentUser
+      const accepted = yield* writer
+        .AnswerShareInvitation({ userId: user.id, invitationId: body.invitationId, accept: body.accept })
+        .pipe(Effect.catchTag("NotFound", () => Effect.fail(new Answer(404, "That invitation was taken back."))))
+      changed(user.id, [FILES_TOP, `${FILES_TOP}/${SHARED_FOLDER}`])
+      if (accepted) changed(accepted.ownerUserId, [accepted.path.slice(0, accepted.path.lastIndexOf("/")) || FILES_TOP])
       return HttpServerResponse.jsonUnsafe({})
     })
 
@@ -1185,10 +1482,17 @@ export const filesRoutes = Layer.unwrap(
       const query = yield* queryOf
       const placed = yield* place(query.get("path") ?? "", "read")
       if (placed.segments.length === 0) return refuse(400, "Name a file.")
+      // Through a share (§1.4): only a file there now, and only what was kept since the share
+      // started; its path's history from before isn't the other account's to see.
+      if (placed.share) {
+        const info = yield* Effect.promise(() => statPath(placed.root, placed.segments).catch(() => null))
+        if (!info?.isFile()) return refuse(404, "Not found. It may have been moved or deleted.")
+      }
       const rows = yield* reader.ListFileVersions({
         userId: placed.userId as never,
         path: placed.ownerFull,
-        limit: VERSIONS_LISTED
+        limit: VERSIONS_LISTED,
+        ...(placed.share ? { since: placed.share.createdAt } : {})
       })
       const user = yield* CurrentUser
       // The account that acted is named when it wasn't you.
@@ -1216,21 +1520,35 @@ export const filesRoutes = Layer.unwrap(
         .FileVersion({ userId: userId as never, id: body.versionId })
         .pipe(Effect.catchTag("NotFound", () => Effect.fail(new Answer(404, "That version is gone."))))
       if (version.path !== placed.ownerFull) return refuse(404, "That version is of another file.")
+      // Through a share, as the list: a file there now, and a version kept since the share started.
+      if (placed.share && version.createdAt < placed.share.createdAt) return refuse(404, "That version is gone.")
       if (!version.mediaPath || !isMediaPath(version.mediaPath))
         return refuse(410, "That version's content isn't kept.")
       const bytes = yield* Effect.tryPromise(() => readFile(join(config.dataDir, version.mediaPath!)))
-      const current = yield* Effect.tryPromise(() => statPath(root, segments))
-      if (current && !current.isFile()) return refuse(409, `“${segments.at(-1)}” isn't a file here now.`)
-      const replaced = current && current.nlink === 1 ? current.size : 0
-      yield* quota
-        .check(userId, Math.max(0, bytes.byteLength - replaced), "restore this version")
-        .pipe(Effect.mapError((error) => new Answer(507, error.message)))
-      const kept = yield* keptVersion(userId, root, segments, placed.ownerFull, "restore", placed.actorId)
-      const token = quota.freed(userId, replaced)
-      yield* Effect.tryPromise(() => writeRegularFile(root, segments, bytes, { createFolders: true })).pipe(
-        Effect.tapError(() => Effect.sync(() => quota.unfreed(userId, token)))
+      // One change at a time to a path: what was there is kept as it was when written over.
+      const kept = yield* withPathLock(
+        root,
+        segments,
+        Effect.gen(function* () {
+          yield* stillPlaced(placed)
+          const current = yield* Effect.tryPromise(() => statPath(root, segments))
+          if (current && !current.isFile())
+            return yield* Effect.fail(new Answer(409, `“${segments.at(-1)}” isn't a file here now.`))
+          if (placed.share && !current)
+            return yield* Effect.fail(new Answer(404, "Not found. It may have been moved or deleted."))
+          const replaced = current && current.nlink === 1 ? current.size : 0
+          yield* quota
+            .check(userId, Math.max(0, bytes.byteLength - replaced), "restore this version")
+            .pipe(Effect.mapError((error) => new Answer(507, error.message)))
+          const kept = yield* keptVersion(userId, root, segments, placed.ownerFull, "restore", placed.actorId)
+          const token = quota.freed(userId, replaced)
+          yield* Effect.tryPromise(() => writeRegularFile(root, segments, bytes, { createFolders: true })).pipe(
+            Effect.tapError(() => Effect.sync(() => quota.unfreed(userId, token)))
+          )
+          quota.wrote(userId, bytes.byteLength + kept.bytes)
+          return kept
+        })
       )
-      quota.wrote(userId, bytes.byteLength + kept.bytes)
       changedAt(placed)
       return HttpServerResponse.jsonUnsafe({ path: placed.full, keptVersionId: kept.id } satisfies RestoredVersion)
     })
@@ -1258,6 +1576,8 @@ export const filesRoutes = Layer.unwrap(
       HttpRouter.add("GET", FILES_ROUTES.shares, authenticated(shares)),
       HttpRouter.add("POST", FILES_ROUTES.share, authenticated(share)),
       HttpRouter.add("POST", FILES_ROUTES.unshare, authenticated(unshare)),
+      HttpRouter.add("POST", FILES_ROUTES.shareAgain, authenticated(shareAgain)),
+      HttpRouter.add("POST", FILES_ROUTES.answerInvitation, authenticated(answerInvitation)),
       HttpRouter.add("GET", FILES_ROUTES.versions, authenticated(versions)),
       HttpRouter.add("POST", FILES_ROUTES.restoreVersion, authenticated(restoreVersion))
     )

@@ -27,7 +27,11 @@ const PATH = "/files/notes/plan.md"
 const A = "a".repeat(64)
 const B = "b".repeat(64)
 const shaOf = (text: string) => String(text.length).padStart(64, "0")
-const file = (text: string, sha256: string): TextFile => ({ path: PATH, text, sha256, size: text.length, mtimeMs: 1 })
+const file = (
+  text: string,
+  sha256: string,
+  format: Pick<TextFile, "lineEnding" | "bom"> = { lineEnding: "lf", bom: false }
+): TextFile => ({ path: PATH, text, ...format, sha256, size: text.length, mtimeMs: 1 })
 
 /** A server with one draft slot and one file, as the RPCs and routes keep them. */
 const fake = (initial: TextFile) => {
@@ -69,10 +73,11 @@ const fake = (initial: TextFile) => {
     return { ok: true, value }
   }) as never
   const source = {
-    saveText: async (_path: string, text: string, base: string) => {
+    saveText: async (_path: string, text: string, base: string, format: Pick<TextFile, "lineEnding" | "bom">) => {
       calls.push(`saveText:${base}`)
+      calls.push(`format:${format.lineEnding}${format.bom ? "+bom" : ""}`)
       if (base !== disk.sha256) throw new FileChanged("It changed since you opened it.")
-      disk = file(text, shaOf(text))
+      disk = file(text, shaOf(text), format)
       return { path: PATH, outcome: "replaced" as const, sha256: disk.sha256 }
     }
   } as never
@@ -149,4 +154,15 @@ it("reopening finds the draft, and a copy never sent is replayed onto it", async
   await again.open()
   expect(server.draft()).toMatchObject({ content: "Typed, then the tab closed.", baseRevision: A })
   expect(again.snapshot()).toMatchObject({ text: "Typed, then the tab closed.", changed: true, conflict: false })
+})
+
+it("Save writes the file's own line breaks and byte order mark back", async () => {
+  // review files4b finding 4: a CRLF file with a BOM saved as LF without it.
+  const server = fake(file("One\nTwo", A, { lineEnding: "crlf", bom: true }))
+  const store = new FileDraft(server.run, server.source, "user", PATH, server.disk())
+  await store.open()
+  store.setText("One\nTwo\nThree")
+  await store.save()
+  expect(server.calls).toContain("format:crlf+bom")
+  expect(server.disk()).toMatchObject({ lineEnding: "crlf", bom: true })
 })

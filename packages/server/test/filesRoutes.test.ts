@@ -5,7 +5,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { createHash } from "node:crypto"
 import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { FolderListing } from "@dreamspan/shared/files.ts"
+import { encodeText, type FolderListing, type TextFile } from "@dreamspan/shared/files.ts"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
@@ -209,6 +209,77 @@ describe("file routes", () => {
       assert.deepStrictEqual(names.sort(), ["out/Left out of this zip.txt", "out/keep.txt"])
       for (const name of names) assert.notInclude(name, "\\")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+  it.live("two saves on the same base: one lands, the other is told it changed, and nothing is lost unkept", () => {
+    // review files4b finding 3: both passed the check before their bodies arrived, and the second
+    // rename overwrote the first save with no version holding it.
+    const hash = (text: string) => createHash("sha256").update(text).digest("hex")
+    return Effect.gen(function* () {
+      const port = yield* serverPort
+      yield* upload("/files/race/plan.md", "Original.")
+      let open!: () => void
+      const gate = new Promise<void>((resolve) => (open = resolve))
+      const slowSave = (text: string) =>
+        fetch(
+          `http://127.0.0.1:${port}/files/upload?${new URLSearchParams({ path: "/files/race/plan.md", conflict: "replace", base: hash("Original.") })}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            duplex: "half",
+            body: new ReadableStream<Uint8Array>({
+              async start(controller) {
+                controller.enqueue(new TextEncoder().encode(text.slice(0, 1)))
+                await gate
+                controller.enqueue(new TextEncoder().encode(text.slice(1)))
+                controller.close()
+              }
+            })
+          } as RequestInit
+        )
+      const both = Promise.all([slowSave("From the first tab."), slowSave("From the second tab.")])
+      // Both have passed the check made as they start; then their bodies end together.
+      yield* Effect.sleep("400 millis")
+      open()
+      const answers = yield* Effect.promise(() => both)
+      assert.deepStrictEqual(answers.map((answer) => answer.status).sort(), [200, 409])
+      const won = answers[0]!.status === 200 ? "From the first tab." : "From the second tab."
+      assert.deepInclude((yield* Effect.promise(() => answers.find((a) => a.status === 409)!.json())) as object, {
+        changed: true
+      })
+      assert.strictEqual(yield* body(yield* call("/files/raw?path=%2Ffiles%2Frace%2Fplan.md")), won)
+      const versions = (yield* Effect.promise(() =>
+        fetch(`http://127.0.0.1:${port}/files/versions?path=%2Ffiles%2Frace%2Fplan.md`).then((r) => r.json())
+      )) as Array<{ origin: string; byteSize: number }>
+      assert.deepStrictEqual(
+        versions.map((version) => [version.origin, version.byteSize]),
+        [["editor", "Original.".length]]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  })
+  it.live("the editor keeps a file's line breaks and byte order mark", () => {
+    // review files4b finding 4: a CRLF file with a BOM came back LF and without it after one edit.
+    const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex")
+    return Effect.gen(function* () {
+      const bytes = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode("one\r\ntwo\r\nthree\n")])
+      yield* call(`/files/upload?${new URLSearchParams({ path: "/files/eol/win.csv", conflict: "ask" })}`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes
+      })
+      const read = yield* call("/files/text?path=%2Ffiles%2Feol%2Fwin.csv")
+      const opened = (yield* Effect.promise(() => read.json())) as TextFile
+      // Mixed: two CRLF and one LF, so CRLF; the text as the editor holds it.
+      assert.deepInclude(opened, { text: "one\ntwo\nthree\n", lineEnding: "crlf", bom: true, sha256: hash(bytes) })
+      const edited = encodeText(opened.text.replace("two", "TWO"), opened.lineEnding, opened.bom)
+      const saved = yield* call(
+        `/files/upload?${new URLSearchParams({ path: "/files/eol/win.csv", conflict: "replace", base: opened.sha256 })}`,
+        { method: "POST", headers: { "content-type": "application/octet-stream" }, body: edited }
+      )
+      assert.strictEqual(saved.status, 200)
+      const served = yield* call("/files/raw?path=%2Ffiles%2Feol%2Fwin.csv")
+      const raw = new Uint8Array(yield* Effect.promise(() => served.arrayBuffer()))
+      assert.deepStrictEqual([...raw], [0xef, 0xbb, 0xbf, ...new TextEncoder().encode("one\r\nTWO\r\nthree\r\n")])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   })
   it.live(
     "the editor: a text file with its hash, a save only onto what it opened, and drafts that follow a move",

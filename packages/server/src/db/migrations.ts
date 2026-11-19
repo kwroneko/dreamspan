@@ -9,6 +9,7 @@ import { workshopBranchesMigration } from "./migrationWorkshopBranches.ts"
 import { personaLocksMigration } from "./migrationPersonaLocks.ts"
 import { contractRecordsMigration } from "./migrationContractRecords.ts"
 import { attachmentPathsMigration } from "./migrationAttachmentPaths.ts"
+import { shareInvitationsMigration } from "./migrationShareInvitations.ts"
 import { rebuildTable, type OutsideStep } from "./tableRebuild.ts"
 
 /**
@@ -41,7 +42,9 @@ export const migrationDefinitions = {
   // spec/REPLY-CONTRACT.md §3.6: how each agent story reply met the send tool's contract.
   "0007_contract_records": { statements: contractRecordsMigration },
   // spec/FILES-AND-ENVIRONMENT.md §6.1: where a workshop's attachment draft was saved in Files.
-  "0008_attachment_paths": { statements: attachmentPathsMigration }
+  "0008_attachment_paths": { statements: attachmentPathsMigration },
+  // spec/FILES-AND-ENVIRONMENT.md §1.4: shares bound to their folder, and accepted before they reach anyone.
+  "0009_share_invitations": { statements: shareInvitationsMigration }
 } satisfies Readonly<Record<string, MigrationDefinition>>
 
 const runAll = (statements: ReadonlyArray<string>) =>

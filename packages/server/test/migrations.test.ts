@@ -162,7 +162,8 @@ describe("0002_files", () => {
           "preview_macro",
           "persona_locks",
           "contract_records",
-          "attachment_paths"
+          "attachment_paths",
+          "share_invitations"
         ]
       )
       // The existing row is kept, an image by default.
@@ -439,7 +440,8 @@ it.effect("fresh defaults include composer guidance, branch additions and global
       "0005_preview_macro",
       "0006_persona_locks",
       "0007_contract_records",
-      "0008_attachment_paths"
+      "0008_attachment_paths",
+      "0009_share_invitations"
     ])
   }).pipe(Effect.provide(layer()))
 )
@@ -510,6 +512,7 @@ describe("0005_preview_macro", () => {
         "0006_persona_locks": _later,
         "0007_contract_records": _latest,
         "0008_attachment_paths": _newest,
+        "0009_share_invitations": _last,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -544,6 +547,7 @@ describe("0006_persona_locks", () => {
         "0006_persona_locks": _new,
         "0007_contract_records": _later,
         "0008_attachment_paths": _latest,
+        "0009_share_invitations": _last,
         ...before
       } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
@@ -586,7 +590,12 @@ describe("0007_contract_records", () => {
   it.effect("adds the rollout's contract columns to a database at 0006, keeping its rollouts, and guards them", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0007_contract_records": _new, "0008_attachment_paths": _later, ...before } = migrations
+      const {
+        "0007_contract_records": _new,
+        "0008_attachment_paths": _later,
+        "0009_share_invitations": _last,
+        ...before
+      } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'rp', 'active', 0)`
@@ -607,7 +616,7 @@ describe("0008_attachment_paths", () => {
   it.effect("adds the path of a workshop's attachment draft, keeping the drafts before it", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      const { "0008_attachment_paths": _new, ...before } = migrations
+      const { "0008_attachment_paths": _new, "0009_share_invitations": _later, ...before } = migrations
       yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
       yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'Owner', 'user', 0)`
       yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('c', 'u', 'workshop', 'active', 0)`
@@ -618,6 +627,30 @@ describe("0008_attachment_paths", () => {
       assert.deepStrictEqual(yield* sql`SELECT id, kind, name, path FROM composer_images`, [
         { id: "i", kind: "image", name: null, path: null }
       ])
+    }).pipe(Effect.provide(layer()))
+  )
+})
+
+describe("0009_share_invitations", () => {
+  it.effect("binds a database at 0008's shares to their folder, keeping them, and adds invitations", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { "0009_share_invitations": _new, ...before } = migrations
+      yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(before) })
+      for (const user of ["u", "v"])
+        yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES (${user}, ${user}, 'Owner', 'user', 0)`
+      yield* sql`INSERT INTO file_shares (id, owner_user_id, path, inode, grantee_user_id, mode, created_at)
+        VALUES ('s', 'u', '/files/A', 7, 'v', 'view', 0)`
+      yield* Effect.scoped(Layer.build(Migrations))
+      assert.deepStrictEqual(yield* sql`SELECT id, inode, device, suspended_at FROM file_shares`, [
+        { id: "s", inode: 7, device: null, suspended_at: null }
+      ])
+      yield* sql`INSERT INTO file_share_invitations (id, owner_user_id, path, inode, device, handle, grantee_user_id, mode, created_at)
+        VALUES ('i', 'u', '/files/A', 7, 1, 'nobody', NULL, 'edit', 0)`
+      const self = yield* Effect.exit(sql`INSERT INTO file_share_invitations
+        (id, owner_user_id, path, inode, device, handle, grantee_user_id, mode, created_at)
+        VALUES ('j', 'u', '/files/A', 7, 1, 'u', 'u', 'edit', 0)`)
+      assert.isTrue(Exit.isFailure(self))
     }).pipe(Effect.provide(layer()))
   )
 })
@@ -634,7 +667,8 @@ describe("released migrations", () => {
       "migrationWorkshopBranches.ts",
       "migrationPreviewMacro.ts",
       "migrationPersonaLocks.ts",
-      "migrationAttachmentPaths.ts"
+      "migrationAttachmentPaths.ts",
+      "migrationShareInvitations.ts"
     ]
     for (const module of modules)
       assert.deepStrictEqual(

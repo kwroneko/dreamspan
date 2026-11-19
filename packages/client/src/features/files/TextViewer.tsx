@@ -6,6 +6,7 @@
 // time. An attachment's copy as sent (no path in Files) is read-only.
 import { formatByteSize } from "@dreamspan/shared/byteSize.ts"
 import {
+  encodeText,
   joinPath,
   keepBothName,
   nameOf,
@@ -21,6 +22,7 @@ import { Button } from "../../ui/Button.tsx"
 import { CodeEditor } from "../../ui/CodeEditor.tsx"
 import { languageOf } from "../../ui/codeLanguages.ts"
 import { Dialog } from "../../ui/Dialog.tsx"
+import { HtmlMessageContext, type HtmlMessage } from "../../ui/html/messageHtml.ts"
 import { effectiveDocumentRenderer } from "../../ui/html/parts.ts"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { RevisionDiff } from "../../ui/RevisionDiff.tsx"
@@ -172,14 +174,25 @@ function Shown({
   )
 }
 
-function MarkdownPreview({ text }: { text: string }) {
+/**
+ * A file's preview is never a message's (§8.2): its own context with scripts and the internet
+ * off, whatever message it was opened from (React context crosses the dialog's portal).
+ */
+const FILE_PREVIEW: HtmlMessage = {
+  key: "file-preview",
+  permit: { scripts: false, network: false, ask: null }
+}
+
+export function MarkdownPreview({ text }: { text: string }) {
   return (
-    <div
-      className="max-h-[70vh] min-w-0 overflow-auto rounded-md border border-border bg-canvas p-3"
-      data-file-markdown=""
-    >
-      <Markdown text={text} streaming={false} />
-    </div>
+    <HtmlMessageContext value={FILE_PREVIEW}>
+      <div
+        className="max-h-[70vh] min-w-0 overflow-auto rounded-md border border-border bg-canvas p-3"
+        data-file-markdown=""
+      >
+        <Markdown text={text} streaming={false} />
+      </div>
+    </HtmlMessageContext>
   )
 }
 
@@ -224,13 +237,15 @@ function TablePreview({ text, name }: { text: string; name: string }) {
 }
 
 /** The page in the message renderer's sandboxed document frame: an opaque origin, scripts off. */
-function HtmlPreview({ text }: { text: string }) {
+export function HtmlPreview({ text }: { text: string }) {
   const Frame = effectiveDocumentRenderer()?.component
   if (!Frame) return <p className="text-sm text-muted">Previews aren’t available here.</p>
   return (
-    <div className="min-w-0 rounded-md border border-border" data-file-html-preview="">
-      <Frame source={text} index={0} />
-    </div>
+    <HtmlMessageContext value={FILE_PREVIEW}>
+      <div className="min-w-0 rounded-md border border-border" data-file-html-preview="">
+        <Frame source={text} index={0} />
+      </div>
+    </HtmlMessageContext>
   )
 }
 
@@ -319,12 +334,14 @@ function Editing({
           label: "Undo",
           hint: "Puts back the text it had before this save.",
           onClick: () => {
-            source.saveText(path, saved.before.text, saved.after.sha256).then(onReread, (error: unknown) =>
-              showToast({
-                title: "Not undone",
-                description: error instanceof FileChanged ? "Changed since. Open its versions." : message(error)
-              })
-            )
+            source
+              .saveText(path, saved.before.text, saved.after.sha256, saved.before)
+              .then(onReread, (error: unknown) =>
+                showToast({
+                  title: "Not undone",
+                  description: error instanceof FileChanged ? "Changed since. Open its versions." : message(error)
+                })
+              )
           }
         }
       ]
@@ -352,7 +369,8 @@ function Editing({
       const folder = parentOf(path)
       const listing = await source.list(folder)
       const copyName = keepBothName(name, new Set(listing.entries.map((entry) => entry.name)))
-      const outcome = await source.upload(joinPath(folder, copyName), new Blob([view.text]), "keep")
+      const bytes = encodeText(view.text, file.lineEnding, file.bom) as Uint8Array<ArrayBuffer>
+      const outcome = await source.upload(joinPath(folder, copyName), new Blob([bytes]), "keep")
       if (await store.ended()) {
         store.update(await source.readText(path))
         setComparing(false)

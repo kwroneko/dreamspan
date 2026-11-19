@@ -1091,6 +1091,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       readonly name: string
       readonly entryKind: string
       readonly byteSize: number
+      readonly actor?: { readonly userId: string; readonly handle: string } | undefined
     }
   ) =>
     insertItem({
@@ -1101,7 +1102,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       chatId: null,
       title: file.name,
       excerpt: file.path,
-      origin: { path: file.path, entryKind: file.entryKind },
+      // `by`: the account that deleted it in a folder shared with them (§1.4), as named then.
+      origin: { path: file.path, entryKind: file.entryKind, ...(file.actor ? { by: file.actor } : {}) },
       byteSize: file.byteSize
     })
 

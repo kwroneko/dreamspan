@@ -23,12 +23,20 @@ export const FILES_ROUTES = {
   move: "/files/move",
   /** POST `{ path }`: to the bin when the listing said so, otherwise gone (`Deleted`). */
   delete: "/files/delete",
-  /** GET `?path=`: who a folder of yours is shared with (`FolderShare[]`). */
+  /** GET `?path=`: who a folder of yours is shared with or offered to (`FolderShare[]`). */
   shares: "/files/shares",
-  /** POST `{ path, handle, mode }`: shares a folder of yours with an account (`FolderShare`). */
+  /**
+   * POST `{ path, handle, mode }`: offers a folder of yours to an account by its name
+   * (`FolderShare`, `invited`), or changes the mode of one it accepted. The answer is the same
+   * whether or not an account has that name.
+   */
   share: "/files/share",
-  /** POST `{ shareId }`: stops sharing. */
+  /** POST `{ shareId }`: stops sharing, or takes back an invitation. */
   unshare: "/files/unshare",
+  /** POST `{ shareId }`: shares an unavailable share's path again, as the folder there now (`FolderShare`). */
+  shareAgain: "/files/share/again",
+  /** POST `{ invitationId, accept }`: the invited account accepts a share, or declines it. */
+  answerInvitation: "/files/invitation",
   /** GET `?path=`: a file's versions, newest first (`FileVersionEntry[]`). */
   versions: "/files/versions",
   /** POST `{ path, versionId }`: a version's content back at the path; what was there is kept (`RestoredVersion`). */
@@ -60,13 +68,57 @@ export const TEXT_EDIT_MAX_CHARS = 1_000_000
 /** A text file as the editor opens it: its text, and what a save checks it against. */
 export const TextFile = Schema.Struct({
   path: Schema.String,
+  /** With its line breaks as `\n` and no byte order mark: `lineEnding` and `bom` say how to write it back. */
   text: Schema.String,
+  /** The file's line break, the most used one in a mixed file (`lf` for one with none). */
+  lineEnding: Schema.Literals(["lf", "crlf", "cr"]),
+  /** It starts with a UTF-8 byte order mark. */
+  bom: Schema.Boolean,
   /** SHA-256 of the file's bytes, hex: an editor save sends it back as `base`. */
   sha256: Schema.String,
   size: Schema.Number,
   mtimeMs: Schema.Number
 })
 export type TextFile = typeof TextFile.Type
+
+export type LineEnding = TextFile["lineEnding"]
+
+const BREAKS: Record<LineEnding, string> = { lf: "\n", crlf: "\r\n", cr: "\r" }
+
+/** A text's most used line break (§8.2); `lf` when it has none, or on a tie with it. */
+export const lineEndingOf = (text: string): LineEnding => {
+  let crlf = 0
+  let lf = 0
+  let cr = 0
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code === 13) {
+      if (text.charCodeAt(i + 1) === 10) {
+        crlf++
+        i++
+      } else cr++
+    } else if (code === 10) lf++
+  }
+  if (crlf > lf && crlf >= cr) return "crlf"
+  if (cr > lf && cr > crlf) return "cr"
+  return "lf"
+}
+
+/** Every line break as `\n`, as the editor holds text. */
+export const normalizeLineEndings = (text: string) => text.replace(/\r\n?/g, "\n")
+
+/**
+ * The editor's text as the file's bytes (§8.2): each line break written as the file had it, and
+ * its byte order mark kept, so a one-character edit changes one character.
+ */
+export const encodeText = (text: string, lineEnding: LineEnding, bom: boolean): Uint8Array => {
+  const body = new TextEncoder().encode(normalizeLineEndings(text).replace(/\n/g, BREAKS[lineEnding]))
+  if (!bom) return body
+  const out = new Uint8Array(body.byteLength + 3)
+  out.set([0xef, 0xbb, 0xbf])
+  out.set(body, 3)
+  return out
+}
 
 /** The largest file a message can attach; larger ones stay in Files for the assistant to open (§6.1). */
 export const ATTACHMENT_MAX_BYTES = 64 * 1024 * 1024
@@ -86,6 +138,34 @@ export const AttachedFile = Schema.Struct({
 })
 export type AttachedFile = typeof AttachedFile.Type
 
+export const ShareMode = Schema.Literals(["view", "edit"])
+export type ShareMode = typeof ShareMode.Type
+
+/** A folder another account offers you (§1.4): it appears under Shared once you accept. */
+export const ShareInvitation = Schema.Struct({
+  id: Schema.String,
+  ownerHandle: Schema.String,
+  ownerName: Schema.String,
+  /** The folder's own name. */
+  folder: Schema.String,
+  mode: ShareMode
+})
+export type ShareInvitation = typeof ShareInvitation.Type
+
+/** A share of yours whose folder isn't at its path any more (§1.4). */
+export const UnavailableShare = Schema.Struct({
+  id: Schema.String,
+  path: Schema.String,
+  handle: Schema.String,
+  displayName: Schema.String,
+  mode: ShareMode,
+  /** `bin`: the folder was deleted (and maybe restored); `moved`: its path holds another folder, or nothing. */
+  reason: Schema.Literals(["bin", "moved"]),
+  /** A folder is at the path now, which Share again would share. */
+  folderThere: Schema.Boolean
+})
+export type UnavailableShare = typeof UnavailableShare.Type
+
 /** What a name is: links and special files are listed with their kind and never opened (§1.1). */
 const FileKind = Schema.Literals(["file", "folder", "link", "other"])
 
@@ -96,7 +176,9 @@ export const FileEntry = Schema.Struct({
   size: Schema.Number,
   mtimeMs: Schema.Number,
   /** A folder of yours shared with other accounts (§1.4): how many. */
-  shared: Schema.optionalKey(Schema.Number)
+  shared: Schema.optionalKey(Schema.Number),
+  /** A folder shared with you that its owner moved, replaced or deleted: it opens once they share it again. */
+  unavailable: Schema.optionalKey(Schema.Boolean)
 })
 export type FileEntry = typeof FileEntry.Type
 
@@ -110,7 +192,11 @@ export const FolderListing = Schema.Struct({
   /** Where folders shared with you appear (`list`), or one shared with you to `view` or `edit` (§1.4). */
   shared: Schema.optionalKey(Schema.Literals(["list", "view", "edit"])),
   /** Deleting here moves to the bin, with Undo (§1.3); false: it's gone, so the app asks first. */
-  bin: Schema.Boolean
+  bin: Schema.Boolean,
+  /** At the top and in Shared: folders other accounts offer you, to accept or decline (§1.4). */
+  invitations: Schema.optionalKey(Schema.Array(ShareInvitation)),
+  /** At the top: your shares whose folder isn't at their path any more, to share again or stop. */
+  unavailableShares: Schema.optionalKey(Schema.Array(UnavailableShare))
 })
 export type FolderListing = typeof FolderListing.Type
 
@@ -290,17 +376,24 @@ export const viewOf = (name: string): FileView => {
 /** Where folders other accounts share with you appear (§1.4): `/files/Shared/<owner>/<folder>`. */
 export const SHARED_FOLDER = "Shared"
 
-export const ShareMode = Schema.Literals(["view", "edit"])
-export type ShareMode = typeof ShareMode.Type
-
-/** One account a folder of yours is shared with. */
+/**
+ * One account a folder of yours is shared with or offered to. `invited`: not accepted yet, named
+ * as you typed it (whether that name is an account isn't said). `unavailable`: the folder at its
+ * path isn't the one you shared (moved, replaced, or restored from the bin) until you share it again.
+ */
 export const FolderShare = Schema.Struct({
   id: Schema.String,
   handle: Schema.String,
   displayName: Schema.String,
-  mode: ShareMode
+  mode: ShareMode,
+  status: Schema.Literals(["active", "invited", "unavailable"])
 })
 export type FolderShare = typeof FolderShare.Type
+
+export const AnswerInvitationRequest = Schema.Struct({
+  invitationId: Schema.String.check(Schema.isMaxLength(64)),
+  accept: Schema.Boolean
+})
 
 export const ShareRequest = Schema.Struct({
   path: Schema.String.check(Schema.isMaxLength(4096)),

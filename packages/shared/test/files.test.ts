@@ -2,6 +2,9 @@
 import { describe, expect, it } from "vitest"
 import {
   crumbsOf,
+  encodeText,
+  lineEndingOf,
+  normalizeLineEndings,
   FILES_TOP,
   foldersShowing,
   isWithin,
@@ -95,5 +98,22 @@ describe("foldersShowing", () => {
     expect(foldersShowing("/files/thesis/notes.md")).toEqual(["/files", "/files/thesis"])
     expect(foldersShowing("/files/readme.txt")).toEqual(["/files"])
     expect(foldersShowing(FILES_TOP)).toEqual([])
+  })
+})
+
+describe("line breaks and the byte order mark (§8.2)", () => {
+  it("a text's line break is its most used one", () => {
+    expect(lineEndingOf("a\nb\n")).toBe("lf")
+    expect(lineEndingOf("a\r\nb\r\n")).toBe("crlf")
+    expect(lineEndingOf("a\r\nb\r\nc\n")).toBe("crlf")
+    expect(lineEndingOf("a\rb\r")).toBe("cr")
+    expect(lineEndingOf("one line")).toBe("lf")
+    expect(lineEndingOf("a\r\nb\n")).toBe("lf")
+  })
+  it("written back as the file had it, with its byte order mark", () => {
+    expect(normalizeLineEndings("a\r\nb\rc\n")).toBe("a\nb\nc\n")
+    expect(new TextDecoder().decode(encodeText("a\nb\n", "crlf", false))).toBe("a\r\nb\r\n")
+    expect(new TextDecoder().decode(encodeText("a\nb", "cr", false))).toBe("a\rb")
+    expect([...encodeText("a\n", "lf", true)]).toEqual([0xef, 0xbb, 0xbf, 0x61, 0x0a])
   })
 })

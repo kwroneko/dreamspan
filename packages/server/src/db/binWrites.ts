@@ -51,6 +51,13 @@ export const makeBinWriteHandlers = (bin: Bin, defaults: BinLimits = defaultBinL
       BinFile: ({ userId, ...file }) =>
         Effect.gen(function* () {
           const itemId = yield* bin.deleteFile(userId, file)
+          // Shares of it, or of folders in it, stop (§1.4): restoring it doesn't share it again
+          // until its owner says so. Invitations not yet accepted are taken back.
+          const below = `${file.path}/`
+          yield* sql`UPDATE file_shares SET suspended_at = ${Date.now()} WHERE owner_user_id = ${userId}
+            AND (path = ${file.path} OR substr(path, 1, ${below.length}) = ${below})`
+          yield* sql`DELETE FROM file_share_invitations WHERE owner_user_id = ${userId}
+            AND (path = ${file.path} OR substr(path, 1, ${below.length}) = ${below})`
           yield* bin.evictDeleted(userId, itemId)
           return toBinItem(yield* bin.loadItem(userId, itemId))
         }).pipe(transaction(sql, "BinFile")),

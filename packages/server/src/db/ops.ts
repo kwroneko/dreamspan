@@ -480,10 +480,30 @@ const FileShare = Schema.Struct({
   path: Schema.String,
   granteeUserId: Schema.String,
   mode: Schema.Literals(["view", "edit"]),
+  /** When it was accepted, or last shared again on its folder: earlier versions aren't the other account's to see. */
   createdAt: Schema.Number,
   /** The grantee's, in the owner's list; the owner's, in the grantee's. */
   handle: Schema.String,
-  displayName: Schema.String
+  displayName: Schema.String,
+  /** The folder it was made on (§1.4): a share resolves only while its path holds that folder. */
+  inode: Schema.NullOr(Schema.Number),
+  device: Schema.NullOr(Schema.Number),
+  /** The folder went to the bin: unavailable until its owner shares it again. */
+  suspendedAt: Schema.NullOr(Schema.Number)
+})
+
+/** A share offered and not accepted yet (§1.4). `handle` is the name it was sent to, as typed. */
+const FileShareInvitation = Schema.Struct({
+  id: Schema.String,
+  ownerUserId: Schema.String,
+  path: Schema.String,
+  mode: Schema.Literals(["view", "edit"]),
+  createdAt: Schema.Number,
+  handle: Schema.String,
+  /** In the grantee's list: the owner's name. In the owner's: the name as typed, again. */
+  displayName: Schema.String,
+  /** The account it reaches; null when no account had the name. The host's alone: never sent to the owner. */
+  granteeUserId: Schema.NullOr(Schema.String)
 })
 
 export const Sha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
@@ -2915,7 +2935,8 @@ const WriteOpsLibraryOwn = RpcGroup.make(
   /**
    * A file or folder renamed or moved in the app (spec/FILES-AND-ENVIRONMENT.md §1.1): the stored
    * references to it and to what's inside it follow, in one transaction: unsaved edits (`file`
-   * drafts). One already at the new path keeps its place.
+   * drafts), shares and invitations. A draft already at the new path keeps its place; shares
+   * left at the new path were stale (nothing was there), so they go.
    */
   Rpc.make("MoveFileReferences", {
     payload: {
@@ -2927,21 +2948,39 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     error: StorageError
   }),
   /**
-   * Shares a folder of the owner's Files with another enabled account (spec/FILES-AND-ENVIRONMENT.md
-   * §1.4), Can view or Can edit; sharing it again with the same account changes the mode.
+   * Offers a folder of the owner's Files to the account with that name (spec/FILES-AND-ENVIRONMENT.md
+   * §1.4), Can view or Can edit. It reaches them as an invitation, and only an enabled account
+   * that existed when it was sent; the answer is the same either way. Already accepted by that
+   * account: the share's mode changes instead (`share`).
    */
-  Rpc.make("ShareFolder", {
+  Rpc.make("InviteToFolder", {
     payload: {
       userId: UserId,
       path: Schema.String.check(Schema.isMaxLength(4096)),
-      inode: Schema.NullOr(Schema.Number),
-      granteeUserId: UserId,
+      inode: Schema.Number,
+      device: Schema.Number,
+      handle: Schema.String.check(Schema.isMaxLength(128)),
       mode: Schema.Literals(["view", "edit"])
     },
+    success: Schema.Union([Schema.Struct({ invitation: FileShareInvitation }), Schema.Struct({ share: FileShare })]),
+    error: StorageError
+  }),
+  /** The invited account accepts (the share starts now) or declines; either way the invitation goes. */
+  Rpc.make("AnswerShareInvitation", {
+    payload: { userId: UserId, invitationId: Schema.String, accept: Schema.Boolean },
+    success: Schema.NullOr(FileShare),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * The owner shares a share's folder again: the folder at its path now (after it was replaced,
+   * moved away by a command, or restored from the bin). Its versions from before stay out of reach.
+   */
+  Rpc.make("RebindFolderShare", {
+    payload: { userId: UserId, shareId: Schema.String, inode: Schema.Number, device: Schema.Number },
     success: FileShare,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** The owner stops sharing: the other account's next look no longer finds it. */
+  /** The owner stops sharing, or takes back an invitation: the other account's next look no longer finds it. */
   Rpc.make("StopSharingFolder", {
     payload: { userId: UserId, shareId: Schema.String },
     success: Schema.Void,
@@ -2975,7 +3014,9 @@ const WriteOpsLibraryOwn = RpcGroup.make(
       path: Schema.String.check(Schema.isMaxLength(4096)),
       name: Schema.String,
       entryKind: Schema.Literals(["file", "folder", "link", "other"]),
-      byteSize: Schema.Int
+      byteSize: Schema.Int,
+      /** Who deleted it, when not its owner (in a folder shared with them, §1.4). */
+      actor: Schema.optionalKey(Schema.Struct({ userId: UserId, handle: Schema.String }))
     },
     success: BinItem,
     error: Schema.Union([NotFound, StorageError])
@@ -6044,7 +6085,8 @@ const ReadOpsOwn = RpcGroup.make(
       byteSize: Schema.Number,
       origin: Schema.String,
       sha256: Schema.NullOr(Schema.String),
-      mediaPath: Schema.NullOr(Schema.String)
+      mediaPath: Schema.NullOr(Schema.String),
+      createdAt: Schema.Number
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -6071,9 +6113,24 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Array(FileShare),
     error: StorageError
   }),
-  /** A file's earlier contents, newest first (§1.3), each with the account that acted. */
+  /** Invitations the owner sent that aren't answered yet, each under the name typed. */
+  Rpc.make("ShareInvitationsSent", {
+    payload: { userId: UserId },
+    success: Schema.Array(FileShareInvitation),
+    error: StorageError
+  }),
+  /** Invitations to this account from other enabled accounts, each with its owner's name. */
+  Rpc.make("ShareInvitationsReceived", {
+    payload: { userId: UserId },
+    success: Schema.Array(FileShareInvitation),
+    error: StorageError
+  }),
+  /**
+   * A file's earlier contents, newest first (§1.3), each with the account that acted. `since`:
+   * only those kept at or after then (through a share: none from before it started).
+   */
   Rpc.make("ListFileVersions", {
-    payload: { userId: UserId, path: Schema.String, limit: Schema.Number },
+    payload: { userId: UserId, path: Schema.String, limit: Schema.Number, since: Schema.optionalKey(Schema.Number) },
     success: Schema.Array(
       Schema.Struct({
         id: Schema.String,

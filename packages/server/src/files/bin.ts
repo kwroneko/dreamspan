@@ -83,7 +83,9 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
     userId: string,
     root: string,
     segments: ReadonlyArray<string>,
-    full: string
+    full: string,
+    /** Who deleted it, when not the owner of the tree (a folder shared with them). */
+    actor?: { readonly userId: string; readonly handle: string }
   ): Effect.Effect<BinItem, unknown> =>
     Effect.gen(function* () {
       if (segments.length === 0) return yield* Effect.fail(new FilePathRefused("The top folder can't be deleted."))
@@ -110,7 +112,8 @@ export const makeFilesBin = (deps: FilesBinDeps) => {
           path: full,
           name,
           entryKind,
-          byteSize
+          byteSize,
+          ...(actor ? { actor: { userId: actor.userId as never, handle: actor.handle } } : {})
         })
         yield* Effect.tryPromise(async () => {
           const bin = await openBin(userId)
