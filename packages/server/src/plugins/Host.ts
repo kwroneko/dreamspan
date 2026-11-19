@@ -715,7 +715,8 @@ export class PluginHost extends Context.Service<
         reader,
         writer,
         rollback,
-        dirty
+        dirty,
+        copies: execution.pluginWorkingCopies
       })
       if (config.plugins) for (const tool of authoring.tools) yield* execution.rolloutTools.register(tool)
       if (config.plugins) {

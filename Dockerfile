@@ -48,6 +48,10 @@ COPY packages/plugin-api/src packages/plugin-api/src
 COPY packages/server/package.json packages/server/
 COPY packages/server/src packages/server/src
 COPY packages/client/src packages/client/src
+# The design docs, for the read-only /app-source copy commands see (spec/FILES-AND-ENVIRONMENT.md
+# §3.6, files/appSource.ts).
+COPY spec/*.md spec/
+COPY ARCHITECTURE.md README.md ./
 COPY --from=build /app/packages/client/dist packages/client/dist
 COPY --from=build /app/packages/server/dist/workers packages/server/dist/workers
 # The two guarded development imports must fail plainly in this image.
@@ -56,6 +60,9 @@ RUN test ! -d packages/server/src/dev && /usr/bin/setpriv --help | grep -q -- --
 # runs the server as node; started as node it runs the server as it is (docker/README.md).
 COPY docker/entrypoint.sh /usr/local/bin/dreamspan-entrypoint
 RUN chmod 0755 /usr/local/bin/dreamspan-entrypoint && mkdir -p /run/dreamspan-cgroup && unshare --help | grep -q -- --map-users
+# Names the version in /app-source's SOURCE.md (optional: --build-arg SOURCE_COMMIT=<commit>).
+ARG SOURCE_COMMIT=""
+ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 USER node
 VOLUME /data
 EXPOSE 8080

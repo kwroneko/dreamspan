@@ -18,6 +18,7 @@ import { appSource, pluginApiDocs } from "../../plugins/reference.ts"
 import { argsDigest } from "../approvals.ts"
 import { ToolInputRefused, type RolloutTool, type ToolContext, type ToolOutput } from "../tools.ts"
 import { builtinCopy, builtinCopyListing } from "../../plugins/builtins.ts"
+import type { PluginWorkingCopy } from "../pluginWorkingCopies.ts"
 
 export const PLUGIN_TOOLS = [
   "plugin_list",
@@ -96,6 +97,8 @@ export interface PluginAuthorDeps {
     target: Target & { commit: string; expectedRevision?: number }
   ) => Effect.Effect<PluginReport, unknown>
   readonly dirty: (actor: User, target: Target) => Effect.Effect<void, unknown>
+  /** Working copies in the account's Files (agent/pluginWorkingCopies.ts); the first is used. */
+  readonly copies?: { readonly list: () => ReadonlyArray<PluginWorkingCopy> }
 }
 export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
   const { reader, writer, dataDir, host } = deps
@@ -135,6 +138,53 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
     })
   const repo = (owner: string, id: string, request: AuthorRequest) =>
     attempt(() => repoTask<AuthorResult>(dataDir, { op: "author", owner, id, request }))
+  /** The repository's tree on disk (the saved version, or what plugin_write left). */
+  const treeOf = (owner: string, id: string) =>
+    repo(owner, id, { action: "files" }).pipe(Effect.map((result) => result.files ?? {}))
+  const copyOf = () => deps.copies?.list()[0]
+  /** The tree before a change, when a working copy follows the repository. */
+  const treeBefore = (owner: string, id: string) =>
+    copyOf() ? treeOf(owner, id).pipe(Effect.orElseSucceed(() => null)) : Effect.succeed(null)
+  /**
+   * Brings the Files working copy up to date after the repository changed (§5.3), and says what
+   * the agent should know. Never fails the tool: a copy that can't be updated is reported.
+   */
+  const follow = (ctx: ToolContext | null, actor: User, target: Target, before: Record<string, string> | null) =>
+    Effect.gen(function* () {
+      const copy = copyOf()
+      if (!copy) return {}
+      const after = yield* treeOf(ownerOf(actor, target), target.id)
+      const synced = yield* copy
+        .sync({
+          actor,
+          target,
+          before,
+          after,
+          ...(ctx ? { call: { rolloutId: ctx.rolloutId, toolCallId: ctx.toolCallId } } : {})
+        })
+        .pipe(
+          Effect.catchCause((cause) => {
+            const reason = cause.reasons.find((r) => r._tag === "Fail" || r._tag === "Die")
+            const value = reason?._tag === "Fail" ? reason.error : reason?._tag === "Die" ? reason.defect : undefined
+            return Effect.succeed({
+              path: copy.where(target),
+              overwritten: [],
+              failed: value instanceof Error ? value.message : "It couldn't be written."
+            })
+          })
+        )
+      return {
+        workingCopy: synced.path,
+        ...("failed" in synced ? { workingCopyNotUpdated: synced.failed } : {}),
+        ...(synced.overwritten.length
+          ? {
+              workingCopyOverwritten: synced.overwritten,
+              workingCopyNote:
+                "These files in the working copy had changes that weren't committed. They now match the repository; their earlier content is kept as versions in Files."
+            }
+          : {})
+      }
+    }).pipe(Effect.orElseSucceed(() => ({})))
   const effects = (
     kind: string,
     target: Target,
@@ -348,9 +398,10 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
         )
         if (report.ok && actor.role === "admin")
           checked.set(checkKey(owner, target.id), { tree: snapshot.tree!, commit: result.commit! })
+        const copy = yield* follow(ctx, actor, target, null)
         const saved = yield* record(
           ctx,
-          JSON.stringify({ plugin: (owner ? "" : "instance:") + target.id, ...result, report }),
+          JSON.stringify({ plugin: (owner ? "" : "instance:") + target.id, ...result, report, ...copy }),
           [
             effects("plugin.create", target, `Made an editable copy of ${part.label}`, {
               creation: true,
@@ -404,7 +455,7 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
       name: Type.String({ maxLength: 120 }),
       runs: Type.Union([Type.Literal("browser"), Type.Literal("server")])
     },
-    "Create a plugin repository from a template. Nothing loads or is enabled; server repositories need an admin.",
+    'Create a plugin repository from a template. Nothing loads or is enabled; server repositories need an admin. It also makes a working copy in your files (/files/Plugins/<id>, a server plugin\'s at /files/Plugins/Server/<id>) with a .git of its own, which commands and the file tools can change; commit it with plugin_commit from: "files".',
     (ctx, args, actor) =>
       Effect.gen(function* () {
         const server = args.runs === "server",
@@ -443,12 +494,17 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
             key: operationKey(ctx, args)
           })
         )
-        return yield* record(ctx, JSON.stringify({ plugin: (server ? "instance:" : "") + target.id, ...result }), [
-          effects("plugin.create", target, `Created the plugin ${String(args.name)}`, {
-            creation: true,
-            commit: result.commit
-          })
-        ])
+        const copy = yield* follow(ctx, actor, target, null)
+        return yield* record(
+          ctx,
+          JSON.stringify({ plugin: (server ? "instance:" : "") + target.id, ...result, ...copy }),
+          [
+            effects("plugin.create", target, `Created the plugin ${String(args.name)}`, {
+              creation: true,
+              commit: result.commit
+            })
+          ]
+        )
       })
   )
   const fileRead = (action: "read" | "search" | "diff") => (ctx: ToolContext, args: Args, actor: User) =>
@@ -502,17 +558,36 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           (args.edits === undefined && (typeof args.old_str !== "string" || typeof args.new_str !== "string")))
       )
         return yield* refused("Provide edits, or both old_str and new_str.")
+      // The working copy's files, read back through the app's own checks (§5.3).
+      const fromFiles = action === "commit" && args.from === "files"
+      const copy = copyOf()
+      if (fromFiles && !copy) return yield* refused("There's no working copy in your files here.")
+      if (fromFiles) {
+        const unsaved = JSON.parse((yield* repo(owner, target.id, { action: "diff" })).text) as {
+          files: Array<unknown>
+        }
+        if (unsaved.files.length)
+          return yield* refused(
+            "This plugin has changes made with plugin_write or plugin_edit that aren't committed. Commit them first (plugin_commit without from), then commit the working copy."
+          )
+      }
+      const files = fromFiles
+        ? yield* copy!.read(actor, target).pipe(Effect.mapError((error) => refused(error.message)))
+        : undefined
       const request: AuthorRequest = {
         ...args,
         action,
         key: operationKey(ctx, args),
+        ...(files ? { files } : {}),
         ...(action === "edit" ? { edits: args.edits ?? [{ old_str: args.old_str, new_str: args.new_str }] } : {})
       } as AuthorRequest
       yield* repo(owner, target.id, { ...request, preview: true })
       const prior = checked.get(checkKey(owner, target.id))
+      const before = yield* treeBefore(owner, target.id)
       const result = yield* repo(owner, target.id, request)
       if (action !== "commit" || prior?.tree !== result.tree) checked.delete(checkKey(owner, target.id))
-      return yield* record(ctx, JSON.stringify(result), [
+      const followed = yield* follow(ctx, actor, target, before)
+      return yield* record(ctx, JSON.stringify({ ...result, ...followed }), [
         effects(
           action === "commit" ? "plugin.commit" : "plugin.write",
           target,
@@ -543,8 +618,17 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
   add(
     "plugin_commit",
     "library",
-    { ...plugin, message: Type.String({ minLength: 1, maxLength: 1000 }) },
-    "Commit the plugin working tree. Nothing is enabled. Undo creates a revert commit; it never runs the old code.",
+    {
+      ...plugin,
+      message: Type.String({ minLength: 1, maxLength: 1000 }),
+      from: Type.Optional(
+        Type.Literal("files", {
+          description:
+            "Commit the working copy in your files (/files/Plugins/<id>) instead: its .git and node_modules are left out, and it must hold only plugin text files."
+        })
+      )
+    },
+    "Commit the plugin working tree. Nothing is enabled. Undo creates a revert commit; it never runs the old code. After every change to the repository, the working copy in your files is updated to match; the result says when that replaced changes made there.",
     mutate("commit")
   )
   add(
@@ -602,18 +686,24 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
         const selectedTree = yield* repo(owner, prepared.target.id, { action: "checkpoint", commit: prepared.commit })
         if (!last || last.tree !== selectedTree.tree)
           return yield* refused("Plugin files changed after the check. Check and ask again.")
+        const before = yield* treeBefore(owner, prepared.target.id)
         const report = yield* deps.rollback(actor, {
           ...prepared.target,
           commit: prepared.commit,
           expectedRevision: prepared.revision
         })
         if (!report.ok) return { dataOnly: true as const, text: data(JSON.stringify(report)), isError: true }
-        const saved = yield* record(ctx, JSON.stringify({ enabled: prepared.commit, plugin: args.plugin }), [
-          effects("plugin.enable", prepared.target, `Turned on ${prepared.name}`, {
-            enabled: prepared.commit,
-            previous: prepared.before
-          })
-        ])
+        const followed = yield* follow(ctx, actor, prepared.target, before)
+        const saved = yield* record(
+          ctx,
+          JSON.stringify({ enabled: prepared.commit, plugin: args.plugin, ...followed }),
+          [
+            effects("plugin.enable", prepared.target, `Turned on ${prepared.name}`, {
+              enabled: prepared.commit,
+              previous: prepared.before
+            })
+          ]
+        )
         return { ...saved, presentation: { title: prepared.name, subtitle: `Version ${prepared.commit.slice(0, 8)}` } }
       }),
     {
@@ -647,9 +737,11 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           after = details.versions.find((v) => v.commit === previous)?.manifest
         if (!after || pluginAccessGrows(before, after))
           return yield* refused("This version adds access. Check it and use plugin_enable to ask first.")
+        const tree = yield* treeBefore(ownerOf(actor, target), target.id)
         const report = yield* deps.rollback(actor, { ...target, commit: previous, expectedRevision: details.revision })
         if (!report.ok) return { dataOnly: true as const, text: data(JSON.stringify(report)), isError: true }
-        return yield* record(ctx, `Went back to ${previous}.`, [
+        const followed = yield* follow(ctx, actor, target, tree)
+        return yield* record(ctx, JSON.stringify({ wentBackTo: previous, ...followed }), [
           effects("plugin.enable", target, `Went back to the previous version of ${target.id}`, {
             enabled: previous,
             previous: details.pin!.commit
@@ -690,7 +782,9 @@ export const makePluginAuthoring = (deps: PluginAuthorDeps) => {
           if (typeof recipe.journal === "string") {
             const request: AuthorRequest = { action: "undo", undo: recipe.journal, key }
             yield* repo(owner, target.id, { ...request, preview: true })
+            const before = yield* treeBefore(owner, target.id)
             yield* repo(owner, target.id, request)
+            yield* follow(null, actor, target, before)
           } else if (effect.kind === "plugin.enable" || effect.kind === "plugin.create") {
             const details = yield* hostDetails(actor, target)
             if (effect.kind === "plugin.enable" && details.pin?.commit !== recipe.enabled)

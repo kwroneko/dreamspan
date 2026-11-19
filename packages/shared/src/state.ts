@@ -199,12 +199,14 @@ export const StateEventData = Schema.Union([
    * Where a workshop's commands start and its relative paths resolve, on this branch
    * (spec/FILES-AND-ENVIRONMENT.md §2.1): a path inside the sandbox (`/files/thesis`) and the
    * folder's inode when it was chosen, to find it again after a rename. Absent: the top of Files.
+   * `host`: a folder on the server outside Files by its real path (§3.7), an admin's only.
    */
   event(
     "workshop.folder",
     Schema.Struct({
       path: Schema.String.check(Schema.isMaxLength(4096)),
-      inode: Schema.NullOr(Schema.Number)
+      inode: Schema.NullOr(Schema.Number),
+      host: Schema.optionalKey(Schema.Literal(true))
     })
   )
 ])
@@ -567,7 +569,12 @@ export interface ChatState {
   /** `workshop.paired`: the story branch this workshop branch goes with. */
   readonly workshopPaired?: string
   /** `workshop.folder`: the branch's working folder; absent is the top of Files. */
-  readonly workshopFolder?: { readonly path: string; readonly inode: number | null }
+  readonly workshopFolder?: {
+    readonly path: string
+    readonly inode: number | null
+    /** A folder on the server outside Files, by its real path (§3.7): an admin's only. */
+    readonly host?: true
+  }
   /** Plugin keys' values by key id (`<plugin>/<key>`); absent until a registered key has an event. */
   readonly plugin?: Readonly<Record<string, unknown>>
 }

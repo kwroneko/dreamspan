@@ -160,3 +160,9 @@ scopes. `COMMAND_SANDBOX` names the sandbox to use (`linux-bwrap` is the only on
 the first available. `COMMAND_CGROUP` names a delegated cgroup subtree the server may write,
 for hosts that make one themselves. `MCP_LOCAL_PROGRAMS=on` lets admins add MCP servers that are
 local programs; they run in the same sandbox (off by default).
+
+`HOST_FOLDERS` (comma-separated absolute paths) lists folders on the server an admin may choose
+as a workshop's working folder; in Docker these are folders you mount into the container. System
+folders and the app's own data are refused. `ALLOW_UNSANDBOXED_COMMANDS=1` lets an admin turn the
+sandbox off for one workshop after a consent; commands then run as the app's user and can read
+every account's data. Neither is ever offered to other accounts.

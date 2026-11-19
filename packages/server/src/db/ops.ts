@@ -6007,6 +6007,21 @@ const ReadOpsOwn = RpcGroup.make(
     success: Schema.Array(Schema.String),
     error: StorageError
   }),
+  /** Folders other accounts shared with this one, by owner handle and path (fileVersions.ts). */
+  Rpc.make("FileSharesGrantedTo", {
+    payload: { userId: UserId },
+    success: Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        ownerId: Schema.String,
+        ownerHandle: Schema.String,
+        path: Schema.String,
+        inode: Schema.NullOr(Schema.Number),
+        mode: Schema.Literals(["view", "edit"])
+      })
+    ),
+    error: StorageError
+  }),
   /** Bytes an account's file versions hold: each stored content once (fileVersions.ts). */
   Rpc.make("FileVersionBytes", {
     payload: { userId: UserId },

@@ -7,7 +7,7 @@ import git from "isomorphic-git"
 import { commitFiles, diskFiles, limits, validPath, confined, pluginFolder, safeGit } from "./repo.ts"
 
 export interface AuthorRequest {
-  readonly action: "read" | "search" | "diff" | "write" | "edit" | "commit" | "checkpoint" | "undo"
+  readonly action: "read" | "search" | "diff" | "write" | "edit" | "commit" | "checkpoint" | "undo" | "files"
   readonly commit?: string
   readonly path?: string
   readonly content?: string
@@ -20,6 +20,8 @@ export interface AuthorRequest {
   readonly key?: string
   readonly preview?: boolean
   readonly undo?: string
+  /** A commit of this whole tree instead of the repository's own (the Files working copy, §5.3). */
+  readonly files?: Readonly<Record<string, string>>
 }
 export interface AuthorResult {
   readonly text: string
@@ -28,6 +30,8 @@ export interface AuthorResult {
   readonly head?: string
   readonly tree?: string
   readonly journal?: string
+  /** `files`: the repository's tree as it is on disk. */
+  readonly files?: Record<string, string>
 }
 interface Journal {
   digest: string
@@ -107,6 +111,7 @@ export const authorRepo = async (
   const current = filesText(await diskFiles(folder))
   if (request.path !== undefined) bound({ [request.path]: "" })
   bound(current)
+  if (request.action === "files") return { text: "The plugin's files.", files: current }
   if (request.action === "read") {
     const text = current[request.path!]
     if (text === undefined) throw new Error("Plugin file not found")
@@ -187,6 +192,12 @@ export const authorRepo = async (
     const after = { ...current }
     let commitUndo = false
     if (request.action === "write") after[request.path!] = request.content ?? ""
+    if (request.action === "commit" && request.files) {
+      // The working copy's tree replaces the saved one; edits made here first would be lost.
+      if (treeHash(current) !== treeHash(filesText(saved))) throw new Error("Plugin has unsaved changes")
+      for (const p of Object.keys(after)) delete after[p]
+      Object.assign(after, request.files)
+    }
     if (request.action === "edit") {
       let text = after[request.path!]
       if (text === undefined || !request.edits?.length || request.edits.length > 32)

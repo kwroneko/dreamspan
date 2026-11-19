@@ -22,6 +22,11 @@ import { accountEnv, prepareAccount } from "./environment.ts"
 import { folderAt, locateFolder } from "./workingFolder.ts"
 import { BIN_FOLDER, makeFilesBin, type FilesBin } from "./bin.ts"
 import { makeFilesQuota, parseByteSize, type FilesQuota } from "./quota.ts"
+import { prepareAppSource } from "./appSource.ts"
+import { makePluginCopies } from "./pluginCopies.ts"
+import { makeCommandOutputs } from "./commandOutput.ts"
+import { makeHostFolders, type HostFolders } from "./hostFolders.ts"
+import { APP_ROOT } from "./appSource.ts"
 
 export class WorkshopFiles extends Context.Service<
   WorkshopFiles,
@@ -41,11 +46,24 @@ export class WorkshopFiles extends Context.Service<
     readonly changed: (userId: string, paths: ReadonlyArray<string>, all?: boolean) => void
     /** A folder of the account's Files with its inode, for `workshop.folder` (§2.1); fails when it isn't one. */
     readonly folderAt: (userId: string, path: string) => Effect.Effect<{ path: string; inode: number | null }, unknown>
-    /** Where a stored working folder is now (workingFolder.ts `locateFolder`); null when it's gone. */
+    /** Empties the account's home folder for commands; fails with FilePathRefused while a command runs. */
+    readonly resetHome: (userId: string) => Effect.Effect<void, unknown>
+    /** Bytes the account's commands moved over the internet since the server started. */
+    readonly networkUse: (userId: string) => { readonly bytes: number; readonly since: number }
+    /**
+     * Where a stored working folder is now (workingFolder.ts `locateFolder`); null when it's gone.
+     * A host folder (§3.7) is where it was, while it's still allowed and the same folder; never
+     * for a non-admin.
+     */
     readonly locateFolder: (
       userId: string,
-      stored: { readonly path: string; readonly inode: number | null }
+      stored: { readonly path: string; readonly inode: number | null; readonly host?: true },
+      admin?: boolean
     ) => Effect.Effect<string | null>
+    /** Folders on the server outside Files (HOST_FOLDERS, §3.7), for admins. */
+    readonly hostFolders: HostFolders
+    /** ALLOW_UNSANDBOXED_COMMANDS is set and a `none` sandbox is registered (§3.7). */
+    readonly unsandboxedAllowed: boolean
   }
 >()("rp/files/WorkshopFiles") {
   static readonly layer = Layer.effect(
@@ -66,6 +84,10 @@ export class WorkshopFiles extends Context.Service<
         filesDir: config.filesDir || join(config.dataDir, "files"),
         homesDir: join(config.dataDir, "env-home")
       }
+      // Host folders (§3.7): never the app's data, Files or code.
+      const hostFolders = makeHostFolders(config.hostFolders, [config.dataDir, dirs.filesDir, APP_ROOT], (line) =>
+        Effect.runFork(Effect.logWarning(line))
+      )
       const quota = makeFilesQuota({
         reader,
         writer,
@@ -98,7 +120,27 @@ export class WorkshopFiles extends Context.Service<
         writer,
         quota
       })
+      // The app's source for /app-source (§3.6): copied on first use, once per version.
+      let sourceCopy: Promise<string | null> | null = null
+      const appSource = () =>
+        (sourceCopy ??= prepareAppSource(config.dataDir).then(
+          (copy) => copy.folder,
+          (error: unknown) => {
+            sourceCopy = null
+            Effect.runFork(Effect.logWarning(`copying the app's source for commands failed: ${String(error)}`))
+            return null
+          }
+        ))
+      // Commands' whole output (§5.1), and what they moved over the internet (§3.5, counted only).
+      const outputs = makeCommandOutputs(config.dataDir)
+      const networkSince = Date.now()
+      const network = new Map<string, number>()
       const files = makeFileTools({
+        appSource,
+        outputs,
+        hostFolders,
+        allowUnsandboxed: config.allowUnsandboxedCommands,
+        onNetwork: (userId, bytes) => network.set(userId, (network.get(userId) ?? 0) + bytes),
         dataDir: config.dataDir,
         ...dirs,
         reader,
@@ -112,6 +154,28 @@ export class WorkshopFiles extends Context.Service<
       })
       for (const tool of files.tools) yield* execution.rolloutTools.register(tool)
       yield* execution.subagentWorkspaces.register(files.workspaces)
+      // Background commands end with the app.
+      yield* Effect.addFinalizer(() => Effect.sync(() => files.stopAll()))
+      // Plugin working copies in Files (§5.3), for the plugin tools.
+      yield* execution.pluginWorkingCopies.register(
+        makePluginCopies({
+          rootOf: async (userId) => {
+            const env = accountEnv(dirs, userId)
+            await prepareAccount(env)
+            return env.filesRoot
+          },
+          keepVersion: files.keepVersion,
+          wrote: quota.wrote,
+          onChanged: changed,
+          initGit: async (userId, folder) => {
+            await files.runQuiet(
+              userId,
+              "git init -q -b main && git add -A && git -c user.name=Assistant -c user.email=assistant@localhost commit -q -m 'Start the plugin'",
+              folder
+            )
+          }
+        })
+      )
       // The turn's tail says where commands start (§2.1), when the turn offers the file tools.
       yield* execution.turnNotes.register({
         id: "files.workingFolder",
@@ -120,6 +184,19 @@ export class WorkshopFiles extends Context.Service<
             if (!offered.some((id) => (FILE_TOOLS as ReadonlyArray<string>).includes(id))) return null
             const stored = state.workshopFolder
             if (!stored) return `Working folder: ${FILES_TOP}`
+            if (stored.host) {
+              // Only while the account is still an enabled admin.
+              const account = yield* reader
+                .GetPasswordHash({ userId: userId as UserId })
+                .pipe(Effect.orElseSucceed(() => null))
+              const at =
+                account?.user.role === "admin"
+                  ? yield* Effect.promise(() => hostFolders.check(stored.path).catch(() => null))
+                  : null
+              return at && (stored.inode === null || at.inode === stored.inode)
+                ? `Working folder: ${at.path} (a folder on the server, outside the files)`
+                : `Working folder: ${FILES_TOP} (${stored.path} isn't available, so commands start at the top of the files)`
+            }
             const now = yield* locate(userId, stored)
             return now
               ? `Working folder: ${now}`
@@ -155,6 +232,11 @@ export class WorkshopFiles extends Context.Service<
         Effect.repeat(Schedule.spaced(Duration.millis(quota.intervals.retentionMs))),
         Effect.forkScoped
       )
+      // Kept command output older than a day.
+      yield* Effect.promise(() => outputs.prune()).pipe(
+        Effect.repeat(Schedule.spaced(Duration.millis(quota.intervals.retentionMs))),
+        Effect.forkScoped
+      )
       // The content of bin items that went (emptied, purged, or evicted past the bin's limits).
       yield* bin.sweep().pipe(
         Effect.tap((bytes) =>
@@ -182,7 +264,20 @@ export class WorkshopFiles extends Context.Service<
             await prepareAccount(env)
             return folderAt(env.filesRoot, path)
           }),
-        locateFolder: locate
+        resetHome: (userId) =>
+          files.resetHome(userId).pipe(Effect.tap(() => quota.measure(userId).pipe(Effect.asVoid))),
+        networkUse: (userId) => ({ bytes: network.get(userId) ?? 0, since: networkSince }),
+        locateFolder: (userId, stored, admin = false) =>
+          stored.host
+            ? Effect.promise(async () => {
+                if (!admin) return null
+                const now = await hostFolders.check(stored.path).catch(() => null)
+                return now && (stored.inode === null || now.inode === stored.inode) ? now.path : null
+              })
+            : locate(userId, stored),
+        hostFolders,
+        unsandboxedAllowed:
+          config.allowUnsandboxedCommands && commandSandboxes.list().some((sandbox) => sandbox.unsandboxed)
       }
     })
   )

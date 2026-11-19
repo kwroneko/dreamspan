@@ -13,6 +13,7 @@ import type { CapabilityMode } from "@dreamspan/shared/workshopApi.ts"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import type { ComposerControlContext } from "../chat/composerControls.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
@@ -46,6 +47,13 @@ function CapabilityRow({
   error?: ReactNode
 }) {
   const choices = choicesOf(capability)
+  // A capability with a consent (no sandbox, spec/FILES-AND-ENVIRONMENT.md §3.7) asks before it's turned on.
+  const [asking, setAsking] = useState<CapabilityMode | null>(null)
+  const ask = (mode: CapabilityMode | null) => {
+    const turningOn = (mode ?? capability.defaultMode) !== "off" && capability.mode === "off"
+    if (capability.confirm && turningOn && mode !== null) setAsking(mode)
+    else choose(mode)
+  }
   const about = capability.example
     ? `${capability.explanation} For example: ${capability.example}`
     : capability.explanation
@@ -72,7 +80,7 @@ function CapabilityRow({
               label: modeLabelOf(capability, mode),
               description: `${modeDescriptionOf(capability, mode)}${mode === capability.defaultMode ? " (The default.)" : ""}`
             }))}
-            onValueChange={(mode) => mode !== capability.mode && choose(mode)}
+            onValueChange={(mode) => mode !== capability.mode && ask(mode)}
           />
         ) : (
           <span className="text-right text-xs text-muted">{modeText(capability)}</span>
@@ -85,12 +93,27 @@ function CapabilityRow({
           className="h-7 self-start px-2 text-xs"
           pending={pending}
           hint={`Goes back to the default here: ${modeLabelOf(capability, capability.defaultMode)}.`}
-          onClick={() => choose(null)}
+          onClick={() => ask(null)}
         >
           Use the default
         </Button>
       )}
       {error}
+      {capability.confirm && (
+        <ConfirmDialog
+          open={asking !== null}
+          onOpenChange={(open) => !open && setAsking(null)}
+          title={capability.confirm.title}
+          description={capability.confirm.body}
+          confirmLabel={capability.confirm.confirmLabel}
+          confirmHint="Turns it on for this workshop."
+          cancelLabel={capability.confirm.cancelLabel}
+          onConfirm={() => {
+            if (asking !== null) choose(asking)
+            setAsking(null)
+          }}
+        />
+      )}
     </li>
   )
 }

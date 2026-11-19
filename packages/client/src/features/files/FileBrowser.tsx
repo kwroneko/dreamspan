@@ -49,7 +49,8 @@ import {
   type ConflictAnswer,
   type UploadItem
 } from "./upload.ts"
-import { freeBytes, noRoomMessage, roomProblem, usageLine } from "./usage.ts"
+import { freeBytes, noRoomMessage, roomProblem } from "./usage.ts"
+import { UsageDetails } from "./UsageDetails.tsx"
 import { NoViewer, viewerFor } from "./viewers.tsx"
 
 /** The chat's working folder on its branch (§2.1), and how to change it where that's offered. */
@@ -529,7 +530,7 @@ export function FileBrowser(props: FileBrowserProps) {
               }}
             />
           </div>
-          {usage && <UsageLine usage={usage} />}
+          {usage && <UsageDetails usage={usage} onChanged={() => void readUsage()} />}
           {readOnly && (
             <p className="text-sm text-muted">Shared with you to view: you can open and download, not change.</p>
           )}
@@ -1148,28 +1149,5 @@ function ConflictDialog({ open, onAnswer }: { open: boolean; onAnswer: (answer: 
         </Button>
       </DialogActions>
     </Dialog>
-  )
-}
-
-/** "1.2 GB of 10 GB used", warning-styled when near or over the quota. */
-function UsageLine({ usage }: { usage: FilesUsage }) {
-  const line = usageLine(usage)
-  return (
-    <Tooltip
-      label={
-        usage.over
-          ? "Your files are over their storage limit. Delete files you don't need and empty the bin to upload or change files again."
-          : "How much of your storage your files use, with their earlier versions, the bin and the assistant's home folder."
-      }
-    >
-      <p
-        tabIndex={0}
-        data-files-usage=""
-        data-warn={line.warn ? "" : undefined}
-        className={`w-fit rounded-md text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus ${line.warn ? "text-warning" : "text-muted"}`}
-      >
-        {line.text}
-      </p>
-    </Tooltip>
   )
 }

@@ -1,8 +1,9 @@
 import { PluginHost } from "../plugins/Host.ts"
 import { WorkshopFiles } from "../files/WorkshopFiles.ts"
+import { HostFolderRefusal } from "../files/hostFolders.ts"
 import { FILES_TOP } from "@dreamspan/shared/files.ts"
 import { FILE_UNDO_ON_HOST } from "../db/workshopEffects.ts"
-import { EffectUndoRefused } from "@dreamspan/shared/workshopApi.ts"
+import { EffectUndoRefused, HostFolderRefused } from "@dreamspan/shared/workshopApi.ts"
 import { CurrentUser } from "@dreamspan/shared/api.ts"
 import type { ChatId, ForkId } from "@dreamspan/shared/chat.ts"
 import type { UserId } from "@dreamspan/shared/domain.ts"
@@ -17,12 +18,12 @@ import { Effect } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
 import { ExecutionRegistry, toolForKind } from "../execution.ts"
-import { MCP_CAPABILITY } from "../agent/capabilities.ts"
+import { COMMANDS_UNSANDBOXED, MCP_CAPABILITY } from "../agent/capabilities.ts"
 import { mcpHostOf } from "../agent/tools/mcp.ts"
 import { type ChatState, foldState } from "@dreamspan/shared/state.ts"
 import { capabilityView, SIDE_STORY_READ_MODE } from "../agent/capabilities.ts"
 import { chatKinds } from "@dreamspan/shared/chatKinds.ts"
-import { NotFound } from "@dreamspan/shared/errors.ts"
+import { Forbidden, NotFound } from "@dreamspan/shared/errors.ts"
 import type { McpConnection } from "@dreamspan/shared/mcp.ts"
 import { cancelCapability, deliverAnswer } from "../agent/approvals.ts"
 import { CARD_SKILLS } from "../agent/tools/loading.ts"
@@ -125,7 +126,9 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
     state: ChatState,
     grants: ReadonlyMap<string, CapabilityMode>,
     story: { readonly title: string | null } | null,
-    connections: ReadonlyArray<{ readonly connection: McpConnection; readonly grant: CapabilityMode | null }>
+    connections: ReadonlyArray<{ readonly connection: McpConnection; readonly grant: CapabilityMode | null }>,
+    /** An admin's saved workshop where the server allows commands without a sandbox (§3.7). */
+    unsandboxed = false
   ) =>
     Effect.gen(function* () {
       const profile = execution.chatKinds.get(kind)
@@ -140,6 +143,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       // A setting shown with the capability it belongs to (Internet from commands, with Run commands).
       for (const entry of execution.workshopCapabilities.list())
         if (entry.alongside && offered.has(entry.alongside)) offered.add(entry.id)
+      // Never offered to other accounts, nor where the server doesn't allow it.
+      if (!unsandboxed || !files.unsandboxedAllowed) offered.delete(COMMANDS_UNSANDBOXED)
       // A kind that loads some of its tools as it goes may load a card's skills (spec/TOOL-LOADING.md §6).
       const loading = execution.toolLoadingProfiles.get(kind)
       const planned = plan?.tools ?? []
@@ -216,7 +221,8 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
       const connections = execution.workshopCapabilities.get(MCP_CAPABILITY)
         ? yield* reader.McpWorkshopConnections({ userId, chatId })
         : []
-      return yield* capabilitiesFrom(chat.kind, state, grants, story, connections)
+      const admin = (yield* CurrentUser).role === "admin"
+      return yield* capabilitiesFrom(chat.kind, state, grants, story, connections, admin)
     })
   /**
    * What a workshop not made yet offers (owner, 2026-11-17: its composer is the saved one before
@@ -343,15 +349,30 @@ export const makeWorkshopHandlers = Effect.gen(function* () {
         const userId = (yield* CurrentUser).id
         const chat = yield* reader.GetChat({ userId, chatId })
         if (chat.kind !== "workshop") return yield* new NotFound({ entity: "workshop", id: chatId })
-        const current = stored === null ? FILES_TOP : yield* files.locateFolder(userId, stored)
+        const admin = (yield* CurrentUser).role === "admin"
+        const current = stored === null ? FILES_TOP : yield* files.locateFolder(userId, stored, admin)
         const memory = yield* reader.WorkshopFolderMemory({ userId, cardId })
         const card = memory.card === null ? null : yield* files.locateFolder(userId, memory.card)
+        const roots = admin ? yield* Effect.promise(() => files.hostFolders.roots().catch(() => [])) : []
         return {
           current,
           recent: memory.recent.map((folder) => folder.path),
-          card: card !== null && card !== current ? card : null
+          card: card !== null && card !== current ? card : null,
+          hostFolders: roots.length > 0
         }
       }).pipe(internal("WorkshopFolderChoices")),
+    ListHostFolders: ({ path }) =>
+      Effect.gen(function* () {
+        if ((yield* CurrentUser).role !== "admin")
+          return yield* new Forbidden({ message: "Only an admin can choose a folder on the server." })
+        return yield* Effect.tryPromise({
+          try: () => files.hostFolders.list(path),
+          catch: (error) =>
+            new HostFolderRefused({
+              message: error instanceof HostFolderRefusal ? error.message : `${path ?? "The folder"} couldn't be read.`
+            })
+        })
+      }).pipe(internal("ListHostFolders")),
     // Grants chosen before the first message: only what a new workshop offers, each as
     // `SetWorkshopGrant` would take it there, so nothing the strip couldn't set gets in.
     CreateWorkshop: (input) =>

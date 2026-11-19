@@ -20,12 +20,25 @@ export interface CapabilityEntry {
    * that capability's tools (`commands.network` beside `commands`).
    */
   readonly alongside?: string
+  /** A dialog the client shows before turning it on (the §3.7 consent), with its two buttons. */
+  readonly confirm?: {
+    readonly title: string
+    readonly body: string
+    readonly confirmLabel: string
+    readonly cancelLabel: string
+  }
 }
 
 const ALL_MODES: ReadonlyArray<CapabilityMode> = ["off", "ask", "allow"]
 
 /** Whether commands reach the internet (spec/FILES-AND-ENVIRONMENT.md §3.5): a setting of `commands`. */
 export const COMMANDS_NETWORK = "commands.network"
+
+/**
+ * Commands without a sandbox (spec/FILES-AND-ENVIRONMENT.md §3.7): a setting of `commands`, offered
+ * only to an admin where ALLOW_UNSANDBOXED_COMMANDS is set (api/workshop.ts), Off by default.
+ */
+export const COMMANDS_UNSANDBOXED = "commands.unsandboxed"
 
 /** The capability of every MCP server's tools; a workshop's choice names the server as its target. */
 export const MCP_CAPABILITY = "mcp"
@@ -120,6 +133,22 @@ export const workshopCapabilities = makeRegistry<CapabilityEntry>([
     alongside: "commands"
   },
   {
+    id: COMMANDS_UNSANDBOXED,
+    order: 77,
+    label: "Run commands without a sandbox",
+    explanation:
+      "Commands run directly on the server as the app. They can read and change every account's chats, files and keys.",
+    example: "Runs a build that needs the server's own tools.",
+    modes: ["off", "allow"],
+    alongside: "commands",
+    confirm: {
+      title: "Run commands without a sandbox?",
+      body: "Commands will run as the server's app. They can read and change every account's chats, files and keys, and use the server's network and other devices. Changes outside your files can't be undone or restored.",
+      confirmLabel: "Run without a sandbox",
+      cancelLabel: "Keep the sandbox"
+    }
+  },
+  {
     id: "plugins.write",
     order: 80,
     label: "Write plugins",
@@ -181,6 +210,8 @@ export const capabilityDefaults = makeRegistry<{ readonly id: string; readonly m
   { id: "files", mode: "allow" },
   { id: "commands", mode: "allow" },
   { id: COMMANDS_NETWORK, mode: "allow" },
+  // Owner [D] (§3.7): Off by default; turned on only through the consent.
+  { id: COMMANDS_UNSANDBOXED, mode: "off" },
   // spec/SUBAGENTS.md §13: decided as a recommendation, not asked.
   { id: "subagents", mode: "allow" },
   { id: "chats.read", mode: "ask" },
@@ -236,6 +267,7 @@ export const capabilityView = (
     defaultMode,
     modes,
     chosen: grants.has(entry.id) && modes.includes(grants.get(entry.id)!),
+    ...(entry.confirm ? { confirm: entry.confirm } : {}),
     ...(modes.length === 1 ? { always: true } : {})
   }
 }

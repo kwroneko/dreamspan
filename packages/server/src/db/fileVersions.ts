@@ -193,6 +193,26 @@ export const makeFileVersionReadHandlers = Effect.gen(function* () {
         Effect.map((rows) => rows.map((row) => row.id)),
         query("FileBinItemIds")
       ),
+    // Folders other accounts shared with this one (§1.4), for its commands' binds (A5). Shares
+    // from a disabled account don't count.
+    FileSharesGrantedTo: ({ userId }) =>
+      sql<{ id: string; owner_user_id: string; handle: string; path: string; inode: number | null; mode: string }>`
+        SELECT s.id, s.owner_user_id, u.handle, s.path, s.inode, s.mode
+        FROM file_shares s JOIN users u ON u.id = s.owner_user_id
+        WHERE s.grantee_user_id = ${userId} AND u.disabled_at IS NULL
+        ORDER BY u.handle, s.path`.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            id: row.id,
+            ownerId: row.owner_user_id,
+            ownerHandle: row.handle,
+            path: row.path,
+            inode: row.inode,
+            mode: row.mode === "edit" ? ("edit" as const) : ("view" as const)
+          }))
+        ),
+        query("FileSharesGrantedTo")
+      ),
     FileVersionBytes: ({ userId }) =>
       sql<{ bytes: number | null }>`SELECT sum(m.byte_size) AS bytes FROM media_assets m
         WHERE m.id IN (SELECT media_id FROM file_versions WHERE owner_user_id = ${userId} AND media_id IS NOT NULL)`.pipe(

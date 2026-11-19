@@ -72,7 +72,8 @@ export const repoTask = async <A>(dataDir: string, request: RepoRequest): Promis
     if (!child.ok) throw new Error("Plugin repository operation failed")
     const response = join(folder, "response.json"),
       info = await lstat(response)
-    if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024)
+    // A plugin's whole tree (`files`) is at most 8 MiB of text, more once quoted as JSON.
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 32 * 1024 * 1024)
       throw new Error("Invalid repository response")
     return JSON.parse(await readFile(response, "utf8")) as A
   } finally {

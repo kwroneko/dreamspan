@@ -4,12 +4,20 @@
 // offered. `linux-bwrap` is the only built-in so far; macOS and Windows register here later.
 import { makeRegistry } from "@dreamspan/shared/registry.ts"
 import { linuxBwrap } from "./linuxBwrap.ts"
+import { noSandbox } from "./none.ts"
 
 /** A host folder seen inside the sandbox at `target`. */
 export interface SandboxMount {
   readonly source: string
   readonly target: string
   readonly writable: boolean
+  /**
+   * An open descriptor of the folder (in this process), bound in place of `source`: a folder
+   * found by the no-follow walk, so a link swapped in for it after the check is never followed.
+   */
+  readonly fd?: number
+  /** An empty, small, memory-backed folder at `target` (`source` unused), to hold other mounts. */
+  readonly empty?: boolean
 }
 
 export interface RunLimits {
@@ -49,6 +57,8 @@ export interface RunSpec {
   readonly env: Readonly<Record<string, string>>
   readonly network: "public" | "none"
   readonly limits: RunLimits
+  /** Each chunk of output (stdout and stderr together) as it comes, for keeping the whole output. */
+  readonly onOutput?: (chunk: Buffer) => void
 }
 
 export interface RunResult {
@@ -68,6 +78,8 @@ export interface RunResult {
   /** The shell's directory when the command ended; null when it didn't say. */
   readonly cwd: string | null
   readonly durationMs: number
+  /** Bytes the command sent and received over the internet, where the sandbox counts them. */
+  readonly networkBytes?: number
 }
 
 /**
@@ -127,9 +139,15 @@ export interface CommandSandbox {
   readonly note?: () => Promise<string | null>
   /** At server start: cleanup and what it found, for the log. */
   readonly start?: () => Promise<ReadonlyArray<string>>
+  /**
+   * Runs commands without isolation (`none`, spec/FILES-AND-ENVIRONMENT.md §3.7): never chosen
+   * by `selectSandbox`, named or not; only the file tools' own check for an admin's workshop
+   * uses it.
+   */
+  readonly unsandboxed?: true
 }
 
-export const commandSandboxes = makeRegistry<CommandSandbox>([linuxBwrap])
+export const commandSandboxes = makeRegistry<CommandSandbox>([linuxBwrap, noSandbox])
 
 /**
  * The sandbox commands run in: the named one, else the first available for this platform.
@@ -142,9 +160,11 @@ export const selectSandbox = async (
   },
   named?: string
 ): Promise<{ readonly sandbox: CommandSandbox } | { readonly unavailable: string }> => {
-  const candidates = named
-    ? [registry.get(named)].filter((s): s is CommandSandbox => s !== undefined)
-    : registry.list().filter((s) => s.platforms.includes(process.platform))
+  const candidates = (
+    named
+      ? [registry.get(named)].filter((s): s is CommandSandbox => s !== undefined)
+      : registry.list().filter((s) => s.platforms.includes(process.platform))
+  ).filter((s) => !s.unsandboxed)
   if (candidates.length === 0)
     return { unavailable: named ? `The sandbox “${named}” isn't installed.` : "Commands can't run on this system yet." }
   let reason = ""

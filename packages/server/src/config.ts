@@ -23,6 +23,23 @@ const AppConfigFromEnv = Config.all({
    */
   commandSandbox: Config.String(serverEnvironment.COMMAND_SANDBOX).pipe(Config.withDefault("")),
   /**
+   * Folders on the server an admin may choose as a workshop's working folder, besides Files
+   * (spec/FILES-AND-ENVIRONMENT.md §3.7): absolute paths, comma-separated. Empty: none. A
+   * security setting, so configurable only here; files/hostFolders.ts refuses system folders
+   * and the app's own.
+   */
+  hostFolders: Config.Array(Schema.String, serverEnvironment.HOST_FOLDERS).pipe(
+    Config.withDefault<ReadonlyArray<string>>([])
+  ),
+  /**
+   * `1`: an admin may turn the sandbox off for a workshop, after a consent (§3.7). Commands then
+   * run as the app's user. Never offered to other accounts.
+   */
+  allowUnsandboxedCommands: Config.String(serverEnvironment.ALLOW_UNSANDBOXED_COMMANDS).pipe(
+    Config.withDefault(""),
+    Config.map((value) => value === "1" || value === "true")
+  ),
+  /**
    * Each account's Files quota by default (spec/FILES-AND-ENVIRONMENT.md §1.2): files, their
    * versions and the home folder together. Bytes, or a number with K, M, G or T (binary units,
    * e.g. `10G`); checked at startup (files/quota.ts). An admin can set another per account.
