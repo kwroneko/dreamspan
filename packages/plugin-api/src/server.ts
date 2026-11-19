@@ -94,15 +94,24 @@ export interface SubagentTypeV1 {
   readonly id: string
   /** Shown in a subagent's row: "Check names". */
   readonly label: string
+  /** For the user, on hover: what it does, in a short sentence. */
+  readonly explanation?: string
   /** For the assistant: what it's for. */
   readonly description: string
   /** Chat kinds it's offered in: ["workshop"]. */
   readonly kinds: ReadonlyArray<string>
-  readonly tools: { readonly ids?: ReadonlyArray<string>; readonly effects?: ReadonlyArray<string> }
+  /** Tools by id, every tool of an effect class, or `all`: every tool the starting reply has (less those no subagent gets). */
+  readonly tools: {
+    readonly ids?: ReadonlyArray<string>
+    readonly effects?: ReadonlyArray<string>
+    readonly all?: boolean
+  }
   /** A model alias from the user's subagent models, used when the assistant names none and it's picked. */
   readonly defaultAlias: string
   readonly instructions: string
   readonly context?: "task" | "fork"
+  /** It works on files: in the reply's folder (`same`) or its own copy of it (`copy`). */
+  readonly isolation?: "same" | "copy"
 }
 export interface ServerHost {
   readonly api: 1

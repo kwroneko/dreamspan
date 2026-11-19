@@ -232,3 +232,38 @@ for (const width of [1440, 390])
       expect(JSON.stringify(provider.bodies.at(-1)?.messages ?? [])).toContain("finished:")
       await expectLayout(page, info, `subagents-background-done-${width}-${theme}`, { scope: "main" })
     })
+
+// SA7 (spec/SUBAGENTS.md §2.3): a fork's row says it started from this conversation, and the row's
+// hover says what its type does (SA9).
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a fork's row says it started from this conversation at ${width} ${theme}`, async ({ page }, info) => {
+      test.setTimeout(180_000)
+      provider.forked()
+      const workshop = await admin((api) => api.CreateWorkshop({ title: `Subagents fork ${width} ${theme}` }))
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ reducedMotion: "reduce", colorScheme: theme })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${workshop.id}`)
+      await expect(page.getByTestId("composer")).toBeVisible()
+      await page.getByLabel("Message", { exact: true }).fill("Find my lighthouse keeper with what we said.")
+      await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+      const done = page.getByRole("article").filter({ hasText: PARENT_ANSWER })
+      await expect(done).toHaveCount(1, { timeout: 60_000 })
+      expect(provider.lastResults().at(-1)).toContain(SUBAGENT_REPORT)
+      const badge = done.locator("[data-steps-badge]")
+      const row = done.locator("[data-subagent]")
+      await expect(async () => {
+        if ((await badge.getAttribute("aria-pressed")) !== "true") await badge.click()
+        await expect(row).toBeVisible({ timeout: 1_000 })
+      }).toPass({ timeout: 15_000 })
+      await expect(row).toHaveAttribute("data-subagent-status", "done")
+      await expect(row).toContainText("Started from this conversation")
+      await row.getByRole("button", { name: /Subagent/ }).hover()
+      await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
+        "Reads and searches without changing anything, then reports. Shows its task and steps."
+      )
+      await page.mouse.move(0, 0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      await expectLayout(page, info, `subagents-fork-${width}-${theme}`, { scope: "article:last-of-type" })
+    })

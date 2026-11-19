@@ -110,7 +110,7 @@ The child's report is generated text, so it comes back through the built worksho
 
 ### 2.5 Types
 
-*Obsolete as a proposal: built in SA7 and SA6 (ARCHITECTURE §16, "Subagent types from plugins and users", "Subagents that work on files"). Differences: `isolation` is `none`, `same` or `copy`; `code`'s tools are the file tools, `bash` and every read tool; `general` gets the reply's offered tools less those no subagent gets; there's no per-type `effort` or `explanation`.*
+*Obsolete as a proposal: built in SA7 and SA6 (ARCHITECTURE §16, "Subagent types from plugins and users", "Subagents that work on files"). Differences: `isolation` is `none`, `same` or `copy`; `code`'s tools are the file tools, `bash` and every read tool; `general` gets the reply's offered tools less those no subagent gets; there's no per-type `effort`; `explanation` was added in subagents9.*
 
 A type (registry `subagentTypes`, §10) is `{ id, label, explanation, description, kinds, tools, defaultAlias, effort?, context, isolation?, caps, instructions }`. Built in:
 

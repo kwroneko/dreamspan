@@ -246,6 +246,17 @@ const validateSubagentType = (type: SubagentType) => {
   if (!Array.isArray(type.kinds) || type.kinds.length === 0) throw new Error("A subagent type names its chat kinds.")
   if (typeof type.tools !== "function" && (typeof type.tools !== "object" || type.tools === null))
     throw new Error("A subagent type's tools are ids or effect classes.")
+  if (typeof type.tools === "object") {
+    const { ids, effects, all } = type.tools
+    if (
+      (ids !== undefined && (!Array.isArray(ids) || ids.some((id) => typeof id !== "string"))) ||
+      (effects !== undefined && (!Array.isArray(effects) || effects.some((e) => typeof e !== "string"))) ||
+      (all !== undefined && typeof all !== "boolean")
+    )
+      throw new Error("A subagent type's tools are ids or effect classes.")
+  }
+  if (type.explanation !== undefined && (typeof type.explanation !== "string" || type.explanation.length > 200))
+    throw new Error("A subagent type's explanation is a short sentence, at most 200 characters.")
   if (type.context !== undefined && type.context !== "task" && type.context !== "fork")
     throw new Error("A subagent type's context is task or fork.")
   if (type.isolation !== undefined && type.isolation !== "same" && type.isolation !== "copy")

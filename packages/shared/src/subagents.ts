@@ -192,6 +192,8 @@ export type SubagentIsolation = typeof SubagentIsolation.Type
 export const SubagentTypeEdit = Schema.Struct({
   id: SubagentTypeId,
   label: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(60))),
+  /** For the user, on hover: what it does. */
+  explanation: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200))),
   description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(600))),
   instructions: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(20_000))),
   /** Tool ids, from what workshops offer. */
@@ -212,6 +214,7 @@ export type SubagentTypes = typeof SubagentTypes.Type
 export const SubagentTypeView = Schema.Struct({
   id: SubagentTypeId,
   label: Schema.String,
+  explanation: Schema.String,
   description: Schema.String,
   instructions: Schema.String,
   tools: Schema.Array(Schema.String),

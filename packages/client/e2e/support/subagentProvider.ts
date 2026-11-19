@@ -28,6 +28,8 @@ export const startSubagentProvider = async () => {
   let reads: string | null = null
   /** Set: the reply starts its subagent in the background, writes, waits, then sums up (SA5). */
   let background = false
+  /** Set: the reply starts its subagent as a fork of its conversation (SA7, §2.3). */
+  let fork = false
   const chunk = (delta: object, finish: string | null = null, usage?: object) =>
     `data: ${JSON.stringify({
       id: "subagent",
@@ -64,7 +66,9 @@ export const startSubagentProvider = async () => {
       const body = JSON.parse(raw) as Body
       bodies.push(body)
       const results = body.messages.filter((m) => m.role === "tool").length
-      const child = JSON.stringify(body.messages[0]?.content ?? "").includes("You are a subagent")
+      const child =
+        JSON.stringify(body.messages[0]?.content ?? "").includes("You are a subagent") ||
+        JSON.stringify(body.messages).includes("From here on you are a subagent")
       if (child && background) {
         if (results === 0) return call(res, "child_progress", "report_progress", { text: SUBAGENT_PROGRESS })
         if (results === 1) return call(res, "child_1", "list_library", { kind: "card" })
@@ -104,7 +108,12 @@ export const startSubagentProvider = async () => {
         return text(res, BACKGROUND_WAITING)
       }
       if (done === 0)
-        return call(res, "call_agent", "agent", { type: "research", task: SUBAGENT_TASK, name: SUBAGENT_NAME })
+        return call(res, "call_agent", "agent", {
+          type: "research",
+          task: SUBAGENT_TASK,
+          name: SUBAGENT_NAME,
+          ...(fork ? { context: "fork" } : {})
+        })
       return text(res, PARENT_ANSWER)
     })
   })
@@ -121,10 +130,16 @@ export const startSubagentProvider = async () => {
       reports = false
       reads = null
       background = false
+      fork = false
     },
     /** SA5: the reply starts its subagent in the background, which shows progress, lists, then waits. */
     inBackground: () => {
       background = true
+    },
+    /** The reply starts its subagent as a fork of its conversation, which reports after its call. */
+    forked: () => {
+      fork = true
+      reports = true
     },
     /** Answers the held subagent requests with the report, and reports from now on. */
     release: () => {

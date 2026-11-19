@@ -567,6 +567,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
             .map((t) => ({
               id: t.id,
               label: t.label,
+              explanation: t.explanation ?? "",
               description: t.description,
               instructions: t.instructions,
               tools: catalog.filter((tool) => mayUse(t, tool)).map((tool) => tool.id),
@@ -606,11 +607,13 @@ export const makeAgentHandlers = Effect.gen(function* () {
             const sameTools =
               edit.tools === undefined ||
               (edit.tools.length === baseTools.length && edit.tools.every((tool) => baseTools.includes(tool)))
-            const differs = <K extends "label" | "description" | "instructions" | "defaultAlias">(key: K) =>
-              edit[key] !== undefined && edit[key] !== base[key] ? { [key]: edit[key] } : {}
+            const differs = <K extends "label" | "explanation" | "description" | "instructions" | "defaultAlias">(
+              key: K
+            ) => (edit[key] !== undefined && edit[key] !== (base[key] ?? "") ? { [key]: edit[key] } : {})
             const change: SubagentTypeEdit = {
               id,
               ...differs("label"),
+              ...differs("explanation"),
               ...differs("description"),
               ...differs("instructions"),
               ...differs("defaultAlias"),
@@ -630,6 +633,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
             stored = {
               id,
               label: edit.label.trim(),
+              ...(edit.explanation?.trim() ? { explanation: edit.explanation.trim() } : {}),
               description: edit.description?.trim() ?? "",
               instructions: edit.instructions,
               tools: [...new Set(edit.tools ?? [])],
