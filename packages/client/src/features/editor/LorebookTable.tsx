@@ -354,6 +354,9 @@ const EntryRow = memo(function EntryRow({
   // its controls (title, keys, switch, checkbox, buttons, cells) keep their own clicks. The
   // arrow stays the keyboard's way to it.
   const headerClick = (event: MouseEvent<HTMLDivElement>) => {
+    // A click in a popup the header opened (its ⋯ menu's Duplicate) reaches it through React's
+    // portal, not the page: it isn't a click on the header.
+    if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return
     if (ownClick(event.target, event.currentTarget)) return
     if (window.getSelection()?.toString()) return
     onToggle(uid, !open)

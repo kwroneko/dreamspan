@@ -44,7 +44,7 @@ import { ShellNavigation, useShellNavigation } from "./characters/shellData.tsx"
 import { sidebarSearch } from "./characters/sidebarSearch.ts"
 import { setPageTitle, useNotices } from "./notices.tsx"
 import { useTabFocused, useTabInStrips, useTabMeta } from "./workbench/tab.tsx"
-import { layoutKeys, layoutParams, useLayoutParam, writeLayoutParam } from "../tabLayoutParams.ts"
+import { layoutKeys, layoutParams, useLayoutParam, viewKeys, writeLayoutParam } from "../tabLayoutParams.ts"
 
 /**
  * Sets the browser tab's title while a screen is shown, and names its workbench tab; only the
@@ -168,11 +168,12 @@ export const openAppMenu = () => {
 function PhoneBar() {
   // Open on the page it was opened on: going anywhere closes it. Browsing the panel itself
   // (its crumbs and tabs, in the URL's sidebar params) doesn't, nor does changing the layout
-  // (a foot section closed, a height dragged: layout params); picking in it does.
+  // (a foot section closed, a height dragged: layout params), nor a page's own view params (an
+  // opening chat writing its Messages or Summaries choice); picking in it does.
   const href = useLocation({
     select: (location) => {
       const params = new URLSearchParams(location.searchStr)
-      for (const key of [...sidebarSearch, ...layoutKeys()]) params.delete(key)
+      for (const key of [...sidebarSearch, ...layoutKeys(), ...viewKeys()]) params.delete(key)
       // The same place whatever order its keys come in: writing a sidebar key can reorder the rest.
       params.sort()
       return `${location.pathname}?${params}`

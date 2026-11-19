@@ -23,6 +23,16 @@ export const layoutParams = makeRegistry<{ readonly id: string; readonly keys: R
 
 export const layoutKeys = () => new Set(layoutParams.list().flatMap((entry) => entry.keys))
 
+/**
+ * A page's own view params that never make it another place (a pane's Messages or Summaries and
+ * its coverage rail, which a chat writes into its URL as it opens): unlike layout params they
+ * are the page's and a workbench tab's, but a change to them alone isn't going anywhere, so the
+ * phone's menu stays open over it.
+ */
+export const viewParams = makeRegistry<{ readonly id: string; readonly keys: ReadonlyArray<string> }>()
+
+export const viewKeys = () => new Set(viewParams.list().flatMap((entry) => entry.keys))
+
 let browser: RouterHistory | null = null
 let unsubscribe: (() => void) | null = null
 const listeners = new Set<() => void>()

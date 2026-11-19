@@ -187,7 +187,8 @@ test("a reply finishing in a chat not looked at is counted in the list, the titl
   // Back to the Chats page in the app, no reload: on a wide screen the left panel stands in
   // for a header link to it.
   await page.goBack()
-  await expect(page).toHaveURL(/\/chats$/)
+  // The chat sent in stays a tab beside (its layout, `wb`, is in the browser's URL).
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/chats")
   await expect(page.getByRole("link", { name: "Elsewhere" })).toBeVisible()
   await expect(page.getByText("new reply")).toHaveCount(0)
   await expect(page).toHaveTitle(/^Chats/)

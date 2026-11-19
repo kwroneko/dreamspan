@@ -1,6 +1,6 @@
 // Personas on the home page (owner, 2026-11-02): the persona folder's cards are under their
 // own Personas tab and left out of the other tabs, unless Include personas is on, which
-// mixes them in marked "Persona". The choice is remembered and in the URL. Every card is made up.
+// mixes them in marked "Persona". The choice is in the tab's URL. Every card is made up.
 import { expect, test, type Page } from "@playwright/test"
 import type { EntityId } from "@dreamspan/shared/chat.ts"
 import { openPanel, closePanel } from "./support/panel.ts"
@@ -38,7 +38,7 @@ const tiles = (page: Page) =>
 const include = (page: Page) => main(page).getByRole("button", { name: "Include personas", exact: true })
 
 for (const width of [1440, 390]) {
-  test(`${width}: Personas tab, and Include personas off, on (marked) and remembered`, async ({ page }) => {
+  test(`${width}: Personas tab, and Include personas off, on (marked) and in the URL`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(server().url)
@@ -79,20 +79,24 @@ for (const width of [1440, 390]) {
     // The counts count it too.
     await expect(show(page, "All")).toContainText("3")
 
-    // In the URL, and remembered: a reload keeps it, and so does a fresh visit with no params.
+    // In the tab's URL (owner, 2026-11-18): a reload and a copied link keep it; nothing is
+    // remembered on the account, so a bare visit shows the default.
     expect(new URL(page.url()).searchParams.get("personas")).toBe("true")
+    const copied = page.url()
     await page.reload()
     await expect(include(page)).toHaveAttribute("aria-pressed", "true")
     await expect.poll(() => tiles(page)).toContain("Open Pia (persona)")
     await page.goto(`${server().url}/library`)
     await page.goto(server().url)
-    await expect(include(page)).toHaveAttribute("aria-pressed", "true")
+    await expect(include(page)).toHaveAttribute("aria-pressed", "false")
+    await expect.poll(() => tiles(page)).toEqual(["Open Corin", "Open Delia"])
 
-    // Off again hides it, and that's remembered as well.
+    // Off again hides it, and leaves the URL bare.
+    await page.goto(copied)
+    await expect(include(page)).toHaveAttribute("aria-pressed", "true")
     await include(page).click()
     await expect.poll(() => tiles(page)).toEqual(["Open Corin", "Open Delia"])
-    await page.goto(server().url)
-    await expect(include(page)).toHaveAttribute("aria-pressed", "false")
+    expect(new URL(page.url()).searchParams.has("personas")).toBe(false)
   })
 }
 
