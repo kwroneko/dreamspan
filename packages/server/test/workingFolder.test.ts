@@ -53,17 +53,33 @@ describe("the workshop's working folder", () => {
       const choices = yield* api.WorkshopFolderChoices({ chatId: workshop.id, stored, cardId })
       assert.deepStrictEqual(choices, { current: "/files/thesis", recent: ["/files/thesis"], card: null })
 
-      // Renamed elsewhere: found by its inode.
+      // Renamed in the app: found by its new path.
       assert.strictEqual((yield* json("/files/move", { from: "/files/thesis", to: "/files/paper" })).status, 200)
       assert.strictEqual(
         (yield* api.WorkshopFolderChoices({ chatId: workshop.id, stored, cardId })).current,
         "/files/paper"
       )
 
-      // A new workshop with the same card starts in its remembered folder.
+      // Moved in the app into another folder under another name: the branch's stored folder is
+      // found through the move, and the card's and recent memory follow it.
+      assert.strictEqual((yield* json("/files/folder", { path: "/files/drafts" })).status, 200)
+      assert.strictEqual((yield* json("/files/move", { from: "/files/paper", to: "/files/drafts/v2" })).status, 200)
+      assert.deepStrictEqual(yield* api.WorkshopFolderChoices({ chatId: workshop.id, stored, cardId }), {
+        current: "/files/drafts/v2",
+        recent: ["/files/drafts/v2"],
+        card: null
+      })
+      assert.strictEqual((yield* json("/files/move", { from: "/files/drafts", to: "/files/journal" })).status, 200)
+      assert.strictEqual(
+        (yield* api.WorkshopFolderChoices({ chatId: workshop.id, stored, cardId })).current,
+        "/files/journal/v2"
+      )
+      assert.strictEqual((yield* json("/files/move", { from: "/files/journal/v2", to: "/files/paper" })).status, 200)
+
+      // A new workshop with the same card starts in its remembered folder, where it is now.
       const second = yield* api.CreateWorkshop({ title: "Second", card: cardId })
       const started = yield* api.GetCast({ chatId: second.id, slotId: null })
-      assert.strictEqual(started.workshopFolder?.path, "/files/thesis")
+      assert.strictEqual(started.workshopFolder?.path, "/files/paper")
       assert.strictEqual(
         (yield* api.WorkshopFolderChoices({ chatId: second.id, stored: started.workshopFolder!, cardId })).current,
         "/files/paper"
@@ -77,7 +93,16 @@ describe("the workshop's working folder", () => {
       })
       const offered = yield* api.WorkshopFolderChoices({ chatId: workshop.id, stored, cardId })
       assert.strictEqual(offered.card, "/files/site")
-      assert.deepStrictEqual(offered.recent, ["/files/site", "/files/thesis"])
+      assert.deepStrictEqual(offered.recent, ["/files/site", "/files/paper"])
+
+      // Deleted and made again at the same path: the path is trusted, not the old inode.
+      assert.strictEqual((yield* json("/files/delete", { path: "/files/site" })).status, 200)
+      assert.strictEqual((yield* json("/files/folder", { path: "/files/site" })).status, 200)
+      const site = (yield* api.GetCast({ chatId: second.id, slotId: null })).workshopFolder!
+      assert.strictEqual(
+        (yield* api.WorkshopFolderChoices({ chatId: second.id, stored: site, cardId })).current,
+        "/files/site"
+      )
 
       // Deleted: gone.
       assert.strictEqual((yield* json("/files/delete", { path: "/files/paper" })).status, 200)

@@ -38,7 +38,7 @@ import { zipStream, type ZipStreamEntry } from "../formats/zipStream.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
 import { BinContentGone } from "./bin.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
-import { FilePathRefused, listFolder, openFolder, readRegularFile, statPath } from "./safePath.ts"
+import { FilePathRefused, listFolder, openFolder, readRegularFile, renameNoReplace, statPath } from "./safePath.ts"
 
 const { O_RDONLY, O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW, O_NONBLOCK } = constants
 
@@ -594,10 +594,14 @@ export const filesRoutes = Layer.unwrap(
         return yield* Effect.gen(function* () {
           const fromName = at(source, from.segments.at(-1)!)
           const toName = at(target, to.segments.at(-1)!)
-          yield* Effect.tryPromise(() => lstat(fromName))
-          const taken = yield* Effect.tryPromise(() => lstat(toName).catch(() => null))
-          if (taken) return refuse(409, "That name is taken.")
-          yield* Effect.tryPromise(() => rename(fromName, toName))
+          const moving = yield* Effect.tryPromise(() => lstat(fromName))
+          // Never over what's there, even something a command makes meanwhile (EEXIST: 409).
+          yield* Effect.tryPromise(() => renameNoReplace(fromName, toName))
+          // The working folders stored for it (and for folders in it) follow (§1 "Paths are the names").
+          if (moving.isDirectory())
+            yield* writer
+              .RecordFolderMove({ userId: from.userId as never, from: from.full, to: to.full })
+              .pipe(Effect.catchCause((cause) => Effect.logWarning("recording a folder move failed", cause)))
           changed(from.userId, [from.full, to.full])
           return HttpServerResponse.jsonUnsafe({ path: to.full })
         }).pipe(Effect.ensuring(Effect.promise(() => target.close())))

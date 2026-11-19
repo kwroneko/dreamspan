@@ -41,7 +41,7 @@ export class WorkshopFiles extends Context.Service<
     readonly changed: (userId: string, paths: ReadonlyArray<string>, all?: boolean) => void
     /** A folder of the account's Files with its inode, for `workshop.folder` (§2.1); fails when it isn't one. */
     readonly folderAt: (userId: string, path: string) => Effect.Effect<{ path: string; inode: number | null }, unknown>
-    /** Where a stored working folder is now (by path, else by inode); null when it's gone. */
+    /** Where a stored working folder is now (workingFolder.ts `locateFolder`); null when it's gone. */
     readonly locateFolder: (
       userId: string,
       stored: { readonly path: string; readonly inode: number | null }
@@ -75,6 +75,16 @@ export class WorkshopFiles extends Context.Service<
           return { filesRoot: env.filesRoot, home: env.home, bin: join(dirs.filesDir, BIN_FOLDER, userId) }
         }
       })
+      /** A stored folder found again (workingFolder.ts), through the app's own moves too. */
+      const locate = (userId: string, stored: { readonly path: string; readonly inode: number | null }) =>
+        Effect.gen(function* () {
+          const { moves } = yield* reader
+            .WorkshopFolderMemory({ userId: userId as UserId, cardId: null })
+            .pipe(Effect.orElseSucceed(() => ({ moves: [] })))
+          return yield* Effect.promise(() =>
+            locateFolder(accountEnv(dirs, userId).filesRoot, stored, moves).catch(() => null)
+          )
+        })
       const changed = (userId: string, paths: ReadonlyArray<string>, all = false) => {
         const folders = new Set<string>()
         for (const path of paths) for (const folder of foldersShowing(path)) folders.add(folder)
@@ -109,9 +119,7 @@ export class WorkshopFiles extends Context.Service<
             if (!offered.some((id) => (FILE_TOOLS as ReadonlyArray<string>).includes(id))) return null
             const stored = state.workshopFolder
             if (!stored) return `Working folder: ${FILES_TOP}`
-            const now = yield* Effect.promise(() =>
-              locateFolder(accountEnv(dirs, userId).filesRoot, stored).catch(() => null)
-            )
+            const now = yield* locate(userId, stored)
             return now
               ? `Working folder: ${now}`
               : `Working folder: ${FILES_TOP} (${stored.path} wasn't found, so commands start at the top of the files)`
@@ -173,8 +181,7 @@ export class WorkshopFiles extends Context.Service<
             await prepareAccount(env)
             return folderAt(env.filesRoot, path)
           }),
-        locateFolder: (userId, stored) =>
-          Effect.promise(() => locateFolder(accountEnv(dirs, userId).filesRoot, stored).catch(() => null))
+        locateFolder: locate
       }
     })
   )

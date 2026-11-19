@@ -2915,6 +2915,19 @@ const WriteOpsLibraryOwn = RpcGroup.make(
     success: Schema.Void,
     error: StorageError
   }),
+  /**
+   * A folder moved or renamed in the app (§1 "Paths are the names"): the remembered working
+   * folders under it follow, and the move is kept for branches' stored folders (workingFolders.ts).
+   */
+  Rpc.make("RecordFolderMove", {
+    payload: {
+      userId: UserId,
+      from: Schema.String.check(Schema.isMaxLength(4096)),
+      to: Schema.String.check(Schema.isMaxLength(4096))
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
   /** The host put a file back (or found its content gone): its bin row goes. */
   Rpc.make("ForgetFileBinItem", {
     payload: { userId: UserId, itemId: Schema.String },
@@ -5949,7 +5962,9 @@ const ReadOpsOwn = RpcGroup.make(
     payload: { userId: UserId, cardId: Schema.NullOr(Schema.String) },
     success: Schema.Struct({
       recent: Schema.Array(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
-      card: Schema.NullOr(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) }))
+      card: Schema.NullOr(Schema.Struct({ path: Schema.String, inode: Schema.NullOr(Schema.Number) })),
+      /** Folders moved in the app, oldest first, for finding a branch's stored folder again. */
+      moves: Schema.Array(Schema.Struct({ from: Schema.String, to: Schema.String }))
     }),
     error: StorageError
   }),
