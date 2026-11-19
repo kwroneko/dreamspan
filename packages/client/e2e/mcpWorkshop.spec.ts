@@ -1,7 +1,7 @@
 // MCP servers in workshops (spec/MCP.md M2, §13.1 Use it in, §13.3 the chip, §13.4 Changes) in the
 // browser: the server's Use it in switches, its On / Off row in the workshop's chip, a call the
-// model makes running without asking, and its change in the step and the Changes tab, which
-// can't be undone from the app. Layout audit at both widths and in both themes. A local fake MCP
+// model makes running without asking with its progress in the step's row, and its change in the
+// step and the Changes tab, which can't be undone from the app. Layout audit at both widths and in both themes. A local fake MCP
 // server and a scripted loopback provider only.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
@@ -109,11 +109,27 @@ for (const width of [1440, 390])
     // Nothing reached the server by turning it on.
     expect(mcp.requests()).toHaveLength(0)
 
-    // The model calls it: it runs without asking, and the change can't be undone from the app.
+    // The model calls it: it runs without asking, its progress shows in the step's row while it
+    // runs, and the change can't be undone from the app.
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => (release = resolve))
+    mcp.state.call = async (_name, _args, _signal, progress) => {
+      await progress(1, 2, "Searching the shelves")
+      await held
+      return { content: [{ type: "text", text: "Found it." }] }
+    }
     await page.getByLabel("Message", { exact: true }).fill("Look up the lighthouse.")
     await page.getByRole("button", { name: /^Send( as .+)?$/ }).click()
+    const running = page.getByRole("article").last()
+    await expect(running.locator("[data-step-progress]")).toHaveText("Searching the shelves (50%)", {
+      timeout: 30_000
+    })
+    await audit(page, info, `mcp-progress-${width}`, "article:last-of-type")
+    release()
+    mcp.state.call = null
     const reply = page.getByRole("article").filter({ hasText: WORKSHOP_ANSWER }).last()
     await expect(reply).toBeVisible({ timeout: 30_000 })
+    await expect(reply.locator("[data-step-progress]")).toHaveCount(0)
     expect(mcp.methods()).toContain("tools/call")
     await expect(reply.locator("[data-approval]")).toHaveCount(0)
     const changes = await openPanel(page, "Changes")

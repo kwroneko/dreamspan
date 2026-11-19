@@ -102,6 +102,11 @@ export function StepRow({
                 <span className="font-medium text-text">{step.label}</span>
                 {step.title && <span> {step.title}</span>}
                 {step.subtitle && <span className="block text-muted">{step.subtitle}</span>}
+                {step.status === "running" && step.progress && (
+                  <span className="block text-muted" data-step-progress aria-live="polite">
+                    {step.progress}
+                  </span>
+                )}
               </span>
             ) : (
               <span className="min-w-0 [overflow-wrap:anywhere]">

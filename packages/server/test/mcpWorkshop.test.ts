@@ -268,6 +268,43 @@ describe("MCP servers in workshops", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("the server's progress shows in the step's row while it runs, and never reaches the model", () =>
+    Effect.gen(function* () {
+      const script = scripted([{ name: "mcp_painter_paint", args: { text: "a lighthouse" }, id: "p1" }])
+      const { api, chat, events, mock } = yield* workshop(script.handler)
+      const painter = yield* fakeServer([fakeTool("paint")])
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      painter.state.call = async (_name, _args, _signal, progress) => {
+        await progress(2, 5)
+        await new Promise((resolve) => setTimeout(resolve, 400))
+        await progress(4, 5, "Adding the waves")
+        await gate
+        return { content: [{ type: "text", text: "painted" }] }
+      }
+      const connection = yield* addServer(api, painter, "Painter")
+      yield* api.SetMcpUse({ connectionId: connection.id, workshops: true })
+      const versionId = yield* task(api, chat, "paint it")
+      const progressOf = () =>
+        events.flatMap((e) =>
+          e._tag === "Steps" && e.versionId === versionId
+            ? e.steps.flatMap((s) => (s.kind === "tool" && s.id === "p1" && s.progress ? [s.progress] : []))
+            : []
+        )
+      yield* eventually(() => progressOf().includes("Working… 40%"))
+      yield* eventually(() => progressOf().includes("Adding the waves (80%)"))
+      release()
+      yield* eventually(() => finished(events, versionId as VersionId) !== undefined)
+      // Done, the row has no progress, and nothing of it was stored or sent to the model.
+      const last = events.flatMap((e) => (e._tag === "Steps" && e.versionId === versionId ? [e.steps] : [])).at(-1)!
+      const step = last.find((s) => s.kind === "tool" && s.id === "p1")
+      assert.isTrue(step?.kind === "tool" && step.status === "done" && step.progress === undefined)
+      const stored = yield* api.GetRolloutSteps({ versionId: versionId as VersionId })
+      assert.notInclude(JSON.stringify(stored), "Adding the waves")
+      assert.notInclude(JSON.stringify(mock.requests()), "Adding the waves")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("a large result is kept whole and the model is shown a page it can read on from", () =>
     Effect.gen(function* () {
       const script = scripted([{ name: "mcp_big_dump", args: {}, id: "b1" }])

@@ -708,7 +708,12 @@ export const layer = Layer.effect(
                   timeout,
                   resetTimeoutOnProgress: true,
                   maxTotalTimeout: MCP_CALL_MAX_MS,
-                  onprogress: (progress) => onProgress?.(progress)
+                  // The server's words are shown to the user: its secrets scrubbed first.
+                  onprogress: (progress) =>
+                    onProgress?.({
+                      ...progress,
+                      message: progress.message === undefined ? undefined : ready.scrub(progress.message)
+                    })
                 }
               ),
             MCP_CALL_MAX_MS

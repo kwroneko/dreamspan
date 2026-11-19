@@ -682,6 +682,11 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
                 }
               }
             }),
+        progress: (text: string | null) => {
+          if (text === null) progressOf.delete(toolCallId)
+          else progressOf.set(toolCallId, text)
+          showProgress()
+        },
         vision: (generation.model as { readonly vision?: boolean } | null)?.vision === true,
         // Tools never reach what only the user may do: grants and approvals.
         writer: toolWriter(writer)
@@ -698,6 +703,19 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       const waiting = new Map<string, ApprovalPrompt>()
       /** The subagents `agent` calls started, as they run: shown in their calls' steps. */
       const children = new Map<string, SubagentRow>()
+      /** How far running calls say they got, shown in their rows (spec/MCP.md §7.3). */
+      const progressOf = new Map<string, string>()
+      // A server may report progress many times a second: the row follows at most 4 times a second.
+      let progressTimer: ReturnType<typeof setTimeout> | null = null
+      /** The final steps went out: a late progress update mustn't follow them. */
+      let stepsFinal = false
+      const showProgress = () => {
+        if (progressTimer !== null) return
+        progressTimer = setTimeout(() => {
+          progressTimer = null
+          if (!stepsFinal) showSteps(false)
+        }, 250)
+      }
       const waitingChanged = (toolCallId: string, prompt: ApprovalPrompt | null) => {
         if (prompt) waiting.set(toolCallId, prompt)
         else waiting.delete(toolCallId)
@@ -1208,6 +1226,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
       }
       const shown = new Map<string, string>()
       const showSteps = (final: boolean) => {
+        if (final) stepsFinal = true
         const posted = several
           ? agent.state.messages
               .slice(historical)
@@ -1225,7 +1244,9 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
           const steps = stepsOf(agent.state.messages, frozen, final, several ? id : undefined).map((step) => {
             const approval = step.kind === "tool" ? waiting.get(step.id) : undefined
             const child = step.kind === "tool" ? children.get(step.id) : undefined
-            const shown = child && step.kind === "tool" ? { ...step, subagent: child } : step
+            const progress = step.kind === "tool" && step.status === "running" ? progressOf.get(step.id) : undefined
+            const withChild = child && step.kind === "tool" ? { ...step, subagent: child } : step
+            const shown = progress !== undefined && withChild.kind === "tool" ? { ...withChild, progress } : withChild
             return approval && shown.kind === "tool"
               ? { ...shown, ...approval.presentation, status: "waiting" as const, approval }
               : shown
@@ -1246,6 +1267,8 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
 
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
+          if (progressTimer !== null) clearTimeout(progressTimer)
+          progressTimer = null
           agent.abort()
           await agent.waitForIdle()
           await flush()

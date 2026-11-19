@@ -97,7 +97,12 @@ const ToolStepFields = {
   /** Existing steps render these three display classes. */
   effect: Schema.Literals(["read", "chat_state", "external"]),
   /** The refined execution class, when it differs from the display class. */
-  effectClass: Schema.optionalKey(EffectClass)
+  effectClass: Schema.optionalKey(EffectClass),
+  /**
+   * While it runs, how far the tool says it got (an MCP server's progress, spec/MCP.md §7.3):
+   * "Working… 40%" or the server's own words. Live only, never stored.
+   */
+  progress: Schema.optionalKey(Schema.String)
 }
 
 /** A subagent's own step, one level deep: never a subagent of its own (spec/SUBAGENTS.md §6.1). */
