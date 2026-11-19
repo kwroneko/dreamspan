@@ -18,6 +18,7 @@ import { StSettingsImport } from "./modelSettings.ts"
 import { LcmApi, LcmSettingsInvalid, SummaryRequestApi } from "./lcm.ts"
 // The client-facing contract. Every UI action is an RPC in this group (DESIGN §7.7).
 import { Context, Schema } from "effect"
+import { DatabaseStartup } from "./databaseStartup.ts"
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc"
 import { BinItem } from "./bin.ts"
 import { ChatApi, ChatEventsApi, MessageVersionApi } from "./chatApi.ts"
@@ -113,22 +114,6 @@ export class Health extends Schema.Class<Health>("Health")({
   /** The longest single event-loop delay over the last minute. */
   eventLoopMaxMs: Schema.Number,
   readers: Schema.Int
-}) {}
-
-/** Rows that point at a row that isn't there, by table and the table they point into. */
-export class BrokenReferences extends Schema.Class<BrokenReferences>("BrokenReferences")({
-  table: Schema.String,
-  parent: Schema.String,
-  rows: Schema.Int
-}) {}
-
-/**
- * What the database writer found when it last started (ARCHITECTURE.md §3.7): the broken
- * references it started with anyway, and the database changes it applied.
- */
-export class DatabaseStartup extends Schema.Class<DatabaseStartup>("DatabaseStartup")({
-  broken: Schema.Array(BrokenReferences),
-  applied: Schema.Array(Schema.String)
 }) {}
 
 /** The result of checking a connection, with the route its request took. */
