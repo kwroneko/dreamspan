@@ -123,6 +123,8 @@ export interface AgentRun {
     readonly stopping?: () => boolean
     /** Its `report_progress` line, shown in its row at once (spec/SUBAGENTS.md §4). */
     readonly onProgress?: (text: string) => void
+    /** Its working folder (spec/SUBAGENTS.md §3.3), for its file tools and commands. */
+    readonly workspace?: { readonly start: string; readonly root?: string }
   }
   /**
    * The tool definitions its requests send, in place of its own: a fork subagent's are its
@@ -718,6 +720,7 @@ export const runAgent = (input: AgentStrategyInput, run: AgentRun): Stream.Strea
         },
         reader: run.reader,
         ...(run.subagent?.onProgress ? { reportProgress: run.subagent.onProgress } : {}),
+        ...(run.subagent?.workspace ? { workspace: run.subagent.workspace } : {}),
         // A subagent's tools start none of their own (spec/SUBAGENTS.md §6.1).
         ...(run.subagent
           ? {}

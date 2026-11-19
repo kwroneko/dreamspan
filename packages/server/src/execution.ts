@@ -40,6 +40,7 @@ import { builtinSkills } from "./agent/skills.ts"
 import { makeLoadSkill, toolSearch } from "./agent/tools/loading.ts"
 import { Context, Effect, Layer, Option } from "effect"
 import { makeRegistry, type Registry } from "./registry.ts"
+import type { SubagentWorkspaces } from "./agent/tools/files.ts"
 import { defaultReplyOutput, type ReplyOutputStrategy } from "./chat/replyOutput.ts"
 import { replySectionsParser, type ReplyParser } from "./chat/replySections.ts"
 import { continueJoinParser } from "./chat/continueJoin.ts"
@@ -93,6 +94,8 @@ export class ExecutionRegistry extends Context.Service<
     readonly turnNotes: Registry<TurnNote>
     /** The kinds of subagents a reply may start (spec/SUBAGENTS.md §2.5, §10); the user's own come from settings. */
     readonly subagentTypes: Registry<SubagentType>
+    /** Subagents' working folders and isolated copies (spec/SUBAGENTS.md §3.3): the files host's. */
+    readonly subagentWorkspaces: Registry<SubagentWorkspaces>
   }
 >()("rp/ExecutionRegistry") {
   static readonly layer = Layer.effect(
@@ -228,7 +231,8 @@ export class ExecutionRegistry extends Context.Service<
         skills,
         toolLoaders,
         turnNotes: makeRegistry<TurnNote>(),
-        subagentTypes
+        subagentTypes,
+        subagentWorkspaces: makeRegistry<SubagentWorkspaces>()
       }
     })
   )
@@ -244,6 +248,8 @@ const validateSubagentType = (type: SubagentType) => {
     throw new Error("A subagent type's tools are ids or effect classes.")
   if (type.context !== undefined && type.context !== "task" && type.context !== "fork")
     throw new Error("A subagent type's context is task or fork.")
+  if (type.isolation !== undefined && type.isolation !== "same" && type.isolation !== "copy")
+    throw new Error("A subagent type's isolation is same (the reply's folder) or copy (its own copy).")
 }
 
 /** Standalone service construction uses the same scoped defaults as the server. */

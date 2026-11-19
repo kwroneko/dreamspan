@@ -76,6 +76,13 @@ export interface ToolContext {
   readonly progress?: (text: string | null) => void
   /** A subagent's own run: shows a one-line status in its row (`report_progress`, spec/SUBAGENTS.md §4). */
   readonly reportProgress?: (text: string) => void
+  /**
+   * A subagent's working folder (spec/SUBAGENTS.md §3.3), a path under /files: where its file
+   * tools and commands start (`start`), and, for an isolated copy, the folder its file tools stay
+   * inside (`root`). The file tools check both with the no-follow walk; commands see the same
+   * Files as the reply's, only starting elsewhere.
+   */
+  readonly workspace?: { readonly start: string; readonly root?: string }
 }
 
 /** Where a new run starts, for a tool's `offerFor`: reads at the run's position only. */

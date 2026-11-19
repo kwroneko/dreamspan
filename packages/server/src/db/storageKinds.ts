@@ -33,7 +33,9 @@ export const storageKinds = makeRegistry<StorageKind>([
       "file.write",
       "file.edit",
       "file.create",
-      "shell.run"
+      "shell.run",
+      // A subagent's isolated copy kept with its changes (spec/SUBAGENTS.md §3.3): target kind `folder`.
+      "subagent.copy"
     ]
   },
   // Who or what made a file's earlier content (spec/FILES-AND-ENVIRONMENT.md §1.3).

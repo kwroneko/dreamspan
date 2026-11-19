@@ -153,7 +153,22 @@ export const SubagentRow = Schema.Struct({
   /** It carries a finished subagent on with the assistant's message (`message_agent`, §4). */
   continued: Schema.optionalKey(Schema.Boolean),
   /** It started from the conversation up to its call, then its task (a fork, §2.3). */
-  forked: Schema.optionalKey(Schema.Boolean)
+  forked: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Where it works on files (spec/SUBAGENTS.md §3.3): its own copy of the working folder (a git
+   * worktree on `branch`, or a file copy). `kept`: it ended with changes, so the copy stays;
+   * false: it had none and was removed; absent while it runs.
+   */
+  copy: Schema.optionalKey(
+    Schema.Struct({
+      path: Schema.String,
+      from: Schema.String,
+      branch: Schema.optionalKey(Schema.String),
+      kept: Schema.optionalKey(Schema.Boolean)
+    })
+  ),
+  /** Where it works in the reply's own folder (same-folder work): the folder it starts in. */
+  folder: Schema.optionalKey(Schema.String)
 })
 export type SubagentRow = typeof SubagentRow.Type
 

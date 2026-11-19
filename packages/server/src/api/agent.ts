@@ -572,6 +572,7 @@ export const makeAgentHandlers = Effect.gen(function* () {
               tools: catalog.filter((tool) => mayUse(t, tool)).map((tool) => tool.id),
               defaultAlias: t.defaultAlias,
               context: t.context ?? "task",
+              isolation: t.isolation ?? ("none" as const),
               source: t.source,
               edited: t.edited,
               off: t.off
@@ -616,6 +617,9 @@ export const makeAgentHandlers = Effect.gen(function* () {
               ...(edit.context !== undefined && edit.context !== (base.context ?? "task")
                 ? { context: edit.context }
                 : {}),
+              ...(edit.isolation !== undefined && edit.isolation !== (base.isolation ?? "none")
+                ? { isolation: edit.isolation }
+                : {}),
               ...(sameTools ? {} : { tools: [...new Set(edit.tools)] }),
               ...(edit.off ? { off: true } : {})
             }
@@ -630,7 +634,8 @@ export const makeAgentHandlers = Effect.gen(function* () {
               instructions: edit.instructions,
               tools: [...new Set(edit.tools ?? [])],
               defaultAlias: edit.defaultAlias ?? SAME,
-              context: edit.context ?? "task"
+              context: edit.context ?? "task",
+              ...(edit.isolation && edit.isolation !== "none" ? { isolation: edit.isolation } : {})
             }
             if (!current.some((e) => e.id === id) && rest.length >= 32)
               return yield* reject("You have as many subagent types as you may.")

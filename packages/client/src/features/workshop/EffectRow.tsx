@@ -87,6 +87,13 @@ export function EffectRow({
               </span>
             </Tooltip>
           )}
+          {current.kind === "subagent.copy" && (
+            <Tooltip label="The copy stays until you delete it in Files. Nothing in it is merged back on its own.">
+              <span className="text-muted" tabIndex={0} data-effect-permanent>
+                Kept
+              </span>
+            </Tooltip>
+          )}
           {current.kind === "mcp.call" && (
             <Tooltip label="The server made this change; undo it there if you need to.">
               <span className="text-muted" tabIndex={0} data-effect-permanent>
@@ -110,6 +117,7 @@ export function EffectRow({
               <Link
                 to={target.to}
                 params={target.params as never}
+                {...("search" in target ? { search: target.search as never } : {})}
                 className={`${buttonClass("ghost")} h-7 px-2 text-xs`}
               >
                 Open
