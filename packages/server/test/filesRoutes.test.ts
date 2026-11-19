@@ -32,6 +32,9 @@ const list = (path: string) =>
     return (yield* Effect.promise(() => response.json())) as FolderListing
   })
 
+/** A zip's central directory entry signature. */
+const CENTRAL = Buffer.from([0x50, 0x4b, 0x01, 0x02])
+
 const body = (response: Response) => Effect.promise(() => response.text())
 
 /** The one account's folder under FILES_DIR (the bin's `.bin` sits beside it). */
@@ -182,6 +185,31 @@ describe("file routes", () => {
       assert.strictEqual((yield* upload("/files/data/x.txt", "x")).status, 400)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   })
+  it.live("a folder zip leaves out names an extractor could read as paths elsewhere", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      yield* upload("/files/out/keep.txt", "Kept.")
+      const filesDir = join(config.dataDir, "files")
+      const out = join(filesDir, accountOf(filesDir), "out")
+      // Names a command (or a prompt-injected assistant) can make: a backslash path, a folder of one.
+      writeFileSync(join(out, "..\\..\\AppData\\x.bat"), "Synthetic.")
+      mkdirSync(join(out, "a\\b"))
+      writeFileSync(join(out, "a\\b", "inner.txt"), "Synthetic.")
+      writeFileSync(join(out, "bell\u0007.txt"), "Synthetic.")
+      const response = yield* call(`/files/zip?${new URLSearchParams({ path: "/files/out" })}`)
+      assert.strictEqual(response.status, 200)
+      const bytes = Buffer.from(yield* Effect.promise(() => response.arrayBuffer()))
+      // The central directory's names.
+      const names: Array<string> = []
+      for (let at = bytes.indexOf(CENTRAL); at !== -1; at = bytes.indexOf(CENTRAL, at + 4)) {
+        const length = bytes.readUInt16LE(at + 28)
+        names.push(bytes.subarray(at + 46, at + 46 + length).toString("utf8"))
+      }
+      assert.deepStrictEqual(names.sort(), ["out/Left out of this zip.txt", "out/keep.txt"])
+      for (const name of names) assert.notInclude(name, "\\")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
+
   it.live("refuses paths, links and origins that would leave the account's tree", () => {
     const config = testConfig()
     return Effect.gen(function* () {

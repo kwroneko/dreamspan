@@ -35,6 +35,7 @@ import { storeMedia } from "../importer/mediaFiles.ts"
 import { Formats } from "../importer/Formats.ts"
 import { describeImage } from "../importer/images.ts"
 import { zipStream, type ZipStreamEntry } from "../formats/zipStream.ts"
+import { isSafePath } from "../formats/zip.ts"
 import { WorkshopFiles } from "./WorkshopFiles.ts"
 import { BinContentGone } from "./bin.ts"
 import { accountEnv, prepareAccount, resolveFilesPath } from "./environment.ts"
@@ -132,6 +133,13 @@ const extension = (name: string) => {
 }
 
 const at = (dir: FileHandle, name: string) => `/proc/self/fd/${dir.fd}/${name}`
+
+/** What an entry name in a folder zip may not hold (§8.1): `\`, which Windows tools split on, and control characters. */
+const UNSAFE_IN_ZIP = /[\\\u0000-\u001f\u007f]/
+/** A name a folder zip takes as it is: none of the above, and not `.` or `..`. */
+const zipSafeName = (name: string) => name !== "." && name !== ".." && !UNSAFE_IN_ZIP.test(name)
+/** The note a folder zip ends with when it left names out. */
+const ZIP_LEFT_OUT = "Left out of this zip.txt"
 
 /** Entries one folder download takes at most. */
 const ZIP_MAX_ENTRIES = 200_000
@@ -397,11 +405,14 @@ export const filesRoutes = Layer.unwrap(
       const { root, segments } = yield* place(query.get("path") ?? FILES_TOP)
       const info = yield* Effect.tryPromise(() => statPath(root, segments))
       if (!info?.isDirectory()) return refuse(400, "That isn't a folder.")
-      const top = segments.at(-1) ?? "Files"
+      // The archive's own top folder: its name with what an extractor could read as a separator replaced.
+      const top = (segments.at(-1) ?? "Files").replace(new RegExp(UNSAFE_IN_ZIP.source, "g"), "_")
       async function* entries(): AsyncGenerator<ZipStreamEntry> {
         // Depth first, each folder opened by the no-follow walk; names sorted for a stable archive.
         const queue: Array<ReadonlyArray<string>> = [[]]
         let count = 0
+        /** Names an extractor could read as other paths: left out, and listed in a note. */
+        const left: Array<string> = []
         while (queue.length) {
           const below = queue.pop()!
           const listed = await listFolder(root, [...segments, ...below], ZIP_MAX_ENTRIES)
@@ -409,15 +420,26 @@ export const filesRoutes = Layer.unwrap(
           for (const entry of listed.entries) {
             if (entry.name.endsWith(".rp-tmp")) continue
             if (++count > ZIP_MAX_ENTRIES) throw new Error("too many entries for one zip")
+            if (entry.kind !== "folder" && entry.kind !== "file") continue
+            const name = [top, ...below, entry.name].join("/")
+            if (!zipSafeName(entry.name) || !isSafePath(name)) {
+              left.push(JSON.stringify([...below, entry.name].join("/")))
+              continue
+            }
             if (entry.kind === "folder") folders.push([...below, entry.name])
-            else if (entry.kind === "file")
-              yield {
-                name: [top, ...below, entry.name].join("/"),
-                chunks: regularFileChunks(root, [...segments, ...below, entry.name])
-              }
+            else yield { name, chunks: regularFileChunks(root, [...segments, ...below, entry.name]) }
           }
           queue.push(...folders.reverse())
         }
+        if (left.length > 0)
+          yield {
+            name: `${top}/${ZIP_LEFT_OUT}`,
+            chunks: (async function* () {
+              yield Buffer.from(
+                `These names have a backslash, a control character or a ".." part, which some unzip tools treat as a path elsewhere, so they aren't in this zip. Download them one at a time.\n\n${left.join("\n")}\n`
+              )
+            })()
+          }
       }
       const body = Stream.fromAsyncIterable(zipStream(entries()), (error) => error).pipe(
         Stream.tapError((error) => Effect.logWarning("a folder download stopped", error))
