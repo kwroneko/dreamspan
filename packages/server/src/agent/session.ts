@@ -125,7 +125,7 @@ export const WRITE_NOW = "Write the reply now."
  * What a reply that never sent fails with (spec/REPLY-CONTRACT.md §3.4): `times` plain turns,
  * the nudges' and the first. Resume and Regenerate are offered on it.
  */
-export const contractFailure = (times: number) =>
+const contractFailure = (times: number) =>
   new GenerationFailed({
     class: "contract",
     message: `The model didn't send a reply: it wrote text ${times} times without calling send_message.`

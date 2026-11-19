@@ -32,7 +32,7 @@ export const decodeOpen = (raw: unknown, uids: ReadonlyArray<number>): ReadonlyS
 }
 
 /** Whether the URL's value is the "all" mode (Expand all, then some closed). */
-export const allMode = (raw: unknown) => Array.isArray(raw) && raw[0] === "all"
+const allMode = (raw: unknown) => Array.isArray(raw) && raw[0] === "all"
 
 /**
  * The URL's value: absent with none open; in the "all" mode (`all`: Expand all, or the value

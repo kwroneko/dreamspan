@@ -6,7 +6,7 @@ import { endOfRequestText } from "./endOfRequest.ts"
  * A prompt the app sends on its own, never from the order: the end-of-request texts (DESIGN
  * §2.2) and the agent's "When the reply wasn't sent" (spec/REPLY-CONTRACT.md §3.3).
  */
-export const outsideTheOrder = (identifier: string) =>
+const outsideTheOrder = (identifier: string) =>
   endOfRequestText(identifier) !== undefined || identifier === SEND_NUDGE_PROMPT.identifier
 
 /** Main always has a slot, even in files and old revisions that left it out. */
