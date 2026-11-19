@@ -2,6 +2,7 @@
 // "How the reply is given" (Send tool, the default; Plain answer; Either), kept over a reload for
 // the chat it was set in. Under the send tool a character may pass: the chat shows the small
 // line "Mira stays silent" as a version of the reply, and swiping it generates an actual reply.
+// While "Replies must say" who's in the scene, Plain answer and Either are greyed out, with why.
 // A scripted loopback provider (no_reply, then send_message); every card is made up. At 1440 and
 // 390, light and dark, with the layout audit on This chat → Tools and the message list.
 import { createServer, type ServerResponse } from "node:http"
@@ -198,4 +199,26 @@ for (const width of [1440, 390])
       await expect(answered.locator("[data-silent]")).toHaveCount(0)
       await page.mouse.move(0, 0)
       await expectLayout(page, info, `silent-swiped-${width}-${colorScheme}`, { scope: '[data-testid="messages"]' })
+
+      // While every reply must say who's in the scene, the send tool is the only way, and the
+      // other two say why.
+      settings = await openPanel(page, "This chat")
+      const must = settings.getByRole("radiogroup", { name: "Who's in the scene" }).getByRole("radio", {
+        name: /^Replies must say/
+      })
+      await must.scrollIntoViewIfNeeded()
+      await must.click()
+      await expect.poll(async () => (await castOf(chatId)).sendPresence).toBe("required")
+      await expect(contract().getByRole("radio", { name: /^Send tool/ })).toBeChecked()
+      await expect(contract().getByRole("radio", { name: /^Plain answer/ })).toBeDisabled()
+      await expect(contract().getByRole("radio", { name: /^Either/ })).toBeDisabled()
+      await expect(settings.getByText("Send tool only, while replies must say who's in the scene.")).toBeVisible()
+      if (width === 1440) {
+        await contract().getByText("Plain answer", { exact: true }).hover()
+        await expect(page.locator('[data-layout-overlay="Tooltip floats above the page"]')).toContainText(
+          "they say it when they send the reply"
+        )
+      }
+      await page.mouse.move(0, 0)
+      await expectLayout(page, info, `reply-contract-forced-${width}-${colorScheme}`, { scope: PANEL })
     })

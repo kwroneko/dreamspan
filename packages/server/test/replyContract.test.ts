@@ -8,12 +8,14 @@ import { assert, describe, it } from "@effect/vitest"
 import type { ServerResponse } from "node:http"
 import { DatabaseSync } from "node:sqlite"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
-import type { PathEntry, VersionId } from "@rp/shared/chat.ts"
-import { SEND_NUDGES, sendNudgeText } from "@rp/shared/agentInstructions.ts"
+import type { EntityId, PathEntry, VersionId } from "@rp/shared/chat.ts"
+import { SEND_NUDGE_PROMPT, SEND_NUDGES, sendNudgeText } from "@rp/shared/agentInstructions.ts"
+import { agentInstructionsPrompt } from "@rp/shared/presetOrder.ts"
 import { Effect } from "effect"
 import { databaseFile } from "../src/db/connection.ts"
+import { importStPreset } from "../src/formats/preset.ts"
 import { Reader } from "../src/db/Database.ts"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { anthropicSse, completionChunks, json, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
@@ -173,12 +175,45 @@ describe("reply contract", () => {
         )
         // A nudged run has steps to show: the stray text, and its count includes the ask.
         assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
-          { kind: "text", text: "Plain words." }
+          { kind: "text", text: "Plain words.", asked: true }
         ])
         assert.strictEqual(version.steps?.count, 1)
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
     }
   )
+
+  it.live("the preset's own nudge is sent instead of the default, its macros filled in", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* scriptedMock((n, _body, res) =>
+        n === 0 ? plain(res) : sse(res, toolCall("send_message", { message: "Sent words." }))
+      )
+      const stPreset = importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!
+      const api = yield* client()
+      const { version } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        presetFields: {
+          prompts: [
+            ...stPreset.prompts,
+            {
+              ...agentInstructionsPrompt,
+              identifier: SEND_NUDGE_PROMPT.identifier,
+              name: SEND_NUDGE_PROMPT.label,
+              role: "user",
+              content: "{{char}}, send that with send_message."
+            }
+          ]
+        },
+        state: TOOLS_ON
+      })
+      assert.strictEqual(version.content, "Sent words.")
+      const [first, second] = bodies(mock.requests()) as [Body, Body]
+      // Never sent by assembly: the first request doesn't hold it.
+      assert.notInclude(JSON.stringify(first.messages), "send that with send_message")
+      assert.deepStrictEqual(second.messages.at(-1), { role: "user", content: "Mira, send that with send_message." })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 
   it.live("three nudges, then the reply fails visibly with its stray text in the steps; Resume tries once more", () => {
     const config = testConfig()
@@ -203,9 +238,9 @@ describe("reply contract", () => {
       assert.lengthOf(sent, SEND_NUDGES + 1)
       assert.deepStrictEqual(sent.map(nudgesSent), [0, 1, 2, 3])
       assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
-        { kind: "text", text: "Text 1." },
-        { kind: "text", text: "Text 2." },
-        { kind: "text", text: "Text 3." },
+        { kind: "text", text: "Text 1.", asked: true },
+        { kind: "text", text: "Text 2.", asked: true },
+        { kind: "text", text: "Text 3.", asked: true },
         { kind: "text", text: "Text 4." }
       ])
       // Resume cuts the last text and answers the last nudge again: one more attempt.
@@ -433,6 +468,37 @@ describe("reply contract", () => {
       )
       const [, second] = bodies(mock.requests()) as [Body, Body]
       assert.notInclude(JSON.stringify(second.messages), '"content":""')
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("a turn of a character you play is never offered the pass, or any tool", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* scriptedMock((_n, body, res) =>
+        body.tools ? sse(res, toolCall("send_message", { message: "Mira answers." })) : plain(res, "Tobin shrugs.")
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {},
+        state: TOOLS_ON
+      })
+      assert.strictEqual(version.content, "Mira answers.")
+      // Tobin is the fixture's character played by the user: a persona turn.
+      const tobin = (yield* api.ListCards()).find((card) => card.name === "Tobin")!.entityId as EntityId
+      const { entry } = yield* posted(
+        api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false, speakerEntityId: tobin })
+      )
+      yield* eventually(() => finished(events, entry.version.id) !== undefined)
+      const own = finished(events, entry.version.id)!
+      assert.strictEqual(own.content, "Tobin shrugs.")
+      assert.isNull(own.mark)
+      const [first, second] = bodies(mock.requests()) as [Body, Body]
+      assert.include(
+        first.tools!.map((t) => t.function.name),
+        "no_reply"
+      )
+      assert.isUndefined(second.tools)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 

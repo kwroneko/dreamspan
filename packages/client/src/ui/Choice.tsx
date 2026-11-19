@@ -7,7 +7,7 @@ import { Checkbox as BaseCheckbox } from "@base-ui/react/checkbox"
 import { Radio as BaseRadio } from "@base-ui/react/radio"
 import { RadioGroup as BaseRadioGroup } from "@base-ui/react/radio-group"
 import { Switch as BaseSwitch } from "@base-ui/react/switch"
-import { type ReactElement, type ReactNode, useId, useRef } from "react"
+import { Fragment, type ReactElement, type ReactNode, useId, useRef } from "react"
 import { AboutHint, LabelWithHelp } from "./AboutHint.tsx"
 import { inlineExplanationClass } from "./Explanation.tsx"
 import { Tooltip } from "./Tooltip.tsx"
@@ -296,7 +296,14 @@ export function RadioGroup<Value extends string>({
 }: {
   value: Value
   onValueChange: (value: Value) => void
-  options: ReadonlyArray<{ value: Value; label: ReactNode; description?: ReactNode }>
+  options: ReadonlyArray<{
+    value: Value
+    label: ReactNode
+    description?: ReactNode
+    /** Not a choice now; `hint` then says why, on hover and focus. */
+    disabled?: boolean
+    hint?: string
+  }>
   disabled?: boolean
   "aria-labelledby"?: string
 }) {
@@ -308,15 +315,21 @@ export function RadioGroup<Value extends string>({
       {...aria}
     >
       {options.map((option) => (
-        <label key={option.value} className="flex items-start gap-2.5">
-          <BaseRadio.Root
-            value={option.value}
-            className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-border bg-surface data-checked:border-accent data-disabled:opacity-50 ${focusRing}`}
-          >
-            <BaseRadio.Indicator className="size-2 rounded-full bg-accent data-unchecked:hidden" />
-          </BaseRadio.Root>
-          <ChoiceLabel description={option.description}>{option.label}</ChoiceLabel>
-        </label>
+        <Fragment key={option.value}>
+          {withHint(
+            option.hint,
+            <label className={`flex items-start gap-2.5 ${option.disabled ? "opacity-60" : ""}`}>
+              <BaseRadio.Root
+                value={option.value}
+                {...(option.disabled ? { disabled: true } : {})}
+                className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border border-border bg-surface data-checked:border-accent data-disabled:opacity-50 ${focusRing}`}
+              >
+                <BaseRadio.Indicator className="size-2 rounded-full bg-accent data-unchecked:hidden" />
+              </BaseRadio.Root>
+              <ChoiceLabel description={option.description}>{option.label}</ChoiceLabel>
+            </label>
+          )}
+        </Fragment>
       ))}
     </BaseRadioGroup>
   )

@@ -842,7 +842,7 @@ describe("agent rollouts", () => {
       )
       // The plain turn the app asked to be sent is a step: what the model wrote, then sent.
       assert.deepStrictEqual(yield* api.GetRolloutSteps({ versionId: version.id }), [
-        { kind: "text", text: "Plain words." }
+        { kind: "text", text: "Plain words.", asked: true }
       ])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })

@@ -33,21 +33,15 @@ const title = (args: unknown, field?: string) => {
 }
 
 /**
- * Tool calls a transcript holds, the message's own call (or the pass) left out, and the app's asks
- * to send the reply (spec/REPLY-CONTRACT.md §3.3), so a run whose stray text was nudged has steps
- * to show: what "N steps" counts.
+ * What "N steps" counts: the tool calls a transcript holds, the message's own call (or the pass)
+ * left out, and the turns the app asked to be sent (spec/REPLY-CONTRACT.md §3.3), so a run whose
+ * stray text was nudged has steps to show. The same count the live steps give (`counted`).
  */
-export const countSteps = (messages: ReadonlyArray<AgentMessage>) =>
-  messages.reduce(
-    (n, m) =>
-      n +
-      (m.role === "assistant"
-        ? m.content.filter((p) => p.type === "toolCall" && !endsReply(p.name)).length
-        : isNudge(m)
-          ? 1
-          : 0),
-    0
-  )
+export const countSteps = (messages: ReadonlyArray<AgentMessage>) => counted(stepsOf(messages, [], true))
+
+/** The steps "N steps" counts: tool calls and the turns the app asked to be sent. */
+export const counted = (steps: ReadonlyArray<RolloutStep>) =>
+  steps.filter((s) => s.kind === "tool" || s.asked === true).length
 
 /**
  * The steps of a transcript. The last assistant turn without tool calls is the message (its
@@ -173,6 +167,14 @@ export const placedSteps = (
         })
       }
     })
+  })
+  // A turn the app asked to be sent after (a nudge follows it) marks its last step, so the ask is
+  // counted where it shows.
+  messages.forEach((m, index) => {
+    if (!isNudge(m)) return
+    const last = steps.findLastIndex((p) => p.message === index - 1 && p.step.kind !== "tool")
+    const placed = steps[last]
+    if (placed && placed.step.kind !== "tool") steps[last] = { ...placed, step: { ...placed.step, asked: true } }
   })
   return steps
 }

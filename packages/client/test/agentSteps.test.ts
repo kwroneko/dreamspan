@@ -28,6 +28,10 @@ describe("an agent reply's steps", () => {
     ).toBe(2)
   })
 
+  it("counts a turn the app asked to be sent, as the finished reply's count does", () => {
+    expect(toolCount([{ kind: "text", text: "Plain words.", asked: true }, tool("a")])).toBe(2)
+  })
+
   it("says the count and the run's time", () => {
     expect(stepsText(3, 14_200)).toBe("3 steps · 14 s")
     expect(stepsText(1, null)).toBe("1 step")
