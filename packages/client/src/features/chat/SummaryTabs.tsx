@@ -2,6 +2,7 @@
 // §10.1): two tabs, Messages and Summaries, hanging from the messages above them. Choosing one
 // is this pane's own and the account's default for chats opened later (chatViewParams.ts).
 // Shown at the boundary and above the chat's first message, only when summaries exist.
+import { useRouter } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 import { TabRow } from "../../ui/Tabs.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -25,32 +26,45 @@ const TABS = [
  * The list is made again on a switch (ChatPage keys it by the mode) and placed anew, so the row
  * a keyboard or pointer chose from is gone. The focus goes back to the tab now chosen: in the
  * same row (boundary or start) when the new list shows it, else in the other row it shows. It
- * only ever takes a focus that is nowhere, never one the reader has put somewhere else.
+ * only ever takes a focus that is nowhere, never one the reader has put somewhere else, only in
+ * the pane chosen in, once, and not after a press anywhere since.
  */
-let refocus: { at: string; until: number } | null = null
+let refocus: { pane: object; at: string; until: number } | null = null
 const ORPHAN_MS = 400
+/** A press anywhere after the choice: the reader moved on, nothing takes the focus back. */
+const forget = () => {
+  refocus = null
+  document.removeEventListener("pointerdown", forget, true)
+}
 
 export function SummaryTabs({ at }: { at: "start" | "boundary" }) {
   const viewer = useViewPrefs()
   const [on, setOn] = useSummariesInChat()
   const root = useRef<HTMLDivElement>(null)
+  // The pane's own router: a row in another pane never takes the focus.
+  const pane = useRouter()
   useEffect(() => {
     // For a while after a choice, a row that mounts takes the focus while it's nowhere (the row
     // it was on is gone): the virtualizer may mount a row, drop it and mount it again as it
     // places the new list. The same row at once; the other row only if that one doesn't come.
     const take = () => {
       const lost = !document.activeElement || document.activeElement === document.body
-      if (refocus && refocus.until >= Date.now() && lost && root.current?.isConnected)
-        root.current.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true })
+      if (refocus?.pane !== pane || refocus.until < Date.now() || !lost || !root.current?.isConnected) return
+      root.current.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true })
+      forget()
     }
-    if (!refocus || refocus.until < Date.now()) return
+    if (refocus?.pane !== pane || refocus.until < Date.now()) return
     // After a frame: the tabs learn their places in the row in effects of their own, and a tab
     // focused before that leaves the arrow keys nowhere to go from.
     const timer = refocus.at === at ? setTimeout(() => requestAnimationFrame(take), 0) : setTimeout(take, ORPHAN_MS)
     return () => clearTimeout(timer)
-  }, [at])
+  }, [at, pane])
   const choose = (value: string) => {
-    if (root.current?.contains(document.activeElement)) refocus = { at, until: Date.now() + 2000 }
+    if (root.current?.contains(document.activeElement)) {
+      refocus = { pane, at, until: Date.now() + 2000 }
+      // After this event's own press, if it was one.
+      setTimeout(() => document.addEventListener("pointerdown", forget, true), 0)
+    }
     setOn(value === "summaries")
   }
   return (

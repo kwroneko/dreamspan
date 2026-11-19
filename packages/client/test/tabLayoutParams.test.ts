@@ -12,9 +12,11 @@ import {
   writeLayoutParam
 } from "../src/tabLayoutParams.ts"
 import { decodeChoices, encodeChoices, KEPT } from "../src/ui/openBlocks.ts"
+import { actsOn } from "../src/ui/ResizeHandle.tsx"
 import { shownPlaceValue, spentOverride } from "../src/usePlaceParam.ts"
 import { decodeOpen, encodeOpen, OPEN_LIMIT } from "../src/features/editor/lorebookOpen.ts"
-import { decodeLayout, encodeLayout } from "../src/features/workbench/layoutParam.ts"
+import { decodeWeights, keptWeights, MAX_WEIGHTS } from "../src/features/chat/ChatPortraitProvider.tsx"
+import { decodeLayout, encodeLayout, WB_LIMIT } from "../src/features/workbench/layoutParam.ts"
 import { initialLayout, openTab, restoreLayout, splitFrame, allTabs, frames } from "../src/features/workbench/model.ts"
 
 const off: Array<() => void> = []
@@ -140,10 +142,13 @@ it("keeps a lorebook view's open entries short: Expand all on 2000 entries is a 
   expect(decodeOpen(undefined, uids)).toEqual(new Set())
   // Expand all, then two closed: "all" and the two.
   const open = new Set(uids.filter((uid) => uid !== 5 && uid !== 7))
-  const value = encodeOpen(open, uids)!
+  const value = encodeOpen(open, uids, true)!
   expect(value).toEqual(["all", 5, 7])
+  // Opened one by one, even all of a one-entry book: a list, so later entries stay closed.
+  expect(encodeOpen(new Set([4]), [4])).toEqual([4])
+  expect(encodeOpen(open, uids)).toHaveLength(OPEN_LIMIT)
   expect(decodeOpen(value, uids)).toEqual(open)
-  expect(encodeURIComponent(JSON.stringify(encodeOpen(new Set(uids), uids))).length).toBeLessThan(40)
+  expect(encodeURIComponent(JSON.stringify(encodeOpen(new Set(uids), uids, true))).length).toBeLessThan(40)
   // Half open, one by one: at most OPEN_LIMIT uids, well under 2 KB with the rest of the URL.
   const half = encodeOpen(new Set(uids.slice(0, 1000)), uids)!
   expect(half).toHaveLength(OPEN_LIMIT)
@@ -200,4 +205,45 @@ it("puts the workbench's frames in one compact param, the focused tab as the URL
     ["/x", true, false],
     ["/z", false, false]
   ])
+})
+
+it("keeps the workbench param under its budget, dropping the place params of the least recent other frames' tabs first", () => {
+  const key = (href: string) => href.split("?")[0]!
+  const place = `?${"lb:open=" + encodeURIComponent(JSON.stringify(Array.from({ length: 50 }, (_, i) => i)))}&timeline=summaries`
+  const fits = (text: string) => new URLSearchParams({ wb: text }).toString().length <= WB_LIMIT
+  let layout = initialLayout("/chats/focused-0")
+  for (let i = 1; i < 30; i++) layout = openTab(layout, `/chats/left-${i}${place}`, key, { preview: false })
+  layout = splitFrame(layout, layout.focused, "row")
+  for (let i = 0; i < 3; i++) layout = openTab(layout, `/chats/right-${i}${place}`, key, { preview: false })
+  const text = encodeLayout(layout, (href) => href)!
+  expect(fits(text)).toBe(true)
+  const back = restoreLayout(decodeLayout(text, "/chats/now"))!
+  const [left, right] = frames(back.root)
+  // The focused frame's hidden tabs keep theirs; in the other frame the most recent tab keeps
+  // its own while the least recent lost theirs; every tab is still there.
+  expect(right!.tabs.filter((t) => t.href.includes("timeline=summaries"))).toHaveLength(right!.tabs.length - 1)
+  expect(left!.tabs).toHaveLength(29)
+  expect(left!.tabs.find((t) => t.href.startsWith("/chats/left-29"))?.href).toContain("timeline=summaries")
+  expect(left!.tabs.find((t) => t.href.startsWith("/chats/left-1"))?.href).toBe("/chats/left-1")
+  // Under the budget, nothing is dropped.
+  expect(encodeLayout(layout, (href) => href, undefined, 1_000_000)).toContain("left-1?")
+  // A focused frame too big alone: its hidden tabs go too, after the other frame's.
+  for (let i = 3; i < 40; i++) layout = openTab(layout, `/chats/right-${i}${place}`, key, { preview: false })
+  expect(fits(encodeLayout(layout, (href) => href)!)).toBe(true)
+})
+
+it("writes portrait shares as it reads them back: the same cap, rounding and bounds", () => {
+  const shown = Array.from({ length: 15 }, (_, i) => [`p${i}`, i === 0 ? 0.0001 : 1 + i / 3.3333] as const)
+  const kept = keptWeights(shown)
+  expect(Object.keys(kept)).toHaveLength(MAX_WEIGHTS)
+  expect(decodeWeights(JSON.parse(JSON.stringify(kept)))).toEqual(kept)
+})
+
+it("a resize grip holds URL writes only for the keys it acts on", () => {
+  expect(actsOn("ArrowLeft", false)).toBe(true)
+  expect(actsOn("ArrowUp", false)).toBe(false)
+  expect(actsOn("ArrowUp", true)).toBe(true)
+  expect(actsOn("ArrowRight", true)).toBe(false)
+  expect(actsOn("End", true)).toBe(true)
+  expect(actsOn("a", false)).toBe(false)
 })

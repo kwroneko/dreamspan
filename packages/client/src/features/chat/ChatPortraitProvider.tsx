@@ -15,19 +15,26 @@ import { whenDragEnds } from "../../tabLayoutParams.ts"
 /** A share's bounds: a crafted URL can't make the stack's sum overflow or a viewer vanish. */
 const MIN_WEIGHT = 0.05
 const MAX_WEIGHT = 20
-/** At most this many portraits' shares are read from the URL. */
-const MAX_WEIGHTS = 12
+/** At most this many portraits' shares go in the URL and are read back: the first ones shown. */
+export const MAX_WEIGHTS = 12
+
+/** A share as the URL keeps it: rounded, within the bounds. Written and read alike. */
+const shareOf = (w: number) => Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, Math.round(w * 1000) / 1000))
 
 /** The URL's shares, each a number clamped to the bounds. */
-const decodeWeights = (raw: unknown): Record<string, number> =>
+export const decodeWeights = (raw: unknown): Record<string, number> =>
   typeof raw === "object" && raw !== null && !Array.isArray(raw)
     ? Object.fromEntries(
         Object.entries(raw)
           .filter((e): e is [string, number] => typeof e[1] === "number" && Number.isFinite(e[1]) && e[1] > 0)
           .slice(0, MAX_WEIGHTS)
-          .map(([id, w]) => [id, Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, w))])
+          .map(([id, w]) => [id, shareOf(w)])
       )
     : {}
+
+/** The shares the URL keeps for the shown portraits (in order): what `decodeWeights` reads back. */
+export const keptWeights = (shown: ReadonlyArray<readonly [string, number]>): Record<string, number> =>
+  Object.fromEntries(shown.slice(0, MAX_WEIGHTS).map(([id, w]) => [id, shareOf(w)]))
 
 export function ChatPortraitProvider({
   wide,
@@ -103,11 +110,13 @@ export function ChatPortraitProvider({
     // equal shares: the column stacks every workbench frame's portraits, so a frame's lone
     // portrait at 0.9 is a share against another frame's, and must stay.
     const nextWeights = Object.fromEntries(next.map((e) => [e.portrait.id, Math.round(e.weight * 1000) / 1000]))
-    const even = Object.values(nextWeights).every((w) => w === 1)
+    // What reading the URL gives back, so a reload shows what the drag left.
+    const kept = keptWeights(next.map((e) => [e.portrait.id, e.weight] as const))
+    const even = Object.values(kept).every((w) => w === 1)
     setDragging(nextWeights)
     // Keyed by this provider: one drag changes every frame's share, and each frame writes its own.
     whenDragEnds(`portraitSizes:${writeKey}`, () => {
-      setSavedWeights(() => (even ? undefined : nextWeights))
+      setSavedWeights(() => (even ? undefined : kept))
       setDragging(null)
     })
   }
